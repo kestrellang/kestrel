@@ -5,7 +5,7 @@
 //! provide the conformance-specific substitutions for `Self` and associated
 //! type bindings, and comparison reduces aliases/projections into `ResolvedTy`.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 
 use kestrel_ast_builder::{Name, TypeAnnotation, TypeParams};
 use kestrel_hecs::{Entity, QueryContext};
@@ -199,12 +199,19 @@ fn normalize_hir_type(
                 .map(|elem| normalize_hir_type(qctx, root, elem, env, state))
                 .collect(),
         ),
+        // The closure KIND rides through normalization, so requirement/witness
+        // signature equality is kind-exact: a `func f(cb: escaping () -> ())`
+        // requirement is not witnessed by a `func f(cb: () -> ())` impl (their
+        // environment representations differ), exactly as `&` never matches
+        // `&mutating` below.
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
             ..
         } => ResolvedTy::Function {
+            kind: *kind,
             params: params
                 .iter()
                 .map(|param| normalize_hir_type(qctx, root, param, env, state))

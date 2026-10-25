@@ -14,8 +14,9 @@
 //
 // var file = try io.File.open("hello.txt");
 //
-// let name = try io.prompt("Name: ");
-// try io.println("Hello, " + name);
+// if let .Some(name) = try io.prompt("Name: ") {
+//     try io.println("Hello, " + name);
+// }
 // ```
 
 module std.io

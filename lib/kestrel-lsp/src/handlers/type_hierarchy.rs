@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use kestrel_ast_builder::{DeclSpan, FilePath, Name, NodeKind};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::HirExpr;
-use kestrel_hir_lower::LowerBody;
 use kestrel_name_res::ConformingProtocols;
 use kestrel_type_infer::InferBody;
 use tower_lsp::lsp_types::{
@@ -185,7 +184,7 @@ fn resolve_type_at(
     compiler: &kestrel_compiler::Compiler,
 ) -> Option<Entity> {
     // Type-position cursor (e.g., `func bar(x: Foo)`).
-    let file_cst = compiler.parse(file_entity).tree;
+    let file_cst = compiler.parse(file_entity).tree();
     if let Some((entity, _)) =
         crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
         && is_type_entity(world, entity)
@@ -196,12 +195,10 @@ fn resolve_type_at(
     // Expression-position: resolve Def to a type entity.
     if let Some(body_entity) = semantic::body_entity_at(world, file_entity, offset) {
         let ctx = world.query_context();
-        if let Some(hir) = ctx.query(LowerBody {
-            entity: body_entity,
-            root,
-        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+        if let Some(lowered) = semantic::lowered_body(world, root, body_entity)
+            && let Some(expr_id) = semantic::expr_at(world, body_entity, &lowered, offset)
         {
-            match &hir.exprs[expr_id] {
+            match &lowered.body.exprs[expr_id] {
                 HirExpr::Def(entity, _, _) if is_type_entity(world, *entity) => {
                     return Some(*entity);
                 },
@@ -259,7 +256,8 @@ fn entity_to_item(
 
     let selection_range = world
         .get::<kestrel_ast_builder::CstNode>(entity)
-        .and_then(|cst| kestrel_syntax_tree::utils::get_name_span(&cst.0, decl_span.file_id))
+        .and(kestrel_ast_builder::syntax::cst_node(world, entity))
+        .and_then(|cst| kestrel_syntax_tree::utils::get_name_span(&cst, decl_span.file_id))
         .map(|s| li.range_for(s.start, s.end))
         .unwrap_or(range);
 

@@ -3,7 +3,7 @@
 // backends: cranelift,llvm
 
 // A Cloneable handle whose deinit closes an fd is observable when dropped:
-// copy lifetime passes could drop a copy early. E507 (emitted after
+// copy lifetime passes could drop a copy early. E508 (emitted after
 // monomorphization, so this is an execution test) asks for the attribute.
 module Test
 

@@ -34,7 +34,7 @@ public struct PBKDF2[H] where H: Digest {
         let blocks = (length + hashLen - 1) / hashLen;
         let passwordKey = SymmetricKey(bytes: password);
 
-        var okm = Array[UInt8]();
+        var okm: [UInt8] = [];
 
         for blockIndex in 1..=blocks {
             // U_1 = HMAC(password, salt || INT_32_BE(blockIndex))
@@ -59,7 +59,7 @@ public struct PBKDF2[H] where H: Digest {
             okm.append(contentsOf: result.asSlice());
         }
 
-        var truncated = Array[UInt8]();
+        var truncated: [UInt8] = [];
         for i in 0..<length {
             truncated.append(okm(i));
         }

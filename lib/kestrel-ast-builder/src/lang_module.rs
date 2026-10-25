@@ -280,10 +280,38 @@ fn seed_generic_fn_multi(
 
 // ===== Intrinsic function categories =====
 
-/// Integer arithmetic, comparison, bitwise, and unary ops for i1/i8/i16/i32/i64.
+/// Integer arithmetic, comparison, bitwise, and unary ops for i8/i16/i32/i64,
+/// plus the boolean ops on i1.
+///
+/// **`i1` is deliberately not an integer width here.** It is the boolean type,
+/// and it gets exactly the four ops below. Running it through the integer
+/// matrix generated 39 names — `i1_add`, `i1_signed_div`, `i1_popcount`,
+/// `i1_clz`, the overflow predicates, all four orderings — of which mir-lower
+/// has only ever had arms for these four. The other 35 were callable from
+/// source and ICEd at post-mono verify ("Callee::Direct not resolved").
+///
+/// Seed a name only if `kestrel-mir-lower`'s intrinsic table can lower it. The
+/// coverage test in `mir-lower/src/body/call/intrinsic.rs` enforces this: this
+/// function is generative and that table is hand-enumerated, so nothing else
+/// keeps the two in step.
+///
+/// `i1_xor` and `i1_ne` are meaningful but omitted — there is no `Op::BoolXor`
+/// or `Op::BoolNe`, and `a != b` on booleans is `i1_not(i1_eq(a, b))`. Add the
+/// ops and the backend arms first if you want the names.
 fn seed_integer_ops(world: &mut World, lang: Entity) {
-    let int_types = ["i1", "i8", "i16", "i32", "i64"];
+    let int_types = ["i8", "i16", "i32", "i64"];
     let i1 = lang_ty("i1");
+
+    for op in ["and", "or", "eq"] {
+        seed_fn(
+            world,
+            lang,
+            &format!("i1_{op}"),
+            &[("a", i1.clone()), ("b", i1.clone())],
+            i1.clone(),
+        );
+    }
+    seed_fn(world, lang, "i1_not", &[("a", i1.clone())], i1.clone());
 
     for ty_name in int_types {
         let ty = lang_ty(ty_name);
@@ -385,8 +413,16 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
             }
         }
 
-        // Unary ops returning same type
-        for op in ["neg", "not", "popcount", "clz", "ctz", "bswap"] {
+        // Unary ops returning same type. `bswap` is skipped for i8: reversing
+        // the bytes of a single byte is the identity, so there is nothing to
+        // lower — the stdlib's Int8/UInt8 `byteSwapped` already returns `self`
+        // rather than calling it.
+        let unary: &[&str] = if ty_name == "i8" {
+            &["neg", "not", "popcount", "clz", "ctz"]
+        } else {
+            &["neg", "not", "popcount", "clz", "ctz", "bswap"]
+        };
+        for op in unary {
             seed_fn(
                 world,
                 lang,

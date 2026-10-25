@@ -1,12 +1,7 @@
 # kestrel-parser Architecture
 
-`kestrel-parser` is the syntax parser for the Kestrel language. It converts a
-token stream into a concrete syntax tree (CST) using Chumsky parser combinators
-and an event-driven tree-building layer inspired by rust-analyzer.
-
-This document describes the target contract for the crate as the parser is
-reworked. Some implementation details still reflect the current transitional
-architecture and are called out below.
+Handwritten recursive-descent parser: lexer tokens → events → lossless rowan
+CST. Linear time, coded diagnostics, recovery per construct.
 
 ## Pipeline Position
 
@@ -16,141 +11,103 @@ Source Text → Tokens → Parser → CST (rowan) → AST Build → Name Res →
                      this crate
 ```
 
-## Target Contract
-
-The parser owns syntax recognition only. It should:
-
-- accept lexer tokens and source text for one file
-- emit a concrete syntax tree with stable `SyntaxKind` nodes and tokens
-- preserve source token order and source spans
-- report syntax errors with useful spans and recovery where practical
-- avoid semantic decisions that belong to AST build, name resolution, HIR, type
-  inference, or later lowering passes
-
-Downstream crates may depend on CST shape and parser diagnostics, but should not
-depend on parser-internal Chumsky combinators or temporary parse-data structs.
-
-### Trivia
-
-The target CST contract is lossless with respect to source text. Whitespace,
-newlines, line comments, and block comments should be preserved as trivia tokens
-with their distinct token kinds.
-
-Current limitation: `TreeBuilder` currently inserts skipped trivia as a single
-`Whitespace` token before emitted syntax tokens, and does not explicitly model
-trailing trivia after the final emitted token. Reworking trivia preservation is a
-planned architecture step.
-
-### Operators
-
-The parser intentionally does not own operator precedence or associativity. It
-recognizes operator tokens and preserves expression/operator order in syntax.
-Operator binding is handled later by the Pratt parser in the downstream
-pipeline, which leaves room for operators to be defined by code in the future.
-
-Parser tests for operators should assert syntax preservation, not semantic
-grouping.
-
-## Two-Phase Architecture
-
-Parsing and tree building are separate concerns:
+## Structure
 
 ```
-Tokens → Chumsky Parsers → Data Structs → Emitters → Events → TreeBuilder → SyntaxNode
-         ^^^^^^^^^^^^^^^^                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-         Phase 1: parse                    Phase 2: emit + build
+tokens ──▶ core::Parser ──▶ internal events ──▶ event::Event ──▶ TreeBuilder ──▶ SyntaxNode
+               ▲                (precede links)     (+ coded errors)  (re-inserts trivia)
+          grammar/*   one function per construct
 ```
-
-**Phase 1 — Parsing**: Chumsky parser combinators match tokens and currently
-produce intermediate data structures (e.g., `FunctionDeclarationData`,
-`ExprVariant`).
-
-**Phase 2 — Emission & Tree Building**: Emitter functions walk data structures
-and push events (`StartNode`, `AddToken`, `FinishNode`, `Error`) into an
-`EventSink`. The `TreeBuilder` then consumes these events with the original
-source text, inserts trivia, and builds rowan green trees.
-
-Current limitation: the data-then-emit split creates multiple representations of
-the same grammar. A future rework should either make the intermediate data layer
-small and local to each parser module, or remove it where direct event/CST
-construction is clearer.
-
-## Core Types
-
-| Type | Module | Description |
-|------|--------|-------------|
-| `Event` | `event.rs` | Four variants: `StartNode(SyntaxKind)`, `AddToken(SyntaxKind, Span)`, `FinishNode`, `Error` |
-| `EventSink` | `event.rs` | Collects events during parsing |
-| `TreeBuilder` | `event.rs` | Consumes events + source text → `SyntaxNode` |
-| `Parser` | `parser.rs` | High-level wrapper: creates sink, runs parse, extracts errors, builds tree |
-| `ParseResult` | `parser.rs` | Result type with tree + accumulated errors |
-| `ParseError` | `parser.rs` | User-friendly error with message, span, and fix suggestions |
-
-## Error Recovery
-
-The target parser should continue after syntax errors:
-
-- Rich errors from chumsky track expectations for helpful messages
-- The tree builder produces a valid CST even with `Error` events interspersed
-- `suggest_fix()` provides context-aware fix suggestions
-
-Current limitation: recovery is mostly implicit through list parsing and parser
-failure behavior. Planned recovery work should add explicit recovery anchors for
-declaration starters, `}`, semicolons, and other syntax boundaries.
-
-## Module Map
 
 | File | Responsibility |
 |------|---------------|
-| `lib.rs` | Public API, convenience `*_from_source()` functions |
-| `parser.rs` | `Parser` struct, `ParseError`, user-friendly formatting |
-| `event.rs` | `Event`, `EventSink`, `TreeBuilder` (event → CST conversion) |
-| `input.rs` | Chumsky integration: `ParserInput`, `ParserExtra` type aliases |
-| `common/parsers.rs` | Shared parser helpers and currently some declaration parsers |
-| `common/emitters.rs` | Shared emitters and currently many declaration emitters |
-| `common/data.rs` | Shared parse data and currently many declaration data structs |
-| `declaration_item/` | Router dispatching to declaration-specific parsers |
-| `type_decl.rs` | Unified struct/enum body parser (handles mutual recursion) |
+| `core.rs` | Token source over **non-trivia** tokens (each knows whether a newline preceded it and whether it touches its predecessor), precomputed bracket matching, the marker API (`start` / `complete` / `abandon` / `precede`), bounded speculation (`checkpoint` / `rollback`), and conversion of the buffer into public events (errors sorted by position and deduplicated). |
+| `grammar/mod.rs` | Entry points (`source_file`, `expression_only`), `delimited` list helper with per-list recovery. |
+| `grammar/items.rs` | Declarations: item list, type bodies (one `Ctx` decides which members a body accepts), parameters, accessors, type aliases. |
+| `grammar/attrs.rs` | `@attribute(args)` lists. |
+| `grammar/generics.rs` | Type parameter lists, conformance lists, where clauses. |
+| `grammar/types.rs` | Type expressions. |
+| `grammar/patterns.rs` | Patterns, and the irrefutable parameter-pattern subset. |
+| `grammar/exprs.rs` | Expressions, postfix chains, trailing closures, control flow. |
+| `grammar/blocks.rs` | Code blocks and statements; the statement-vs-value decision. |
+| `event.rs` | `Event`, `EventSink`, `TreeBuilder` (inserts trivia from the source between emitted tokens). |
+| `syntax_error.rs` | `E8xx` codes and message construction. Every parse error has a code. |
+| `parser.rs` | `ParseResult`, `ParseError`, `Parser::parse`. |
 
-Target direction: `common` should become small and boring. Declaration modules
-should own their data structs, parsers, emitters, and CST wrappers. `common`
-should keep only reusable syntax fragments such as token helpers, identifiers,
-trivia, visibility, and separated-list utilities.
+Each grammar file starts with the grammar it implements, in EBNF.
 
-### Declaration modules
+## Key Design Decisions
 
-Each follows the pattern: data type + parser + emitter.
+**No backtracking, no re-parsing.** Choices use bounded lookahead: a fixed
+number of tokens, or one bracket group via the precomputed matching table
+(closure headers `{ (…) in`, function types `(…) ->`, qualified associated
+type targets `P[…].Item`). The single speculative parse is a type-argument
+list after an expression path segment (`foo[Int]` vs. an unrelated `[…]`); it
+is bounded by its brackets and never contains an expression. A block parses
+each expression once and decides afterwards — from its kind and the next
+token — whether it is a statement, a statement-like expression, or the
+block's value (this was audit H7: the combinator parser re-parsed tail
+expressions at every closure level, exponential in nesting).
 
-| Module | Parses |
-|--------|--------|
-| `module/` | `module A.B.C` declarations |
-| `import/` | `import A.B.C.(X, Y)` with aliases and wildcards |
-| `struct/`, `enum_decl/` | Type declarations (delegates to `type_decl.rs`) |
-| `protocol/` | Protocol declarations with associated types |
-| `extension/` | Extend declarations |
-| `function/` | Function declarations with generics |
-| `field/` | Field declarations (var/let, computed properties) |
-| `subscript/` | Subscript declarations |
-| `type_alias/` | Type aliases and associated type bindings |
+**Every source token is in the tree, in order, with its own kind.**
+Separators and brackets are real tokens of the list they belong to;
+trailing closures follow the call's `)` inside its `ArgumentList`
+(audit H1). Tokens the grammar cannot place are wrapped in an `Error`
+node. Invariant (tested over the whole stdlib): zero parse errors ⇒ zero
+`Error` elements and an exact round trip.
 
-### Expression and type modules
+**Missing children are absent.** A missing `;`, `)`, `}` or member name is
+reported and simply not in the tree; there are no synthesized tokens.
 
-| Module | Parses |
-|--------|--------|
-| `expr/` | Expressions: literals, calls, operators, closures, control flow |
-| `ty/` | Type expressions: paths, tuples, functions, arrays, generics |
-| `pattern/` | Patterns: wildcards, bindings, tuples, enums, structs |
-| `block/` | Code blocks: statements + trailing expression |
-| `stmt/` | Statements: let/var bindings |
-| `attribute/` | Attributes: `@name` or `@name(args)` |
-| `type_param/` | Type parameters, where clauses, bounds |
+**Line breaks matter in three places**, all via `Parser::nl_before`: a call's
+`(` and a trailing closure's `{` (or `label: {`) must be on the operand's
+line. Everything else is newline-insensitive, as before.
+
+**Condition mode.** `if`/`while`/`for`/`match` heads, match guards and
+`if let` values use the expression grammar with a restriction (no trailing
+closures, no assignment, no block-like primaries, a single prefix operator)
+instead of a second grammar. Bracketed sub-expressions lift it.
+
+**Operators are parsed by precedence climbing** (`exprs::binary_bp`), so
+`ExprBinary` nodes already have the language's precedence and
+associativity — later stages lower them as written. Binding powers, loosest
+first: `or` 10, `??` 15 (right-associative), `and` 20, comparisons 30
+(non-chaining), `..=`/`..<` 40, `+ - | ^` 50, `* / % &` 60, `<< >>` 70.
+Each `ExprBinary` spans exactly its operands.
+
+**Interpolated strings are structured.** The lexer splits
+`"a\(x)b"` into `StringStart StringFragment InterpStart <tokens> InterpEnd
+… StringEnd` (a plain string stays one `String` token); the parser builds
+`ExprInterpolatedString > Interpolation > Expression (FormatSpec)?` and
+parses each hole as an ordinary expression in place. A broken hole is an
+`Error` node with a diagnostic prefixed "invalid expression in string
+interpolation"; nothing downstream re-lexes string text.
+
+**The tree conforms to `kestrel.ungram`.** Every error-free parse matches
+the grammar in `lib/kestrel-syntax-tree` (`tests/conformance.rs` checks the
+whole corpus; debug builds assert it on every parse), so the generated typed
+views read it correctly. Grouping parens in a type are a `TyParen` node; an
+expression body `func f() = e` is `FunctionBody('=' Expression)`.
+
+## Error Recovery
+
+| Construct | Recovers to |
+|-----------|-------------|
+| Top-level items | next item start (keyword, modifier, `@`) |
+| Type-body members | next member start or `}` |
+| Block statements | next statement keyword, expression start, or past `;` |
+| Delimited lists | next `,` or the closer (bracket groups skipped whole) |
+| Match arms | next `,` or `}` |
+
+A broken construct keeps its node with the parts that parsed; errors are
+anchored on the offending token, or — for a missing `;`/`)`/`}` — on the
+token before the gap.
 
 ## Dependencies
 
 | Crate | Usage |
 |-------|-------|
-| `chumsky` | Parser combinator framework |
-| `stacker` | Stack growth for deeply nested types |
-| `kestrel-lexer` | `Token` enum as parser input |
+| `stacker` | Stack growth for deeply nested source |
+| `kestrel-lexer` | `Token` input |
 | `kestrel-syntax-tree` | `SyntaxKind`, `SyntaxNode`, `GreenNodeBuilder` |
-| `kestrel-span` | `Span` for source locations |
+| `kestrel-span` | `Span` |

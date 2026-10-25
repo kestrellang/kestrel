@@ -18,6 +18,7 @@
 pub mod components;
 pub mod diagnostic;
 pub mod queries;
+pub mod stdlib_path;
 
 pub use components::{FilePath, SourceText};
 pub use diagnostic::ThrowDiagnostic;
@@ -46,7 +47,7 @@ pub struct Compiler {
     root: Entity,
     /// Compilation target for conditional filtering (@platform, etc.)
     target: TargetConfig,
-    /// Warnings found after monomorphization (E507), from the most recent
+    /// Warnings found after monomorphization (E508), from the most recent
     /// `monomorphize_mir`. They live outside the query system because the
     /// mono pipeline runs outside it; read them with [`Self::mono_warnings`].
     mono_warnings: std::sync::Mutex<Vec<codespan_reporting::diagnostic::Diagnostic<usize>>>,
@@ -58,7 +59,10 @@ impl Compiler {
         world.begin_revision();
         let root = world.spawn();
         world.set(root, kestrel_ast_builder::NodeKind::Module);
-        world.set(root, kestrel_ast_builder::Name("<root>".to_string()));
+        world.set(
+            root,
+            kestrel_ast_builder::Name(kestrel_ast_builder::Name::ROOT.to_string()),
+        );
         // Seed the lang module so lang.* builtins (lang.i64, lang.alloc, etc.) are available
         kestrel_ast_builder::seed_lang_module(&mut world, root);
         // Register default analyzers on the root entity
@@ -135,14 +139,21 @@ impl Compiler {
         ctx.query(ParseFile { entity })
     }
 
-    /// Collect all diagnostics from the current revision.
+    /// Collect all diagnostics from the current revision, in source order.
     ///
     /// Returns codespan-reporting `Diagnostic`s accumulated by lex, parse,
     /// and type inference queries. Use `CompilerDriver::emit_diagnostics()`
     /// (from `kestrel-compiler-driver`) to render them to a terminal.
+    ///
+    /// The accumulator holds values per query in map order, so this is the
+    /// one place that gives every consumer (CLI, LSP, test harness) the same
+    /// deterministic order: by file, then primary-label position.
     pub fn diagnostics(&self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
-        self.world
-            .accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>()
+        let mut diags = self
+            .world
+            .accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>();
+        diags.sort_by_cached_key(diagnostic::source_order);
+        diags
     }
 
     /// Begin a new compilation cycle. Call before updating sources.
@@ -170,7 +181,7 @@ impl Compiler {
         kestrel_ast_builder::build_declarations(
             &mut self.world,
             file_entity,
-            &result.tree,
+            &result.tree(),
             self.root,
             Some(&self.target),
         );
@@ -257,8 +268,13 @@ impl Compiler {
     /// Best-effort lowering to a PRE-MONO `Stage` for inspection (`kestrel dump
     /// mir -s <stage>`). Runs passes up to `stop`; runs verify only at
     /// `Stage::Verify`. Returns the module plus any verify errors (empty unless
-    /// `stop == Verify`). Never aborts and never accumulates diagnostics — the
-    /// caller decides whether/how to surface errors.
+    /// `stop == Verify`). Never aborts.
+    ///
+    /// It does **not** accumulate the *verify* errors it returns — the caller
+    /// decides how to surface those. It does not follow that nothing is
+    /// accumulated: `lower_module` deposits its own coded diagnostics (the
+    /// move-out-of-borrow E503 backstop, E497) straight into the context, so a
+    /// caller must still flush the accumulator (F18).
     pub fn lower_to_mir_stage(
         &self,
         stop: kestrel_mir::passes::Stage,
@@ -338,7 +354,7 @@ impl Compiler {
     }
 
     /// Warnings found after monomorphization by the most recent build
-    /// (currently E507 `observable_drop_unmarked`).
+    /// (currently E508 `observable_drop_unmarked`).
     pub fn mono_warnings(&self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
         self.mono_warnings
             .lock()
@@ -346,7 +362,7 @@ impl Compiler {
             .unwrap_or_default()
     }
 
-    /// E507: a `Cloneable` type whose deinit reaches an observable extern but
+    /// E508: a `Cloneable` type whose deinit reaches an observable extern but
     /// is not `@observabledrop`. Replaces the previous build's warnings.
     fn record_mono_warnings(&self, mono: &kestrel_mir::mono::MonoModule) {
         use codespan_reporting::diagnostic::{Diagnostic, Label};
@@ -384,7 +400,7 @@ impl Compiler {
                     };
                     Some(
                     Diagnostic::warning()
-                        .with_code("E507")
+                        .with_code("E508")
                         .with_message(format!(
                             "`Cloneable` type `{type_name}` has a `deinit` that calls `{callee}`; \
                              mark it `@observabledrop` so its copies are not dropped early"
@@ -438,6 +454,18 @@ impl Compiler {
         // Recover zero-copy aggregate moves: flip provably-safe Takes to aliasing
         // before expand/codegen turn them into memcpys (#219).
         kestrel_mir::passes::copy_propagation::mark_independent_takes(&mut mono);
+
+        // The ownership walk again, now that copyability is CONCRETE, but BEFORE
+        // expand_destroy_copy. The ordering is load-bearing: expand removes and
+        // remaps DestroyValue, so afterwards the walk's leak check ("every
+        // @owned value must be consumed") is no longer true of well-formed IR —
+        // running it after expand reports ~34k false positives on hello world.
+        // Here the types are concrete and the destroys are still intact.
+        //
+        // Diagnostic only; no-op unless KESTREL_VERIFY_FLOW_MONO is set. Walks
+        // every INSTANTIATION, so it stays opt-in rather than riding the
+        // pre-mono default.
+        let _mono_flow = kestrel_mir::verify::verify_mono_flow(&mono);
 
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
 
@@ -511,9 +539,15 @@ impl Compiler {
             return Ok((mono, Vec::new()));
         }
 
+        // Before expand — see the twin call site above for why the ordering is
+        // load-bearing. Diagnostic only; no-op unless KESTREL_VERIFY_FLOW_MONO
+        // is set.
+        let _mono_flow = kestrel_mir::verify::verify_mono_flow(&mono);
+
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
         // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
         kestrel_mir::mono::audit::run_audit(&mono);
+
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);
         Ok((mono, mono_verify.errors))
     }
@@ -563,6 +597,31 @@ mod tests {
     use super::*;
     use kestrel_lexer::Token;
     use kestrel_syntax_tree::SyntaxKind;
+
+    /// The one producer of the root name must satisfy the predicate every
+    /// consumer uses. These sit in different crates (`kestrel-compiler` writes
+    /// it; `kestrel-name-res`, `kestrel-mir-lower`, `kestrel-doc` and the LSP
+    /// read it), so nothing but a test connects them — and the visibility
+    /// consumer fails *open*, silently publishing every `internal` declaration.
+    #[test]
+    fn the_root_entity_is_recognized_as_root() {
+        let compiler = Compiler::new();
+        let name = compiler
+            .world()
+            .get::<kestrel_ast_builder::Name>(compiler.root())
+            .expect("root entity has a Name");
+        assert!(
+            name.is_root(),
+            "Compiler::new spawned root named {name:?}, which Name::is_root rejects"
+        );
+        // Unspellable by construction: no source identifier can collide.
+        assert!(
+            kestrel_ast_builder::Name::ROOT
+                .chars()
+                .any(|c| !c.is_alphanumeric() && c != '_'),
+            "Name::ROOT must not be a legal identifier"
+        );
+    }
 
     /// Helper: extract non-trivia token kinds from a token stream.
     fn structural_tokens(tokens: &[SpannedToken]) -> Vec<Token> {
@@ -760,7 +819,7 @@ mod tests {
         // Any parse through the query always yields a SourceFile root node
         let mut c = Compiler::new();
         let f = c.set_source("t.ks", "module Main".into());
-        assert_eq!(c.parse(f).tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(c.parse(f).tree().kind(), SyntaxKind::SourceFile);
     }
 
     #[test]
@@ -771,7 +830,7 @@ mod tests {
         let result = c.parse(f);
 
         assert!(result.errors.is_empty());
-        assert_eq!(result.tree.children().count(), 3);
+        assert_eq!(result.tree().children().count(), 3);
     }
 
     #[test]
@@ -782,7 +841,7 @@ mod tests {
         let result = c.parse(f);
         assert!(result.errors.is_empty());
 
-        let child_kinds: Vec<_> = result.tree.children().map(|n| n.kind()).collect();
+        let child_kinds: Vec<_> = result.tree().children().map(|n| n.kind()).collect();
         // SourceFile children are module declaration + struct declaration nodes
         assert!(
             child_kinds.contains(&SyntaxKind::ModuleDeclaration),
@@ -803,8 +862,8 @@ mod tests {
         let f = c.set_source("t.ks", "".into());
         let result = c.parse(f);
 
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
-        assert_eq!(result.tree.children().count(), 0);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().children().count(), 0);
         assert!(result.errors.is_empty());
         assert!(c.diagnostics().is_empty());
     }
@@ -849,7 +908,7 @@ mod tests {
         let f = c.set_source("t.ks", "module".into());
         let result = c.parse(f);
 
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
     }
 
     // ================================================================
@@ -864,7 +923,7 @@ mod tests {
 
         let r1 = c.parse(f);
         let r2 = c.parse(f);
-        assert_eq!(r1.tree.children().count(), r2.tree.children().count());
+        assert_eq!(r1.tree().children().count(), r2.tree().children().count());
         assert_eq!(r1.errors.len(), r2.errors.len());
     }
 
@@ -879,7 +938,7 @@ mod tests {
         c.set_source("t.ks", "module A\nstruct B {}\nstruct C {}".into());
         let r2 = c.parse(f);
 
-        assert!(r2.tree.children().count() > r1.tree.children().count());
+        assert!(r2.tree().children().count() > r1.tree().children().count());
     }
 
     #[test]
@@ -911,8 +970,8 @@ mod tests {
         let e = c.world.spawn();
         let result = c.parse(e);
 
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
-        assert_eq!(result.tree.children().count(), 0);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().children().count(), 0);
         assert!(c.diagnostics().is_empty());
     }
 
@@ -1062,7 +1121,7 @@ mod tests {
         // Parse should reflect the new source.
         let r = c.parse(f2);
         assert!(
-            r.tree
+            r.tree()
                 .children()
                 .any(|n| n.kind() == kestrel_syntax_tree::SyntaxKind::StructDeclaration)
         );
@@ -1105,7 +1164,7 @@ mod tests {
         // Verify f2 actually got updated results
         let r2 = c.parse(f2);
         assert_eq!(
-            r2.tree.children().count(),
+            r2.tree().children().count(),
             2,
             "f2 should have module + struct"
         );

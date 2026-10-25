@@ -18,7 +18,7 @@ fn build_from_source(source: &str) -> (World, Entity) {
 
     let root = world.spawn();
     world.set(root, NodeKind::Module);
-    world.set(root, Name("<root>".to_string()));
+    world.set(root, Name(Name::ROOT.to_string()));
     // Seed `lang.*` primitives so literal fallback in `apply_literal_defaults`
     // has `lang.i1` / `lang.i64` / `lang.str` / `lang.f64` to bind to when
     // the test source doesn't load stdlib's `Default<Kind>LiteralType`.
@@ -30,7 +30,7 @@ fn build_from_source(source: &str) -> (World, Entity) {
         .collect();
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
     let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
-    build_declarations(&mut world, file_entity, &result.tree, root, None);
+    build_declarations(&mut world, file_entity, &result.tree(), root, None);
 
     (world, root)
 }

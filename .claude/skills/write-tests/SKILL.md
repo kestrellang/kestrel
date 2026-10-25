@@ -124,7 +124,7 @@ files that would trigger it. (Diagnostics coming from the stdlib are not
 counted; only those located in the test file.) `// ERROR(E123)` matches by code
 for errors; there is no code form for warnings.
 
-**Post-monomorphization warnings (E507) are checked in `execution` tests.** They
+**Post-monomorphization warnings (E508) are checked in `execution` tests.** They
 only exist once the program is built, so a `diagnostics` test never sees them.
 In an execution test, any `// WARN:` annotation makes the harness match the
 build's post-mono warnings two ways (unannotated ones then fail the test). To

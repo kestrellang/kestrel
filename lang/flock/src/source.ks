@@ -44,7 +44,7 @@ public struct ResolvedPackage: Cloneable {
 /// - PathSource: resolves local path dependencies
 /// - (future) RegistrySource: resolves from a package registry
 public protocol PackageSource {
-    func resolve(name name: String, spec spec: DependencySpec, baseDir baseDir: String) -> Result[ResolvedPackage, FlockError]
+    func resolve(name name: String, spec spec: DependencySpec, baseDir baseDir: String) -> ResolvedPackage throws FlockError
 }
 
 // ============================================================================
@@ -55,24 +55,24 @@ public protocol PackageSource {
 public struct PathSource: PackageSource {
     public init() {}
 
-    public func resolve(name name: String, spec spec: DependencySpec, baseDir baseDir: String) -> Result[ResolvedPackage, FlockError] {
+    public func resolve(name name: String, spec spec: DependencySpec, baseDir baseDir: String) -> ResolvedPackage throws FlockError {
         match spec {
             .Path(relPath) => {
                 let pkgDir = joinPath(base: baseDir, rel: relPath);
                 let manifestPath = joinPath(base: pkgDir, rel: "flock.toml");
 
                 if not fileExists(manifestPath) {
-                    return .Err(FlockError.ManifestNotFound(manifestPath))
+                    throw FlockError.ManifestNotFound(manifestPath)
                 }
 
                 match readFileString(manifestPath) {
                     .Err(e) => {
                         var msg = String(); msg.append("cannot read "); msg.append(manifestPath);
-                        return .Err(FlockError.IoError(msg))
+                        throw FlockError.IoError(msg)
                     },
                     .Ok(source) => {
                         match parseManifest(source: source) {
-                            .Err(e) => return .Err(e),
+                            .Err(e) => throw e,
                             .Ok(manifest) => {
                                 .Ok(ResolvedPackage(
                                     name: manifest.package.name,
@@ -100,7 +100,7 @@ public struct PathSource: PackageSource {
 /// Joins a base path with a relative path.
 /// Handles trailing slashes and normalizes ".." segments.
 public func joinPath(base base: String, rel rel: String) -> String {
-    if rel.byteCount == 0 {
+    if rel.bytes.count == 0 {
         return base
     }
 
@@ -111,27 +111,24 @@ public func joinPath(base base: String, rel rel: String) -> String {
 
     // Strip trailing slash from base
     var cleanBase = base;
-    if cleanBase.byteCount > 1 and cleanBase.ends(with: "/") {
-        cleanBase = cleanBase.asSlice().subslice(from: 0, to: cleanBase.byteCount - 1).toOwned()
+    if cleanBase.bytes.count > 1 and cleanBase.ends(with: "/") {
+        cleanBase = cleanBase.asSlice().subslice(from: 0, to: cleanBase.bytes.count - 1).toOwned()
     }
 
     // Split relative path and process ".." segments
     var parts = splitOnSlash(cleanBase);
     let relParts = splitOnSlash(rel);
 
-    var i: Int64 = 0;
-    while i < relParts.count {
-        let part = relParts(unchecked: i);
+    for part in relParts {
         if part == ".." {
             if parts.count > 0 {
                  parts.pop();
             }
         } else if part == "." {
             // skip current dir
-        } else if part.byteCount > 0 {
+        } else if part.bytes.count > 0 {
             parts.append(part)
         }
-        i = i + 1
     }
 
     // Rebuild path
@@ -140,13 +137,11 @@ public func joinPath(base base: String, rel rel: String) -> String {
     }
 
     var result = String();
-    i = 0;
-    while i < parts.count {
-        if i > 0 or base.starts(with: "/") {
+    for (index, part) in parts.iter().enumerate() {
+        if index > 0 or base.starts(with: "/") {
             result.append("/")
         }
-        result.append(parts(unchecked: i));
-        i = i + 1
+        result.append(part)
     }
 
     result
@@ -188,10 +183,10 @@ public func flockHome() -> String {
 
 /// Splits a path on "/" characters.
 func splitOnSlash(s: String) -> Array[String] {
-    var result = Array[String]();
+    var result = [];
     var start: Int64 = 0;
     var i: Int64 = 0;
-    let len = s.byteCount;
+    let len = s.bytes.count;
 
     while i < len {
         let byte = s.bytes(unchecked: i);

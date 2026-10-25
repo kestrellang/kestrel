@@ -27,12 +27,55 @@ pub enum ConformsOrigin {
     TypeArg,
 }
 
+/// Which associated type an `Associated` constraint projects (G29).
+///
+/// `Entity` is the associated-type declaration the producer already holds (a
+/// where-clause subject, an `AssocProjection`, a protocol's own child); the
+/// solver looks up **that** requirement, so two protocols that both declare
+/// `Out` cannot be confused. `Name` is only for producers that genuinely start
+/// from a spelling with no declaration in hand (array/dictionary literals,
+/// `Indirection.Target`, `ArrayMatchable.Element`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssocKey {
+    Entity(Entity),
+    Name(String),
+}
+
+/// Why a type was expected at a check — shown on a type mismatch as
+/// "expected because of …", pointing at the thing that set the expectation
+/// (bidi design §10, P0d). Carried by `Equal` / `Coerce` / `EqualDecayed` and
+/// attached to the `TypeMismatch` their solving produces.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub enum Reason {
+    /// No user-facing cause (internal plumbing constraints).
+    #[default]
+    Unspecified,
+    /// A type annotation, e.g. `let x: T = …`.
+    Annotation(Span),
+    /// The enclosing function's declared return type.
+    Return(Span),
+    /// Parameter `index` (0-based) of the callee; `decl` is the parameter's
+    /// declared type, when the declaration is known.
+    Param { index: usize, decl: Option<Span> },
+    /// The first branch of an `if` / `match`, which fixed the result type.
+    FirstArm(Span),
+    /// The first element of an array literal.
+    Element(Span),
+    /// The target of an assignment.
+    Assign(Span),
+}
+
 /// A type constraint emitted during constraint generation.
 #[derive(Clone, Debug)]
 pub enum Constraint {
     /// `a = b` — structural type equality.
     /// Used where types must be identical: if/match branches, array elements.
-    Equal { a: TyVar, b: TyVar, span: Span },
+    Equal {
+        a: TyVar,
+        b: TyVar,
+        span: Span,
+        reason: Reason,
+    },
 
     /// `from → to` — value flows from source to target.
     /// Tries Equal first; on failure, falls back to promotion (FromValue).
@@ -42,6 +85,7 @@ pub enum Constraint {
         to: TyVar,
         expr: HirExprId,
         span: Span,
+        reason: Reason,
     },
 
     /// `&inner → Ref { pointee }` — a borrow expression's pointee
@@ -72,6 +116,7 @@ pub enum Constraint {
         value: TyVar,
         target: TyVar,
         span: Span,
+        reason: Reason,
     },
 
     /// `value → local target` — an assignment whose target is a LOCAL read.
@@ -81,10 +126,7 @@ pub enum Constraint {
     /// (`if let .Some(w) = call()`) resolves only when the deferred
     /// ImplicitPat fires, and an eager Coerce would pin `w` from the RHS
     /// literal first — the late payload equate then collided ("expected
-    /// Int64 got &mutating Int64"). Targets nothing ever resolves fall back
-    /// to the plain Coerce after the literal-relaxation loop exhausts
-    /// (`break_stalled_assign_targets`), so plain `x = 5` shapes cannot
-    /// deadlock. Mutability legality is analyze's job (E200/E208), not
+    /// Int64 got &mutating Int64"). Mutability legality is analyze's job (E200/E208), not
     /// typing's.
     AssignTarget {
         value: TyVar,
@@ -113,7 +155,7 @@ pub enum Constraint {
     /// Deferred until container is concrete.
     Associated {
         container: TyVar,
-        name: String,
+        key: AssocKey,
         result: TyVar,
         span: Span,
     },
@@ -227,6 +269,29 @@ pub enum Constraint {
         acc_tv: TyVar,
         span: Span,
     },
+
+    /// A member was committed while its applicability was still `Unknown`
+    /// (bidi design §5.1 step 6): the receiver had an open var, so the
+    /// extension's where clauses (or the protocol conformance it was reached
+    /// through) could not be decided yet. Re-evaluated through the entailment
+    /// kernel as the receiver resolves; `Fails` is reported as the lookup
+    /// failure it stands for ("no member"), never permitted (N1).
+    Applicable {
+        receiver: TyVar,
+        source: ApplicableSource,
+        name: String,
+        is_call: bool,
+        span: Span,
+    },
+}
+
+/// What a tagged member commitment still has to prove.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplicableSource {
+    /// The extension that declared the member.
+    Extension(Entity),
+    /// The protocol the member was resolved through.
+    Protocol(Entity),
 }
 
 /// Argument in a call: optional label + type variable + source expression.

@@ -61,6 +61,19 @@ pub fn compile_inst(
             }
         },
 
+        // Thick-function layouts are prefix-compatible: view kinds are the
+        // first two words of the four-word owning layout.
+        InstKind::CoerceFnKind {
+            result, operand, ..
+        } => {
+            let src = fc.get_value(builder, *operand);
+            let ty = fc.body.values[result.index()].ty;
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), fc.ctx.ptr_ty);
+            mem::copy_aggregate(builder, repr.size(), slot, src);
+            fc.map_value(builder, *result, slot);
+        },
+
         InstKind::DestroyValue { .. } => {},
 
         // operand: RAW (custom spill for @owned scalars) → result: ADDR
@@ -85,7 +98,10 @@ pub fn compile_inst(
                 kestrel_mir::MirTy::Ref { .. }
             );
             let result_is_ref = matches!(
-                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                fc.ctx
+                    .module
+                    .ty_arena
+                    .get(fc.body.values[result.index()].ty),
                 kestrel_mir::MirTy::Ref { .. }
             );
             if operand_is_ref && !result_is_ref {
@@ -230,6 +246,8 @@ pub fn compile_inst(
                 &fc.ctx.tc,
             );
             let val = match repr {
+                // Twin of the LLVM `Discriminant` handling in
+                // `kestrel-codegen-llvm/src/inst.rs` — keep both in sync.
                 TypeRepr::Scalar(scalar_ty) if is_guaranteed => {
                     // Load the scalar through the borrow at its OWN width, then
                     // normalize to `disc_width`. `disc_width` is the enum tag
@@ -279,8 +297,10 @@ pub fn compile_inst(
                 // struct_extract computes field offsets, CopyValue loads from it.
                 let a = fc.resolve_scalar(builder, *arg);
                 fc.map_value(builder, *result, a);
-            } else if matches!(op, Op::PtrTo(_)) {
-                // PtrTo needs the ADDRESS of the arg, not the loaded value.
+            // `PtrTo`/`RefToPtr` need the ADDRESS of the arg, never its loaded
+            // value: a `&T` IS an address, and `resolve_scalar` would load the
+            // pointee (silently reading a scalar pointee's BITS as a pointer).
+            } else if matches!(op, Op::PtrTo(_) | Op::RefToPtr) {
                 // The arg is @guaranteed (Borrow convention) — its codegen
                 // value is already the address we want.
                 let a = fc.get_value(builder, *arg);
@@ -386,8 +406,11 @@ pub fn compile_inst(
             result,
             callee,
             captures,
+            retain,
+            release,
         } => {
-            let val = compile_apply_partial(fc, builder, callee, captures)?;
+            let val =
+                compile_apply_partial(fc, builder, *result, callee, captures, retain, release)?;
             fc.map_value(builder, *result, val);
         },
 
@@ -571,7 +594,9 @@ fn compile_op1(
             };
             builder.ins().bitcast(int_ty, MemFlags::new(), arg)
         },
-        Op::BitsToFloat(fb) => builder.ins().bitcast(float_bits_to_cl(fb), MemFlags::new(), arg),
+        Op::BitsToFloat(fb) => builder
+            .ins()
+            .bitcast(float_bits_to_cl(fb), MemFlags::new(), arg),
         Op::FloatWiden(_, to) => builder.ins().fpromote(float_bits_to_cl(to), arg),
         Op::FloatTruncate(_, to) => builder.ins().fdemote(float_bits_to_cl(to), arg),
         Op::RefToImmut => arg,
@@ -587,6 +612,15 @@ fn compile_op1(
         },
         Op::PtrCast(_) | Op::PtrBitcast(_) => arg,
         Op::RefToPtr => arg,
+        // Project word `i` out of a closure value. A `FuncThick` is always
+        // addressed (TypeRepr::Aggregate), so `arg` is the base address and the
+        // word is a plain pointer-sized load at `i * ptr_size`.
+        Op::ClosureWord(i) => {
+            let off = (i as u64 * fc.ctx.ptr_size) as i32;
+            builder
+                .ins()
+                .load(ptr_ty, MemFlags::new(), arg, Offset32::new(off))
+        },
         Op::PtrRead(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             mem::load_from_repr(builder, repr, arg, ptr_ty)
@@ -850,20 +884,22 @@ fn compile_op2(
             mem::store_to_repr(builder, repr, lhs, rhs);
             builder.ins().iconst(ptr_ty, 0)
         },
-        Op::AtomicAdd => builder.ins().atomic_rmw(
-            ir::types::I64,
-            MemFlags::new(),
-            ir::AtomicRmwOp::Add,
-            lhs,
-            rhs,
-        ),
-        Op::AtomicSub => builder.ins().atomic_rmw(
-            ir::types::I64,
-            MemFlags::new(),
-            ir::AtomicRmwOp::Sub,
-            lhs,
-            rhs,
-        ),
+        // `lang.atomic_add`/`atomic_sub` are seeded generic over `T`
+        // (ast-builder/lang_module.rs), so the access width must come from the
+        // value operand — hardcoding I64 reads/writes 8 bytes at a narrower
+        // location. Matches the LLVM backend, which infers it from the operand.
+        Op::AtomicAdd => {
+            let ty = builder.func.dfg.value_type(rhs);
+            builder
+                .ins()
+                .atomic_rmw(ty, MemFlags::new(), ir::AtomicRmwOp::Add, lhs, rhs)
+        },
+        Op::AtomicSub => {
+            let ty = builder.func.dfg.value_type(rhs);
+            builder
+                .ins()
+                .atomic_rmw(ty, MemFlags::new(), ir::AtomicRmwOp::Sub, lhs, rhs)
+        },
         Op::FloatCopysign(_) => builder.ins().fcopysign(lhs, rhs),
         _ => {
             return Err(CodegenError::Unsupported(format!("op2 variant: {op:?}")));
@@ -927,6 +963,22 @@ fn compile_struct(
                     &fc.ctx.module.ty_arena,
                     fc.ctx.module,
                     &fc.ctx.tc,
+                );
+                // This is where F40's wrong value was minted, so this is where the
+                // layout authorities are cross-checked. `resolve_slot_value` on an
+                // AGGREGATE field yields that field's stack-slot ADDRESS — fine as
+                // a value only if the struct is itself carried by address. A
+                // `Scalar` struct repr over an aggregate field therefore returns a
+                // pointer typed as an integer, and every by-repr copy downstream
+                // moves 8 bytes of address instead of contents. `classify_named`
+                // must answer `Aggregate` for a newtype over an aggregate field.
+                debug_assert!(
+                    !fc.ctx
+                        .tc
+                        .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module)
+                        .is_aggregate(),
+                    "scalar-repr struct over an aggregate field: the constructed \
+                     value would be a stack-slot address (F40)"
                 );
                 return Ok(resolve_slot_value(fc, builder, field_ty, fields[0].1));
             }
@@ -1181,8 +1233,11 @@ fn compile_array(
 fn compile_apply_partial(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
+    result: ValueId,
     callee: &Callee,
     captures: &[ValueId],
+    retain: &Option<Callee>,
+    release: &Option<Callee>,
 ) -> Result<Value, CodegenError> {
     let ptr_ty = fc.ctx.ptr_ty;
     let ptr_size = fc.ctx.ptr_size;
@@ -1191,17 +1246,34 @@ fn compile_apply_partial(
     // instance, exactly like a Call. Resolving by `MonoFuncId` (not by scanning
     // for the first function whose `source` matches the generic entity) is what
     // keeps each instantiation bound to *its own* thunk.
-    let func_addr = {
-        let Callee::Resolved(mono_id) = callee else {
-            return Err(CodegenError::Unsupported(format!(
-                "ApplyPartial callee not resolved to a mono instance: {callee:?}"
-            )));
+    let func_addr = resolve_func_addr(fc, builder, callee)?;
+
+    // Owning tier (lockstep 9): the closure value is 4 words and its
+    // environment is ALREADY boxed — `captures[0]` IS the handle, packed
+    // verbatim into word 1; no stack environment is allocated. `retain`/
+    // `release` are the type-erased share/release shims in words 2/3.
+    if let (Some(retain), Some(release)) = (retain.as_ref(), release.as_ref()) {
+        let handle = match captures.first() {
+            Some(&h) => fc.resolve_scalar(builder, h),
+            None => builder.ins().iconst(ptr_ty, 0),
         };
-        let func_id = fc.ctx.func_ids[mono_id.index()]
-            .ok_or_else(|| CodegenError::Unsupported("closure target not declared".into()))?;
-        let func_ref = fc.ctx.cl_module.declare_func_in_func(func_id, builder.func);
-        builder.ins().func_addr(ptr_ty, func_ref)
-    };
+        let retain_addr = resolve_func_addr(fc, builder, retain)?;
+        let release_addr = resolve_func_addr(fc, builder, release)?;
+        let thick = mem::alloc_stack_slot(builder, ptr_size * 4, ptr_size, ptr_ty);
+        for (i, w) in [func_addr, handle, retain_addr, release_addr]
+            .into_iter()
+            .enumerate()
+        {
+            builder.ins().store(
+                MemFlags::new(),
+                w,
+                thick,
+                Offset32::new((i as u64 * ptr_size) as i32),
+            );
+        }
+        return Ok(thick);
+    }
+    let _ = result;
 
     let mut env_size = 0u64;
     let mut env_align = 1u64;
@@ -1251,6 +1323,23 @@ fn compile_apply_partial(
     Ok(thick)
 }
 
+/// Address of a mono-resolved callee, for packing into a closure value.
+fn resolve_func_addr(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    callee: &Callee,
+) -> Result<Value, CodegenError> {
+    let Callee::Resolved(mono_id) = callee else {
+        return Err(CodegenError::Unsupported(format!(
+            "ApplyPartial callee not resolved to a mono instance: {callee:?}"
+        )));
+    };
+    let func_id = fc.ctx.func_ids[mono_id.index()]
+        .ok_or_else(|| CodegenError::Unsupported("closure target not declared".into()))?;
+    let func_ref = fc.ctx.cl_module.declare_func_in_func(func_id, builder.func);
+    Ok(builder.ins().func_addr(fc.ctx.ptr_ty, func_ref))
+}
+
 // ======================================================================
 // Aggregate destructuring
 // ======================================================================
@@ -1283,6 +1372,27 @@ fn compile_struct_extract(
         .tc
         .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
 
+    // Layout-authority cross-check, deliberately ABOVE the @guaranteed early
+    // return so it is reached on BOTH ownership paths. A scalar-repr struct
+    // whose field is carried by address cannot be consistent: the "value" of
+    // such a struct can only be a smuggled pointer, and every by-repr copy
+    // downstream then moves the address instead of the contents. This is F40 —
+    // `classify_named` must classify a newtype over an aggregate field as
+    // `Aggregate`.
+    //
+    // The previous guard lived below as an `if let (Scalar, Scalar)`, which
+    // does not MATCH a mixed pair and so silently fell through on the one input
+    // it named. An assertion must not be spelled as a pattern that the failure
+    // case fails to match.
+    debug_assert!(
+        !matches!(
+            (operand_repr, field_repr),
+            (TypeRepr::Scalar(_), TypeRepr::Aggregate { .. })
+        ),
+        "scalar-repr struct with an aggregate field {field:?} — classify_named must \
+         carry a newtype over an aggregate by address (F40)"
+    );
+
     // @guaranteed operands are always pointers (Option B invariant).
     // Return the field address — CopyValue handles the load.
     if is_borrowed {
@@ -1305,16 +1415,16 @@ fn compile_struct_extract(
         // would make its consumers deref one level too many.
         if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
             && !matches!(
-                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                fc.ctx
+                    .module
+                    .ty_arena
+                    .get(fc.body.values[result.index()].ty),
                 MirTy::Ref { .. }
             )
         {
-            return Ok(builder.ins().load(
-                fc.ctx.ptr_ty,
-                MemFlags::new(),
-                addr,
-                Offset32::new(0),
-            ));
+            return Ok(builder
+                .ins()
+                .load(fc.ctx.ptr_ty, MemFlags::new(), addr, Offset32::new(0)));
         }
         return Ok(addr);
     }
@@ -1322,8 +1432,8 @@ fn compile_struct_extract(
     // @owned: single-field scalar newtype — value IS the field. A newtype's
     // representation IS its field's (classify_named delegates to it), so the @owned
     // value already carries the field's scalar; no load or bitcast coercion is needed.
-    // The assert pins that single-source-of-truth invariant — if it ever fires, a
-    // layout authority has diverged from classify_named again.
+    // The mixed (Scalar, Aggregate) case is asserted against above; any other
+    // combination falls through to the offset+load below, which is correct for it.
     if let (TypeRepr::Scalar(base_cl), TypeRepr::Scalar(field_cl)) = (operand_repr, field_repr) {
         debug_assert_eq!(
             base_cl, field_cl,
@@ -1381,7 +1491,10 @@ fn compile_tuple_extract(
             // results keep the slot address).
             if matches!(arena.get(elem_ty), MirTy::Ref { .. })
                 && !matches!(
-                    fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                    fc.ctx
+                        .module
+                        .ty_arena
+                        .get(fc.body.values[result.index()].ty),
                     MirTy::Ref { .. }
                 )
             {
@@ -1435,7 +1548,10 @@ fn compile_enum_payload(
                     // Ref-typed results keep the slot address).
                     if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
                         && !matches!(
-                            fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                            fc.ctx
+                                .module
+                                .ty_arena
+                                .get(fc.body.values[result.index()].ty),
                             MirTy::Ref { .. }
                         )
                     {
@@ -1625,10 +1741,10 @@ fn compile_resolved_call(
                         val
                     } else {
                         let arg_ty = fc.body.values[call_arg.value.index()].ty;
-                        let arg_repr = fc
-                            .ctx
-                            .tc
-                            .repr(arg_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                        let arg_repr =
+                            fc.ctx
+                                .tc
+                                .repr(arg_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
                         if let TypeRepr::Scalar(t) = arg_repr {
                             builder
                                 .ins()
@@ -1857,7 +1973,7 @@ fn compile_thick_call(
         _ => func_ty,
     };
 
-    let (param_tys, ret_ty) = if let MirTy::FuncThick { params, ret } = arena.get(inner_ty) {
+    let (param_tys, ret_ty) = if let MirTy::FuncThick { params, ret, .. } = arena.get(inner_ty) {
         (params.clone(), *ret)
     } else {
         return Err(CodegenError::Unsupported(format!(

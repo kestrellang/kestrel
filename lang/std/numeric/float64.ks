@@ -14,7 +14,7 @@ import std.core.(
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
-import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.numeric.(Int64, UInt64, Float32)
 import std.collections.Array
 
@@ -30,7 +30,7 @@ import std.collections.Array
 /// ```
 /// let pi = Float64.pi;
 /// let area = pi * radius * radius;
-/// let s = area.format(.{precision: 2});  // "314.16"
+/// let s = area.formatted(.{precision: 2});  // "314.16"
 /// ```
 ///
 /// ```
@@ -867,7 +867,7 @@ public struct Float64:
     /// Float64(parsing: "");          // None
     /// ```
     public init(parsing string: String)? {
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {
             return null
         }
@@ -1100,14 +1100,14 @@ public struct Float64:
     /// # Examples
     ///
     /// ```
-    /// (3.14159).format();                                          // "3.14159"
-    /// (3.14159).format(.{precision: 2});                  // "3.14"
-    /// (1234.5).format(.{floatStyle: .Scientific});        // "1.2345e3"
-    /// (0.756).format(.{floatStyle: .Percent});            // "75.6%"
-    /// (3.14).format(.{width: 8, fill: '0'});              // "00003.14"
-    /// (3.14).format(.{sign: .Always});                    // "+3.14"
+    /// (3.14159).formatted();                                          // "3.14159"
+    /// (3.14159).formatted(.{precision: 2});                  // "3.14"
+    /// (1234.5).formatted(.{floatStyle: .Scientific});        // "1.2345e3"
+    /// (0.756).formatted(.{floatStyle: .Percent});            // "75.6%"
+    /// (3.14).formatted(.{width: 8, fill: '0'});              // "00003.14"
+    /// (3.14).formatted(.{sign: .Always});                    // "+3.14"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         var precision: Int64 = 6;
         var precisionProvided = false;
         if let .Some(p) = options.precision {
@@ -1225,7 +1225,7 @@ public struct Float64:
             }
         }
         if trimTrailingZeros {
-            let len = number.byteCount;
+            let len = number.bytes.count;
             var dotIndex: Int64 = -1;
             var expIndex: Int64 = -1;
             var i: Int64 = 0;

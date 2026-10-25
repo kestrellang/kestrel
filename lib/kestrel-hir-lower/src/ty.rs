@@ -13,8 +13,9 @@ use kestrel_ast_builder::{
     TypeAnnotation, TypeParams,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
+use kestrel_hir::Builtin;
 use kestrel_hir::ty::HirTy;
-use kestrel_name_res::{ExtensionTargetEntity, ResolveTypePath, TypeResolution};
+use kestrel_name_res::{ExtensionTargetEntity, ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_reporting::{Diagnostic, Label};
 use kestrel_span::Span;
 
@@ -46,6 +47,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                     } else {
                         ctx.accumulate(
                             Diagnostic::error()
+                                .with_code("E138")
                                 .with_message("'Self' is not valid in this scope")
                                 .with_labels(vec![Label::primary(span.file_id, span.range())]),
                         );
@@ -60,6 +62,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                         .join(".");
                     ctx.accumulate(
                         Diagnostic::error()
+                            .with_code("E476")
                             .with_message(format!("cannot find type '{type_name}' in this scope"))
                             .with_labels(vec![
                                 Label::primary(span.file_id, span.range())
@@ -89,6 +92,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                     }
                     ctx.accumulate(
                         Diagnostic::error()
+                            .with_code("E139")
                             .with_message(format!("'{type_name}' is not a type"))
                             .with_labels(labels),
                     );
@@ -106,6 +110,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
         },
 
         AstType::Function {
+            kind,
             params,
             param_conventions,
             return_type,
@@ -117,6 +122,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                 .collect();
             let lowered_ret = Box::new(lower_ast_type(ctx, owner, root, return_type));
             HirTy::Function {
+                kind: *kind,
                 params: lowered_params,
                 param_conventions: param_conventions.clone(),
                 ret: lowered_ret,
@@ -124,17 +130,32 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
             }
         },
 
-        // Sugar types → resolve standard library entity + Struct
-        AstType::Array(elem, span) => {
-            lower_sugar_type(ctx, owner, root, "Array", &[elem.as_ref()], span)
-        },
-        AstType::Optional(inner, span) => {
-            lower_sugar_type(ctx, owner, root, "Optional", &[inner.as_ref()], span)
-        },
+        // Sugar types → resolve standard library entity + Struct.
+        // The `Builtin` is the `@builtin(.XTypeOperator)` lang item that binds
+        // the syntax; the string is only a fallback for worlds without it.
+        AstType::Array(elem, span) => lower_sugar_type(
+            ctx,
+            owner,
+            root,
+            Builtin::ArrayTypeOperator,
+            "Array",
+            &[elem.as_ref()],
+            span,
+        ),
+        AstType::Optional(inner, span) => lower_sugar_type(
+            ctx,
+            owner,
+            root,
+            Builtin::OptionalTypeOperator,
+            "Optional",
+            &[inner.as_ref()],
+            span,
+        ),
         AstType::Dictionary(key, val, span) => lower_sugar_type(
             ctx,
             owner,
             root,
+            Builtin::DictionaryTypeOperator,
             "Dictionary",
             &[key.as_ref(), val.as_ref()],
             span,
@@ -143,6 +164,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
             ctx,
             owner,
             root,
+            Builtin::ResultTypeOperator,
             "Result",
             &[ok.as_ref(), err.as_ref()],
             span,
@@ -150,13 +172,44 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
         AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
         AstType::Never(span) => HirTy::Never(span.clone()),
         AstType::Inferred(span) => HirTy::Infer(span.clone()),
-        AstType::Some { bounds, span } => {
+        AstType::Some {
+            bounds,
+            negative,
+            span,
+        } => {
             let hir_bounds: Vec<HirTy> = bounds
                 .iter()
                 .map(|b| lower_ast_type(ctx, owner, root, b))
                 .collect();
+            // The only legal negative bound is `Copyable` (same rule as the
+            // E424 conformance-list check). Recovery keeps the flag set so a
+            // bad negative doesn't cascade into "underlier must be Copyable".
+            let not_copyable = match negative {
+                None => false,
+                Some(neg) => {
+                    if !negative_bound_is_copyable(ctx, owner, root, neg) {
+                        let neg_span = ast_type_span(neg);
+                        ctx.accumulate(
+                            Diagnostic::error()
+                                .with_code("E140")
+                                .with_message("negative bound on an opaque type must be 'Copyable'")
+                                .with_labels(vec![
+                                    Label::primary(neg_span.file_id, neg_span.range())
+                                        .with_message("only 'not Copyable' is supported here"),
+                                ])
+                                .with_notes(vec![
+                                    "`not` is only legal on builtin protocols with implicit \
+                                     conformance (e.g. `Copyable`)"
+                                        .into(),
+                                ]),
+                        );
+                    }
+                    true
+                },
+            };
             HirTy::Opaque {
                 bounds: hir_bounds,
+                not_copyable,
                 span: span.clone(),
             }
         },
@@ -342,10 +395,31 @@ fn build_assoc_projection_base(
     span: &Span,
 ) -> HirTy {
     if segments.len() >= 2 {
-        // Lower segments[..last] as a standalone path.
+        // Lower segments[..last] as a standalone path, spanning only those
+        // segments (`B` in `B.Item`), so each node's span says which segment
+        // names which entity — LSP hover/definition on a `TypeRef` read it
+        // (G26). A synthesized path whose segment spans fall outside `span`
+        // keeps the whole span.
+        let prefix_segments = &segments[..segments.len() - 1];
+        let (first, last) = (
+            &prefix_segments[0],
+            &prefix_segments[prefix_segments.len() - 1],
+        );
+        let prefix_span = if span.start <= first.span.start
+            && first.span.start <= last.span.end
+            && last.span.end <= span.end
+        {
+            Span {
+                file_id: span.file_id,
+                start: first.span.start,
+                end: last.span.end,
+            }
+        } else {
+            span.clone()
+        };
         let prefix = AstType::Named {
-            segments: segments[..segments.len() - 1].to_vec(),
-            span: span.clone(),
+            segments: prefix_segments.to_vec(),
+            span: prefix_span,
         };
         lower_ast_type(ctx, owner, root, &prefix)
     } else {
@@ -611,11 +685,13 @@ pub fn reject_ref_types(
             span,
         ),
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
             span,
         } => HirTy::Function {
+            kind,
             params: params
                 .into_iter()
                 .map(|p| reject_ref_types(ctx, p, RefPosition::Param, policy))
@@ -634,11 +710,16 @@ pub fn reject_ref_types(
             assoc,
             span,
         },
-        HirTy::Opaque { bounds, span } => HirTy::Opaque {
+        HirTy::Opaque {
+            bounds,
+            not_copyable,
+            span,
+        } => HirTy::Opaque {
             bounds: bounds
                 .into_iter()
                 .map(|b| reject_ref_types(ctx, b, RefPosition::Other, RefPolicy::Strict))
                 .collect(),
+            not_copyable,
             span,
         },
         leaf @ (HirTy::Param(..)
@@ -683,6 +764,7 @@ fn validate_arity(
             .join(".");
         ctx.accumulate(
             Diagnostic::error()
+                .with_code("E438")
                 .with_message(format!("too few type arguments for '{type_name}'"))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
@@ -698,6 +780,7 @@ fn validate_arity(
             .join(".");
         ctx.accumulate(
             Diagnostic::error()
+                .with_code("E438")
                 .with_message(format!("too many type arguments for '{type_name}'"))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
@@ -715,6 +798,7 @@ fn lower_sugar_type(
     ctx: &QueryContext<'_>,
     owner: Entity,
     root: Entity,
+    builtin: Builtin,
     name: &str,
     type_args: &[&AstType],
     span: &Span,
@@ -724,7 +808,7 @@ fn lower_sugar_type(
         .map(|t| lower_ast_type(ctx, owner, root, t))
         .collect();
 
-    if let Some(entity) = resolve_std_type(ctx, owner, root, name) {
+    if let Some(entity) = resolve_sugar_type(ctx, owner, root, builtin, name) {
         let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
         // Dispatch by NodeKind — Optional is an enum, Array/Dictionary are structs.
         match ctx.get::<NodeKind>(entity).cloned() {
@@ -747,6 +831,7 @@ fn lower_sugar_type(
     } else {
         ctx.accumulate(
             Diagnostic::error()
+                .with_code("E141")
                 .with_message(format!("{name} is not defined"))
                 .with_labels(vec![Label::primary(span.file_id, span.range())])
                 .with_notes(vec!["is the standard library imported?".to_string()]),
@@ -782,6 +867,54 @@ fn fill_type_arg_defaults(
         }
     }
     args
+}
+
+/// Resolve the type that a piece of type sugar (`[T]`, `T?`, `[K: V]`,
+/// `T throws E`) denotes.
+///
+/// Goes through the `@builtin(.XTypeOperator)` lang item, which is what the
+/// stdlib annotation is *for*. Before this, the four annotations in `lang/std`
+/// had zero readers and the sugar resolved the hardcoded name `"Array"` in the
+/// **user's** scope — so `struct Array[T] {}` in a user file silently captured
+/// `[Int]`, and every array literal in that file failed to conform to
+/// `_ExpressibleByArrayLiteral`.
+///
+/// Falls back to the name for worlds built without the stdlib (unit tests,
+/// `--no-std`), where there is no lang item to find.
+fn resolve_sugar_type(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    builtin: Builtin,
+    name: &str,
+) -> Option<Entity> {
+    if let Some(alias) = ctx.query(ResolveBuiltin { builtin, root })
+        && let Some(target) = sugar_alias_target(ctx, root, alias)
+    {
+        return Some(target);
+    }
+    resolve_std_type(ctx, owner, root, name)
+}
+
+/// Follow `@builtin(.ArrayTypeOperator) type ArrayTypeOperator[T] = Array[T]`
+/// to `Array`.
+///
+/// The target is resolved with the **alias** as context, so it lands in the
+/// stdlib's own scope no matter what the user file declares or imports.
+fn sugar_alias_target(ctx: &QueryContext<'_>, root: Entity, alias: Entity) -> Option<Entity> {
+    let annotation = ctx.get::<TypeAnnotation>(alias)?;
+    let AstType::Named { segments, .. } = &annotation.0 else {
+        return None;
+    };
+    let segments: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    match ctx.query(ResolveTypePath {
+        segments,
+        context: alias,
+        root,
+    }) {
+        TypeResolution::Found(entity) => Some(entity),
+        _ => None,
+    }
 }
 
 /// Resolve a well-known standard library type name (e.g. "Array", "Optional").
@@ -872,9 +1005,12 @@ impl QueryFn for LowerTypeAnnotation {
                 Diagnostic::error()
                     .with_code("E490")
                     .with_message("a throwing function cannot return a reference")
-                    .with_labels(vec![Label::primary(span.file_id, span.range())
-                        .with_message("`throws` wraps the return in `Result` — a reference \
-                                       cannot live in an enum payload")]),
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range()).with_message(
+                            "`throws` wraps the return in `Result` — a reference \
+                                       cannot live in an enum payload",
+                        ),
+                    ]),
             );
             return Some(HirTy::Error(span.clone()));
         }
@@ -903,7 +1039,8 @@ impl QueryFn for LowerTypeAnnotation {
                 span,
             } = lowered
         {
-            let inner = reject_ref_types(ctx, *inner, RefPosition::Other, RefPolicy::AllowAggregate);
+            let inner =
+                reject_ref_types(ctx, *inner, RefPosition::Other, RefPolicy::AllowAggregate);
             return Some(HirTy::Ref {
                 inner: Box::new(inner),
                 mutating,
@@ -1198,6 +1335,34 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
     }
 }
 
+/// Is the negative bound of `some P and not X` the `Copyable` builtin?
+///
+/// Entity comparison is the source of truth; the last-segment string match is
+/// a fallback for stdlib-less fixtures where the builtin entity isn't
+/// registered (mirrors `nominal_copy_semantics_impl` in kestrel-semantics).
+fn negative_bound_is_copyable(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    neg: &AstType,
+) -> bool {
+    let AstType::Named { segments, .. } = neg else {
+        return false;
+    };
+    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    if let TypeResolution::Found(entity) = ctx.query(ResolveTypePath {
+        segments: seg_names,
+        context: owner,
+        root,
+    }) {
+        return ctx.query(ResolveBuiltin {
+            builtin: Builtin::Copyable,
+            root,
+        }) == Some(entity);
+    }
+    segments.last().is_some_and(|s| s.name == "Copyable")
+}
+
 fn ast_type_span(ty: &AstType) -> Span {
     match ty {
         AstType::Named { span, .. }
@@ -1247,7 +1412,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let iter_proto = world.spawn();
         world.set(iter_proto, NodeKind::Protocol);
@@ -1289,7 +1454,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let alias = world.spawn();
         world.set(alias, NodeKind::TypeAlias);

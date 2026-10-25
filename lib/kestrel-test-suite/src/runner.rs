@@ -141,18 +141,11 @@ fn temp_dir() -> PathBuf {
 }
 
 /// Collect C shim sources from the stdlib directory.
+///
+/// Same resolver as the compiler proper — this had its own copy that skipped
+/// the `exists()` check on `KESTREL_STD`, so a stale value silently linked
+/// without the libc shims.
 fn stdlib_c_sources() -> Vec<PathBuf> {
-    let std_dir = if let Ok(path) = std::env::var("KESTREL_STD") {
-        PathBuf::from(path)
-    } else {
-        let manifest = env!("CARGO_MANIFEST_DIR");
-        std::path::Path::new(manifest)
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("lang/std")
-    };
-    let shim = std_dir.join("io/libc_shims.c");
-    if shim.exists() { vec![shim] } else { vec![] }
+    let std_dir = kestrel_compiler::stdlib_path::default_std_path().ok();
+    kestrel_compiler::stdlib_path::stdlib_c_sources(std_dir.as_deref())
 }

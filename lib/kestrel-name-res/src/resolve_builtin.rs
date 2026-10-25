@@ -5,13 +5,16 @@
 //! - `EntityBuiltin`: Forward lookup — does this entity have `@builtin(.X)`?
 //! - `BuiltinIndex`: Scans all entities to build a complete Builtin → Entity map.
 //! - `ResolveBuiltin`: Reverse lookup — which entity is the `Addable` protocol?
-//!   Uses name-based resolution first, then falls back to the attribute index.
+//!   Answered by the attribute index ONLY. A lang item is whatever carries the
+//!   `@builtin(.X)` annotation; its source name means nothing (a user
+//!   `module Int64` must not become the integer type — audit H2).
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use kestrel_ast_builder::Attributes;
+use kestrel_ast::AstType;
+use kestrel_ast_builder::{Attributes, TypeAnnotation};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::Builtin;
 
@@ -97,33 +100,62 @@ impl QueryFn for BuiltinIndex {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Arc<BuiltinMap> {
         let mut map = HashMap::new();
-        scan_builtins(ctx, self.root, &mut map);
+        scan_builtins(ctx, self.root, self.root, &mut map);
         Arc::new(BuiltinMap(map))
     }
 }
 
-/// Recursively scan an entity and its children for @builtin attributes.
-fn scan_builtins(ctx: &QueryContext<'_>, entity: Entity, map: &mut HashMap<Builtin, Entity>) {
-    if let Some(builtin) = ctx.query(EntityBuiltin { entity }) {
-        map.insert(builtin, entity);
+/// Scan an entity and its children for @builtin attributes, depth-first in
+/// declaration order. The FIRST annotation of a builtin wins; any later one
+/// is a duplicate, reported as E400 by kestrel-analyze (`duplicate_builtin`).
+/// Annotations [`builtin_annotation_allowed`] rejects never enter the index.
+fn scan_builtins(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    entity: Entity,
+    map: &mut HashMap<Builtin, Entity>,
+) {
+    if let Some(builtin) = ctx.query(EntityBuiltin { entity })
+        && builtin_annotation_allowed(ctx, root, entity)
+    {
+        map.entry(builtin).or_insert(entity);
     }
     for &child in ctx.children_of(entity) {
-        scan_builtins(ctx, child, map);
+        scan_builtins(ctx, root, child, map);
     }
+}
+
+/// Whether `entity`'s `@builtin` annotation may define a lang item. With a
+/// stdlib loaded (a top-level `std` module exists) only declarations inside
+/// it may — user code cannot claim a lang item (E401, kestrel-analyze
+/// `duplicate_builtin`). Without a stdlib (`--no-std` programs, test
+/// preludes) the program supplies its own lang items, so any module may.
+///
+/// Single source of truth for both the index and the diagnostic. Stdlib
+/// membership is by module path, so a user file declaring `module std.x`
+/// still passes; telling stdlib files apart by origin needs a file-level
+/// marker the loader does not set today.
+pub fn builtin_annotation_allowed(ctx: &QueryContext<'_>, root: Entity, entity: Entity) -> bool {
+    let Some(std_module) = crate::resolve_module::find_child_module(ctx, root, "std") else {
+        return true;
+    };
+    let mut current = entity;
+    while let Some(parent) = ctx.parent_of(current) {
+        if current == std_module {
+            return true;
+        }
+        current = parent;
+    }
+    false
 }
 
 // ===== ResolveBuiltin: reverse lookup (Builtin → Entity) =====
 
-/// Query: resolve a builtin type/protocol to its entity.
-///
-/// Two resolution strategies:
-/// 1. **Name-based**: Look up the type by its source name in the root scope.
-///    Works for types that are auto-imported from std (e.g., "Addable", "Bool").
-/// 2. **Attribute index**: Scan for `@builtin(.Feature)` annotations.
-///    Works for features that aren't directly importable by name (e.g.,
-///    OptionalEnum, protocol methods, enum cases).
-///
-/// Both strategies are cached by the query system.
+/// Query: resolve a builtin type/protocol to its entity — the declaration
+/// annotated `@builtin(.Feature)`, from [`BuiltinIndex`]. There is no
+/// name-based lookup: a lang item is identified by its annotation only, so a
+/// user declaration that merely shares a builtin's name (`module Int64`,
+/// `struct Bool`) is never taken for it.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ResolveBuiltin {
     pub builtin: Builtin,
@@ -134,18 +166,30 @@ impl QueryFn for ResolveBuiltin {
     type Output = Option<Entity>;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Option<Entity> {
-        // Strategy 1: name-based lookup (fast path for auto-imported types)
-        let result = ctx.query(ResolveTypePath {
-            segments: vec![self.builtin.name().to_string()],
-            context: self.root,
-            root: self.root,
-        });
-        if let TypeResolution::Found(entity) = result {
-            return Some(entity);
+        let annotated = ctx
+            .query(BuiltinIndex { root: self.root })
+            .get(&self.builtin)?;
+        if !self.builtin.denotes_alias_target() {
+            return Some(annotated);
         }
+        alias_target(ctx, annotated, self.root)
+    }
+}
 
-        // Strategy 2: attribute index fallback
-        let index = ctx.query(BuiltinIndex { root: self.root });
-        index.get(&self.builtin)
+/// The nominal a type alias names (`Int64` for `type IntegerLiteralType =
+/// Int64`, `Array` for `type ArrayLiteralType[T] = std.collections.Array[T]`),
+/// resolved in the alias's own scope.
+fn alias_target(ctx: &QueryContext<'_>, alias: Entity, root: Entity) -> Option<Entity> {
+    let TypeAnnotation(AstType::Named { segments, .. }) = ctx.get::<TypeAnnotation>(alias)? else {
+        return None;
+    };
+    let resolution = ctx.query(ResolveTypePath {
+        segments: segments.iter().map(|s| s.name.clone()).collect(),
+        context: ctx.parent_of(alias).unwrap_or(root),
+        root,
+    });
+    match resolution {
+        TypeResolution::Found(entity) => Some(entity),
+        _ => None,
     }
 }

@@ -38,7 +38,7 @@ func nsGetArgv() -> lang.ptr[lang.ptr[lang.ptr[lang.i8]]]
 /// ```
 @platform(.darwin)
 public func getArgv() -> Array[String] {
-    var result = Array[String]();
+    var result = [];
 
     let argcPtr = nsGetArgc();
     let argc = Int32(raw: lang.ptr_read(argcPtr));
@@ -73,7 +73,7 @@ public func getArgv() -> Array[String] {
 /// ```
 @platform(.linux)
 public func getArgv() -> Array[String] {
-    var result = Array[String]();
+    var result = [];
 
     let path = "/proc/self/cmdline".toCString();
     let fd = std.io.libc.open(path.raw, O_RDONLY(), 0);

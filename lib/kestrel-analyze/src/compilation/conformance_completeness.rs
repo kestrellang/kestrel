@@ -18,7 +18,7 @@
 //! ### E458 -- `wrong_method_return_type` (Error, Correctness)
 //! **Message:** "method '{name}' has wrong return type for protocol '{proto}'"
 //!
-//! ### E459 -- `wrong_method_receiver_kind` (Error, Correctness)
+//! ### E477 -- `wrong_method_receiver_kind` (Error, Correctness)
 //! **Message:** "method '{name}' has wrong receiver kind for protocol '{proto}'"
 //!
 //! ### E460 -- `missing_property_setter` (Error, Correctness)
@@ -38,7 +38,7 @@ use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, InitEffect, Name, NodeKind, QualifiedTarget, Settable,
+    Callable, ConformanceItem, Conformances, InitEffect, NodeKind, QualifiedTarget, Settable,
     TypeAnnotation, TypeParams, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
@@ -53,7 +53,7 @@ use kestrel_type_infer::compare::{
 };
 use kestrel_type_infer::conformance::type_satisfies;
 use kestrel_type_infer::entailment::constraint_entailed_by;
-use kestrel_type_infer::resolve::WhereClause as ResolvedWhereClause;
+use kestrel_type_infer::resolve::{WhereClause as ResolvedWhereClause, WhereSubject};
 use kestrel_type_infer::result::ResolvedTy;
 use kestrel_type_infer::where_clauses::WhereClausesOf;
 
@@ -89,7 +89,7 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "E459",
+        id: "E477",
         name: "wrong_method_receiver_kind",
         default_severity: Severity::Error,
         category: Category::Correctness,
@@ -280,9 +280,7 @@ fn check_protocol_requirements(
         // method that's already (illegally) implemented. Skip — the body is
         // visible to readers as a (would-be) default, so the conformance is
         // not missing in the sense E454 is meant to flag.
-        if cx.query.get::<kestrel_ast_builder::Body>(child).is_some()
-            || cx.query.get::<kestrel_ast_builder::Valued>(child).is_some()
-        {
+        if cx.query.get::<kestrel_ast_builder::Valued>(child).is_some() {
             continue;
         }
         let child_kind = cx.query.get::<NodeKind>(child);
@@ -1101,7 +1099,8 @@ fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> Re
     {
         return ResolvedTy::Tuple(Vec::new());
     }
-    if kestrel_name_res::extensions::resolve_lang_child(&cx.query, cx.root, "!") == Some(type_entity)
+    if kestrel_name_res::extensions::resolve_lang_child(&cx.query, cx.root, "!")
+        == Some(type_entity)
     {
         return ResolvedTy::Never;
     }
@@ -1244,6 +1243,7 @@ fn resolve_conformance_type_arg(
             Some(ResolvedTy::Tuple(resolved))
         },
         AstType::Function {
+            kind,
             params,
             param_conventions,
             return_type,
@@ -1255,6 +1255,7 @@ fn resolve_conformance_type_arg(
                 .collect();
             let ret = resolve_conformance_type_arg(cx, return_type, context, ext_to_struct)?;
             Some(ResolvedTy::Function {
+                kind: *kind,
                 params,
                 conventions: param_conventions.clone(),
                 ret: Box::new(ret),
@@ -1449,15 +1450,11 @@ fn receivers_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
     }
 }
 
+/// The name this member answers to. Delegates to name resolution's rule —
+/// this was a fork that keyed subscripts on `NodeKind::Subscript` while the
+/// real lookup keys them on the `Subscript` marker component.
 fn member_lookup_name(cx: &CompilationContext<'_>, entity: Entity) -> Option<String> {
-    if let Some(name) = cx.query.get::<Name>(entity) {
-        return Some(name.0.clone());
-    }
-    match cx.query.get::<NodeKind>(entity) {
-        Some(NodeKind::Initializer) => Some("init".into()),
-        Some(NodeKind::Subscript) => Some("subscript".into()),
-        _ => None,
-    }
+    kestrel_name_res::helpers::member_lookup_name(cx.query, entity).map(str::to_owned)
 }
 
 /// Check if an entity has a TypeAlias child with the given name (regardless of binding).
@@ -1640,8 +1637,15 @@ fn extension_clauses_entailed(
         // provides `isEqual` to `BoxC: Container[Int64]` exactly when Int64
         // genuinely satisfies Equatable. This is the constrained-protocol-
         // extension witness the stdlib's own Array/Slice idiom relies on (#213).
-        if let ResolvedWhereClause::Bound { param, protocol, .. } = c
-            && let Some(binding) = proto_subs.get(param)
+        // `as_param()` keeps projection subjects out of this concrete-binding
+        // check: `substitute_clause` renames their root, and a concrete root
+        // makes it `None` (not entailed), since `Int64.Item: P` needs a real
+        // conformance check this path does not do.
+        if let ResolvedWhereClause::Bound {
+            subject, protocol, ..
+        } = c
+            && let Some(param) = subject.as_param()
+            && let Some(binding) = proto_subs.get(&param)
             && !matches!(binding, ResolvedTy::Param { .. })
         {
             return type_satisfies(cx.query, &resolved_ty_to_hir(binding), *protocol, cx.root);
@@ -1656,33 +1660,60 @@ fn extension_clauses_entailed(
 }
 
 /// Apply `proto_subs` (protocol-param → conforming-type binding) to a where
-/// clause. Returns None if a referenced param maps to a non-`Param` binding
-/// (concrete type), since the entailment check only handles param-to-param.
+/// clause: its subject (root param, through any projection) and, for an
+/// equality, every `Param` inside the RHS. Returns `None` if any referenced
+/// param maps to a non-`Param` binding (concrete type), since the entailment
+/// check only handles param-to-param.
 fn substitute_clause(
     clause: &ResolvedWhereClause,
     proto_subs: &HashMap<Entity, ResolvedTy>,
 ) -> Option<ResolvedWhereClause> {
     match clause {
         ResolvedWhereClause::Bound {
-            param,
+            subject,
             protocol,
             protocol_type_args,
-        } => {
-            let new_param = match proto_subs.get(param) {
-                Some(ResolvedTy::Param { entity }) => *entity,
-                Some(_) => return None,
-                None => *param,
-            };
-            Some(ResolvedWhereClause::Bound {
-                param: new_param,
-                protocol: *protocol,
-                protocol_type_args: protocol_type_args.clone(),
-            })
+        } => Some(ResolvedWhereClause::Bound {
+            subject: substitute_subject(subject, proto_subs)?,
+            protocol: *protocol,
+            protocol_type_args: protocol_type_args.clone(),
+        }),
+        ResolvedWhereClause::Equality { subject, rhs } => Some(ResolvedWhereClause::Equality {
+            subject: substitute_subject(subject, proto_subs)?,
+            rhs: rhs.try_rename_params(&mut |p| rename_param(p, proto_subs))?,
+        }),
+        ResolvedWhereClause::NotBound { subject, protocol } => Some(ResolvedWhereClause::NotBound {
+            subject: substitute_subject(subject, proto_subs)?,
+            protocol: *protocol,
+        }),
+    }
+}
+
+/// Rename a where-clause subject's root param through `proto_subs`, keeping
+/// every projection above it (`T.Item` → `U.Item`). `Self` has no param to
+/// rename and is kept as written.
+fn substitute_subject(
+    subject: &WhereSubject,
+    proto_subs: &HashMap<Entity, ResolvedTy>,
+) -> Option<WhereSubject> {
+    Some(match subject {
+        WhereSubject::Param(p) => WhereSubject::Param(rename_param(*p, proto_subs)?),
+        WhereSubject::SelfType => WhereSubject::SelfType,
+        WhereSubject::Projection { base, assoc } => WhereSubject::Projection {
+            base: Box::new(substitute_subject(base, proto_subs)?),
+            assoc: *assoc,
         },
-        // Equality clauses passed through unchanged; entailment treats them
-        // conservatively (always rejects). Substitution would only matter
-        // once entailment is generalized.
-        other => Some(other.clone()),
+    })
+}
+
+/// One param through `proto_subs`: unmapped stays itself, a param binding
+/// renames, a concrete binding is `None` (param-to-param entailment cannot
+/// judge it).
+fn rename_param(param: Entity, proto_subs: &HashMap<Entity, ResolvedTy>) -> Option<Entity> {
+    match proto_subs.get(&param) {
+        Some(ResolvedTy::Param { entity }) => Some(*entity),
+        Some(_) => None,
+        None => Some(param),
     }
 }
 
@@ -1807,8 +1838,14 @@ fn collect_context_where_clauses(
             .zip(struct_params.iter())
             .map(|(&d, &s)| (d, s))
             .collect();
+        // Remap ONLY a bare `Param` root. A projection subject is left
+        // untouched — that is what happened when it was a separate clause
+        // variant this `if let` never matched.
+        // TODO(G17 stage 3a): remapping a projection's base is the desirable
+        // behaviour, but it is a semantic change and belongs in its own commit.
         for clause in &mut clauses {
-            if let ResolvedWhereClause::Bound { param, .. } = clause
+            if let ResolvedWhereClause::Bound { subject, .. } = clause
+                && let WhereSubject::Param(param) = subject
                 && let Some(&mapped) = decl_to_struct.get(param)
             {
                 *param = mapped;

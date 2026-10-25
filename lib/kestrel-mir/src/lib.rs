@@ -27,10 +27,13 @@ pub use immediate::{Immediate, ImmediateKind};
 pub use item::WitnessMethodKey;
 pub use item::{CopyBehavior, DropBehavior, Layout, TargetConfig, TypeInfo, TypeParamDef};
 pub use layout::{EnumLayout, StructLayout};
-pub use op::{DivGuard, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness};
+pub use op::{
+    DivGuard, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness, op_type,
+    op_type_mut,
+};
 pub use substitute::{SubstMap, substitute};
 pub use terminator::SwitchCase;
-pub use ty::{MirTy, ParamConvention, TyArena};
+pub use ty::{FnKind, MirTy, ParamConvention, TyArena, func_thick_words};
 pub use value::Ownership;
 
 use item::enum_def::EnumDef;
@@ -48,7 +51,16 @@ use item::witness::WitnessDef;
 pub struct EscapeCarry {
     pub any_ref: bool,
     pub mutating_ref: bool,
+    /// Carries ANY closure. Drives taint PROPAGATION (`carry_ref_taint`), which
+    /// must keep tracking an owning closure's root so a truncated view of a
+    /// borrowed handle is still recognizable.
     pub closure: bool,
+    /// Carries a FRAME-BOUND closure — a view kind whose environment holds
+    /// addresses into the defining frame. Only this drives the E494 escape
+    /// MODE: a boxed handle (`escaping`'s shared box, `consuming`'s unique
+    /// box) owns its environment, so returning it or storing it in a returned
+    /// struct is legal (plan D7).
+    pub view_closure: bool,
 }
 
 impl EscapeCarry {
@@ -69,6 +81,38 @@ pub struct MirModule {
     pub statics: IndexMap<Entity, StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
+    /// The `@builtin(.Copyable)` / `@builtin(.Cloneable)` protocol entities,
+    /// resolved once in mir-lower via `ResolveBuiltin`.
+    ///
+    /// MIR has no `World`, so it used to re-derive these with
+    /// `p.name.ends_with("Copyable")` — which also matched any user protocol
+    /// whose name happened to end that way, and silently matched nothing if the
+    /// stdlib protocol were ever renamed. Carrying the entity keeps the lang
+    /// item the single source of truth across the mir-lower → mir boundary.
+    ///
+    /// `None` for hand-built modules (unit tests) and for a build with no
+    /// stdlib — the same answer the name scan gave in those cases.
+    pub copyable_protocol: Option<Entity>,
+    pub cloneable_protocol: Option<Entity>,
+    /// The `@builtin(.BooleanConditional)` protocol and the `@builtin(.Bool)`
+    /// struct entities, resolved once in mir-lower via `ResolveBuiltin`.
+    ///
+    /// Same reasoning as `copyable_protocol` above: MIR has no `World`, so
+    /// carrying the entity keeps the lang item the single source of truth
+    /// across the mir-lower → mir boundary. These drive implicit-condition
+    /// lowering (`coerce_condition_to_i1`): the protocol names the witness to
+    /// dispatch, and `bool_struct` identifies the one nominal type that may
+    /// skip that dispatch and branch on its scalar directly.
+    ///
+    /// `bool_struct` must be matched by *entity*, never structurally: a
+    /// "single-field struct wrapping `lang.i1`" test would also swallow a
+    /// user's own `struct MyFlag { var value: lang.i1 }` whose `boolValue()`
+    /// need not be the identity.
+    ///
+    /// `None` for hand-built modules (unit tests) and for a build with no
+    /// stdlib — implicit conditions then branch raw, as they always did.
+    pub boolean_conditional_protocol: Option<Entity>,
+    pub bool_struct: Option<Entity>,
     /// Nominal types marked `@observabledrop`: dropping one has an observable
     /// effect (closing a connection), so copy lifetime passes must not drop
     /// copies of it — or of anything containing it — earlier than scope end.
@@ -87,6 +131,10 @@ impl MirModule {
             statics: IndexMap::new(),
             ty_arena: TyArena::new(),
             entity_names: IndexMap::new(),
+            copyable_protocol: None,
+            cloneable_protocol: None,
+            boolean_conditional_protocol: None,
+            bool_struct: None,
             observable_drop: IndexSet::new(),
         }
     }
@@ -152,7 +200,15 @@ impl MirModule {
                 let pointee = *pointee;
                 self.escape_carry_into(pointee, out, visited);
             },
-            MirTy::FuncThick { .. } => out.closure = true,
+            // A boxed (owning) value owns a heap environment, so its handle
+            // is self-contained: returning it, storing it in a returned struct
+            // and handing back a `consuming` parameter's handle are all legal
+            // (plan D7). It still PROPAGATES taint so the truncated-view check
+            // can see a borrowed handle's root.
+            MirTy::FuncThick { kind, .. } => {
+                out.closure = true;
+                out.view_closure |= !kind.is_boxed();
+            },
             MirTy::Tuple(elems) => {
                 for e in elems.clone() {
                     self.escape_carry_into(e, out, visited);

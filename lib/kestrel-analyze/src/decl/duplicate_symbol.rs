@@ -9,7 +9,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### E424 -- `duplicate_symbol_same_kind` (Error, Correctness)
+//! ### E474 -- `duplicate_symbol_same_kind` (Error, Correctness)
 //!
 //! **Message:** "duplicate definition of {kind} '{name}'"
 //!
@@ -23,7 +23,7 @@
 //!
 //! **Notes:** (none)
 //!
-//! ### E425 -- `duplicate_symbol_different_kind` (Error, Correctness)
+//! ### E475 -- `duplicate_symbol_different_kind` (Error, Correctness)
 //!
 //! **Message:** "'{name}' is already defined as a {original_kind}"
 //!
@@ -43,18 +43,18 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{CstNode, Name, NodeKind};
+use kestrel_ast_builder::{Name, NodeKind};
 use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "E424",
+        id: "E474",
         name: "duplicate_symbol_same_kind",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "E425",
+        id: "E475",
         name: "duplicate_symbol_different_kind",
         default_severity: Severity::Error,
         category: Category::Correctness,
@@ -120,10 +120,7 @@ impl DeclCheck for DuplicateSymbolAnalyzer {
 
         // For types that have members, also check member-level duplicates.
         // Function-to-function with the same name is allowed (overloading by labels).
-        if matches!(
-            cx.kind,
-            NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension
-        ) {
+        if cx.kind.is_type_scope() {
             check_member_duplicates(cx, &mut diags);
         }
 
@@ -159,11 +156,10 @@ fn check_duplicates(
             continue;
         };
         if *child_kind == NodeKind::TypeAlias
-            && let Some(cst) = cx.query.get::<CstNode>(child)
+            && let Some(cst) = kestrel_ast_builder::syntax::cst_node(cx.query, child)
         {
             use kestrel_syntax_tree::SyntaxKind;
             if cst
-                .0
                 .children()
                 .any(|c| c.kind() == SyntaxKind::AssociatedTypeTarget)
             {
@@ -175,7 +171,7 @@ fn check_duplicates(
 
         if let Some((first_span, first_desc)) = seen.get(&name) {
             if desc == *first_desc {
-                // Same kind duplicate (E424)
+                // Same kind duplicate (E474)
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
                     severity: DESCRIPTORS[0].default_severity,
@@ -195,7 +191,7 @@ fn check_duplicates(
                     notes: vec![],
                 });
             } else {
-                // Different kind duplicate (E425)
+                // Different kind duplicate (E475)
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[1].id,
                     severity: DESCRIPTORS[1].default_severity,

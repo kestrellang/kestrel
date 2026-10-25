@@ -251,13 +251,14 @@ fn fmt_ty(ty: TyId, arena: &TyArena, module: &dyn NameResolver) -> String {
             )
         },
 
-        MirTy::FuncThick { params, ret } => {
+        MirTy::FuncThick { kind, params, ret } => {
             let ps: Vec<_> = params
                 .iter()
                 .map(|(t, _)| fmt_ty(*t, arena, module))
                 .collect();
             format!(
-                "@thick ({}) -> {}",
+                "@thick{} ({}) -> {}",
+                kind.display_suffix(),
                 ps.join(", "),
                 fmt_ty(*ret, arena, module)
             )
@@ -330,6 +331,23 @@ fn fmt_inst(
         },
         InstKind::DestroyValue { operand } => {
             write!(out, "destroy_value {}", fmt_value(*operand)).unwrap();
+        },
+        InstKind::CoerceFnKind {
+            result,
+            operand,
+            from,
+            to,
+        } => {
+            write!(
+                out,
+                "{} = coerce_fn_kind {:?}->{:?} {}",
+                fmt_value(*result),
+                from,
+                to,
+                fmt_value(*operand)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
         },
 
         // -- Borrowing --
@@ -445,7 +463,7 @@ fn fmt_inst(
             )
             .unwrap();
         },
-        InstKind::DestroyAddr { address, ty } => {
+        InstKind::DestroyAddr { address, ty, .. } => {
             write!(
                 out,
                 "destroy_addr {}, {}",
@@ -729,6 +747,8 @@ fn fmt_inst(
             result,
             callee,
             captures,
+            retain,
+            release,
         } => {
             let vals: Vec<_> = captures.iter().map(|v| fmt_value(*v)).collect();
             let callee_str = fmt_callee(callee, arena, module);
@@ -740,6 +760,12 @@ fn fmt_inst(
                 vals.join(", "),
             )
             .unwrap();
+            if let Some(r) = retain {
+                write!(out, " retain {}", fmt_callee(r, arena, module)).unwrap();
+            }
+            if let Some(r) = release {
+                write!(out, " release {}", fmt_callee(r, arena, module)).unwrap();
+            }
             out.push_str(&fmt_type_comment(*result, body, arena, module));
         },
 

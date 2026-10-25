@@ -18,7 +18,7 @@ struct Tracked: Cloneable {
         self.clones.write(self.clones.read() + 1);
         Tracked(payload: self.payload.clone(), clones: self.clones)
     }
-    func size() -> Int64 { self.payload.byteCount }
+    func size() -> Int64 { self.payload.bytes.count }
 }
 
 func describe(t: Tracked) -> Int64 { t.size() }

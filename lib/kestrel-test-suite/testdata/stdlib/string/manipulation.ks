@@ -9,12 +9,12 @@ module Test
             var s = std.text.String();
             s.append("hello");
             s.append(" world");
-            if s.byteCount != 11 { return 1 }
+            if s.bytes.count != 11 { return 1 }
 
             // Test trim
             let padded: std.text.String = "  hello  ";
             let trimmed = padded.trimmed();
-            if trimmed.byteCount != 5 { return 2 }
+            if trimmed.bytes.count != 5 { return 2 }
 
             // Test lowercase/uppercase
             let mixed: std.text.String = "HeLLo";

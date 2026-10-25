@@ -4,7 +4,7 @@
 module Test
 
 struct Handler {
-    let f: (std.numeric.Int64) -> std.numeric.Int64
+    let f: escaping (std.numeric.Int64) -> std.numeric.Int64
 }
 
 func triple(x: std.numeric.Int64) -> std.numeric.Int64 {

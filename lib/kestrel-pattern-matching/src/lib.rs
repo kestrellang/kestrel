@@ -43,6 +43,7 @@
 //! | `constructor` | Constructor enum, TypeShape (type → constructor space) |
 //! | `flat_pat` | Normalized pattern, HirPat→FlatPat conversion, decompose() |
 //! | `matrix` | Pattern matrix, specialize (S(c,P)), default (D(P)) |
+//! | `split` | Cuts overlapping constructors (ranges, array lengths) into disjoint pieces |
 //! | `usefulness` | Core Maranget algorithm, ExhaustivenessResult |
 //! | `witness` | Example values for "missing pattern: `.None`" messages |
 //! | `decision_tree` | Decision tree compilation, binding extraction |
@@ -54,6 +55,8 @@
 //! - **Pattern decomposition** — `FlatPat::decompose()` (used by matrix + decision tree)
 //! - **Constructor field types** — `Constructor::field_types()` (used by matrix + decision tree)
 //! - **Constructor matching** — `Constructor::matches()` (used by decompose + matrix)
+//! - **Constructor splitting** — `split::split()` (used by `PatternMatrix::head_constructors`
+//!   and `PatternMatrix::split_head`); nothing switches on an unsplit range
 //! - **Type classification** — `TypeShape::classify()` (used by usefulness + irrefutability)
 //!
 //! # References
@@ -65,6 +68,7 @@ pub mod constructor;
 pub mod decision_tree;
 pub mod flat_pat;
 pub mod matrix;
+pub mod split;
 pub mod usefulness;
 pub mod witness;
 

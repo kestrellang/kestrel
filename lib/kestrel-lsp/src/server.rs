@@ -17,7 +17,6 @@ use tower_lsp::lsp_types::Url;
 
 use crate::compiler_worker::CompilerHandle;
 use crate::documents::OpenDocs;
-use crate::position::LineIndex;
 
 pub struct ServerState {
     /// Compiler-key (canonical path) → source text. Single source of truth
@@ -30,12 +29,12 @@ pub struct ServerState {
     /// "user code" — anything in `sources` not in this set.
     pub stdlib_paths: HashSet<String>,
     /// Per-URL editor state (line index, version).
+    ///
+    /// Line indices for *non-open* files are deliberately absent: they are
+    /// built on demand from `sources` (see
+    /// [`crate::handlers::diagnostics::refresh`]). A cached second copy of
+    /// disk text goes stale the moment an edited buffer is closed (F38).
     pub docs: OpenDocs,
-    /// LSP-side line indices for project files we've loaded from disk
-    /// but the editor hasn't opened. Keyed by compiler path. Used so we
-    /// can publish diagnostics in non-open files (e.g. when an open file
-    /// triggers an error in a closed dep).
-    pub disk_line_indices: HashMap<String, LineIndex>,
     /// Workspace roots received from `initialize`.
     pub workspace_roots: Vec<PathBuf>,
     /// URLs we've published diagnostics for at least once. We send empty
@@ -68,7 +67,6 @@ impl ServerState {
             sources: HashMap::new(),
             stdlib_paths: HashSet::new(),
             docs: OpenDocs::default(),
-            disk_line_indices: HashMap::new(),
             workspace_roots: Vec::new(),
             published: HashSet::new(),
             revision_token: 0,

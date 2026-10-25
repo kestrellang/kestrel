@@ -17,18 +17,45 @@ pub struct LowerCtx<'w> {
     pub module: MirModule,
     pub closure_counter: u32,
     synthetic_counter: u32,
+    /// The module-wide no-op retain/release shim used by capture-free
+    /// `escaping` closure values (see `body/closure_box.rs`). Synthesized on
+    /// first use so a module with no escaping closures gains nothing.
+    pub escaping_nop_shim: Option<Entity>,
 }
 
 impl<'w> LowerCtx<'w> {
     pub fn new(world: &'w World, root: Entity, name: &str) -> Self {
         let query = world.query_context();
+        // Resolve the copy/clone lang items once here: MIR has no `World`, so
+        // without this it falls back to matching protocol names by suffix.
+        let mut module = MirModule::new(name);
+        module.copyable_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Copyable,
+            root,
+        });
+        module.cloneable_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Cloneable,
+            root,
+        });
+        // Implicit-condition lowering needs both of these at *every* branch
+        // site (~1835 in a trivial stdlib program), so resolve them once here
+        // rather than re-querying per branch.
+        module.boolean_conditional_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::BooleanConditional,
+            root,
+        });
+        module.bool_struct = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Bool,
+            root,
+        });
         Self {
             world,
             query,
             root,
-            module: MirModule::new(name),
+            module,
             closure_counter: 0,
             synthetic_counter: 0,
+            escaping_nop_shim: None,
         }
     }
 

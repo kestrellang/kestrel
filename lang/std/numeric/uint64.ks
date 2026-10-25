@@ -15,7 +15,7 @@ import std.core.(
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
-import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(ArraySlice, Pointer)
 import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64)
@@ -595,8 +595,11 @@ public struct UInt64:
     // CLAMPING
     // ========================================================================
 
-    /// Clamps `self` into `[min, max]`. Caller is responsible for ensuring
-    /// `min <= max`; otherwise the result is undefined.
+    /// Clamps `self` into `[min, max]`.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"clamp: min must be <= max"` when `min > max`.
     ///
     /// # Examples
     ///
@@ -606,6 +609,9 @@ public struct UInt64:
     /// (15).clamp(0, 10);   // 10
     /// ```
     public func clamp(min: UInt64, max: UInt64) -> UInt64 {
+        if min > max {
+            fatalError("clamp: min must be <= max")
+        }
         if self < min { min }
         else if self > max { max }
         else { self }
@@ -627,13 +633,15 @@ public struct UInt64:
     /// Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
     public consuming func bitwiseNot() -> UInt64 { UInt64(raw: lang.i64_not(self.raw)) }
 
-    /// Left shift by `count`. Behavior is undefined when `count >= bitWidth`
-    /// — pre-mask the count if you can't guarantee the bound.
+    /// Left shift by `count`. The shift count is masked to
+    /// `count % bitWidth` (matching hardware semantics), so
+    /// `count >= bitWidth` wraps around rather than zeroing the value —
+    /// e.g. shifting a `UInt64` left by `bitWidth` is a no-op.
     public consuming func shiftLeft(consuming by count: Int64) -> UInt64 { UInt64(raw: lang.i64_shl(self.raw, count.raw)) }
 
     /// Right shift by `count`. Arithmetic (sign-extending) for signed types,
-    /// logical (zero-filling) for unsigned. Same `count` precondition as
-    /// `shiftLeft`.
+    /// logical (zero-filling) for unsigned. The count is masked to
+    /// `count % bitWidth`, same as `shiftLeft`.
     public consuming func shiftRight(consuming by count: Int64) -> UInt64 { UInt64(raw: lang.i64_unsigned_shr(self.raw, count.raw)) }
 
     /// Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
@@ -808,7 +816,7 @@ public struct UInt64:
     /// let bad = UInt64(parsing: "-1"); // null (no sign for unsigned)
     /// ```
     public init(parsing string: String)? {
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {
             return null
         }
@@ -878,7 +886,7 @@ public struct UInt64:
             return null
         }
 
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {
             return null
         }
@@ -942,15 +950,15 @@ public struct UInt64:
     /// # Examples
     ///
     /// ```
-    /// (42).format();                                           // "42"
-    /// (255).format(.{radix: 16});                     // "ff"
-    /// (255).format(.{radix: 16, uppercase: true});    // "FF"
-    /// (255).format(.{radix: 16, alternate: true});    // "0xff"
-    /// (42).format(.{radix: 2, alternate: true});      // "0b101010"
-    /// (42).format(.{width: .Some(5), fill: '0'});     // "00042"
-    /// (-42).format(.{sign: .Always});                 // "-42"
+    /// (42).formatted();                                           // "42"
+    /// (255).formatted(.{radix: 16});                     // "ff"
+    /// (255).formatted(.{radix: 16, uppercase: true});    // "FF"
+    /// (255).formatted(.{radix: 16, alternate: true});    // "0xff"
+    /// (42).formatted(.{radix: 2, alternate: true});      // "0b101010"
+    /// (42).formatted(.{width: .Some(5), fill: '0'});     // "00042"
+    /// (-42).formatted(.{sign: .Always});                 // "-42"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         var n = self;
         let isNegative = false;
 
@@ -1000,7 +1008,7 @@ public struct UInt64:
             }
         }
 
-        var i = digits.byteCount - 1;
+        var i = digits.bytes.count - 1;
         while i >= 0 {
             result.appendByte(digits.bytes(unchecked: i));
             i = i - 1

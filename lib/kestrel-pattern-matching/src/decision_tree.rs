@@ -312,6 +312,24 @@ fn build_specialized_paths(
                 field_path.push(PathElement::Downcast(name));
                 field_path.push(PathElement::Index(i));
             },
+            // An open array case is `prefix, rest, suffix`: suffix slots sit
+            // at a runtime offset from the end, not at a fixed index.
+            Constructor::Array {
+                prefix_len,
+                suffix_len,
+                has_rest: true,
+            } => {
+                field_path.push(match i.cmp(prefix_len) {
+                    std::cmp::Ordering::Less => PathElement::Index(i),
+                    std::cmp::Ordering::Equal => PathElement::RestSlice {
+                        prefix_len: *prefix_len,
+                        suffix_len: *suffix_len,
+                    },
+                    std::cmp::Ordering::Greater => {
+                        PathElement::IndexFromEnd(suffix_len - (i - prefix_len - 1))
+                    },
+                });
+            },
             Constructor::Tuple { .. } | Constructor::Array { .. } => {
                 field_path.push(PathElement::Index(i));
             },

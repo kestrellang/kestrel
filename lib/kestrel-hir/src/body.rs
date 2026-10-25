@@ -221,6 +221,16 @@ pub enum HirExpr {
     /// Function, enum case, type, etc. — resolved by name resolution.
     /// Optional type args for explicit generic instantiation (e.g., `Pointer[UInt8]`).
     Def(Entity, Vec<crate::ty::HirTy>, Span),
+    /// A type written in expression position whose meaning needs more than
+    /// one entity — today the receiver of a static call on an associated-type
+    /// projection, `B.Item.zero()`. Carries the full `HirTy`
+    /// (`AssocProjection { base: Param(B), assoc: Item }`), so inference types
+    /// it exactly as the annotation `-> B.Item` and the projection keeps its
+    /// base (G17 S5). A `Def` of the alias entity would drop `B`.
+    TypeRef {
+        ty: crate::ty::HirTy,
+        span: Span,
+    },
     /// Multiple overloaded function entities sharing the same name.
     /// Resolved by type inference at the call site via OverloadedCall constraint.
     OverloadSet {
@@ -282,6 +292,13 @@ pub enum HirExpr {
         method: HirName,
         type_args: Option<Vec<HirTy>>,
         args: Vec<HirCallArg>,
+        /// True when this call was desugared from an operator (binary, unary,
+        /// postfix, short-circuit, compound-assign) — i.e. the method follows
+        /// the `Output = Self`-by-convention operator protocols. False for
+        /// other sugar (for-in's iterate/next, try's branch). Consumed by the
+        /// solver's literal-inference passes, which must not apply
+        /// operator-shaped reasoning to non-operator sugar.
+        from_operator: bool,
         span: Span,
     },
 
@@ -470,8 +487,17 @@ pub enum HirLiteral {
         value: String,
         escape_errors: Vec<EscapeError>,
     },
-    /// Unicode scalar value (must be a valid `char`, i.e. `<= 0x10FFFF` and not a surrogate)
-    Char(u32),
+    /// Unicode scalar value (a valid `char`: `<= 0x10FFFF` and not a surrogate)
+    /// plus any escape-sequence errors found decoding it.
+    ///
+    /// Errors are carried exactly like `String`'s, so the same analyzer assigns
+    /// the same E700-E703 codes. They used to be `ctx.accumulate`d ad hoc from
+    /// the char decoder — uncoded, and skipped entirely in pattern position, so
+    /// `'\u{D800}'` in a `match` arm silently became NUL (F26).
+    Char {
+        value: u32,
+        escape_errors: Vec<EscapeError>,
+    },
     Bool(bool),
     Null,
 }
@@ -484,41 +510,12 @@ pub struct EscapeError {
     pub kind: EscapeErrorKind,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum EscapeErrorKind {
-    /// Unknown backslash escape (e.g. `\q`) or malformed `\xNN`.
-    InvalidEscape { sequence: String },
-    /// `\xNN` with value > 0x7F — strings only allow 7-bit ASCII via `\x`.
-    AsciiEscapeOutOfRange { value: u8 },
-    /// Trailing `\` at end of string.
-    IncompleteEscape,
-    /// `\u{...}` malformed in some way; `reason` distinguishes.
-    InvalidUnicodeEscape {
-        value: String,
-        reason: UnicodeEscapeErrorReason,
-    },
-    /// A line in a multi-line string body has less indentation than the
-    /// closing `"""` delimiter.
-    MultilineUnderIndented,
-    /// Multi-line string opener `"""` must be followed immediately by a
-    /// newline.
-    MultilineMissingLeadingNewline,
-    /// Multi-line string closer `"""` must be on its own line (only
-    /// whitespace before it on that line).
-    MultilineMissingTrailingNewline,
-    /// String literal has no closing delimiter.
-    UnterminatedString,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum UnicodeEscapeErrorReason {
-    MissingOpenBrace,
-    MissingCloseBrace,
-    EmptyBraces,
-    TooManyDigits,
-    InvalidHexDigit,
-    OutOfRange,
-}
+// `EscapeErrorKind` / `UnicodeEscapeErrorReason` live in `kestrel-ast` beside
+// the decoder that produces them: `kestrel-ast-builder` needs them too (the
+// literal segments of interpolated strings) and cannot depend on `kestrel-hir`.
+// Re-exported here so every existing `kestrel_hir::body::EscapeErrorKind` path
+// keeps working — there is still exactly one definition (F26).
+pub use kestrel_ast::escape::{EscapeErrorKind, UnicodeEscapeErrorReason};
 
 /// Manual Hash because f64 doesn't implement Hash.
 /// We hash the bit representation which is deterministic.
@@ -532,7 +529,7 @@ impl std::hash::Hash for HirLiteral {
             HirLiteral::Integer(v) => v.hash(state),
             HirLiteral::Float(v) => v.to_bits().hash(state),
             HirLiteral::String { value, .. } => value.hash(state),
-            HirLiteral::Char(v) => v.hash(state),
+            HirLiteral::Char { value, .. } => value.hash(state),
             HirLiteral::Bool(v) => v.hash(state),
             HirLiteral::Null => {},
         }
@@ -889,6 +886,25 @@ pub fn lookup_compound_assign_op(
         .map(|(_, proto, method, label)| (*proto, *method, *label))
 }
 
+// ===== Loop-label resolution =====
+
+/// Does a `break`/`continue` carrying `use_label` resolve to the loop labeled
+/// `loop_label`?
+///
+/// This is the single source of truth for Kestrel's one label rule, mirrored by
+/// `kestrel-mir-lower`'s `find_loop` and by `kestrel-analyze`'s control-flow
+/// walk: an **unlabeled** `break` claims the nearest enclosing loop; a
+/// **labeled** `break` claims the nearest loop whose label matches exactly — so
+/// an inner loop reusing the same label shadows the outer one.
+///
+/// Callers apply it to a loop stack, innermost-first, and take the first hit.
+pub fn label_selects_loop(use_label: Option<&str>, loop_label: Option<&str>) -> bool {
+    match use_label {
+        None => true,
+        Some(l) => loop_label == Some(l),
+    }
+}
+
 // ===== Tests =====
 
 #[cfg(test)]
@@ -935,6 +951,27 @@ mod tests {
 
         assert!(matches!(&pats[w], HirPat::Wildcard { .. }));
         assert!(matches!(&pats[err], HirPat::Error { .. }));
+    }
+
+    #[test]
+    fn label_selects_loop_rules() {
+        // (use_label, loop_label, expected)
+        let cases: &[(Option<&str>, Option<&str>, bool)] = &[
+            // Unlabeled break claims the nearest enclosing loop, labeled or not.
+            (None, None, true),
+            (None, Some("outer"), true),
+            // Labeled break claims only an exactly-matching label.
+            (Some("outer"), Some("outer"), true),
+            (Some("outer"), Some("inner"), false),
+            (Some("outer"), None, false),
+        ];
+        for &(use_label, loop_label, expected) in cases {
+            assert_eq!(
+                label_selects_loop(use_label, loop_label),
+                expected,
+                "label_selects_loop({use_label:?}, {loop_label:?})"
+            );
+        }
     }
 
     #[test]

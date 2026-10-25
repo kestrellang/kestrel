@@ -49,6 +49,6 @@ func main() -> lang.i64 {
 
     if n != 7 { return 1 }
     if f != 2.5 { return 2 }
-    if s.byteCount != 2 { return 3 }
+    if s.bytes.count != 2 { return 3 }
     0
 }

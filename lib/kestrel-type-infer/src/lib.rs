@@ -10,11 +10,15 @@
 //! ```
 
 pub mod captures;
+mod collections;
 pub mod compare;
 pub mod conformance;
 pub mod constraint;
 pub mod ctx;
 pub mod entailment;
+mod entail_layer;
+mod solver_entail;
+pub mod obligations;
 pub mod error;
 pub mod generate;
 pub mod resolve;
@@ -24,7 +28,7 @@ pub mod ty;
 pub mod unify;
 pub mod where_clauses;
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_ast_builder::{Callable, EnclosingContainer, NodeKind, TypeParams};
@@ -40,6 +44,7 @@ use result::TypedBody;
 
 pub use captures::{CaptureKind, CapturedPlace, ClosureCaptureMap, ClosureCaptures, PlaceKey};
 pub use conformance::{extension_bounds_hold, type_satisfies};
+pub use error::describe_fn_kind;
 
 /// Resolve the logical enclosing container for a function-like entity.
 /// Setters have an `EnclosingContainer` component set at build time;
@@ -96,24 +101,48 @@ impl QueryFn for InferBody {
         // Create return type TyVar from TypeAnnotation component
         let return_ty = create_return_type(&mut infer_ctx, query_ctx, self.entity);
 
+        // Settle the assumptions as one batch, then check the body against
+        // them, deciding each constraint where it is emitted (bidi P5).
+        solver::fixpoint(&mut infer_ctx);
+        infer_ctx.eager = true;
+
         // Generate constraints from HIR
         generate::generate(&mut infer_ctx, &hir, &param_types, return_ty);
 
         // Solve
-        solver::solve(&mut infer_ctx, &hir);
+        obligations::finish_body(&mut infer_ctx, &hir);
 
         // Detect circular opaque returns: if the concrete type behind `some P`
         // is itself another opaque, the body never grounded to a real type.
-        if let Some(ref info) = infer_ctx.opaque_return {
+        // Otherwise, a plain `some P` (no `and not Copyable`) promises callers
+        // a duplicable value — reject a move-only concrete type behind it.
+        // (Cloneable underliers are fine: uses duplicate, MIR clone-elaborates.)
+        let opaque_check = infer_ctx.opaque_return.as_ref().map(|info| {
             let resolved = infer_ctx.resolve(info.concrete_tv);
-            if let ty::TySlot::Resolved(ty::TyKind::Opaque { .. }) =
-                &infer_ctx.types[resolved.0 as usize]
+            let is_circular = matches!(
+                &infer_ctx.types[resolved.0 as usize],
+                ty::TySlot::Resolved(ty::TyKind::Opaque { .. })
+            );
+            (
+                info.concrete_tv,
+                info.not_copyable,
+                info.span.clone(),
+                is_circular,
+            )
+        });
+        if let Some((concrete_tv, not_copyable, span, is_circular)) = opaque_check {
+            if is_circular {
+                // report_error keeps errors/error_details parallel (a bare
+                // errors.push would drop the detail in the analyze zip).
+                infer_ctx.report_error(error::InferError::CircularOpaqueReturn { span });
+            } else if !not_copyable
+                && solver::solver_copy_class(&infer_ctx, concrete_tv, 0)
+                    == kestrel_copy_fold::CopySemantics::NotCopyable
             {
-                infer_ctx
-                    .errors
-                    .push(error::InferError::CircularOpaqueReturn {
-                        span: info.span.clone(),
-                    });
+                infer_ctx.report_error(error::InferError::OpaqueUnderlierNotCopyable {
+                    concrete: concrete_tv,
+                    span,
+                });
             }
         }
 
@@ -312,56 +341,69 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
     // in clause iteration order — exactly as the inline match arms did.
     for clause in clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            resolve::WhereClause::NotBound { .. } => {},
+            // The one real consumer of a projection subject: dispatch on the
+            // subject's shape rather than on a sibling clause variant.
             resolve::WhereClause::Bound {
-                param,
+                subject,
                 protocol,
                 protocol_type_args,
-            } => emit_method_bound_constraint(
-                ctx,
-                param,
-                protocol,
-                &protocol_type_args,
-                &type_params,
-                &parent_type_params,
-                &span,
-            ),
-            resolve::WhereClause::ProjectionBound {
-                base,
-                assoc,
-                protocol,
-                protocol_type_args,
-            } => emit_method_projection_bound_constraint(
-                ctx,
-                base,
-                assoc,
-                protocol,
-                &protocol_type_args,
-                &type_params,
-                &parent_type_params,
-                &span,
-            ),
-            resolve::WhereClause::TypeEquality {
-                param,
-                assoc_name,
-                rhs,
-            } => emit_method_type_equality_constraint(
-                ctx,
-                param,
-                &assoc_name,
-                &rhs,
-                &type_params,
-                &parent_type_params,
-                &span,
-            ),
-            resolve::WhereClause::DirectEquality { param, rhs } => {
-                emit_method_direct_equality_constraint(
+            } => match &subject {
+                resolve::WhereSubject::Param(param) => emit_method_bound_constraint(
                     ctx,
-                    query_ctx,
-                    param,
-                    &rhs,
+                    *param,
+                    protocol,
+                    &protocol_type_args,
                     &type_params,
                     &parent_type_params,
-                );
+                    &span,
+                ),
+                resolve::WhereSubject::Projection { assoc, .. } => {
+                    emit_method_projection_bound_constraint(
+                        ctx,
+                        &subject,
+                        *assoc,
+                        protocol,
+                        &protocol_type_args,
+                        &type_params,
+                        &parent_type_params,
+                        &span,
+                    )
+                },
+                // `where Self: P` on a *method's own* clause list. `Self` in a
+                // method being set up for body inference is the abstract
+                // conformer; there is no TyVar here that denotes it (the
+                // receiver's `self_tv` belongs to the container path, below in
+                // `emit_container_where_clauses`). Nothing to emit — permit.
+                // Body-side member lookup through such a clause is served by
+                // `resolve::collect_extension_where_clause_protocols`, not here.
+                resolve::WhereSubject::SelfType => {},
+            },
+            resolve::WhereClause::Equality { subject, rhs } => match subject.equality_lhs() {
+                Some(resolve::EqualityLhs::Assoc { root, assoc }) => {
+                    emit_method_type_equality_constraint(
+                        ctx,
+                        root,
+                        assoc,
+                        &rhs,
+                        &type_params,
+                        &parent_type_params,
+                        &span,
+                    )
+                },
+                Some(resolve::EqualityLhs::Direct(param)) => {
+                    emit_method_direct_equality_constraint(
+                        ctx,
+                        query_ctx,
+                        param,
+                        &rhs,
+                        &type_params,
+                        &parent_type_params,
+                    );
+                },
+                None => {},
             },
         }
     }
@@ -426,7 +468,7 @@ fn emit_method_bound_constraint(
 #[allow(clippy::too_many_arguments)]
 fn emit_method_projection_bound_constraint(
     ctx: &mut InferCtx<'_>,
-    base: Entity,
+    subject: &resolve::WhereSubject,
     assoc: Entity,
     protocol: Entity,
     protocol_type_args: &[kestrel_hir::ty::HirTy],
@@ -434,11 +476,23 @@ fn emit_method_projection_bound_constraint(
     parent_type_params: &[Entity],
     span: &Span,
 ) {
-    let base_tv = ctx.param(base);
-    let proj_tv = ctx.assoc_projection(base_tv, assoc);
+    // `SubjectRoot::Mint` reproduces the old `ctx.param(base)` exactly, and
+    // recurses for depth > 1 subjects (which `WhereClausesOf` does not build
+    // yet — see `where_clauses::resolve_projection_subject`).
+    // `Opaque`: this is declaration scope. The base is a type parameter of the
+    // method being set up, so the projection must survive as `T.Assoc` for the
+    // body's own uses to reuse it via `push_assoc_sub` below.
+    let Some((base_tv, proj_tv)) = generate::lower_subject_with_base(
+        ctx,
+        subject,
+        generate::SubjectRoot::Mint,
+        generate::ProjectionPolicy::Opaque,
+    ) else {
+        return;
+    };
     ctx.conforms_typearg(proj_tv, protocol, span.clone());
     // The body's `T.Assoc` projections reuse this TyVar (preserving the base).
-    ctx.where_clause_assoc_subs.push((assoc, proj_tv));
+    ctx.push_assoc_sub(base_tv, assoc, proj_tv);
 
     let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
     let arg_tvs: Vec<ty::TyVar> = protocol_type_args
@@ -455,7 +509,7 @@ fn emit_method_projection_bound_constraint(
 fn emit_method_type_equality_constraint(
     ctx: &mut InferCtx<'_>,
     param: Entity,
-    assoc_name: &str,
+    assoc: Entity,
     rhs: &kestrel_hir::ty::HirTy,
     type_params: &[Entity],
     parent_type_params: &[Entity],
@@ -463,15 +517,16 @@ fn emit_method_type_equality_constraint(
 ) {
     let subject_tv = ctx.param(param);
     let assoc_result = ctx.fresh();
-    ctx.associated(subject_tv, assoc_name, assoc_result, span.clone());
+    ctx.associated_entity(subject_tv, assoc, assoc_result, span.clone());
 
     let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
     let rhs_tv = generate::lower_hir_ty_with_subs(ctx, rhs, &subs);
+    // Register the assumption before anything can consult it: the equality
+    // below is decided on the spot (bidi P5), and the `Associated` lookup
+    // must then find `I.Item = T` in Γ. Memo key = the clause's own entity
+    // (G29), never a by-name re-lookup.
+    ctx.push_assoc_sub(Some(subject_tv), assoc, rhs_tv);
     ctx.equal(assoc_result, rhs_tv, span.clone());
-
-    if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, assoc_name) {
-        ctx.where_clause_assoc_subs.push((assoc_entity, rhs_tv));
-    }
 }
 
 /// Emit a `param = RHS` clause: redirect the param's TyVar slot straight to
@@ -490,11 +545,13 @@ fn emit_method_direct_equality_constraint(
     // Redirect the param to the RHS type
     ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
     // For TypeAlias entities (associated types like Item), also register
-    // in where_clause_assoc_subs so lower_hir_ty_sub can find it
+    // in where_clause_assoc_subs so lower_hir_ty_sub can find it.
+    // Baseless by construction: `where Item = X` on a TypeAlias entity names
+    // no receiver — the one legitimate `None` base in the table (G17 P3).
     if query_ctx.get::<kestrel_ast_builder::NodeKind>(param)
         == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
     {
-        ctx.where_clause_assoc_subs.push((param, rhs_tv));
+        ctx.push_assoc_sub(None, param, rhs_tv);
     }
 }
 
@@ -515,6 +572,7 @@ fn create_return_type(
         root: ctx.root,
     });
 
+    ctx.return_ty_span = hir_ty.as_ref().map(generate::hir_ty_span);
     match hir_ty {
         Some(ref hir) if contains_hir_opaque(hir) => create_return_type_with_opaque(ctx, hir),
         Some(hir_ty) => generate::lower_hir_ty(ctx, &hir_ty),
@@ -549,7 +607,11 @@ fn create_return_type_with_opaque(
 ) -> ty::TyVar {
     use kestrel_hir::ty::HirTy;
     match hir_ty {
-        HirTy::Opaque { bounds, span } => {
+        HirTy::Opaque {
+            bounds,
+            not_copyable,
+            span,
+        } => {
             let concrete_ret = ctx.fresh();
 
             let mut opaque_bounds = Vec::new();
@@ -569,6 +631,7 @@ fn create_return_type_with_opaque(
             ctx.opaque_return = Some(ctx::OpaqueReturnInfo {
                 concrete_tv: concrete_ret,
                 bounds: opaque_bounds,
+                not_copyable: *not_copyable,
                 span: span.clone(),
             });
 
@@ -596,6 +659,7 @@ fn create_return_type_with_opaque(
             ctx.tuple(tvs)
         },
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
@@ -606,7 +670,7 @@ fn create_return_type_with_opaque(
                 .map(|p| create_return_type_with_opaque(ctx, p))
                 .collect();
             let ret_tv = create_return_type_with_opaque(ctx, ret);
-            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
+            ctx.function_conv(*kind, param_tvs, param_conventions.clone(), ret_tv)
         },
         _ => generate::lower_hir_ty(ctx, hir_ty),
     }
@@ -653,7 +717,7 @@ fn emit_container_where_clauses(
 
     // Cache for associated type TyVars so we reuse the same TyVar
     // if the same associated type appears in multiple constraints
-    let mut assoc_type_tvs: HashMap<Entity, ty::TyVar> = HashMap::new();
+    let mut assoc_type_tvs: HashMap<Entity, ty::TyVar> = HashMap::default();
 
     let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
         entity: where_entity,
@@ -661,11 +725,48 @@ fn emit_container_where_clauses(
     });
     for clause in clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            resolve::WhereClause::NotBound { .. } => {},
             resolve::WhereClause::Bound {
-                param,
+                subject,
                 protocol,
                 protocol_type_args,
             } => {
+                // Which entity this container clause is *about*, from the
+                // body's vantage — where `self_tv` is the receiver.
+                //
+                // * `T: P` — the container's own type param.
+                // * `Self.Assoc: P` — `get_or_create_subject_tv` turns an
+                //   alias entity into `associated(self_tv, "Assoc")`, which is
+                //   precisely `Self.Assoc`. Pre-C9 the subject arrived already
+                //   collapsed to `Param(Assoc)` and took this path by accident;
+                //   naming the shape keeps body inference identical now that
+                //   the root survives.
+                // * `T.Assoc: P` — skipped. Handled at body setup via the
+                //   member path; no extra emission here yet (#185 follow-up).
+                //   TODO(G17 C5): this skip is a live bug — this is the only
+                //   emitter for container-level clauses.
+                // * `Self: P` — skipped. `self_tv` is the abstract conformer
+                //   inside a protocol extension, and conforming it would reject
+                //   bodies that are correct for every real conformer. Pre-C9
+                //   this arrived as `Param(<protocol entity>)`, which
+                //   `get_or_create_subject_tv` could not map either: it minted
+                //   a *fresh* TyVar and emitted an unsatisfiable
+                //   `Conforms(fresh, P)` that surfaced as a spanless `E100`.
+                //   Skipping is both correct and strictly quieter.
+                let subject_entity = match &subject {
+                    resolve::WhereSubject::Param(p) => Some(*p),
+                    resolve::WhereSubject::Projection { base, assoc }
+                        if matches!(**base, resolve::WhereSubject::SelfType) =>
+                    {
+                        Some(*assoc)
+                    },
+                    _ => None,
+                };
+                let Some(param) = subject_entity else {
+                    continue;
+                };
                 // Skip the implicit `T: Copyable` / `Cloneable` bound that
                 // `WhereClausesOf` injects for every generic param. Those are
                 // call-site obligations, not body-inference facts — emitting
@@ -724,50 +825,23 @@ fn emit_container_where_clauses(
                     &span,
                 );
             },
-            resolve::WhereClause::TypeEquality {
-                param,
-                assoc_name,
-                rhs,
-            } => {
-                let span = Span::synthetic(0);
-                let subject_tv = get_or_create_subject_tv(
-                    ctx,
-                    &target_type_params,
-                    fresh_args,
-                    &mut assoc_type_tvs,
-                    param,
-                    self_tv,
-                    query_ctx,
-                );
-                let assoc_result = ctx.fresh();
-                ctx.associated(subject_tv, &assoc_name, assoc_result, span.clone());
+            resolve::WhereClause::Equality { subject, rhs } => match subject.equality_lhs() {
+                Some(resolve::EqualityLhs::Assoc { root: param, assoc }) => {
+                    let span = Span::synthetic(0);
+                    let subject_tv = get_or_create_subject_tv(
+                        ctx,
+                        &target_type_params,
+                        fresh_args,
+                        &mut assoc_type_tvs,
+                        param,
+                        self_tv,
+                        query_ctx,
+                    );
+                    let assoc_result = ctx.fresh();
+                    ctx.associated_entity(subject_tv, assoc, assoc_result, span.clone());
 
-                // Build subs so RHS references to type params and associated types
-                // resolve to the same TyVars used in constraints (not raw Named entities)
-                let mut rhs_subs: Vec<(Entity, ty::TyVar)> = target_type_params
-                    .iter()
-                    .zip(fresh_args.iter())
-                    .map(|(&e, &tv)| (e, tv))
-                    .collect();
-                for (&e, &tv) in &assoc_type_tvs {
-                    rhs_subs.push((e, tv));
-                }
-                let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
-                ctx.equal(assoc_result, rhs_tv, span);
-
-                // Register the associated type entity → rhs_tv mapping so the solver
-                // can substitute it in protocol member signatures (e.g., Output → Item).
-                // Search param's protocol bounds for a child TypeAlias named assoc_name.
-                if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, &assoc_name) {
-                    ctx.where_clause_assoc_subs.push((assoc_entity, rhs_tv));
-                }
-            },
-            resolve::WhereClause::DirectEquality { param, rhs } => {
-                // Direct type param equality: V = Array[E]
-                // Overwrite the param's TyVar slot with the concrete RHS type.
-                if let Some(idx) = target_type_params.iter().position(|&p| p == param) {
-                    let param_tv = fresh_args[idx];
-                    // Build subs so RHS type param references resolve correctly
+                    // Build subs so RHS references to type params and associated types
+                    // resolve to the same TyVars used in constraints (not raw Named entities)
                     let mut rhs_subs: Vec<(Entity, ty::TyVar)> = target_type_params
                         .iter()
                         .zip(fresh_args.iter())
@@ -777,13 +851,36 @@ fn emit_container_where_clauses(
                         rhs_subs.push((e, tv));
                     }
                     let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
-                    // Overwrite the Param slot → the param IS the RHS type in this scope
-                    ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
-                }
+                    ctx.equal(assoc_result, rhs_tv, span);
+
+                    // Register the clause's own associated type → rhs_tv so the
+                    // solver substitutes it in protocol member signatures
+                    // (e.g., Output → Item). Keyed by entity (G29): a by-name
+                    // re-lookup reached `Equal.Output` for `Set.sum`'s
+                    // `T.Output = T`, which means `Addable.Output`.
+                    ctx.push_assoc_sub(Some(subject_tv), assoc, rhs_tv);
+                },
+                Some(resolve::EqualityLhs::Direct(param)) => {
+                    // Direct type param equality: V = Array[E]
+                    // Overwrite the param's TyVar slot with the concrete RHS type.
+                    if let Some(idx) = target_type_params.iter().position(|&p| p == param) {
+                        let param_tv = fresh_args[idx];
+                        // Build subs so RHS type param references resolve correctly
+                        let mut rhs_subs: Vec<(Entity, ty::TyVar)> = target_type_params
+                            .iter()
+                            .zip(fresh_args.iter())
+                            .map(|(&e, &tv)| (e, tv))
+                            .collect();
+                        for (&e, &tv) in &assoc_type_tvs {
+                            rhs_subs.push((e, tv));
+                        }
+                        let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
+                        // Overwrite the Param slot → the param IS the RHS type in this scope
+                        ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
+                    }
+                },
+                None => {},
             },
-            // `T.Assoc: P` on an extension — handled at body setup via the
-            // member path; no extra emission needed here yet (#185 follow-up).
-            resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 }
@@ -835,14 +932,10 @@ fn emit_protocol_assoc_type_where_clauses(
             {
                 continue;
             }
-            let assoc_name = query_ctx
-                .get::<kestrel_ast_builder::Name>(child)
-                .map(|n| n.0.clone())
-                .unwrap_or_default();
             assoc_type_tvs.entry(child).or_insert_with(|| {
                 let tv = ctx.fresh();
-                ctx.associated(subject_tv, &assoc_name, tv, span.clone());
-                ctx.where_clause_assoc_subs.push((child, tv));
+                ctx.associated_entity(subject_tv, child, tv, span.clone());
+                ctx.push_assoc_sub(Some(subject_tv), child, tv);
                 tv
             });
         }
@@ -869,25 +962,30 @@ fn emit_protocol_assoc_type_where_clauses(
         }
 
         // Get the TyVar for this associated type (e.g., T.Iter)
-        let assoc_name = query_ctx
-            .get::<kestrel_ast_builder::Name>(child)
-            .map(|n| n.0.clone())
-            .unwrap_or_default();
         let alias_tv = *assoc_type_tvs.entry(child).or_insert_with(|| {
             let tv = ctx.fresh();
-            ctx.associated(subject_tv, &assoc_name, tv, span.clone());
-            ctx.where_clause_assoc_subs.push((child, tv));
+            ctx.associated_entity(subject_tv, child, tv, span.clone());
+            ctx.push_assoc_sub(Some(subject_tv), child, tv);
             tv
         });
 
         // Emit the TypeAlias's own where clauses
         for clause in clauses {
             match clause {
+                // `T: not P` emits nothing here: negative bounds gate member
+                // applicability (the kernel) and copy semantics, not body solving.
+                resolve::WhereClause::NotBound { .. } => {},
                 resolve::WhereClause::Bound {
+                    subject,
                     protocol: bound_proto,
                     protocol_type_args,
-                    ..
                 } => {
+                    // Projection subjects on a protocol's associated-type
+                    // clauses are not emitted here. TODO(G17 stage 3a): inert
+                    // feature, but the skip must stay explicit.
+                    if subject.as_param().is_none() {
+                        continue;
+                    }
                     ctx.conforms_typearg(alias_tv, bound_proto, span.clone());
                     let subs: Vec<(Entity, ty::TyVar)> = target_type_params
                         .iter()
@@ -902,13 +1000,15 @@ fn emit_protocol_assoc_type_where_clauses(
                         ctx.record_witness_args(alias_tv, bound_proto, arg_tvs);
                     }
                 },
-                resolve::WhereClause::TypeEquality {
-                    assoc_name: inner_assoc,
-                    rhs,
-                    ..
-                } => {
+                // The clause is about this alias (`TargetIterator.Item = …`); the
+                // root is not re-read, as before the fold.
+                resolve::WhereClause::Equality { subject, rhs } => {
+                    let Some(resolve::EqualityLhs::Assoc { assoc, .. }) = subject.equality_lhs()
+                    else {
+                        continue;
+                    };
                     let fresh = ctx.fresh();
-                    ctx.associated(alias_tv, &inner_assoc, fresh, span.clone());
+                    ctx.associated_entity(alias_tv, assoc, fresh, span.clone());
 
                     // Build subs so RHS references resolve correctly
                     let mut rhs_subs: Vec<(Entity, ty::TyVar)> = target_type_params
@@ -919,17 +1019,20 @@ fn emit_protocol_assoc_type_where_clauses(
                     for (&e, &tv) in assoc_type_tvs.iter() {
                         rhs_subs.push((e, tv));
                     }
+                    // The RHS is written inside the protocol, so a bare `Item`
+                    // arrives as `Self.Item` (`AssocProjection { SelfType(P) }`).
+                    // Here `Self` is the conformer `subject_tv`; without this it
+                    // lowers to the literal protocol `Self` and the equality is
+                    // about the wrong receiver (G25 step 1).
+                    rhs_subs.push((protocol, subject_tv));
                     let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
                     ctx.equal(fresh, rhs_tv, span.clone());
 
-                    // Register so solve_associated can reuse
-                    if let Some(inner_entity) = find_assoc_type_in_bounds(ctx, child, &inner_assoc)
-                    {
-                        ctx.where_clause_assoc_subs.push((inner_entity, rhs_tv));
-                    }
+                    // Register so solve_associated can reuse. Base is the alias
+                    // itself: this is `TargetIterator.Item`, not `Self.Item`
+                    // (G17 P7 — the Iterable/Iterator bridge).
+                    ctx.push_assoc_sub(Some(alias_tv), assoc, rhs_tv);
                 },
-                resolve::WhereClause::DirectEquality { .. } => {},
-                resolve::WhereClause::ProjectionBound { .. } => {},
             }
         }
     }
@@ -961,13 +1064,10 @@ fn get_or_create_subject_tv(
         if let Some(&cached) = assoc_type_tvs.get(&param) {
             return cached;
         }
-        // Get the name of the associated type
-        if let Some(name) = query_ctx.get::<kestrel_ast_builder::Name>(param) {
-            let result_tv = ctx.fresh();
-            ctx.associated(self_tv, &name.0, result_tv, Span::synthetic(0));
-            assoc_type_tvs.insert(param, result_tv);
-            return result_tv;
-        }
+        let result_tv = ctx.fresh();
+        ctx.associated_entity(self_tv, param, result_tv, Span::synthetic(0));
+        assoc_type_tvs.insert(param, result_tv);
+        return result_tv;
     }
 
     // Fallback: create a fresh TyVar
@@ -1045,12 +1145,14 @@ fn is_ptr_ref_intrinsic_call(
         return false;
     };
     // Mirror of body lowering's resolve_callee_entity_from_expr.
-    let entity = typed.resolutions.get(callee).copied().or_else(|| {
-        match &hir.exprs[*callee] {
+    let entity = typed
+        .resolutions
+        .get(callee)
+        .copied()
+        .or_else(|| match &hir.exprs[*callee] {
             HirExpr::Def(e, _, _) => Some(*e),
             _ => None,
-        }
-    });
+        });
     let Some(e) = entity else {
         return false;
     };
@@ -1061,29 +1163,4 @@ fn is_ptr_ref_intrinsic_call(
         ctx.get::<Name>(e).map(|n| n.0.as_str()),
         Some("ptr_ref" | "ptr_mut_ref")
     )
-}
-
-/// Find an associated type entity by searching protocol bounds of a TypeAlias.
-/// E.g., for param=Item (which conforms to Addable), find Addable's "Output" child.
-/// Uses the resolver to find protocol bounds, then searches their children.
-fn find_assoc_type_in_bounds(
-    ctx: &InferCtx<'_>,
-    param: Entity,
-    assoc_name: &str,
-) -> Option<Entity> {
-    // Resolve the associated type through the resolver's associated type mechanism.
-    // Build a TyKind::Param for the param entity to query the resolver.
-    let param_kind = ty::TyKind::Param { entity: param };
-    let resolved = ctx
-        .resolver
-        .resolve_associated_type(&param_kind, assoc_name)?;
-    // Extract the entity from whichever variant the resolver returned.
-    match &resolved.resolved {
-        kestrel_hir::ty::HirTy::Struct { entity, .. }
-        | kestrel_hir::ty::HirTy::Enum { entity, .. }
-        | kestrel_hir::ty::HirTy::Protocol { entity, .. }
-        | kestrel_hir::ty::HirTy::AliasUse { entity, .. } => Some(*entity),
-        kestrel_hir::ty::HirTy::AssocProjection { assoc, .. } => Some(*assoc),
-        _ => None,
-    }
 }

@@ -205,7 +205,7 @@ extend Iterator {
     /// [1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
     /// ["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
     /// ```
-    public func map[U](consuming as transform: (Item) -> U) -> MapIterator[Self, U] {
+    public consuming func map[U](consuming as transform: escaping (Item) -> U) -> MapIterator[Self, U] {
         MapIterator(inner: self, as: transform)
     }
 
@@ -217,7 +217,7 @@ extend Iterator {
     /// ```
     /// [1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
     /// ```
-    public func filter(consuming where predicate: (Item) -> Bool) -> FilterIterator[Self] {
+    public consuming func filter(consuming where predicate: escaping (Item) -> Bool) -> FilterIterator[Self] {
         FilterIterator(inner: self, where: predicate)
     }
 
@@ -232,7 +232,7 @@ extend Iterator {
     ///     .filterMap { Int64.parse(it) }
     ///     .collect();   // [1, 3]
     /// ```
-    public func filterMap[U](consuming as transform: (Item) -> U?) -> FilterMapIterator[Self, U] {
+    public consuming func filterMap[U](consuming as transform: escaping (Item) -> U?) -> FilterMapIterator[Self, U] {
         FilterMapIterator(inner: self, as: transform)
     }
 
@@ -246,7 +246,7 @@ extend Iterator {
     /// let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
     /// xs.iter().compactMap().collect();   // [1, 2, 3]
     /// ```
-    public func compactMap[T]() -> FilterMapIterator[Self, T] where Item = Optional[T] {
+    public consuming func compactMap[T]() -> FilterMapIterator[Self, T] where Item = Optional[T] {
         FilterMapIterator(inner: self, as: { it })
     }
 
@@ -259,7 +259,7 @@ extend Iterator {
     ///     print("Index \{i}: \{item}")
     /// };
     /// ```
-    public func enumerate() -> EnumerateIterator[Self] {
+    public consuming func enumerate() -> EnumerateIterator[Self] {
         EnumerateIterator(inner: self)
     }
 
@@ -280,7 +280,7 @@ extend Iterator {
     ///     .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
     ///     .collect();   // [2, 2]
     /// ```
-    public func flatMap[U](consuming as transform: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator {
+    public consuming func flatMap[U](consuming as transform: escaping (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator, U: not Copyable {
         FlatMapIterator(inner: self, as: transform)
     }
 
@@ -296,7 +296,7 @@ extend Iterator {
     ///     .scan(from: 0) { (acc, x) in acc + x }
     ///     .collect();   // [1, 3, 6, 10]
     /// ```
-    public func scan[Acc](from initial: Acc, consuming by combine: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc] {
+    public consuming func scan[Acc](consuming from initial: Acc, consuming by combine: escaping (Acc, Item) -> Acc) -> ScanIterator[Self, Acc] where Acc: Copyable {
         ScanIterator(inner: self, from: initial, by: combine)
     }
 }
@@ -317,7 +317,7 @@ extend Iterator {
     /// [1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
     /// [1, 2].iter().take(10).collect();           // [1, 2]
     /// ```
-    public func take(count: Int64) -> TakeIterator[Self] {
+    public consuming func take(count: Int64) -> TakeIterator[Self] {
         TakeIterator(inner: self, count: count)
     }
 
@@ -331,7 +331,7 @@ extend Iterator {
     ///     .takeWhile { it < 4 }
     ///     .collect();   // [1, 2, 3]
     /// ```
-    public func takeWhile(consuming where predicate: (Item) -> Bool) -> TakeWhileIterator[Self] {
+    public consuming func takeWhile(consuming where predicate: escaping (Item) -> Bool) -> TakeWhileIterator[Self] {
         TakeWhileIterator(inner: self, where: predicate)
     }
 
@@ -343,7 +343,7 @@ extend Iterator {
     /// [1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
     /// [1, 2].iter().skip(10).collect();           // []
     /// ```
-    public func skip(count: Int64) -> SkipIterator[Self] {
+    public consuming func skip(count: Int64) -> SkipIterator[Self] {
         SkipIterator(inner: self, count: count)
     }
 
@@ -358,7 +358,7 @@ extend Iterator {
     ///     .skipWhile { it < 3 }
     ///     .collect();   // [3, 4, 1, 2]
     /// ```
-    public func skipWhile(consuming where predicate: (Item) -> Bool) -> SkipWhileIterator[Self] {
+    public consuming func skipWhile(consuming where predicate: escaping (Item) -> Bool) -> SkipWhileIterator[Self] {
         SkipWhileIterator(inner: self, where: predicate)
     }
 }
@@ -381,7 +381,7 @@ extend Iterator {
     /// names.iter().zip(ages.iter()).collect();
     /// // [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
     /// ```
-    public func zip[Other](other: Other) -> ZipIterator[Self, Other] where Other: Iterator {
+    public consuming func zip[Other](consuming other: Other) -> ZipIterator[Self, Other] where Other: Iterator {
         ZipIterator(first: self, second: other)
     }
 
@@ -393,7 +393,7 @@ extend Iterator {
     /// ```
     /// [1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
     /// ```
-    public func chain[Other](other: Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item = Item {
+    public consuming func chain[Other](consuming other: Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item = Item {
         ChainIterator(first: self, second: other)
     }
 }
@@ -417,7 +417,7 @@ extend Iterator {
     /// it.next();   // Some(1) — now consumed
     /// it.peek();   // Some(2)
     /// ```
-    public func peekable() -> PeekableIterator[Self] {
+    public consuming func peekable() -> PeekableIterator[Self] where Item: Copyable {
         PeekableIterator(inner: self)
     }
 
@@ -425,7 +425,7 @@ extend Iterator {
     /// fused (i.e. that may produce more elements after returning `None`
     /// once). After the first `None`, this adapter returns `None`
     /// forever.
-    public func fuse() -> FusedIterator[Self] {
+    public consuming func fuse() -> FusedIterator[Self] {
         FusedIterator(inner: self)
     }
 
@@ -442,19 +442,22 @@ extend Iterator {
     ///     .inspect { print("after filter: \{it}") }
     ///     .collect();
     /// ```
-    public func inspect(consuming inspector: (Item) -> ()) -> InspectIterator[Self] {
+    public consuming func inspect(consuming inspector: escaping (Item) -> ()) -> InspectIterator[Self] {
         InspectIterator(inner: self, inspector: inspector)
     }
 
-    /// Yields every `n`-th element, starting at the first. `n == 0` is
-    /// undefined (the adapter will spin forever).
+    /// Yields every `n`-th element, starting at the first.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"Iterator.stepBy: step must be >= 1"` when `n < 1`.
     ///
     /// # Examples
     ///
     /// ```
     /// [0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
     /// ```
-    public func stepBy(n: Int64) -> StepByIterator[Self] {
+    public consuming func stepBy(n: Int64) -> StepByIterator[Self] {
         StepByIterator(inner: self, step: n)
     }
 }
@@ -472,7 +475,7 @@ extend Iterator {
     /// [1, 2, 3].iter().intersperse(with: 0).collect();
     /// // [1, 0, 2, 0, 3]
     /// ```
-    public func intersperse(with separator: Item) -> IntersperseIterator[Self] {
+    public consuming func intersperse(consuming with separator: Item) -> IntersperseIterator[Self] where Item: Copyable {
         IntersperseIterator(inner: self, with: separator)
     }
 }
@@ -492,7 +495,7 @@ extend Iterator {
     ///     .intersperseWith { counter += 1; counter * 10 }
     ///     .collect();   // [1, 10, 2, 20, 3]
     /// ```
-    public func intersperseWith(consuming with separator: () -> Item) -> IntersperseWithIterator[Self] {
+    public consuming func intersperseWith(consuming with separator: escaping () -> Item) -> IntersperseWithIterator[Self] {
         IntersperseWithIterator(inner: self, with: separator)
     }
 }
@@ -512,7 +515,7 @@ extend Iterator {
     /// [1, 2, 3].iter().cycle().take(7).collect();
     /// // [1, 2, 3, 1, 2, 3, 1]
     /// ```
-    public func cycle() -> CycleIterator[Self] {
+    public consuming func cycle() -> CycleIterator[Self] where Self: Copyable {
         CycleIterator(iter: self)
     }
 }
@@ -668,8 +671,17 @@ extend Iterator {
     ///     File.delete(path)   // Result[(), IoError]
     /// };   // stops on first failure
     /// ```
-    public mutating func tryForEach[E](consuming action: (Item) -> Result[(), E]) -> Result[(), E] {
-        self.tryFold(from: (), by: { (_, item) in action(item) })
+    public mutating func tryForEach[E](mutating action: mutating (Item) -> Result[(), E]) -> Result[(), E] {
+        // A direct loop, not a `tryFold` forward: forwarding would capture the
+        // `mutating` action in a literal and force `tryFold` (a normal-closure
+        // fold API) to become `mutating` as an implementation artifact.
+        // docs/design/closures-stdlib-audit.md, "mutating: Eager Write-Back".
+        while let .Some(item) = self.next() {
+            if let .Err(err) = action(item) {
+                return .Err(err)
+            }
+        }
+        .Ok(())
     }
 }
 
@@ -688,7 +700,7 @@ extend Iterator {
     /// ```
     /// [1, 2, 3].iter().forEach { print(it) };
     /// ```
-    public consuming func forEach(action: (Item) -> ()) {
+    public consuming func forEach(mutating action: mutating (Item) -> ()) {
         while let .Some(item) = self.next() {
             action(item);
         }
@@ -1068,7 +1080,7 @@ extend Iterator where Item: Iterator {
     /// let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
     /// nested.flatten().collect();   // [1, 2, 3, 4, 5]
     /// ```
-    public func flatten() -> FlattenIterator[Self] {
+    public consuming func flatten() -> FlattenIterator[Self] {
         FlattenIterator(inner: self)
     }
 }
@@ -1090,7 +1102,7 @@ extend DoubleEndedIterator {
     /// [1, 2, 3, 4, 5].iter().rev().take(3).collect();         // [5, 4, 3]
     /// [1, 2, 3, 4, 5].iter().rev().first { it % 2 == 0 };            // Some(4)
     /// ```
-    public func rev() -> ReversedIterator[Self] {
+    public consuming func rev() -> ReversedIterator[Self] {
         ReversedIterator(inner: self)
     }
 }

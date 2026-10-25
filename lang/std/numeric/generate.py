@@ -497,15 +497,15 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
     /// # Examples
     ///
     /// ```
-    /// (42).format();                                           // "42"
-    /// (255).format(.{{radix: 16}});                     // "ff"
-    /// (255).format(.{{radix: 16, uppercase: true}});    // "FF"
-    /// (255).format(.{{radix: 16, alternate: true}});    // "0xff"
-    /// (42).format(.{{radix: 2, alternate: true}});      // "0b101010"
-    /// (42).format(.{{width: .Some(5), fill: '0'}});     // "00042"
-    /// (-42).format(.{{sign: .Always}});                 // "-42"
+    /// (42).formatted();                                           // "42"
+    /// (255).formatted(.{{radix: 16}});                     // "ff"
+    /// (255).formatted(.{{radix: 16, uppercase: true}});    // "FF"
+    /// (255).formatted(.{{radix: 16, alternate: true}});    // "0xff"
+    /// (42).formatted(.{{radix: 2, alternate: true}});      // "0b101010"
+    /// (42).formatted(.{{width: .Some(5), fill: '0'}});     // "00042"
+    /// (-42).formatted(.{{sign: .Always}});                 // "-42"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {{
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {{
         var n = self;{sign_handling}
 
         var radix: Int64 = options.radix;
@@ -534,7 +534,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
             }}
         }}
 
-        var i = digits.byteCount - 1;
+        var i = digits.bytes.count - 1;
         while i >= 0 {{
             result.appendByte(digits.bytes(unchecked: i));
             i = i - 1
@@ -595,7 +595,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// {type_name}(parsing: "abc");   // None
     /// ```
     public init(parsing string: String)? {{
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {{
             return null
         }}
@@ -669,7 +669,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             return null
         }}
 
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {{
             return null
         }}
@@ -750,7 +750,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// let bad = {type_name}(parsing: "-1"); // null (no sign for unsigned)
     /// ```
     public init(parsing string: String)? {{
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {{
             return null
         }}
@@ -826,7 +826,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             return null
         }}
 
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {{
             return null
         }}
@@ -1228,7 +1228,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
     /// __TYPE_NAME__(parsing: "");          // None
     /// ```
     public init(parsing string: String)? {
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {
             return null
         }
@@ -1499,14 +1499,14 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
     /// # Examples
     ///
     /// ```
-    /// (3.14159).format();                                          // "3.14159"
-    /// (3.14159).format(.{precision: 2});                  // "3.14"
-    /// (1234.5).format(.{floatStyle: .Scientific});        // "1.2345e3"
-    /// (0.756).format(.{floatStyle: .Percent});            // "75.6%"
-    /// (3.14).format(.{width: 8, fill: '0'});              // "00003.14"
-    /// (3.14).format(.{sign: .Always});                    // "+3.14"
+    /// (3.14159).formatted();                                          // "3.14159"
+    /// (3.14159).formatted(.{precision: 2});                  // "3.14"
+    /// (1234.5).formatted(.{floatStyle: .Scientific});        // "1.2345e3"
+    /// (0.756).formatted(.{floatStyle: .Percent});            // "75.6%"
+    /// (3.14).formatted(.{width: 8, fill: '0'});              // "00003.14"
+    /// (3.14).formatted(.{sign: .Always});                    // "+3.14"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         var precision: Int64 = 6;
         var precisionProvided = false;
         if let .Some(p) = options.precision {
@@ -1624,7 +1624,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
             }
         }
         if trimTrailingZeros {
-            let len = number.byteCount;
+            let len = number.bytes.count;
             var dotIndex: Int64 = -1;
             var expIndex: Int64 = -1;
             var i: Int64 = 0;

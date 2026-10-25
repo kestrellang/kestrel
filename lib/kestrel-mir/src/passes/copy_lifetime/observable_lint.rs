@@ -1,4 +1,4 @@
-//! E507 — find `Cloneable` types whose drop looks observable but which are not
+//! E508 — find `Cloneable` types whose drop looks observable but which are not
 //! marked `@observabledrop`.
 //!
 //! Runs on the monomorphized module, where every call is resolved to a concrete
@@ -27,6 +27,8 @@ use kestrel_hecs::Entity;
 /// observable.
 const MEMORY_EXTERNS: &[&str] = &[
     "malloc", "calloc", "realloc", "free", "memcpy", "memmove", "memset", "memcmp",
+    // The system allocator's aligned path (`SystemAllocator.allocate`).
+    "posix_memalign", "aligned_alloc",
 ];
 
 /// One unmarked `Cloneable` type whose deinit reaches an observable extern.

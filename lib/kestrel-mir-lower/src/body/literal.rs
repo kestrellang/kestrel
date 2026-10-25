@@ -69,7 +69,7 @@ impl OssaBodyCtx<'_, '_> {
                     "floatLiteral",
                     kestrel_hir::Builtin::ExpressibleByFloatLiteral,
                 ),
-                HirLiteral::Char(_) => (
+                HirLiteral::Char { .. } => (
                     "charLiteral",
                     kestrel_hir::Builtin::ExpressibleByCharLiteral,
                 ),
@@ -102,7 +102,7 @@ impl OssaBodyCtx<'_, '_> {
             },
             HirLiteral::Bool(v) => Immediate::bool(*v),
             HirLiteral::String { value, .. } => Immediate::string(value.clone()),
-            HirLiteral::Char(c) => Immediate::i32(*c as i128),
+            HirLiteral::Char { value: c, .. } => Immediate::i32(*c as i128),
             HirLiteral::Null => Immediate::unit(),
         };
         self.emit_literal(imm)

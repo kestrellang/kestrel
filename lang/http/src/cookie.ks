@@ -112,7 +112,7 @@ public struct Cookie: Cloneable {
         if self.secure {
             result.append("; Secure")
         }
-        if self.sameSite.byteCount > 0 {
+        if self.sameSite.bytes.count > 0 {
             result.append("; SameSite=");
             result.append(self.sameSite)
         }

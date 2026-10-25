@@ -247,7 +247,7 @@ mod tests {
     fn direct_members_only() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
         let s = spawn_struct(&mut world, root, "S");
         let m = spawn_method(&mut world, s, "m");
         let f = spawn_field(&mut world, s, "f");
@@ -271,7 +271,7 @@ mod tests {
     fn extension_members_are_discovered() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
         let s = spawn_struct(&mut world, root, "S");
         spawn_method(&mut world, s, "direct");
         let ext = spawn_extension(&mut world, root, "S");
@@ -294,19 +294,21 @@ mod tests {
         // S: P, and `extend P { method }` should surface `method` on S.
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
         let proto = spawn_protocol(&mut world, root, "P");
         let s = spawn_struct(&mut world, root, "S");
         world.set(
             s,
             Conformances(vec![ConformanceItem::Positive(
                 named_ast("P"),
-                kestrel_syntax_tree::SyntaxNode::new_root({
-                    let mut b = kestrel_syntax_tree::GreenNodeBuilder::new();
-                    b.start_node(kestrel_syntax_tree::SyntaxKind::Root.into());
-                    b.finish_node();
-                    b.finish()
-                }),
+                kestrel_syntax_tree::SyntaxNodePtr::new(
+                    &kestrel_syntax_tree::SyntaxNode::new_root({
+                        let mut b = kestrel_syntax_tree::GreenNodeBuilder::new();
+                        b.start_node(kestrel_syntax_tree::SyntaxKind::Root.into());
+                        b.finish_node();
+                        b.finish()
+                    }),
+                ),
             )]),
         );
 
@@ -335,7 +337,7 @@ mod tests {
     fn members_by_name_filters_and_includes_visibility() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
         let s = spawn_struct(&mut world, root, "S");
         let m1 = spawn_method(&mut world, s, "wanted");
         spawn_method(&mut world, s, "other");

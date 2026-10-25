@@ -234,32 +234,18 @@ impl<'a> CollectionContext<'a> {
 
         for block in &body.blocks {
             for inst in &block.insts {
+                for (_, callee) in inst.kind.callees() {
+                    self.scan_callee(
+                        callee,
+                        &subst,
+                        parent_self,
+                        caller_entity,
+                        inst.span.as_ref(),
+                    );
+                }
                 match &inst.kind {
-                    InstKind::Call { callee, .. } => {
-                        self.scan_callee(
-                            callee,
-                            &subst,
-                            parent_self,
-                            caller_entity,
-                            inst.span.as_ref(),
-                        );
-                    },
                     InstKind::Literal { value, .. } => {
                         self.scan_immediate(&value.kind, &subst, parent_self);
-                    },
-                    InstKind::ApplyPartial { callee, .. } => {
-                        // The partial-applied closure/thunk is referenced exactly
-                        // like a Call callee (a `Callee::Direct` after the thunk
-                        // pass), so discover its instantiation the same way — this
-                        // is what binds each `read[T]` to its own thunk instead of
-                        // collapsing to the first.
-                        self.scan_callee(
-                            callee,
-                            &subst,
-                            parent_self,
-                            caller_entity,
-                            inst.span.as_ref(),
-                        );
                     },
                     InstKind::DestroyValue { operand } => {
                         let operand_ty = body.values[operand.index()].ty;
@@ -488,16 +474,32 @@ impl<'a> CollectionContext<'a> {
         false
     }
 
+    /// The function that clones `nominal`, as decided once by the clone-shim
+    /// pass. A struct or enum, never both — one lookup, no fallback chain.
+    fn clone_impl_of(&self, nominal: Entity) -> Option<Entity> {
+        self.type_info_of(nominal).and_then(|ti| ti.clone_impl)
+    }
+
+    /// The `__drop$T` for `nominal`, as decided once by the drop-shim pass.
+    fn drop_impl_of(&self, nominal: Entity) -> Option<Entity> {
+        self.type_info_of(nominal).and_then(|ti| ti.drop_impl)
+    }
+
+    fn type_info_of(&self, nominal: Entity) -> Option<&crate::item::TypeInfo> {
+        self.structs
+            .get(&nominal)
+            .map(|s| &s.type_info)
+            .or_else(|| self.enums.get(&nominal).map(|e| &e.type_info))
+    }
+
     /// If `ty` is a Named type with a drop shim, enqueue the shim instantiation.
     fn discover_drop_shim(&mut self, ty: TyId, parent_self: Option<TyId>) {
         match self.arena.get(ty) {
             MirTy::Named { entity, type_args } => {
                 let entity = *entity;
                 let type_args = type_args.clone();
-                if let Some(shim) = self.functions.values().find(
-                    |f| matches!(f.kind, FunctionKind::DropShim { nominal } if nominal == entity),
-                ) {
-                    let key = InstantiationKey::new(shim.entity, type_args, parent_self);
+                if let Some(shim) = self.drop_impl_of(entity) {
+                    let key = InstantiationKey::new(shim, type_args, parent_self);
                     if self.seen.insert(key.clone()) {
                         self.queue.push_back(key);
                     }
@@ -523,24 +525,8 @@ impl<'a> CollectionContext<'a> {
             MirTy::Named { entity, type_args } => {
                 let entity = *entity;
                 let type_args = type_args.clone();
-                // Find clone shim or user clone method
-                let clone_func = self
-                    .functions
-                    .values()
-                    .find(
-                        |f| matches!(f.kind, FunctionKind::CloneShim { nominal } if nominal == entity),
-                    )
-                    .or_else(|| {
-                        // Match a user `clone()` by its self-param nominal: an
-                        // `extend`-defined clone doesn't reliably set `parent` to
-                        // the extended type, so `parent == entity` would miss it
-                        // (leaving the clone uncollected and the value bit-copied).
-                        self.functions
-                            .values()
-                            .find(|f| f.clone_method_self_nominal(self.arena) == Some(entity))
-                    });
-                if let Some(func) = clone_func {
-                    let key = InstantiationKey::new(func.entity, type_args, parent_self);
+                if let Some(func) = self.clone_impl_of(entity) {
+                    let key = InstantiationKey::new(func, type_args, parent_self);
                     if self.seen.insert(key.clone()) {
                         self.queue.push_back(key);
                     }
@@ -690,12 +676,7 @@ pub fn detect_implicit_protocol(
     // Closures inside protocol default methods inherit self_type but their
     // first param is env pointer, not Self. Scan their types for protocol
     // TypeParams, gated by function kind to avoid scanning every method.
-    if !matches!(
-        func.kind,
-        FunctionKind::Closure { .. }
-            | FunctionKind::ClosureCall { .. }
-            | FunctionKind::Thunk { .. }
-    ) {
+    if !func.kind.takes_env_param() {
         return None;
     }
     for proto in protocols.values() {
@@ -810,7 +791,11 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
         },
         MirTy::Ref { pointee, mutating } => {
             let r = deep_resolve(arena, witnesses, pointee, depth + 1);
-            if r != pointee { arena.ref_ty(r, mutating) } else { ty }
+            if r != pointee {
+                arena.ref_ty(r, mutating)
+            } else {
+                ty
+            }
         },
         MirTy::Tuple(elems) => {
             let new: Vec<TyId> = elems
@@ -819,8 +804,18 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
                 .collect();
             if new != elems { arena.tuple(new) } else { ty }
         },
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
-            let is_thin = matches!(arena.get(ty), MirTy::FuncThin { .. });
+        MirTy::FuncThin { params, ret }
+        | MirTy::FuncThick {
+            params,
+            ret,
+            kind: _,
+        } => {
+            // The kind is preserved verbatim — deep_resolve only rewrites
+            // component types, never the closure tier.
+            let fn_kind = match arena.get(ty) {
+                MirTy::FuncThick { kind, .. } => Some(*kind),
+                _ => None,
+            };
             let new_params: Vec<(TyId, crate::ty::ParamConvention)> = params
                 .iter()
                 .map(|&(p, c)| (deep_resolve(arena, witnesses, p, depth + 1), c))
@@ -832,16 +827,16 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
                 .any(|((np, _), (op, _))| np != op)
                 || new_ret != ret;
             if changed {
-                if is_thin {
-                    arena.intern(MirTy::FuncThin {
+                match fn_kind {
+                    None => arena.intern(MirTy::FuncThin {
                         params: new_params,
                         ret: new_ret,
-                    })
-                } else {
-                    arena.intern(MirTy::FuncThick {
+                    }),
+                    Some(kind) => arena.intern(MirTy::FuncThick {
+                        kind,
                         params: new_params,
                         ret: new_ret,
-                    })
+                    }),
                 }
             } else {
                 ty
@@ -863,7 +858,12 @@ fn references_type_param(arena: &TyArena, ty: TyId, entity: Entity) -> bool {
         MirTy::Named { type_args, .. } => type_args
             .iter()
             .any(|&a| references_type_param(arena, a, entity)),
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+        MirTy::FuncThin { params, ret }
+        | MirTy::FuncThick {
+            params,
+            ret,
+            kind: _,
+        } => {
             params
                 .iter()
                 .any(|(p, _)| references_type_param(arena, *p, entity))
@@ -882,9 +882,12 @@ pub fn has_type_param(arena: &TyArena, ty: TyId) -> bool {
         MirTy::Ref { pointee, .. } => has_type_param(arena, *pointee),
         MirTy::Tuple(elems) => elems.iter().any(|&e| has_type_param(arena, e)),
         MirTy::Named { type_args, .. } => type_args.iter().any(|&a| has_type_param(arena, a)),
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
-            params.iter().any(|(p, _)| has_type_param(arena, *p)) || has_type_param(arena, *ret)
-        },
+        MirTy::FuncThin { params, ret }
+        | MirTy::FuncThick {
+            params,
+            ret,
+            kind: _,
+        } => params.iter().any(|(p, _)| has_type_param(arena, *p)) || has_type_param(arena, *ret),
         MirTy::AssociatedProjection { base, .. } => has_type_param(arena, *base),
         _ => false,
     }
@@ -1006,6 +1009,7 @@ mod tests {
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         let result = collect_all(
@@ -1044,6 +1048,7 @@ mod tests {
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         let result = collect_all(
@@ -1079,6 +1084,7 @@ mod tests {
             body: Some(make_body(vec![], gen_ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         // main() calls generic_fn[Int64]
@@ -1108,6 +1114,7 @@ mod tests {
             )),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         let result = collect_all(
@@ -1154,6 +1161,7 @@ mod tests {
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         let thunk = FunctionDef {
@@ -1169,6 +1177,7 @@ mod tests {
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         let result = collect_all(
@@ -1207,6 +1216,7 @@ mod tests {
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         let result = collect_all(
@@ -1257,6 +1267,7 @@ mod tests {
             body: Some(make_body(vec![], impl_ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         // main() has a witness call
@@ -1287,6 +1298,7 @@ mod tests {
             )),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         let mut names = IndexMap::new();

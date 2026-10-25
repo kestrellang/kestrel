@@ -272,7 +272,7 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
         self.nanos.hash(into: hasher);
     }
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(self.isoString());
     }
 
@@ -284,7 +284,7 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
 // --- Helpers ---
 
 // Append fractional nanoseconds, trimming trailing zeros
-func appendFractional(mutating into b: StringBuilder, nanos: Int64) {
+func appendFractional(mutating into b: some Formatter, nanos: Int64) {
     var n = nanos;
     var digits: Int64 = 9;
     // Trim trailing zeros

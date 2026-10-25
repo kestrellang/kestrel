@@ -30,7 +30,9 @@
 
 use std::collections::HashSet;
 
-use kestrel_ast_builder::{Callable, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams};
+use kestrel_ast_builder::{
+    Callable, FieldClass, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams,
+};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
 use kestrel_name_res::{
@@ -38,6 +40,7 @@ use kestrel_name_res::{
 };
 use kestrel_type_infer::result::ResolvedTy;
 
+use super::split;
 use super::witness::Witness;
 
 // ===== Constructor =====
@@ -115,9 +118,12 @@ impl Constructor {
         matches!(self, Constructor::Wildcard)
     }
 
-    /// Check if this constructor is compatible with `other` for specialization.
+    /// Does this row constructor cover every value of `other`?
     ///
-    /// Returns true if a value matching `self` could also match `other`.
+    /// `other` is the constructor being specialized on. It is containment, not
+    /// overlap: specialization keeps a row only if the row matches the whole
+    /// case. Overlapping families (int/char ranges, array lengths) are cut into
+    /// disjoint pieces by `split::split` first, so containment is exact (F1).
     /// This is the SINGLE compatibility check — no duplicates elsewhere.
     pub fn matches(&self, other: &Constructor) -> bool {
         match (self, other) {
@@ -135,25 +141,15 @@ impl Constructor {
             },
             (Constructor::Tuple { arity: a1 }, Constructor::Tuple { arity: a2 }) => a1 == a2,
 
-            // Integer comparisons
-            (Constructor::IntLiteral(v1), Constructor::IntLiteral(v2)) => v1 == v2,
-            (Constructor::IntLiteral(v), Constructor::IntRange { start, end }) => {
-                start.is_none_or(|s| *v >= s) && end.is_none_or(|e| *v <= e)
-            },
+            // Integers and chars: the case's interval lies inside the row's.
             (
-                Constructor::IntRange { start: s1, end: e1 },
-                Constructor::IntRange { start: s2, end: e2 },
-            ) => ranges_overlap_i64(*s1, *e1, *s2, *e2),
-
-            // Character comparisons
-            (Constructor::CharLiteral(v1), Constructor::CharLiteral(v2)) => v1 == v2,
-            (Constructor::CharLiteral(v), Constructor::CharRange { start, end }) => {
-                start.is_none_or(|s| *v >= s) && end.is_none_or(|e| *v <= e)
-            },
+                Constructor::IntLiteral(_) | Constructor::IntRange { .. },
+                Constructor::IntLiteral(_) | Constructor::IntRange { .. },
+            ) => interval_contains(split::int_interval(self), split::int_interval(other)),
             (
-                Constructor::CharRange { start: s1, end: e1 },
-                Constructor::CharRange { start: s2, end: e2 },
-            ) => ranges_overlap_char(*s1, *e1, *s2, *e2),
+                Constructor::CharLiteral(_) | Constructor::CharRange { .. },
+                Constructor::CharLiteral(_) | Constructor::CharRange { .. },
+            ) => interval_contains(split::char_interval(self), split::char_interval(other)),
 
             // String
             (Constructor::StringLiteral(s1), Constructor::StringLiteral(s2)) => s1 == s2,
@@ -173,10 +169,11 @@ impl Constructor {
             ) => {
                 let min1 = p1 + s1;
                 let min2 = p2 + s2;
+                // A rest row covers every length from its minimum up; a fixed
+                // row covers one length, so never an open-ended case.
                 match (*r1, *r2) {
-                    (true, true) => true,
-                    (true, false) => min1 <= min2,
-                    (false, true) => min2 <= min1,
+                    (true, _) => min1 <= min2,
+                    (false, true) => false,
                     (false, false) => min1 == min2,
                 }
             },
@@ -637,12 +634,21 @@ fn is_array_type(query: &QueryContext<'_>, root: Entity, ty: &ResolvedTy) -> boo
         )
 }
 
-/// Collect Field children of an entity, in declaration order.
+/// Collect the stored instance fields of an entity, in declaration order.
+///
+/// Must stay index-aligned with the MIR layout (`items/struct_lower.rs`), since
+/// sub-pattern positions index into the scrutinee's fields. Including computed
+/// properties here made a pattern read past the end of the struct — an OSSA
+/// block-arg type mismatch rather than a diagnostic.
 pub(super) fn collect_fields(query: &QueryContext<'_>, entity: Entity) -> Vec<Entity> {
     query
         .children_of(entity)
         .iter()
-        .filter(|&&child| matches!(query.get::<NodeKind>(child), Some(NodeKind::Field)))
+        .filter(|&&child| {
+            query
+                .get::<FieldClass>(child)
+                .is_some_and(FieldClass::is_stored_instance)
+        })
         .copied()
         .collect()
 }
@@ -808,7 +814,9 @@ fn resolve_ast_type_with_subs(
                 .map(|seg| {
                     seg.type_args
                         .iter()
-                        .map(|a| resolve_ast_type_with_subs(query, root, Some(a), subs, scope_entity))
+                        .map(|a| {
+                            resolve_ast_type_with_subs(query, root, Some(a), subs, scope_entity)
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
@@ -831,36 +839,14 @@ fn resolve_ast_type_with_subs(
     }
 }
 
-
-/// Check if two optional i64 ranges overlap.
-fn ranges_overlap_i64(s1: Option<i64>, e1: Option<i64>, s2: Option<i64>, e2: Option<i64>) -> bool {
-    let start_ok = match (s1, e2) {
-        (Some(s), Some(e)) => s <= e,
-        _ => true,
-    };
-    let end_ok = match (s2, e1) {
-        (Some(s), Some(e)) => s <= e,
-        _ => true,
-    };
-    start_ok && end_ok
-}
-
-/// Check if two optional char ranges overlap.
-fn ranges_overlap_char(
-    s1: Option<char>,
-    e1: Option<char>,
-    s2: Option<char>,
-    e2: Option<char>,
-) -> bool {
-    let start_ok = match (s1, e2) {
-        (Some(s), Some(e)) => s <= e,
-        _ => true,
-    };
-    let end_ok = match (s2, e1) {
-        (Some(s), Some(e)) => s <= e,
-        _ => true,
-    };
-    start_ok && end_ok
+/// Is `inner` inside `outer`? An empty `inner` covers no value, so nothing
+/// needs to match it and it is inside everything.
+fn interval_contains(outer: Option<(i128, i128)>, inner: Option<(i128, i128)>) -> bool {
+    match (outer, inner) {
+        (_, None) => true,
+        (None, Some(_)) => false,
+        (Some((os, oe)), Some((is, ie))) => os <= is && ie <= oe,
+    }
 }
 
 /// Find missing array constructors given covered patterns.

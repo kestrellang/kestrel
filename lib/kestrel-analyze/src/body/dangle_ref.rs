@@ -112,7 +112,11 @@ impl BodyCheck for DangleRefAnalyzer {
                 continue;
             }
             let Some((local, arg)) = trace_pointer_to_local(cx, *base) else {
-                kestrel_debug::ktrace!("dangle", "base {base:?} trace failed: {:?}", &cx.hir.exprs[*base]);
+                kestrel_debug::ktrace!(
+                    "dangle",
+                    "base {base:?} trace failed: {:?}",
+                    &cx.hir.exprs[*base]
+                );
                 continue;
             };
             let name = &cx.hir.locals[local].name;
@@ -158,10 +162,7 @@ fn peel_block_tail(hir: &HirBody, mut id: HirExprId) -> HirExprId {
 /// construction. Follows single-assignment `let` pointers; params and `var`
 /// pointers (reassignable) end the trace. Returns the address-taken local
 /// and the argument expr for the secondary label.
-fn trace_pointer_to_local(
-    cx: &BodyContext<'_>,
-    expr: HirExprId,
-) -> Option<(LocalId, HirExprId)> {
+fn trace_pointer_to_local(cx: &BodyContext<'_>, expr: HirExprId) -> Option<(LocalId, HirExprId)> {
     let expr = peel_block_tail(cx.hir, expr);
     match &cx.hir.exprs[expr] {
         HirExpr::Call { callee, args, .. } => {
@@ -212,7 +213,10 @@ fn trace_pointer_to_local(
 
 /// Is this entity the stdlib `Pointer.init(to:)`?
 fn is_pointer_to_init(cx: &BodyContext<'_>, entity: kestrel_hecs::Entity) -> bool {
-    if !matches!(cx.query.get::<NodeKind>(entity), Some(NodeKind::Initializer)) {
+    if !matches!(
+        cx.query.get::<NodeKind>(entity),
+        Some(NodeKind::Initializer)
+    ) {
         return false;
     }
     cx.query

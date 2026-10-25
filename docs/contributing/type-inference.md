@@ -27,7 +27,7 @@ Downstream code (analyzers, MIR lowering) reads these fields; it does not re-run
 | `src/constraint.rs` | `Constraint` enum. |
 | `src/error.rs` | `InferError` enum. |
 | `src/generate.rs` | HIR walker that emits constraints. |
-| `src/solver.rs` | The fixpoint loop and per-constraint solve routines. |
+| `src/solver/` | The fixpoint loop and per-constraint solve routines. |
 | `src/unify.rs` | Unification. |
 | `src/resolve.rs` | `TypeResolver` / `WorldResolver` — name resolution for types during inference. |
 | `src/where_clauses.rs` | `WhereClausesOf` query — resolves entity-scoped where clauses. |
@@ -83,7 +83,7 @@ Constraints are generated in `generate.rs` while walking the HIR body. For each 
 ## The solver
 
 ```rust
-// src/solver.rs
+// src/solver/
 pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     fixpoint(ctx);                       // Phase 1: main solving
     apply_literal_defaults(ctx);         // Phase 2: literals default to Int64 / Float64 / String / …
@@ -192,20 +192,20 @@ let result = ctx.report_error(InferError::TypeMismatch { … });
 
 1. Add it to `Constraint` in `constraint.rs` with a doc comment: what rule, eager or deferred, why.
 2. Generate it where the HIR construct it represents is walked, in `generate.rs`.
-3. Add a `try_solve_*` function in `solver.rs`. Return `Solved` / `Deferred` / `Errored`.
+3. Add a `try_solve_*` function in `solver/`. Return `Solved` / `Deferred` / `Errored`.
 4. Wire it into the fixpoint dispatch (the big match in `fixpoint`).
 5. If the constraint can fail, add the corresponding `InferError` variant (see below — **five** files).
 6. Write focused tests under `lib/kestrel-test-suite/testdata/inference/`.
 
 ## Adding an `InferError` variant
 
-From `lib/kestrel-type-infer/AGENTS.md` — the variant must be mirrored in **five** files:
+From `lib/kestrel-type-infer/AGENTS.md` — the variant must be mirrored in **three** files:
 
-1. `kestrel-type-infer/src/error.rs` — the variant plus its span arm in `InferError::span`.
+1. `kestrel-type-infer/src/error.rs` — the variant, its arm in `InferError::span`, and its arm in `InferError::render` (code, message, label, notes — the single owner of the user-facing wording).
 2. `kestrel-type-infer/src/result.rs` — `describe_error()` match arm (short detail string).
-3. `kestrel-compiler/src/diagnostic.rs` — match arm building the user-facing `Diagnostic` (message, labels, notes).
-4. `kestrel-analyze/src/body/type_check.rs` — `format_error()` match arm returning `(message, label_text)`.
-5. `kestrel-compiler-driver/src/lib.rs` — both `describe()` and `format_error()` arms.
+3. `kestrel-compiler-driver/src/lib.rs` — both `describe()` and `format_error()` arms.
+
+`kestrel-compiler/src/diagnostic.rs` wraps `render()` and needs no per-variant arm.
 
 Missing any one produces a non-exhaustive-match error only in a downstream crate — so do the whole set in one commit.
 
@@ -213,8 +213,8 @@ Emit from the solver via `ctx.report_error(InferError::YourVariant { … })`, no
 
 ## Debugging
 
-- `VERBOSE_DEBUG_OUTPUT=1 triage <test>` enables `debug_trace!` in the solver — member resolution, unification steps, where-clause lookups.
-- Add `debug_trace!` calls rather than `eprintln!` so output stays filterable.
+- `KESTREL_DEBUG=infer,solver triage <test>` enables `ktrace!` in inference and the solver. `KESTREL_DEBUG=all` turns on every category.
+- Add `ktrace!("<category>", …)` calls rather than `eprintln!` so output stays filterable. The category is a free-form string chosen at the call site; reuse `infer` / `solver` here rather than minting a new one for a single session.
 - `kestrel dump` can print the HIR and the inferred types for a `.ks` file. Useful when a constraint never fires or fires with unexpected inputs.
 - **"Cannot infer type"** usually means a `TyVar` stayed `Infer` — the constraint that should have pinned it either wasn't generated, or deferred forever because its own inputs never resolved. Trace back from the unsolved var to the constraint that carries it.
 - **"Type mismatch"** on what looks like compatible types — check that aliases expanded (`TypeAlias` branch in `unify`) and that `Self` substitution happened at the method entry.

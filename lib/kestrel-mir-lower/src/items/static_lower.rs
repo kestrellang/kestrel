@@ -7,14 +7,15 @@
 
 use std::path::PathBuf;
 
-use kestrel_ast::ast_body::{AstExpr, AstLiteral};
-use kestrel_ast_builder::{Attributes, Body, FileId, FilePath, Settable};
+use kestrel_ast_builder::{Attributes, FileId, FilePath, Settable, Valued};
 use kestrel_hecs::Entity;
 use kestrel_mir::body::OssaBody;
 use kestrel_mir::item::function::{FunctionDef, FunctionKind};
 use kestrel_mir::item::static_def::{FileConstantData, StaticDef};
 use kestrel_mir::op::IntBits;
 use kestrel_mir::{FieldIdx, Immediate, MirTy, TyId, WitnessMethodKey};
+use kestrel_syntax_tree::SyntaxKind;
+use kestrel_syntax_tree::ast::{self, AstNode};
 
 use crate::context::LowerCtx;
 use crate::ty::resolve_type_annotation;
@@ -50,7 +51,7 @@ pub fn synthesize_static_inits(ctx: &mut LowerCtx) {
         .statics
         .values()
         .filter(|s| s.file_constant_data.is_none())
-        .filter(|s| ctx.world.get::<Body>(s.entity).is_some())
+        .filter(|s| ctx.world.get::<Valued>(s.entity).is_some())
         .map(|s| (s.entity, s.ty))
         .collect();
 
@@ -385,36 +386,34 @@ fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, Entity, TyId)])
     entity
 }
 
-/// If the initializer body is a single literal expression (no statements),
+/// If the initializer is a single decimal integer, float or bool literal,
 /// extract it as an Immediate so it can be baked into the static data section
-/// without needing an init thunk.
+/// without needing an init thunk. Anything else (including hex or `_`-grouped
+/// integers, which this does not parse) gets an init thunk.
 fn extract_literal_initializer(ctx: &LowerCtx, entity: Entity, ty: TyId) -> Option<Immediate> {
-    let body = &ctx.world.get::<Body>(entity)?.0;
-    if !body.statements.is_empty() {
-        return None;
-    }
-    let tail = body.tail_expr?;
-    match &body.exprs[tail] {
-        AstExpr::Literal { kind, .. } => match kind {
-            AstLiteral::Integer(s) => {
-                let v: i128 = s.parse().ok()?;
-                Some(match ctx.module.ty_arena.get(ty) {
-                    MirTy::I8 => Immediate::i8(v),
-                    MirTy::I16 => Immediate::i16(v),
-                    MirTy::I32 => Immediate::i32(v),
-                    _ => Immediate::i64(v),
-                })
-            },
-            AstLiteral::Float(s) => {
-                let v: f64 = s.parse().ok()?;
-                Some(match ctx.module.ty_arena.get(ty) {
-                    MirTy::F32 => Immediate::f32(v),
-                    _ => Immediate::f64(v),
-                })
-            },
-            AstLiteral::Bool(v) => Some(Immediate::bool(*v)),
-            _ => None,
+    ctx.world.get::<Valued>(entity)?;
+    let node = kestrel_ast_builder::syntax::valued_node(ctx.world, entity)?;
+    let literal = ast::Expression::cast(node)?.expr()?;
+    let token = kestrel_syntax_tree::ast::first_token(literal.syntax())?;
+    let text = token.text();
+    match literal.syntax().kind() {
+        SyntaxKind::ExprInteger => {
+            let v: i128 = text.parse().ok()?;
+            Some(match ctx.module.ty_arena.get(ty) {
+                MirTy::I8 => Immediate::i8(v),
+                MirTy::I16 => Immediate::i16(v),
+                MirTy::I32 => Immediate::i32(v),
+                _ => Immediate::i64(v),
+            })
         },
+        SyntaxKind::ExprFloat => {
+            let v: f64 = text.parse().ok()?;
+            Some(match ctx.module.ty_arena.get(ty) {
+                MirTy::F32 => Immediate::f32(v),
+                _ => Immediate::f64(v),
+            })
+        },
+        SyntaxKind::ExprBool => Some(Immediate::bool(text == "true")),
         _ => None,
     }
 }

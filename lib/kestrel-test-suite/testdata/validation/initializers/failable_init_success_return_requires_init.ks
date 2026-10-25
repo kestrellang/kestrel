@@ -10,7 +10,7 @@ struct Pair {
     var y: std.numeric.Int64
 
     init(from source: std.numeric.Int64)? {
-        self.x = source
+        self.x = source;
         return // ERROR: cannot return before all fields
     }
 }

@@ -40,6 +40,28 @@ pub enum FunctionKind {
     ModuleInit,
 }
 
+impl FunctionKind {
+    /// True when this function's params[0] is a synthesized env pointer rather
+    /// than a real parameter — closures (capturing and capture-free) and
+    /// generated thunks. Both producers push it unconditionally (mir-lower
+    /// `closure.rs` pushes `"env"` outside the match that picks
+    /// `Closure`/`ClosureCall`; `passes::thunk` pushes `"_env"` right after
+    /// setting `Thunk`), so the kind and the leading env param are in lockstep.
+    /// This is the one place that answers the question.
+    ///
+    /// It used to be answered by parameter NAME (`p.name == "env" || "_env"`),
+    /// which silently miscompiled any user function whose first parameter was
+    /// called `env` when that function was used as a function value — the
+    /// environment pointer landed in the user's first parameter and the last
+    /// real argument was dropped (fragility audit G3).
+    pub fn takes_env_param(&self) -> bool {
+        matches!(
+            self,
+            Self::Closure { .. } | Self::ClosureCall { .. } | Self::Thunk { .. }
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParamDef {
     pub name: String,
@@ -113,6 +135,11 @@ pub enum WhereConstraint {
         type_param: Entity,
         protocol: Entity,
     },
+    /// `subject = rhs` — an equality clause (`where T = Int64`,
+    /// `where I.Item = U`), lowered from the front end's resolved
+    /// `WhereClausesOf`. Decided at witness selection by the entailment
+    /// kernel (`mono::entail`).
+    Equal { subject: crate::TyId, rhs: crate::TyId },
 }
 
 impl WhereConstraint {
@@ -194,27 +221,10 @@ pub struct FunctionDef {
 }
 
 impl FunctionDef {
-    /// For a user `clone()` method, the nominal entity of the type it clones,
-    /// taken from the **self** (first) param's type rather than `kind`'s
-    /// `parent`. A `clone()` defined in an `extend` block does not reliably set
-    /// `parent` to the extended type, so the self-param type is the robust key
-    /// for associating the clone with its nominal (used by clone-shim copy
-    /// behavior, mono collection, and the expand pass's CopyValue→clone lookup).
-    /// Returns `None` if this isn't a `.clone` method or self isn't a nominal.
-    pub fn clone_method_self_nominal(&self, arena: &crate::ty::TyArena) -> Option<Entity> {
-        if !matches!(self.kind, FunctionKind::Method { .. }) || !self.name.ends_with(".clone") {
-            return None;
-        }
-        let self_ty = self.params.first()?.ty;
-        match arena.get(self_ty) {
-            crate::ty::MirTy::Named { entity, .. } => Some(*entity),
-            crate::ty::MirTy::Pointer(p) => match arena.get(*p) {
-                crate::ty::MirTy::Named { entity, .. } => Some(*entity),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
+    // NOTE: `clone_method_self_nominal` used to live here. "Which function is
+    // T's clone" is now decided once by `passes::clone_shim` and stored in
+    // `TypeInfo::clone_impl`; read that instead of re-deriving it from a
+    // function's name or `parent` (F7).
 
     pub fn new(entity: Entity, name: impl Into<String>, ret: TyId) -> Self {
         Self {

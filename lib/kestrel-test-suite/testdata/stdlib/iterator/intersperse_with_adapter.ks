@@ -24,15 +24,19 @@ module Test
             let emptyResult = empty.iter().intersperseWith(with: { () in 99 }).collect();
             if emptyResult.count != 0 { return 9 }
 
-            // intersperseWith with varying separator (counter-based)
-            // Note: cannot use mutable closure captures, so use a constant separator
-            let result2: std.collections.Array[std.numeric.Int64] = [10, 20, 30].iter().intersperseWith(with: { () in -1 }).collect();
+            // intersperseWith with varying separator (counter-based).
+            // The builder takes an `escaping` closure (closures-stdlib-audit.md),
+            // so the callback owns a snapshot it may mutate across calls; the
+            // frame's own `step` is untouched by those writes.
+            var step: std.numeric.Int64 = 0;
+            let result2: std.collections.Array[std.numeric.Int64] = [10, 20, 30].iter().intersperseWith(with: { () in step = step - 1; step }).collect();
             if result2.count != 5 { return 10 }
             if result2(unchecked: 0) != 10 { return 11 }
             if result2(unchecked: 1) != -1 { return 12 }
             if result2(unchecked: 2) != 20 { return 13 }
-            if result2(unchecked: 3) != -1 { return 14 }
+            if result2(unchecked: 3) != -2 { return 14 }
             if result2(unchecked: 4) != 30 { return 15 }
+            if step != 0 { return 16 }
 
             0
         }

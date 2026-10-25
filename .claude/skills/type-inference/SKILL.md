@@ -23,19 +23,24 @@ When unsure: start with `solver.md` for "how it works", `pitfalls.md` for "why i
 ## Three-phase summary (memorize this)
 
 ```
-HirBody ─► generate.rs ─► constraints ─► solver.rs ─► substitutions ─► resolve.rs ─► TypedBody
+HirBody ─► generate.rs ─► constraints ─► solver/ ─► substitutions ─► resolve.rs ─► TypedBody
            (walk once)    (fixpoint)                  (lower to concrete)
 ```
 
 **Generate** (`generate.rs`) — walks the HIR once and emits one or more constraints
 per expr/pat/stmt. Allocates fresh `TyVar`s, records `expr_types` / `local_types`.
 
-**Solve** (`solver.rs`) — drains constraints, dispatches via `try_solve`
-(solver.rs:589), each arm returns `SolveResult::{Solved, Deferred, Error}`. Deferred
-constraints are re-queued for the next round. Fixpoint: `fixpoint()` at solver.rs:330
-→ loops `solve_round()` (solver.rs:343) until a round makes no progress. Then
-`apply_literal_defaults` (solver.rs:2862), another fixpoint, then
-`default_never_fallback` (solver.rs:117), then `report_unsolved` (solver.rs:370) for
+**Solve** (`solver/`) — drains constraints, dispatches via `try_solve`
+(solver/:589), each arm returns `SolveResult::{Solved, Deferred, Error}`. Deferred
+constraints are re-queued for the next round. Fixpoint: `fixpoint()` at solver/:330
+→ loops `solve_round()` (solver/:343) until a round makes no progress. Then
+the defaulting relax loop: `apply_operator_shape_projections` first (a deferred
+operator-protocol member on a literal receiver gets its result var shaped as the
+default type's generalized return — `100..=200` → `ClosedRange[?lit]` — so
+annotations/parameterized bounds can pin the literal instead of it
+force-defaulting to Int64), then
+`apply_literal_defaults` (solver/:2862), another fixpoint, then
+`default_never_fallback` (solver/:117), then `report_unsolved` (solver/:370) for
 anything still unresolved.
 
 **Resolve** (`resolve.rs`) — after solving, lowers every `TyVar` to `ResolvedTy`
@@ -60,7 +65,7 @@ too; the "resolve" split is conceptual, not file-strict.
 
 All in `constraint.rs`:
 
-| Variant | Meaning | Solver fn (solver.rs) |
+| Variant | Meaning | Solver fn (solver/) |
 |---|---|---|
 | `Equal { a, b }` | τ₁ = τ₂ structural equality | `solve_equal` :1000 |
 | `Coerce { from, to, expr }` | Value flow, tries equal then promotion (`FromValue`) | `solve_coerce` :1155 |
@@ -75,15 +80,15 @@ All in `constraint.rs`:
 | `TupleRestPat { scrutinee, prefix_tys, suffix_tys }` | `[a, ...rest, b]` / `(a, ...rest, b)` bindings | `solve_tuple_rest_pat` :2651 |
 | `TupleIndex { tuple, index, result }` | `pair.0` projection | `solve_tuple_index` :730 |
 
-`try_solve` dispatch: `solver.rs:589`.
+`try_solve` dispatch: `solver/:589`.
 
 ## Verify before recommending
 
 **Line numbers drift.** Every function anchor in this skill was current at the
-time of writing. Before telling the user "edit solver.rs:1955," re-grep:
+time of writing. Before telling the user "edit solver/:1955," re-grep:
 
 ```
-grep -n "^fn solve_member\|^fn try_solve" lib/kestrel-type-infer/src/solver.rs
+grep -n "^fn solve_member\|^fn try_solve" lib/kestrel-type-infer/src/solver/
 ```
 
 Enum variants (`Constraint`, `TyKind`, `InferError`) are stable; dispatch fns
@@ -120,4 +125,4 @@ the index):
   `extend Iterator` leaks as `Named(Protocol)` without substitution.
 
 Pipeline-routing memory lives in the `kestrel-pipeline` skill — use that for
-"where does `AstExpr::Foo` turn into a constraint?"
+"where does `ExprFoo` syntax turn into a constraint?"

@@ -154,7 +154,7 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
             HirLiteral::Integer(i) => i.to_string(),
             HirLiteral::Float(f) => f.to_string(),
             HirLiteral::String { value, .. } => format!("\"{}\"", value),
-            HirLiteral::Char(c) => {
+            HirLiteral::Char { value: c, .. } => {
                 if let Some(ch) = char::from_u32(*c) {
                     format!("'{}'", ch)
                 } else {

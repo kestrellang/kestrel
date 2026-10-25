@@ -71,6 +71,20 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     },
 ];
 
+/// Look a descriptor up by its E-code.
+///
+/// Emit sites name the code, never a position. The positional form
+/// (`DESCRIPTORS[5]`, aliased behind `const E210: usize = 5;`) tied a code to
+/// an array index with nothing but the constant's *name* — inserting a
+/// descriptor in the middle silently reassigned every later code, its severity
+/// and its docs link (F16). `descriptor()` makes that reordering a no-op.
+fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
+    DESCRIPTORS
+        .iter()
+        .find(|d| d.id == id)
+        .expect("descriptor id must be declared in this analyzer's DESCRIPTORS")
+}
+
 pub struct AccessModeAnalyzer;
 
 impl Describe for AccessModeAnalyzer {
@@ -100,6 +114,7 @@ impl BodyCheck for AccessModeAnalyzer {
         for (expr_id, expr) in cx.hir.exprs.iter() {
             match expr {
                 HirExpr::Call { callee, args, .. } => {
+                    check_mutating_kind_call(cx, *callee, &mut diags);
                     // Resolve callee entity from typed resolutions
                     let callee_entity = match &cx.hir.exprs[*callee] {
                         HirExpr::Def(entity, _, _) => Some(*entity),
@@ -151,8 +166,8 @@ impl BodyCheck for AccessModeAnalyzer {
                         && !matches!(classify_mutability(cx, *scrutinee), MutClass::Mutable)
                     {
                         diags.push(AnalyzeDiagnostic {
-                            descriptor_id: DESCRIPTORS[5].id,
-                            severity: DESCRIPTORS[5].default_severity,
+                            descriptor_id: descriptor("E210").id,
+                            severity: descriptor("E210").default_severity,
                             message: "`&mutating` pattern bindings need a mutable scrutinee place"
                                 .to_string(),
                             labels: vec![DiagLabel {
@@ -186,10 +201,11 @@ fn check_borrow_init(
     span: &kestrel_span::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    let push = |diags: &mut Vec<AnalyzeDiagnostic>, d: usize, message: String, note: String| {
+    let push = |diags: &mut Vec<AnalyzeDiagnostic>, code: &str, message: String, note: String| {
+        let d = descriptor(code);
         diags.push(AnalyzeDiagnostic {
-            descriptor_id: DESCRIPTORS[d].id,
-            severity: DESCRIPTORS[d].default_severity,
+            descriptor_id: d.id,
+            severity: d.default_severity,
             message,
             labels: vec![DiagLabel {
                 span: span.clone(),
@@ -199,8 +215,6 @@ fn check_borrow_init(
             notes: vec![note],
         });
     };
-    const E210: usize = 5;
-    const E499: usize = 6;
 
     // A get/set-only member has no mutable place to lend — the writeback
     // temp the lowering would borrow strands every later store made
@@ -219,7 +233,7 @@ fn check_borrow_init(
     {
         push(
             diags,
-            E210,
+            "E210",
             "cannot take a `&mutating` borrow of a get/set member".to_string(),
             "writes through this member go get→set; a borrowable place needs a \
              `mutating ref` accessor"
@@ -231,7 +245,7 @@ fn check_borrow_init(
     match classify_mutability(cx, inner) {
         MutClass::Temporary => push(
             diags,
-            E499,
+            "E499",
             "cannot borrow a temporary value".to_string(),
             "a borrow names an existing place; bind the value first (`let x = ...;`) \
              and borrow that"
@@ -239,19 +253,19 @@ fn check_borrow_init(
         ),
         MutClass::SharedRef if mutating => push(
             diags,
-            E210,
+            "E210",
             "cannot take a `&mutating` borrow through a shared reference".to_string(),
             "the place is reached through `&T`, which permits reads only".to_string(),
         ),
         MutClass::ImmutableLocal(name) if mutating => push(
             diags,
-            E210,
+            "E210",
             format!("cannot take a `&mutating` borrow of immutable variable '{name}'"),
             "declare the variable with `var`, or take a shared `&` borrow".to_string(),
         ),
         MutClass::ImmutableField(name) if mutating => push(
             diags,
-            E210,
+            "E210",
             format!("cannot take a `&mutating` borrow of immutable field '{name}'"),
             "the field is declared with `let`".to_string(),
         ),
@@ -289,9 +303,99 @@ fn check_call_args(
         if let Some(param) = callable.params.get(i)
             && param.is_mut
             && !param.is_consuming
+            && !arg_is_closure_value(cx, arg.value)
         {
             check_mutating_arg(cx, arg.value, diags);
         }
+    }
+}
+
+/// Is this argument a CLOSURE value?
+///
+/// A `mutating` convention on a closure-typed parameter does not mean "the
+/// callee writes back into the caller's binding" — it declares that the callee
+/// calls the closure EXCLUSIVELY, which is the convention a `mutating`-kind
+/// closure type requires (docs/design/closures.md, "Passing: What Fits Where";
+/// the pairing itself is E625). The mutable place such a call needs is the
+/// closure's own environment — views into the caller's frame — not the
+/// argument expression, so a literal (a temporary) and a `let`-bound normal
+/// closure adapted to `mutating` both pass. Non-exclusive *calls* of a
+/// mutating-kind closure are still an E203-family mutating use of the callee
+/// binding; that is a different site.
+fn arg_is_closure_value(cx: &BodyContext<'_>, arg_id: HirExprId) -> bool {
+    matches!(
+        cx.typed.expr_types.get(&arg_id),
+        Some(kestrel_type_infer::result::ResolvedTy::Function { .. })
+    )
+}
+
+/// Calling a `mutating`-KIND closure is an EXCLUSIVE use of whatever holds it.
+///
+/// docs/design/closures.md, "`mutating`: write-back": "Calling one is an
+/// exclusive use — it must be held in a `var` (or `mutating` parameter)".
+/// Plan D8 deliberately routes this through the EXISTING mutability band
+/// rather than the kind machinery (E624 is the passing table, E625 the
+/// signature-level kind/convention pairing): the callee binding sits in a
+/// mutating position, so the ordinary classification decides — `let`-held is
+/// E203, an immutable field E204, a shared `&` reach E207.
+///
+/// What still passes: an inline literal (a temporary the caller owns for the
+/// duration of the call), a `var` binding, and a `mutating`/MutBorrow
+/// parameter. This is about CALLING, never about PASSING — passing a
+/// closure-typed argument to a `mutating` parameter has its own exemption
+/// (`arg_is_closure_value`).
+fn check_mutating_kind_call(
+    cx: &BodyContext<'_>,
+    callee: HirExprId,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    if !matches!(
+        cx.typed.expr_types.get(&callee),
+        Some(kestrel_type_infer::result::ResolvedTy::Function {
+            kind: kestrel_ast::FnTypeKind::Mutating,
+            ..
+        })
+    ) {
+        return;
+    }
+    let span = util::expr_span(cx.hir, callee);
+    let note = "a `mutating` closure writes back through its captures, so calling it needs \
+                exclusive access — hold it in a `var`, or take it as a `mutating` parameter";
+    match classify_mutability(cx, callee) {
+        // Owned temporary (an inline literal) or a mutable place: exclusive.
+        MutClass::Mutable | MutClass::Temporary => {},
+        MutClass::SharedRef => {
+            diags.push(shared_ref_diag(
+                span,
+                "cannot call a `mutating` closure through a shared reference",
+            ));
+        },
+        MutClass::ImmutableLocal(name) => {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: descriptor("E203").id,
+                severity: descriptor("E203").default_severity,
+                message: format!("cannot call `mutating` closure '{name}': it is bound with 'let'"),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "calling this needs exclusive access".into(),
+                    is_primary: true,
+                }],
+                notes: vec![note.into()],
+            });
+        },
+        MutClass::ImmutableField(name) => {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: descriptor("E204").id,
+                severity: descriptor("E204").default_severity,
+                message: format!("cannot call `mutating` closure in immutable field '{name}'"),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "calling this needs exclusive access".into(),
+                    is_primary: true,
+                }],
+                notes: vec![note.into()],
+            });
+        },
     }
 }
 
@@ -314,8 +418,8 @@ fn check_mutating_receiver(
         },
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
+                descriptor_id: descriptor("E203").id,
+                severity: descriptor("E203").default_severity,
                 message: format!(
                     "cannot pass immutable binding '{}' to 'mutating' parameter",
                     name
@@ -330,8 +434,8 @@ fn check_mutating_receiver(
         },
         MutClass::ImmutableField(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[1].id,
-                severity: DESCRIPTORS[1].default_severity,
+                descriptor_id: descriptor("E204").id,
+                severity: descriptor("E204").default_severity,
                 message: format!(
                     "cannot pass immutable field '{}' to 'mutating' parameter",
                     name
@@ -360,8 +464,8 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
         },
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
+                descriptor_id: descriptor("E203").id,
+                severity: descriptor("E203").default_severity,
                 message: format!(
                     "cannot pass immutable binding '{}' to 'mutating' parameter",
                     name
@@ -376,8 +480,8 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
         },
         MutClass::ImmutableField(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[1].id,
-                severity: DESCRIPTORS[1].default_severity,
+                descriptor_id: descriptor("E204").id,
+                severity: descriptor("E204").default_severity,
                 message: format!(
                     "cannot pass immutable field '{}' to 'mutating' parameter",
                     name
@@ -392,8 +496,8 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
         },
         MutClass::Temporary => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[2].id,
-                severity: DESCRIPTORS[2].default_severity,
+                descriptor_id: descriptor("E205").id,
+                severity: descriptor("E205").default_severity,
                 message: "cannot pass temporary value to 'mutating' parameter".into(),
                 labels: vec![DiagLabel {
                     span,
@@ -409,8 +513,8 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
 /// E207: mutating use through a shared `&T` — the const-cast guard.
 fn shared_ref_diag(span: kestrel_span::Span, message: &str) -> AnalyzeDiagnostic {
     AnalyzeDiagnostic {
-        descriptor_id: DESCRIPTORS[4].id,
-        severity: DESCRIPTORS[4].default_severity,
+        descriptor_id: descriptor("E207").id,
+        severity: descriptor("E207").default_severity,
         message: message.into(),
         labels: vec![DiagLabel {
             span,
@@ -489,9 +593,10 @@ fn pat_has_mutating_ref_binder(cx: &BodyContext<'_>, pat: kestrel_hir::body::Hir
         HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => args
             .iter()
             .any(|a| pat_has_mutating_ref_binder(cx, a.pattern)),
-        HirPat::Struct { fields, .. } => fields
-            .iter()
-            .any(|f| f.pattern.is_some_and(|p| pat_has_mutating_ref_binder(cx, p))),
+        HirPat::Struct { fields, .. } => fields.iter().any(|f| {
+            f.pattern
+                .is_some_and(|p| pat_has_mutating_ref_binder(cx, p))
+        }),
         HirPat::Or { alternatives, .. } => alternatives
             .iter()
             .any(|&p| pat_has_mutating_ref_binder(cx, p)),

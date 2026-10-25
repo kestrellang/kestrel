@@ -54,10 +54,10 @@ impl DeclCheck for StaticContextAnalyzer {
 
         // Check parent: static is valid inside Struct, Enum, Protocol, Extension
         if let Some(parent) = cx.query.parent_of(cx.entity)
-            && matches!(
-                cx.query.get::<NodeKind>(parent),
-                Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
-            )
+            && cx
+                .query
+                .get::<NodeKind>(parent)
+                .is_some_and(NodeKind::is_type_scope)
         {
             return vec![];
         }

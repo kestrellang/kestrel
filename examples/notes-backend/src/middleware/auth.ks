@@ -15,7 +15,7 @@ public struct AuthMiddleware: Middleware[AppCtx], Cloneable {
             return .Respond(Response.unauthorized())
         }
 
-        let token = authHeader.asSlice().subslice(from: 7, to: authHeader.byteCount).toOwned();
+        let token = authHeader.asSlice().subslice(from: 7, to: authHeader.bytes.count).toOwned();
 
         let db = ctx.db;
         guard let .Ok(some userId) = lookupToken(db, token) else {

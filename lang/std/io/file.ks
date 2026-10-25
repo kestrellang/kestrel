@@ -95,7 +95,7 @@ public struct File: Readable, Writable, not Copyable {
     public static func open(path: String) -> Result[File, IoError] {
         // Get pointer to string bytes (need null-terminated for libc)
         // For now, we'll copy to a buffer with null terminator
-        let len = path.byteCount;
+        let len = path.bytes.count;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
@@ -121,7 +121,7 @@ public struct File: Readable, Writable, not Copyable {
     /// try writeString(file, "New content");
     /// ```
     public static func create(path: String) -> Result[File, IoError] {
-        let len = path.byteCount;
+        let len = path.bytes.count;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
@@ -143,7 +143,7 @@ public struct File: Readable, Writable, not Copyable {
     /// or open" semantics combine with `create` / `createNew` as
     /// appropriate.
     public static func openReadWrite(path: String) -> Result[File, IoError] {
-        let len = path.byteCount;
+        let len = path.bytes.count;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
@@ -164,7 +164,7 @@ public struct File: Readable, Writable, not Copyable {
     /// left the cursor — the standard idiom for log files and any
     /// concurrent appender.
     public static func openAppend(path: String) -> Result[File, IoError] {
-        let len = path.byteCount;
+        let len = path.bytes.count;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {
@@ -197,7 +197,7 @@ public struct File: Readable, Writable, not Copyable {
     /// }
     /// ```
     public static func createNew(path: String) -> Result[File, IoError] {
-        let len = path.byteCount;
+        let len = path.bytes.count;
         var pathBuf = Array[UInt8](capacity: len + 1);
         var i: Int64 = 0;
         while i < len {

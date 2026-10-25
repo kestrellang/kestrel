@@ -10,7 +10,8 @@
 //!
 //! Coverage today:
 //! - Direct entity references in expressions: `HirExpr::Def(target, ...)`,
-//!   `OverloadSet` containing `target`, `ProtocolCall { protocol: target }`.
+//!   `OverloadSet` containing `target`, `ProtocolCall { protocol: target }`,
+//!   and every segment of a `HirExpr::TypeRef` that names `target`.
 //! - Pattern-position references: `HirPat::Variant`, `HirPat::Struct`.
 //! - Inference-resolved member accesses: anything in `TypedBody::resolutions`
 //!   that maps to `target` (covers `Field`, `MethodCall`, `Call`,
@@ -23,12 +24,13 @@
 //!   entity isn't kept on the AST node. Add a `ResolveTypeRefs { file }`
 //!   query in `kestrel-name-res` when needed.
 
-use kestrel_ast_builder::{Body, FileId};
+use kestrel_ast_builder::{DeclSpan, FileId, Valued};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirExpr, HirPat};
 use kestrel_hir::res::LocalId;
 use kestrel_hir_lower::LowerBody;
 use kestrel_span::Span;
+use kestrel_syntax_tree::utils::get_name_span;
 use kestrel_type_infer::InferBody;
 
 use crate::semantic::hir_expr_span;
@@ -56,7 +58,7 @@ pub struct ReferenceSite {
 /// Find every reference to `target` in the workspace.
 pub fn references_to(world: &World, root: Entity, target: Entity) -> Vec<ReferenceSite> {
     let ctx = world.query_context();
-    let body_entities: Vec<Entity> = world.iter_component::<Body>().map(|(e, _)| e).collect();
+    let body_entities: Vec<Entity> = world.iter_component::<Valued>().map(|(e, _)| e).collect();
 
     let mut sites: Vec<ReferenceSite> = Vec::new();
 
@@ -92,6 +94,19 @@ pub fn references_to(world: &World, root: Entity, target: Entity) -> Vec<Referen
                         kind: RefKind::Direct,
                     })
                 },
+                // A type in expression position (`B.Item`): each segment that
+                // names `target`. A projection's span covers its base, so the
+                // site is clipped to the trailing identifier like a member.
+                HirExpr::TypeRef { ty, .. } => sites.extend(
+                    crate::semantic::hir_ty_named_entities(ty)
+                        .into_iter()
+                        .filter(|(e, _)| *e == target)
+                        .map(|(_, span)| ReferenceSite {
+                            file,
+                            span,
+                            kind: RefKind::MemberAccess,
+                        }),
+                ),
                 _ => {},
             }
         }
@@ -149,37 +164,34 @@ fn sort_key(s: &ReferenceSite) -> (usize, usize, usize, u8) {
     (s.file.index(), s.span.start, s.span.end, kind)
 }
 
-/// Find references to a local within its owning body. Locals don't escape, so
-/// this never crosses body boundaries.
+/// Find references to a local within its owning body: every identifier the
+/// body's source map records as naming it. Locals don't escape, so this
+/// never crosses body boundaries. The declaration is not a reference (see
+/// `semantic::local_name_site`).
 pub fn local_references(
     world: &World,
     body_entity: Entity,
     root: Entity,
     local: LocalId,
 ) -> Vec<ReferenceSite> {
-    let ctx = world.query_context();
     let Some(file) = entity_file(world, body_entity) else {
         return Vec::new();
     };
-    let Some(hir) = ctx.query(LowerBody {
-        entity: body_entity,
-        root,
-    }) else {
+    let Some(lowered) = crate::semantic::lowered_body(world, root, body_entity) else {
         return Vec::new();
     };
-
-    let mut sites: Vec<ReferenceSite> = Vec::new();
-    for (_, expr) in hir.exprs.iter() {
-        if let HirExpr::Local(id, span) = expr
-            && *id == local
-        {
-            sites.push(ReferenceSite {
-                file,
-                span: span.clone(),
-                kind: RefKind::Direct,
-            });
-        }
-    }
+    let mut sites: Vec<ReferenceSite> = lowered
+        .source_map
+        .name_refs()
+        .filter(
+            |(_, expr)| matches!(lowered.body.exprs[*expr], HirExpr::Local(id, _) if id == local),
+        )
+        .map(|(range, _)| ReferenceSite {
+            file,
+            span: Span::new(file.index(), range.into()),
+            kind: RefKind::Direct,
+        })
+        .collect();
     sites.sort_by_key(sort_key);
     sites.dedup();
     sites
@@ -210,6 +222,44 @@ pub fn clip_to_identifier(source: &str, span: &Span, kind: RefKind) -> Span {
 
 pub fn is_ident_char(c: char) -> bool {
     c == '_' || c.is_alphanumeric()
+}
+
+/// Does `span` literally spell `name` in `source`?
+///
+/// The single fail-closed predicate for "is this span actually the identifier
+/// it claims to name?". Renaming rewrites the bytes under a span, so any span
+/// that does not spell its own name will corrupt source when edited. Rename
+/// takes a local's span from its body's source map (the declaring
+/// identifier), never from `Local::span` — which covers a whole `let`
+/// statement, is `Span::synthetic(0)` for a parameter, and borrows the
+/// construct's span for a desugaring temporary — so this is defence in depth.
+///
+/// Deliberately *not* a `is_synthetic() || name.starts_with('$')` heuristic:
+/// closure-destructure params (`_cparam_N`) get a real, non-synthetic span
+/// (the closure's) and a name with no `$`, so both heuristics wave them
+/// through. Text equality is the property we actually need, and it stays
+/// correct for spans and synthetic names that don't exist yet.
+pub fn span_spells_name(source: &str, span: &Span, name: &str) -> bool {
+    source.get(span.start..span.end) == Some(name)
+}
+
+/// The `enclosing_decl_at` fallback, restricted to the decl's *own name*.
+///
+/// `semantic::enclosing_decl_at` resolves any offset inside a declaration's
+/// extent to that declaration — including every offset in its body. Handlers
+/// that use it as the "cursor is on a declaration's identifier" fallback must
+/// therefore re-check that the cursor really is on the identifier: otherwise
+/// a cursor anywhere in a body silently resolves to the enclosing function —
+/// and rename then renames *that* workspace-wide.
+///
+/// `get_name_span` is the same function `rename::identifier_for_target` uses
+/// to find the text it would edit, so the two agree by construction.
+pub fn decl_at_name_offset(world: &World, file_entity: Entity, offset: usize) -> Option<Entity> {
+    let decl = crate::semantic::enclosing_decl_at(world, file_entity, offset)?;
+    let cst = kestrel_ast_builder::syntax::cst_node(world, decl)?;
+    let decl_span = world.get::<DeclSpan>(decl)?;
+    let name_span = get_name_span(&cst, decl_span.0.file_id)?;
+    (name_span.start <= offset && offset <= name_span.end).then_some(decl)
 }
 
 pub fn entity_file(world: &World, entity: Entity) -> Option<Entity> {

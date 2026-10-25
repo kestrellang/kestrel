@@ -3,7 +3,7 @@
 module uuid
 
 import std.numeric.(UInt32, UInt64, Int64, RandomNumberGenerator)
-import std.text.(String, StringBuilder, Char, CharsView, Formattable, FormatOptions)
+import std.text.(String, StringBuilder, Formatter, Char, CharsView, Formattable, FormatOptions)
 import std.core.(Equatable, Hashable, Hasher, Matchable, Bool)
 import crypto.random.(SecureRandom)
 
@@ -63,7 +63,7 @@ public struct UUID: Equatable, Hashable, Formattable, Matchable {
     // FORMATTING
     // ========================================================================
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         // 8-4-4-4-12 hex groups separated by dashes
         let a = self.high >> 32;
         let b = (self.high >> 16) & 0xFFFF;

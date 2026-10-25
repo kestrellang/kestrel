@@ -5,18 +5,27 @@ bb0:
 bb1:
     %v1 = literal i64 1  // @owned Int64
     %v2 = struct Test.Handle { .0: %v1 }  // @owned Test.Handle
-    %v3 = move_value %v2  // @owned Test.Handle
-    %v4 = call Test.consume(%v3)  // @owned ()
-    %v5 = literal ()  // @owned ()
+    %v3 = uninit Test.Handle  // @owned Pointer[Test.Handle]
+    store_init %v3, %v2
+    %v4 = uninit Bool  // @owned Pointer[Bool]
+    %v5 = literal true  // @owned Bool
+    store_init %v4, %v5
+    %v6 = take %v3, Test.Handle  // @owned Test.Handle
+    %v7 = literal false  // @owned Bool
+    store_assign %v4, %v7
+    %v8 = call Test.consume(%v6)  // @owned ()
+    %v9 = literal ()  // @owned ()
+    destroy_value %v8
     destroy_value %v4
-    return %v5
+    destroy_value %v3
+    return %v9
 
 bb2:
-    %v8 = literal ()  // @owned ()
-    jump bb3(%v8)
+    %v12 = literal ()  // @owned ()
+    jump bb3(%v12)
 
-bb3(%v9: @owned ()):
-    %v10 = literal ()  // @owned ()
-    destroy_value %v9
-    return %v10
+bb3(%v13: @owned ()):
+    %v14 = literal ()  // @owned ()
+    destroy_value %v13
+    return %v14
 

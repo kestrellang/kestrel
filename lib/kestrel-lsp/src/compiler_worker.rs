@@ -515,12 +515,9 @@ mod tests {
     fn revision_boundary_does_not_change_diagnostics() {
         use kestrel_compiler::Compiler;
         use kestrel_compiler_driver::CompilerDriver;
-        use std::path::Path;
 
-        let std_dir = Path::new("/Users/dino/Documents/Projects/kestrel/lang/std");
-        if !std_dir.exists() {
-            return; // skip when run outside the dev tree
-        }
+        let std_dir = kestrel_compiler::stdlib_path::repo_std_path();
+        let std_dir = std_dir.as_path();
 
         let user_src = "module hello\n\
                         public func add(x: Int64, y: Int64) -> Int64 { x + y }\n\
@@ -575,10 +572,13 @@ mod tests {
         use kestrel_compiler_driver::CompilerDriver;
         use std::path::Path;
 
-        let std_dir = Path::new("/Users/dino/Documents/Projects/kestrel/lang/std");
-        let user_path = "/Users/dino/Documents/Projects/kestrel/lang/hello/main.ks";
-        if !std_dir.exists() || !Path::new(user_path).exists() {
-            return; // skip when run outside the dev tree
+        let std_dir = kestrel_compiler::stdlib_path::repo_std_path();
+        let std_dir = std_dir.as_path();
+        let hello = std_dir.with_file_name("hello").join("main.ks");
+        let user_path = hello.to_string_lossy().to_string();
+        let user_path = user_path.as_str();
+        if !Path::new(user_path).exists() {
+            return; // this sample is not part of the repo on every checkout
         }
 
         // Walk the stdlib dir to mirror what the LSP does.
@@ -635,6 +635,203 @@ mod tests {
         );
     }
 
+    /// Sorted diagnostic messages for a CLI-style fresh build of `files`.
+    fn fresh_build_messages(files: &[(&str, &str)]) -> Vec<String> {
+        use kestrel_compiler::Compiler;
+        use kestrel_compiler_driver::CompilerDriver;
+
+        let mut fresh = Compiler::new();
+        for (path, text) in files {
+            let e = fresh.set_source(path, (*text).into());
+            fresh.build(e);
+        }
+        let driver = CompilerDriver::new(&fresh);
+        let _ = driver.infer_all();
+        let _ = driver.analyze_all(false);
+        let mut msgs: Vec<String> = fresh
+            .diagnostics()
+            .iter()
+            .map(|d| d.message.clone())
+            .collect();
+        msgs.sort();
+        msgs
+    }
+
+    /// Regression for hECS "invalidation only lasts one revision": the
+    /// worker despawns an edited file *after* queries ran and *before*
+    /// `begin_revision`, and a request may then only re-parse that file.
+    /// Memos for an untouched importer must still see the rename when a
+    /// later, unrelated edit triggers the next full check.
+    #[test]
+    fn cross_file_rename_survives_an_unobserved_revision() {
+        use kestrel_compiler_driver::CompilerDriver;
+
+        let a_v1 = "module a\npublic func fa() {}\n";
+        let a_v2 = "module a\npublic func fz() {}\n";
+        let b = "module b\nimport a.(fa)\nfunc useIt() { fa() }\n";
+        let c_v1 = "module c\nfunc other() {}\n";
+        let c_v2 = "module c\nfunc other() {}\nfunc another() {}\n";
+        let sources = |a: &str, c: &str| -> HashMap<String, String> {
+            [("/tmp/a.ks", a), ("/tmp/b.ks", b), ("/tmp/c.ks", c)]
+                .into_iter()
+                .map(|(p, t)| (p.to_string(), t.to_string()))
+                .collect()
+        };
+        let full_check = |state: &WorkerState| -> Vec<String> {
+            let driver = CompilerDriver::new(&state.compiler);
+            let _ = driver.infer_all();
+            let _ = driver.analyze_all(false);
+            let mut msgs: Vec<String> = state
+                .compiler
+                .diagnostics()
+                .iter()
+                .map(|d| d.message.clone())
+                .collect();
+            msgs.sort();
+            msgs
+        };
+
+        let mut state = WorkerState::fresh();
+        sync_stdlib(&mut state, &HashMap::new());
+
+        // Revision 1: everything resolves; populate the memos.
+        sync_user(&mut state, &sources(a_v1, c_v1), false);
+        assert_eq!(full_check(&state), Vec::<String>::new());
+
+        // Revision 2: rename in `a`, but only a parse-level request runs.
+        sync_user(&mut state, &sources(a_v2, c_v1), false);
+        let a = state.by_path["/tmp/a.ks"];
+        let _ = state.compiler.parse(a);
+
+        // Revision 3: an unrelated edit, then the full check.
+        sync_user(&mut state, &sources(a_v2, c_v2), false);
+        let worker = full_check(&state);
+
+        let fresh =
+            fresh_build_messages(&[("/tmp/a.ks", a_v2), ("/tmp/b.ks", b), ("/tmp/c.ks", c_v2)]);
+        assert!(
+            fresh.iter().any(|m| m.contains("fa")),
+            "fresh build should reject the stale import: {fresh:?}"
+        );
+        assert_eq!(
+            worker, fresh,
+            "persistent worker kept stale memos across revisions"
+        );
+    }
+
+    /// Audit F20's failure scenario: deleting a file despawns its
+    /// entities and builds nothing, so nothing re-marks the module. The
+    /// importer must still see the declaration disappear.
+    #[test]
+    fn deleting_an_imported_file_invalidates_the_importer() {
+        use kestrel_compiler_driver::CompilerDriver;
+
+        let a = "module a\npublic func fa() {}\n";
+        let b = "module b\nimport a.(fa)\nfunc useIt() { fa() }\n";
+        let full_check = |state: &WorkerState| -> Vec<String> {
+            let driver = CompilerDriver::new(&state.compiler);
+            let _ = driver.infer_all();
+            let _ = driver.analyze_all(false);
+            let mut msgs: Vec<String> = state
+                .compiler
+                .diagnostics()
+                .iter()
+                .map(|d| d.message.clone())
+                .collect();
+            msgs.sort();
+            msgs
+        };
+
+        let mut state = WorkerState::fresh();
+        sync_stdlib(&mut state, &HashMap::new());
+        let both: HashMap<String, String> = [("/tmp/a.ks", a), ("/tmp/b.ks", b)]
+            .into_iter()
+            .map(|(p, t)| (p.to_string(), t.to_string()))
+            .collect();
+        sync_user(&mut state, &both, false);
+        assert_eq!(full_check(&state), Vec::<String>::new());
+
+        let only_b: HashMap<String, String> = [("/tmp/b.ks".to_string(), b.to_string())].into();
+        sync_user(&mut state, &only_b, false);
+        let worker = full_check(&state);
+
+        let fresh = fresh_build_messages(&[("/tmp/b.ks", b)]);
+        assert!(
+            !fresh.is_empty(),
+            "fresh build should reject the dangling import"
+        );
+        assert_eq!(
+            worker, fresh,
+            "deleted file's declarations still visible to the importer"
+        );
+    }
+
+    /// Audit F23: deleting a function despawns its entity, so nothing
+    /// ever demands its queries again. The errors they filed must not
+    /// outlive it.
+    #[test]
+    fn deleting_a_function_drops_its_errors() {
+        let v1 = "module a\nfunc ok() {}\nfunc bad() { nope() }\n";
+        let v2 = "module a\nfunc ok() {}\n";
+        let mut state = WorkerState::fresh();
+        sync_stdlib(&mut state, &HashMap::new());
+
+        sync_user(&mut state, &[("/tmp/a.ks".to_string(), v1.to_string())].into(), false);
+        let before = full_check_messages(&state);
+        assert!(
+            before.iter().any(|m| m.contains("nope")),
+            "v1 should report the undefined name: {before:?}"
+        );
+
+        sync_user(&mut state, &[("/tmp/a.ks".to_string(), v2.to_string())].into(), false);
+        let worker = full_check_messages(&state);
+        assert_eq!(
+            worker,
+            fresh_build_messages(&[("/tmp/a.ks", v2)]),
+            "a deleted function's errors are still reported"
+        );
+    }
+
+    /// Audit F23, whole-file form: a deleted file's errors must go too.
+    #[test]
+    fn deleting_a_file_drops_its_errors() {
+        let a = "module a\nfunc bad() { nope() }\n";
+        let b = "module b\nfunc ok() {}\n";
+        let mut state = WorkerState::fresh();
+        sync_stdlib(&mut state, &HashMap::new());
+
+        let both: HashMap<String, String> = [("/tmp/a.ks", a), ("/tmp/b.ks", b)]
+            .into_iter()
+            .map(|(p, t)| (p.to_string(), t.to_string()))
+            .collect();
+        sync_user(&mut state, &both, false);
+        assert!(!full_check_messages(&state).is_empty());
+
+        sync_user(&mut state, &[("/tmp/b.ks".to_string(), b.to_string())].into(), false);
+        assert_eq!(
+            full_check_messages(&state),
+            fresh_build_messages(&[("/tmp/b.ks", b)]),
+            "a deleted file's errors are still reported"
+        );
+    }
+
+    /// Sorted diagnostic messages after the LSP's full check on `state`.
+    fn full_check_messages(state: &WorkerState) -> Vec<String> {
+        use kestrel_compiler_driver::CompilerDriver;
+
+        let driver = CompilerDriver::new(&state.compiler);
+        let _ = driver.infer_all();
+        let _ = driver.analyze_all(false);
+        let mut msgs: Vec<String> = state
+            .compiler
+            .diagnostics()
+            .iter()
+            .map(|d| d.message.clone())
+            .collect();
+        msgs.sort();
+        msgs
+    }
+
     /// End-to-end regression: rebuild user code in the persistent
     /// compiler and confirm diagnostics still match a CLI-style fresh
     /// build. This is the path the live LSP exercises on every edit
@@ -646,12 +843,9 @@ mod tests {
     fn rebuild_user_code_matches_fresh_diagnostics() {
         use kestrel_compiler::Compiler;
         use kestrel_compiler_driver::CompilerDriver;
-        use std::path::Path;
 
-        let std_dir = Path::new("/Users/dino/Documents/Projects/kestrel/lang/std");
-        if !std_dir.exists() {
-            return;
-        }
+        let std_dir = kestrel_compiler::stdlib_path::repo_std_path();
+        let std_dir = std_dir.as_path();
 
         let user_path = "/tmp/repro_rebuild.ks".to_string();
         let v1 = "module hello\n\

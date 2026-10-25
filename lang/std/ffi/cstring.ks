@@ -140,7 +140,7 @@ public struct CString: FFISafe {
 extend String {
     /// Allocates a fresh null-terminated copy of this string and returns it as a `CString`.
     ///
-    /// Sizes the buffer to `byteCount + 1`, copies the source bytes
+    /// Sizes the buffer to `bytes.count + 1`, copies the source bytes
     /// via `memcpy`, and writes the trailing `\0`. The caller takes
     /// ownership and must release the buffer with `cstr.free()`.
     ///
@@ -159,19 +159,19 @@ extend String {
     /// cstr.free();
     /// ```
     public func toCString() -> CString {
-        let byteCount = self.byteCount;
-        let totalSize = byteCount + 1;
+        let byteLen = self.bytes.count;
+        let totalSize = byteLen + 1;
 
         let rawPtr = malloc(totalSize);
         let ptr = rawPtr.cast[UInt8]();
 
         if ptr.isNull == false {
-            if byteCount > 0 {
+            if byteLen > 0 {
                 let srcPtr = RawPointer(raw: self.bytes.asRaw());
-                 memcpy(rawPtr, srcPtr, byteCount);
+                 memcpy(rawPtr, srcPtr, byteLen);
             }
 
-            ptr.offset(by: byteCount).write(0);
+            ptr.offset(by: byteLen).write(0);
         }
 
         return CString(raw: ptr);

@@ -3,11 +3,11 @@
 module std.collections
 
 import std.core.(Bool, Equatable, Comparable, Hashable, Hasher, Range, ClosedRange, RangeFrom, RangeUpTo, RangeThrough, fatalError)
-import std.numeric.(Int64)
+import std.numeric.(Int64, UInt64, RandomNumberGenerator, SystemRandom)
 import std.result.(Optional)
 import std.memory.(ArraySlice, ArraySliceIterator, Pointer)
 import std.iter.(Iterable)
-import std.text.(Formattable, FormatOptions, StringBuilder, String)
+import std.text.(Formattable, Formatter, FormatOptions, StringBuilder, String)
 import std.collections.(Array)
 
 // ============================================================================
@@ -637,6 +637,41 @@ extend Slice[T] {
         }
     }
 
+    /// A uniformly random element drawn from `rng`, or `.None` for an
+    /// empty collection. O(1).
+    ///
+    /// Passing the same seeded generator reproduces the same picks —
+    /// use the no-argument overload for OS-entropy randomness.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var rng = Lcg64(seed: 42);
+    /// [1, 2, 3].randomElement(using: rng);  // deterministic for the seed
+    /// [].randomElement(using: rng);          // None
+    /// ```
+    public func randomElement(mutating using rng: some RandomNumberGenerator) -> T? {
+        let s = self.asSlice();
+        if s.count == 0 {
+            return .None
+        }
+        let index = Int64(from: rng.nextUInt64(below: UInt64(from: s.count)));
+        .Some(s.pointer.offset(by: index).read())
+    }
+
+    /// A uniformly random element using OS entropy, or `.None` for an
+    /// empty collection. O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["red", "green", "blue"].randomElement();  // e.g. Some("green")
+    /// ```
+    public func randomElement() -> T? {
+        var rng = SystemRandom();
+        self.randomElement(using: rng)
+    }
+
     // -- Iteration -----------------------------------------------------------
 
     /// Forward iterator over the elements.
@@ -990,7 +1025,7 @@ extend Slice[T] {
     /// let v = [1, -1, 2, 3, -1, 4].split(where: { it < 0 });
     /// for seg in v { ... }
     /// ```
-    public func split(consuming where predicate: (T) -> Bool) -> ArraySplitWhereView[T] {
+    public func split(consuming where predicate: escaping (T) -> Bool) -> ArraySplitWhereView[T] {
         ArraySplitWhereView(slice: self.asSlice(), predicate: predicate)
     }
 
@@ -1413,7 +1448,7 @@ extend Slice[T] where T: Formattable {
     /// [1, 2, 3].format();  // "[1, 2, 3]"
     /// [].format();          // "[]"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: '[');
         let s = self.asSlice();
         let myPtr = s.pointer;

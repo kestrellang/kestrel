@@ -29,7 +29,7 @@ HirBody → Generate → Constraints → Solver → Substitutions → Resolve �
 | Type | Module | Description |
 |------|--------|-------------|
 | `TyVar` | `ctx.rs` | Type variable — placeholder assigned during generation |
-| `TyKind` | `ctx.rs` | What a TyVar resolves to: `Named`, `Tuple`, `Function`, `Param`, `Infer`, `Never`, `Error` |
+| `TyKind` | `ctx.rs` | What a TyVar resolves to: `Named`, `Tuple`, `Function`, `Param`, `Infer`, `Never`, `Error`. `Function { kind, params, conventions, ret }` carries the closure kind and per-param conventions |
 | `Constraint` | `constraint.rs` | 40+ variants: `Equal`, `Call`, `Member`, `Associated`, `ConformsTo`, ... |
 | `InferCtx` | `ctx.rs` | Inference context: type registry, substitutions, constraints, deferred queue |
 | `TypedBody` | `result.rs` | Final output: fully-typed expressions with resolved members |
@@ -72,6 +72,50 @@ loop {
 ```
 
 Constraints that can't be solved yet (e.g., receiver type still `Infer`) are deferred and retried in later rounds. The solver terminates when a round produces no new substitutions.
+
+## Closure Kinds
+
+A function type carries its closure tier (`normal` / `mutating` /
+`consuming` / `escaping`) as a `kestrel_ast::FnTypeKind` on both
+`TyKind::Function` and the output `ResolvedTy::Function`. It participates in
+the derived `Eq`/`Hash`, so signature matching is **kind-exact**: a
+`func f(cb: escaping () -> ())` requirement is not witnessed by a
+`func f(cb: () -> ())` impl.
+
+Whole-type `unify` demands kind equality. Everything softer happens on the
+**coerce** side, in `reconcile_fn_kinds`, which runs three cases in order:
+
+1. **Literal retrofit.** A closure literal `{ … }` is always built at
+   `Normal`; the expected type selects the environment it is built with, so
+   the literal's kind is rewritten in place via `InferCtx::set_function_kind`
+   (the twin of the `set_function_conventions` retrofit for #106). Whether
+   the *body* supports that kind is a later analyzer's judgement.
+2. **Bare-value adoption.** `ctx.kind_flex` holds the TyVars of *bare*
+   callables (named `Def`s, enum-case constructors). A bare function pointer
+   has no environment, so it satisfies every kind and ADOPTS the other side's
+   kind. Modeled as a TyVar set rather than a fifth `FnTypeKind` variant — a
+   wildcard kind that survived unification would poison control-flow merges.
+3. **The passing table.** For a real closure value, only three cross-kind
+   cells pass: `normal → mutating`, `escaping → normal`,
+   `escaping → consuming`. An accepted cell unifies params/return pairwise
+   and returns `Solved` *without* structurally unifying the two function
+   types, and never re-labels the source value (`escaping → normal` yields a
+   non-owning view; bit-copying a relabelled shared handle would skip the
+   share). A rejected cell is `InferError::KindMismatch` → **E624**.
+
+Two side-channels carry the results downstream:
+
+- **`closure_literal_exprs`** — which expressions *are* closure literals,
+  recorded during generation. `Block` and `Sugar` wrappers share their
+  inner expression's TyVar, so `propagate_closure_literal` carries the
+  marker OUTWARD through them: the `Coerce` at a trailing-closure call site
+  names the wrapper, and without the propagation the retrofit silently
+  misses and the site fails with a spurious E624/E603.
+- **`TypedBody.kind_coercions`** — `expr → (source kind, target kind)` for
+  accepted cross-kind cells only, so MIR can see the conversion a cell
+  needs. `expr_types[expr]` deliberately still reports the *source* kind;
+  this is the single source of truth for the difference, never re-derived
+  downstream.
 
 ## Module Map
 

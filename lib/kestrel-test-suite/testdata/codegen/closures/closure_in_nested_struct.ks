@@ -4,7 +4,7 @@
 module Test
 
 struct Inner {
-    let transform: (std.numeric.Int64) -> std.numeric.Int64
+    let transform: escaping (std.numeric.Int64) -> std.numeric.Int64
 }
 
 struct Outer {

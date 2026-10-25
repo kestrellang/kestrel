@@ -227,7 +227,7 @@ fn run_ks_test_inner(
                 .run_on(backend)
                 .map_err(Into::<Box<dyn std::error::Error>>::into)?;
 
-            // Post-monomorphization warnings (E507) only exist once the
+            // Post-monomorphization warnings (E508) only exist once the
             // program is built, so execution tests are where they are checked.
             let warn_annotations: Vec<_> = annotation::parse_annotations(source)
                 .into_iter()

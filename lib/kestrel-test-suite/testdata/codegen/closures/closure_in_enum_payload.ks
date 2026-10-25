@@ -4,7 +4,7 @@
 module Test
 
 enum Action {
-    case Transform(f: (std.numeric.Int64) -> std.numeric.Int64)
+    case Transform(f: escaping (std.numeric.Int64) -> std.numeric.Int64)
     case NoOp
 }
 

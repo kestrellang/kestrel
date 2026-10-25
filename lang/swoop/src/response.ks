@@ -54,7 +54,7 @@ extend Response {
     /// let res = try Swoop().fetch("http://api.example.com/data");
     /// let json = try res.json();
     /// ```
-    public func json() -> Result[Value, DeserializeError] = quill.json.Json.decode(self.body)
+    public func json() -> Value throws DeserializeError = quill.json.Json.decode(self.body)
 }
 
 // ============================================================================
@@ -71,7 +71,7 @@ extend Response {
     /// let res = try Swoop().fetch(url);
     /// let validated = try res.validate();
     /// ```
-    public func validate() -> Result[Response, SwoopError] {
+    public func validate() -> Response throws SwoopError {
         if self.status.isSuccess() {
             .Ok(self)
         } else {

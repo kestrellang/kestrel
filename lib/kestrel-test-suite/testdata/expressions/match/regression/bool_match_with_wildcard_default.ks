@@ -1,5 +1,6 @@
 // test: execution
 // stdlib: true
+// backends: cranelift,llvm
 
 // Regression for the issue #121 follow-up: `match` on a `Bool` with a wildcard
 // arm goes through the discriminant+switch path. `Bool` is a struct (newtype

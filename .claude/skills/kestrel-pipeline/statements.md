@@ -1,41 +1,42 @@
-# Statements — CST → AST → HIR → infer → MIR
+# Statements — CST → HIR → infer → MIR
 
-Covers every variant of `AstStmt` (4) and `HirStmt` (3). Verify before citing —
-pipeline maps go stale.
+Covers every statement kind of the CST (`StatementKind`: 4) and `HirStmt` (3). Verify
+before citing — pipeline maps go stale.
 
 Top-level dispatch anchors:
 
-- AST constructor switch: `lib/kestrel-ast-builder/src/lower.rs:160` (`lower_stmt`)
-- HIR lowering switch: `lib/kestrel-hir-lower/src/stmt.rs:15` (`LowerCtx::lower_stmt`)
+- HIR lowering switch: `lib/kestrel-hir-lower/src/stmt.rs` (`LowerCtx::lower_stmt` →
+  `lower_stmt_node`, matching on the `SyntaxKind`)
 - Inference gen switch: `lib/kestrel-type-infer/src/generate.rs:551` (`gen_stmt`)
 - MIR lowering switch: `lib/kestrel-mir-lower/src/body_lower.rs:419` (`lower_stmt`)
 
-Top-of-body lowering: `AstBody::statements` → `HirBody::statements` through
-`kestrel-hir-lower/src/lib.rs` which calls `lower_stmt` for each. Tail expressions are
-lowered via `lower_expr` only.
+Top-of-body lowering: `LowerBodyWithSourceMap` (`kestrel-hir-lower/src/lib.rs`) reads the
+entity's `Valued` body node — a `CodeBlock`, a function's `= expr` (`FunctionBody`), a
+parameter default's `= expr` (`DefaultValue`) or a field initializer `Expression` —
+into a `BlockSyntax` (`syntax::block_syntax`: a `Statement` child is a statement, a bare
+final `Expression` or a final statement-like `ExpressionStatement` without `;` is the
+value) and calls `lower_block_stmts` (guard-let CPS applies at the top level).
 
 ---
 
-## AstStmt variants (4)
+## Statement syntax → HIR (every `StatementKind`)
 
-Enum: `lib/kestrel-ast/src/ast_body.rs:200`.
-
-### AstStmt::Let
+### `VariableDeclaration` (`let` / `var`)
 
 - Surface: `let x = v;`, `var x: Int = 0;`, `let (a, b) = pair;`,
-  `let Point { x, y } = p;`.
-- CST: `VariableDeclaration` (`lower.rs:162`).
-- AST-builder: `lib/kestrel-ast-builder/src/lower.rs:186` (`lower_variable_decl`,
-  alloc at 232). Detects `var` for `is_mut`, pulls pattern / type / optional value.
-- HIR lowering: `lib/kestrel-hir-lower/src/stmt.rs:18-24` dispatches to
-  `lower_let_stmt` (`stmt.rs:64`). Two paths:
-  - **Simple binding pattern** (`stmt.rs:78-86`): allocates a `LocalId` via
-    `define_local`, emits `HirStmt::Let { local, ty, value, span }` directly.
-  - **Complex pattern** (`stmt.rs:87-138`): desugars to
-    `{ let $let_tmp = value; match $let_tmp { pattern => () } }`. The outer return is
-    a `HirStmt::Expr` wrapping a `HirExpr::Block`, the inner `HirStmt::Let` names the
-    `$let_tmp` local, and the `HirExpr::Match` has `source: MatchSource::LetDestructure`.
-    `lower_pat_forcing_mut(body, pattern, is_mut)` propagates outer `var` into all sub-bindings.
+  `let Point { x, y } = p;`, `let r = &place;`.
+- CST: `('let' | 'var') Pattern (':' Ty)? ('=' Expression)? ';'` (`syntax::let_syntax`).
+- HIR lowering: `stmt.rs` `lower_let_stmt`. Two paths, chosen on the pattern after
+  grouping parentheses are removed (`PatSrc::resolve`):
+  - **Simple binding** (a `BindingPattern` / `RefBindingPattern` with a name):
+    `define_named_local` (records the identifier in the source map), emits
+    `HirStmt::Let { local, ty, value, span }` — `Local::span` is the whole statement.
+  - **Anything else** (including a binding whose name the parser could not find):
+    `{ let $let_tmp = value; match $let_tmp { pattern => () } }` — a `HirStmt::Expr`
+    wrapping a `HirExpr::Block`; the `Match` has `source: MatchSource::LetDestructure`.
+    `lower_pat_forcing_mut(pattern, is_mut)` propagates an outer `var` into every binding.
+  - A `&expr` / `&mutating expr` initializer on a simple `let` → `HirExpr::Borrow`;
+    on a `var` or a destructuring pattern → E209 (lowered without the borrow).
 - Type-infer: `generate.rs:553-587`. Annotated → `lower_hir_ty(ty)` for local TyVar;
   unannotated → fresh. `ctx.local_types.insert(local, local_tv)`. Bidirectional hints:
   if annotation is `Array[E]` and RHS is `HirExpr::Array`, seed
@@ -45,86 +46,60 @@ Enum: `lib/kestrel-ast/src/ast_body.rs:200`.
   rvalue: value_to_rvalue(init_value) }`. No init value → no statement emitted (the
   local slot is zero-initialized by default).
 - Gotchas:
-  - `let _ = expr;` is NOT a separate variant — `_` is `AstPat::Wildcard`, which is
-    NOT a simple binding, so it routes through the complex-pattern path and becomes a
-    match with a wildcard arm.
-  - Complex-pattern desugaring uses `$let_tmp` as the local name — prefixed with `$`
-    to avoid collisions with user identifiers. Same convention as `$iter`, `$try_value`,
-    `$try_early`, `$unwrap` (see `desugar.rs`).
-  - `var (a, b) = pair` propagates `is_mut` into both `a` and `b` via
-    `lower_pat_forcing_mut`. Plain `let` does not.
+  - `let _ = expr;` is not a simple binding — `_` routes through the destructuring
+    path and becomes a match with a wildcard arm.
+  - Desugaring temporaries are `$`-prefixed (`$let_tmp`, `$iter`, `$try_value`,
+    `$try_early`, `$dsi`, `$opts`) so they cannot collide with user identifiers.
 
-### AstStmt::Expr
+### `ExpressionStatement`
 
-- Surface: `foo();`, any expression followed by `;` (or a block-form expr as an
-  expression statement).
-- CST: `ExpressionStatement` (`lower.rs:163`). Also the fallback for unknown expr-like
-  statements (`lower.rs:168-180`).
-- AST-builder: `lower.rs:252` (`lower_expr_stmt`, alloc at 261). Also synthesized for
-  malformed statements (`lower.rs:179`) and promoted tail expressions (see
-  `lower_expr_stmt_as_expr` at 244).
-- HIR lowering: `stmt.rs:26-32` — 1:1.
-  ```
-  AstStmt::Expr { expr, span } => {
-      let lowered = self.lower_expr(body, *expr);
-      self.alloc_stmt(HirStmt::Expr { expr: lowered, span: span.clone() })
-  }
-  ```
+- Surface: `foo();`, any expression followed by `;`, a statement-like expression
+  (`if`, `while`, `match`, …) standing alone mid-block.
+- CST: `Expression ';'?`. In a closure, a statement-like expression stands *without*
+  the wrapper; `syntax::closure_body_syntax` demotes it to a statement
+  (`StmtSyntax::Expr`, synthetic span) when something follows it.
+- HIR lowering: `stmt.rs` `lower_stmt_node` → `HirStmt::Expr { expr, span }` (1:1).
 - Type-infer: `generate.rs:589-591` — `gen_expr(ctx, hir, expr)`; result discarded.
 - MIR: `body_lower.rs:432-435` — `let _ = self.lower_expr(*expr);` (lowered for
   side effects).
 - Gotchas:
-  - Block expressions at the end of a code block can be promoted to the block's tail
-    expression by `lower_block` (`lower.rs:115-141`) — the expr appears in
-    `tail_expr`, not as a `Stmt::Expr`. See MEMORY `match_pattern_analyzer.md` for
-    the closure-vs-block ambiguity background.
-  - If a guard-let / while / let-destructure desugaring produces a statement rather
-    than an expression, it's wrapped in `HirStmt::Expr` internally — see
-    `stmt.rs:120-123, 174-177`, `desugar.rs:234-237, 303-306, 452-455`.
+  - A final statement-like expression without `;` is the block's *value*
+    (`block_syntax`), not a statement.
+  - Desugarings that produce a statement wrap it in `HirStmt::Expr` internally.
 
-### AstStmt::GuardLet
+### `GuardStatement`
 
 - Surface: `guard let .Some(x) = opt else { return }`,
-  `guard let x = opt, y > 0 else { throw err }`.
-- CST: `GuardLetStatement` (`lower.rs:164`).
-- AST-builder: `lower.rs:265` (`lower_guard_let`, alloc at 280). Stores
-  `Vec<IfCondition>` (mixed let/expr) plus the else block.
-- HIR lowering: `stmt.rs:34-38` → `lower_guard_let` (`stmt.rs:143`). Emits
-  `HirExpr::If { condition: lowered_conditions, then_body: {}, else_body: Some(else_block) }`
-  wrapped in `HirStmt::Expr`. The statement id is pushed into
-  `ctx.guard_let_stmts` (`stmt.rs:180`) so the **guard-let-divergence analyzer** can
-  enforce that the else block diverges. `lower_if_conditions` is called with
-  `source: MatchSource::GuardLet` so any desugared let-condition match gets the right
-  `MatchSource` tag.
-- Type-infer: `generate.rs:589-591` (routes through `HirStmt::Expr`). Crucially
-  `generate.rs:376-380` in the `HirExpr::If` arm skips the else-equate for guard-let
-  Ifs (via `is_guard_let_if`), because the else block must diverge.
-- MIR: `body_lower.rs:432-435` (through `HirStmt::Expr` → `lower_expr` → `lower_if`).
+  `guard let x = opt, y > 0 else { throw err }`, `guard cond else { … }`.
+- CST: `guard Condition (, Condition)* else CodeBlock`; conditions are `GuardCondition`
+  (`let p = v`) or `Expression` (`LowerCtx::guard_parts`).
+- HIR lowering: two shapes.
+  - Any `let` condition → **CPS** in `expr.rs` `lower_block_stmts` / `lower_guard_cps`:
+    the remaining statements + tail become the success continuation of a
+    `lower_condition_chain` with `MatchSource::GuardLet` (bindings dominate the rest of
+    the block under OSSA); the else block is lowered once as the shared fail arm.
+  - No `let` → `stmt.rs` `lower_guard`: `HirExpr::If { condition, then: {}, else: Some(else) }`
+    in a `HirStmt::Expr`, conditions through `lower_if_conditions(MatchSource::Guard)`;
+    the statement id is pushed to `guard_stmts` for the divergence analyzer.
+- Type-infer: `generate.rs:589-591` (routes through `HirStmt::Expr`). The `HirExpr::If`
+  arm skips the else-equate for guard Ifs, because the else block must diverge.
+- MIR: `body_lower.rs:432-435` (through `HirStmt::Expr` → `lower_expr`).
 - Gotchas:
-  - The **bindings** from let-conditions live in the **outer** scope (not a nested
-    scope) — see `stmt.rs:157-162`. That's how `guard let x = opt else { return }`
-    lets you use `x` after the guard.
-  - The else block is required to diverge (return/break/continue/throw). The
-    `guard_let_divergence` analyzer is responsible — HIR lowering does not enforce this.
-  - Differs from `AstExpr::If` in that GuardLet is always a **statement**, not an
-    expression, so it never has a tail value.
+  - The else block is required to diverge (return/break/continue/throw); the guard
+    divergence analyzer enforces it — HIR lowering does not.
+  - Always a statement, never a block value.
 
-### AstStmt::Deinit
+### `DeinitStatement`
 
 - Surface: `deinit handle;`.
-- CST: `DeinitStatement` (`lower.rs:165`).
-- AST-builder: `lower.rs:288` (`lower_deinit_stmt`, alloc at 298).
-- HIR lowering: `stmt.rs:40-57` — looks up `name` via `lookup_local`, emits a
-  diagnostic ("undeclared variable") if missing, then allocates
-  `HirStmt::Deinit { name, local: Option<LocalId>, span }`. The `local` may be `None`
-  if the lookup failed (error already reported).
+- CST: `deinit ident ;`.
+- HIR lowering: `stmt.rs` `lower_deinit_stmt` — `lookup_local`, E137 ("undeclared
+  variable") when missing, then `HirStmt::Deinit { name, local: Option<LocalId>, span }`.
+  A missing name (reported by the parser) lowers to `HirName::Missing` with no E137.
 - Type-infer: `generate.rs:593-595` — no constraints. Purely a cleanup registration.
 - MIR: `body_lower.rs:436-438` — **skipped**. Deinit resolution is handled by a later
   pass (not yet fully wired in lib).
 - Gotchas:
-  - No runtime code is currently emitted for deinit — if you're debugging a dropped
-    value and expect a destructor call, check that the pass that consumes
-    `HirStmt::Deinit` is actually running.
   - Not a method call — `deinit x` is a statement keyword, not `x.deinit()`.
 
 ---
@@ -135,10 +110,10 @@ Enum: `lib/kestrel-hir/src/body.rs:234`.
 
 ### HirStmt::Let
 
-- Produced by: `AstStmt::Let` with a simple `AstPat::Binding` (`stmt.rs:78-86`). Also
+- Produced by: `VariableDeclaration` with a simple `BindingPattern` (`stmt.rs`). Also
   synthesized for complex-pattern let desugaring's `$let_tmp` binding
-  (`stmt.rs:91-95`) and for the for-loop `$iter` temp (`desugar.rs:370-374`).
-- Type-infer: `generate.rs:553-587` (see `AstStmt::Let`). Both the annotated and
+  (`stmt.rs`) and for the for-loop `$iter` temp (`desugar.rs`).
+- Type-infer: `generate.rs:553-587` (see `VariableDeclaration`). Both the annotated and
   unannotated paths live here; bidirectional hints are handled before generating the
   value expression.
 - MIR: `body_lower.rs:419-430` — `Assign` into `Place::local(map_local(local))`.
@@ -148,19 +123,19 @@ Enum: `lib/kestrel-hir/src/body.rs:234`.
 
 ### HirStmt::Expr
 
-- Produced by: `AstStmt::Expr` (`stmt.rs:26-32`), `AstStmt::GuardLet` (`stmt.rs:174-177`,
-  wrapping a synthesized `HirExpr::If`), complex-pattern `let` (`stmt.rs:120-136`,
+- Produced by: `ExpressionStatement` (`stmt.rs`), `GuardStatement` (`stmt.rs`,
+  wrapping a synthesized `HirExpr::If`), complex-pattern `let` (`stmt.rs`,
   wrapping the `HirExpr::Block(Let + Match)` and also inner wrapping of the Match
-  itself at 120-123), `desugar_while` intermediate if-break (`desugar.rs:234-237`),
-  `desugar_while_let` intermediate if-break (`desugar.rs:303-306`), and `desugar_for_loop`
-  iterator let (`desugar.rs:370-374` emits `HirStmt::Let`, not `::Expr`, but the match
+  itself at 120-123), `desugar_while` intermediate if-break (`desugar.rs`),
+  `desugar_while_let` intermediate if-break (`desugar.rs`), and `desugar_for_loop`
+  iterator let (`desugar.rs` emits `HirStmt::Let`, not `::Expr`, but the match
   body ends up inside a `HirStmt::Expr` at 452-455).
 - Type-infer: `generate.rs:589-591` — `gen_expr`, discard result.
 - MIR: `body_lower.rs:432-435` — `lower_expr(expr)`, result discarded.
 
 ### HirStmt::Deinit
 
-- Produced by: `AstStmt::Deinit` only (`stmt.rs:40-57`). The `local: Option<LocalId>`
+- Produced by: `DeinitStatement` only (`stmt.rs`). The `local: Option<LocalId>`
   is resolved at HIR-lowering time; `None` means lookup failed and a diagnostic was
   already emitted.
 - Type-infer: `generate.rs:593-595` — no constraints.

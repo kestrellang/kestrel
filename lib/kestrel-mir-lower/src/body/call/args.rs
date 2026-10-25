@@ -167,12 +167,18 @@ impl OssaBodyCtx<'_, '_> {
     /// Lower call args with Borrow convention for all params.
     /// Used for indirect/closure calls where the callee's conventions
     /// aren't known at the call site.
+    ///
+    /// Goes through `prepare_call_arg_for_expr` like every other arg path.
+    /// Lowering the expression to a VALUE first and borrowing the result is
+    /// wrong for a local held in an address slot: the value read is a
+    /// *consuming* read, so it takes the local out of its slot and leaves it
+    /// uninit, and the call then borrows the temporary rather than the slot.
+    /// Any later use of that local reads vacated storage — the shape behind
+    /// `Slice.first(where:)`'s `predicate(elem)` followed by `.Some(elem)`.
+    /// The place path borrows the slot in place and never vacates it.
     pub(crate) fn lower_call_args_default(&mut self, args: &[HirCallArg]) -> Vec<CallArg> {
         args.iter()
-            .map(|arg| {
-                let val = self.lower_expr(arg.value);
-                self.prepare_call_arg(val, ParamConvention::Borrow)
-            })
+            .map(|arg| self.prepare_call_arg_for_expr(arg.value, ParamConvention::Borrow))
             .collect()
     }
 
@@ -229,7 +235,10 @@ impl OssaBodyCtx<'_, '_> {
             return None;
         }
         let callee = self.ctx.world.parent_of(default_entity)?;
-        let tps = self.ctx.world.get::<kestrel_ast_builder::TypeParams>(callee)?;
+        let tps = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::TypeParams>(callee)?;
         let mut subst = kestrel_mir::SubstMap::new();
         for (&tp, &arg) in tps.0.iter().zip(callee_type_args.iter()) {
             subst.type_params.insert(tp, arg);
@@ -283,9 +292,10 @@ impl OssaBodyCtx<'_, '_> {
         // not possible (a default expr can't itself call with defaults mid-lower
         // in a way that re-enters here before restore), so a plain save/restore
         // of the scalar field is sufficient.
-        let saved_subst = self
-            .default_arg_subst
-            .replace(self.default_arg_subst_map(default_entity, callee_type_args).unwrap_or_default());
+        let saved_subst = self.default_arg_subst.replace(
+            self.default_arg_subst_map(default_entity, callee_type_args)
+                .unwrap_or_default(),
+        );
 
         // Create values for the default body's HIR locals
         let default_locals: Vec<_> = self

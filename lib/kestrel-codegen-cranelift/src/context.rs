@@ -327,6 +327,12 @@ impl<'m> CodegenCtx<'m> {
             if func.body.is_some() {
                 let func_id = self.func_ids[i].expect("function must be declared");
                 let func_name = func.name.clone();
+                // This is one of the compiler's panic-catching hosts: a
+                // panicking function becomes a trap stub and codegen carries
+                // on in the same process. Nothing below this point pushes to
+                // a stack that a later function reads, so there is nothing to
+                // unwind-guard today — if you add such state, bracket it with
+                // `kestrel_hecs::guard::OnDrop`, not a manual pop (F22).
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     func::compile_function(self, i, func_id)
                 }));

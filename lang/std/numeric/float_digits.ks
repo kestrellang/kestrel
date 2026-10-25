@@ -584,7 +584,7 @@ fileprivate func appendExponent(out: String, decExp: Int64, upper: Bool) -> Stri
     } else {
         var tmp = String();
         while ex > 0 { tmp.appendByte(UInt8(from: ex % 10 + 48)); ex = ex / 10 };
-        var k = tmp.byteCount - 1;
+        var k = tmp.bytes.count - 1;
         while k >= 0 { s.appendByte(tmp.bytes(unchecked: k)); k = k - 1 }
     };
     s

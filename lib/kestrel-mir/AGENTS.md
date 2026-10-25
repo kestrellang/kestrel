@@ -61,9 +61,15 @@ witness's protocol type args against the expected args from the call site's
 `method_type_args`. Without this filter, the first matching witness wins
 regardless of which generic instantiation it represents.
 
-`witness_proto_args_match` treats `TypeParam` entries as wildcards (they
-come from `extend T: Proto[FreeParam]` where the free param has no
-concrete value at witness-construction time).
+`witness_proto_args_match` substitutes `TypeParam` entries that were BOUND
+by the implementing-type pattern match before comparing (`extend
+ClosedRange[T]: RandomBounds[T]` at self `ClosedRange[Int64]` contributes
+proto arg `Int64`, and must NOT satisfy a `RandomBounds[Int16]` call site —
+treating bound params as wildcards was a silent wrong-layout miscompile).
+Only a genuinely free param (`extend T: Proto[FreeParam]`, never mentioned
+in the implementing type) still matches anything. This requires
+`match_pattern` to run BEFORE the proto-args filter in
+`find_witness_with_method` — keep that ordering.
 
 ## Per-type lookups in mono passes: key by `(Entity, type_args)`, never nominal alone
 
@@ -82,6 +88,36 @@ this — it degraded a real `CopyValue` on `Optional[Int64]` into a move-alias, 
 returned the overwritten value. See [[expand_not_copyable_nominal_collapse]].
 This is the MIR face of the same per-instantiation invariant the solver / MIR
 ty_query / semantics enforce ([[per_instantiation_copy_semantics]]).
+
+## Per-nominal facts go on `TypeInfo`; the pass that decides one stores it
+
+The complement of the rule above. Some facts are genuinely **per-nominal** —
+`Optional` has exactly one `__clone$Optional` shared by `Optional[String]`,
+`Optional[Int64]`, and `Optional[File]`. Those belong in a `TypeInfo` field
+(`clone_impl`, `drop_impl`, `layout`), *not* nested inside `CopyBehavior` /
+`DropBehavior`, which `refine_mono_copy_behavior` rewrites per instantiation.
+Nesting a per-nominal fact in a per-instance enum drops it on every instance the
+refinement moves off that variant.
+
+`MonoStruct`/`MonoEnum` clone `TypeInfo` wholesale from the generic def, so a
+field set pre-mono survives into mono untouched. Read it there rather than
+re-deriving.
+
+**The general rule: the pass that can compute a fact computes it once and stores
+it; every later pass reads the stored value.** "Which function is `T`'s clone?"
+used to be reconstructed in four places — by Cloneable witness, by
+`name.ends_with(".clone")`, by `FunctionKind::Method`'s `parent`, and by the
+self-param nominal — each with a different fallback, so they could disagree and
+the loser was chosen by `module.functions` order (fragility audit F7). The
+deciding pass (`passes/clone_shim.rs`) had the answer in a local `shim_map` and
+dropped it on return. Now it writes `type_info.clone_impl` and the derivations
+are gone. Same shape as `FieldClass` (F3) and the `copyable_protocol` /
+`cloneable_protocol` lang items on `MirModule` (F6).
+
+Corollary — assert the direction that actually holds. `verify_clone_impl_present`
+checks `copy == Clone(_)` ⇒ `clone_impl.is_some()`, never the converse: a
+conditionally-Copyable container and a primitive-only struct both get a shim
+while keeping a `None`/`Bitwise` base.
 
 ## Copy and destroy elaboration must stay symmetric (`mono/expand.rs`)
 
@@ -132,7 +168,7 @@ copies of a `var` (`borrow_copies`). Invariants every change here must keep:
   marked `@observabledrop`, or containing one through fields, payloads, type
   arguments or pointer pointees (`RcBox[TcpStream]`). Mark a `Cloneable` type
   `@observabledrop` when its drop does something visible (closes an fd,
-  deletes a file); E507 (post-mono, `observable_lint.rs`) warns when that looks likely. Design:
+  deletes a file); E508 (post-mono, `observable_lint.rs`) warns when that looks likely. Design:
   `docs/plans/observable_drop/observable_drop-design.md`.
 - **Never shorten a copy a raw pointer or view was derived from**
   (`TypeFacts::holds_raw_pointer`). A pointer stored in a type with a `deinit`

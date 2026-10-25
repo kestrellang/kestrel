@@ -57,14 +57,28 @@ impl OssaBodyCtx<'_, '_> {
     /// the caller composes its own fallback. Read-count-neutral: callers
     /// that meter named-binding reads keep doing so themselves.
     pub(crate) fn lower_place(&mut self, expr_id: HirExprId, views: FieldViews) -> Option<Place> {
-        // Captured projected place (`self.cap` in a closure): the env value
-        // loaded at entry is the view. Checked first, like
-        // `lower_expr_for_borrow`.
-        if let Some(v) = self.captured_place_value(expr_id) {
-            let pointee = self.body.value(v).ty;
-            return Some(Place {
-                repr: PlaceRepr::View(v),
-                pointee,
+        // Captured projected place (`self.cap` in a closure). Checked first,
+        // like `lower_expr_for_borrow`. A snapshot capture's env value IS the
+        // view; a VIEW capture's env field is a `Pointer[T]` into the frame,
+        // so the place is that address — reads/writes go through it at each
+        // use, which is what makes a normal closure see later writes and a
+        // `mutating` one write back.
+        if let Some(pc) = self.captured_place_value(expr_id) {
+            return Some(match pc {
+                super::PlaceCapture::Value(v) => {
+                    let pointee = self.body.value(v).ty;
+                    Place {
+                        repr: PlaceRepr::View(v),
+                        pointee,
+                    }
+                },
+                super::PlaceCapture::Addr(addr) => {
+                    let pointee = self.place_capture_pointee(addr);
+                    Place {
+                        repr: PlaceRepr::Addr(addr),
+                        pointee,
+                    }
+                },
             });
         }
         let expr = self.hir.exprs[expr_id].clone();
@@ -161,7 +175,8 @@ impl OssaBodyCtx<'_, '_> {
             match base_place.repr {
                 PlaceRepr::Addr(base_addr) => {
                     let elem_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
-                    let pointee = match self.ctx.module.ty_arena.get(self.body.value(elem_addr).ty) {
+                    let pointee = match self.ctx.module.ty_arena.get(self.body.value(elem_addr).ty)
+                    {
                         MirTy::Pointer(inner) => *inner,
                         _ => unreachable!("FieldAddr result must be Pointer-typed"),
                     };
@@ -226,8 +241,15 @@ impl OssaBodyCtx<'_, '_> {
             .and_then(|t| t.resolutions.get(&expr_id))
             .copied();
         let plain_stored = resolved.is_none_or(|e| {
-            self.ctx.world.get::<kestrel_ast_builder::Callable>(e).is_none()
-                && self.ctx.world.get::<kestrel_ast_builder::Static>(e).is_none()
+            self.ctx
+                .world
+                .get::<kestrel_ast_builder::Callable>(e)
+                .is_none()
+                && self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::Static>(e)
+                    .is_none()
         });
         if !plain_stored {
             return None;

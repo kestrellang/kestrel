@@ -47,3 +47,12 @@ __pycache__/
 /external/
 
 .wrangler
+
+scripts
+
+# Benchmark build artifacts (see examples/life/bench/)
+examples/life/bench/*.o
+examples/life/bench/*.a
+examples/life/bench/life_bench_c_O*
+examples/life/bench/life_bench_ks
+target-linux/

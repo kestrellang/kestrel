@@ -13,7 +13,7 @@ use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAn
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_span::Span;
 
-use crate::constraint::{CallArg, Constraint, labels_match};
+use crate::constraint::{CallArg, Constraint, Reason, labels_match};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
@@ -42,43 +42,174 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
     // exhaustive_return analyzer (E001) reports that more precisely, and
     // the redundant E100 here would mask it at diagnostic-match time.
     if let Some(tail) = hir.tail_expr {
+        // The tail is checked against the return type (bidi §2.1): arms and
+        // block tails inside it are leaves and may promote (`T` → `T?`,
+        // `T` → `Result[T, E]`).
+        // Registered before the tail is generated: a member solved during
+        // generation reads the decay registries (`bind_call_result`).
+        if tail_is_exhaustive(hir, tail) {
+            mark_return_value(ctx, hir, tail);
+        }
+        if tail_is_exhaustive(hir, tail) && expectation_known(ctx, ctx.return_ty) {
+            let reason = return_reason(ctx);
+            let (tail_tv, pushed) = check_expr(ctx, hir, tail, ctx.return_ty, reason);
+            if !pushed {
+                mark_synth_pending(ctx, hir, tail, tail_tv);
+                finish_tail(ctx, hir, tail, tail_tv);
+            }
+            emit_type_param_value_errors(ctx);
+            return;
+        }
         let tail_tv = gen_expr(ctx, hir, tail);
         if tail_is_exhaustive(hir, tail) {
             let span = expr_span(hir, tail);
-            // Return-tail is a value position: a ref-returning call decays to
-            // the pointee when the declared return type is non-ref. Mirrors the
-            // binding/arm decay wiring (the missing fifth decay site) so
-            // bind_call_result pins the pointee. When the return type IS `&T` we
-            // leave the ref intact — the return-position borrow / ref-to-ref
-            // pass-through in solve_coerce handles it.
-            if !matches!(
-                ctx.slot(ctx.resolve(ctx.return_ty)),
-                TySlot::Resolved(TyKind::Ref { .. })
-            ) {
-                mark_arm_value(ctx, hir, tail);
-            }
-            ctx.coerce(tail_tv, ctx.return_ty, tail, span);
+            let reason = return_reason(ctx);
+            ctx.coerce_because(tail_tv, ctx.return_ty, tail, span, reason);
         }
     }
+    emit_type_param_value_errors(ctx);
+}
 
-    // Report type parameters used as standalone values (not consumed by MethodCall/Call)
+/// A returned value (tail or `return e`) is a value position: a
+/// ref-returning call decays to the pointee when the declared return type is
+/// non-ref (#194). When the return type IS `&T` the ref stays — the
+/// return-position borrow / ref-to-ref pass-through in `solve_coerce`
+/// handles it. Call before generating `value`.
+fn mark_return_value(ctx: &mut InferCtx<'_>, hir: &HirBody, value: HirExprId) {
+    if !matches!(
+        ctx.slot(ctx.resolve(ctx.return_ty)),
+        TySlot::Resolved(TyKind::Ref { .. })
+    ) {
+        mark_arm_value(ctx, hir, value);
+    }
+}
+
+/// The return-tail coerce for a tail `check_expr` could not push into.
+fn finish_tail(ctx: &mut InferCtx<'_>, hir: &HirBody, tail: HirExprId, tail_tv: TyVar) {
+    let span = expr_span(hir, tail);
+    let reason = return_reason(ctx);
+    ctx.coerce_because(tail_tv, ctx.return_ty, tail, span, reason);
+}
+
+/// Report type parameters used as standalone values (not consumed by
+/// MethodCall/Call).
+fn emit_type_param_value_errors(ctx: &mut InferCtx<'_>) {
     let stale_defs: Vec<Span> = ctx.type_param_defs.drain().map(|(_, s)| s).collect();
     for span in stale_defs {
         ctx.report_error(InferError::TypeParamAsValue { span });
     }
 }
 
+/// `check(e, E@r)` (bidi design §2.1). Introduction forms (`if`/`match`/
+/// block/array/dictionary) push `E` inward and coerce at their leaves; the
+/// result's `.1` is then `true` and the caller must not coerce `e` again.
+/// Otherwise `e` is synthesized (`.1` is `false`) and the caller coerces as
+/// before. `E` is pushed only when its head is already known — an open var
+/// gives the leaves nothing to promote against, and pushing it would only
+/// change which arm fixes the type.
+fn check_expr(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    id: HirExprId,
+    expected: TyVar,
+    reason: Reason,
+) -> (TyVar, bool) {
+    // Pushed into every check leaf whose expected head is known (maintainer
+    // ruling 2026-10-23 approved the resulting diagnostic rewording, §14
+    // risk 7). A ref expectation keeps the synth path: ref decay and the
+    // return-position borrow rules live in `solve_coerce`.
+    if !expectation_known(ctx, expected) || expected_is_ref(ctx, expected) {
+        return (gen_expr(ctx, hir, id), false);
+    }
+    ctx.expectation = Some((expected, reason));
+    ctx.expectation_pushed = false;
+    let tv = gen_expr(ctx, hir, id);
+    // A form that does not consume the expectation leaves it unread only if
+    // `gen_expr` never ran; it always takes it on entry.
+    ctx.expectation = None;
+    let pushed = std::mem::take(&mut ctx.expectation_pushed);
+    (tv, pushed)
+}
+
+/// Check a leaf against `expected`: push into a nested introduction form,
+/// or synthesize and coerce (the one place `FromValue` promotion may fire).
+fn check_leaf(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, expected: TyVar, reason: Reason) {
+    let (tv, pushed) = check_expr(ctx, hir, id, expected, reason.clone());
+    if !pushed {
+        mark_synth_pending(ctx, hir, id, tv);
+        let span = expr_span(hir, id);
+        ctx.coerce_because(tv, expected, id, span, reason);
+    }
+}
+
+/// Record a leaf whose type its own call/method/operator constraint will
+/// produce (see `InferCtx::synth_pending_exprs`).
+fn mark_synth_pending(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, tv: TyVar) {
+    let computed = matches!(
+        hir.exprs[id],
+        HirExpr::Call { .. } | HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. }
+    );
+    if computed && matches!(ctx.slot(ctx.resolve(tv)), TySlot::Unresolved { literal: None }) {
+        ctx.synth_pending_exprs.insert(id);
+    }
+}
+
+/// `check` for a block: its statements, then its tail as a leaf.
+fn check_block(ctx: &mut InferCtx<'_>, hir: &HirBody, block: &HirBlock, expected: TyVar, reason: Reason) {
+    for &stmt_id in &block.stmts {
+        gen_stmt(ctx, hir, stmt_id);
+    }
+    match block.tail_expr {
+        Some(tail) => {
+            mark_arm_value(ctx, hir, tail);
+            check_leaf(ctx, hir, tail, expected, reason);
+        },
+        None => {
+            // No tail: unit, or `!` when the block diverges — both flow
+            // into the expectation like any other value.
+            let tv = if block_diverges(hir, &block.stmts) {
+                ctx.never()
+            } else {
+                ctx.tuple(vec![])
+            };
+            let span = block
+                .stmts
+                .last()
+                .map(|&s| stmt_span(hir, s))
+                .unwrap_or_else(|| Span::synthetic(0));
+            ctx.equal_because(expected, tv, span, reason);
+        },
+    }
+}
+
+/// Is `tv`'s head known at generation time (so check mode has something to
+/// push)?
+fn expectation_known(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    matches!(
+        ctx.slot(ctx.resolve(tv)),
+        TySlot::Resolved(kind) if !matches!(kind, TyKind::Error)
+    )
+}
+
+/// A ref expectation (`-> &T`) keeps the synth path: ref decay and the
+/// return-position borrow rules live in `solve_coerce` / `EqualDecayed`.
+fn expected_is_ref(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    matches!(ctx.slot(ctx.resolve(tv)), TySlot::Resolved(TyKind::Ref { .. }))
+}
+
 // ===== Expression generation =====
 
 /// Generate constraints for an expression, returning its TyVar.
 fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
+    // Only this expression may use a `check_expr` expectation, never a child.
+    let expect = ctx.expectation.take();
     let tv = match &hir.exprs[id] {
         // === Literals ===
         HirExpr::Literal { value, .. } => match value {
             HirLiteral::Integer(_) => ctx.fresh_literal(LiteralKind::Integer),
             HirLiteral::Float(_) => ctx.fresh_literal(LiteralKind::Float),
             HirLiteral::String { .. } => ctx.fresh_literal(LiteralKind::String),
-            HirLiteral::Char(_) => ctx.fresh_literal(LiteralKind::Char),
+            HirLiteral::Char { .. } => ctx.fresh_literal(LiteralKind::Char),
             HirLiteral::Bool(_) => ctx.fresh_literal(LiteralKind::Bool),
             HirLiteral::Null => ctx.fresh_literal(LiteralKind::Null),
         },
@@ -131,6 +262,20 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.type_param_defs.insert(id, span.clone());
             }
             tv
+        },
+
+        // A type in expression position (`B.Item` in `B.Item.zero()`), typed
+        // exactly as the annotation `-> B.Item` is, so a projection keeps its
+        // base and S4's base-aware member lookup can judge it (G17 S5). MIR
+        // lowers it to unit, so — like a `Def(TypeParameter)` — it is only
+        // valid when consumed as a receiver, callee or field base; tracked in
+        // the same set so a bare `let x = Item.Sub;` is reported (G26). A
+        // type that already failed to resolve carries its own diagnostic.
+        HirExpr::TypeRef { ty, span } => {
+            if !matches!(ty, HirTy::Error(_)) {
+                ctx.type_param_defs.insert(id, span.clone());
+            }
+            lower_hir_ty(ctx, ty)
         },
 
         // Overloaded function reference — can only appear as callee of Call
@@ -234,7 +379,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let callee_tv = gen_expr(ctx, hir, *callee);
             // Consuming a Def(TypeParameter) as a Call callee is valid (T() = init)
             ctx.type_param_defs.remove(callee);
-            let arg_tvs = gen_call_args(ctx, hir, args);
+            let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
 
             // If the callee is a known function returning Never (e.g., lang.panic),
             // use Never directly so divergence propagates through control flow.
@@ -254,6 +399,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             };
 
             ctx.call(callee_tv, arg_tvs, result_tv, id, span.clone());
+            finish_postponed(ctx, hir, postponed);
             result_tv
         },
 
@@ -265,24 +411,26 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             span,
         } => {
             let recv_tv = gen_expr(ctx, hir, *receiver);
-            let arg_tvs = gen_call_args(ctx, hir, args);
+            let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
             let result_tv = ctx.fresh();
 
             // A MethodCall whose receiver is a type-level reference (struct,
             // enum, protocol, type alias, type parameter) is a static call —
             // e.g. `Counter.getValue()`, `T.staticFn()`, `Pointer[UInt8].nullPointer()`.
             // solve_member uses this to reject instance methods called as static.
-            let is_static_ctx = matches!(
-                &hir.exprs[*receiver],
-                HirExpr::Def(entity, _, _) if matches!(
+            // A `TypeRef` (a projection like `B.Item`, G17 S5) is always one.
+            let is_static_ctx = match &hir.exprs[*receiver] {
+                HirExpr::TypeRef { .. } => true,
+                HirExpr::Def(entity, _, _) => matches!(
                     ctx.query_ctx.get::<NodeKind>(*entity),
                     Some(&NodeKind::Struct)
                         | Some(&NodeKind::Enum)
                         | Some(&NodeKind::Protocol)
                         | Some(&NodeKind::TypeAlias)
                         | Some(&NodeKind::TypeParameter)
-                )
-            );
+                ),
+                _ => false,
+            };
 
             let has_explicit = explicit_targs.as_ref().is_some_and(|a| !a.is_empty());
 
@@ -295,8 +443,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Parser already reported "expected identifier after `.`";
                 // short-circuit to Error so downstream constraints absorb.
                 ctx.poison(result_tv);
+                finish_postponed(ctx, hir, postponed);
                 return result_tv;
             };
+
+            if !is_static_ctx {
+                require_known_receiver(ctx, recv_tv, method_str, span);
+            }
 
             if is_static_ctx {
                 let ext_args = if has_explicit {
@@ -336,6 +489,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     span.clone(),
                 );
             }
+            finish_postponed(ctx, hir, postponed);
             result_tv
         },
 
@@ -344,6 +498,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             protocol,
             method,
             args,
+            from_operator,
             span,
             ..
         } => {
@@ -370,6 +525,18 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // `==` forwards via `extend W: Equatable`, never by peeling the
             // member to the pointee (which would coerce the argument; R7).
             ctx.protocol_dispatch_members.insert(id);
+            if *from_operator {
+                ctx.operator_members.insert(id, *protocol);
+                unify_literal_operands(ctx, *protocol, recv_tv, &arg_tvs);
+                type_literal_operator(ctx, *protocol, method, recv_tv, &arg_tvs, expect.as_ref());
+            }
+            // An operator over a still-open literal gets its result's shape
+            // now (`100..=200` → `ClosedRange[ℓ]`), so a later bound or
+            // annotation on the result can pin the literal (bidi P5: the
+            // walker, not the end of the body).
+            if *from_operator && open_literal(ctx, recv_tv).is_some() {
+                crate::solver::project_operator_shape(ctx, recv_tv, result_tv, method_str, &arg_tvs);
+            }
             // Resolve method on the protocol
             ctx.member(
                 recv_tv,
@@ -390,20 +557,25 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let base_tv = gen_expr(ctx, hir, *base);
             let result_tv = ctx.fresh();
 
-            // Field access through a type-param ref (T.staticProp) is a static
-            // protocol-property access — analogous to T.method() in MethodCall.
-            // Consume the Def(TypeParameter) so it isn't flagged as a stray
-            // type-param-as-value at end of inference.
-            if matches!(
-                &hir.exprs[*base],
-                HirExpr::Def(entity, _, _) if ctx.query_ctx.get::<NodeKind>(*entity)
-                    == Some(&NodeKind::TypeParameter)
-            ) {
+            // Field access through a type-param ref (T.staticProp) or a
+            // projection (`B.Item.staticProp`) is a static protocol-property
+            // access — analogous to T.method() in MethodCall. Consume the base
+            // so it isn't flagged as a stray type-as-value at end of inference.
+            if matches!(&hir.exprs[*base], HirExpr::TypeRef { .. })
+                || matches!(
+                    &hir.exprs[*base],
+                    HirExpr::Def(entity, _, _) if ctx.query_ctx.get::<NodeKind>(*entity)
+                        == Some(&NodeKind::TypeParameter)
+                )
+            {
                 ctx.type_param_defs.remove(base);
             }
 
             match name {
                 HirName::Name(name_str) => {
+                    if !is_type_level(ctx, hir, *base) {
+                        require_known_receiver(ctx, base_tv, name_str, span);
+                    }
                     // Member constraint with no args (field/property access)
                     ctx.member(
                         base_tv,
@@ -452,7 +624,17 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.poison(result_tv);
                 return result_tv;
             };
-            // Implicit constraint: resolved against expected type
+            // Check mode (bidi §2.1): look `.Case` up on the expected type,
+            // or on its promotion target (`.Red` against `Color?` is a
+            // `Color`, then promoted by the caller's coercion).
+            let home = expect
+                .as_ref()
+                .and_then(|(e, _)| implicit_case_home(ctx, *e, name_str));
+            if let Some(home) = home {
+                ctx.equal(result_tv, home, span.clone());
+            }
+            // Implicit constraint: decided here against the home just
+            // equated (or queued while the expected type is still open).
             ctx.implicit(result_tv, name_str, arg_tvs, result_tv, id, span.clone());
             result_tv
         },
@@ -470,6 +652,26 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // when stdlib code uses lang intrinsics directly in conditions.
             let _cond_tv = gen_expr(ctx, hir, *condition);
 
+            // Check mode: every arm is checked against the expectation, so a
+            // bare arm value promotes at its own leaf (D7).
+            if let (Some((expected, reason)), Some(else_block)) = (expect.clone(), else_body)
+                && !is_guard_if(hir, id)
+            {
+                check_block(ctx, hir, then_body, expected, reason.clone());
+                check_block(ctx, hir, else_block, expected, reason);
+                ctx.expectation_pushed = true;
+                ctx.expr_types.insert(id, expected);
+                return expected;
+            }
+
+            // Arm values are value positions (decay registries are read when
+            // a member solves, so register before generating).
+            if else_body.is_some() {
+                mark_arm_value_block(ctx, hir, then_body);
+            }
+            if let Some(else_block) = else_body.as_ref().filter(|_| !is_guard_if(hir, id)) {
+                mark_arm_value_block(ctx, hir, else_block);
+            }
             let then_tv = gen_block(ctx, hir, then_body);
 
             if let Some(else_block) = else_body {
@@ -483,12 +685,17 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // deferred for local reads (pattern-payload ref bindings
                 // resolve after generation), eager-peel otherwise.
                 match then_body.tail_expr {
-                    Some(tail) => {
-                        equate_decaying_value(ctx, hir, tail, then_tv, result_tv, then_span)
-                    },
-                    None => ctx.equal(then_tv, result_tv, then_span),
+                    Some(tail) => equate_decaying_value(
+                        ctx,
+                        hir,
+                        tail,
+                        then_tv,
+                        result_tv,
+                        then_span.clone(),
+                        Reason::Unspecified,
+                    ),
+                    None => ctx.equal(then_tv, result_tv, then_span.clone()),
                 }
-                mark_arm_value_block(ctx, hir, then_body);
                 // Guard desugars to `if cond {} else { body }` where the
                 // else block is required to diverge. Don't equate its value
                 // type with the empty then branch — the guard divergence
@@ -497,12 +704,22 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     let else_span =
                         block_value_span(hir, else_block).unwrap_or_else(|| span.clone());
                     match else_block.tail_expr {
-                        Some(tail) => {
-                            equate_decaying_value(ctx, hir, tail, else_tv, result_tv, else_span)
-                        },
-                        None => ctx.equal(else_tv, result_tv, else_span),
+                        Some(tail) => equate_decaying_value(
+                            ctx,
+                            hir,
+                            tail,
+                            else_tv,
+                            result_tv,
+                            else_span,
+                            Reason::FirstArm(then_span),
+                        ),
+                        None => ctx.equal_because(
+                            else_tv,
+                            result_tv,
+                            else_span,
+                            Reason::FirstArm(then_span),
+                        ),
                     }
-                    mark_arm_value_block(ctx, hir, else_block);
                 }
                 result_tv
             } else {
@@ -515,8 +732,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             scrutinee,
             arms,
             source,
-            ..
+            span,
         } => {
+            ctx.scrutinee_exprs.insert(*scrutinee);
             let scrut_tv = gen_expr(ctx, hir, *scrutinee);
             // Stage-1 transparent place: a scrutinee is a VALUE context, so a
             // ref-returning call used as a scrutinee must bind its result var
@@ -524,11 +742,15 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // `bind_call_result` when the member resolves. Patterns stay
             // wired directly to the scrutinee var (an earlier fresh-var
             // indirection broke array/tuple pattern generation, which
-            // inspects the scrutinee's resolution).
-            ctx.scrutinee_exprs.insert(*scrutinee);
+            // inspects the scrutinee's resolution). Registered above, before
+            // generation.
             // A ref-binding scrutinee (`match r`) matches its POINTEE —
             // patterns never see a ref (the MIR scrutinee decay copies).
             let scrut_tv = peel_ref_tv(ctx, scrut_tv);
+            // Patterns are checked against a synthesized scrutinee (bidi
+            // §6.1 / P3f): settle it first, so binders get their types here
+            // rather than from a deferred ImplicitPat.
+            settle_scrutinee(ctx, scrut_tv);
             let result_tv = ctx.fresh();
 
             // Empty match has no arms to pin the result type. An analyzer
@@ -538,6 +760,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.poison(result_tv);
             }
 
+            // The first arm's value fixes the result type; it is the reason
+            // for a later arm's mismatch.
+            let mut first_arm_span: Option<Span> = None;
             for arm in arms {
                 // Pattern constrains scrutinee type
                 gen_pat(ctx, hir, arm.pattern, scrut_tv, *source);
@@ -553,12 +778,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // match keyword. Never-arms don't pin the result (see the
                 // `Never` branch in `unify`); if every arm turns out to be
                 // Never, `default_never_fallback` settles it.
-                let body_tv = gen_expr(ctx, hir, arm.body);
-                let body_span = expr_span(hir, arm.body);
-                // Arm values decay to the pointee UNLESS the result position
-                // is a ref (stage 2b): deferred for local reads, eager-peel
-                // otherwise.
-                equate_decaying_value(ctx, hir, arm.body, body_tv, result_tv, body_span);
                 // Arm-value decay applies only where the arm value is the
                 // user's expression. GuardLet is CPS-desugared — its pattern
                 // arm is the CONTINUATION, and marking it would decay a legal
@@ -568,6 +787,24 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 if matches!(*source, MatchSource::UserMatch | MatchSource::IfLet) {
                     mark_arm_value(ctx, hir, arm.body);
                 }
+                if let Some((expected, reason)) = expect.clone() {
+                    check_leaf(ctx, hir, arm.body, expected, reason);
+                    continue;
+                }
+                let body_tv = gen_expr(ctx, hir, arm.body);
+                let body_span = expr_span(hir, arm.body);
+                // Arm values decay to the pointee UNLESS the result position
+                // is a ref (stage 2b): deferred for local reads, eager-peel
+                // otherwise.
+                let reason = first_arm_span
+                    .clone()
+                    .map_or(Reason::Unspecified, Reason::FirstArm);
+                first_arm_span.get_or_insert_with(|| body_span.clone());
+                equate_decaying_value(ctx, hir, arm.body, body_tv, result_tv, body_span, reason);
+            }
+            if let Some((expected, _)) = expect.filter(|_| !arms.is_empty()) {
+                ctx.equal(result_tv, expected, span.clone());
+                ctx.expectation_pushed = true;
             }
             result_tv
         },
@@ -605,24 +842,18 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         HirExpr::Return { value, span } => {
             if let Some(val) = value {
+                // A `return e;` statement is a value position, identical to
+                // the return-tail.
+                mark_return_value(ctx, hir, *val);
                 let val_tv = gen_expr(ctx, hir, *val);
-                // A `return e;` statement is a value position, identical to the
-                // return-tail: a ref-returning call decays to the pointee when
-                // the declared return type is non-ref (#194). When the return
-                // type IS `&T`, leave the ref intact (return-position borrow /
-                // ref-to-ref pass-through handle it in solve_coerce).
-                if !matches!(
-                    ctx.slot(ctx.resolve(ctx.return_ty)),
-                    TySlot::Resolved(TyKind::Ref { .. })
-                ) {
-                    mark_arm_value(ctx, hir, *val);
-                }
-                ctx.coerce(val_tv, ctx.return_ty, *val, span.clone());
+                let reason = return_reason(ctx);
+                ctx.coerce_because(val_tv, ctx.return_ty, *val, span.clone(), reason);
             } else {
                 // Bare return — coerce unit against return type so
                 // `return` in a non-void function is a type mismatch
                 let unit_tv = ctx.tuple(vec![]);
-                ctx.coerce(unit_tv, ctx.return_ty, id, span.clone());
+                let reason = return_reason(ctx);
+                ctx.coerce_because(unit_tv, ctx.return_ty, id, span.clone(), reason);
             }
             ctx.never()
         },
@@ -636,8 +867,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // A `&mutating T`-returning target types as the pointee
             // (bind_call_result decay) so the value Coerce is `T -> T`.
             ctx.assign_target_exprs.insert(*target);
-            let target_tv = gen_expr(ctx, hir, *target);
-            let value_tv = gen_expr(ctx, hir, *value);
             // The RHS is a copy-out value position: a ref-returning call decays
             // to the pointee, whether the target is a plain place (`x = b.peek()`)
             // or a ref place written through (`arr.mutableAt(0) = arr.at(1)`).
@@ -646,6 +875,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // bogus "expected T got &T" (#194). A non-call RHS (e.g. `&x`) is
             // inert to the decay set, so rebind-style stores are unaffected.
             mark_arm_value(ctx, hir, *value);
+            let target_tv = gen_expr(ctx, hir, *target);
+            let value_tv = gen_expr(ctx, hir, *value);
             // Route through AssignTarget, which picks store-through vs plain
             // coerce once the target resolves — and crucially DEFERS while the
             // target is still unresolved. A LOCAL target may resolve late
@@ -664,7 +895,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             if route_via_assign_target {
                 ctx.assign_target(value_tv, target_tv, *value, span.clone());
             } else {
-                ctx.coerce(value_tv, target_tv, *value, span.clone());
+                let reason = Reason::Assign(expr_span(hir, *target));
+                ctx.coerce_because(value_tv, target_tv, *value, span.clone(), reason);
             }
             ctx.tuple(vec![]) // assignment returns unit
         },
@@ -675,7 +907,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // its inferred param convention (the no-annotation `MutBorrow`
             // inference applies to literals only, not named function values).
             ctx.closure_literal_exprs.insert(id);
-            gen_closure(ctx, hir, params, body)
+            let expected_fn = expect.map(|(e, _)| e);
+            gen_closure(ctx, hir, params, body, expected_fn)
         },
 
         // === Aggregates ===
@@ -692,18 +925,40 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // constraints run. This way each element is compared against the
             // target element type, not against whatever literal kind the first
             // element happens to have.
-            if let Some(hint_elem) = ctx.expected_array_elem.take() {
-                ctx.equal(elem_tv, hint_elem, span.clone());
-            }
-            for &e in elements {
+            let hint = expect
+                .as_ref()
+                .and_then(|(expected, _)| extract_array_elem_hint(ctx, *expected));
+            let hinted = match hint {
+                Some(hint_elem) => {
+                    ctx.equal(elem_tv, hint_elem, span.clone());
+                    true
+                },
+                None => false,
+            };
+            // Without an annotation's hint, the first element fixes the
+            // element type and is the reason for every later mismatch.
+            let first_span = elements.first().map(|&e| expr_span(hir, e));
+            for (i, &e) in elements.iter().enumerate() {
+                // Literal elements always decay refs to owned (stage 1.5).
+                mark_arm_value(ctx, hir, e);
+                // Check mode: an element is a leaf checked against the
+                // expected element type, so it may promote (D7).
+                if let Some(h) = hint
+                    && expectation_known(ctx, h)
+                {
+                    check_leaf(ctx, hir, e, elem_tv, Reason::Unspecified);
+                    continue;
+                }
                 let e_tv = gen_expr(ctx, hir, e);
                 let e_span = expr_span(hir, e);
                 let e_tv = peel_ref_tv(ctx, e_tv);
+                let reason = match &first_span {
+                    Some(first) if i > 0 && !hinted => Reason::Element(first.clone()),
+                    _ => Reason::Unspecified,
+                };
                 // Order (elem_tv, e_tv) so diagnostics read "expected <target>
                 // got <element>" rather than the reverse.
-                ctx.equal(elem_tv, e_tv, e_span);
-                // Literal elements always decay refs to owned (stage 1.5).
-                mark_arm_value(ctx, hir, e);
+                ctx.equal_because(elem_tv, e_tv, e_span, reason);
             }
             arr_tv
         },
@@ -714,12 +969,17 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let val_tv = ctx.fresh();
             ctx.associated(dict_tv, "Key", key_tv, span.clone());
             ctx.associated(dict_tv, "Value", val_tv, span.clone());
-            let expected_entry = ctx.expected_dict_entry.take();
+            let expected_entry = expect
+                .as_ref()
+                .and_then(|(expected, _)| extract_dict_entry_hint(ctx, *expected));
             if let Some((hint_key, hint_val)) = expected_entry {
                 ctx.equal(key_tv, hint_key, span.clone());
                 ctx.equal(val_tv, hint_val, span.clone());
             }
             for entry in entries {
+                // Literal entries always decay refs to owned (stage 1.5).
+                mark_arm_value(ctx, hir, entry.key);
+                mark_arm_value(ctx, hir, entry.value);
                 let k = gen_expr(ctx, hir, entry.key);
                 let v = gen_expr(ctx, hir, entry.value);
                 let k = peel_ref_tv(ctx, k);
@@ -750,9 +1010,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ) {
                     ctx.equal(val_tv, v, value_span);
                 }
-                // Literal entries always decay refs to owned (stage 1.5).
-                mark_arm_value(ctx, hir, entry.key);
-                mark_arm_value(ctx, hir, entry.value);
             }
             dict_tv
         },
@@ -766,8 +1023,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let elem_tvs: Vec<TyVar> = elements
                 .iter()
                 .map(|&e| {
-                    let tv = gen_expr(ctx, hir, e);
                     mark_arm_value(ctx, hir, e);
+                    let tv = gen_expr(ctx, hir, e);
                     if value_expr_is_local(hir, e) {
                         let slot = ctx.fresh();
                         ctx.equal_decayed(tv, slot, expr_span(hir, e));
@@ -781,7 +1038,19 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         },
 
         // Block expression: execute stmts, result is the tail expr
-        HirExpr::Block { body, .. } => gen_block(ctx, hir, body),
+        HirExpr::Block { body, .. } => {
+            if let (Some((expected, reason)), Some(_)) = (expect.clone(), body.tail_expr) {
+                check_block(ctx, hir, body, expected, reason);
+                ctx.expectation_pushed = true;
+                ctx.expr_types.insert(id, expected);
+                return expected;
+            }
+            let tv = gen_block(ctx, hir, body);
+            if let Some(tail) = body.tail_expr {
+                propagate_closure_literal(ctx, tail, id);
+            }
+            tv
+        },
 
         HirExpr::Error { span } => ctx.report_error(InferError::FromHir { span: span.clone() }),
 
@@ -792,7 +1061,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         // Type-of(Sugar) == type-of(inner) (structurally transparent).
         HirExpr::Sugar { kind, inner, span } => {
             mark_sugar_primary(ctx, hir, *kind, *inner);
+            // An interpolation is one literal checked in place (bidi §6.1):
+            // its desugared accumulator calls are not user receivers.
+            let interp = matches!(kind, kestrel_hir::body::SugarKind::StringInterpolation);
+            ctx.interpolation_depth += interp as u32;
             let result_tv = gen_expr(ctx, hir, *inner);
+            ctx.interpolation_depth -= interp as u32;
 
             // Link the interpolation's result type to its accumulator so that
             // an expected type (from a let annotation or function parameter)
@@ -803,6 +1077,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.interpolation_link(result_tv, acc_tv, span.clone());
             }
 
+            propagate_closure_literal(ctx, *inner, id);
             result_tv
         },
     };
@@ -810,6 +1085,22 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
     // Record the type for this expression
     ctx.expr_types.insert(id, tv);
     tv
+}
+
+/// Carry the closure-*literal* marker outward through a transparent wrapper
+/// (`HirExpr::Block`, `HirExpr::Sugar`) — both share the inner expression's
+/// TyVar, so the wrapper denotes the same literal.
+///
+/// The marker gates both retrofits the expected type performs on a literal:
+/// the param-convention upgrade (#106) and the closure-kind rewrite (D3). The
+/// `Coerce` those read carries the id of whatever expression sits in the
+/// argument / initializer slot, which for a wrapped literal is the WRAPPER —
+/// without this the retrofit silently misses and the site fails with a
+/// spurious E624 / E603.
+fn propagate_closure_literal(ctx: &mut InferCtx<'_>, inner: HirExprId, outer: HirExprId) {
+    if ctx.closure_literal_exprs.contains(&inner) {
+        ctx.closure_literal_exprs.insert(outer);
+    }
 }
 
 /// Record which inner `ProtocolCall` expr_id is the "primary" for a Sugar
@@ -898,21 +1189,27 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
             ctx.local_types.insert(*local, local_tv);
 
             if let Some(val) = value {
-                // Bidirectional hint: if the annotation is `Array[E]` and the
-                // RHS is an array literal, feed `E` down so the array's element
-                // TyVar is pinned to the target before element equates run.
-                let prev_hint = ctx.expected_array_elem;
-                if ty.is_some() && matches!(&hir.exprs[*val], HirExpr::Array { .. }) {
-                    ctx.expected_array_elem = extract_array_elem_hint(ctx, local_tv);
+                let named_ref = matches!(&hir.exprs[*val], HirExpr::Borrow { .. });
+                // Stage-1 binding decay: a binding is a VALUE context —
+                // record the init expr so bind_call_result binds the
+                // POINTEE directly. Registered before generation: a member
+                // may solve while its initializer is being generated.
+                if !named_ref {
+                    ctx.binding_init_exprs.insert(*val);
                 }
-                let prev_dict_hint = ctx.expected_dict_entry;
-                if ty.is_some() && matches!(&hir.exprs[*val], HirExpr::Dict { .. }) {
-                    ctx.expected_dict_entry = extract_dict_entry_hint(ctx, local_tv);
-                }
-                let val_tv = gen_expr(ctx, hir, *val);
-                ctx.expected_array_elem = prev_hint;
-                ctx.expected_dict_entry = prev_dict_hint;
-                if matches!(&hir.exprs[*val], HirExpr::Borrow { .. }) {
+                // An annotated binding is a check: the annotation is pushed
+                // into introduction forms (arms, elements, block tails).
+                let reason = ty
+                    .as_ref()
+                    .map_or(Reason::Unspecified, |t| Reason::Annotation(hir_ty_span(t)));
+                let (val_tv, pushed) = if ty.is_some() {
+                    check_expr(ctx, hir, *val, local_tv, reason.clone())
+                } else {
+                    (gen_expr(ctx, hir, *val), false)
+                };
+                if pushed {
+                    // The leaves already coerced into the annotation.
+                } else if named_ref {
                     // Named ref binding (`let r = &expr;`): the one binding
                     // form that is NOT a value context — no decay-set entry,
                     // no Coerce (the from-ref arm would decay the Ref to its
@@ -924,15 +1221,19 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                     // the new local — it is defined after the init lowers.)
                     ctx.local_types.insert(*local, val_tv);
                 } else {
-                    // Stage-1 binding decay: a binding is a VALUE context.
-                    // The coerce decay arm handles a resolved ref, but with
-                    // an unannotated binding the coerce can run BEFORE the
-                    // member resolves (unify redirects local ≡ result) —
-                    // record the init expr so bind_call_result binds the
-                    // POINTEE directly.
-                    ctx.binding_init_exprs.insert(*val);
+                    // An unannotated binding is a value context (bidi §9: "an
+                    // unannotated `let` decays"): a ref initializer whose type
+                    // is already known gives the binding its pointee here,
+                    // instead of the end-of-body ref-decay default.
+                    if ty.is_none()
+                        && let TySlot::Resolved(TyKind::Ref { pointee, .. }) =
+                            ctx.slot(ctx.resolve(val_tv))
+                    {
+                        let pointee = *pointee;
+                        let _ = unify::unify(ctx, local_tv, pointee);
+                    }
                     // Value flows to the binding (allows promotion)
-                    ctx.coerce(val_tv, local_tv, *val, span.clone());
+                    ctx.coerce_because(val_tv, local_tv, *val, span.clone(), reason);
                 }
             }
         },
@@ -1264,10 +1565,14 @@ fn gen_struct_init(
 
             // Constrain args against the matched init's param types
             if let Some(param_tys) = qctx.query(LowerCallableTypes { entity: init, root }) {
-                for (arg, param_ty) in args.iter().zip(param_tys.iter()) {
+                for (index, (arg, param_ty)) in args.iter().zip(param_tys.iter()).enumerate() {
                     if let Some(hir_ty) = param_ty {
                         let param_tv = lower_hir_ty_with_subs(ctx, hir_ty, &init_subs);
-                        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
+                        let reason = Reason::Param {
+                            index,
+                            decl: Some(hir_ty_span(hir_ty)),
+                        };
+                        ctx.coerce_because(arg.ty, param_tv, arg.value, span.clone(), reason);
                     }
                 }
             }
@@ -1304,16 +1609,15 @@ fn gen_struct_init(
         }
     } else {
         // Memberwise init: match args against stored field types (in order).
-        // `NodeKind::Field` also covers computed properties and static stored
-        // vars, neither of which is an instance field — filter them out via the
-        // `Computed`/`Static` markers so the synthesized init takes only
-        // instance storage (mirrors the layout collection in struct_lower.rs).
+        // This list must be index-aligned with the MIR layout in
+        // struct_lower.rs, because struct construction maps argument position
+        // straight to FieldIdx. Both sides read `FieldClass` so they cannot
+        // drift; do not re-derive the predicate here.
         let fields: Vec<Entity> = children
             .iter()
             .filter(|&&c| {
-                qctx.get::<NodeKind>(c) == Some(&NodeKind::Field)
-                    && qctx.get::<kestrel_ast_builder::Computed>(c).is_none()
-                    && qctx.get::<kestrel_ast_builder::Static>(c).is_none()
+                qctx.get::<kestrel_ast_builder::FieldClass>(c)
+                    .is_some_and(kestrel_ast_builder::FieldClass::is_stored_instance)
             })
             .copied()
             .collect();
@@ -1353,13 +1657,17 @@ fn gen_struct_init(
             }
         }
 
-        for (arg, &field) in args.iter().zip(fields.iter()) {
+        for (index, (arg, &field)) in args.iter().zip(fields.iter()).enumerate() {
             if let Some(hir_ty) = qctx.query(LowerTypeAnnotation {
                 entity: field,
                 root,
             }) {
                 let field_tv = lower_hir_ty_with_subs(ctx, &hir_ty, &struct_subs);
-                ctx.coerce(arg.ty, field_tv, arg.value, span.clone());
+                let reason = Reason::Param {
+                    index,
+                    decl: Some(hir_ty_span(&hir_ty)),
+                };
+                ctx.coerce_because(arg.ty, field_tv, arg.value, span.clone(), reason);
             }
         }
     }
@@ -1510,7 +1818,11 @@ fn gen_closure(
     hir: &HirBody,
     params: &[HirClosureParam],
     body: &HirBlock,
+    expected: Option<TyVar>,
 ) -> TyVar {
+    if let Some(shape) = expected.and_then(|e| expected_closure_shape(ctx, hir, params, e)) {
+        return check_closure(ctx, hir, params, body, shape);
+    }
     // Fresh TyVars for each param (may have type annotation)
     let param_tvs: Vec<TyVar> = params
         .iter()
@@ -1527,46 +1839,11 @@ fn gen_closure(
 
     // A closure has its OWN return type: a `return e` inside the body returns
     // from the CLOSURE (closure-local return, Swift-style), checked against the
-    // closure's return type — NOT the enclosing function's. Without this swap,
-    // returns coerce against the enclosing `ctx.return_ty`, the closure types as
-    // `() -> Never`, its body lowers to a trap, and generic-callee inference
-    // collapses the param to the Never-typed return (#199).
+    // closure's return type — NOT the enclosing function's (#199). The tail is
+    // a value position and refs do not cross the closure boundary: a
+    // ref-returning tail call decays to the pointee (#195).
     let closure_ret_tv = ctx.fresh();
-    let saved_return_ty = ctx.return_ty;
-    ctx.return_ty = closure_ret_tv;
-
-    // Infer body
-    let body_tv = gen_block(ctx, hir, body);
-
-    // Reconcile the body's fall-through value with the closure's return type,
-    // mirroring `generate()` for a function body. `return` statements already
-    // coerced to `closure_ret_tv` via the swapped `ctx.return_ty` above.
-    //
-    // A closure's tail is a value (return) position and refs do not cross the
-    // closure boundary (stage-1) — a ref-returning tail call decays to the
-    // pointee (#195). Without this the raw `&T` becomes the closure's return
-    // type, mismatching a `() -> T` expectation (or reaching MIR as a non-
-    // ret_borrow `@guaranteed` return → OSSA ICE).
-    match body.tail_expr {
-        Some(tail) => {
-            mark_arm_value(ctx, hir, tail);
-            // A value tail flows to the return type; a diverging tail
-            // (`return e`) is Never and the coerce is a well-defined no-op
-            // (it does not pin `closure_ret_tv` to Never).
-            if tail_is_exhaustive(hir, tail) {
-                let span = expr_span(hir, tail);
-                ctx.coerce(body_tv, closure_ret_tv, tail, span);
-            }
-        },
-        // No tail that falls through to unit pins the return type to unit; a
-        // body that diverges via `return` statements is constrained by those.
-        None if !block_diverges(hir, &body.stmts) => {
-            let _ = unify::unify(ctx, body_tv, closure_ret_tv);
-        },
-        None => {},
-    }
-
-    ctx.return_ty = saved_return_ty;
+    gen_closure_body(ctx, hir, body, closure_ret_tv);
 
     // Param conventions: an explicit `mutating` closure param is `MutBorrow`;
     // otherwise `Consuming` (the default, matching ordinary closures). The
@@ -1587,7 +1864,16 @@ fn gen_closure(
     // closure-local `closure_ret_tv` (unifying the tail value and every
     // `return` in the body), never the raw `body_tv` (which is Never when the
     // tail diverges via `return`).
-    let fn_tv = ctx.function_conv(param_tvs, conventions, closure_ret_tv);
+    // Kind: a closure literal is ALWAYS built at `Normal`. There is no
+    // kind-on-literal syntax; the expected type retrofits the real kind in
+    // place during solving (`reconcile_fn_kinds`), exactly as it upgrades the
+    // param conventions above.
+    let fn_tv = ctx.function_conv(
+        kestrel_ast::FnTypeKind::Normal,
+        param_tvs,
+        conventions,
+        closure_ret_tv,
+    );
 
     if params.is_empty() {
         // No explicit params, no `it` — adapts to any expected arity
@@ -1598,6 +1884,449 @@ fn gen_closure(
     }
 
     fn_tv
+}
+
+/// Is `base` a type-level reference (`T.staticProp`, `B.Item.x`)?
+fn is_type_level(ctx: &InferCtx<'_>, hir: &HirBody, base: HirExprId) -> bool {
+    match &hir.exprs[base] {
+        HirExpr::TypeRef { .. } => true,
+        HirExpr::Def(entity, _, _) => matches!(
+            ctx.query_ctx.get::<NodeKind>(*entity),
+            Some(&NodeKind::Struct)
+                | Some(&NodeKind::Enum)
+                | Some(&NodeKind::Protocol)
+                | Some(&NodeKind::TypeAlias)
+                | Some(&NodeKind::TypeParameter)
+        ),
+        _ => false,
+    }
+}
+
+/// Bidi ruling D3 (§2.3 `structurally_resolve`): a member access needs its
+/// receiver's head type where it is checked. Solve everything generated so
+/// far; if the receiver is still unknown, report E106 and poison it instead
+/// of deferring the lookup to whatever a later statement decides. An open
+/// numeric literal as a method/field receiver is the same error (Rust E0689),
+/// never defaulted on the spot. Other open literals (`[]`, `""`) wait for
+/// their default (D2′).
+fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, span: &Span) {
+    if ctx.interpolation_depth > 0 || !receiver_open(ctx, recv) {
+        return;
+    }
+    // Solve what is to the left — Rule L included, so `0..<n` types its
+    // literal from `n` the way the end-of-body relax loop would.
+    settle_left(ctx);
+    // Every open literal the receiver is built from takes its default now:
+    // a numeric literal that IS the receiver (`(6).multiplyChecked(7)`,
+    // Rule R — maintainer ruling 2026-10-23 relaxed D3 here), a `[]`/`""`
+    // receiver (D2′), a call waiting on a literal argument (§5.2 step 4), an
+    // operator over a literal (`5...`, `-5`), an interpolation's accumulator.
+    if default_literal_roots(ctx, recv) {
+        settle_left(ctx);
+    }
+    // A binding initialized from a ref (`let s = r`) takes its copy-out
+    // decay — the default the relax loop would give it at body end.
+    if receiver_open(ctx, recv) && crate::solver::apply_ref_decay_defaults_into(ctx, Some(recv)) {
+        settle_left(ctx);
+    }
+    if !receiver_open(ctx, recv) {
+        return;
+    }
+    // Still open: only an unresolved var is an error; an open literal has
+    // no default here (`// stdlib: false`) and is left to its uses.
+    let open = peel_ref_var(ctx, recv);
+    if !matches!(ctx.slot(open), TySlot::Unresolved { literal: None }) {
+        return;
+    }
+    kestrel_debug::ktrace!("e106", "receiver of '{member}' unknown at its use: {open:?}");
+    ctx.report_error(InferError::TypeMustBeKnown {
+        member: member.to_string(),
+        span: span.clone(),
+    });
+    ctx.poison(open);
+}
+
+/// Settle a match scrutinee before its patterns are generated: solve the
+/// left side and default the open literals it is built from (unless it is
+/// itself a literal, which literal patterns may still type).
+fn settle_scrutinee(ctx: &mut InferCtx<'_>, scrut: TyVar) {
+    if !receiver_open(ctx, scrut) {
+        return;
+    }
+    settle_left(ctx);
+    if open_literal(ctx, peel_ref_var(ctx, scrut)).is_none() && default_literal_roots(ctx, scrut) {
+        settle_left(ctx);
+    }
+}
+
+/// The P2 operator rule (bidi ruling D2; Rust's built-in binop rule): the
+/// two operands of a homogeneous arithmetic / comparison / bitwise operator
+/// unify while both are still open numeric literals, so `1 + 2.5` is one
+/// Float64 (int ⊔ float = float). Shifts and ranges are heterogeneous and
+/// excluded. The operator's conformance stays an obligation, settled when
+/// the joined literal is determined or defaulted.
+fn unify_literal_operands(ctx: &mut InferCtx<'_>, protocol: Entity, recv: TyVar, args: &[CallArg]) {
+    use kestrel_hir::builtin::Builtin;
+    const HOMOGENEOUS: [Builtin; 14] = [
+        Builtin::AddOperatorProtocol,
+        Builtin::SubtractOperatorProtocol,
+        Builtin::MultiplyOperatorProtocol,
+        Builtin::DivideOperatorProtocol,
+        Builtin::ModuloOperatorProtocol,
+        Builtin::EqualsOperatorProtocol,
+        Builtin::NotEqualsOperatorProtocol,
+        Builtin::LessThanOperatorProtocol,
+        Builtin::GreaterThanOperatorProtocol,
+        Builtin::LessOrEqualOperatorProtocol,
+        Builtin::GreaterOrEqualOperatorProtocol,
+        Builtin::BitwiseAndOperatorProtocol,
+        Builtin::BitwiseOrOperatorProtocol,
+        Builtin::BitwiseXorOperatorProtocol,
+    ];
+    let [arg] = args else {
+        return;
+    };
+    let numeric = |ctx: &InferCtx<'_>, tv: TyVar| {
+        matches!(
+            open_literal(ctx, tv),
+            Some(LiteralKind::Integer | LiteralKind::Float)
+        )
+    };
+    if !numeric(ctx, recv) || !numeric(ctx, arg.ty) {
+        return;
+    }
+    if HOMOGENEOUS
+        .iter()
+        .any(|&b| ctx.resolver.builtin(b) == Some(protocol))
+    {
+        let _ = unify::unify(ctx, recv, arg.ty);
+    }
+}
+
+/// The type `.name` resolves on when checked against `expected`: `expected`
+/// itself when its nominal declares a member `name`, else the first type
+/// argument that does (the `FromValue` promotion target of `Optional[T]` /
+/// `Result[T, E]`). `None` leaves the lookup to the solver.
+fn implicit_case_home(ctx: &InferCtx<'_>, expected: TyVar, name: &str) -> Option<TyVar> {
+    let declares = |tv: TyVar| match ctx.slot(ctx.resolve(tv)) {
+        TySlot::Resolved(TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. }) => ctx
+            .query_ctx
+            .children_of(*entity)
+            .iter()
+            .any(|&c| ctx.query_ctx.get::<Name>(c).is_some_and(|n| n.0 == name)),
+        _ => false,
+    };
+    if declares(expected) {
+        return Some(expected);
+    }
+    let TySlot::Resolved(TyKind::Struct { args, .. } | TyKind::Enum { args, .. }) =
+        ctx.slot(ctx.resolve(expected))
+    else {
+        return None;
+    };
+    args.iter().copied().find(|&a| declares(a))
+}
+
+/// Type an operator's open literal receiver where the walker meets it
+/// (bidi §4): Rule L from a known right operand (`100 + small`), else
+/// Rule C from the pushed expected result (`let y: Int8 = 100 + 27`). What
+/// neither decides waits for the end-of-body passes and defaulting.
+fn type_literal_operator(
+    ctx: &mut InferCtx<'_>,
+    protocol: Entity,
+    method: &HirName,
+    recv: TyVar,
+    args: &[CallArg],
+    expect: Option<&(TyVar, Reason)>,
+) {
+    let Some(lit) = open_literal(ctx, recv) else {
+        return;
+    };
+    if let [arg] = args
+        && crate::solver::rule_l_applies(ctx, recv, arg.ty, protocol)
+    {
+        let _ = unify::unify(ctx, recv, arg.ty);
+        return;
+    }
+    let (Some((expected, _)), Some(name)) = (expect, method.as_str()) else {
+        return;
+    };
+    if !expectation_known(ctx, *expected) {
+        return;
+    }
+    let result = ctx.fresh();
+    let _ = unify::unify(ctx, result, *expected);
+    if let Some(entity) = crate::solver_entail::rule_c_pick(ctx, lit, result, name, args) {
+        let ty = ctx.named(entity, Vec::new());
+        let _ = unify::unify(ctx, recv, ty);
+    }
+}
+
+/// Run the solver over everything generated so far, Rule L included.
+fn settle_left(ctx: &mut InferCtx<'_>) {
+    crate::solver::fixpoint(ctx);
+    while crate::solver::apply_operator_literal_adoption(ctx) {
+        crate::solver::fixpoint(ctx);
+    }
+}
+
+fn open_literal(ctx: &InferCtx<'_>, tv: TyVar) -> Option<LiteralKind> {
+    match ctx.slot(ctx.resolve(tv)) {
+        TySlot::Unresolved { literal } => *literal,
+        _ => None,
+    }
+}
+
+/// `tv` with one ref layer peeled (dispatch reads through refs).
+fn peel_ref_var(ctx: &InferCtx<'_>, tv: TyVar) -> TyVar {
+    match ctx.slot(ctx.resolve(tv)) {
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => ctx.resolve(*pointee),
+        _ => ctx.resolve(tv),
+    }
+}
+
+
+/// Default every open literal `recv` is built from, walking back through
+/// the pending constraints that produce it. Returns true on progress.
+fn default_literal_roots(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
+    let mut roots = Vec::new();
+    collect_literal_roots(ctx, recv, 4, &mut roots);
+    let mut progress = false;
+    for tv in roots {
+        if let Some(lit) = open_literal(ctx, tv) {
+            progress |= crate::solver::default_literal_var(ctx, ctx.resolve(tv), lit);
+        }
+    }
+    progress
+}
+
+/// The open literal vars `tv` is produced from: itself, or the inputs of
+/// the pending constraint whose result it is (a call's or member's receiver
+/// and arguments, an associated type's container, an interpolation's
+/// accumulator), up to `depth` steps back.
+fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Vec<TyVar>) {
+    let target = peel_ref_var(ctx, tv);
+    if open_literal(ctx, target).is_some() {
+        if !out.contains(&target) {
+            out.push(target);
+        }
+        return;
+    }
+    if depth == 0 || !matches!(ctx.slot(target), TySlot::Unresolved { .. }) {
+        return;
+    }
+    let produced_by = |r: &TyVar| peel_ref_var(ctx, *r) == target;
+    let mut inputs: Vec<TyVar> = Vec::new();
+    for c in &ctx.constraints {
+        match c {
+            Constraint::Call {
+                callee,
+                result,
+                args,
+                ..
+            } if produced_by(result) => {
+                inputs.push(*callee);
+                inputs.extend(args.iter().map(|a| a.ty));
+            },
+            Constraint::Member {
+                result,
+                receiver,
+                args,
+                ..
+            } if produced_by(result) => {
+                inputs.push(*receiver);
+                inputs.extend(args.iter().map(|a| a.ty));
+            },
+            Constraint::Associated {
+                container, result, ..
+            } if produced_by(result) => inputs.push(*container),
+            Constraint::InterpolationLink {
+                result_tv, acc_tv, ..
+            } if produced_by(result_tv) => inputs.push(*acc_tv),
+            Constraint::TupleIndex { tuple, result, .. } if produced_by(result) => {
+                inputs.push(*tuple)
+            },
+            // A borrow's pointee comes from the borrowed expression
+            // (`let e = &xs(at: 0)`).
+            Constraint::BorrowPointee { inner, pointee, .. } if produced_by(pointee) => {
+                inputs.push(*inner)
+            },
+            // A pattern binder comes from its scrutinee.
+            Constraint::ImplicitPat {
+                scrutinee, arg_tys, ..
+            } if arg_tys.iter().any(produced_by) => inputs.push(*scrutinee),
+            // A deferred value flow into it (an argument into a protocol
+            // argument, a binding's initializer).
+            Constraint::Coerce { from, to, .. } if produced_by(to) => inputs.push(*from),
+            Constraint::Equal { a, b, .. } if produced_by(a) => inputs.push(*b),
+            Constraint::Equal { a, b, .. } if produced_by(b) => inputs.push(*a),
+            _ => {},
+        }
+    }
+    for input in inputs {
+        collect_literal_roots(ctx, input, depth - 1, out);
+    }
+}
+
+/// Unresolved (a ref's pointee counts: dispatch peels refs).
+fn receiver_open(ctx: &InferCtx<'_>, recv: TyVar) -> bool {
+    match ctx.slot(ctx.resolve(recv)) {
+        TySlot::Unresolved { .. } => true,
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
+            matches!(ctx.slot(ctx.resolve(*pointee)), TySlot::Unresolved { .. })
+        },
+        _ => false,
+    }
+}
+
+/// The function type a closure literal is checked against (bidi §8).
+struct ClosureShape {
+    kind: kestrel_ast::FnTypeKind,
+    params: Vec<TyVar>,
+    conventions: Vec<kestrel_ast::ParamConvention>,
+    ret: TyVar,
+}
+
+/// `expected` as a [`ClosureShape`] when the closure can be checked against
+/// it directly: a resolved function type of the closure's exact arity (an
+/// `it` closure needs arity 1). Anything else — an open var, a
+/// parameterless closure adapting to any arity — takes the synth path and
+/// the solver's coercion rules.
+fn expected_closure_shape(
+    ctx: &InferCtx<'_>,
+    hir: &HirBody,
+    params: &[HirClosureParam],
+    expected: TyVar,
+) -> Option<ClosureShape> {
+    let TySlot::Resolved(TyKind::Function {
+        kind,
+        params: eparams,
+        conventions,
+        ret,
+    }) = ctx.slot(ctx.resolve(expected))
+    else {
+        return None;
+    };
+    if params.is_empty() || eparams.len() != params.len() {
+        return None;
+    }
+    let _ = hir;
+    Some(ClosureShape {
+        kind: *kind,
+        params: eparams.clone(),
+        conventions: conventions.clone(),
+        ret: *ret,
+    })
+}
+
+/// `check(closure, E)` (bidi §8): parameters, conventions, kind and return
+/// type come from E, so the body is generated with its parameter types
+/// already known. An annotated parameter must equal E's.
+fn check_closure(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    params: &[HirClosureParam],
+    body: &HirBlock,
+    shape: ClosureShape,
+) -> TyVar {
+    let mut conventions = Vec::with_capacity(params.len());
+    for ((p, &eparam), &econv) in params.iter().zip(&shape.params).zip(&shape.conventions) {
+        let tv = match &p.ty {
+            Some(ty) => {
+                let lowered = lower_hir_ty(ctx, ty);
+                ctx.equal(eparam, lowered, hir_ty_span(ty));
+                lowered
+            },
+            None => eparam,
+        };
+        ctx.local_types.insert(p.local, tv);
+        // An explicit `mutating` stays MutBorrow (a mismatch is the
+        // coercion's to report); otherwise the expected convention.
+        conventions.push(if p.is_mut {
+            kestrel_ast::ParamConvention::MutBorrow
+        } else {
+            econv
+        });
+    }
+    let param_tvs: Vec<TyVar> = params.iter().map(|p| ctx.local_types[&p.local]).collect();
+    gen_closure_body(ctx, hir, body, shape.ret);
+    ctx.function_conv(shape.kind, param_tvs, conventions, shape.ret)
+}
+
+/// Generate a closure body against its return type `ret_tv` (a `return`
+/// inside returns from the closure).
+fn gen_closure_body(ctx: &mut InferCtx<'_>, hir: &HirBody, body: &HirBlock, ret_tv: TyVar) {
+    let saved_return_ty = ctx.return_ty;
+    ctx.return_ty = ret_tv;
+    let saved_return_ty_span = ctx.return_ty_span.take();
+    // The tail is a value position: register before generating it.
+    if let Some(tail) = body.tail_expr {
+        mark_arm_value(ctx, hir, tail);
+    }
+    let body_tv = gen_block(ctx, hir, body);
+    match body.tail_expr {
+        Some(tail) => {
+            if tail_is_exhaustive(hir, tail) {
+                let span = expr_span(hir, tail);
+                ctx.coerce(body_tv, ret_tv, tail, span);
+            }
+        },
+        None if !block_diverges(hir, &body.stmts) => {
+            let _ = unify::unify(ctx, body_tv, ret_tv);
+        },
+        None => {},
+    }
+    ctx.return_ty = saved_return_ty;
+    ctx.return_ty_span = saved_return_ty_span;
+}
+
+/// Phase 1 of a call's arguments (bidi §8, Rust's two-pass
+/// `check_argument_types`): closure literals get a placeholder var and are
+/// generated by [`finish_postponed`] once the call is emitted, so they are
+/// checked against the parameter type the other arguments determined.
+fn gen_call_args_phased(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    args: &[HirCallArg],
+) -> (Vec<CallArg>, Vec<(TyVar, HirExprId)>) {
+    let mut postponed = Vec::new();
+    let args = args
+        .iter()
+        .map(|arg| {
+            let ty = if matches!(hir.exprs[arg.value], HirExpr::Closure { .. }) {
+                let placeholder = ctx.fresh();
+                // The call's own coercion treats it as the closure literal it
+                // stands for.
+                ctx.closure_literal_exprs.insert(arg.value);
+                postponed.push((placeholder, arg.value));
+                placeholder
+            } else {
+                gen_expr(ctx, hir, arg.value)
+            };
+            CallArg {
+                label: arg.label.clone(),
+                ty,
+                value: arg.value,
+            }
+        })
+        .collect();
+    (args, postponed)
+}
+
+/// Phase 2: solve what the call and its other arguments determined, then
+/// check each postponed closure against its parameter type, in source order.
+fn finish_postponed(ctx: &mut InferCtx<'_>, hir: &HirBody, postponed: Vec<(TyVar, HirExprId)>) {
+    if postponed.is_empty() {
+        return;
+    }
+    crate::solver::fixpoint(ctx);
+    for (placeholder, closure) in postponed {
+        ctx.expectation = Some((placeholder, Reason::Unspecified));
+        let closure_tv = gen_expr(ctx, hir, closure);
+        ctx.expectation = None;
+        let span = expr_span(hir, closure);
+        ctx.coerce(closure_tv, placeholder, closure, span);
+    }
 }
 
 /// Instantiate an entity's type: reads the ECS to determine what kind of
@@ -1895,12 +2624,28 @@ fn emit_where_clause_constraints_with_subs(
     });
     for clause in where_clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            crate::resolve::WhereClause::NotBound { .. } => {},
             crate::resolve::WhereClause::Bound {
-                param,
+                subject,
                 protocol,
                 protocol_type_args,
             } => {
-                if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
+                // G17 C7: a projection subject (`A.Item: P`) gets its call-site
+                // obligation here, same as a bare `A: P`. `Reduce`, not
+                // `Opaque`: the base is a call type-arg, so at `good(StrSrc(…))`
+                // the obligation is really about `String`, and an unreduced
+                // `StrSrc.Item` would be judged as an opaque projection — which
+                // permits. `lower_subject` returns `None` when the subject's
+                // root is not one of `subs`, and that skip is the deliberate
+                // conservative permit for an abstract position.
+                if let Some(tv) = lower_subject(
+                    ctx,
+                    &subject,
+                    SubjectRoot::Subs(subs),
+                    ProjectionPolicy::Reduce(site_span),
+                ) {
                     // Call-site where-clause obligation: a TYPE-ARGUMENT
                     // bound (success instantiates witnesses at tv).
                     ctx.conforms_typearg(tv, protocol, site_span.clone());
@@ -1913,28 +2658,25 @@ fn emit_where_clause_constraints_with_subs(
                     }
                 }
             },
-            crate::resolve::WhereClause::TypeEquality {
-                param,
-                assoc_name,
-                rhs,
-            } => {
-                if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
-                    let assoc_result = ctx.fresh();
-                    ctx.associated(tv, &assoc_name, assoc_result, site_span.clone());
-                    let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, subs);
-                    ctx.equal(assoc_result, rhs_tv, site_span.clone());
+            crate::resolve::WhereClause::Equality { subject, rhs } => {
+                match subject.equality_lhs() {
+                    Some(crate::resolve::EqualityLhs::Assoc { root, assoc }) => {
+                        if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == root) {
+                            let assoc_result = ctx.fresh();
+                            ctx.associated_entity(tv, assoc, assoc_result, site_span.clone());
+                            let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, subs);
+                            ctx.equal(assoc_result, rhs_tv, site_span.clone());
+                        }
+                    },
+                    Some(crate::resolve::EqualityLhs::Direct(param)) => {
+                        if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
+                            let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, subs);
+                            ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
+                        }
+                    },
+                    None => {},
                 }
             },
-            crate::resolve::WhereClause::DirectEquality { param, rhs } => {
-                if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
-                    let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, subs);
-                    ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
-                }
-            },
-            // Projection bounds (`T.Assoc: P`) are body-inference facts emitted
-            // at body setup; nothing to do at this call-site path (the assoc
-            // entity isn't a call type-arg here).
-            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 }
@@ -1993,12 +2735,19 @@ fn emit_copyable_wellformedness(
     });
     for clause in where_clauses {
         let crate::resolve::WhereClause::Bound {
-            param, protocol, ..
+            subject, protocol, ..
         } = clause
         else {
             continue;
         };
-        if Some(protocol) != copyable && Some(protocol) != cloneable && Some(protocol) != static_proto
+        // TODO(G17 stage 3a): projection subjects are skipped here, as they
+        // were when `ProjectionBound` was a separate variant.
+        let Some(param) = subject.as_param() else {
+            continue;
+        };
+        if Some(protocol) != copyable
+            && Some(protocol) != cloneable
+            && Some(protocol) != static_proto
         {
             continue;
         }
@@ -2015,6 +2764,93 @@ fn emit_copyable_wellformedness(
 /// Convert an HirTy (already resolved during HIR lowering) to a TyVar.
 pub fn lower_hir_ty(ctx: &mut InferCtx<'_>, ty: &HirTy) -> TyVar {
     lower_hir_ty_with_subs(ctx, ty, &[])
+}
+
+/// How a `WhereSubject`'s `Param` leaf becomes a TyVar.
+///
+/// An enum rather than a closure: a `FnMut(&mut InferCtx, Entity)` cannot be
+/// held across `lower_subject`'s recursive call without re-borrowing `ctx`.
+/// There are exactly two policies and both already exist in the tree.
+#[derive(Clone, Copy)]
+pub(crate) enum SubjectRoot<'a> {
+    /// Look the entity up in a caller-supplied substitution; `None` on a miss.
+    /// The "skip the clause" policy used by the call-site emitters.
+    Subs(&'a [(Entity, TyVar)]),
+    /// Mint-or-reuse via `InferCtx::param` — the "always succeeds" policy used
+    /// by the method where-clause path.
+    Mint,
+}
+
+/// How a `WhereSubject`'s `Projection` step becomes a TyVar (G17 stage 3a).
+///
+/// The two callers of `lower_subject` want opposite things from `T.Assoc`, and
+/// getting it wrong is silent in both directions — hence a named policy rather
+/// than a second copy of the walk.
+#[derive(Clone, Copy)]
+pub(crate) enum ProjectionPolicy<'a> {
+    /// `ctx.assoc_projection` — the projection survives as an opaque
+    /// `TyKind::AssocProjection`. Correct in *declaration* scope, where the base
+    /// is a type parameter that will never reduce and the bound must stay
+    /// nameable as `T.Assoc`.
+    Opaque,
+    /// `ctx.project_associated` — allocate a fresh TyVar *and* emit the
+    /// `Associated` constraint that reduces it. Required at a **call site**: at
+    /// `good(StrSrc(…))` the subject's base is concrete, and an opaque
+    /// `StrSrc.Item` is judged by `solve_conforms` as an unreduced projection
+    /// (which permits) instead of the `String` it denotes.
+    Reduce(&'a Span),
+}
+
+/// Lower a where-clause subject to the TyVar the constraints should talk
+/// about, preserving the receiver at every depth.
+///
+/// `Param`      → per `root`
+/// `SelfType`   → `None`. Both callers are *call-site* / type-formation
+///                emitters keyed on a substitution of declared type params;
+///                neither has the receiver `Self` denotes, and the enclosing
+///                entity is the wrong answer (D8). `None` = permit.
+/// `Projection` → per `proj`, over `lower_subject(base)?`
+///
+/// Neither projection policy memoizes: caching would merge projection TyVars
+/// that are distinct today.
+pub(crate) fn lower_subject(
+    ctx: &mut InferCtx<'_>,
+    subject: &crate::resolve::WhereSubject,
+    root: SubjectRoot<'_>,
+    proj: ProjectionPolicy<'_>,
+) -> Option<TyVar> {
+    lower_subject_with_base(ctx, subject, root, proj).map(|(_, tv)| tv)
+}
+
+/// As [`lower_subject`], but also hands back the **base** of the outermost
+/// projection — `Some(base_tv)` for `T.Assoc` / `T.Iter.Item`, `None` for a
+/// bare `T`. That base is what `where_clause_assoc_subs` has to be keyed on;
+/// re-walking the chain at the emitter to recover it would be a second answer
+/// to the same question (G17 stage 3a).
+pub(crate) fn lower_subject_with_base(
+    ctx: &mut InferCtx<'_>,
+    subject: &crate::resolve::WhereSubject,
+    root: SubjectRoot<'_>,
+    proj: ProjectionPolicy<'_>,
+) -> Option<(Option<TyVar>, TyVar)> {
+    use crate::resolve::WhereSubject;
+    match subject {
+        WhereSubject::Param(e) => match root {
+            SubjectRoot::Subs(subs) => subs.iter().find(|(s, _)| s == e).map(|&(_, tv)| (None, tv)),
+            SubjectRoot::Mint => Some((None, ctx.param(*e))),
+        },
+        WhereSubject::SelfType => None,
+        WhereSubject::Projection { base, assoc } => {
+            let base_tv = lower_subject(ctx, base, root, proj)?;
+            let tv = match proj {
+                ProjectionPolicy::Opaque => ctx.assoc_projection(base_tv, *assoc),
+                ProjectionPolicy::Reduce(span) => {
+                    ctx.project_associated(base_tv, *assoc, span.clone())
+                },
+            };
+            Some((Some(base_tv), tv))
+        },
+    }
 }
 
 /// If `tv` resolves to `Array[E]`, return the TyVar for `E`; otherwise None.
@@ -2091,7 +2927,7 @@ fn literal_kind_for_expr(hir: &HirBody, expr: HirExprId) -> Option<LiteralKind> 
         HirLiteral::Integer(_) => LiteralKind::Integer,
         HirLiteral::Float(_) => LiteralKind::Float,
         HirLiteral::String { .. } => LiteralKind::String,
-        HirLiteral::Char(_) => LiteralKind::Char,
+        HirLiteral::Char { .. } => LiteralKind::Char,
         HirLiteral::Bool(_) => LiteralKind::Bool,
         HirLiteral::Null => LiteralKind::Null,
     })
@@ -2123,11 +2959,15 @@ fn lower_return_ty_with_opaque(
     subs: &[(Entity, TyVar)],
 ) -> TyVar {
     match ret_hir {
-        HirTy::Opaque { bounds, .. } => {
+        HirTy::Opaque {
+            bounds,
+            not_copyable,
+            ..
+        } => {
             if ctx.owner == callee {
                 return ctx.return_ty;
             }
-            lower_opaque_to_tyvar(ctx, bounds, callee, subs)
+            lower_opaque_to_tyvar(ctx, bounds, *not_copyable, callee, subs)
         },
         // Recurse into structural types so nested opaques are handled
         HirTy::Struct { entity, args, .. } => {
@@ -2152,6 +2992,7 @@ fn lower_return_ty_with_opaque(
             ctx.tuple(tvs)
         },
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
@@ -2162,7 +3003,7 @@ fn lower_return_ty_with_opaque(
                 .map(|p| lower_return_ty_with_opaque(ctx, p, callee, subs))
                 .collect();
             let ret_tv = lower_return_ty_with_opaque(ctx, ret, callee, subs);
-            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
+            ctx.function_conv(*kind, param_tvs, param_conventions.clone(), ret_tv)
         },
         // Non-structural types: delegate to the standard path
         _ => lower_hir_ty_with_subs(ctx, ret_hir, subs),
@@ -2173,6 +3014,7 @@ fn lower_return_ty_with_opaque(
 fn lower_opaque_to_tyvar(
     ctx: &mut InferCtx<'_>,
     bounds: &[HirTy],
+    not_copyable: bool,
     callee: Entity,
     subs: &[(Entity, TyVar)],
 ) -> TyVar {
@@ -2198,6 +3040,7 @@ fn lower_opaque_to_tyvar(
         bounds: opaque_bounds,
         origin_args,
         index: 0,
+        not_copyable,
     });
     tv
 }
@@ -2245,11 +3088,10 @@ pub(crate) fn lower_hir_ty_with_subs(
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
                     return tv;
                 }
-                if let Some(&(_, tv)) = ctx
-                    .where_clause_assoc_subs
-                    .iter()
-                    .find(|(e, _)| e == entity)
-                {
+                // R1 — the one genuinely baseless read: a bare `Item` here has
+                // no receiver in scope, so C3's unambiguity rule applies —
+                // a lone candidate answers, two or more fall through below.
+                if let Some(tv) = ctx.assoc_sub("generate:AliasUse", None, *entity) {
                     return tv;
                 }
                 if let Some(&tv) = ctx.param_tyvars.get(entity) {
@@ -2265,9 +3107,9 @@ pub(crate) fn lower_hir_ty_with_subs(
         HirTy::AssocProjection { base, assoc, span } => {
             let base_tv = lower_hir_ty_with_subs(ctx, base, subs);
             // Short-circuit if this specific assoc is already bound via a
-            // where-clause equality (e.g. `Item = (A, B)`).
-            if let Some(&(_, tv)) = ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == assoc) {
-                let _ = base_tv;
+            // where-clause equality (e.g. `Item = (A, B)`). R2 — since C3 the
+            // equality has to be about *this* base to answer here.
+            if let Some(tv) = ctx.assoc_sub("generate:AssocProjection", Some(base_tv), *assoc) {
                 return tv;
             }
             ctx.project_associated(base_tv, *assoc, span.clone())
@@ -2280,6 +3122,7 @@ pub(crate) fn lower_hir_ty_with_subs(
             ctx.tuple(elem_tvs)
         },
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
@@ -2290,7 +3133,7 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .map(|p| lower_hir_ty_with_subs(ctx, p, subs))
                 .collect();
             let ret_tv = lower_hir_ty_with_subs(ctx, ret, subs);
-            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
+            ctx.function_conv(*kind, param_tvs, param_conventions.clone(), ret_tv)
         },
         HirTy::Param(entity, _) => {
             // Check substitution map first (for instantiated type params)
@@ -2300,7 +3143,13 @@ pub(crate) fn lower_hir_ty_with_subs(
             ctx.param(*entity)
         },
         HirTy::SelfType(entity, _) => {
-            // Preserve the "this is Self" identity through inference output so
+            // A subs entry keyed on the owning protocol binds that protocol's
+            // `Self` to a known conformer — e.g. the `T` of `T: Iterable` when
+            // lowering an associated type's where-clause RHS (G25 step 1).
+            if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
+                return tv;
+            }
+            // Otherwise preserve the "this is Self" identity through inference output so
             // MIR receives `MirTy::SelfType` and monomorphization substitutes
             // it with the caller's concrete self type. `TyKind::SelfType(P)`
             // behaves like `Protocol(P)` for associated-type / conformance
@@ -2333,7 +3182,7 @@ fn literal_to_tyvar(ctx: &mut InferCtx<'_>, value: &HirLiteral) -> TyVar {
         HirLiteral::Integer(_) => ctx.fresh_literal(LiteralKind::Integer),
         HirLiteral::Float(_) => ctx.fresh_literal(LiteralKind::Float),
         HirLiteral::String { .. } => ctx.fresh_literal(LiteralKind::String),
-        HirLiteral::Char(_) => ctx.fresh_literal(LiteralKind::Char),
+        HirLiteral::Char { .. } => ctx.fresh_literal(LiteralKind::Char),
         HirLiteral::Bool(_) => ctx.fresh_literal(LiteralKind::Bool),
         HirLiteral::Null => ctx.fresh_literal(LiteralKind::Null),
     }
@@ -2403,13 +3252,25 @@ fn equate_decaying_value(
     value_tv: TyVar,
     target_tv: TyVar,
     span: Span,
+    reason: Reason,
 ) {
     if value_expr_is_local(hir, value_expr) {
-        ctx.equal_decayed(value_tv, target_tv, span);
+        ctx.equal_decayed_because(value_tv, target_tv, span, reason);
     } else {
         let peeled = peel_ref_tv(ctx, value_tv);
-        ctx.equal(peeled, target_tv, span);
+        // Target first, like `EqualDecayed` and array elements: a mismatch
+        // reads "expected <result type> got <this arm>", which is what the
+        // `FirstArm` reason explains.
+        ctx.equal_because(target_tv, peeled, span, reason);
     }
+}
+
+/// The reason a value is checked against the function's return type: its
+/// declared return type, when there is one to point at.
+fn return_reason(ctx: &InferCtx<'_>) -> Reason {
+    ctx.return_ty_span
+        .clone()
+        .map_or(Reason::Unspecified, Reason::Return)
 }
 
 /// Shallow ref peel for Equal-based decay sites (match scrutinee wiring,
@@ -2453,6 +3314,7 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Closure { span, .. }
         | HirExpr::Local(_, span)
         | HirExpr::Def(_, _, span)
+        | HirExpr::TypeRef { span, .. }
         | HirExpr::OverloadSet { span, .. }
         | HirExpr::Borrow { span, .. }
         | HirExpr::Field { span, .. }
@@ -2475,7 +3337,7 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
 }
 
 /// Extract a span from a HirTy.
-fn hir_ty_span(ty: &HirTy) -> Span {
+pub(crate) fn hir_ty_span(ty: &HirTy) -> Span {
     match ty {
         HirTy::Struct { span, .. }
         | HirTy::Enum { span, .. }
@@ -2569,26 +3431,23 @@ fn gen_implicit_variant_pat(
     span: &Span,
     source: MatchSource,
 ) {
-    let arg_tys: Vec<TyVar> = args
-        .iter()
-        .map(|arg| {
-            let tv = ctx.fresh();
-            // A binder's type comes from the PATTERN, never its uses: gate
-            // use-site Coerces while the ImplicitPat may still fire (see
-            // `pattern_binder_tvs`).
-            ctx.pattern_binder_tvs.insert(tv);
-            gen_pat(ctx, hir, arg.pattern, tv, source);
-            tv
-        })
-        .collect();
-
-    ctx.constraints
-        .push(crate::constraint::Constraint::ImplicitPat {
-            scrutinee: scrutinee_tv,
-            name: name.to_string(),
-            arg_tys,
-            span: span.clone(),
-        });
+    let arg_tys: Vec<TyVar> = args.iter().map(|_| ctx.fresh()).collect();
+    // Resolve the case against the (settled) scrutinee first, so each
+    // sub-pattern is generated against its known payload type (bidi P3f).
+    let pat = crate::constraint::Constraint::ImplicitPat {
+        scrutinee: scrutinee_tv,
+        name: name.to_string(),
+        arg_tys: arg_tys.clone(),
+        span: span.clone(),
+    };
+    if receiver_open(ctx, scrutinee_tv) {
+        ctx.constraints.push(pat);
+    } else {
+        crate::solver::solve_now(ctx, pat);
+    }
+    for (arg, &tv) in args.iter().zip(&arg_tys) {
+        gen_pat(ctx, hir, arg.pattern, tv, source);
+    }
 }
 
 /// Generate constraints for a struct pattern.
@@ -2652,5 +3511,13 @@ fn gen_struct_pat(
         if let Some(pat) = field.pattern {
             gen_pat(ctx, hir, pat, field_tv, source);
         }
+    }
+}
+
+fn stmt_span(hir: &HirBody, id: HirStmtId) -> Span {
+    match &hir.stmts[id] {
+        HirStmt::Let { span, .. } | HirStmt::Expr { span, .. } | HirStmt::Deinit { span, .. } => {
+            span.clone()
+        },
     }
 }

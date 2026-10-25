@@ -17,8 +17,9 @@ use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_mir::TyId;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
-use kestrel_mir::op::Op;
 use kestrel_mir::item::witness::WitnessMethodKey;
+use kestrel_mir::op::Op;
+use kestrel_mir::value::RootProvenance;
 use kestrel_mir::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 
 use super::place::{FieldViews, PlaceRepr};
@@ -30,6 +31,7 @@ impl OssaBodyCtx<'_, '_> {
     /// Lower an HIR expression to a ValueId, applying promotion if needed.
     pub fn lower_expr(&mut self, expr_id: HirExprId) -> ValueId {
         let value = self.lower_expr_no_promote(expr_id);
+        let value = self.apply_kind_coercion(expr_id, value);
         self.apply_promotion(expr_id, value)
     }
 
@@ -45,6 +47,9 @@ impl OssaBodyCtx<'_, '_> {
     /// netted zero on the shared `RcBox`, so dropping the "clone" over-released
     /// the storage. Moving the local balances the books (no copy, no drop).
     pub fn lower_expr_for_return(&mut self, expr_id: HirExprId) -> ValueId {
+        if self.has_kind_coercion(expr_id) {
+            return self.lower_expr(expr_id);
+        }
         let local = match &self.hir.exprs[expr_id] {
             HirExpr::Local(l, _) if self.is_var_local(l) => Some(*l),
             _ => None,
@@ -111,20 +116,39 @@ impl OssaBodyCtx<'_, '_> {
         };
         let base = *base;
         let field_name = name.as_str_or_empty().to_string();
-        // Base must be a directly-owned local: `consuming self` / an
-        // owned-by-value local binds as `Ssa(@owned)`. A borrowed self (normal
-        // method, bound @guaranteed) or a `var` slot is not ours to consume.
+        // Base must be a directly-owned local: `consuming self` binds as
+        // `Ssa(@owned)`; a let/var binds as `Var` over an @owned slot it
+        // solely owns (a MutBorrow param's slot is @guaranteed — the
+        // caller's storage, not ours to consume). A borrowed self (normal
+        // method, bound @guaranteed `Ssa`) is rejected by the ownership
+        // check below.
         let HirExpr::Local(base_local, _) = &self.hir.exprs[base] else {
             return None;
         };
-        let base_val = match self.local_map.get(base_local) {
-            Some(super::LocalBinding::Ssa(v)) => *v,
-            _ => return None,
-        };
-        if self.body.value(base_val).ownership != kestrel_mir::value::Ownership::Owned {
-            return None;
+        let base_local = *base_local;
+        enum BaseSrc {
+            Ssa(ValueId),
+            Slot(ValueId),
         }
-        let base_ty = self.body.value(base_val).ty;
+        let (base_src, base_ty) = match self.local_map.get(&base_local) {
+            Some(super::LocalBinding::Ssa(v)) => {
+                let v = *v;
+                if self.body.value(v).ownership != kestrel_mir::value::Ownership::Owned {
+                    return None;
+                }
+                (BaseSrc::Ssa(v), self.body.value(v).ty)
+            },
+            Some(super::LocalBinding::Var(addr)) => {
+                let addr = *addr;
+                if self.body.value(addr).ownership != kestrel_mir::value::Ownership::Owned
+                    || self.var_init(base_local) == Some(super::VarInit::DefUninit)
+                {
+                    return None;
+                }
+                (BaseSrc::Slot(addr), self.resolve_local_type(base_local))
+            },
+            None => return None,
+        };
         let entity = match self.ctx.module.ty_arena.get(base_ty) {
             MirTy::Named { entity, .. } => *entity,
             _ => return None,
@@ -151,6 +175,20 @@ impl OssaBodyCtx<'_, '_> {
         if field_idx.index() >= field_tys.len() {
             return None;
         }
+        // Materialize the whole base as @owned. A slot-bound local is taken
+        // out (Swift `load [take]`) and marked moved so scope exit doesn't
+        // destroy the vacated slot.
+        let base_val = match base_src {
+            BaseSrc::Ssa(v) => v,
+            BaseSrc::Slot(addr) => {
+                let v = self.emit_take(addr, base_ty);
+                self.set_var_init(base_local, super::VarInit::DefUninit);
+                if let Some(flag) = self.var_flag(base_local) {
+                    self.store_drop_flag(flag, false);
+                }
+                v
+            },
+        };
         // Destructure consumes `base_val` (no whole-self destroy) and tracks
         // every field as @owned; the return path keeps the wanted field (its
         // `keep` set) and drops the siblings at scope exit.
@@ -181,6 +219,97 @@ impl OssaBodyCtx<'_, '_> {
         // Consume the value so ownership transfers into the wrapped enum.
         let arg = self.prepare_call_arg(value, ParamConvention::Consuming);
         self.emit_call_returning(callee, vec![arg], target_ty)
+    }
+
+    pub(crate) fn has_kind_coercion(&self, expr_id: HirExprId) -> bool {
+        self.typed
+            .as_ref()
+            .is_some_and(|typed| typed.kind_coercions.contains_key(&expr_id))
+    }
+
+    /// Replay the solver's accepted cross-kind conversion at the single value
+    /// boundary shared by every ordinary expression context.
+    fn apply_kind_coercion(&mut self, expr_id: HirExprId, value: ValueId) -> ValueId {
+        let Some((from, to)) = self
+            .typed
+            .as_ref()
+            .and_then(|typed| typed.kind_coercions.get(&expr_id))
+            .copied()
+        else {
+            return value;
+        };
+        let from = crate::ty::to_mir_fn_kind(from);
+        let to = crate::ty::to_mir_fn_kind(to);
+        let value = if matches!(
+            (from, to),
+            (
+                kestrel_mir::FnKind::Escaping,
+                kestrel_mir::FnKind::Consuming
+            )
+        ) && self.body.value(value).ownership
+            == kestrel_mir::value::Ownership::Guaranteed
+        {
+            // A borrowed escaping parameter still owns its handle in the
+            // caller. Retain one independent owner before transferring it to
+            // the consuming representation.
+            self.emit_copy_value(value)
+        } else {
+            value
+        };
+        let (actual, params, ret) = match self.ctx.module.ty_arena.get(self.body.value(value).ty) {
+            MirTy::FuncThick { kind, params, ret } => (*kind, params.clone(), *ret),
+            _ => return value,
+        };
+
+        // Bare function values adopt their destination kind during inference,
+        // so `lower_def` has already emitted the correctly widened ApplyPartial.
+        if actual == to {
+            return value;
+        }
+        debug_assert_eq!(
+            actual, from,
+            "recorded closure-kind source drifted before MIR"
+        );
+
+        let result_ty = self.ctx.intern(MirTy::FuncThick {
+            kind: to,
+            params,
+            ret,
+        });
+        let source_root = self.body.value(value).root;
+        let result = self.alloc_value(result_ty, kestrel_mir::value::Ownership::Owned);
+        let root = if matches!(
+            (from, to),
+            (kestrel_mir::FnKind::Escaping, kestrel_mir::FnKind::Normal)
+        ) {
+            match source_root {
+                RootProvenance::Static => RootProvenance::Static,
+                // A truncated view owns no retain. Root it in this body's
+                // backing value so it cannot escape even when that backing is
+                // a borrowed parameter owned by the caller.
+                _ => RootProvenance::Local(value),
+            }
+        } else {
+            source_root
+        };
+        self.stamp_root(result, root);
+        self.push_inst(kestrel_mir::inst::InstKind::CoerceFnKind {
+            result,
+            operand: value,
+            from,
+            to,
+        });
+        if matches!(
+            (from, to),
+            (
+                kestrel_mir::FnKind::Escaping,
+                kestrel_mir::FnKind::Consuming
+            )
+        ) {
+            self.consume(value);
+        }
+        self.track_owned(result);
+        result
     }
 
     fn lower_expr_no_promote(&mut self, expr_id: HirExprId) -> ValueId {
@@ -234,10 +363,36 @@ impl OssaBodyCtx<'_, '_> {
                     // StoreAssign then drops — `Optional.take()` returned freed
                     // bits). Moving + init-tracking is correct for the reassign
                     // shape; mirrors the same guard in pattern.rs. (#141 cluster.)
-                    if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
+                    //
+                    // ...but ONLY when this is the local's only read. Taking is
+                    // valid for a LAST use; the mono-dependent arm can't tell
+                    // which read is last, so it used to take on every one and a
+                    // second read hit a vacated slot (`generic_local_read_twice`,
+                    // and — before 3662a94e — stdlib `Slice.first(where:)`).
+                    // `is_single_use` is the conservative approximation of "last
+                    // use": one textual read in the whole HIR arena, so branches
+                    // and loops can't make it repeat. A multi-read local copies
+                    // instead, which is what the language says a Copyable-by-
+                    // default `T` does. If such a `T` is instantiated with a
+                    // non-Copyable argument that copy degrades to an alias — but
+                    // that already violates invariant 1 and is what
+                    // `KESTREL_VERIFY_INSTANTIATION=1` reports. The #141
+                    // take/replace shapes read `self` exactly once, so they keep
+                    // taking.
+                    if self.is_non_copyable(ty)
+                        || (self.copy_behavior_is_mono_dependent(ty)
+                            && self.is_single_use(*hir_local))
+                    {
                         debug_assert!(
                             self.var_init(*hir_local) != Some(super::VarInit::DefUninit),
-                            "consuming read of an already-moved var — frontend should reject use-after-move"
+                            "consuming read of an already-moved var — frontend should reject use-after-move (func {:?} {:?}, local {:?})",
+                            self.ctx
+                                .module
+                                .functions
+                                .get(&self.func_entity)
+                                .map(|f| f.name.clone()),
+                            self.func_entity,
+                            hir_local
                         );
                         let v = self.emit_take(addr, ty);
                         self.set_var_init(*hir_local, super::VarInit::DefUninit);
@@ -282,17 +437,17 @@ impl OssaBodyCtx<'_, '_> {
             },
 
             HirExpr::Field { base, name, .. } => {
-                // A captured projected place (e.g. `self.cap`) reads the env
-                // value instead of projecting from a non-captured receiver.
-                if let Some(v) = self.captured_place_value(expr_id) {
-                    return self.emit_value_use(v);
+                // A captured projected place (e.g. `self.cap`) reads through
+                // the env instead of projecting from a non-captured receiver.
+                if let Some(v) = self.lower_captured_place_read(expr_id) {
+                    return v;
                 }
                 self.lower_field_access(expr_id, *base, name.as_str_or_empty())
             },
 
             HirExpr::TupleIndex { base, index, .. } => {
-                if let Some(v) = self.captured_place_value(expr_id) {
-                    return self.emit_value_use(v);
+                if let Some(v) = self.lower_captured_place_read(expr_id) {
+                    return v;
                 }
                 let base_val = self.lower_expr_for_borrow(*base);
                 // Stage 2b ref slot: extract with the SLOT type (the expr
@@ -311,8 +466,7 @@ impl OssaBodyCtx<'_, '_> {
                 // stored-field twin in lower_field). Named bindings stay live.
                 if self.ref_results.contains(&base_val)
                     && !self.ref_binding_vals.contains_key(&base_val)
-                    && self.body.value(result).ownership
-                        == kestrel_mir::value::Ownership::Owned
+                    && self.body.value(result).ownership == kestrel_mir::value::Ownership::Owned
                 {
                     self.emit_end_borrow(base_val);
                 }
@@ -320,6 +474,11 @@ impl OssaBodyCtx<'_, '_> {
             },
 
             HirExpr::Def(entity, _type_args, _) => self.lower_def(expr_id, *entity),
+
+            // A type in expression position only ever stands as a static
+            // call's receiver; like `Def` of a type parameter or alias it has
+            // no runtime value (G17 S5).
+            HirExpr::TypeRef { .. } => self.emit_literal(Immediate::unit()),
 
             HirExpr::OverloadSet { candidates, .. } => {
                 if let Some(&resolved) = self
@@ -418,6 +577,8 @@ impl OssaBodyCtx<'_, '_> {
                 };
                 self.drain_deferred_borrows();
                 self.destroy_scopes_to_depth(0, &[ret_val]);
+                // A guarded destroy in the exit renames threaded values.
+                let ret_val = self.resolve_value(ret_val);
                 self.emit_ret(ret_val);
                 self.emit_literal(Immediate::unit())
             },
@@ -531,7 +692,10 @@ impl OssaBodyCtx<'_, '_> {
             _ => None,
         }
         .unwrap_or_else(|| {
-            debug_assert!(false, "ICE: peeled write field '{field_name}' not on pointee");
+            debug_assert!(
+                false,
+                "ICE: peeled write field '{field_name}' not on pointee"
+            );
             FieldIdx::new(0)
         });
         // PtrTo on the @guaranteed mutable view yields the pointee's address;
@@ -616,6 +780,42 @@ impl OssaBodyCtx<'_, '_> {
                 let arg = self.prepare_call_arg_for_expr(base, ParamConvention::Borrow);
                 return self.emit_call_returning(callee, vec![arg], result_ty);
             }
+        }
+
+        // Unapplied static METHOD as a value (`let f = T.zero`, G26): a
+        // function value, not a call. A protocol requirement named through a
+        // type param / projection dispatches through the witness of the
+        // receiver type, so mono binds it to the conformer's implementation.
+        let is_method =
+            resolved.is_some_and(|e| self.ctx.world.get::<NodeKind>(e) == Some(&NodeKind::Function));
+        let value_ty = self.resolve_expr_type(expr_id);
+        if is_method
+            && is_static
+            && matches!(
+                self.ctx.module.ty_arena.get(value_ty),
+                MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+            )
+        {
+            let method = resolved.unwrap();
+            self.ctx.register_name(method);
+            let self_type = self.type_from_type_ref(base);
+            let method_type_args = self.resolve_type_args(expr_id);
+            let callee = match self.ctx.is_protocol_method(method) {
+                Some(protocol) => {
+                    self.ctx.register_name(protocol);
+                    Callee::Witness {
+                        protocol,
+                        method: self.ctx.witness_method_key(method),
+                        self_type,
+                        method_type_args,
+                    }
+                },
+                None => {
+                    let type_args = self.prepend_receiver_type_args(self_type, method_type_args);
+                    Callee::direct_with_args(method, type_args, None)
+                },
+            };
+            return self.emit_apply_partial(callee, vec![], value_ty);
         }
 
         // Computed property → getter call
@@ -915,11 +1115,7 @@ impl OssaBodyCtx<'_, '_> {
                 };
 
             // Lower args with the actual per-param conventions (no receiver slot — offset 0).
-            let call_args = self.lower_call_args(
-                args.unwrap_or(&[]),
-                &conventions,
-                0,
-            );
+            let call_args = self.lower_call_args(args.unwrap_or(&[]), &conventions, 0);
 
             self.emit_call_returning(callee, call_args, result_ty)
         }
@@ -946,7 +1142,13 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Setter dispatch: computed properties, subscripts, field-subscripts
+        let wb_mark = self.pending_writebacks.len();
         if let Some(result) = self.try_lower_setter_assign(target, value) {
+            // The assignment is a complete effect: writebacks fabricated for
+            // its target (dotted chained subscripts, #129) must land now — a
+            // tail-position assignment never reaches the statement-boundary
+            // drain, which would silently drop the write.
+            self.drain_writebacks(wb_mark);
             return result;
         }
 
@@ -1080,7 +1282,8 @@ impl OssaBodyCtx<'_, '_> {
                     } else {
                         self.emit_store_assign(field_addr, rhs);
                     }
-                } else if self.try_lower_field_assign_through_setter(base, base_ty, field_idx, rhs) {
+                } else if self.try_lower_field_assign_through_setter(base, base_ty, field_idx, rhs)
+                {
                     // `o.proxy.field = v` through a get/set computed property:
                     // handled by a get→modify→set rewrite (#139).
                 } else {
@@ -1317,7 +1520,9 @@ impl OssaBodyCtx<'_, '_> {
                 call_args.push(self.prepare_call_arg_for_expr(base, ParamConvention::MutBorrow));
                 self.prepend_receiver_type_args(receiver_ty, ta)
             };
-            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
+            return Some(
+                self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs),
+            );
         }
 
         // Concrete computed property setter
@@ -1472,7 +1677,9 @@ impl OssaBodyCtx<'_, '_> {
             // with defaults yet; add the equivalent `expand_default_args` here when
             // one surfaces (the ref accessor's params are the index params only — no
             // trailing `newValue` — so it'd expand against the full param list).
-            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
+            return Some(
+                self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs),
+            );
         }
 
         let setter = self.ctx.find_setter_child(resolved)?;
@@ -1646,7 +1853,9 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.register_name(accessor);
             let pointee_ty = self.resolve_expr_type(target_id);
             let type_args = self.prepend_receiver_type_args(field_ty, type_args);
-            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
+            return Some(
+                self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs),
+            );
         }
 
         let setter = setter.expect("setter present when no mutating ref accessor");

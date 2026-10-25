@@ -96,6 +96,16 @@ in between can clobber the value.
 
 _Defined in `lang/std/io/error.ks`._
 
+### Implements `Formattable`
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating some Formatter, FormatOptions)
+```
+
+_Defined in `lang/std/io/error.ks`._
+
 ## enum `IoErrorKind`
 
 ```kestrel

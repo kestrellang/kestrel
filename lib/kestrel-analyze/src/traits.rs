@@ -19,7 +19,6 @@ pub enum AnalyzerId {
     ExhaustiveReturn,
     DeadCode,
     GuardDivergence,
-    TypeCheck,
     ConditionCheck,
     ParamPattern,
     Assignment,
@@ -41,7 +40,9 @@ pub enum AnalyzerId {
     ProtocolMethod,
     StaticContext,
     StaticValueType,
+    ClosureField,
     BuiltinMarkerProtocol,
+    DuplicateBuiltin,
     ConformanceRules,
     DuplicateDeinit,
     DuplicateEnumCase,
@@ -53,8 +54,10 @@ pub enum AnalyzerId {
     ExternFfiSafe,
     DefaultParamOrdering,
     CloneableField,
+    ClosureKindConvention,
     DuplicateSymbol,
     DuplicateCallable,
+    FieldMethodCollision,
     ExtensionConflictDeclStub,
     ExtensionValidation,
     RecursiveEnum,
@@ -85,7 +88,6 @@ impl AnalyzerId {
             AnalyzerId::ExhaustiveReturn => "exhaustive_return",
             AnalyzerId::DeadCode => "dead_code",
             AnalyzerId::GuardDivergence => "guard_divergence",
-            AnalyzerId::TypeCheck => "type_check",
             AnalyzerId::ConditionCheck => "condition_check",
             AnalyzerId::ParamPattern => "param_pattern",
             AnalyzerId::Assignment => "assignment",
@@ -105,7 +107,9 @@ impl AnalyzerId {
             AnalyzerId::ProtocolMethod => "protocol_method",
             AnalyzerId::StaticContext => "static_context",
             AnalyzerId::StaticValueType => "static_value_type",
+            AnalyzerId::ClosureField => "closure_field",
             AnalyzerId::BuiltinMarkerProtocol => "builtin_marker_protocol",
+            AnalyzerId::DuplicateBuiltin => "duplicate_builtin",
             AnalyzerId::ConformanceRules => "conformance_rules",
             AnalyzerId::DuplicateDeinit => "duplicate_deinit",
             AnalyzerId::DuplicateEnumCase => "duplicate_enum_case",
@@ -117,8 +121,10 @@ impl AnalyzerId {
             AnalyzerId::ExternFfiSafe => "extern_ffi_safe",
             AnalyzerId::DefaultParamOrdering => "default_param_ordering",
             AnalyzerId::CloneableField => "cloneable_field",
+            AnalyzerId::ClosureKindConvention => "closure_kind_convention",
             AnalyzerId::DuplicateSymbol => "duplicate_symbol",
             AnalyzerId::DuplicateCallable => "duplicate_callable",
+            AnalyzerId::FieldMethodCollision => "field_method_collision",
             AnalyzerId::ExtensionConflictDeclStub => "extension_conflict_decl_stub",
             AnalyzerId::ExtensionValidation => "extension_validation",
             AnalyzerId::RecursiveEnum => "recursive_enum",
@@ -153,8 +159,20 @@ pub trait Describe: Send + Sync + 'static {
     /// Unique analyzer identifier (e.g. `AnalyzerId::ExhaustiveReturn`).
     fn id(&self) -> AnalyzerId;
 
-    /// Diagnostic descriptors this analyzer can produce.
+    /// Diagnostic descriptors this analyzer OWNS — the codes allocated to it.
     fn descriptors(&self) -> &'static [DiagnosticDescriptor];
+
+    /// Descriptors this analyzer emits but does **not** own — codes allocated
+    /// to another analyzer that report the same fact from a different position.
+    ///
+    /// Sharing is legitimate (`cannot find type 'X' in this scope` is E476
+    /// whether the annotation is a binding's or a where-clause subject's), but
+    /// it has to be declared. Emitting an unlisted code is how E436 came to
+    /// mean two unrelated things at once (F16); `registry.rs`'s ownership test
+    /// walks owned ∪ borrowed and rejects anything outside it.
+    fn borrowed_descriptors(&self) -> &'static [&'static DiagnosticDescriptor] {
+        &[]
+    }
 }
 
 /// Analyze function/init bodies (Roslyn: RegisterOperationBlockAction).

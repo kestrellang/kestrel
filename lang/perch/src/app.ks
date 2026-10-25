@@ -60,7 +60,7 @@ public struct App[T]: Cloneable, Routes[T] where T: Cloneable {
     // ROUTE REGISTRATION
     // ========================================================================
 
-    public mutating func addRoute(method: HttpMethod, path: String, handler: (Request, T) -> Response) {
+    public mutating func addRoute(method: HttpMethod, path: String, handler: escaping (Request, T) -> Response) {
         self.router.addRoute(method, path, handler)
     }
 
@@ -83,7 +83,7 @@ public struct App[T]: Cloneable, Routes[T] where T: Cloneable {
     ///
     /// Returns `IoError` if the TCP bind or accept fails (e.g. port
     /// already in use, permission denied).
-    public func listen(port: UInt16) -> Result[(), IoError] {
+    public func listen(port: UInt16) -> () throws IoError {
         var listener = try TcpListener.bind(port);
          println("Perch listening on port \(port)");
 

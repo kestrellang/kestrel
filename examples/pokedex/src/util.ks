@@ -9,7 +9,7 @@ public func containsLower(haystack: String, needleLower: String) -> Bool {
 
 // Capitalize first letter (ASCII), used to display "bulbasaur" -> "Bulbasaur"
 public func capitalize(s: String) -> String {
-    let len = s.byteCount;
+    let len = s.bytes.count;
     if len == 0 { return s.clone() };
     let first = s.bytes(unchecked: 0);
     // If first byte is lowercase ASCII a-z, uppercase it

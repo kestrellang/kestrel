@@ -146,31 +146,35 @@ impl BodyCheck for StringEscapeAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut out = Vec::new();
 
+        // Char literals carry escape errors exactly like string literals, so
+        // they get the same codes here. They used to be reported ad hoc by the
+        // char decoder with `ctx.accumulate` and no E-code — and not at all in
+        // pattern position, where the decoder ran with no diagnostic sink (F26).
         for (_, expr) in cx.hir.exprs.iter() {
-            if let HirExpr::Literal {
-                value: HirLiteral::String { escape_errors, .. },
-                ..
-            } = expr
-            {
-                for err in escape_errors {
-                    out.push(diagnose(err));
-                }
+            if let HirExpr::Literal { value, .. } = expr {
+                out.extend(escape_errors_of(value).iter().map(diagnose));
             }
         }
 
         for (_, pat) in cx.hir.pats.iter() {
-            if let HirPat::Literal {
-                value: HirLiteral::String { escape_errors, .. },
-                ..
-            } = pat
-            {
-                for err in escape_errors {
-                    out.push(diagnose(err));
-                }
+            if let HirPat::Literal { value, .. } = pat {
+                out.extend(escape_errors_of(value).iter().map(diagnose));
             }
         }
 
         out
+    }
+}
+
+/// Escape errors recorded on a literal, whatever its form. One accessor so a
+/// literal kind that starts carrying errors cannot be forgotten at one of the
+/// two walk sites.
+fn escape_errors_of(value: &HirLiteral) -> &[EscapeError] {
+    match value {
+        HirLiteral::String { escape_errors, .. } | HirLiteral::Char { escape_errors, .. } => {
+            escape_errors
+        },
+        _ => &[],
     }
 }
 

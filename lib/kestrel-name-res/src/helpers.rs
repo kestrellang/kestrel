@@ -69,13 +69,17 @@ pub fn is_in_std_module(ctx: &QueryContext<'_>, entity: Entity) -> bool {
 /// The entity's `Name` component wins; nameless callables fall back to the
 /// keyword sentinels `"init"` (Initializer NodeKind) and `"subscript"`
 /// (Subscript marker). Both sentinels are reserved keywords, so they can't
-/// collide with a user-declared member name. Single source of truth for
-/// member-name matching — `member_name_matches` and the build-time
-/// `MemberMap` name index both derive from it.
-pub(crate) fn member_lookup_name<'a>(
-    ctx: &'a QueryContext<'_>,
-    entity: Entity,
-) -> Option<&'a str> {
+/// collide with a user-declared member name.
+///
+/// **The single source of truth for member-name matching.** Everything that
+/// asks "what is this member called?" comes here — `member_name_matches`, the
+/// build-time `MemberMap` name index, and the conformance analyzers. There
+/// were three implementations and they keyed subscripts on *different
+/// components*: this one on the `Subscript` marker, the analyzers on
+/// `NodeKind::Subscript`. They happen to agree today only because the builder
+/// sets both; nothing enforced it, and `witness_lower.rs` already documents a
+/// place where the analogous `Callable`-vs-`Computed` split did drift.
+pub fn member_lookup_name<'a>(ctx: &'a QueryContext<'_>, entity: Entity) -> Option<&'a str> {
     if let Some(n) = ctx.get::<Name>(entity) {
         return Some(n.0.as_str());
     }
@@ -95,10 +99,14 @@ pub(crate) fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query:
 }
 
 /// Search extensions of `target` for visible members named `member_name`,
-/// keeping only those that pass `filter`. Returns the matches from the
-/// first extension that has any (extensions are not merged across), or
-/// empty if none do. Shared by value-path resolution for extension static
-/// methods and associated-type static members.
+/// keeping only those that pass `filter`. Merges across **every** extension
+/// of `target`, in `ExtensionsFor` order — the result is the complete
+/// overload set, matching what `TypeMembers` reports. Truncating to the
+/// first matching extension here is unrecoverable: value-path resolution
+/// hands this straight to `HirExpr::OverloadSet` and inference never
+/// re-widens a single `Def`, so splitting one `extend` block in two would
+/// silently drop overloads. Shared by value-path resolution for extension
+/// static methods and associated-type static members.
 pub(crate) fn find_in_extensions(
     ctx: &QueryContext<'_>,
     target: Entity,
@@ -107,22 +115,17 @@ pub(crate) fn find_in_extensions(
     root: Entity,
     filter: impl Fn(&QueryContext<'_>, Entity) -> bool,
 ) -> Vec<Entity> {
-    let extensions = ctx.query(ExtensionsFor { target, root });
-    for &ext in &extensions {
-        let matches: Vec<Entity> = ctx
-            .query(VisibleChildrenByName {
+    ctx.query(ExtensionsFor { target, root })
+        .iter()
+        .flat_map(|&ext| {
+            ctx.query(VisibleChildrenByName {
                 parent: ext,
                 name: member_name.to_string(),
                 context,
             })
-            .into_iter()
-            .filter(|&e| filter(ctx, e))
-            .collect();
-        if !matches.is_empty() {
-            return matches;
-        }
-    }
-    Vec::new()
+        })
+        .filter(|&e| filter(ctx, e))
+        .collect()
 }
 
 /// Filter discovered members down to those answering to `name` (including
@@ -160,7 +163,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let std = world.spawn();
         world.set(std, NodeKind::Module);
@@ -240,7 +243,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let user_mod = world.spawn();
         world.set(user_mod, NodeKind::Module);

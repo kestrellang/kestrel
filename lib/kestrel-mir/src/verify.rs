@@ -2,11 +2,24 @@
 //!
 //! Checks that a body satisfies the linear ownership invariant: every @owned
 //! value is consumed exactly once, borrows are properly scoped, and address
-//! init/uninit state is consistent. The algorithm is a single forward BFS walk
-//! over the CFG — no fixpoint needed because the block-parameter live-in
-//! contract guarantees each block can be verified in isolation.
-
-use std::collections::VecDeque;
+//! init/uninit state is consistent.
+//!
+//! The algorithm is a single forward walk over the reachable blocks in RPO,
+//! and each block is verified **in isolation** from an empty `FlowState`.
+//!
+//! That isolation is not justified. This module used to claim "no fixpoint
+//! needed because the block-parameter live-in contract guarantees each block
+//! can be verified in isolation" — there is no such contract. MIR lowering
+//! uses the ordinary SSA dominance rule (a block may reference any definition
+//! that dominates it), which is why `check_operands_defined` pools definitions
+//! across every block. Enforcing the claimed contract was measured against the
+//! suite and rejects the stdlib outright (audit finding F34, and the
+//! "Corrections" section of `docs/fragility-audit.md`).
+//!
+//! The consequence is a real hole: leaks are caught, but a value consumed in
+//! two *different* blocks is invisible, because `owned` starts empty in each.
+//! Closing it means flowing `FlowState` along CFG edges to a fixpoint with a
+//! join at merge points — not reshaping lowering.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -14,11 +27,149 @@ use kestrel_hecs::Entity;
 use kestrel_span::Span;
 
 use crate::body::OssaBody;
+use crate::callee::Callee;
 use crate::inst::InstKind;
 use crate::terminator::TerminatorKind;
-use crate::ty::ParamConvention;
+use crate::ty::{ParamConvention, TyArena};
 use crate::value::Ownership;
 use crate::{BlockId, FieldIdx, MirModule, TyId, ValueId};
+
+// ---------------------------------------------------------------------------
+// Flow-sensitivity mode
+// ---------------------------------------------------------------------------
+
+/// How much of the flow-sensitive ownership walk is active.
+///
+/// Staged deliberately: the walk newly reports whole classes of violation that
+/// have never been checked (cross-block double-consume, use-after-consume
+/// across a merge), and any hit inside shipped code is a latent bug that has
+/// to be fixed rather than silenced. `Warn` exists to measure that blast
+/// radius against the suite before anything hard-fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlowMode {
+    /// Block-local walk, exactly as before flow-sensitivity existed.
+    Off,
+    /// State flows; newly-reachable violations are counted and summarised on
+    /// stderr but do NOT fail the build.
+    Warn,
+    /// State flows; newly-reachable violations are hard errors.
+    Enforce,
+}
+
+impl FlowMode {
+    fn current() -> FlowMode {
+        use std::sync::OnceLock;
+        static MODE: OnceLock<FlowMode> = OnceLock::new();
+        *MODE.get_or_init(|| {
+            FlowMode::parse(std::env::var("KESTREL_VERIFY_FLOW").ok().as_deref())
+        })
+    }
+
+    /// Split out from `current` so the parse is testable: `current` memoises
+    /// per process, so a test cannot exercise both settings through it.
+    ///
+    /// `Enforce` is the DEFAULT. Flow-sensitive ownership checking was staged
+    /// behind this variable while it was measured; the corpus that blocked
+    /// turning it on (931 testdata files reporting 4655 violations, all from
+    /// one argument-lowering bug) is now at zero, so an unset variable means
+    /// the checking is live. `off` remains as an escape hatch for bisecting a
+    /// suspected false positive.
+    fn parse(value: Option<&str>) -> FlowMode {
+        match value {
+            Some("off") => FlowMode::Off,
+            Some("warn") => FlowMode::Warn,
+            _ => FlowMode::Enforce,
+        }
+    }
+
+    fn flows(self) -> bool {
+        self != FlowMode::Off
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The module seam
+// ---------------------------------------------------------------------------
+
+/// Everything the ownership walk needs to know about the enclosing module.
+///
+/// The walk itself is pure CFG + ownership reasoning and is identical pre- and
+/// post-monomorphization, but the two modules answer these two questions
+/// differently: `MirModule` keys its structs by `Entity`, `MonoModule` by
+/// `(Entity, type_args)`. Abstracting exactly these two lets the same verifier
+/// run over a `MonoFunction` body, where copyability is CONCRETE and
+/// instantiation-specific violations become visible — a pre-mono sweep reports
+/// zero on programs that double-free, because pre-mono there is only the
+/// generic body.
+///
+/// `ret_borrow` is deliberately NOT here: it is per-function, `MonoFunction`
+/// already stores it as a precomputed bit, and `MirModule` derives it from the
+/// entity — so it is threaded in as an argument instead of looked up.
+pub trait VerifyModule {
+    fn ty_arena(&self) -> &TyArena;
+
+    /// Number of fields for a named struct type, or `None` if `ty` is not one.
+    fn struct_field_count(&self, ty: TyId) -> Option<usize>;
+
+    /// Declared parameter count of a statically-known callee, or `None` when
+    /// the callee is indirect / a witness / not resolvable in this module.
+    ///
+    /// Backstop for lowering bugs that build a `Call` whose argument list does
+    /// not match the target's signature — the class of bug G3 was (a synthesized
+    /// wrapper dropping a real parameter). Count only: per-argument TYPE
+    /// verification here would need substitution, ref-decay and ByVal/ByRef
+    /// reasoning and would false-positive corpus-wide; the exact per-position
+    /// type check lives in `passes::thunk`, where the types of the REAL params
+    /// are literally the same `TyId`s. Note the env pointer at index 0 is not —
+    /// a thunk's env param is type-erased to `Pointer[()]` by design, and
+    /// comparing `TyId`s there panicked on every stdlib program; see the
+    /// backstop comment in `passes::thunk`.
+    fn callee_declared_arity(&self, callee: &Callee) -> Option<usize>;
+}
+
+impl VerifyModule for MirModule {
+    fn ty_arena(&self) -> &TyArena {
+        &self.ty_arena
+    }
+
+    fn struct_field_count(&self, ty: TyId) -> Option<usize> {
+        if let crate::ty::MirTy::Named { entity, .. } = self.ty_arena.get(ty)
+            && let Some(s) = self.structs.get(entity)
+        {
+            return Some(s.fields.len());
+        }
+        None
+    }
+
+    fn callee_declared_arity(&self, callee: &Callee) -> Option<usize> {
+        match callee {
+            Callee::Direct { func, .. } => self.functions.get(func).map(|f| f.params.len()),
+            _ => None,
+        }
+    }
+}
+
+impl VerifyModule for crate::mono::types::MonoModule {
+    fn ty_arena(&self) -> &TyArena {
+        &self.ty_arena
+    }
+
+    fn struct_field_count(&self, ty: TyId) -> Option<usize> {
+        if let crate::ty::MirTy::Named { entity, type_args } = self.ty_arena.get(ty)
+            && let Some(s) = self.structs.get(&(*entity, type_args.clone()))
+        {
+            return Some(s.fields.len());
+        }
+        None
+    }
+
+    fn callee_declared_arity(&self, callee: &Callee) -> Option<usize> {
+        match callee {
+            Callee::Resolved(id) => self.functions.get(id.index()).map(|f| f.params.len()),
+            _ => None,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -60,47 +211,196 @@ pub fn verify_ossa(
     func_name: &str,
     entity: Entity,
 ) -> Vec<VerifyError> {
+    let ret_borrow = module.functions.get(&entity).is_some_and(|f| {
+        matches!(
+            crate::item::function::ret_convention(&module.ty_arena, f.ret),
+            crate::item::function::RetConvention::RefBorrow { .. }
+        )
+    });
+    verify_ossa_with_mode(body, module, func_name, entity, ret_borrow, FlowMode::current())
+}
+
+/// The same ownership walk over a MONOMORPHIZED body.
+///
+/// Worth running even though the pre-mono walk already passed: copyability is
+/// concrete here, so violations that only exist at one instantiation become
+/// visible. A pre-mono sweep is blind to those by construction — it reports
+/// zero across the whole corpus on programs that double-free at runtime,
+/// because pre-mono there is only the one generic body.
+///
+/// `ret_borrow` comes from `MonoFunction::ret_borrow`, which mono already
+/// computed; there is no function table to look it up in here.
+pub fn verify_ossa_mono(
+    body: &OssaBody,
+    module: &crate::mono::types::MonoModule,
+    func_name: &str,
+    entity: Entity,
+    ret_borrow: bool,
+) -> Vec<VerifyError> {
+    verify_ossa_with_mode(body, module, func_name, entity, ret_borrow, FlowMode::current())
+}
+
+/// `verify_ossa` with the flow mode supplied rather than read from the
+/// environment. The environment is consulted once per process, so tests that
+/// need a specific mode must inject it here.
+fn verify_ossa_with_mode(
+    body: &OssaBody,
+    module: &dyn VerifyModule,
+    func_name: &str,
+    entity: Entity,
+    ret_borrow: bool,
+    mode: FlowMode,
+) -> Vec<VerifyError> {
     let mut errors = Vec::new();
 
     // Check 1: ValueId uniqueness — every value defined exactly once.
-    check_value_uniqueness(body, func_name, entity, &mut errors);
+    // The returned map (value -> defining block) feeds Check 1c below, which
+    // needs to know where a value was defined to ask whether that definition
+    // dominates the use. Built here either way, so returning it avoids a
+    // second full traversal.
+    let def_blocks = check_value_uniqueness(body, func_name, entity, &mut errors);
 
     // Check 1b: every operand must have a definition (block param or instruction result).
     check_operands_defined(body, func_name, entity, &mut errors);
 
-    // Forward BFS walk from the entry block.
-    let mut visited = FxHashSet::default();
-    let mut queue = VecDeque::new();
-    queue.push_back(body.entry);
+    let order = reverse_postorder(body);
+    let aliases = AddrAliases::build(body);
 
-    while let Some(block_id) = queue.pop_front() {
-        if !visited.insert(block_id) {
-            continue;
-        }
-        verify_block(body, module, block_id, func_name, entity, &mut errors);
-
-        // Enqueue successors.
-        let block = body.block(block_id);
-        for succ in block.terminator.kind.successors() {
-            if !visited.contains(&succ) {
-                queue.push_back(succ);
+    // Check 1c: definitions must dominate their uses. Gated with the rest of
+    // the flow work so `Off` remains exactly the historical behaviour, and
+    // staged the same way: `Warn` reports without failing the build, only
+    // `Enforce` turns a violation into a hard error. Measured at zero across
+    // the 3573-file corpus, so this is a guard against regressions rather
+    // than a live finding.
+    let mut dominance_findings = Vec::new();
+    if mode.flows() {
+        check_dominance(
+            body,
+            &order,
+            &def_blocks,
+            func_name,
+            entity,
+            &mut dominance_findings,
+        );
+        match mode {
+            FlowMode::Enforce => errors.append(&mut dominance_findings),
+            _ => {
+                if !dominance_findings.is_empty() {
+                    report_flow_findings(func_name, &dominance_findings);
+                }
             }
         }
     }
 
+    // Phase 1: solve for each block's entry state.
+    //
+    // Off: every block starts empty, i.e. the original block-local walk, and
+    // no ownership state crosses a block boundary (audit finding F34).
+    //
+    // Otherwise: forward dataflow to a fixpoint. Termination — the transfer
+    // function is monotone (an instruction either leaves a value's state
+    // untouched, or sets it to a constant independent of the incoming state),
+    // `join` only ever moves a state up the lattice, and each of the finitely
+    // many values has a 3-height lattice, so entry states can change only
+    // finitely often.
+    let mut in_states: FxHashMap<BlockId, FlowState> = FxHashMap::default();
+    if mode.flows() {
+        in_states.insert(body.entry, entry_state(body));
+
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for &block_id in &order {
+                let entry = in_states.get(&block_id).cloned().unwrap_or_default();
+                // `report: false` — findings from a not-yet-settled state are
+                // meaningless, and re-running would duplicate them.
+                let outcome = verify_block(
+                    body, module, block_id, func_name, entity, ret_borrow, entry, false, mode,
+                    &aliases,
+                );
+                for succ in body.block(block_id).terminator.kind.successors() {
+                    match in_states.get_mut(&succ) {
+                        Some(existing) => {
+                            if existing.join(&outcome.out_state) {
+                                changed = true;
+                            }
+                        },
+                        None => {
+                            in_states.insert(succ, outcome.out_state.clone());
+                            changed = true;
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+    // Phase 2: report once, against the settled entry states.
+    let mut flow_findings = Vec::new();
+    for block_id in order {
+        let entry = in_states.get(&block_id).cloned().unwrap_or_default();
+        let outcome = verify_block(
+            body, module, block_id, func_name, entity, ret_borrow, entry, true, mode, &aliases,
+        );
+        errors.extend(outcome.errors);
+        flow_findings.extend(outcome.flow_findings);
+    }
+
+    if !flow_findings.is_empty() {
+        report_flow_findings(func_name, &flow_findings);
+    }
+
     errors
+}
+
+/// Ownership state on entry to the function.
+///
+/// Consuming parameters arrive owned and un-consumed. They are not block
+/// params, so nothing else would ever track them: without seeding, every
+/// consume of a parameter falls into the untracked `None` arm and the walk is
+/// blind to a parameter consumed twice.
+fn entry_state(body: &OssaBody) -> FlowState {
+    let mut state = FlowState::default();
+    for i in 0..body.param_count {
+        let v = ValueId::new(i);
+        if body
+            .values
+            .get(v.index())
+            .is_some_and(|vd| vd.ownership == Ownership::Owned)
+        {
+            state.owned.insert(v, ValueState::Live);
+        }
+    }
+    state
+}
+
+/// Summarise newly-visible violations on stderr. `Warn` mode only — this is a
+/// measurement aid for staging the flow-sensitive walk, not a diagnostic
+/// surface, so it deliberately bypasses the diagnostic machinery.
+fn report_flow_findings(func_name: &str, findings: &[VerifyError]) {
+    eprintln!(
+        "[KESTREL_VERIFY_FLOW] {} newly-visible ownership violation(s) in '{}':",
+        findings.len(),
+        func_name,
+    );
+    for f in findings {
+        eprintln!("  {:?}[{:?}]: {}", f.block, f.inst, f.message);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Check 1: ValueId uniqueness
 // ---------------------------------------------------------------------------
 
+/// Returns the definition map (`ValueId` -> defining block) it builds anyway,
+/// so later checks don't recompute it. On a duplicate definition the *first*
+/// block wins the map entry and the duplicate is reported.
 fn check_value_uniqueness(
     body: &OssaBody,
     func_name: &str,
     entity: Entity,
     errors: &mut Vec<VerifyError>,
-) {
+) -> FxHashMap<ValueId, BlockId> {
     // Map from ValueId -> (block that defined it).
     let mut definitions: FxHashMap<ValueId, BlockId> = FxHashMap::default();
 
@@ -151,6 +451,359 @@ fn check_value_uniqueness(
                 }
             }
         }
+    }
+
+    definitions
+}
+
+// ---------------------------------------------------------------------------
+// Block ordering
+// ---------------------------------------------------------------------------
+
+/// Reachable blocks in reverse postorder.
+///
+/// RPO visits every block after at least one of its predecessors except across
+/// back edges, which is the order a forward dataflow fixpoint wants: it
+/// minimises the number of times a block has to be re-analysed. Today the walk
+/// carries no state between blocks so any order would do, but the ordering is
+/// the seam the flow-sensitive walk plugs into. Unreachable blocks are
+/// excluded, exactly as the previous BFS excluded them.
+fn reverse_postorder(body: &OssaBody) -> Vec<BlockId> {
+    let mut postorder = Vec::new();
+    let mut visited = FxHashSet::default();
+    // Explicit stack: (block, next successor index) — recursion would blow the
+    // stack on long function bodies.
+    let mut stack: Vec<(BlockId, usize)> = vec![(body.entry, 0)];
+    visited.insert(body.entry);
+
+    while let Some((block_id, succ_idx)) = stack.pop() {
+        let successors = body.block(block_id).terminator.kind.successors();
+        if succ_idx < successors.len() {
+            stack.push((block_id, succ_idx + 1));
+            let succ = successors[succ_idx];
+            if visited.insert(succ) {
+                stack.push((succ, 0));
+            }
+        } else {
+            postorder.push(block_id);
+        }
+    }
+
+    postorder.reverse();
+    postorder
+}
+
+// ---------------------------------------------------------------------------
+// Dominance
+// ---------------------------------------------------------------------------
+
+/// Immediate dominators, indexed by block, for the reachable CFG.
+///
+/// Cooper-Harvey-Kennedy: iterate over blocks in RPO, intersecting the
+/// already-computed idoms of each block's processed predecessors, until
+/// nothing changes. Small and adequate here — bodies are function-sized.
+///
+/// `None` for the entry block and for unreachable blocks.
+fn immediate_dominators(body: &OssaBody, order: &[BlockId]) -> FxHashMap<BlockId, Option<BlockId>> {
+    // Position in RPO; also the "have we processed this yet" test.
+    let mut rpo_index: FxHashMap<BlockId, usize> = FxHashMap::default();
+    for (i, &b) in order.iter().enumerate() {
+        rpo_index.insert(b, i);
+    }
+
+    let mut preds: FxHashMap<BlockId, Vec<BlockId>> = FxHashMap::default();
+    for &b in order {
+        for succ in body.block(b).terminator.kind.successors() {
+            if rpo_index.contains_key(&succ) {
+                preds.entry(succ).or_default().push(b);
+            }
+        }
+    }
+
+    let mut idom: FxHashMap<BlockId, Option<BlockId>> = FxHashMap::default();
+    for &b in order {
+        idom.insert(b, None);
+    }
+    // The entry dominates itself; represented by staying `None` while being
+    // treated as "processed" below.
+    let mut processed: FxHashSet<BlockId> = FxHashSet::default();
+    processed.insert(body.entry);
+
+    let intersect = |mut a: BlockId,
+                     mut b: BlockId,
+                     idom: &FxHashMap<BlockId, Option<BlockId>>,
+                     rpo_index: &FxHashMap<BlockId, usize>|
+     -> BlockId {
+        // Walk both up the dominator tree until they meet.
+        while a != b {
+            while rpo_index[&a] > rpo_index[&b] {
+                match idom.get(&a).copied().flatten() {
+                    Some(next) => a = next,
+                    None => return b,
+                }
+            }
+            while rpo_index[&b] > rpo_index[&a] {
+                match idom.get(&b).copied().flatten() {
+                    Some(next) => b = next,
+                    None => return a,
+                }
+            }
+        }
+        a
+    };
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &b in order {
+            if b == body.entry {
+                continue;
+            }
+            let Some(bpreds) = preds.get(&b) else {
+                continue;
+            };
+            let mut new_idom: Option<BlockId> = None;
+            for &p in bpreds {
+                if !processed.contains(&p) {
+                    continue;
+                }
+                new_idom = Some(match new_idom {
+                    None => p,
+                    Some(cur) => intersect(p, cur, &idom, &rpo_index),
+                });
+            }
+            if let Some(candidate) = new_idom
+                && idom.get(&b).copied().flatten() != Some(candidate)
+            {
+                idom.insert(b, Some(candidate));
+                processed.insert(b);
+                changed = true;
+            }
+            processed.insert(b);
+        }
+    }
+
+    idom
+}
+
+/// Does `a` dominate `b`? Walks `b` up the dominator tree.
+fn dominates(a: BlockId, b: BlockId, idom: &FxHashMap<BlockId, Option<BlockId>>) -> bool {
+    let mut cur = b;
+    loop {
+        if cur == a {
+            return true;
+        }
+        match idom.get(&cur).copied().flatten() {
+            Some(next) => cur = next,
+            None => return false,
+        }
+    }
+}
+
+/// Check 1c: every operand's definition must DOMINATE its use.
+///
+/// This is the sound version of a check the audit originally prescribed for
+/// F34 — "every operand must be defined by this block's params or an earlier
+/// instruction in it". That was implemented and measured, and it rejects the
+/// stdlib: lowering uses the ordinary SSA rule, where a block may reference
+/// any definition that dominates it. Dominance is the property that actually
+/// holds, and the one that makes a definition meaningful at a use site.
+///
+/// `check_operands_defined` only asks whether a definition exists ANYWHERE,
+/// so it accepts a use that a definition cannot reach.
+fn check_dominance(
+    body: &OssaBody,
+    order: &[BlockId],
+    def_blocks: &FxHashMap<ValueId, BlockId>,
+    func_name: &str,
+    entity: Entity,
+    errors: &mut Vec<VerifyError>,
+) {
+    let idom = immediate_dominators(body, order);
+
+    for &block_id in order {
+        let block = body.block(block_id);
+
+        // Values usable at the top of this block without dominance analysis.
+        let mut available: FxHashSet<ValueId> = FxHashSet::default();
+        for param in &block.params {
+            available.insert(param.value);
+        }
+        if block_id == body.entry {
+            for i in 0..body.param_count {
+                available.insert(ValueId::new(i));
+            }
+        }
+
+        let check = |operand: ValueId,
+                         inst: Option<u32>,
+                         span: Option<Span>,
+                         available: &FxHashSet<ValueId>,
+                         errors: &mut Vec<VerifyError>| {
+            if available.contains(&operand) {
+                return;
+            }
+            let Some(&def_block) = def_blocks.get(&operand) else {
+                // No definition at all — check_operands_defined reports that.
+                return;
+            };
+            if def_block == block_id {
+                // Defined in this block but not yet available: used before it
+                // was produced.
+                errors.push(VerifyError {
+                    block: block_id,
+                    inst,
+                    message: format!(
+                        "operand {operand:?} is used before it is defined in {block_id:?}"
+                    ),
+                    span,
+                    func_name: func_name.to_string(),
+                    entity,
+                    diag: None,
+                });
+                return;
+            }
+            if !dominates(def_block, block_id, &idom) {
+                errors.push(VerifyError {
+                    block: block_id,
+                    inst,
+                    message: format!(
+                        "operand {operand:?} is defined in {def_block:?}, which does not \
+                         dominate {block_id:?} — the definition cannot be guaranteed to \
+                         have executed, so it must arrive as a block parameter"
+                    ),
+                    span,
+                    func_name: func_name.to_string(),
+                    entity,
+                    diag: None,
+                });
+            }
+        };
+
+        for (inst_idx, inst) in block.insts.iter().enumerate() {
+            for operand in inst.kind.operands() {
+                check(
+                    operand,
+                    Some(inst_idx as u32),
+                    inst.span.clone(),
+                    &available,
+                    errors,
+                );
+            }
+            for result in inst.kind.results() {
+                available.insert(result);
+            }
+        }
+        for operand in block.terminator.kind.operands() {
+            check(
+                operand,
+                None,
+                block.terminator.span.clone(),
+                &available,
+                errors,
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Address aliasing
+// ---------------------------------------------------------------------------
+
+/// Which underlying slot each address-typed value refers to.
+///
+/// An address created by `Uninit` in one block and threaded to a successor as
+/// a block argument arrives there under a *different* `ValueId`. Both name the
+/// same storage, and lowering mixes them freely — the guarded-destroy shape
+/// takes through the renamed param but destroys through the original id. A
+/// per-`ValueId` init map is blind to that in both directions: the take
+/// appears to touch an untracked address, and the destroy sees a slot that is
+/// still `Init`.
+///
+/// So collapse every address to the `Uninit` that created it, and key init
+/// state by that root instead. Flow-insensitive and computed once per body.
+#[derive(Debug, Default)]
+struct AddrAliases {
+    /// address value -> the `Uninit` result that created its storage.
+    root: FxHashMap<ValueId, ValueId>,
+    /// Params reachable from two *different* roots. Nothing can be said about
+    /// their storage, so they are untracked — which is exactly how the walk
+    /// behaved for every cross-block address before aliasing existed.
+    poisoned: FxHashSet<ValueId>,
+    /// `FieldAddr` result -> (root address, field). Whole-function, so a
+    /// projection taken in one block is still understood in another.
+    field_of: FxHashMap<ValueId, (ValueId, FieldIdx)>,
+}
+
+impl AddrAliases {
+    fn build(body: &OssaBody) -> AddrAliases {
+        let mut aliases = AddrAliases::default();
+
+        // Roots.
+        for block in &body.blocks {
+            for inst in &block.insts {
+                if let InstKind::Uninit { result, .. } = &inst.kind {
+                    aliases.root.insert(*result, *result);
+                }
+            }
+        }
+
+        // Propagate along block-argument bindings to a fixpoint: a param's
+        // root may only become known after a later terminator is processed,
+        // and back edges mean one pass is not enough.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for block in &body.blocks {
+                for (succ, args) in block.terminator.kind.successor_args() {
+                    let params = &body.block(succ).params;
+                    for (arg, param) in args.iter().zip(params.iter()) {
+                        let Some(&arg_root) = aliases.root.get(arg) else {
+                            continue;
+                        };
+                        if aliases.poisoned.contains(&param.value) {
+                            continue;
+                        }
+                        match aliases.root.get(&param.value) {
+                            Some(&existing) if existing == arg_root => {},
+                            Some(_) => {
+                                // Two different slots reach this param.
+                                aliases.root.remove(&param.value);
+                                aliases.poisoned.insert(param.value);
+                                changed = true;
+                            },
+                            None => {
+                                aliases.root.insert(param.value, arg_root);
+                                changed = true;
+                            },
+                        }
+                    }
+                }
+            }
+        }
+
+        // Field projections, now that roots are settled.
+        for block in &body.blocks {
+            for inst in &block.insts {
+                if let InstKind::FieldAddr {
+                    result, base, field, ..
+                } = &inst.kind
+                    && let Some(&base_root) = aliases.root.get(base)
+                {
+                    aliases.field_of.insert(*result, (base_root, *field));
+                }
+            }
+        }
+
+        aliases
+    }
+
+    /// The slot `v` names, or `None` when it cannot be attributed to one.
+    fn resolve(&self, v: ValueId) -> Option<ValueId> {
+        if self.poisoned.contains(&v) {
+            return None;
+        }
+        self.root.get(&v).copied()
     }
 }
 
@@ -227,6 +880,21 @@ fn check_operands_defined(
 enum ValueState {
     Live,
     Consumed,
+    /// Consumed on some incoming paths but not others. Legal: this is how a
+    /// conditional move looks once control flow merges, and the runtime drop
+    /// flag is what makes it safe. Every operation on a `Maybe` state is
+    /// therefore PERMITTED — the walk reports only *definite* violations.
+    MaybeConsumed,
+}
+
+impl ValueState {
+    fn join(self, other: Self) -> Self {
+        if self == other {
+            self
+        } else {
+            ValueState::MaybeConsumed
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -235,10 +903,25 @@ struct BorrowInfo {
     is_mut: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InitState {
     Init,
     Uninit,
+    /// Init on some incoming paths, uninit on others — the guarded-destroy
+    /// shape (`emit_guarded_destroy`) that a drop flag resolves at runtime.
+    /// Mirrors lowering's own `VarInit::MaybeUninit`; permissive, like
+    /// `ValueState::MaybeConsumed`.
+    MaybeInit,
+}
+
+impl InitState {
+    fn join(self, other: Self) -> Self {
+        if self == other {
+            self
+        } else {
+            InitState::MaybeInit
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -251,9 +934,118 @@ enum AddrKind {
     },
 }
 
-struct BlockVerifier<'a> {
+/// The part of the verifier's state that is a property of a *program point*
+/// rather than of a block: what each `@owned` value's consumption state is and
+/// what each address's init state is.
+///
+/// Split out because these are the two maps that must eventually flow along
+/// CFG edges and be joined at merge points. Everything else on `FlowVerifier`
+/// is either immutable context or genuinely block-scoped (borrows are required
+/// to end or be forwarded within their block, which Check 4 enforces).
+#[derive(Debug, Clone, Default)]
+struct FlowState {
+    /// Tracks @owned values: Live or Consumed.
+    owned: FxHashMap<ValueId, ValueState>,
+    /// Address init states.
+    addrs: FxHashMap<ValueId, AddrKind>,
+}
+
+impl FlowState {
+    /// Merge `other` (an incoming edge's out-state) into `self`. Returns
+    /// whether anything changed, which is the fixpoint's termination signal.
+    ///
+    /// A key absent from one side keeps the present side's value rather than
+    /// becoming `Maybe`: absence means "this path never mentioned the value",
+    /// not "this path left it in the other state". Values are only reachable
+    /// where they are defined, so a genuine partial-definition would have been
+    /// caught by Check 1b already.
+    fn join(&mut self, other: &FlowState) -> bool {
+        let mut changed = false;
+
+        for (&v, &incoming) in &other.owned {
+            match self.owned.get(&v) {
+                Some(&existing) => {
+                    let merged = existing.join(incoming);
+                    if merged != existing {
+                        self.owned.insert(v, merged);
+                        changed = true;
+                    }
+                },
+                None => {
+                    self.owned.insert(v, incoming);
+                    changed = true;
+                },
+            }
+        }
+
+        for (&a, incoming) in &other.addrs {
+            match self.addrs.get(&a) {
+                Some(existing) => {
+                    if let Some(merged) = existing.join(incoming) {
+                        self.addrs.insert(a, merged);
+                        changed = true;
+                    }
+                },
+                None => {
+                    self.addrs.insert(a, incoming.clone());
+                    changed = true;
+                },
+            }
+        }
+
+        changed
+    }
+}
+
+impl AddrKind {
+    /// Merge two address states, returning `Some(merged)` only when the result
+    /// differs from `self` (so the caller can track fixpoint progress).
+    ///
+    /// A `Whole` meeting a `SubField` collapses to `Whole`: the paths disagree
+    /// about whether the slot is field-tracked at all, and whole-tracking is
+    /// the conservative reading (any `Maybe` field makes the whole `Maybe`).
+    fn join(&self, other: &AddrKind) -> Option<AddrKind> {
+        let merged = match (self, other) {
+            (AddrKind::Whole(a), AddrKind::Whole(b)) => AddrKind::Whole(a.join(*b)),
+            (
+                AddrKind::SubField { ty, fields: fa },
+                AddrKind::SubField { fields: fb, .. },
+            ) => {
+                let mut fields = fa.clone();
+                for (&idx, &b) in fb {
+                    let merged = match fa.get(&idx) {
+                        Some(&a) => a.join(b),
+                        None => b,
+                    };
+                    fields.insert(idx, merged);
+                }
+                AddrKind::SubField { ty: *ty, fields }
+            },
+            // Mixed tracking granularity — collapse to whole.
+            (AddrKind::Whole(a), AddrKind::SubField { fields, .. })
+            | (AddrKind::SubField { fields, .. }, AddrKind::Whole(a)) => {
+                let collapsed = fields
+                    .values()
+                    .copied()
+                    .fold(*a, |acc, f| acc.join(f));
+                AddrKind::Whole(collapsed)
+            },
+        };
+        if merged.same_as(self) { None } else { Some(merged) }
+    }
+
+    fn same_as(&self, other: &AddrKind) -> bool {
+        match (self, other) {
+            (AddrKind::Whole(a), AddrKind::Whole(b)) => a == b,
+            (AddrKind::SubField { fields: a, .. }, AddrKind::SubField { fields: b, .. }) => a == b,
+            _ => false,
+        }
+    }
+}
+
+struct FlowVerifier<'a> {
     body: &'a OssaBody,
-    _module: &'a MirModule,
+    _module: &'a dyn VerifyModule,
     block_id: BlockId,
     func_name: &'a str,
     entity: Entity,
@@ -263,8 +1055,22 @@ struct BlockVerifier<'a> {
     /// function is an ICE (the copy guards must have copied it to @owned).
     ret_borrow: bool,
 
-    /// Tracks @owned values: Live or Consumed.
-    owned: FxHashMap<ValueId, ValueState>,
+    /// Flowing state (owned/addr maps) — see `FlowState`.
+    state: FlowState,
+    /// How to treat violations that only became visible because state flowed
+    /// in from a predecessor.
+    mode: FlowMode,
+    /// Suppress error construction during fixpoint iterations; only the final
+    /// reporting pass records anything.
+    report: bool,
+    /// Values defined by THIS block (params + instruction results). A
+    /// violation naming one of these was already reachable under the
+    /// block-local walk, so it stays a hard error regardless of mode;
+    /// anything else is newly-visible and is gated by `mode`.
+    defined_here: FxHashSet<ValueId>,
+    /// Newly-visible violations, held separately so `Warn` can report a
+    /// summary without failing the build.
+    flow_findings: Vec<VerifyError>,
     /// Active borrows keyed by the @guaranteed result value.
     borrows: FxHashMap<ValueId, BorrowInfo>,
     /// Live references: @guaranteed call results (only ref-returning calls
@@ -273,28 +1079,23 @@ struct BlockVerifier<'a> {
     /// borrow that a live ref chains through was kept alive *by* the ref,
     /// so the conflict is the user's (E498), not a lowering bug (ICE).
     refs: FxHashMap<ValueId, ValueId>,
-    /// Address init states.
-    addrs: FxHashMap<ValueId, AddrKind>,
-    /// Maps a FieldAddr result -> (base_addr, field_idx).
-    field_addr_map: FxHashMap<ValueId, (ValueId, FieldIdx)>,
+    /// Whole-function address aliasing: which slot each address names.
+    aliases: &'a AddrAliases,
 
     errors: Vec<VerifyError>,
 }
 
-impl<'a> BlockVerifier<'a> {
+impl<'a> FlowVerifier<'a> {
     fn new(
         body: &'a OssaBody,
-        module: &'a MirModule,
+        module: &'a dyn VerifyModule,
         block_id: BlockId,
         func_name: &'a str,
         entity: Entity,
+        ret_borrow: bool,
+        state: FlowState,
+        aliases: &'a AddrAliases,
     ) -> Self {
-        let ret_borrow = module.functions.get(&entity).is_some_and(|f| {
-            matches!(
-                crate::item::function::ret_convention(&module.ty_arena, f.ret),
-                crate::item::function::RetConvention::RefBorrow { .. }
-            )
-        });
         Self {
             body,
             _module: module,
@@ -302,11 +1103,14 @@ impl<'a> BlockVerifier<'a> {
             func_name,
             entity,
             ret_borrow,
-            owned: FxHashMap::default(),
+            state,
+            mode: FlowMode::current(),
+            report: true,
+            defined_here: FxHashSet::default(),
+            flow_findings: Vec::new(),
             borrows: FxHashMap::default(),
             refs: FxHashMap::default(),
-            addrs: FxHashMap::default(),
-            field_addr_map: FxHashMap::default(),
+            aliases,
             errors: Vec::new(),
         }
     }
@@ -338,6 +1142,12 @@ impl<'a> BlockVerifier<'a> {
     }
 
     fn push_err(&mut self, inst: Option<u32>, span: Option<Span>, message: String) {
+        // Fixpoint iterations re-run the transfer function; only the final
+        // reporting pass records. Without this, errors are duplicated once per
+        // iteration and their order depends on how fast the fixpoint settles.
+        if !self.report {
+            return;
+        }
         self.errors.push(VerifyError {
             block: self.block_id,
             inst,
@@ -351,9 +1161,40 @@ impl<'a> BlockVerifier<'a> {
 
     // -- Ownership helpers --
 
-    /// Record that an @owned value has been produced.
+    /// Record that an @owned value has been produced. A definition OVERWRITES
+    /// any inherited state, which is what makes loops sound: a value defined
+    /// and consumed inside a loop body re-enters via the back edge as
+    /// `Consumed`, and its defining instruction resets it to `Live`.
     fn define_owned(&mut self, v: ValueId) {
-        self.owned.insert(v, ValueState::Live);
+        self.state.owned.insert(v, ValueState::Live);
+        self.defined_here.insert(v);
+    }
+
+    /// Report a violation that may only be visible because ownership state
+    /// flowed in from a predecessor block.
+    ///
+    /// If the value was defined in this block the finding was already
+    /// reachable block-locally, so it is a hard error as before. Otherwise it
+    /// is new, and `Warn` collects it for the summary instead of failing.
+    fn flow_err(&mut self, v: ValueId, inst: Option<u32>, message: String) {
+        if self.defined_here.contains(&v) || self.mode == FlowMode::Enforce {
+            self.err_val(inst, v, message);
+            return;
+        }
+        if self.report && self.mode == FlowMode::Warn {
+            let span = self
+                .inst_span(inst)
+                .or_else(|| self.body.value(v).span.clone());
+            self.flow_findings.push(VerifyError {
+                block: self.block_id,
+                inst,
+                message,
+                span,
+                func_name: self.func_name.to_string(),
+                entity: self.entity,
+                diag: None,
+            });
+        }
     }
 
     /// Attempt to consume an @owned value. Returns false if already consumed.
@@ -376,15 +1217,14 @@ impl<'a> BlockVerifier<'a> {
         if ownership != Ownership::Owned {
             return true; // not tracked
         }
-        match self.owned.get(&v) {
+        match self.state.owned.get(&v) {
             Some(ValueState::Live) => {
                 // Check borrow provenance: cannot consume while borrowed.
                 let blocking: Vec<ValueId> = self
                     .borrows
                     .iter()
                     .filter(|(borrow_val, info)| {
-                        info.source == v
-                            && !exempt.is_some_and(|e| e.contains(borrow_val))
+                        info.source == v && !exempt.is_some_and(|e| e.contains(borrow_val))
                     })
                     .map(|(borrow_val, _)| *borrow_val)
                     .collect();
@@ -408,19 +1248,91 @@ impl<'a> BlockVerifier<'a> {
                         );
                     }
                 }
-                self.owned.insert(v, ValueState::Consumed);
+                self.state.owned.insert(v, ValueState::Consumed);
+                true
+            },
+            Some(ValueState::MaybeConsumed) => {
+                // Consumed on some incoming paths only — the drop-flag shape.
+                // Permitted; the runtime flag decides. Definitely consumed
+                // from here on, so a *later* consume is still catchable.
+                self.state.owned.insert(v, ValueState::Consumed);
                 true
             },
             Some(ValueState::Consumed) => {
-                self.err_val(inst, v, format!("value {:?} consumed more than once", v));
+                self.flow_err(v, inst, format!("value {:?} consumed more than once", v));
                 false
             },
             None => {
-                // Value not tracked in this block — likely defined elsewhere.
-                // We still flag it so the caller sees it.
+                // Not reached by any tracked definition. Under the block-local
+                // walk this is the common case (the value was defined in
+                // another block); once state flows it means the value is
+                // genuinely untracked, e.g. a non-consuming function param.
                 true
             },
         }
+    }
+
+    /// Slot-form of the consume-while-borrowed gate: a `Take` from `addr`
+    /// while a borrow whose source is `addr` is live. Mirrors the value-form
+    /// check in `try_consume_exempting` (E498 when a live `&T` chains to the
+    /// slot; unattributable conflicts stay an ICE — a lowering bug). Does
+    /// NOT touch owned-state: the address value itself stays live (it is
+    /// consumed later by its own destroy).
+    fn check_take_while_borrowed(&mut self, addr: ValueId, inst: Option<u32>) {
+        let blocking: Vec<ValueId> = self
+            .borrows
+            .iter()
+            .filter(|(_, info)| info.source == addr)
+            .map(|(borrow_val, _)| *borrow_val)
+            .collect();
+        if blocking.is_empty() {
+            return;
+        }
+        if let Some(ref_val) = self.live_ref_rooted_at(addr) {
+            self.err_consume_while_ref_live(addr, inst, ref_val);
+        } else {
+            self.err_val(
+                inst,
+                addr,
+                format!(
+                    "cannot take from {:?}: active borrow(s) {:?} depend on it",
+                    addr, blocking,
+                ),
+            );
+        }
+    }
+
+    /// E498 for `deinit x` (a `DestroyAddr`) while a borrow into `x`'s
+    /// storage is live — `let rc = &c.name; deinit c;`. Destroying the owner
+    /// is a consume with no destination, so it gets the consume rule.
+    /// Reassignment and mutating access are NOT checked: refs are may-alias
+    /// with no exclusivity rule (references stage 2 requirements).
+    fn check_destroy_while_ref_live(&mut self, addr: ValueId, inst: Option<u32>) {
+        let Some(storage) = self.storage_of(addr) else {
+            return;
+        };
+        let blocking = self.borrows.iter().find_map(|(&b, info)| {
+            let mut cur = info.source;
+            for _ in 0..=self.borrows.len() {
+                if self.storage_of(cur) == Some(storage) {
+                    return Some(b);
+                }
+                cur = self.borrows.get(&cur)?.source;
+            }
+            None
+        });
+        if let Some(b) = blocking {
+            self.err_consume_while_ref_live(addr, inst, b);
+        }
+    }
+
+    /// The storage (`Uninit` root) an address names, seeing through field
+    /// projections, so `&c.name` and `c` share one storage.
+    fn storage_of(&self, v: ValueId) -> Option<ValueId> {
+        if let Some(&(root, _)) = self.aliases.field_of.get(&v) {
+            return Some(root);
+        }
+        self.aliases.resolve(v)
     }
 
     /// Find a live reference (@guaranteed call result) whose borrow-source
@@ -486,8 +1398,9 @@ impl<'a> BlockVerifier<'a> {
         if ownership != Ownership::Owned {
             return;
         }
-        if let Some(ValueState::Consumed) = self.owned.get(&v) {
-            self.err_val(inst, v, format!("use of consumed value {:?}", v));
+        // MaybeConsumed is permitted — see `ValueState::MaybeConsumed`.
+        if let Some(ValueState::Consumed) = self.state.owned.get(&v) {
+            self.flow_err(v, inst, format!("use of consumed value {:?}", v));
         }
     }
 
@@ -519,8 +1432,8 @@ impl<'a> BlockVerifier<'a> {
 
     fn addr_require_init(&mut self, addr: ValueId, inst: Option<u32>) {
         // If this is a field addr, check the specific field.
-        if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
-            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get(&base)
+        if let Some(&(base, field)) = self.aliases.field_of.get(&addr) {
+            if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get(&base)
                 && let Some(InitState::Uninit) = fields.get(&field)
             {
                 self.err(
@@ -532,12 +1445,18 @@ impl<'a> BlockVerifier<'a> {
         }
 
         // Collect error messages first to avoid borrow conflict.
+        let Some(addr) = self.aliases.resolve(addr) else {
+            return;
+        };
         let mut errs = Vec::new();
-        if let Some(ak) = self.addrs.get(&addr) {
+        if let Some(ak) = self.state.addrs.get(&addr) {
             match ak {
                 AddrKind::Whole(InitState::Uninit) => {
                     errs.push(format!("address {:?} is uninit", addr));
                 },
+                // MaybeInit: init on some paths only (guarded destroy) — the
+                // drop flag decides at runtime. Permitted.
+                AddrKind::Whole(InitState::MaybeInit) => {},
                 AddrKind::SubField { fields, .. } => {
                     for (f, st) in fields {
                         if *st == InitState::Uninit {
@@ -552,15 +1471,15 @@ impl<'a> BlockVerifier<'a> {
             }
         }
         for msg in errs {
-            self.err(inst, msg);
+            self.flow_err(addr, inst, msg);
         }
     }
 
     fn addr_set_uninit(&mut self, addr: ValueId, inst: Option<u32>) {
         // If this is a field addr, set that specific field.
-        if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
+        if let Some(&(base, field)) = self.aliases.field_of.get(&addr) {
             let mut err_msg = None;
-            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get_mut(&base)
+            if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get_mut(&base)
                 && let Some(st) = fields.get_mut(&field)
             {
                 if *st == InitState::Uninit {
@@ -577,10 +1496,14 @@ impl<'a> BlockVerifier<'a> {
             return;
         }
 
+        let Some(addr) = self.aliases.resolve(addr) else {
+            return;
+        };
         let mut err_msg = None;
-        if let Some(ak) = self.addrs.get_mut(&addr) {
+        if let Some(ak) = self.state.addrs.get_mut(&addr) {
             match ak {
                 AddrKind::Whole(st) => {
+                    // MaybeInit is the guarded-destroy arm — permitted.
                     if *st == InitState::Uninit {
                         err_msg = Some(format!("address {:?} already uninit", addr));
                     }
@@ -593,15 +1516,15 @@ impl<'a> BlockVerifier<'a> {
             }
         }
         if let Some(msg) = err_msg {
-            self.err(inst, msg);
+            self.flow_err(addr, inst, msg);
         }
     }
 
     fn addr_store_init(&mut self, addr: ValueId, inst: Option<u32>) {
         // If this is a field addr, set that specific field.
-        if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
+        if let Some(&(base, field)) = self.aliases.field_of.get(&addr) {
             let mut err_msg = None;
-            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get_mut(&base)
+            if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get_mut(&base)
                 && let Some(st) = fields.get_mut(&field)
             {
                 if *st == InitState::Init {
@@ -618,10 +1541,15 @@ impl<'a> BlockVerifier<'a> {
             return;
         }
 
+        let Some(addr) = self.aliases.resolve(addr) else {
+            return;
+        };
         let mut err_msg = None;
-        if let Some(ak) = self.addrs.get_mut(&addr) {
+        if let Some(ak) = self.state.addrs.get_mut(&addr) {
             match ak {
                 AddrKind::Whole(st) => {
+                    // MaybeInit: re-initialising a conditionally-moved slot,
+                    // which is the in-loop reinit shape. Permitted.
                     if *st == InitState::Init {
                         err_msg =
                             Some(format!("store_init on address {:?} but already init", addr,));
@@ -636,13 +1564,16 @@ impl<'a> BlockVerifier<'a> {
             }
         }
         if let Some(msg) = err_msg {
-            self.err(inst, msg);
+            self.flow_err(addr, inst, msg);
         }
     }
 
     fn addr_store_assign(&mut self, addr: ValueId, inst: Option<u32>) {
+        let Some(addr) = self.aliases.resolve(addr) else {
+            return;
+        };
         let mut err_msg = None;
-        if let Some(ak) = self.addrs.get(&addr)
+        if let Some(ak) = self.state.addrs.get(&addr)
             && let AddrKind::Whole(InitState::Uninit) = ak
         {
             err_msg = Some(format!(
@@ -651,13 +1582,13 @@ impl<'a> BlockVerifier<'a> {
             ));
         }
         if let Some(msg) = err_msg {
-            self.err(inst, msg);
+            self.flow_err(addr, inst, msg);
         }
     }
 
     // -- Main verification --
 
-    fn verify(mut self) -> Vec<VerifyError> {
+    fn verify(mut self) -> BlockOutcome {
         let block = self.body.block(self.block_id);
 
         // Register block params.
@@ -689,7 +1620,11 @@ impl<'a> BlockVerifier<'a> {
         // Process terminator.
         self.verify_terminator(block);
 
-        self.errors
+        BlockOutcome {
+            errors: self.errors,
+            flow_findings: self.flow_findings,
+            out_state: self.state,
+        }
     }
 
     fn verify_instruction(&mut self, kind: &InstKind, idx: Option<u32>) {
@@ -705,6 +1640,19 @@ impl<'a> BlockVerifier<'a> {
             },
             InstKind::DestroyValue { operand } => {
                 self.try_consume(*operand, idx);
+            },
+            InstKind::CoerceFnKind {
+                result,
+                operand,
+                from,
+                to,
+            } => {
+                if matches!((from, to), (crate::FnKind::Escaping, crate::FnKind::Consuming)) {
+                    self.try_consume(*operand, idx);
+                } else {
+                    self.assert_readable(*operand, idx);
+                }
+                self.define_owned(*result);
             },
 
             // -- Borrowing --
@@ -759,6 +1707,13 @@ impl<'a> BlockVerifier<'a> {
                 result: _, address, ..
             } => {
                 self.addr_require_init(*address, idx);
+                // Taking the contents while a borrow into the slot is live
+                // leaves the borrow dangling — the slot-form of the
+                // consume-while-borrowed conflict (`let`/`var` locals live
+                // at addresses, so `eat(b)` takes b's slot while `b.peek()`
+                // is still borrowed from it). Attributed to a live `&T`
+                // chaining to the slot (E498); otherwise a lowering bug.
+                self.check_take_while_borrowed(*address, idx);
                 self.addr_set_uninit(*address, idx);
                 if let Some(r) = kind.result()
                     && self.body.value(r).ownership == Ownership::Owned
@@ -801,8 +1756,15 @@ impl<'a> BlockVerifier<'a> {
                 self.try_consume(*value, idx);
                 self.addr_store_assign(*address, idx);
             },
-            InstKind::DestroyAddr { address, .. } => {
+            InstKind::DestroyAddr {
+                address,
+                user_deinit,
+                ..
+            } => {
                 self.addr_require_init(*address, idx);
+                if *user_deinit {
+                    self.check_destroy_while_ref_live(*address, idx);
+                }
                 self.addr_set_uninit(*address, idx);
             },
 
@@ -865,7 +1827,8 @@ impl<'a> BlockVerifier<'a> {
             },
 
             // -- Aggregate construction: operands that are @owned are consumed --
-            InstKind::Struct { result, fields, .. } => {
+            InstKind::Struct { result, ty, fields } => {
+                self.check_struct_construct_complete(*ty, fields, idx);
                 for (_, v) in fields {
                     if self.body.value(*v).ownership == Ownership::Owned {
                         self.try_consume(*v, idx);
@@ -953,7 +1916,29 @@ impl<'a> BlockVerifier<'a> {
             },
 
             // -- Calls --
-            InstKind::Call { result, args, .. } => {
+            InstKind::Call {
+                result,
+                args,
+                callee,
+            } => {
+                // Lowering backstop: a statically-resolvable callee must be
+                // handed exactly as many arguments as it declares. Catches
+                // synthesized wrappers built from the wrong parameter list
+                // before the mismatch reaches the backend as a raw Cranelift/
+                // LLVM verifier failure with no Kestrel context (G3).
+                if let Some(declared) = self._module.callee_declared_arity(callee)
+                    && declared != args.len()
+                {
+                    let span = self.inst_span(idx);
+                    self.push_err(
+                        idx,
+                        span,
+                        format!(
+                            "call passes {} argument(s) to a callee declaring {declared}",
+                            args.len()
+                        ),
+                    );
+                }
                 for arg in args {
                     match arg.convention {
                         ParamConvention::Consuming => {
@@ -966,7 +1951,7 @@ impl<'a> BlockVerifier<'a> {
                 }
                 if let Some(r) = result {
                     let ty = self.body.value(*r).ty;
-                    let is_never = matches!(self._module.ty_arena.get(ty), crate::ty::MirTy::Never);
+                    let is_never = matches!(self._module.ty_arena().get(ty), crate::ty::MirTy::Never);
                     if self.body.value(*r).ownership == Ownership::Owned && !is_never {
                         self.define_owned(*r);
                     }
@@ -1002,9 +1987,7 @@ impl<'a> BlockVerifier<'a> {
                 ..
             } => {
                 self.define_owned(*result);
-                if self.addrs.contains_key(base) {
-                    self.field_addr_map.insert(*result, (*base, *field));
-                }
+                let _ = (base, field); // projections come from `AddrAliases`
             },
 
             // -- Uninit: creates sub-field tracking --
@@ -1017,26 +2000,73 @@ impl<'a> BlockVerifier<'a> {
                     for i in 0..count {
                         fields.insert(FieldIdx::new(i), InitState::Uninit);
                     }
-                    self.addrs
+                    self.state.addrs
                         .insert(*result, AddrKind::SubField { ty: *ty, fields });
                 } else {
                     // Non-struct type: whole tracking, starts uninit.
-                    self.addrs
+                    self.state.addrs
                         .insert(*result, AddrKind::Whole(InitState::Uninit));
                 }
             },
         }
     }
 
-    /// Returns the number of fields for a named struct type, or None if not a struct.
-    fn struct_field_count(&self, ty: TyId) -> Option<usize> {
-        let mir_ty = self._module.ty_arena.get(ty);
-        if let crate::ty::MirTy::Named { entity, .. } = mir_ty
-            && let Some(s) = self._module.structs.get(entity)
-        {
-            return Some(s.fields.len());
+    /// A `Struct` instruction must supply every field of its type exactly once.
+    ///
+    /// Struct construction is where the independently-computed field rosters
+    /// meet: the memberwise-init roster decides the arguments, the MIR layout
+    /// decides the `FieldIdx` space. When those drifted apart (F3) the result
+    /// was a wrong-slot write and an uninitialized field, with no diagnostic at
+    /// any stage. This turns any future divergence — a new member kind, a new
+    /// construction path — into a verifier error at the choke point, whichever
+    /// producer introduced it.
+    ///
+    /// Skipped for types with no lowered struct def (nothing to check against).
+    fn check_struct_construct_complete(
+        &mut self,
+        ty: TyId,
+        fields: &[(FieldIdx, ValueId)],
+        idx: Option<u32>,
+    ) {
+        let Some(count) = self.struct_field_count(ty) else {
+            return;
+        };
+        let mut seen = vec![0usize; count];
+        for (f, _) in fields {
+            match seen.get_mut(f.index()) {
+                Some(slot) => *slot += 1,
+                None => {
+                    let span = self.inst_span(idx);
+                    self.push_err(
+                        idx,
+                        span,
+                        format!(
+                            "struct construction writes field index {} but the type has \
+                             only {count} field(s)",
+                            f.index()
+                        ),
+                    );
+                },
+            }
         }
-        None
+        for (i, n) in seen.iter().enumerate() {
+            if *n != 1 {
+                let span = self.inst_span(idx);
+                let what = if *n == 0 { "never written" } else { "written twice or more" };
+                self.push_err(
+                    idx,
+                    span,
+                    format!("struct construction leaves field index {i} {what}"),
+                );
+            }
+        }
+    }
+
+    /// Returns the number of fields for a named struct type, or None if not a
+    /// struct. Delegated to the module seam — pre- and post-mono key their
+    /// struct tables differently (`Entity` vs `(Entity, type_args)`).
+    fn struct_field_count(&self, ty: TyId) -> Option<usize> {
+        self._module.struct_field_count(ty)
     }
 
     fn verify_terminator(&mut self, block: &crate::block::BasicBlock) {
@@ -1154,10 +2184,18 @@ impl<'a> BlockVerifier<'a> {
         }
 
         // Check 2: every @owned value must be Consumed or forwarded by now.
+        //
+        // Scoped to values DEFINED in this block. Under the block-local walk
+        // that was every tracked value, so this filter is a no-op there; once
+        // state flows, a value merely passing through would otherwise be
+        // reported as a leak by every block that inherits it while live.
         let unconsumed: Vec<ValueId> = self
+            .state
             .owned
             .iter()
-            .filter(|(_, state)| **state == ValueState::Live)
+            .filter(|(v, state)| {
+                **state == ValueState::Live && self.defined_here.contains(v)
+            })
             .map(|(&v, _)| v)
             .collect();
         for v in unconsumed {
@@ -1207,17 +2245,101 @@ impl<'a> BlockVerifier<'a> {
 // Per-block entry point
 // ---------------------------------------------------------------------------
 
+/// What one block's transfer function produced.
+struct BlockOutcome {
+    errors: Vec<VerifyError>,
+    flow_findings: Vec<VerifyError>,
+    out_state: FlowState,
+}
+
 fn verify_block(
     body: &OssaBody,
-    module: &MirModule,
+    module: &dyn VerifyModule,
     block_id: BlockId,
     func_name: &str,
     entity: Entity,
-    errors: &mut Vec<VerifyError>,
-) {
-    let verifier = BlockVerifier::new(body, module, block_id, func_name, entity);
-    let block_errors = verifier.verify();
-    errors.extend(block_errors);
+    ret_borrow: bool,
+    entry_state: FlowState,
+    report: bool,
+    mode: FlowMode,
+    aliases: &AddrAliases,
+) -> BlockOutcome {
+    let mut verifier = FlowVerifier::new(
+        body,
+        module,
+        block_id,
+        func_name,
+        entity,
+        ret_borrow,
+        entry_state,
+        aliases,
+    );
+    verifier.report = report;
+    verifier.mode = mode;
+    verifier.verify()
+}
+
+/// Run the ownership walk over every MONOMORPHIZED body.
+///
+/// Opt-in via `KESTREL_VERIFY_FLOW_MONO` — unlike the pre-mono walk (which is
+/// enforced by default and runs once per generic body), this walks every
+/// INSTANTIATION, so a program that instantiates a generic fifty times pays for
+/// fifty walks.
+///
+/// Findings are deduplicated by (source function, block, inst, message). One
+/// bug in one generic body would otherwise be reported once per
+/// monomorphization, which buries the signal — `Slice.first` alone is
+/// instantiated many times in an ordinary program. The count of collapsed
+/// duplicates is preserved in the message so a violation that only affects SOME
+/// instantiations is still distinguishable from one that affects all of them.
+pub fn verify_mono_flow(module: &crate::mono::types::MonoModule) -> Vec<VerifyError> {
+    if std::env::var("KESTREL_VERIFY_FLOW_MONO").is_err() {
+        return Vec::new();
+    }
+
+    // (source entity, block, inst, message) -> (representative error, count)
+    let mut seen: FxHashMap<(Entity, BlockId, Option<u32>, String), (VerifyError, usize)> =
+        FxHashMap::default();
+
+    for func in &module.functions {
+        let Some(body) = &func.body else { continue };
+        if body.values.is_empty() || body.blocks.is_empty() {
+            continue;
+        }
+        for err in verify_ossa_mono(body, module, &func.name, func.source, func.ret_borrow) {
+            let key = (func.source, err.block, err.inst, err.message.clone());
+            seen.entry(key)
+                .and_modify(|(_, n)| *n += 1)
+                .or_insert((err, 1));
+        }
+    }
+
+    let mut out: Vec<VerifyError> = seen
+        .into_values()
+        .map(|(mut err, n)| {
+            if n > 1 {
+                err.message = format!("{} (in {n} instantiations)", err.message);
+            }
+            err
+        })
+        .collect();
+    // Deterministic order — `seen` is a hash map, and this feeds diagnostics.
+    out.sort_by(|a, b| {
+        (a.func_name.as_str(), a.block.index(), a.inst)
+            .cmp(&(b.func_name.as_str(), b.block.index(), b.inst))
+    });
+
+    if !out.is_empty() {
+        eprintln!(
+            "[KESTREL_VERIFY_FLOW_MONO] {} ownership violation(s) visible only after \
+             monomorphization:",
+            out.len(),
+        );
+        for e in &out {
+            eprintln!("  {}: {:?}[{:?}]: {}", e.func_name, e.block, e.inst, e.message);
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -1248,12 +2370,61 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
         Carrier { mutating: bool, closure: bool },
     }
 
+    // Escape taint must survive CFG MERGES. A closure (or ref carrier) built
+    // in an `if`/`else` arm reappears at the join under the target block's
+    // PARAM ValueId, and `OssaBody::alloc_value` self-roots a param with no
+    // borrow source — so the taint stamped at `emit_apply_partial` was lost and
+    // a returned frame-view closure escaped with ZERO diagnostics (the
+    // `capture_from_nested_scope.ks` hole). Recover it here: fixpoint the join
+    // of every incoming argument's effective root into its block param. A
+    // SELF-rooted argument is untainted and contributes nothing (joining its
+    // `Local(arg)` would poison every merge).
+    fn merged_roots(
+        body: &crate::body::OssaBody,
+        convs: &[ParamConvention],
+    ) -> FxHashMap<ValueId, RootProvenance> {
+        let mut roots: FxHashMap<ValueId, RootProvenance> = FxHashMap::default();
+        let effective = |roots: &FxHashMap<ValueId, RootProvenance>, v: ValueId| {
+            let r = roots.get(&v).copied().unwrap_or(body.value(v).root);
+            (r != RootProvenance::Local(v) && !r.is_derived_placeholder()).then_some(r)
+        };
+        loop {
+            let mut changed = false;
+            for block in &body.blocks {
+                for (target, args) in block.terminator.kind.successor_args() {
+                    for (i, &arg) in args.iter().enumerate() {
+                        let Some(src) = effective(&roots, arg) else {
+                            continue;
+                        };
+                        let Some(param) = body.block(target).params.get(i) else {
+                            continue;
+                        };
+                        let cur = roots.get(&param.value).copied();
+                        let next = match cur {
+                            Some(c) => c.join(src, convs),
+                            None => src,
+                        };
+                        if cur != Some(next) {
+                            roots.insert(param.value, next);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if !changed {
+                return roots;
+            }
+        }
+    }
+
     let mut errors = Vec::new();
     for func in module.functions.values() {
         let Some(body) = &func.body else { continue };
         if body.values.is_empty() || body.blocks.is_empty() {
             continue;
         }
+        let convs: Vec<ParamConvention> = func.params.iter().map(|p| p.convention).collect();
+        let merged = merged_roots(body, &convs);
         let mode = match ret_convention(&module.ty_arena, func.ret) {
             RetConvention::RefBorrow { mutating } => EscapeMode::RefBorrow { mutating },
             _ => {
@@ -1272,7 +2443,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                         mutating: carry.mutating_ref,
                         closure: false,
                     }
-                } else if carry.closure {
+                } else if carry.view_closure {
                     EscapeMode::Carrier {
                         mutating: false,
                         closure: true,
@@ -1288,6 +2459,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 continue;
             };
             let vd = body.value(*v);
+            let vd_root = merged.get(v).copied().unwrap_or(vd.root);
             let (carrier, mutating, is_closure) = match mode {
                 EscapeMode::RefBorrow { mutating } => {
                     if vd.ownership != Ownership::Guaranteed {
@@ -1299,9 +2471,9 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 EscapeMode::Carrier { mutating, closure } => {
                     if vd.ownership != Ownership::Owned
                         // Hand-built bodies may bypass alloc_value.
-                        || vd.root.is_derived_placeholder()
+                        || vd_root.is_derived_placeholder()
                         // Untainted: the value's own self-root.
-                        || vd.root == RootProvenance::Local(*v)
+                        || vd_root == RootProvenance::Local(*v)
                     {
                         continue;
                     }
@@ -1327,7 +2499,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 });
             };
 
-            let mut root = vd.root;
+            let mut root = vd_root;
             if root.is_derived_placeholder() {
                 // Hand-built bodies may bypass alloc_value; treat as a local
                 // with no known definition. (Carrier mode skipped these.)
@@ -1337,7 +2509,10 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
             // A directly-returned closure says "this closure"; a struct/tuple
             // that merely carries one says "this value: it carries a closure".
             let what = if is_closure {
-                if matches!(module.ty_arena.get(func.ret), crate::ty::MirTy::FuncThick { .. }) {
+                if matches!(
+                    module.ty_arena.get(func.ret),
+                    crate::ty::MirTy::FuncThick { .. }
+                ) {
                     "this closure: it captures"
                 } else {
                     "this value: it carries a closure that captures"
@@ -1359,18 +2534,37 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                         .get(local.index())
                         .and_then(|d| d.span.clone())
                         .map(|s| (s, format!("the borrowed local{name} is defined here")));
+                    // FIX-IT (docs/design/closures.md, Diagnostics table:
+                    // E494's "message gains a fix-it suggesting an `escaping`
+                    // or `consuming` owning type"). Fix-its are `notes`
+                    // strings in this data model (plan, decision 7). The kind
+                    // is spelled in the EXPECTED type, never on the literal —
+                    // that is the whole inference rule, so the note names the
+                    // return/expected type as the place to change.
+                    let mut notes = vec![
+                        "only parameter-rooted or `Pointer`-derived references can be returned"
+                            .into(),
+                        "Pointer-derived references are not verified by the compiler".into(),
+                    ];
+                    if is_closure {
+                        notes = vec![
+                            "a normal or `mutating` closure holds VIEWS into this frame, so it \
+                             cannot leave it"
+                                .into(),
+                            "write an owning kind in the expected/return type — `escaping (…) \
+                             -> …` (shared environment, callable many times) or `consuming (…) \
+                             -> …` (unique environment, called once) — and the literal is \
+                             rebuilt with owned captures"
+                                .into(),
+                        ];
+                    }
                     push(
                         "E494",
                         format!(
                             "cannot return {what} local{name}, which does not outlive the call"
                         ),
                         secondary,
-                        vec![
-                            "only parameter-rooted or `Pointer`-derived references can be \
-                             returned"
-                                .into(),
-                            "Pointer-derived references are not verified by the compiler".into(),
-                        ],
+                        notes,
                     );
                 },
                 RootProvenance::Param(idx) => {
@@ -1421,8 +2615,10 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                         };
                         push(
                             "E495",
-                            format!("{subject} requires a mutable root; a static is not a \
-                                 mutable root"),
+                            format!(
+                                "{subject} requires a mutable root; a static is not a \
+                                 mutable root"
+                            ),
                             None,
                             vec![],
                         );
@@ -1502,6 +2698,332 @@ mod tests {
     fn run_verify(b: OssaBuilder) -> Vec<VerifyError> {
         let (body, module) = b.finish();
         verify_ossa(&body, &module, "test", Entity::from_raw(0))
+    }
+
+    /// Build: entry defines an @owned value, destroys it, then jumps to a
+    /// second block that destroys it AGAIN without it being threaded as a
+    /// block argument. That is a double-consume across a block boundary — a
+    /// double free if it reached codegen.
+    fn cross_block_double_consume() -> (crate::body::OssaBody, MirModule) {
+        let mut b = OssaBuilder::new("test");
+        let (owned_ty, _) = make_owned_type(&mut b);
+
+        let second = b.new_block();
+        let entry = b.current_block();
+
+        let x = b.new_value(owned_ty, Ownership::Owned);
+        {
+            let body = b.body_mut();
+            body.block_mut(entry).params.push(crate::block::BlockParam {
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
+            });
+        }
+        b.emit_destroy_value(x);
+        b.emit_jump(second, vec![]);
+
+        b.switch_to(second);
+        b.emit_destroy_value(x);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        b.finish()
+    }
+
+    /// Build a diamond where a value is defined on ONE arm and used on the
+    /// other. `def` cannot dominate `use` — control can reach the use without
+    /// ever having executed the definition.
+    fn non_dominating_def() -> (crate::body::OssaBody, MirModule) {
+        let mut b = OssaBuilder::new("test");
+
+        let then_b = b.new_block();
+        let else_b = b.new_block();
+
+        let cond = b.emit_literal(Immediate::bool(true));
+        b.emit_branch(cond, then_b, vec![], else_b, vec![]);
+
+        // Defined only on the `then` arm.
+        b.switch_to(then_b);
+        let only_on_then = b.emit_literal(Immediate::i64(1));
+        b.emit_return(only_on_then);
+
+        // Used on the `else` arm, which `then` does not dominate.
+        b.switch_to(else_b);
+        b.emit_return(only_on_then);
+
+        b.finish()
+    }
+
+    #[test]
+    fn dominance_rejects_definition_that_does_not_dominate_its_use() {
+        // Guards against the check going inert. It measures zero across the
+        // whole corpus, which is the desired answer only if it can still say
+        // "no" — this body is the "no".
+        let (body, _module) = non_dominating_def();
+        let order = reverse_postorder(&body);
+        let mut errors = Vec::new();
+        let def_blocks = check_value_uniqueness(&body, "test", Entity::from_raw(0), &mut errors);
+        errors.clear();
+        check_dominance(
+            &body,
+            &order,
+            &def_blocks,
+            "test",
+            Entity::from_raw(0),
+            &mut errors,
+        );
+        assert!(
+            errors.iter().any(|e| e.message.contains("does not dominate")),
+            "a def on one arm of a diamond must not be usable on the other: {:?}",
+            errors,
+        );
+    }
+
+    #[test]
+    fn dominance_accepts_the_ordinary_ssa_shape() {
+        // The counterpart: the audit's prescribed Check 1b ("defined by this
+        // block's params or an earlier instruction in it") REJECTS this, which
+        // is why it rejected the stdlib. Dominance accepts it.
+        let mut b = OssaBuilder::new("test");
+        let second = b.new_block();
+
+        let defined_in_entry = b.emit_literal(Immediate::i64(7));
+        b.emit_jump(second, vec![]);
+
+        b.switch_to(second);
+        b.emit_return(defined_in_entry);
+
+        let (body, _module) = b.finish();
+        let order = reverse_postorder(&body);
+        let mut errors = Vec::new();
+        let def_blocks = check_value_uniqueness(&body, "test", Entity::from_raw(0), &mut errors);
+        errors.clear();
+        check_dominance(
+            &body,
+            &order,
+            &def_blocks,
+            "test",
+            Entity::from_raw(0),
+            &mut errors,
+        );
+        assert!(
+            errors.is_empty(),
+            "entry dominates its successor, so the use is legal: {:?}",
+            errors,
+        );
+    }
+
+    #[test]
+    fn dominance_rejects_use_before_def_within_a_block() {
+        // Dominance alone is not enough: a block dominates itself, so an
+        // operand defined LATER in the same block would slip through if the
+        // walk only asked about blocks. Order within the block matters too.
+        let mut b = OssaBuilder::new("test");
+        let (owned_ty, _) = make_owned_type(&mut b);
+        let v = b.emit_uninit(owned_ty);
+        b.emit_destroy_value(v);
+        {
+            // Swap so the destroy now precedes the definition it consumes.
+            let body = b.body_mut();
+            let entry = body.entry;
+            body.block_mut(entry).insts.swap(0, 1);
+        }
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let (body, _module) = b.finish();
+        let order = reverse_postorder(&body);
+        let mut errors = Vec::new();
+        let def_blocks = check_value_uniqueness(&body, "test", Entity::from_raw(0), &mut errors);
+        errors.clear();
+        check_dominance(
+            &body,
+            &order,
+            &def_blocks,
+            "test",
+            Entity::from_raw(0),
+            &mut errors,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("used before it is defined")),
+            "a use preceding its definition in the same block must be caught: {:?}",
+            errors,
+        );
+    }
+
+    #[test]
+    fn cross_block_double_consume_invisible_when_flow_off() {
+        // Documents F34: with the block-local walk, `second` starts from an
+        // empty state, so the second destroy is unattributable and silent.
+        // (`FlowMode` is read from the environment once per process, so this
+        // asserts the Off-mode transfer rules directly rather than by env.)
+        let (body, module) = cross_block_double_consume();
+        let aliases = AddrAliases::build(&body);
+        let mut v = FlowVerifier::new(
+            &body,
+            &module,
+            BlockId::new(body.blocks.len() - 1),
+            "test",
+            Entity::from_raw(0),
+            false,
+            FlowState::default(),
+            &aliases,
+        );
+        v.mode = FlowMode::Off;
+        let outcome = v.verify();
+        assert!(
+            !outcome
+                .errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
+            "block-local walk should not see the cross-block consume: {:?}",
+            outcome.errors,
+        );
+    }
+
+    #[test]
+    fn cross_block_double_consume_caught_when_state_flows() {
+        // The F34 payoff: hand the block the state its predecessor actually
+        // left behind, and the second consume is a hard error.
+        let (body, module) = cross_block_double_consume();
+
+        let aliases = AddrAliases::build(&body);
+        let mut incoming = FlowState::default();
+        incoming
+            .owned
+            .insert(ValueId::new(0), ValueState::Consumed);
+
+        let mut v = FlowVerifier::new(
+            &body,
+            &module,
+            BlockId::new(body.blocks.len() - 1),
+            "test",
+            Entity::from_raw(0),
+            false,
+            incoming,
+            &aliases,
+        );
+        v.mode = FlowMode::Enforce;
+        let outcome = v.verify();
+        assert!(
+            outcome
+                .errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
+            "flowed state should catch the cross-block double consume: {:?}",
+            outcome.errors,
+        );
+    }
+
+    #[test]
+    fn maybe_consumed_is_permitted() {
+        // A conditional move: consumed on one incoming path, live on the
+        // other. The drop flag decides at runtime, so consuming here must NOT
+        // be reported — otherwise every guarded destroy in the stdlib ICEs.
+        let (body, module) = cross_block_double_consume();
+
+        let aliases = AddrAliases::build(&body);
+        let mut incoming = FlowState::default();
+        incoming
+            .owned
+            .insert(ValueId::new(0), ValueState::MaybeConsumed);
+
+        let mut v = FlowVerifier::new(
+            &body,
+            &module,
+            BlockId::new(body.blocks.len() - 1),
+            "test",
+            Entity::from_raw(0),
+            false,
+            incoming,
+            &aliases,
+        );
+        v.mode = FlowMode::Enforce;
+        let outcome = v.verify();
+        assert!(
+            !outcome
+                .errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
+            "MaybeConsumed must be permissive: {:?}",
+            outcome.errors,
+        );
+    }
+
+    #[test]
+    fn driver_off_mode_misses_cross_block_double_consume() {
+        // End-to-end through verify_ossa: the block-local walk is blind.
+        let (body, module) = cross_block_double_consume();
+        let errors = verify_ossa_with_mode(
+            &body,
+            &module,
+            "test",
+            Entity::from_raw(0),
+            false,
+            FlowMode::Off,
+        );
+        assert!(
+            !errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
+            "Off mode should miss it (that IS F34): {:?}",
+            errors,
+        );
+    }
+
+    #[test]
+    fn driver_enforce_mode_catches_cross_block_double_consume() {
+        // Same body, same entry point, state now flows along the CFG edge.
+        let (body, module) = cross_block_double_consume();
+        let errors = verify_ossa_with_mode(
+            &body,
+            &module,
+            "test",
+            Entity::from_raw(0),
+            false,
+            FlowMode::Enforce,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
+            "the fixpoint should propagate Consumed across the jump: {:?}",
+            errors,
+        );
+    }
+
+    #[test]
+    fn flow_mode_parses_from_env_value() {
+        // Closes the last link: env string -> mode. (mode -> driver -> caught
+        // is covered by the driver_* tests.) Enforce is the default now that
+        // the staging measurements are done, so an unset or unrecognised value
+        // means the flow check is LIVE; only an explicit `off` disables it.
+        assert_eq!(FlowMode::parse(Some("warn")), FlowMode::Warn);
+        assert_eq!(FlowMode::parse(Some("enforce")), FlowMode::Enforce);
+        assert_eq!(FlowMode::parse(Some("off")), FlowMode::Off);
+        assert_eq!(FlowMode::parse(None), FlowMode::Enforce);
+        assert_eq!(FlowMode::parse(Some("")), FlowMode::Enforce);
+        assert_eq!(FlowMode::parse(Some("1")), FlowMode::Enforce);
+        assert!(!FlowMode::Off.flows());
+        assert!(FlowMode::Warn.flows());
+        assert!(FlowMode::Enforce.flows());
+    }
+
+    #[test]
+    fn join_disagreeing_states_yields_maybe() {
+        let mut a = FlowState::default();
+        a.owned.insert(ValueId::new(0), ValueState::Live);
+        let mut b = FlowState::default();
+        b.owned.insert(ValueId::new(0), ValueState::Consumed);
+
+        assert!(a.join(&b), "join must report that it changed");
+        assert_eq!(a.owned[&ValueId::new(0)], ValueState::MaybeConsumed);
+
+        // Idempotent: joining again changes nothing (fixpoint termination).
+        assert!(!a.join(&b));
     }
 
     // -----------------------------------------------------------------------
@@ -2352,6 +3874,115 @@ mod tests {
     // Category 10: Valid Uninit + FieldAddr + StoreInit + Take passes
     // -----------------------------------------------------------------------
 
+    // -----------------------------------------------------------------------
+    // Struct construction completeness (F3 backstop)
+    //
+    // Struct construction is where the independently-computed field rosters
+    // meet. These assert the verifier rejects the shapes a roster divergence
+    // produces, so the next one is a verifier error rather than a wrong-slot
+    // write into uninitialized memory.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn struct_construct_complete_is_accepted() {
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 3);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+        let v2 = b.emit_literal(Immediate::i64(3));
+
+        let s = b.emit_struct(
+            struct_ty,
+            vec![
+                (FieldIdx::new(0), v0),
+                (FieldIdx::new(1), v1),
+                (FieldIdx::new(2), v2),
+            ],
+        );
+        b.emit_destroy_value(s);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn struct_construct_missing_field_is_rejected() {
+        // The exact shape of the F3 miscompile: the caller's roster had fewer
+        // fields than the layout, so a slot was never written and was later
+        // read as garbage.
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 3);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+
+        let s = b.emit_struct(struct_ty, vec![(FieldIdx::new(0), v0), (FieldIdx::new(1), v1)]);
+        b.emit_destroy_value(s);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("field index 2") && e.message.contains("never written")),
+            "expected a missing-field error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn struct_construct_duplicate_field_is_rejected() {
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 2);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+
+        // Both arguments land in slot 0 — field 1 is left uninitialized.
+        let s = b.emit_struct(struct_ty, vec![(FieldIdx::new(0), v0), (FieldIdx::new(0), v1)]);
+        b.emit_destroy_value(s);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(
+            errors.iter().any(|e| e.message.contains("written twice")),
+            "expected a duplicate-field error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn struct_construct_out_of_range_field_is_rejected() {
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 2);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+        let v2 = b.emit_literal(Immediate::i64(3));
+
+        let s = b.emit_struct(
+            struct_ty,
+            vec![
+                (FieldIdx::new(0), v0),
+                (FieldIdx::new(1), v1),
+                (FieldIdx::new(2), v2),
+            ],
+        );
+        b.emit_destroy_value(s);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("only 2 field(s)")),
+            "expected an out-of-range error, got: {:?}",
+            errors
+        );
+    }
+
     #[test]
     fn valid_uninit_field_store_take() {
         let mut b = OssaBuilder::new("test");
@@ -2663,7 +4294,10 @@ mod tests {
     fn escape_param_root_ok() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
         b.emit_return(p);
         let (module, _) = finish_fn(b, ref_ty, &[(ParamConvention::Borrow, i64_ty)]);
@@ -2674,7 +4308,10 @@ mod tests {
     fn escape_local_root_rejected() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let local = b.emit_literal(Immediate::i64(7));
         let borrow = b.emit_begin_borrow(local);
         b.emit_return(borrow);
@@ -2682,11 +4319,48 @@ mod tests {
         assert_eq!(escape_codes(&module), vec!["E494"]);
     }
 
+    /// E494's closure-carrier FIX-IT (docs/design/closures.md, Diagnostics
+    /// table: "message gains a fix-it suggesting an `escaping` or `consuming`
+    /// owning type"). Pinned here rather than in testdata because the `.ks`
+    /// harness matches only a diagnostic's message + primary label — a
+    /// diagnostic's `notes` are not visible to `// ERROR:` annotations, and
+    /// the fix-it is a note (plan, decision 7).
+    #[test]
+    fn escape_view_closure_return_note_suggests_owning_kind() {
+        let mut b = OssaBuilder::new("t");
+        let i64_ty = b.i64();
+        let view_fn = b.ty(MirTy::FuncThick {
+            kind: crate::FnKind::Normal,
+            params: vec![],
+            ret: i64_ty,
+        });
+        // A frame-bound closure value: an @owned FuncThick whose root is the
+        // captured local, exactly what `emit_apply_partial` stamps for a view
+        // kind.
+        let cap = b.emit_literal(Immediate::i64(7));
+        let closure = b.new_value(view_fn, Ownership::Owned);
+        b.set_root(closure, RootProvenance::Local(cap));
+        b.emit_return(closure);
+        let (module, _) = finish_fn(b, view_fn, &[]);
+        let errs = check_escapes(&module);
+        assert_eq!(escape_codes(&module), vec!["E494"]);
+        let notes = &errs[0].diag.as_ref().unwrap().notes;
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.contains("escaping (…) -> …") && n.contains("consuming (…) -> …")),
+            "E494 on a closure carrier must suggest an owning kind, got {notes:?}"
+        );
+    }
+
     #[test]
     fn escape_consuming_param_rejected() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Owned);
         let borrow = b.emit_begin_borrow(p);
         b.emit_return(borrow);
@@ -2698,7 +4372,10 @@ mod tests {
     fn escape_mutating_needs_mutable_root() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let mut_ref = b.ty(MirTy::Ref { pointee: i64_ty, mutating: true });
+        let mut_ref = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: true,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
         b.emit_return(p);
         // Shared Borrow param rooting a `-> &mutating` return: const-cast guard.
@@ -2710,7 +4387,10 @@ mod tests {
     fn escape_mut_param_root_ok_for_mutating() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let mut_ref = b.ty(MirTy::Ref { pointee: i64_ty, mutating: true });
+        let mut_ref = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: true,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
         b.emit_return(p);
         let (module, _) = finish_fn(b, mut_ref, &[(ParamConvention::MutBorrow, i64_ty)]);
@@ -2723,7 +4403,10 @@ mod tests {
         for (mutating, expect) in [(false, vec![]), (true, vec!["E495"])] {
             let mut b = OssaBuilder::new("t");
             let i64_ty = b.i64();
-            let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating });
+            let ref_ty = b.ty(MirTy::Ref {
+                pointee: i64_ty,
+                mutating,
+            });
             let local = b.emit_literal(Immediate::i64(7));
             let borrow = b.emit_begin_borrow(local);
             b.set_root(borrow, RootProvenance::Static);
@@ -2745,7 +4428,10 @@ mod tests {
         for (mutable, mutating, expect) in cases {
             let mut b = OssaBuilder::new("t");
             let i64_ty = b.i64();
-            let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating });
+            let ref_ty = b.ty(MirTy::Ref {
+                pointee: i64_ty,
+                mutating,
+            });
             let local = b.emit_literal(Immediate::i64(7));
             let borrow = b.emit_begin_borrow(local);
             b.set_root(borrow, RootProvenance::PointerDerived { mutable });
@@ -2764,7 +4450,10 @@ mod tests {
         // Borrow of a borrow of a param still roots at the param.
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
         let b1 = b.emit_begin_borrow(p);
         let b2 = b.emit_begin_borrow(b1);
@@ -2797,7 +4486,10 @@ mod tests {
     fn owned_return_in_ret_borrow_fn_is_error() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let v = b.emit_literal(Immediate::i64(7));
         b.emit_return(v);
         let (module, entity) = finish_fn(b, ref_ty, &[]);
@@ -2816,7 +4508,10 @@ mod tests {
         // The returned borrow is exempt from "still active at block exit".
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
         let borrow = b.emit_begin_borrow(p);
         b.emit_return(borrow);

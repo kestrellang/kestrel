@@ -1,0 +1,626 @@
+// Kestrel concrete syntax tree — the single source of truth for tree shape.
+//
+// Rules are in rust-analyzer's ungrammar format:
+//   Node = Child ('tok' Child)* Other? (A | B)
+// Every rule named after a `SyntaxKind` describes that node's non-trivia
+// children, in order. A rule that is a bare alternative of nodes (`Item`,
+// `Expr`, `Ty`…) names no node: it becomes an enum in the typed views.
+// `label:Node` names an accessor when a node has several children of one
+// kind. Token names are the spellings `kinds.txt` gives each token kind.
+//
+// Generated from this file and `kinds.txt` (`cargo test -p
+// kestrel-syntax-tree --test sourcegen`, `UPDATE_GENERATED=1` to rewrite):
+// `src/ast/generated.rs` (typed views) and `src/validate/generated.rs` (the
+// validator's rules).
+// The parser must produce trees that conform — `validate::validate` checks,
+// and the parser tests run it over the whole corpus.
+
+//*************************//
+//        Items            //
+//*************************//
+
+SourceFile =
+  Item*
+
+Item =
+  ModuleDeclaration
+| ImportDeclaration
+| ExtensionDeclaration
+| ProtocolDeclaration
+| StructDeclaration
+| EnumDeclaration
+| FunctionDeclaration
+| SubscriptDeclaration
+| FieldDeclaration
+| TypeAliasDeclaration
+| InitializerDeclaration
+| DeinitDeclaration
+| EnumCaseDeclaration
+
+ModuleDeclaration =
+  'module' ModulePath
+
+ModulePath =
+  'ident' ('.' 'ident')*
+
+ImportDeclaration =
+  'import' ModulePath
+  ('as' alias:'ident' | '.' '(' ImportItem (',' ImportItem)* ')')?
+
+ImportItem =
+  'ident' ('as' alias:'ident')?
+
+ExtensionDeclaration =
+  'extend' Ty ConformanceList? WhereClause? ExtensionBody
+
+ExtensionBody =
+  '{' Item* '}'
+
+ProtocolDeclaration =
+  AttributeList? Visibility 'protocol' Name TypeParameterList?
+  ConformanceList? WhereClause? ProtocolBody
+
+ProtocolBody =
+  '{' Item* '}'
+
+StructDeclaration =
+  AttributeList? Visibility 'struct' Name TypeParameterList?
+  ConformanceList? WhereClause? StructBody
+
+StructBody =
+  '{' Item* '}'
+
+EnumDeclaration =
+  AttributeList? Visibility IndirectModifier? 'enum' Name TypeParameterList?
+  ConformanceList? WhereClause? EnumBody
+
+EnumBody =
+  '{' Item* '}'
+
+IndirectModifier =
+  'indirect'
+
+EnumCaseDeclaration =
+  AttributeList? 'case' Name EnumCaseParameterList?
+
+EnumCaseParameterList =
+  '(' (EnumCaseParameter (',' EnumCaseParameter)* ','?)? ')'
+
+EnumCaseParameter =
+  (Name ':')? Ty
+
+FunctionDeclaration =
+  AttributeList? Visibility StaticModifier? ('mutating' | 'consuming')?
+  'func' Name TypeParameterList? ParameterList ReturnType? WhereClause?
+  FunctionBody?
+
+InitializerDeclaration =
+  AttributeList? Visibility 'init' TypeParameterList? ParameterList
+  InitEffect? WhereClause? FunctionBody?
+
+InitEffect =
+  '?' | 'throws' Ty
+
+DeinitDeclaration =
+  'deinit' FunctionBody
+
+FunctionBody =
+  CodeBlock
+| '=' Expression
+
+SubscriptDeclaration =
+  AttributeList? Visibility StaticModifier? 'subscript' TypeParameterList?
+  ParameterList ReturnType WhereClause? SubscriptBody
+
+SubscriptBody =
+  CodeBlock | PropertyAccessors
+
+FieldDeclaration =
+  AttributeList? Visibility StaticModifier? ('let' | 'var') Name ':' Ty
+  PropertyAccessors? ('=' Expression)? ';'?
+
+// `{ get set }` (requirement), `{ get { } set { } }` (clauses), or a
+// `{ … }` getter shorthand (a field's only; a subscript's shorthand block
+// sits directly in its SubscriptBody).
+PropertyAccessors =
+  '{' 'get' 'set'? '}'
+| '{' AccessorClause* '}'
+| CodeBlock
+
+AccessorClause =
+  GetterClause | SetterClause | RefClause | MutatingRefClause
+
+GetterClause =
+  'get' CodeBlock
+
+SetterClause =
+  'set' CodeBlock
+
+// `ref` is a contextual keyword: an identifier token.
+RefClause =
+  'ident' CodeBlock
+
+MutatingRefClause =
+  'mutating' 'ident' CodeBlock
+
+TypeAliasDeclaration =
+  AttributeList? Visibility 'type' (Name | AssociatedTypeTarget)
+  TypeParameterList? ConformanceList? WhereClause? ('=' AliasedType)? ';'?
+
+// `Proto[Args].Name` in a type binding, or `T.Item` in a where clause.
+AssociatedTypeTarget =
+  Ty '.' Name
+| Path
+
+AliasedType =
+  Ty
+
+StaticModifier =
+  'static'
+
+Visibility =
+  ('public' | 'private' | 'internal' | 'fileprivate')?
+
+Name =
+  'ident'
+
+AttributeList =
+  Attribute*
+
+Attribute =
+  '@' 'ident' AttributeArgs?
+
+AttributeArgs =
+  '(' (AttributeArg (',' AttributeArg)* ','?)? ')'
+
+AttributeArg =
+  ('ident' ':')?
+  ( 'string' | 'float' | 'int' | 'bool'
+  | '.' 'ident'
+  | 'ident' ('.' 'ident')* )
+
+ParameterList =
+  '(' (Parameter (',' Parameter)* ','?)? ')'
+
+Parameter =
+  ('mutating' | 'consuming')? Name? Pattern ':' Ty DefaultValue?
+
+DefaultValue =
+  '=' Expression
+
+ReturnType =
+  '->' Ty
+
+//*************************//
+//  Generics & conformance //
+//*************************//
+
+TypeParameterList =
+  '[' (TypeParameter (',' TypeParameter)* ','?)? ']'
+
+TypeParameter =
+  Name DefaultType?
+
+DefaultType =
+  '=' Ty
+
+ConformanceList =
+  ':' ConformanceItem (',' ConformanceItem)* ','?
+
+ConformanceItem =
+  NegativeConformance | Ty
+
+NegativeConformance =
+  'not' (Ty | Path TypeArgumentList?)
+
+WhereClause =
+  'where' WhereConstraint (',' WhereConstraint)*
+
+WhereConstraint =
+  TypeBound | TypeEquality
+
+TypeBound =
+  (Name | AssociatedTypeTarget) ':'
+  (NegativeConformance | Path TypeArgumentList? ('and' Path TypeArgumentList?)*)
+
+TypeEquality =
+  AssociatedTypeTarget '=' Ty
+
+Path =
+  PathElement ('.' PathElement)*
+
+PathElement =
+  'ident'
+
+TypeArgumentList =
+  '[' (Ty (',' Ty)* ','?)? ']'
+
+//*************************//
+//        Types            //
+//*************************//
+
+Ty =
+  TyKind
+
+TyKind =
+  TyPath
+| TyUnit
+| TyNever
+| TyInferred
+| TyTuple
+| TyFunction
+| TyArray
+| TyDictionary
+| TyOptional
+| TyResult
+| TySome
+| TyRef
+| TyMutRef
+| TyParen
+
+TyPath =
+  Path TypeArgumentList?
+
+TyUnit =
+  '(' ')'
+
+TyNever =
+  '!'
+
+TyInferred =
+  '_'
+
+TyTuple =
+  '(' Ty ',' (Ty (',' Ty)* ','?)? ')'
+
+// `(T)` — grouping parentheses around a type.
+TyParen =
+  '(' Ty ')'
+
+// A kind keyword (`mutating`/`consuming`, contextual `escaping`) then the
+// parameter list. `mutating` inside the list marks a by-reference parameter.
+TyFunction =
+  ('mutating' | 'consuming' | 'ident')? TyList '->' Ty
+
+TyList =
+  '(' ('mutating'? Ty (',' 'mutating'? Ty)* ','?)? ')'
+
+TyArray =
+  '[' Ty ']'
+
+TyDictionary =
+  '[' key:Ty ':' value:Ty ']'
+
+// `T?`, and `T??` with the inner optional sharing the outer `??` token.
+TyOptional =
+  Ty ('?' | '??')?
+
+TyResult =
+  Ty 'throws' error:Ty
+
+TySome =
+  'some' Ty ('and' Ty)* ('and' NegativeConformance)?
+
+TyRef =
+  '&' Ty
+
+TyMutRef =
+  '&' 'mutating' Ty
+
+//*************************//
+//   Blocks & statements   //
+//*************************//
+
+// A block's items: statements, standalone statement-like expressions, and
+// the block's value (a final expression without `;`).
+CodeBlock =
+  '{' BlockItem* '}'
+
+BlockItem =
+  Statement | Expression
+
+Statement =
+  StatementKind
+
+StatementKind =
+  VariableDeclaration
+| ExpressionStatement
+| GuardStatement
+| DeinitStatement
+
+VariableDeclaration =
+  ('let' | 'var') Pattern (':' Ty)? ('=' Expression)? ';'
+
+ExpressionStatement =
+  Expression ';'?
+
+GuardStatement =
+  'guard' Condition (',' Condition)* 'else' CodeBlock
+
+GuardCondition =
+  'let' Pattern '=' Expression
+
+DeinitStatement =
+  'deinit' 'ident' ';'
+
+Condition =
+  GuardCondition | IfLetCondition | WhileLetCondition | Expression
+
+//*************************//
+//      Expressions        //
+//*************************//
+
+Expression =
+  Expr
+
+Expr =
+  ExprInteger
+| ExprFloat
+| ExprString
+| ExprRawString
+| ExprChar
+| ExprBool
+| ExprNull
+| ExprUnit
+| ExprInterpolatedString
+| ExprArray
+| ExprDictionary
+| ExprTuple
+| ExprGrouping
+| ExprPath
+| ExprTupleIndex
+| ExprImplicitMemberAccess
+| ExprUnary
+| ExprPostfix
+| ExprBinary
+| ExprAssignment
+| ExprCompoundAssignment
+| ExprCall
+| ExprIf
+| ExprWhile
+| ExprFor
+| ExprLoop
+| ExprBreak
+| ExprContinue
+| ExprReturn
+| ExprThrow
+| ExprTry
+| ExprClosure
+| ExprMatch
+
+ExprInteger = 'int'
+ExprFloat = 'float'
+ExprString = 'string'
+ExprRawString = 'raw_string'
+ExprChar = 'char'
+ExprBool = 'bool'
+ExprNull = 'null'
+ExprUnit = '(' ')'
+
+// `"text \(expr) text \(expr:spec)"`. A hole that failed to parse holds an
+// Error node instead of its Expression.
+ExprInterpolatedString =
+  'string_start' ('string_fragment' | StringInterpolation)* 'string_end'
+
+StringInterpolation =
+  'interp_start' Expression FormatSpecifier? 'interp_end'
+
+FormatSpecifier =
+  ':' 'format_spec'?
+
+ExprArray =
+  '[' (Expression (',' Expression)* ','?)? ']'
+
+ExprDictionary =
+  '[' ':' ']'
+| '[' (DictionaryEntry (',' DictionaryEntry)* ','?)? ']'
+
+DictionaryEntry =
+  key:Expression ':' value:Expression
+
+ExprTuple =
+  '(' Expression (',' Expression)* ','? ')'
+
+ExprGrouping =
+  '(' Expression ')'
+
+// A path `a.b[T].c`, or member access `base.c.d` extending it. The base,
+// when it is not itself a path, is the leading Expression.
+ExprPath =
+  (Expression '.')? 'ident' TypeArgumentList? ('.' 'ident' TypeArgumentList?)*
+
+ExprTupleIndex =
+  Expression '.' 'int'
+
+ExprImplicitMemberAccess =
+  '.' Name ArgumentList?
+
+ExprUnary =
+  ('-' | '+' | '!' | 'not' | '..<' | '..=' | '&' 'mutating'?) Expression
+
+ExprPostfix =
+  Expression ('!' | '..')
+
+ExprBinary =
+  lhs:Expression
+  ( 'or' | '??' | 'and'
+  | '==' | '!=' | '<' | '>' | '<=' | '>='
+  | '..=' | '..<'
+  | '+' | '-' | '|' | '^'
+  | '*' | '/' | '%' | '&'
+  | '<<' | '>>' )
+  rhs:Expression
+
+ExprAssignment =
+  lhs:Expression '=' rhs:Expression
+
+ExprCompoundAssignment =
+  lhs:Expression
+  ('+=' | '-=' | '*=' | '/=' | '%=' | '&=' | '|=' | '^=' | '<<=' | '>>=')
+  rhs:Expression
+
+ExprCall =
+  Expression ArgumentList
+
+// `(args)` followed by trailing closures, or trailing closures alone.
+ArgumentList =
+  '(' (Argument (',' Argument)* ','?)? ')' Argument*
+| Argument Argument*
+
+Argument =
+  (label:'ident' ':')? Expression
+
+ExprIf =
+  'if' Condition (',' Condition)* CodeBlock ElseClause?
+
+IfLetCondition =
+  'let' Pattern '=' Expression
+
+ElseClause =
+  'else' (CodeBlock | Expression)
+
+ExprWhile =
+  LoopLabel? 'while' Condition (',' Condition)* CodeBlock
+
+WhileLetCondition =
+  'let' Pattern '=' Expression
+
+ExprFor =
+  LoopLabel? 'for' ForPattern 'in' ForIterable CodeBlock
+
+ForPattern =
+  Pattern
+
+ForIterable =
+  Expression
+
+ExprLoop =
+  LoopLabel? 'loop' CodeBlock
+
+LoopLabel =
+  'ident' ':'
+
+ExprBreak =
+  'break' label:'ident'?
+
+ExprContinue =
+  'continue' label:'ident'?
+
+ExprReturn =
+  'return' Expression?
+
+ExprThrow =
+  'throw' Expression?
+
+ExprTry =
+  'try' Expression
+
+ExprClosure =
+  '{' (ClosureParams 'in')? BlockItem* '}'
+
+ClosureParams =
+  '(' (ClosureParam (',' ClosureParam)* ','?)? ')'
+
+ClosureParam =
+  'mutating'? Pattern (':' Ty)?
+
+ExprMatch =
+  'match' Expression '{' (MatchArm (',' MatchArm)* ','?)? '}'
+
+MatchArm =
+  Pattern MatchArmGuard? '=>' Expression
+
+MatchArmGuard =
+  'if' Expression
+
+//*************************//
+//        Patterns         //
+//*************************//
+
+Pattern =
+  Pat
+
+Pat =
+  WildcardPattern
+| BindingPattern
+| RefBindingPattern
+| TuplePattern
+| LiteralPattern
+| RangePattern
+| EnumPattern
+| NullPattern
+| SomePattern
+| StructPattern
+| ArrayPattern
+| AtPattern
+| RestPattern
+| OrPattern
+
+WildcardPattern =
+  '_'
+
+BindingPattern =
+  'var'? 'ident'
+
+RefBindingPattern =
+  '&' 'mutating'? 'ident'
+
+TuplePattern =
+  '(' (TuplePatternElement (',' TuplePatternElement)* ','?)? ')'
+
+TuplePatternElement =
+  Pat
+
+LiteralPattern =
+  'int' | 'float' | 'string' | 'bool' | 'char'
+
+RangePattern =
+  ('int' | 'char') '..'
+| ('int' | 'char') ('..=' | '..<') ('int' | 'char')
+| ('..=' | '..<') ('int' | 'char')
+
+EnumPattern =
+  '.' 'ident' ('(' (EnumPatternArg (',' EnumPatternArg)* ','?)? ')')?
+
+EnumPatternArg =
+  'ident' (':' Pat)?
+| Pat
+
+NullPattern =
+  'null'
+
+SomePattern =
+  'some' Pat
+
+StructPattern =
+  'ident' '{' (StructPatternMember (',' StructPatternMember)* ','?)? '}'
+
+StructPatternMember =
+  StructPatternField | StructPatternRest
+
+StructPatternField =
+  'ident' (':' Pat)?
+
+StructPatternRest =
+  '..'
+
+ArrayPattern =
+  '[' (ArrayPatternMember (',' ArrayPatternMember)* ','?)? ']'
+
+ArrayPatternMember =
+  ArrayPatternElement | ArrayPatternRest
+
+ArrayPatternElement =
+  Pat
+
+ArrayPatternRest =
+  '..' 'ident'?
+
+AtPattern =
+  'var'? 'ident' '@' Pat
+
+RestPattern =
+  '..'
+
+OrPattern =
+  Pat 'or' Pat ('or' Pat)*

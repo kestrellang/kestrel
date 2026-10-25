@@ -56,5 +56,29 @@ module Test
             if l1.isEqual(to: l2) == false { return 13 }
             if l1.isEqual(to: l3) { return 14 }
 
+            // Over-aligned allocation and reallocation preserve both the
+            // alignment contract and the common byte prefix.
+            let alignedLayout = std.memory.Layout(size: 64, alignment: 64);
+            let alignedResult = alloc.allocate(alignedLayout);
+            if alignedResult.isNone() { return 15 }
+            let aligned = alignedResult.unwrap();
+            if aligned.address % 64 != 0 { return 16 }
+            aligned.cast[std.numeric.Int64]().write(777);
+
+            let grownLayout = std.memory.Layout(size: 128, alignment: 64);
+            let grownResult = alloc.reallocate(aligned, alignedLayout, grownLayout);
+            if grownResult.isNone() { return 17 }
+            let grown = grownResult.unwrap();
+            if grown.address % 64 != 0 { return 18 }
+            if grown.cast[std.numeric.Int64]().read() != 777 { return 19 }
+            alloc.deallocate(grown, grownLayout);
+
+            if std.memory.Layout.arrayChecked[std.numeric.Int64](-1).isSome() { return 20 }
+            if std.memory.Layout.arrayChecked[std.numeric.Int64](std.numeric.Int64.maxValue).isSome() { return 21 }
+            if std.memory.Layout(size: std.numeric.Int64.maxValue, alignment: 8).padToAlignChecked().isSome() { return 22 }
+            if std.memory.Layout(size: std.numeric.Int64.maxValue, alignment: 1)
+                .mergeChecked(with: std.memory.Layout(size: 1, alignment: 1)).isSome() { return 23 }
+            if alloc.allocate(std.memory.Layout(size: 8, alignment: 3)).isSome() { return 24 }
+
             0
         }

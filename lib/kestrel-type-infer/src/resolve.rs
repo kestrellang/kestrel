@@ -7,7 +7,7 @@
 use kestrel_ast_builder::arg_binding::{BindParam, binds};
 use kestrel_ast_builder::{
     AstType, Callable, ConformanceItem, Conformances, Gettable, Name, NodeKind, Settable, Static,
-    TypeParams, Vis, WhereClause as AstWhereClause, WhereConstraint,
+    TypeParams, Vis,
 };
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
@@ -114,36 +114,176 @@ pub struct AssociatedTypeResolution {
     pub source_extension: Option<Entity>,
 }
 
+/// What a where-clause bound is *about* (decision D7).
+///
+/// One type for every spelling, so no code path can hold a subject whose
+/// receiver it has silently dropped. Nests to arbitrary depth: `T.Iter.Item`
+/// is `Projection { base: Projection { base: Param(T), assoc: Iter }, assoc: Item }`.
+///
+/// Invariant: a `Projection` chain always bottoms out at `Param` or
+/// `SelfType`; there is no baseless projection. Keeping the base is what stops
+/// a method returning `T.Assoc` from resolving to a bare `Param(Assoc)` that
+/// leaks past monomorphization (#184).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum WhereSubject {
+    /// `T`
+    Param(Entity),
+    /// The `Self` position. NOT collapsed to the enclosing entity: in a
+    /// protocol extension `Self` is the *conformer*, resolved per-conformance,
+    /// so pinning it to the protocol entity is receiver loss one level up.
+    ///
+    /// Payload-free on purpose (D8, `docs/fragility/G14-G17/decisions.md`):
+    /// there is no entity that is correct here, and a "compatibility" field
+    /// holding the enclosing one would be a known-false value stored where
+    /// people look for the truth. A reader that wants a type for `Self` gets it
+    /// from the **receiver it is judging** — see `conformance::subject_type`,
+    /// the reference implementation. A reader with no receiver in hand (the
+    /// entailment checker, the call-site emitters) cannot answer, and must
+    /// **permit**: that is the conservative contract for abstract positions.
+    SelfType,
+    /// `<base>.<assoc>`, to any depth.
+    Projection {
+        base: Box<WhereSubject>,
+        assoc: Entity,
+    },
+}
+
+impl WhereSubject {
+    /// Read an equality clause's subject as one of the two shapes
+    /// `WhereClausesOf` produces. `None` for any other shape (a `Self` root, a
+    /// deeper chain) — no producer emits one today, and a reader that meets it
+    /// must skip, i.e. permit.
+    pub(crate) fn equality_lhs(&self) -> Option<EqualityLhs> {
+        match self {
+            WhereSubject::Param(e) => Some(EqualityLhs::Direct(*e)),
+            WhereSubject::Projection { base, assoc } => match **base {
+                WhereSubject::Param(root) => Some(EqualityLhs::Assoc {
+                    root,
+                    assoc: *assoc,
+                }),
+                _ => None,
+            },
+            WhereSubject::SelfType => None,
+        }
+    }
+
+    /// The subject entity iff this is a bare `Param` — the exact set of
+    /// subjects the pre-D7 `WhereClause::Bound { param }` could hold.
+    ///
+    /// Every site that used to destructure `param` goes through this, so
+    /// "projections are skipped here" is one grep rather than twenty match
+    /// arms. A `None` return is a projection or a `Self`-rooted subject; both
+    /// mean "this site cannot name the subject", which must **permit**.
+    pub fn as_param(&self) -> Option<Entity> {
+        match self {
+            WhereSubject::Param(e) => Some(*e),
+            _ => None,
+        }
+    }
+
+    /// The entity this subject is finally *about*: the param itself, or a
+    /// projection's last associated type (`T.Iter.Item` → `Item`). `None` for
+    /// `Self`, which names a position, not an entity.
+    pub fn tail(&self) -> Option<Entity> {
+        match self {
+            WhereSubject::Param(e) | WhereSubject::Projection { assoc: e, .. } => Some(*e),
+            WhereSubject::SelfType => None,
+        }
+    }
+
+    /// Flatten to `(root type parameter, then each projected alias)` — the
+    /// receiver spine. `T` is `[T]`, `T.Item` is `[T, Item]`, `T.Iter.Item` is
+    /// `[T, Iter, Item]`.
+    ///
+    /// `None` for anything with no nameable root — a `Self`-rooted chain, whose
+    /// root is a position rather than an entity. Callers must read `None` as
+    /// "cannot compare", never as "different".
+    ///
+    /// The same flattening applied to a `TyKind::AssocProjection` chain yields
+    /// a directly comparable spine; that is the one bridge between the
+    /// declaration world and the inference world in `assoc_projection_base_admits`.
+    pub fn spine(&self) -> Option<Vec<Entity>> {
+        match self {
+            WhereSubject::Param(e) => Some(vec![*e]),
+            WhereSubject::SelfType => None,
+            WhereSubject::Projection { base, assoc } => {
+                let mut spine = base.spine()?;
+                spine.push(*assoc);
+                Some(spine)
+            },
+        }
+    }
+}
+
+/// What receiver a where-clause subject names, relative to one alias entity.
+/// See [`subject_receiver_of`].
+enum SubjectReceiver {
+    /// The subject is about some other type — ignore it.
+    NotThisAlias,
+    /// The subject is about this alias but names no receiver we can compare
+    /// (a bare `Item`, or a `Self`-rooted chain). Conservatively permits.
+    Unnamed,
+    /// The subject is `<spine>.<alias>`.
+    Spine(Vec<Entity>),
+}
+
+/// Classify a where-clause subject against the alias a projection is asking
+/// about. `where A.Item: Show` seen from a query about `Producer.Item` yields
+/// `Spine([A])`; `where Item: Show` inside `protocol Producer` yields
+/// `Unnamed`; `where T: Copyable` yields `NotThisAlias`.
+fn subject_receiver_of(subject: &WhereSubject, assoc: Entity) -> SubjectReceiver {
+    match subject {
+        // A bare-assoc subject: `where Item: Show` in a scope where `Item`
+        // resolves to the alias. No receiver written, so no receiver to check.
+        WhereSubject::Param(e) if *e == assoc => SubjectReceiver::Unnamed,
+        WhereSubject::Projection { base, assoc: a } if *a == assoc => match base.spine() {
+            Some(spine) => SubjectReceiver::Spine(spine),
+            None => SubjectReceiver::Unnamed,
+        },
+        _ => SubjectReceiver::NotThisAlias,
+    }
+}
+
 /// Where clause on a declaration.
 #[derive(Clone, Debug, Hash)]
 pub enum WhereClause {
-    /// `T: Protocol` or `T: Protocol[Args]`
+    /// `T: Protocol`, `T: Protocol[Args]`, or `T.Assoc: Protocol` — the
+    /// subject carries its own shape, so a projection is the *same* arm as a
+    /// bare param rather than a sibling variant readers can forget to handle.
     Bound {
-        param: Entity,
+        subject: WhereSubject,
         protocol: Entity,
         /// Type arguments applied to the protocol (e.g., `[lang.i64]` in `Factory[lang.i64]`).
         /// Empty for non-generic protocols.
         protocol_type_args: Vec<HirTy>,
     },
-    /// `T.Assoc: Protocol` — a bound whose subject is an associated-type
-    /// PROJECTION off a type param, not the bare param. Kept distinct from
-    /// `Bound` so the base (`T`) survives: collapsing the subject to the assoc
-    /// entity (`Assoc`) loses the receiver and makes a method returning
-    /// `T.Assoc` resolve to a bare `Param(Assoc)` that leaks past mono (#184).
-    ProjectionBound {
-        base: Entity,
-        assoc: Entity,
-        protocol: Entity,
-        protocol_type_args: Vec<HirTy>,
-    },
-    /// `T.Item = SomeType` (associated type equality)
-    TypeEquality {
-        param: Entity,
-        assoc_name: String,
-        rhs: HirTy,
-    },
-    /// `V = Array[E]` (direct type parameter equality)
-    DirectEquality { param: Entity, rhs: HirTy },
+    /// `T.Item = SomeType` or `V = Array[E]`. The subject is the same
+    /// `WhereSubject` a bound carries, so the assoc is an **entity**, never a
+    /// name string (D7's deferred fold, G25 step 3). `WhereClausesOf` produces
+    /// exactly two shapes, read through [`WhereSubject::equality_lhs`].
+    Equality { subject: WhereSubject, rhs: HirTy },
+    /// `T: not P` — a negative bound. Decided by the entailment kernel
+    /// (`Goal::NotConforms`) and lowered to MIR's `NotImplements`.
+    NotBound { subject: WhereSubject, protocol: Entity },
+}
+
+/// The source name of an associated-type entity. The `Associated` constraint
+/// is name-keyed, so an equality clause's assoc entity is spelled back out
+/// here, at the one place a consumer needs the string.
+pub(crate) fn assoc_name(qctx: &kestrel_hecs::QueryContext<'_>, assoc: Entity) -> String {
+    qctx.get::<kestrel_ast_builder::Name>(assoc)
+        .map(|n| n.0.clone())
+        .unwrap_or_default()
+}
+
+/// The two left-hand shapes an [`WhereClause::Equality`] is produced in.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum EqualityLhs {
+    /// `root.assoc = X` — the former `TypeEquality`. `root` is a type
+    /// parameter or an associated-type alias (`TargetIterator.Item`).
+    Assoc { root: Entity, assoc: Entity },
+    /// `V = X` — the former `DirectEquality`.
+    Direct(Entity),
 }
 
 /// Slim trait abstracting world queries for testability.
@@ -171,12 +311,79 @@ pub trait TypeResolver {
     /// Check if a concrete type conforms to a protocol.
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool;
 
+    /// G17 — the base-aware half of [`Self::conforms_to`]'s
+    /// `TyKind::AssocProjection` answer.
+    ///
+    /// `conforms_to` answers *declares-only* for a projection: it collects the
+    /// bounds filed against the alias **entity** and never asks which receiver
+    /// the projection is rooted at, so `where A.Item: Show` — recorded under
+    /// the entity `Producer.Item` — is handed to `B.Item` as well. This asks
+    /// the question the arm cannot: does a clause that could have produced
+    /// that grant actually name *this* receiver?
+    ///
+    /// `base_spine` is the query's base flattened to `(root type parameter,
+    /// then each projected alias)`; `[B]` for `B.Item`, `[T, Iter]` for
+    /// `T.Iter.Item`. The caller computes it because only an `InferCtx` can
+    /// resolve a `TyVar`.
+    ///
+    /// **Permits unless it can prove otherwise** — the same conservative
+    /// contract the rest of this module keeps for abstract positions. The
+    /// default impl permits outright, so a resolver that models no where
+    /// clauses (the solver's test stubs) answers exactly as before.
+    fn assoc_projection_base_admits(
+        &self,
+        assoc: Entity,
+        protocol: Entity,
+        base_spine: &[Entity],
+    ) -> bool {
+        let _ = (assoc, protocol, base_spine);
+        true
+    }
+
+    /// G17 S4 — [`Self::resolve_member`] for a caller that can also name the
+    /// receiver's base. The member-lookup twin of
+    /// [`Self::assoc_projection_base_admits`]: a `TyKind::AssocProjection`
+    /// receiver's bound search otherwise collects every bound filed against
+    /// the alias **entity**, so `where A.Item: Show` hands `show()` to
+    /// `B.Item`. `base_spine` is the same flattened base that method takes;
+    /// `None` means "cannot compare" and permits.
+    ///
+    /// The default ignores the spine, so a resolver that models no where
+    /// clauses answers exactly as `resolve_member` does.
+    fn resolve_member_with_base(
+        &self,
+        receiver_ty: &TyKind,
+        base_spine: Option<&[Entity]>,
+        name: &str,
+        args: &[crate::constraint::CallArg],
+    ) -> Result<MemberResolution, MemberError> {
+        let _ = base_spine;
+        self.resolve_member(receiver_ty, name, args)
+    }
+
     /// Resolve an associated type on a container (e.g., Array[Int].Element → Int).
     fn resolve_associated_type(
         &self,
         container: &TyKind,
         name: &str,
     ) -> Option<AssociatedTypeResolution>;
+
+    /// [`Self::resolve_associated_type`] for a caller that holds the
+    /// associated type's **entity** (G29 — `AssocKey::Entity`). On an abstract
+    /// container the answer is that requirement, never a same-named one
+    /// reached first through another bound. `name` is the entity's spelling,
+    /// which is how a *concrete* conformer's binding witnesses a requirement.
+    ///
+    /// The default answers by name, for resolvers that model no protocols.
+    fn resolve_associated_type_by_entity(
+        &self,
+        container: &TyKind,
+        assoc: Entity,
+        name: &str,
+    ) -> Option<AssociatedTypeResolution> {
+        let _ = assoc;
+        self.resolve_associated_type(container, name)
+    }
 
     /// Look up a builtin entity by language feature.
     fn builtin(&self, feature: Builtin) -> Option<Entity>;
@@ -230,28 +437,19 @@ impl TypeResolver for WorldResolver<'_> {
         }
 
         // Abstract associated-type projection: member-lookup through the
-        // assoc entity's bounds (same machinery as TypeAlias below).
+        // assoc entity's bounds (same machinery as TypeAlias below). No base
+        // spine reaches this entry point, so nothing is filtered — callers
+        // that can name the base use `resolve_member_with_base` (G17 S4).
         if let TyKind::AssocProjection { assoc, .. } = receiver_ty {
-            match self.resolve_assoc_type_member(*assoc, name, _args) {
-                Ok(res) => return Ok(res),
-                Err(MemberError::NotFound) => {
-                    return self.resolve_assoc_type_static_member_resolve(*assoc, name, _args);
-                },
-                Err(e) => return Err(e),
-            }
+            return self.resolve_projection_member(*assoc, None, name, _args);
         }
 
         // TypeAlias receiver: abstract associated types consult protocol bounds;
         // concrete aliases should have been reduced by the solver's Reduce rule
         // before reaching here (but handle defensively in case they show up).
+        // A bare alias has already lost its base, so it cannot be filtered.
         if let TyKind::TypeAlias { entity, .. } = receiver_ty {
-            match self.resolve_assoc_type_member(*entity, name, _args) {
-                Ok(res) => return Ok(res),
-                Err(MemberError::NotFound) => {
-                    return self.resolve_assoc_type_static_member_resolve(*entity, name, _args);
-                },
-                Err(e) => return Err(e),
-            }
+            return self.resolve_projection_member(*entity, None, name, _args);
         }
 
         // Opaque types: delegate member resolution to the protocol bounds.
@@ -265,7 +463,7 @@ impl TypeResolver for WorldResolver<'_> {
                 None => {
                     // Expand to parent protocols for the full closure
                     let mut expanded = bound_protocols;
-                    let mut visited = std::collections::HashSet::new();
+                    let mut visited = crate::collections::HashSet::default();
                     for p in &expanded {
                         visited.insert(*p);
                     }
@@ -355,7 +553,7 @@ impl TypeResolver for WorldResolver<'_> {
                 .iter()
                 .any(|&c| self.matches_labels(c, &arg_labels_for_fallback));
         if !direct_label_match {
-            let mut seen_signatures: std::collections::HashSet<_> = all_candidates
+            let mut seen_signatures: crate::collections::HashSet<_> = all_candidates
                 .iter()
                 .map(|&c| self.label_signature(c))
                 .collect();
@@ -594,7 +792,7 @@ impl TypeResolver for WorldResolver<'_> {
             TyKind::Opaque { bounds, .. } => {
                 // Expand all bounds through superprotocol chains
                 let mut all_protocols: Vec<Entity> = bounds.iter().map(|(p, _)| *p).collect();
-                let mut visited = std::collections::HashSet::new();
+                let mut visited = crate::collections::HashSet::default();
                 for p in &all_protocols {
                     visited.insert(*p);
                 }
@@ -654,6 +852,90 @@ impl TypeResolver for WorldResolver<'_> {
         }
     }
 
+    /// G17 C4 — see the trait docs. Three questions, in order, and any one of
+    /// them answering "not my business" permits:
+    ///
+    /// 1. Is the grant receiver-free (a bound on the alias declaration, or on
+    ///    the owning protocol's own `Item`)? Then every receiver has it.
+    /// 2. Otherwise it came from the owner hierarchy. Which clauses there could
+    ///    have produced it, and what receiver does each name? A bare `Item`
+    ///    subject names none, so it permits.
+    /// 3. Does any of them name *this* receiver?
+    ///
+    /// Only "at least one clause could have granted it, every one of them names
+    /// a receiver, and none of those receivers is ours" rejects.
+    fn assoc_projection_base_admits(
+        &self,
+        assoc: Entity,
+        protocol: Entity,
+        base_spine: &[Entity],
+    ) -> bool {
+        // (1) A bound the alias carries regardless of receiver.
+        if self
+            .collect_assoc_type_receiver_free_bounds(assoc)
+            .contains(&protocol)
+        {
+            return true;
+        }
+
+        // (2)/(3) The owner-hierarchy where clauses — the same walk
+        // `collect_assoc_type_direct_bounds_inner` does, but reading the
+        // *structured* subject (`WhereClausesOf`) so the receiver survives
+        // instead of `gather_bounds_from_where_clause`'s last-segment collapse,
+        // which is the aliasing this check exists to undo.
+        let mut saw_other_receiver = false;
+        let mut checked = crate::collections::HashSet::default();
+        let mut current = Some(self.body_owner);
+        while let Some(entity) = current {
+            if checked.insert(entity) {
+                for clause in self.ctx.query(crate::where_clauses::WhereClausesOf {
+                    entity,
+                    root: self.root,
+                }) {
+                    let WhereClause::Bound {
+                        subject,
+                        protocol: granted,
+                        ..
+                    } = clause
+                    else {
+                        continue;
+                    };
+                    if !self.protocol_closure_contains(granted, protocol) {
+                        continue;
+                    }
+                    match subject_receiver_of(&subject, assoc) {
+                        SubjectReceiver::NotThisAlias => {},
+                        // About this alias but with no receiver we can name —
+                        // a bare `Item`, or a `Self`-rooted chain (D8). Permit.
+                        SubjectReceiver::Unnamed => return true,
+                        SubjectReceiver::Spine(spine) => {
+                            if spine == base_spine {
+                                return true;
+                            }
+                            saw_other_receiver = true;
+                        },
+                    }
+                }
+            }
+            current = self.ctx.parent_of(entity);
+        }
+
+        !saw_other_receiver
+    }
+
+    fn resolve_member_with_base(
+        &self,
+        receiver_ty: &TyKind,
+        base_spine: Option<&[Entity]>,
+        name: &str,
+        args: &[crate::constraint::CallArg],
+    ) -> Result<MemberResolution, MemberError> {
+        let TyKind::AssocProjection { assoc, .. } = receiver_ty else {
+            return self.resolve_member(receiver_ty, name, args);
+        };
+        self.resolve_projection_member(*assoc, base_spine, name, args)
+    }
+
     fn resolve_associated_type(
         &self,
         container: &TyKind,
@@ -680,26 +962,30 @@ impl TypeResolver for WorldResolver<'_> {
                     kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, "!")?;
                 self.find_associated_type_in_entity_and_extensions(entity, name)
             },
-            TyKind::Protocol { entity, .. } | TyKind::SelfType { entity } => {
-                self.find_associated_type_in_protocol(*entity, name)
-            },
-            TyKind::TypeAlias { entity, .. } => {
-                // Protocol associated type (e.g. Iter: Iterator) —
-                // search the bound protocols for the name.
-                let bound_protocols = self.collect_assoc_type_protocol_bounds(*entity);
-                self.find_associated_type_in_protocols(&bound_protocols, name)
-            },
-            TyKind::Param { entity } => {
-                let bound_protocols = self.collect_param_protocol_bounds(*entity);
-                self.find_associated_type_in_protocols(&bound_protocols, name)
-            },
-            TyKind::AssocProjection { assoc, .. } => {
-                // Nested: T.Iter.Item — search Iter's bound protocols for Item.
-                let bound_protocols = self.collect_assoc_type_protocol_bounds(*assoc);
+            TyKind::Protocol { .. }
+            | TyKind::SelfType { .. }
+            | TyKind::TypeAlias { .. }
+            | TyKind::Param { .. }
+            | TyKind::AssocProjection { .. } => {
+                let bound_protocols = self.abstract_container_bounds(container)?;
                 self.find_associated_type_in_protocols(&bound_protocols, name)
             },
             _ => None,
         }
+    }
+
+    fn resolve_associated_type_by_entity(
+        &self,
+        container: &TyKind,
+        assoc: Entity,
+        name: &str,
+    ) -> Option<AssociatedTypeResolution> {
+        // A concrete conformer's `type Out = …` witnesses every requirement
+        // spelled `Out`, so there the name *is* the match rule.
+        let Some(protocols) = self.abstract_container_bounds(container) else {
+            return self.resolve_associated_type(container, name);
+        };
+        self.find_associated_type_in_protocols_where(&protocols, |e| e == assoc)
     }
 
     fn builtin(&self, feature: Builtin) -> Option<Entity> {
@@ -1130,18 +1416,24 @@ impl WorldResolver<'_> {
         None
     }
 
-    /// Search a protocol for an associated type, including inherited protocols
-    /// and protocol extensions.
-    ///
-    /// TODO: Move this into a shared name-resolution query that returns a
-    /// single associated-type member by name, so type inference does not need
-    /// to know how protocol associated-type traversal is assembled.
-    fn find_associated_type_in_protocol(
-        &self,
-        protocol: Entity,
-        name: &str,
-    ) -> Option<AssociatedTypeResolution> {
-        self.find_associated_type_in_protocols(&[protocol], name)
+    /// The protocols an **abstract** container's associated types come from,
+    /// in lookup order; `None` for a concrete container, whose own bindings
+    /// answer instead. The one list both the name and the entity lookup
+    /// search (G29).
+    fn abstract_container_bounds(&self, container: &TyKind) -> Option<Vec<Entity>> {
+        match container {
+            TyKind::Protocol { entity, .. } | TyKind::SelfType { entity } => Some(vec![*entity]),
+            // Protocol associated type (`Iter: Iterator`) — its bound protocols.
+            TyKind::TypeAlias { entity, .. } => {
+                Some(self.collect_assoc_type_protocol_bounds(*entity))
+            },
+            TyKind::Param { entity } => Some(self.collect_param_protocol_bounds(*entity)),
+            // Nested `T.Iter.Item` — `Iter`'s bound protocols.
+            TyKind::AssocProjection { assoc, .. } => {
+                Some(self.collect_assoc_type_protocol_bounds(*assoc))
+            },
+            _ => None,
+        }
     }
 
     /// Search protocol bounds for an associated type with the given name.
@@ -1155,13 +1447,25 @@ impl WorldResolver<'_> {
         protocols: &[Entity],
         name: &str,
     ) -> Option<AssociatedTypeResolution> {
+        self.find_associated_type_in_protocols_where(protocols, |e| {
+            self.ctx.get::<Name>(e).is_some_and(|n| n.0 == name)
+        })
+    }
+
+    /// The first associated type of `protocols` (same traversal and order as
+    /// [`Self::find_associated_type_in_protocols`]) whose entity `matches`.
+    fn find_associated_type_in_protocols_where(
+        &self,
+        protocols: &[Entity],
+        matches: impl Fn(Entity) -> bool,
+    ) -> Option<AssociatedTypeResolution> {
         for &proto in protocols {
             let members = self.ctx.query(kestrel_name_res::ProtocolAssociatedTypes {
                 protocol: proto,
                 root: self.root,
             });
             for m in members {
-                if self.ctx.get::<Name>(m.entity).is_none_or(|n| n.0 != name) {
+                if !matches(m.entity) {
                     continue;
                 }
                 // Concrete (has TypeAnnotation) → lower and return.
@@ -1402,6 +1706,14 @@ impl WorldResolver<'_> {
         for &c in concrete_matches {
             if c == method {
                 continue;
+            }
+            // A non-callable stored field can never implement a callable
+            // protocol requirement — its empty param shape trivially
+            // "matches" a zero-arg method, silently absorbing the field and
+            // binding every access to the (recursive) method (#130). Reject
+            // the collapse so the caller reports a genuine ambiguity.
+            if self.ctx.get::<Callable>(c).is_none() && self.ctx.get::<Callable>(method).is_some() {
+                return None;
             }
             let concrete_param_tys = self.param_type_shapes(c);
             if !param_shapes_compatible(&proto_param_tys, &concrete_param_tys) {
@@ -1693,22 +2005,22 @@ impl WorldResolver<'_> {
         param_entity: Entity,
         protocol_entity: Entity,
     ) -> Vec<HirTy> {
-        // Walk up from the param to find the owner (function/init that declares the where clause)
-        let owner = self.ctx.parent_of(param_entity).unwrap_or(self.body_owner);
-        let clauses = self.ctx.query(crate::where_clauses::WhereClausesOf {
-            entity: owner,
-            root: self.root,
-        });
+        // The clauses written on the param's owner (the function/init/type that
+        // declares it). Shared with the entailment tier so the hop lives once.
+        let clauses =
+            crate::where_clauses::param_owner_where_clauses(self.ctx, param_entity, self.root);
 
         // Direct match: where clause says T: Protocol[Args]
+        // TODO(G17 stage 3a): `as_param()` skips projection subjects, matching
+        // the pre-D7 behaviour where `ProjectionBound` was a different variant.
         for clause in &clauses {
             if let WhereClause::Bound {
-                param,
+                subject,
                 protocol,
                 protocol_type_args,
                 ..
             } = clause
-                && *param == param_entity
+                && subject.as_param() == Some(param_entity)
                 && *protocol == protocol_entity
             {
                 return protocol_type_args.clone();
@@ -1720,9 +2032,9 @@ impl WorldResolver<'_> {
         // E.g., T: IntConverter, IntConverter: Converter[i64] → find [i64] for Converter.
         for clause in &clauses {
             if let WhereClause::Bound {
-                param, protocol, ..
+                subject, protocol, ..
             } = clause
-                && *param == param_entity
+                && subject.as_param() == Some(param_entity)
                 && let Some(args) =
                     self.find_inherited_protocol_type_args(*protocol, protocol_entity)
             {
@@ -1782,9 +2094,9 @@ impl WorldResolver<'_> {
         // parent protocols, and the `"init"` / `"subscript"` sentinels for
         // nameless Callable entities.
         let mut all_candidates = Vec::new();
-        let mut seen_entities = std::collections::HashSet::new();
+        let mut seen_entities = crate::collections::HashSet::default();
         for proto in protocols {
-            let mut seen_in_proto = std::collections::HashSet::new();
+            let mut seen_in_proto = crate::collections::HashSet::default();
             let members = self.ctx.query(kestrel_name_res::ProtocolMembersByName {
                 protocol: *proto,
                 name: name.to_string(),
@@ -1889,6 +2201,41 @@ impl WorldResolver<'_> {
         Ok((instance_candidates, member))
     }
 
+    /// Member lookup on an abstract associated type: instance members first,
+    /// then static ones. `base_spine` narrows the bound search to the bounds
+    /// this receiver's base admits (G17 S4); `None` narrows nothing.
+    fn resolve_projection_member(
+        &self,
+        alias_entity: Entity,
+        base_spine: Option<&[Entity]>,
+        name: &str,
+        args: &[crate::constraint::CallArg],
+    ) -> Result<MemberResolution, MemberError> {
+        match self.resolve_assoc_type_member(alias_entity, base_spine, name, args) {
+            Err(MemberError::NotFound) => {
+                self.resolve_assoc_type_static_member_resolve(alias_entity, base_spine, name, args)
+            },
+            other => other,
+        }
+    }
+
+    /// G17 S4 — drop every bound `protocols` holds that the projection's base
+    /// does not admit. The per-bound verdict is C4's
+    /// [`TypeResolver::assoc_projection_base_admits`], so member lookup and the
+    /// conformance answer cannot disagree about which receiver a clause names.
+    /// `None` (no comparable base) keeps everything — the module's permit.
+    fn retain_base_admitted(
+        &self,
+        alias_entity: Entity,
+        base_spine: Option<&[Entity]>,
+        protocols: &mut Vec<Entity>,
+    ) {
+        let Some(spine) = base_spine else {
+            return;
+        };
+        protocols.retain(|&p| self.assoc_projection_base_admits(alias_entity, p, spine));
+    }
+
     /// Resolve a member on an associated type (TypeAlias entity, e.g., `Iter`, `Item`).
     ///
     /// Associated types in protocols have bounds (e.g., `type Iter: Iterator`).
@@ -1900,17 +2247,20 @@ impl WorldResolver<'_> {
     fn resolve_assoc_type_member(
         &self,
         alias_entity: Entity,
+        base_spine: Option<&[Entity]>,
         name: &str,
         args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError> {
         // Prefer direct bounds over expanded bounds (same reason as
         // resolve_param_member — see the comment there).
         let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
-        let direct = self.collect_assoc_type_direct_bounds(alias_entity);
+        let mut direct = self.collect_assoc_type_direct_bounds(alias_entity);
+        self.retain_base_admitted(alias_entity, base_spine, &mut direct);
         if let Some(m) = self.select_bound_candidate(&direct, name, &arg_labels)? {
             return self.build_member_resolution(m);
         }
-        let expanded = self.collect_assoc_type_protocol_bounds(alias_entity);
+        let mut expanded = self.collect_assoc_type_protocol_bounds(alias_entity);
+        self.retain_base_admitted(alias_entity, base_spine, &mut expanded);
         if expanded.is_empty() {
             return Err(MemberError::NotFound);
         }
@@ -1924,10 +2274,12 @@ impl WorldResolver<'_> {
     fn resolve_assoc_type_static_member_resolve(
         &self,
         alias_entity: Entity,
+        base_spine: Option<&[Entity]>,
         name: &str,
         args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError> {
-        let bound_protocols = self.collect_assoc_type_protocol_bounds(alias_entity);
+        let mut bound_protocols = self.collect_assoc_type_protocol_bounds(alias_entity);
+        self.retain_base_admitted(alias_entity, base_spine, &mut bound_protocols);
         if bound_protocols.is_empty() {
             return Err(MemberError::NotFound);
         }
@@ -1988,10 +2340,49 @@ impl WorldResolver<'_> {
     fn collect_assoc_type_direct_bounds_inner(
         &self,
         alias_entity: Entity,
-    ) -> (Vec<Entity>, std::collections::HashSet<Entity>) {
+    ) -> (Vec<Entity>, crate::collections::HashSet<Entity>) {
+        let (mut protocols, mut visited, mut checked) =
+            self.collect_assoc_type_receiver_free_bounds_inner(alias_entity);
+
+        // Walk from owner upward — function/extension where clauses may also
+        // constrain associated types. E.g., `func contains() where Item: Equatable`
+        let mut current = Some(self.body_owner);
+        while let Some(entity) = current {
+            if checked.insert(entity) {
+                self.gather_bounds_from_where_clause(
+                    alias_entity,
+                    entity,
+                    &mut protocols,
+                    &mut visited,
+                );
+            }
+            current = self.ctx.parent_of(entity);
+        }
+
+        (protocols, visited)
+    }
+
+    /// The half of [`Self::collect_assoc_type_direct_bounds_inner`] that holds
+    /// for **every** receiver: the alias's own `Conformances`
+    /// (`type Iter: Iterator`) and the *owning protocol*'s where clause
+    /// (`protocol P { type Item }` + `where Item: Equatable`). Both are
+    /// statements about the alias itself, so every `X.Item` gets them.
+    ///
+    /// Split out from the owner-hierarchy walk because that walk is the one
+    /// that can name a specific receiver (`where A.Item: Show`) — G17. Returns
+    /// the `checked` set so the caller resumes the walk without re-visiting the
+    /// parent protocol.
+    fn collect_assoc_type_receiver_free_bounds_inner(
+        &self,
+        alias_entity: Entity,
+    ) -> (
+        Vec<Entity>,
+        crate::collections::HashSet<Entity>,
+        crate::collections::HashSet<Entity>,
+    ) {
         let mut protocols = Vec::new();
-        let mut visited = std::collections::HashSet::new();
-        let mut checked = std::collections::HashSet::new();
+        let mut visited = crate::collections::HashSet::default();
+        let mut checked = crate::collections::HashSet::default();
 
         // Check Conformances on the TypeAlias itself (e.g., `type Iter: Iterator`)
         if let Some(conformances) = self.ctx.get::<Conformances>(alias_entity) {
@@ -2019,22 +2410,28 @@ impl WorldResolver<'_> {
             );
         }
 
-        // Walk from owner upward — function/extension where clauses may also
-        // constrain associated types. E.g., `func contains() where Item: Equatable`
-        let mut current = Some(self.body_owner);
-        while let Some(entity) = current {
-            if checked.insert(entity) {
-                self.gather_bounds_from_where_clause(
-                    alias_entity,
-                    entity,
-                    &mut protocols,
-                    &mut visited,
-                );
-            }
-            current = self.ctx.parent_of(entity);
-        }
+        (protocols, visited, checked)
+    }
 
-        (protocols, visited)
+    /// Receiver-free bounds on `alias_entity`, superprotocol closure included.
+    fn collect_assoc_type_receiver_free_bounds(&self, alias_entity: Entity) -> Vec<Entity> {
+        let (mut protocols, mut visited, _) =
+            self.collect_assoc_type_receiver_free_bounds_inner(alias_entity);
+        expand_protocol_closure_in_place(self.ctx, self.root, &mut protocols, &mut visited);
+        protocols
+    }
+
+    /// Does declaring `declared` also grant `wanted`? True for `declared ==
+    /// wanted` and for any superprotocol of `declared`, so a clause spelling
+    /// `A.Item: Comparable` still answers a `Equatable` query.
+    fn protocol_closure_contains(&self, declared: Entity, wanted: Entity) -> bool {
+        if declared == wanted {
+            return true;
+        }
+        let mut protocols = vec![declared];
+        let mut visited: crate::collections::HashSet<Entity> = protocols.iter().copied().collect();
+        expand_protocol_closure_in_place(self.ctx, self.root, &mut protocols, &mut visited);
+        protocols.contains(&wanted)
     }
 
     /// Collect all protocol entities a type parameter is bound to,
@@ -2064,11 +2461,17 @@ impl WorldResolver<'_> {
                     });
                     for clause in clauses {
                         if let WhereClause::Bound {
-                            param, protocol, ..
+                            subject, protocol, ..
                         } = clause
                         {
-                            // `Self: Protocol` — param is the target protocol entity
-                            if param == target_protocol {
+                            // `Self: Protocol`. `SelfType` is the spelling the
+                            // resolver produces (G17 stage 3a); `Param(target)`
+                            // still covers the same clause written with the
+                            // protocol's own name. Projections stay skipped —
+                            // `Self.Item: P` bounds the *alias*, not `Self`.
+                            if matches!(subject, WhereSubject::SelfType)
+                                || subject.as_param() == Some(target_protocol)
+                            {
                                 protocols.push(protocol);
                             }
                         }
@@ -2138,15 +2541,25 @@ impl WorldResolver<'_> {
             // Mirror `hir_type_copy_semantics`: protocol existentials / `some P`
             // are Copyable; an abstract associated projection is conservatively
             // NotCopyable (not known to be copyable).
-            TyKind::Protocol { .. } | TyKind::Opaque { .. } => CopySemantics::Copyable,
+            TyKind::Protocol { .. } => CopySemantics::Copyable,
+            // `some P and not Copyable` may hide a move-only underlier.
+            TyKind::Opaque { not_copyable, .. } => {
+                if *not_copyable {
+                    CopySemantics::NotCopyable
+                } else {
+                    CopySemantics::Copyable
+                }
+            },
             TyKind::AssocProjection { .. } => CopySemantics::NotCopyable,
-            // Tuple elements aren't resolvable here; Function/Never/Error and
-            // reducible aliases never block a Copyable bound. Permissive — the
-            // MIR layer is element-aware for the cases that matter.
+            // A closure value's copy class is its KIND's (plan D6) — the twin
+            // of the `solver_copy_class` arm.
+            TyKind::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),
+            // Tuple elements aren't resolvable here; Never/Error and reducible
+            // aliases never block a Copyable bound. Permissive — the MIR layer
+            // is element-aware for the cases that matter.
             // Ref: never a stored value (decay copies the POINTEE; the copy
             // guards judge that copy) — permissive like the others.
             TyKind::Tuple(_)
-            | TyKind::Function { .. }
             | TyKind::TypeAlias { .. }
             | TyKind::Ref { .. }
             | TyKind::Never
@@ -2167,10 +2580,10 @@ impl WorldResolver<'_> {
     fn collect_param_direct_bounds_inner(
         &self,
         param_entity: Entity,
-    ) -> (Vec<Entity>, std::collections::HashSet<Entity>) {
+    ) -> (Vec<Entity>, crate::collections::HashSet<Entity>) {
         let mut protocols = Vec::new();
-        let mut visited = std::collections::HashSet::new();
-        let mut checked = std::collections::HashSet::new();
+        let mut visited = crate::collections::HashSet::default();
+        let mut checked = crate::collections::HashSet::default();
 
         // Check param's direct parent (function/method that declares the type param)
         if let Some(parent) = self.ctx.parent_of(param_entity) {
@@ -2203,34 +2616,61 @@ impl WorldResolver<'_> {
     }
 
     /// Extract protocol bounds for `param_entity` from a single entity's WhereClause.
+    ///
+    /// **G17 S2 — scope.** The clause is *written on* `entity`, so its names
+    /// mean whatever they mean in `entity`'s own scope, not in the body that
+    /// happens to be under inference. Resolving them against `self.body_owner`
+    /// (what this did before) let a method-local type parameter named `Item`
+    /// capture a clause written about the protocol's `Item`, in both
+    /// directions: the local param wrongly *gained* the bound and the real
+    /// subject wrongly *lost* it. Per-holder resolution *is* the scope check —
+    /// a name that does not resolve in `entity`'s scope cannot bind
+    /// `param_entity` — so this also subsumes the "ancestor chain" leak for
+    /// `TypeParameter` subjects; the walk itself (`body_owner` + ancestors)
+    /// stays as it was, because that walk answers the different question of
+    /// *which clauses are in force here*.
+    ///
+    /// **G29 — structure.** The clause is read through
+    /// [`Self::where_clause_bounds_on`], not re-derived from the raw AST: a
+    /// by-name re-resolution of `T.Out` picked the first `Out` in source order
+    /// (`R.Out` through `Q` when the clause means `P.Out`) and re-granted
+    /// bounds the structured layer had dropped as ambiguous (E479).
     fn gather_bounds_from_where_clause(
         &self,
         param_entity: Entity,
         entity: Entity,
         protocols: &mut Vec<Entity>,
-        visited: &mut std::collections::HashSet<Entity>,
+        visited: &mut crate::collections::HashSet<Entity>,
     ) {
-        let Some(wc) = self.ctx.get::<AstWhereClause>(entity) else {
-            return;
-        };
-        for constraint in &wc.0 {
-            if let WhereConstraint::Bound {
-                subject,
-                protocols: proto_types,
-                ..
-            } = constraint
-                && let Some(resolved_subj) = self.resolve_type_entity(subject)
-                && resolved_subj == param_entity
-            {
-                for proto_ty in proto_types {
-                    if let Some(proto) = self.resolve_type_entity(proto_ty)
-                        && visited.insert(proto)
-                    {
-                        protocols.push(proto);
-                    }
-                }
+        for proto in self.where_clause_bounds_on(param_entity, entity) {
+            if visited.insert(proto) {
+                protocols.push(proto);
             }
         }
+    }
+
+    /// The protocols the clauses **written** on `entity` bound `param_entity`
+    /// by, read off the structured `ExplicitWhereClauses` (G29 / G17's raw-AST
+    /// half). A subject matches on its entity — the param itself, or a
+    /// projection's tail associated type — so a clause resolution dropped
+    /// (E479/E440) grants nothing here. `ExplicitWhereClauses`, not
+    /// `WhereClausesOf`: the implicit `Copyable`/`Static` bounds are not
+    /// written clauses (G17 `plan-scope.md` Q1).
+    fn where_clause_bounds_on(&self, param_entity: Entity, entity: Entity) -> Vec<Entity> {
+        let resolution = self.ctx.query(crate::where_clauses::ExplicitWhereClauses {
+            entity,
+            root: self.root,
+        });
+        resolution
+            .clauses
+            .iter()
+            .filter_map(|clause| match clause {
+                WhereClause::Bound {
+                    subject, protocol, ..
+                } if subject.tail() == Some(param_entity) => Some(*protocol),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Rank ambiguous candidates by extension specificity.

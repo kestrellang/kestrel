@@ -25,16 +25,21 @@ pub mod visibility;
 pub use conformances::{
     ConformingProtocolInstantiations, ConformingProtocols, expand_protocol_closure,
     expand_protocol_closure_in_place, extract_ast_type_args, find_protocol_witness_init,
+    protocol_parents,
 };
-pub use extensions::{ExtensionTargetEntity, ExtensionsFor, ResolvedExtensionTarget};
+pub use extensions::{
+    ExtensionLhsParams, ExtensionTargetEntity, ExtensionsFor, ResolvedExtensionTarget,
+};
 pub use protocol_members::{
     ProtocolAssociatedTypes, ProtocolMember, ProtocolMemberMap, ProtocolMembers,
     ProtocolMembersByName,
 };
-pub use resolve_builtin::{BuiltinIndex, BuiltinMap, EntityBuiltin, ResolveBuiltin};
+pub use resolve_builtin::{
+    BuiltinIndex, BuiltinMap, EntityBuiltin, ResolveBuiltin, builtin_annotation_allowed,
+};
 pub use resolve_module::{ResolveModulePath, StdModules};
 pub use resolve_name::{NameResolution, ResolveName};
-pub use resolve_type::{ResolveTypePath, TypeResolution};
+pub use resolve_type::{ResolveTypePath, TypePathChain, TypeResolution, resolve_type_path_chain};
 pub use resolve_value::{ResolveValuePath, ValueResolution};
 pub use scope::{Scope, ScopeFor};
 pub use traversal::MemberMap;

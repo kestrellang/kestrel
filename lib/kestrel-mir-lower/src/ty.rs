@@ -8,9 +8,10 @@ use std::collections::HashSet;
 
 use kestrel_ast_builder::{Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
+use kestrel_hecs::guard::OnDrop;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
-use kestrel_mir::{MirTy, ParamConvention, TyId};
+use kestrel_mir::{FnKind, MirTy, ParamConvention, TyId};
 use kestrel_type_infer::InferBody;
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -25,6 +26,18 @@ fn to_mir_convention(c: kestrel_ast::ParamConvention) -> ParamConvention {
         kestrel_ast::ParamConvention::Borrow => ParamConvention::Borrow,
         kestrel_ast::ParamConvention::MutBorrow => ParamConvention::MutBorrow,
         kestrel_ast::ParamConvention::Consuming => ParamConvention::Consuming,
+    }
+}
+
+/// The closure kind rides the type from parse through inference into MIR: the
+/// view tiers (`Normal`/`Mutating`) lower captures as frame addresses, the
+/// owning tiers own their environment. Single mapping point.
+pub(crate) fn to_mir_fn_kind(k: kestrel_ast::FnTypeKind) -> FnKind {
+    match k {
+        kestrel_ast::FnTypeKind::Normal => FnKind::Normal,
+        kestrel_ast::FnTypeKind::Mutating => FnKind::Mutating,
+        kestrel_ast::FnTypeKind::Consuming => FnKind::Consuming,
+        kestrel_ast::FnTypeKind::Escaping => FnKind::Escaping,
     }
 }
 
@@ -123,6 +136,7 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
             ctx.module.ty_arena.tuple(elems)
         },
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
@@ -142,6 +156,7 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
                 .collect();
             let lowered_ret = lower_type(ctx, ret);
             ctx.intern(MirTy::FuncThick {
+                kind: to_mir_fn_kind(*kind),
                 params: lowered_params,
                 ret: lowered_ret,
             })
@@ -229,6 +244,7 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
             ctx.module.ty_arena.tuple(lowered)
         },
         ResolvedTy::Function {
+            kind,
             params,
             conventions,
             ret,
@@ -247,6 +263,7 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
                 .collect();
             let lowered_ret = lower_resolved_ty_preserving(ctx, ret);
             ctx.intern(MirTy::FuncThick {
+                kind: to_mir_fn_kind(*kind),
                 params: lowered_params,
                 ret: lowered_ret,
             })
@@ -258,20 +275,36 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
         } => {
             let is_cycle = OPAQUE_RESOLVE_STACK.with(|stack| !stack.borrow_mut().insert(*origin));
             if is_cycle {
+                // Early-out *before* the insert took effect for us, so no
+                // guard is owed here.
                 return ctx.module.ty_arena.error();
             }
+            // Remove on every exit path including an unwind: a leaked entry
+            // makes this origin look like a cycle forever, so every later
+            // lowering of the same opaque type on this thread silently
+            // yields `error()` (F22 — see `kestrel_hecs::guard`).
+            let origin = *origin;
+            let _stack_guard = OnDrop::new(move || {
+                OPAQUE_RESOLVE_STACK.with(|stack| {
+                    stack.borrow_mut().remove(&origin);
+                });
+            });
 
             let body = ctx.query.query(InferBody {
-                entity: *origin,
+                entity: origin,
                 root: ctx.root,
             });
-            let concrete = body
+            let Some(concrete) = body
                 .as_ref()
                 .and_then(|b| b.opaque_concrete_type.as_ref())
                 .cloned()
-                .unwrap_or_else(|| {
-                    panic!("ICE: opaque type origin {:?} has no concrete type", origin)
-                });
+            else {
+                // Fail soft, like `resolve_callable_return_type` does for the
+                // identical question: an opaque whose body never produced a
+                // concrete type is an upstream inference failure that already
+                // reported, and `error()` lets the rest of the module lower.
+                return ctx.module.ty_arena.error();
+            };
 
             // `origin_args` is built parallel to the opaque origin's
             // substitution list: the origin's OWN type params first, then the
@@ -285,10 +318,10 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
             // that `origin_args` doesn't carry.
             let mut type_params: Vec<Entity> = ctx
                 .world
-                .get::<TypeParams>(*origin)
+                .get::<TypeParams>(origin)
                 .map(|tp| tp.0.clone())
                 .unwrap_or_default();
-            let mut ancestor = ctx.world.parent_of(*origin);
+            let mut ancestor = ctx.world.parent_of(origin);
             while let Some(p) = ancestor {
                 if let Some(tp) = ctx.world.get::<TypeParams>(p) {
                     type_params.extend(tp.0.iter().copied());
@@ -297,10 +330,7 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
             }
 
             let substituted = substitute_resolved_ty(&concrete, &type_params, origin_args);
-            let result = lower_resolved_ty_preserving(ctx, &substituted);
-
-            OPAQUE_RESOLVE_STACK.with(|stack| stack.borrow_mut().remove(origin));
-            result
+            lower_resolved_ty_preserving(ctx, &substituted)
         },
         ResolvedTy::Never => ctx.module.ty_arena.never(),
         ResolvedTy::Error => ctx.module.ty_arena.error(),
@@ -436,7 +466,9 @@ fn lower_type_replacing_opaque(ctx: &mut LowerCtx, ty: &HirTy, concrete: &Resolv
                 .collect();
             ctx.module.ty_arena.tuple(lowered)
         },
-        HirTy::Function { params, ret, .. } => {
+        HirTy::Function {
+            kind, params, ret, ..
+        } => {
             let lowered_params: Vec<(TyId, ParamConvention)> = params
                 .iter()
                 .map(|p| {
@@ -454,6 +486,7 @@ fn lower_type_replacing_opaque(ctx: &mut LowerCtx, ty: &HirTy, concrete: &Resolv
                 lower_type(ctx, ret)
             };
             ctx.intern(MirTy::FuncThick {
+                kind: to_mir_fn_kind(*kind),
                 params: lowered_params,
                 ret: lowered_ret,
             })
@@ -491,6 +524,14 @@ fn contains_opaque(ty: &HirTy) -> bool {
 }
 
 /// Substitute type params in a ResolvedTy (for opaque return type resolution).
+///
+/// **Exhaustive on purpose — do not add a `_ =>` arm.** This is the second
+/// substitution kernel in the tree (`kestrel_mir::substitute` is the first, over
+/// `MirTy`, and is exhaustive for the same reason). It used to end in
+/// `_ => ty.clone()`, which silently stopped recursing at `Ref` and `Opaque`
+/// even though both carry nested `ResolvedTy`s, and guaranteed that any future
+/// variant would be skipped rather than be a compile error (fragility audit
+/// F32). Leaf variants are listed by name so adding one is a decision.
 fn substitute_resolved_ty(
     ty: &ResolvedTy,
     type_params: &[Entity],
@@ -524,10 +565,12 @@ fn substitute_resolved_ty(
                 .collect(),
         ),
         ResolvedTy::Function {
+            kind,
             params: fn_params,
             conventions,
             ret,
         } => ResolvedTy::Function {
+            kind: *kind,
             params: fn_params
                 .iter()
                 .map(|p| substitute_resolved_ty(p, type_params, args))
@@ -539,7 +582,42 @@ fn substitute_resolved_ty(
             base: Box::new(substitute_resolved_ty(base, type_params, args)),
             assoc: *assoc,
         },
-        _ => ty.clone(),
+        ResolvedTy::Ref { pointee, mutating } => ResolvedTy::Ref {
+            pointee: Box::new(substitute_resolved_ty(pointee, type_params, args)),
+            mutating: *mutating,
+        },
+        ResolvedTy::Opaque {
+            origin,
+            bounds,
+            origin_args,
+            index,
+            not_copyable,
+        } => ResolvedTy::Opaque {
+            origin: *origin,
+            // A bound's own arguments can mention the params being substituted
+            // (`some Collection[T]`), as can the args the opaque was produced
+            // with. The bound protocol entity itself is not a type.
+            bounds: bounds
+                .iter()
+                .map(|(protocol, bound_args)| {
+                    (
+                        *protocol,
+                        bound_args
+                            .iter()
+                            .map(|a| substitute_resolved_ty(a, type_params, args))
+                            .collect(),
+                    )
+                })
+                .collect(),
+            origin_args: origin_args
+                .iter()
+                .map(|a| substitute_resolved_ty(a, type_params, args))
+                .collect(),
+            index: *index,
+            not_copyable: *not_copyable,
+        },
+        // Leaves: no nested types to walk into.
+        ResolvedTy::SelfType { .. } | ResolvedTy::Never | ResolvedTy::Error => ty.clone(),
     }
 }
 
@@ -551,10 +629,7 @@ mod tests {
     use kestrel_mir::MirTy;
 
     fn stdlib_path() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../lang/std")
-            .canonicalize()
-            .expect("stdlib path should exist at lang/std")
+        kestrel_compiler::stdlib_path::repo_std_path()
     }
 
     #[test]
@@ -640,6 +715,73 @@ mod tests {
         let hir = HirTy::Param(param_entity, kestrel_span::Span::synthetic(0));
         let ty = lower_type(&mut ctx, &hir);
         assert_eq!(ctx.module.ty_arena.get(ty), &MirTy::TypeParam(param_entity));
+    }
+
+    // === substitute_resolved_ty (fragility audit F32) ===
+
+    /// `Ref` and `Opaque` both carry nested `ResolvedTy`s. The kernel used to
+    /// end in `_ => ty.clone()`, so substitution stopped at either of them and
+    /// the type parameter inside survived into MIR unsubstituted.
+    #[test]
+    fn substitution_reaches_inside_refs_and_opaques() {
+        let param = Entity::from_raw(999);
+        let concrete = Entity::from_raw(7);
+        let named = |e| ResolvedTy::Named {
+            entity: e,
+            args: vec![],
+        };
+        let params = [param];
+        let args = [named(concrete)];
+
+        let through_ref = substitute_resolved_ty(
+            &ResolvedTy::Ref {
+                pointee: Box::new(ResolvedTy::Param { entity: param }),
+                mutating: true,
+            },
+            &params,
+            &args,
+        );
+        match through_ref {
+            ResolvedTy::Ref { pointee, mutating } => {
+                assert!(mutating, "substitution must not drop `mutating`");
+                assert_eq!(*pointee, named(concrete), "T survived inside &mutating T");
+            },
+            other => panic!("Ref did not stay a Ref: {other:?}"),
+        }
+
+        let through_opaque = substitute_resolved_ty(
+            &ResolvedTy::Opaque {
+                origin: Entity::from_raw(1),
+                bounds: vec![(
+                    Entity::from_raw(2),
+                    vec![ResolvedTy::Param { entity: param }],
+                )],
+                origin_args: vec![ResolvedTy::Param { entity: param }],
+                index: 3,
+                not_copyable: true,
+            },
+            &params,
+            &args,
+        );
+        match through_opaque {
+            ResolvedTy::Opaque {
+                bounds,
+                origin_args,
+                index,
+                not_copyable,
+                ..
+            } => {
+                assert_eq!(bounds[0].1, vec![named(concrete)], "T survived in a bound");
+                assert_eq!(
+                    origin_args,
+                    vec![named(concrete)],
+                    "T survived in origin_args"
+                );
+                assert_eq!(index, 3);
+                assert!(not_copyable, "substitution must not drop `not_copyable`");
+            },
+            other => panic!("Opaque did not stay an Opaque: {other:?}"),
+        }
     }
 
     #[test]

@@ -6,17 +6,17 @@ use crate::entity::Entity;
 
 /// Trait alias for types that can be stored as components.
 ///
-/// Blanket-implemented for all `Any + Clone + 'static` types, so users
+/// Blanket-implemented for all `Any + Clone + Send + Sync + 'static` types, so users
 /// never need to implement this manually — just use any cloneable type.
-pub trait Component: Any + Clone + 'static {}
+pub trait Component: Any + Clone + Send + Sync + 'static {}
 
-impl<T: Any + Clone + 'static> Component for T {}
+impl<T: Any + Clone + Send + Sync + 'static> Component for T {}
 
 // -- Type-erased column interface --
 
 /// Type-erased operations on a component column.
 #[allow(dead_code)]
-trait AnyColumn: Any {
+trait AnyColumn: Any + Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn has(&self, entity: Entity) -> bool;

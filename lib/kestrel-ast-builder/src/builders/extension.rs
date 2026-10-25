@@ -5,57 +5,61 @@ use std::collections::HashSet;
 use kestrel_ast::{AstType, PathSegment};
 use kestrel_hecs::{Entity, World};
 use kestrel_span::Span;
+
+use kestrel_syntax_tree::SyntaxNodePtr;
+use kestrel_syntax_tree::ast::{self, AstNode};
 use kestrel_syntax_tree::utils::get_decl_span;
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use super::helpers::*;
-use crate::ast_type::ast_type_from_cst;
+use crate::ast_type::lower_opt_type;
 use crate::components::*;
 
 /// Build an extension declaration entity from CST.
 ///
 /// Components: NodeKind::Extension, FileId, ExtensionTarget,
-/// [Conformances], [WhereClause], [Attributes], [Documentation],
+/// [Conformances], [WhereClause], [Documentation],
 /// [TypeParams] — when the RHS conformance list introduces free type
 /// parameters that aren't bound by the extension target's own LHS args
 /// (e.g. `extend Int64: ArrayIndex[T]` → free `T`).
 ///
-/// Extensions have no Name — they extend an existing type.
+/// Extensions have no Name — they extend an existing type — and take no
+/// attributes (the grammar has none on `extend`).
 pub fn build_extension(
     world: &mut World,
-    node: &SyntaxNode,
+    node: &ast::ExtensionDeclaration,
     parent: Entity,
     file_entity: Entity,
     file_id: usize,
-) -> (Entity, Option<SyntaxNode>) {
+) -> (Entity, Vec<ast::Item>) {
+    let syntax = node.syntax();
     let entity = world.spawn();
 
     world.set(entity, NodeKind::Extension);
     world.set(entity, FileId(file_entity));
-    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
-    world.set(entity, CstNode(node.clone()));
+    world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
+    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
     world.set_parent(entity, parent);
 
-    // ExtensionTarget — the type being extended is the first type node
-    if let Some(target_ty) = node
-        .children()
-        .find(|c| is_type_kind(c.kind()))
-        .and_then(|c| ast_type_from_cst(&c, file_id))
-    {
+    if let Some(target_ty) = lower_opt_type(node.ty(), file_id) {
         world.set(entity, ExtensionTarget(target_ty));
     }
 
-    set_attributes(world, entity, node, file_id);
-    set_documentation(world, entity, node);
+    set_documentation(world, entity, syntax);
     set_conformances(world, entity, node, file_id);
     set_where_clause(world, entity, node, file_id);
 
-    introduce_rhs_free_type_params(world, entity, file_entity, file_id);
+    // Record what the LHS introduces before the RHS scan, which consumes the
+    // same list. Both must agree on it — see `ExtensionLhsParamNames`.
+    let lhs_names = collect_lhs_target_names(world, entity);
+    world.set(entity, ExtensionLhsParamNames(lhs_names.clone()));
 
-    let body = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::ExtensionBody);
-    (entity, body)
+    introduce_rhs_free_type_params(world, entity, file_entity, file_id, lhs_names);
+
+    let members = node
+        .extension_body()
+        .map(|b| b.items().collect())
+        .unwrap_or_default();
+    (entity, members)
 }
 
 /// Scan the conformance RHS for free type parameters not already in scope
@@ -80,15 +84,15 @@ fn introduce_rhs_free_type_params(
     entity: Entity,
     file_entity: Entity,
     file_id: usize,
+    lhs_names: Vec<String>,
 ) {
     let conformances = match world.get::<Conformances>(entity) {
         Some(c) => c.0.clone(),
         None => return,
     };
 
-    let lhs_names = collect_lhs_target_names(world, entity);
-    let mut seen: HashSet<String> = lhs_names;
-    let mut new_params: Vec<(String, Span, SyntaxNode)> = Vec::new();
+    let mut seen: HashSet<String> = lhs_names.into_iter().collect();
+    let mut new_params: Vec<(String, Span, SyntaxNodePtr)> = Vec::new();
 
     let cst = match world.get::<CstNode>(entity) {
         Some(node) => node.0.clone(),
@@ -173,12 +177,24 @@ fn is_free_type_param_name(name: &str) -> bool {
 }
 
 /// Collect single-segment names appearing as top-level type args of the
-/// extension's target. For `extend Pair[T, U]` returns {"T", "U"}. For
-/// `extend Int64` returns {}. For a ref target `extend &T` the POINTEE is
-/// the param position, so it returns {"T"} — without this, an RHS scan
-/// would introduce a shadowing free param for the same name.
-fn collect_lhs_target_names(world: &World, entity: Entity) -> HashSet<String> {
-    let mut names = HashSet::new();
+/// extension's target, in source order. For `extend Pair[T, U]` returns
+/// `["T", "U"]`. For `extend Int64` returns `[]`. For a ref target `extend &T`
+/// the POINTEE is the param position, so it returns `["T"]` — without this, an
+/// RHS scan would introduce a shadowing free param for the same name.
+///
+/// This is a superset of the names that actually *bind*: `extend Box[Payload]`
+/// yields `["Payload"]` even though `Payload` is a concrete type. Consumers
+/// that need the binding parameters intersect this with the target nominal's
+/// declared parameter names (see `ExtensionLhsParams` in kestrel-name-res);
+/// the RHS free-param scan wants the superset, since a name already mentioned
+/// on the LHS must never be re-introduced.
+fn collect_lhs_target_names(world: &World, entity: Entity) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut push = |name: &str| {
+        if !names.iter().any(|n: &String| n == name) {
+            names.push(name.to_string());
+        }
+    };
     let Some(target) = world.get::<ExtensionTarget>(entity) else {
         return names;
     };
@@ -187,7 +203,7 @@ fn collect_lhs_target_names(world: &World, entity: Entity) -> HashSet<String> {
             && segments.len() == 1
             && segments[0].type_args.is_empty()
         {
-            names.insert(segments[0].name.clone());
+            push(&segments[0].name);
         }
         return names;
     }
@@ -202,7 +218,7 @@ fn collect_lhs_target_names(world: &World, entity: Entity) -> HashSet<String> {
             && segs.len() == 1
             && segs[0].type_args.is_empty()
         {
-            names.insert(segs[0].name.clone());
+            push(&segs[0].name);
         }
     }
     names

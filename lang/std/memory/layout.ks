@@ -2,8 +2,9 @@
 
 module std.memory
 
-import std.core.(Equatable, Bool)
+import std.core.(Equatable, Bool, fatalError)
 import std.numeric.(Int64)
+import std.result.(Optional)
 
 /// Size + alignment pair describing the memory footprint of a type.
 ///
@@ -22,9 +23,9 @@ import std.numeric.(Int64)
 ///
 /// # Representation
 ///
-/// Two `Int64`s — `size` and `alignment`. No invariants enforced at
-/// construction; misaligned layouts are caught (or undefined) at the
-/// allocator level.
+/// Two `Int64`s — `size` and `alignment`. Explicitly constructed layouts
+/// are validated by allocators; the factories in this type reject negative
+/// sizes, invalid alignments, and arithmetic overflow.
 public struct Layout: Equatable {
     /// Footprint in bytes.
     public var size: Int64
@@ -46,15 +47,27 @@ public struct Layout: Equatable {
         Layout(size: Int64(intLiteral: lang.sizeof[T]()), alignment: Int64(intLiteral: lang.alignof[T]()))
     }
 
-    /// Layout for `count` contiguous `T` values. Inherits the element's
-    /// alignment; size is `sizeof[T] * count` with no inter-element padding
-    /// (T is assumed already padded to its own alignment).
-    public static func array[T](count: Int64) -> Layout {
+    /// Layout for `count` contiguous `T` values. Traps if `count` is negative
+    /// or the total size cannot be represented by `Int64`. Use
+    /// `arrayChecked` to handle those cases explicitly.
+    public static func array[T](count: Int64) -> Layout where T: not Copyable {
+        match Layout.arrayChecked[T](count) {
+            .Some(layout) => layout,
+            .None => fatalError("Layout.array: negative count or size overflow")
+        }
+    }
+
+    /// Checked counterpart to `array`. Returns `None` for a negative count
+    /// or when `sizeof[T] * count` overflows.
+    public static func arrayChecked[T](count: Int64) -> Layout? where T: not Copyable {
+        if count < 0 {
+            return .None
+        };
         let elementLayout = Layout.of[T]();
-        Layout(
-            size: elementLayout.size * count,
-            alignment: elementLayout.alignment
-        )
+        match elementLayout.size.multiplyChecked(count) {
+            .Some(size) => .Some(Layout(size: size, alignment: elementLayout.alignment)),
+            .None => .None
+        }
     }
 
     /// Equal when both fields match.
@@ -62,12 +75,26 @@ public struct Layout: Equatable {
         self.size == other.size and self.alignment == other.alignment
     }
 
-    /// Rounds `size` up to the next multiple of `alignment`. Use when
-    /// emitting a value into a packed array — without padding, element
-    /// `i+1` would land at the wrong offset.
+    /// Rounds `size` up to the next multiple of `alignment`. Traps for an
+    /// invalid layout or arithmetic overflow; use `padToAlignChecked` to
+    /// handle failure explicitly.
     public func padToAlign() -> Layout {
+        match self.padToAlignChecked() {
+            .Some(layout) => layout,
+            .None => fatalError("Layout.padToAlign: invalid layout or size overflow")
+        }
+    }
+
+    /// Checked counterpart to `padToAlign`.
+    public func padToAlignChecked() -> Layout? {
+        if self.size < 0 or not self.alignment.isPowerOfTwo {
+            return .None
+        };
         let padding = (self.alignment - (self.size % self.alignment)) % self.alignment;
-        Layout(size: self.size + padding, alignment: self.alignment)
+        match self.size.addChecked(padding) {
+            .Some(size) => .Some(Layout(size: size, alignment: self.alignment)),
+            .None => .None
+        }
     }
 
     /// Concatenates `other` after `self`, mimicking how a C struct lays
@@ -75,15 +102,32 @@ public struct Layout: Equatable {
     /// offset where `other`'s storage starts (handy for building field
     /// access tables by hand).
     public func merge(with other: Layout) -> (Layout, Int64) {
+        match self.mergeChecked(with: other) {
+            .Some(merged) => merged,
+            .None => fatalError("Layout.merge: invalid layout or size overflow")
+        }
+    }
+
+    /// Checked counterpart to `merge`. Returns `None` if either input is
+    /// invalid or if padding/size arithmetic overflows.
+    public func mergeChecked(with other: Layout) -> (Layout, Int64)? {
+        if self.size < 0 or other.size < 0 or
+            not self.alignment.isPowerOfTwo or not other.alignment.isPowerOfTwo {
+            return .None
+        };
         let newAlign = if self.alignment > other.alignment {
             self.alignment
         } else {
             other.alignment
         };
         let padding = (other.alignment - (self.size % other.alignment)) % other.alignment;
-        let offset = self.size + padding;
-        let newSize = offset + other.size;
-        (Layout(size: newSize, alignment: newAlign), offset)
+        match self.size.addChecked(padding) {
+            .Some(offset) => match offset.addChecked(other.size) {
+                .Some(newSize) => .Some((Layout(size: newSize, alignment: newAlign), offset)),
+                .None => .None
+            },
+            .None => .None
+        }
     }
 
     // Repeat layout for array

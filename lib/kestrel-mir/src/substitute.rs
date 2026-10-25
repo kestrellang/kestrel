@@ -122,7 +122,7 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             }
         },
 
-        MirTy::FuncThick { params, ret } => {
+        MirTy::FuncThick { kind, params, ret } => {
             let sub_params: Vec<(TyId, ParamConvention)> = params
                 .iter()
                 .map(|&(t, conv)| (substitute(arena, t, subst), conv))
@@ -130,6 +130,7 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             let sub_ret = substitute(arena, ret, subst);
             if sub_params != params || sub_ret != ret {
                 arena.intern(MirTy::FuncThick {
+                    kind,
                     params: sub_params,
                     ret: sub_ret,
                 })

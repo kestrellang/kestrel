@@ -18,18 +18,19 @@ File paths and commands for common tasks. All paths relative to the repo root.
 | Lower AST body → HIR body | `lib/kestrel-hir-lower/src/` |
 | Lower a type annotation | `lib/kestrel-hir-lower/src/` (`LowerTypeAnnotation`) |
 | Add a type-inference `Constraint` | `lib/kestrel-type-infer/src/constraint.rs` |
-| Add a solver rule for a constraint | `lib/kestrel-type-infer/src/solver.rs` |
+| Add a solver rule for a constraint | `lib/kestrel-type-infer/src/solver/` |
 | Add an `InferError` variant | see `lib/kestrel-type-infer/AGENTS.md` (updates **5** files) |
 | Add a body-level analyzer | `lib/kestrel-analyze/src/body/<name>.rs` |
 | Add a declaration-level analyzer | `lib/kestrel-analyze/src/decl/<name>.rs` |
 | Add a whole-compilation analyzer | `lib/kestrel-analyze/src/compilation/<name>.rs` |
 | Register an analyzer | `lib/kestrel-analyze/src/lib.rs` (`default_analyzers`) |
-| MIR types (`Place`, `Rvalue`, `Terminator`) | `lib/kestrel-mir/src/` |
+| MIR types (`ValueId`, `Instruction`, `Terminator`) | `lib/kestrel-mir/src/` |
 | Lower entities → MIR | `lib/kestrel-mir-lower/src/` |
-| Type layout | `lib/kestrel-codegen/src/layout.rs` |
-| Symbol mangling | `lib/kestrel-codegen/src/mangle.rs` |
+| Type layout | `lib/kestrel-mir/src/layout.rs` |
+| Symbol mangling | `lib/kestrel-mir/src/mono/mangle.rs` |
+| Monomorphization (MIR pass) | `lib/kestrel-mir/src/mono/` |
 | Cranelift codegen | `lib/kestrel-codegen-cranelift/src/` |
-| Monomorphization | `lib/kestrel-codegen-cranelift/src/` |
+| LLVM codegen | `lib/kestrel-codegen-llvm/src/` |
 | Diagnostic formatting | `lib/kestrel-reporting/src/` |
 
 ## Tests and stdlib
@@ -66,7 +67,7 @@ Inside a query (`fn execute(&self, ctx: &QueryContext)`):
 ## Test annotations
 
 ```kestrel
-// test: diagnostics        // or: compiles, runs
+// test: diagnostics        // or: mir, execution
 // stdlib: false             // opt out of stdlib for unit-ish diagnostic tests
 
 module Main
@@ -78,6 +79,7 @@ func main() -> Unit {
 }
 ```
 
+- Valid test kinds are `diagnostics`, `mir` (clean compile + MIR snapshot), and `execution` (compile, run, check exit code / stdout). **Unknown kinds silently fall back to `diagnostics`** (`lib/kestrel-test-suite/src/annotation.rs`) — a typo like `runs` or `compiles` won't error, it just runs the file as a diagnostics test.
 - `// ERROR:` is a substring match; write the full distinctive message.
 - Place the annotation on the same line as the offending token.
 - See `lib/kestrel-test-suite/AGENTS.md` for the full conventions.
@@ -90,8 +92,8 @@ triage
 triage <pattern>
 triage --failures
 
-# Verbose debug traces in the compiler
-VERBOSE_DEBUG_OUTPUT=1 triage <pattern>
+# Debug traces in the compiler (comma-separated categories, or `all`)
+KESTREL_DEBUG=infer,solver triage <pattern>
 
 # Format / lint / check
 cargo fmt
@@ -103,7 +105,7 @@ cargo test -p kestrel-codegen
 cargo test -p kestrel-type-infer
 ```
 
-Package names in `lib/` have a `2` suffix in `Cargo.toml` (`kestrel-compiler`, `kestrel-codegen`, `kestrel-test-suite`, …) — the directory names don't. Use the package name with `-p`.
+Package names in `lib/` match the directory names (`kestrel-compiler`, `kestrel-codegen`, `kestrel-test-suite`, …). Use the directory name with `-p`.
 
 ## `NodeKind` catalogue
 
@@ -137,13 +139,13 @@ pub enum NodeKind {
 | `NodeKind` | Discriminant (always present). |
 | `Name(String)` | Declared identifier. |
 | `DeclSpan(Span)` | Declaration's own span. |
-| `CstNode(SyntaxNode)` | Backing CST reference. |
+| `CstNode(SyntaxNodePtr)` | Handle to the backing CST node; resolve with `kestrel_ast_builder::syntax::cst_node`. |
 | `FileId(Entity)` | Owning source file entity. |
 | `Vis` | Public / Private / Internal / Fileprivate. |
 | `Typed` (marker) | Can appear in type position. |
 | `TypeAnnotation(AstType)` | Has a declared type (fields, params, alias targets). |
 | `Callable` | Parameter list + receiver convention. |
-| `Valued(SyntaxNode)` / `Body(AstBody)` | Has a body/initializer (pre- / post-lower). |
+| `Valued(SyntaxNodePtr)` | Has a body/initializer — a pointer to its syntax, lowered on demand by `LowerBody`. |
 | `Gettable` / `Settable` (markers) | Read / write capability. |
 | `Static` (marker) | Accessed via type, not instance. |
 | `Subscript` (marker) | Call-syntax accessor. |
@@ -175,5 +177,5 @@ See each crate's `docs/architecture.md` for the full query list.
 | Diagnostic descriptors | `static DESCRIPTORS: &[DiagnosticDescriptor]` at the top of each analyzer file. |
 | Constraint enum | `lib/kestrel-type-infer/src/constraint.rs`. |
 | `InferError` enum | `lib/kestrel-type-infer/src/error.rs`. |
-| `MirTy` / `Statement` / `Terminator` | `lib/kestrel-mir/src/`. |
+| `MirTy` / `Instruction` / `Terminator` | `lib/kestrel-mir/src/` (OSSA-style SSA — `ValueId`s with `@owned`/`@guaranteed` ownership, not `Place`/`Rvalue`/`Statement`; see `docs/contributing/mir-ownership-spec.md`). |
 | `HirExpr` / `HirStmt` / `HirPat` | `lib/kestrel-hir/src/body.rs`. |

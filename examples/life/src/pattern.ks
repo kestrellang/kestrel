@@ -7,7 +7,7 @@ enum Pattern: Formattable {
     case Pulsar
     case GosperGun
 
-    func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         let s = match self {
             .Glider => "GLIDER",
             .Blinker => "BLINKER",

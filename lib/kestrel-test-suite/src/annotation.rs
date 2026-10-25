@@ -35,7 +35,7 @@ pub struct TestConfig {
     /// requirement (E618). Execution-mode tests imply this; a diagnostics test
     /// opts in via `// executable: true` to exercise the missing-`@main` check.
     pub executable: bool,
-    /// Execution tests: check post-monomorphization warnings (E507) against
+    /// Execution tests: check post-monomorphization warnings (E508) against
     /// `// WARN:` annotations both ways even when the file has none
     /// (`// warnings: checked`), so "no warning" is assertable. A file with
     /// any `// WARN:` annotation is checked regardless.
@@ -158,6 +158,17 @@ pub fn parse_test_config(source: &str) -> TestConfig {
             },
             "skip" => {
                 config.skip = Some(value.to_string());
+            },
+            // `// host: darwin` — run only on that host OS (platform-gated
+            // tests whose outcome depends on `@platform` matching the host).
+            // Uses the compiler's own `Os` so both agree on "the host".
+            "host" => {
+                use kestrel_ast_builder::components::Os;
+                match Os::from_name(value.trim()) {
+                    Some(os) if os == Os::host() => {},
+                    Some(_) => config.skip = Some(format!("host-only test ({value})")),
+                    None => config.skip = Some(format!("unknown host '{value}'")),
+                }
             },
             "expect-exit" => {
                 config.expect_exit = i32::from_str(value).ok();

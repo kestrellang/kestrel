@@ -8,7 +8,7 @@ import std.core.(Range, ClosedRange, Hashable)
 import std.collections.(SeqRange)
 import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
-import std.numeric.(RandomNumberGenerator, Lcg64)
+import std.numeric.(RandomNumberGenerator, Lcg64, SystemRandom)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RefSliceIterator, MutRefSliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
 import std.ffi.(memcpy)
@@ -16,8 +16,41 @@ import std.iter.(Iterator, Iterable)
 import std.text.(String)
 import std.collections.(Slice)
 
-// ArrayIterator[T] removed — Array.iter() now returns ArraySliceIterator[T]
-// (same (ptr, remaining) layout; single iterator type for all Slice conformers).
+/// Forward iterator over an `Array[T]`: an `ArraySliceIterator[T]` cursor plus
+/// a share of the array's storage.
+///
+/// The share keeps the buffer alive and marks it shared, so the iterator sees
+/// the array's value at the moment `iter()` was called (value semantics, as in
+/// Swift): appending to or reassigning the array while iterating copies or
+/// drops the array's own buffer, never the one being read, and an iterator
+/// returned from a function outlives the array it came from.
+///
+/// # Representation
+///
+/// A `CowBox` share (one refcount) and the `(ptr, remaining)` cursor.
+public struct ArrayIterator[T]: Iterator, Cloneable {
+    type Item = T
+
+    private var storage: CowBox[ArrayStorage[T]]
+    private var cursor: ArraySliceIterator[T]
+
+    /// @name From Storage
+    /// Holds `storage` for the cursor's lifetime.
+    fileprivate init(storage storage: CowBox[ArrayStorage[T]], cursor cursor: ArraySliceIterator[T]) {
+        self.storage = storage;
+        self.cursor = cursor;
+    }
+
+    /// Yields the next element, or `.None` at the end.
+    public mutating func next() -> Optional[T] {
+        self.cursor.next()
+    }
+
+    /// An independent cursor at the same position, holding its own share.
+    public func clone() -> ArrayIterator[T] {
+        ArrayIterator(storage: self.storage.clone(), cursor: self.cursor)
+    }
+}
 
 // ChunksIterator and WindowsIterator live in views.ks (alongside
 // ChunksView / WindowsView).
@@ -222,7 +255,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// `Iterable` element type — the element produced by `iter().next()`.
     type Item = T
     /// `Iterable` iterator type — the concrete iterator returned by `iter()`.
-    type TargetIterator = ArraySliceIterator[T]
+    type TargetIterator = ArrayIterator[T]
     /// Pattern-matching element type — used by `ArrayMatchable` for
     /// `[a, b, ..rest]` patterns.
     type Element = T
@@ -937,12 +970,17 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         self.storage.modify { (mutating s) in
             var writeIdx: Int64 = 0;
             for readIdx in 0..<s.len {
-                let element = s.ptr.offset(by: readIdx).read();
-                if predicate(element) {
+                let keep = s.ptr.offset(by: readIdx).with { (element) in
+                    predicate(element)
+                };
+                if keep {
                     if writeIdx != readIdx {
+                        let element = s.ptr.offset(by: readIdx).take();
                         s.ptr.offset(by: writeIdx).write(element)
                     }
                     writeIdx = writeIdx + 1
+                } else {
+                    s.ptr.offset(by: readIdx).dropInPlace()
                 }
             }
             s.len = writeIdx
@@ -1163,27 +1201,23 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// var rng = Lcg64(seed: 42);
     /// arr.shuffle(using: rng);  // deterministic for the seed
     /// ```
-    public mutating func shuffle(using rng: some RandomNumberGenerator) {
+    public mutating func shuffle(mutating using rng: some RandomNumberGenerator) {
         let n = self.len();
         if n <= 1 {
             return
         }
         self.makeUnique();
-        self.storage.modify { (mutating s) in
-            var generator = rng;
-            // Fisher-Yates shuffle
-            var i: Int64 = n - 1;
-            while i > 0 {
-                // Inline nextInt(below:) since extension methods may not be visible on generic R
-                let bound = UInt64(from: i) + 1;
-                let rngValue = generator.nextUInt64();
-                let j = Int64(from: rngValue.modulo(bound));
-                // Swap elements at i and j
-                let temp = s.ptr.offset(by: i).read();
-                s.ptr.offset(by: i).write(s.ptr.offset(by: j).read());
-                s.ptr.offset(by: j).write(temp);
-                i = i - 1
-            }
+        // Fisher-Yates shuffle. The generator is mutated directly (not the
+        // storage closure's copy) so the caller's stream advances; draws go
+        // through the unbiased nextUInt64(below:).
+        let ptr = self.ptr();
+        var i: Int64 = n - 1;
+        while i > 0 {
+            let j = Int64(from: rng.nextUInt64(below: UInt64(from: i) + 1));
+            let temp = ptr.offset(by: i).read();
+            ptr.offset(by: i).write(ptr.offset(by: j).read());
+            ptr.offset(by: j).write(temp);
+            i = i - 1
         }
     }
 
@@ -1200,7 +1234,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.shuffle();  // e.g. [3, 1, 5, 2, 4]
     /// ```
     public mutating func shuffle() {
-        var rng = Lcg64();
+        var rng = SystemRandom();
         self.shuffle(using: rng)
     }
 
@@ -1217,7 +1251,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// let result = arr.shuffled(using: rng);
     /// // arr is still [1, 2, 3, 4, 5]
     /// ```
-    public func shuffled(using rng: some RandomNumberGenerator) -> Array[T] {
+    public func shuffled(mutating using rng: some RandomNumberGenerator) -> Array[T] {
         var result = self.clone();
         result.shuffle(using: rng);
         result
@@ -1324,9 +1358,14 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     // ITERATION
     // ========================================================================
 
-    /// Returns a forward iterator over the array's elements.
-    public func iter() -> ArraySliceIterator[T] {
-        ArraySliceIterator(ptr: self.ptr(), remaining: self.len())
+    /// Returns a forward iterator over the array's elements, as they are now:
+    /// the iterator shares the storage, so later mutation of the array copies
+    /// first and the iteration is unaffected.
+    public func iter() -> ArrayIterator[T] {
+        ArrayIterator(
+            storage: self.storage.clone(),
+            cursor: ArraySliceIterator(ptr: self.ptr(), remaining: self.len()),
+        )
     }
 
     /// Returns an iterator yielding SHARED REFERENCES (`&T`) to the
@@ -1398,11 +1437,15 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
 
             while true {
                 // Find first element that doesn't satisfy predicate
-                while lo < s.len and predicate(s.ptr.offset(by: lo).read()) {
+                while lo < s.len {
+                    let matches = s.ptr.offset(by: lo).with { (element) in predicate(element) };
+                    if matches == false { break };
                     lo = lo + 1
                 }
                 // Find last element that satisfies predicate
-                while hi >= 0 and predicate(s.ptr.offset(by: hi).read()) == false {
+                while hi >= 0 {
+                    let matches = s.ptr.offset(by: hi).with { (element) in predicate(element) };
+                    if matches { break };
                     hi = hi - 1
                 }
 
@@ -1411,9 +1454,11 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
                 }
 
                 // Swap
-                let temp = s.ptr.offset(by: lo).read();
-                s.ptr.offset(by: lo).write(s.ptr.offset(by: hi).read());
-                s.ptr.offset(by: hi).write(temp);
+                let loPtr = s.ptr.offset(by: lo);
+                let hiPtr = s.ptr.offset(by: hi);
+                let temp = loPtr.take();
+                loPtr.write(hiPtr.take());
+                hiPtr.write(temp);
                 lo = lo + 1;
                 hi = hi - 1
             }
@@ -1435,17 +1480,19 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// // evens = [2, 4]
     /// // odds  = [1, 3, 5]
     /// ```
-    public func partitioned(by predicate: (T) -> Bool) -> (Array[T], Array[T]) {
+    public func partitioned(by predicate: (T) -> Bool) -> (Array[T], Array[T]) where T: Copyable {
         var matching = Array[T]();
         var notMatching = Array[T]();
         let myLen = self.len();
         let myPtr = self.ptr();
         for i in 0..<myLen {
-            let element = myPtr.offset(by: i).read();
-            if predicate(element) {
-                matching.append( element)
+            let matches = myPtr.offset(by: i).with { (element) in
+                predicate(element)
+            };
+            if matches {
+                matching.append(myPtr.offset(by: i).read())
             } else {
-                notMatching.append( element)
+                notMatching.append(myPtr.offset(by: i).read())
             }
         }
         (matching, notMatching)
@@ -1644,6 +1691,31 @@ extend Array[T] where T: Comparable {
 // ============================================================================
 // HASH EXTENSION
 // ============================================================================
+
+/// `Hashable` conformance — an array hashes its elements in order, so
+/// two arrays hash equal exactly when they compare `==`.
+extend Array[T]: Hashable where T: Hashable {
+    /// Order-sensitive hash: feeds the element count, then each element
+    /// front to back, into `hasher`.
+    ///
+    /// The count prefix disambiguates nested-collection layouts (e.g.
+    /// `[[1], [2]]` vs `[[1, 2], []]`). Consistent with the `Equatable`
+    /// conformance: equal arrays produce equal hashes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var h = DefaultHasher();
+    /// [1, 2, 3].hash(into: h);
+    /// let digest = h.finish();
+    /// ```
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        self.count.hash(into: hasher);
+        for i in 0..<self.count {
+            self(unchecked: i).hash(into: hasher);
+        }
+    }
+}
 
 extend Array[T] where T: Hashable {
     /// Removes every duplicate in place, keeping the first occurrence.
@@ -1950,4 +2022,3 @@ extend Array[T] where T: Formattable {
 /// ```
 @builtin(.ArrayTypeOperator)
 public type ArrayTypeOperator[T] = Array[T];
-

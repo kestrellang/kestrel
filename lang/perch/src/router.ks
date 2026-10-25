@@ -25,42 +25,42 @@ import perch.response.(Response)
 /// app.route(delete: "/users/:id", deleteUser);
 /// ```
 public protocol Routes[T] {
-    mutating func addRoute(method: HttpMethod, path: String, handler: (Request, T) -> Response)
+    mutating func addRoute(method: HttpMethod, path: String, handler: escaping (Request, T) -> Response)
 }
 
-extend Routes {
+extend Routes[T] {
     /// Registers a GET route.
-    public mutating func route(get path: String, handler: (Request, T) -> Response) {
+    public mutating func route(get path: String, handler: escaping (Request, T) -> Response) {
         self.addRoute(HttpMethod.Get, path, handler)
     }
 
     /// Registers a POST route.
-    public mutating func route(post path: String, handler: (Request, T) -> Response) {
+    public mutating func route(post path: String, handler: escaping (Request, T) -> Response) {
         self.addRoute(HttpMethod.Post, path, handler)
     }
 
     /// Registers a PUT route.
-    public mutating func route(put path: String, handler: (Request, T) -> Response) {
+    public mutating func route(put path: String, handler: escaping (Request, T) -> Response) {
         self.addRoute(HttpMethod.Put, path, handler)
     }
 
     /// Registers a DELETE route.
-    public mutating func route(delete path: String, handler: (Request, T) -> Response) {
+    public mutating func route(delete path: String, handler: escaping (Request, T) -> Response) {
         self.addRoute(HttpMethod.Delete, path, handler)
     }
 
     /// Registers a PATCH route.
-    public mutating func route(patch path: String, handler: (Request, T) -> Response) {
+    public mutating func route(patch path: String, handler: escaping (Request, T) -> Response) {
         self.addRoute(HttpMethod.Patch, path, handler)
     }
 
     /// Registers a HEAD route.
-    public mutating func route(head path: String, handler: (Request, T) -> Response) {
+    public mutating func route(head path: String, handler: escaping (Request, T) -> Response) {
         self.addRoute(HttpMethod.Head, path, handler)
     }
 
     /// Registers an OPTIONS route.
-    public mutating func route(options path: String, handler: (Request, T) -> Response) {
+    public mutating func route(options path: String, handler: escaping (Request, T) -> Response) {
         self.addRoute(HttpMethod.Options, path, handler)
     }
 }
@@ -78,8 +78,8 @@ public struct Route[T]: Cloneable {
     var method: HttpMethod
     var pattern: String
     var patternSegments: Array[String]
-    var middleware: Array[(Request, T) -> MiddlewareResult]
-    var handler: (Request, T) -> Response
+    var middleware: Array[escaping (Request, T) -> MiddlewareResult]
+    var handler: escaping (Request, T) -> Response
 
     public func clone() -> Route[T] {
         Route[T](
@@ -100,7 +100,7 @@ public struct Route[T]: Cloneable {
 public struct RouteGroup[T]: Cloneable {
     var prefix: String
     var prefixSegments: Array[String]
-    var middleware: Array[(Request, T) -> MiddlewareResult]
+    var middleware: Array[escaping (Request, T) -> MiddlewareResult]
     var routes: Array[Route[T]]
 
     public func clone() -> RouteGroup[T] {
@@ -130,13 +130,13 @@ public struct RouteGroup[T]: Cloneable {
 /// ```
 public struct GroupBuilder[T]: Cloneable, Routes[T] {
     var prefix: String
-    var middleware: Array[(Request, T) -> MiddlewareResult]
+    var middleware: Array[escaping (Request, T) -> MiddlewareResult]
     var routes: Array[Route[T]]
 
     /// Creates a new group builder with the given path prefix.
     public init(prefix: String) {
         self.prefix = prefix;
-        self.middleware = Array[(Request, T) -> MiddlewareResult]();
+        self.middleware = Array[escaping (Request, T) -> MiddlewareResult]();
         self.routes = Array[Route[T]]()
     }
 
@@ -145,14 +145,14 @@ public struct GroupBuilder[T]: Cloneable, Routes[T] {
         self.middleware.append({ (req: Request, ctx: T) in middleware.handle(req, ctx) })
     }
 
-    public mutating func addRoute(method: HttpMethod, path: String, handler: (Request, T) -> Response) {
+    public mutating func addRoute(method: HttpMethod, path: String, handler: escaping (Request, T) -> Response) {
         let fullPath = self.prefix + path;
         let segments = splitPathSegments(fullPath);
         self.routes.append(Route[T](
             method: method,
             pattern: fullPath,
             patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
+            middleware: Array[escaping (Request, T) -> MiddlewareResult](),
             handler: handler
         ))
     }
@@ -172,9 +172,9 @@ public struct GroupBuilder[T]: Cloneable, Routes[T] {
 /// The result of matching a request against a route.
 struct MatchResult[T]: Cloneable {
     var params: Dictionary[String, String]
-    var groupMiddleware: Array[(Request, T) -> MiddlewareResult]
-    var routeMiddleware: Array[(Request, T) -> MiddlewareResult]
-    var handler: (Request, T) -> Response
+    var groupMiddleware: Array[escaping (Request, T) -> MiddlewareResult]
+    var routeMiddleware: Array[escaping (Request, T) -> MiddlewareResult]
+    var handler: escaping (Request, T) -> Response
 
     func clone() -> MatchResult[T] {
         MatchResult[T](
@@ -196,13 +196,13 @@ struct MatchResult[T]: Cloneable {
 /// standalone routes. The first match wins — later routes for the same
 /// method and pattern are shadowed.
 public struct Router[T]: Cloneable, Routes[T] {
-    public var globalMiddleware: Array[(Request, T) -> MiddlewareResult]
+    public var globalMiddleware: Array[escaping (Request, T) -> MiddlewareResult]
     var groups: Array[RouteGroup[T]]
     var routes: Array[Route[T]]
 
     /// Creates an empty router.
     public init() {
-        self.globalMiddleware = Array[(Request, T) -> MiddlewareResult]();
+        self.globalMiddleware = Array[escaping (Request, T) -> MiddlewareResult]();
         self.groups = Array[RouteGroup[T]]();
         self.routes = Array[Route[T]]()
     }
@@ -212,13 +212,13 @@ public struct Router[T]: Cloneable, Routes[T] {
         self.globalMiddleware.append({ (req: Request, ctx: T) in middleware.handle(req, ctx) })
     }
 
-    public mutating func addRoute(method: HttpMethod, path: String, handler: (Request, T) -> Response) {
+    public mutating func addRoute(method: HttpMethod, path: String, handler: escaping (Request, T) -> Response) {
         let segments = splitPathSegments(path);
         self.routes.append(Route[T](
             method: method,
             pattern: path,
             patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
+            middleware: Array[escaping (Request, T) -> MiddlewareResult](),
             handler: handler
         ))
     }
@@ -260,7 +260,7 @@ public struct Router[T]: Cloneable, Routes[T] {
                     .Some(params) => {
                         return .Some(MatchResult[T](
                             params: params,
-                            groupMiddleware: Array[(Request, T) -> MiddlewareResult](),
+                            groupMiddleware: Array[escaping (Request, T) -> MiddlewareResult](),
                             routeMiddleware: route.middleware,
                             handler: route.handler
                         ))
@@ -296,13 +296,13 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
         return .None
     }
 
-    var params = Dictionary[String, String]();
+    var params = [:];
     for i in 0..<patternSegments.count {
         let pattern = patternSegments(unchecked: i);
         let actual = requestSegments(unchecked: i);
 
         if pattern.starts(with: ":") {
-            let paramName = pattern.asSlice().subslice(from: 1, to: pattern.byteCount).toOwned();
+            let paramName = pattern.asSlice().subslice(from: 1, to: pattern.bytes.count).toOwned();
              params.insert(paramName, actual);
         } else if pattern != actual {
             return .None
@@ -314,9 +314,9 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
 
 /// Splits a path into non-empty segments.
 func splitPathSegments(path: String) -> Array[String] {
-    var segments = Array[String]();
+    var segments = [];
     for part in path.split("/") {
-        if part.byteCount > 0 {
+        if part.bytes.count > 0 {
             segments.append(part.toOwned())
         }
     }

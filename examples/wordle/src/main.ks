@@ -42,7 +42,7 @@ func handleRoot(req: Request, ctx: Ctx) -> Response {
         .Some(v) => v,
         .None => ""
     };
-    if sParam.byteCount == 0 {
+    if sParam.bytes.count == 0 {
         // First visit — pick a default seed and redirect so the URL is shareable.
         return Response.redirect(to: "/?s=42")
     };
@@ -64,7 +64,7 @@ func handleRoot(req: Request, ctx: Ctx) -> Response {
         .None => ""
     };
 
-    if raw.byteCount > 0 {
+    if raw.bytes.count > 0 {
         match validateAndAppend(raw, guesses, answer, ctx.words) {
             .Ok(newGuesses) => {
                 return Response.redirect(to: cleanUrl(seed, newGuesses, ""))
@@ -102,7 +102,7 @@ func validateAndAppend(raw: String, guesses: Array[String], answer: String, word
     };
 
     let normalized = normalizeGuess(raw);
-    if normalized.byteCount == 0 {
+    if normalized.bytes.count == 0 {
         return GuessResult.Err("bad-format")
     };
 
@@ -128,7 +128,7 @@ func cleanUrl(seed: Int64, guesses: Array[String], err: String) -> String {
         u.append("&g=");
         u.append(joinGuesses(guesses))
     };
-    if err.byteCount > 0 {
+    if err.bytes.count > 0 {
         u.append("&err=");
         u.append(percentEncode(err))
     };

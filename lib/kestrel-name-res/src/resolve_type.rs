@@ -11,8 +11,11 @@ use kestrel_ast_builder::{
     ConformanceItem, Conformances, Name, NodeKind, TypeParams, Typed, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
+use std::collections::HashSet;
 
-use crate::resolve_name::{find_assoc_type, NameResolution, ResolveName};
+use crate::resolve_name::{
+    NameResolution, ResolveName, find_assoc_type, resolve_inherited_protocol_member,
+};
 use crate::visibility::VisibleChildrenByName;
 
 // ===== TypeResolution =====
@@ -60,55 +63,122 @@ impl QueryFn for ResolveTypePath {
     }
 
     fn execute(&self, ctx: &QueryContext<'_>) -> TypeResolution {
-        if self.segments.is_empty() {
-            return TypeResolution::NotFound("<empty>".into());
-        }
-
-        // Handle "Self" keyword
-        if self.segments[0] == "Self" {
-            // Multi-segment Self.Item — try resolving through synthetic type param
-            if self.segments.len() > 1 {
-                if let Some(result) =
-                    try_resolve_self_as_type_param(ctx, &self.segments, self.context, self.root)
-                {
-                    return result;
-                }
-                // Fallback: resolve Self.Item through the enclosing extension target.
-                // For `extend Iterator: Iterable { type Iterable.Item = Self.Item }`,
-                // Self resolves to Iterator, then .Item walks Iterator's children.
-                if let Some(result) = try_resolve_self_via_extension_target(
-                    ctx,
-                    &self.segments,
-                    self.context,
-                    self.root,
-                ) {
-                    return result;
-                }
-            }
-            // Bare "Self" — return SelfType for contextual resolution by caller
-            if self.segments.len() == 1 {
-                return TypeResolution::SelfType;
-            }
-        }
-
-        // Resolve first segment via name resolution; single-segment paths
-        // and lookup failures resolve fully here.
-        let mut current =
-            match resolve_first_segment(ctx, &self.segments, self.context, self.root) {
-                Ok(entity) => entity,
-                Err(resolution) => return resolution,
-            };
-
-        // Multi-segment: walk remaining segments
-        for segment in &self.segments[1..] {
-            current = match resolve_segment(ctx, current, segment, self.context, self.root) {
-                Ok(next) => next,
-                Err(resolution) => return resolution,
-            };
-        }
-
-        TypeResolution::Found(current)
+        resolve_type_path_chain(ctx, &self.segments, self.context, self.root).resolution
     }
+}
+
+// ===== TypePathChain =====
+
+/// A resolved dotted type path, with the entity for *every* segment.
+///
+/// `ResolveTypePath` only ever needs the last entity, but a where-clause
+/// projection subject (`C.Iter.Item: P`) needs the whole chain so it can keep
+/// its receiver at each depth. Both come from the same walk — the segment
+/// ordering in `resolve_segment` is load-bearing and must have exactly one
+/// implementation.
+#[derive(Clone, Debug)]
+pub struct TypePathChain {
+    /// Exactly what `ResolveTypePath` returns for the same inputs.
+    pub resolution: TypeResolution,
+    /// One entity per segment, in source order (`steps[i]` is `segments[i]`).
+    /// Empty unless `resolution` is `Found`.
+    pub steps: Vec<Entity>,
+    /// The path began at the `Self` keyword, so `steps[0]` is whatever `Self`
+    /// resolved *through* (a synthetic `Self` type param, or the enclosing
+    /// extension's target) rather than a user-written name.
+    pub self_rooted: bool,
+}
+
+/// Resolve a dotted type path, recording the entity behind each segment.
+///
+/// Free function, not a second query: a memoized twin on the same key would
+/// double the cache for every type path in the program to serve one caller
+/// (`WhereClausesOf`, itself memoized). Same house pattern as
+/// `kestrel_type_infer::where_clauses::resolve_where_clauses`.
+pub fn resolve_type_path_chain(
+    ctx: &QueryContext<'_>,
+    segments: &[String],
+    context: Entity,
+    root: Entity,
+) -> TypePathChain {
+    let self_rooted = segments.first().is_some_and(|s| s == "Self");
+    let mut steps = Vec::with_capacity(segments.len());
+    let resolution = resolve_path_steps(ctx, segments, context, root, &mut steps);
+    // Only a fully resolved path has a meaningful chain; a partial walk that
+    // hit NotFound/NotAType must not leak half a chain to callers.
+    if !matches!(resolution, TypeResolution::Found(_)) {
+        steps.clear();
+    }
+    TypePathChain {
+        resolution,
+        steps,
+        self_rooted,
+    }
+}
+
+/// The one implementation of the type-path walk. `steps` accumulates the
+/// per-segment entities; it is only trustworthy when the return is `Found`.
+fn resolve_path_steps(
+    ctx: &QueryContext<'_>,
+    segments: &[String],
+    context: Entity,
+    root: Entity,
+    steps: &mut Vec<Entity>,
+) -> TypeResolution {
+    if segments.is_empty() {
+        return TypeResolution::NotFound("<empty>".into());
+    }
+
+    // Handle "Self" keyword
+    if segments[0] == "Self" {
+        // Multi-segment Self.Item — try resolving through synthetic type param
+        if segments.len() > 1 {
+            if let Some(result) =
+                try_resolve_self_as_type_param(ctx, segments, context, root, steps)
+            {
+                return result;
+            }
+            // Fallback: resolve Self.Item through the enclosing extension target.
+            // For `extend Iterator: Iterable { type Iterable.Item = Self.Item }`,
+            // Self resolves to Iterator, then .Item walks Iterator's children.
+            if let Some(result) =
+                try_resolve_self_via_extension_target(ctx, segments, context, root, steps)
+            {
+                return result;
+            }
+        }
+        // Bare "Self" — return SelfType for contextual resolution by caller
+        if segments.len() == 1 {
+            return TypeResolution::SelfType;
+        }
+    }
+
+    // Resolve first segment via name resolution; single-segment paths
+    // and lookup failures resolve fully here.
+    steps.clear();
+    let mut current = match resolve_first_segment(ctx, segments, context, root) {
+        Ok(entity) => entity,
+        // Single-segment paths resolve fully here — record the one step so a
+        // `Found` chain always has one entity per segment.
+        Err(resolution) => {
+            if let TypeResolution::Found(e) = &resolution {
+                steps.push(*e);
+            }
+            return resolution;
+        },
+    };
+    steps.push(current);
+
+    // Multi-segment: walk remaining segments
+    for segment in &segments[1..] {
+        current = match resolve_segment(ctx, current, segment, context, root) {
+            Ok(next) => next,
+            Err(resolution) => return resolution,
+        };
+        steps.push(current);
+    }
+
+    TypeResolution::Found(current)
 }
 
 /// Resolve the first path segment via name resolution.
@@ -223,6 +293,7 @@ fn try_resolve_self_as_type_param(
     segments: &[String],
     context: Entity,
     root: Entity,
+    steps: &mut Vec<Entity>,
 ) -> Option<TypeResolution> {
     // Try to resolve "Self" via name resolution
     let result = ctx.query(ResolveName {
@@ -242,6 +313,8 @@ fn try_resolve_self_as_type_param(
     }
 
     // Walk remaining segments through type param bounds
+    steps.clear();
+    steps.push(self_entity);
     let mut current = self_entity;
     for segment in &segments[1..] {
         if let Some(assoc) = resolve_type_param_assoc(ctx, current, segment, context, root) {
@@ -252,6 +325,7 @@ fn try_resolve_self_as_type_param(
         } else {
             return Some(TypeResolution::NotFound(segment.clone()));
         }
+        steps.push(current);
     }
 
     Some(TypeResolution::Found(current))
@@ -267,6 +341,7 @@ fn try_resolve_self_via_extension_target(
     segments: &[String],
     context: Entity,
     root: Entity,
+    steps: &mut Vec<Entity>,
 ) -> Option<TypeResolution> {
     // Walk up from context to find an enclosing Extension
     let mut current = Some(context);
@@ -286,6 +361,8 @@ fn try_resolve_self_via_extension_target(
     // Walk remaining segments (after "Self") through the target's children
     // and associated types. For protocols, this finds associated types;
     // for structs, this finds nested types.
+    steps.clear();
+    steps.push(target);
     let mut resolved = target;
     for segment in &segments[1..] {
         // Check if resolved is a protocol — look for associated types
@@ -293,6 +370,7 @@ fn try_resolve_self_via_extension_target(
             && let Some(assoc) = find_assoc_type(ctx, resolved, segment)
         {
             resolved = assoc;
+            steps.push(resolved);
             continue;
         }
 
@@ -307,6 +385,7 @@ fn try_resolve_self_via_extension_target(
         } else {
             return Some(TypeResolution::NotFound(segment.clone()));
         }
+        steps.push(resolved);
     }
 
     Some(TypeResolution::Found(resolved))
@@ -324,11 +403,15 @@ pub fn resolve_type_param_assoc(
     root: Entity,
 ) -> Option<Entity> {
     let tp_name = ctx.get::<Name>(type_param)?;
+    let subject = SubjectParam {
+        entity: type_param,
+        name: &tp_name.0,
+    };
 
     // Walk the type param's ancestor chain for where-clause bounds.
     let mut ancestor = ctx.parent_of(type_param);
     while let Some(anc) = ancestor {
-        if let Some(found) = search_entity_bounds(ctx, anc, &tp_name.0, assoc_name, root) {
+        if let Some(found) = search_entity_bounds(ctx, anc, subject, assoc_name, root) {
             return Some(found);
         }
         ancestor = ctx.parent_of(anc);
@@ -340,7 +423,7 @@ pub fn resolve_type_param_assoc(
     // where-clause is on the extension which is an ancestor of context, not of T).
     let mut ancestor = Some(context);
     while let Some(anc) = ancestor {
-        if let Some(found) = search_entity_bounds(ctx, anc, &tp_name.0, assoc_name, root) {
+        if let Some(found) = search_entity_bounds(ctx, anc, subject, assoc_name, root) {
             return Some(found);
         }
         ancestor = ctx.parent_of(anc);
@@ -349,29 +432,69 @@ pub fn resolve_type_param_assoc(
     None
 }
 
+/// The type parameter a where-clause subject must denote for its bounds to
+/// apply, carried as *entity plus name* rather than a bare name.
+///
+/// Two distinct type parameters routinely share a name — `struct Holder[T]`
+/// and a method `func f[T]` inside it, or an `extend Box[T]` LHS param and a
+/// method's own `[T]`. Matching by name alone silently hands the inner,
+/// unbounded parameter the outer one's associated types. The name is kept only
+/// as a cheap prefilter so the common case never pays for a `ResolveName`.
+#[derive(Clone, Copy)]
+struct SubjectParam<'a> {
+    entity: Entity,
+    name: &'a str,
+}
+
+/// True when the where-clause subject `name`, resolved in the scope of the
+/// entity that *bears* the clause, denotes exactly `subject.entity`.
+///
+/// Resolving in `scope` is what distinguishes shadowed parameters: a clause on
+/// `Holder` resolves `T` to Holder's parameter, so a method's own `T` — a
+/// different entity with the same name — correctly fails to match.
+fn subject_denotes(
+    ctx: &QueryContext<'_>,
+    scope: Entity,
+    name: &str,
+    subject: SubjectParam<'_>,
+    root: Entity,
+) -> bool {
+    // Prefilter: names must agree before it is worth resolving.
+    if name != subject.name {
+        return false;
+    }
+    let resolution = ctx.query(ResolveName {
+        name: name.to_string(),
+        context: scope,
+        root,
+    });
+    let NameResolution::Found(entities) = resolution else {
+        // Unresolvable subject (malformed clause) — fall back to the name
+        // match so a broken where clause degrades to the old behavior rather
+        // than dropping bounds that used to resolve.
+        return true;
+    };
+    entities.contains(&subject.entity)
+}
+
 /// Search a single entity's where-clause and conformances for bounds
 /// on `type_param_name` that contain an associated type `assoc_name`.
 fn search_entity_bounds(
     ctx: &QueryContext<'_>,
     entity: Entity,
-    type_param_name: &str,
+    subject: SubjectParam<'_>,
     assoc_name: &str,
     root: Entity,
 ) -> Option<Entity> {
     if let Some(where_clause) = ctx.get::<WhereClause>(entity) {
         if let Some(found) =
-            search_bounds_for_assoc(ctx, where_clause, type_param_name, assoc_name, entity, root)
+            search_bounds_for_assoc(ctx, where_clause, subject, assoc_name, entity, root)
         {
             return Some(found);
         }
-        if let Some(found) = search_inherited_assoc_bounds(
-            ctx,
-            where_clause,
-            type_param_name,
-            assoc_name,
-            entity,
-            root,
-        ) {
+        if let Some(found) =
+            search_inherited_assoc_bounds(ctx, where_clause, subject, assoc_name, entity, root)
+        {
             return Some(found);
         }
     }
@@ -383,7 +506,7 @@ fn search_entity_bounds(
 fn search_bounds_for_assoc(
     ctx: &QueryContext<'_>,
     where_clause: &WhereClause,
-    type_param_name: &str,
+    param: SubjectParam<'_>,
     assoc_name: &str,
     scope: Entity,
     root: Entity,
@@ -400,7 +523,10 @@ fn search_bounds_for_assoc(
         let kestrel_ast::AstType::Named { segments, .. } = subject else {
             continue;
         };
-        if segments.len() != 1 || segments[0].name != type_param_name {
+        if segments.len() != 1 {
+            continue;
+        }
+        if !subject_denotes(ctx, scope, &segments[0].name, param, root) {
             continue;
         }
 
@@ -419,7 +545,7 @@ fn search_bounds_for_assoc(
 fn search_inherited_assoc_bounds(
     ctx: &QueryContext<'_>,
     where_clause: &WhereClause,
-    type_param_name: &str,
+    param: SubjectParam<'_>,
     assoc_name: &str,
     scope: Entity,
     root: Entity,
@@ -437,7 +563,10 @@ fn search_inherited_assoc_bounds(
         let kestrel_ast::AstType::Named { segments, .. } = subject else {
             continue;
         };
-        if segments.len() < 2 || segments[0].name != type_param_name {
+        if segments.len() < 2 {
+            continue;
+        }
+        if !subject_denotes(ctx, scope, &segments[0].name, param, root) {
             continue;
         }
 
@@ -459,6 +588,11 @@ fn search_protocols_for_assoc(
     scope: Entity,
     root: Entity,
 ) -> Option<Entity> {
+    // One guard shared across the whole search: the conformance graph is static
+    // per revision, so re-walking a protocol we already visited can only find
+    // nothing again (a real match early-returns before it could be re-marked).
+    let mut visited = HashSet::new();
+
     for proto_type in protocols {
         let kestrel_ast::AstType::Named {
             segments: proto_segs,
@@ -495,8 +629,13 @@ fn search_protocols_for_assoc(
             return Some(found);
         }
 
-        // Also check inherited associated types from parent protocols
-        if let Some(found) = find_inherited_assoc_type(ctx, proto_entity, assoc_name, scope, root) {
+        // Also check inherited associated types from parent protocols.
+        // Shared with `ResolveName`'s inherited-member search: same walk, and
+        // its `visited` set is what keeps protocol-inheritance cycles from
+        // recursing forever (the cycle itself is reported as E459 elsewhere).
+        if let Some(found) =
+            resolve_inherited_protocol_member(ctx, proto_entity, assoc_name, root, &mut visited)
+        {
             return Some(found);
         }
     }
@@ -624,58 +763,6 @@ fn is_type_param_name(ctx: &QueryContext<'_>, entity: Entity, name: &str) -> boo
     }
 }
 
-/// Find an associated type in a protocol's inherited (parent) protocols.
-fn find_inherited_assoc_type(
-    ctx: &QueryContext<'_>,
-    protocol: Entity,
-    name: &str,
-    scope: Entity,
-    root: Entity,
-) -> Option<Entity> {
-    let conformances = ctx.get::<Conformances>(protocol)?;
-
-    for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_type, _) = item else {
-            continue;
-        };
-
-        let kestrel_ast::AstType::Named { segments, .. } = ast_type else {
-            continue;
-        };
-        if segments.is_empty() {
-            continue;
-        }
-
-        let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-        // Use scope's parent to avoid cycles when scope is a protocol
-        let resolve_ctx = ctx.parent_of(scope).unwrap_or(scope);
-        let result = ctx.query(ResolveTypePath {
-            segments: seg_names,
-            context: resolve_ctx,
-            root,
-        });
-
-        let TypeResolution::Found(parent_proto) = result else {
-            continue;
-        };
-
-        if ctx.get::<NodeKind>(parent_proto) != Some(&NodeKind::Protocol) {
-            continue;
-        }
-
-        if let Some(found) = find_assoc_type(ctx, parent_proto, name) {
-            return Some(found);
-        }
-
-        // Recursively check grandparent protocols
-        if let Some(found) = find_inherited_assoc_type(ctx, parent_proto, name, resolve_ctx, root) {
-            return Some(found);
-        }
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -688,7 +775,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let std = world.spawn();
         world.set(std, NodeKind::Module);

@@ -79,7 +79,11 @@ impl RootProvenance {
                 RootProvenance::PointerDerived { mutable: true } => 0,
             }
         };
-        if rank(other) > rank(self) { other } else { self }
+        if rank(other) > rank(self) {
+            other
+        } else {
+            self
+        }
     }
 }
 
@@ -211,7 +215,10 @@ mod tests {
         let borrow2 = RootProvenance::Param(1);
         assert_eq!(borrow.join(borrow2, &convs), borrow);
         // Placeholder ranks as Local.
-        assert_eq!(stat.join(RootProvenance::derived(), &convs), RootProvenance::derived());
+        assert_eq!(
+            stat.join(RootProvenance::derived(), &convs),
+            RootProvenance::derived()
+        );
         // Out-of-range param index ranks conservatively (consuming).
         let oob = RootProvenance::Param(9);
         assert_eq!(borrow.join(oob, &convs), oob);

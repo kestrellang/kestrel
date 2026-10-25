@@ -31,7 +31,7 @@ public struct RegistryConfig: Cloneable {
 /// 1. Project-level override (from flock.toml [registry] section)
 /// 2. Global config (~/.flock/config.toml)
 /// 3. Hardcoded default
-public func resolveRegistryUrl(projectUrl projectUrl: Optional[String]) -> String {
+public func resolveRegistryUrl(projectUrl projectUrl: String?) -> String {
     // 1. Project-level override
     match projectUrl {
         .Some(url) => return url,
@@ -45,9 +45,9 @@ public func resolveRegistryUrl(projectUrl projectUrl: Optional[String]) -> Strin
             .Ok(source) => {
                 match parseToml(source) {
                     .Ok(root) => {
-                        match root.value(forKey: "registry") {
+                        match root.value(for: "registry") {
                             .Some(regVal) => {
-                                match regVal.value(forKey: "url") {
+                                match regVal.value(for: "url") {
                                     .Some(urlVal) => {
                                         match urlVal.asString() {
                                             .Some(url) => return url,
@@ -76,12 +76,12 @@ public func resolveRegistryUrl(projectUrl projectUrl: Optional[String]) -> Strin
 // ============================================================================
 
 /// Splits "org/pkg" into (org, pkg). Returns None if no slash found.
-public func splitPackageName(name name: String) -> Optional[(String, String)] {
+public func splitPackageName(name name: String) -> (String, String)? {
     var i: Int64 = 0;
-    while i < name.byteCount {
+    while i < name.bytes.count {
         if name.bytes(unchecked: i) == 47 {
             let org = name.asSlice().subslice(from: 0, to: i).toOwned();
-            let pkg = name.asSlice().subslice(from: i + 1, to: name.byteCount).toOwned();
+            let pkg = name.asSlice().subslice(from: i + 1, to: name.bytes.count).toOwned();
             return .Some((org, pkg))
         }
         i = i + 1
@@ -91,12 +91,10 @@ public func splitPackageName(name name: String) -> Optional[(String, String)] {
 
 /// Returns true if the name contains a slash (i.e., is an org/pkg name).
 public func isRegistryName(name name: String) -> Bool {
-    var i: Int64 = 0;
-    while i < name.byteCount {
-        if name.bytes(unchecked: i) == 47 {
+    for element in name.bytes {
+        if element == 47 {
             return true
         }
-        i = i + 1
     }
     false
 }

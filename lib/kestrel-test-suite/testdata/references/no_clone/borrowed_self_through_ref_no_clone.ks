@@ -20,7 +20,7 @@ struct Tracked: Cloneable {
         // payload-clone, never `{ self }` (the aliasing footgun)
         Tracked(payload: self.payload.clone(), clones: self.clones)
     }
-    func size() -> Int64 { self.payload.byteCount }
+    func size() -> Int64 { self.payload.bytes.count }
 }
 
 @main

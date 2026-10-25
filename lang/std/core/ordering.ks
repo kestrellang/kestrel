@@ -2,7 +2,7 @@
 
 module std.core
 
-import std.text.(String, StringBuilder, FormatOptions, Formattable)
+import std.text.(String, Formatter, FormatOptions, Formattable)
 
 /// The three-valued result of a `Comparable.compare()` call.
 ///
@@ -95,7 +95,7 @@ public enum Ordering: Equatable, Formattable {
 
     /// Renders as `"Less"`, `"Equal"`, or `"Greater"`. With `debug` set,
     /// prefixes with the type name (`"Ordering.Less"`).
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         let value = match self {
             .Less => "Less",
             .Equal => "Equal",

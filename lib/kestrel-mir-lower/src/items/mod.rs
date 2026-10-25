@@ -14,13 +14,34 @@ use crate::context::LowerCtx;
 
 /// Walk all entities under the root and lower declarations to MIR items.
 ///
-/// Two-pass: types first (structs, enums, protocols), then functions.
-/// This ensures all TypeInfo (CopyBehavior, DropBehavior) is available
-/// when function bodies are lowered — is_copy_type lookups work regardless
-/// of module ordering.
+/// Three phases: types, `fix_drop_behaviors`, then functions. Both splits are
+/// load-bearing, and the two halves of `TypeInfo` are NOT symmetric:
+///
+/// - **`CopyBehavior` is final after `lower_types`.** `lower_copy_behavior`
+///   asks `NominalCopySemantics`, which already folds the whole type; no later
+///   pass fixes it up. Pass 1 alone is enough for every `is_copy_type` /
+///   `copy_behavior` lookup in a body, regardless of declaration order.
+/// - **`DropBehavior` is NOT.** `lower_drop_behavior` only reports a *user*
+///   `deinit`; a struct with no `deinit` but a droppable field comes out of
+///   pass 1 as `DropBehavior::None` and becomes droppable only when
+///   [`fix_drop_behaviors`](kestrel_mir::passes::drop_fix::fix_drop_behaviors)
+///   walks the fields to a fixed point. Body lowering reads that flag through
+///   `needs_drop` (`body/mod.rs` `setup_init_field_flags`), so the pass MUST
+///   run between the two halves — running it only from the `Stage::DropFix`
+///   slot in `passes::run_pipeline_until` put the writer strictly after the
+///   reader and silently leaked every transitively-droppable init field
+///   (fragility audit G1).
+///
+/// The pass is deliberately run TWICE (here and in `run_pipeline_until`), not
+/// duplicated by accident — see the comment at the other call site. It is
+/// monotone and additive (`None → StructDrop`, or push a field index that
+/// isn't already present) and its own outer `loop` already re-runs it to a
+/// no-change fixed point, so a second run over an unchanged module is a no-op.
 pub fn lower_items(ctx: &mut LowerCtx) {
     let root = ctx.root;
     lower_types(ctx, root);
+    // Decide DropBehavior BEFORE any body is lowered: bodies query it.
+    kestrel_mir::passes::drop_fix::fix_drop_behaviors(&mut ctx.module);
     lower_functions(ctx, root);
 }
 

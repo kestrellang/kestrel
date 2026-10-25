@@ -2,39 +2,52 @@
 
 Kestrel's copy semantics prioritize ergonomics for application developers while providing escape hatches for systems programming.
 
+## The Classification
+
+Every type has exactly one of three copy classes:
+
+| Class | Meaning |
+|-------|---------|
+| **Copyable** | Duplicated by bitwise copy; uses never invalidate the value |
+| **Cloneable** | Duplicated by calling `clone()`; still usable like a Copyable type |
+| **NotCopyable** | Cannot be duplicated; assignment and consuming passes are moves |
+
+The classification is computed by a single decision tree shared by every compiler stage (the `kestrel-copy-fold` crate). For aggregates it is a fold over the members: **NotCopyable dominates; otherwise any Cloneable member makes the aggregate Cloneable; otherwise it is Copyable.**
+
 ## Implicit Copyable
 
 A `struct` or `enum` is automatically `Copyable` if **all** its fields are `Copyable`:
 
 ```kestrel
 struct Point {
-    var x: Int
-    var y: Int
+    var x: Int64
+    var y: Int64
 }
-// Point is implicitly Copyable (Int is Copyable)
+// Point is implicitly Copyable (Int64 is Copyable)
 
-let p1 = Point(x: 1, y: 2)
-let p2 = p1  // Copy
-print(p1.x)  // OK: p1 is still valid
+let p1 = Point(x: 1, y: 2);
+let p2 = p1;  // Copy
+print(p1.x);  // OK: p1 is still valid
 ```
 
 ### Built-in Copyable Types
 
-- All integer types (`Int`, `Int8`, `Int16`, etc.)
-- All floating point types (`Float`, `Double`)
-- `Bool`
-- `Char`
-- Tuples of Copyable types
-- Arrays of Copyable types (copies the array)
-- Optional of Copyable types
+- All integer types (`Int8` … `Int64`, `UInt8` … `UInt64`, and the `Int`/`UInt` aliases)
+- All floating point types (`Float16`, `Float32`, `Float64`, `Float`)
+- `Bool`, `Char`
+- `lang.ptr[T]` raw pointers (copying copies the address)
+- References `&T` / `&mutating T` (copying copies the alias, never the pointee)
+- Tuples of Copyable types (the fold above)
 
-## Implicit NonCopyable
+Heap-owning stdlib types (`String`, `Array`, `Dictionary`, …) are **Cloneable**, not bitwise-Copyable — copies go through `clone()` (see [cloneable.md](cloneable.md)). Generic containers such as `Optional[T]` and `Array[T]` follow their arguments per-instantiation (see [generics.md](generics.md)).
+
+## Implicit NotCopyable
 
 If a type contains a non-copyable field, it automatically becomes non-copyable:
 
 ```kestrel
 struct FileHandle: not Copyable {
-    var fd: Int
+    var fd: Int64
 }
 
 struct Wrapper {
@@ -49,15 +62,17 @@ You can explicitly mark a type as non-copyable to enforce uniqueness, even if al
 
 ```kestrel
 struct Ticket: not Copyable {
-    var id: Int
+    var id: Int64
     var seat: String
 }
 
-let t1 = Ticket(id: 1, seat: "A1")
-let t2 = t1  // MOVE, not copy
+let t1 = Ticket(id: 1, seat: "A1");
+let t2 = t1;  // MOVE, not copy
 // t1 is now invalid
-print(t1.id)  // ERROR: use of moved value
+print(t1.id); // ERROR(E500): use of moved value
 ```
+
+Declaring both `Cloneable` and `not Copyable` on one type is a conflict (E423).
 
 ### Use Cases for Explicit `not Copyable`
 
@@ -68,29 +83,87 @@ print(t1.id)  // ERROR: use of moved value
 
 ## Move Semantics
 
-For `not Copyable` types, assignment and parameter passing are **moves**:
+For `not Copyable` types, assignment and `consuming` parameter passing are **moves**:
 
 ```kestrel
 struct Connection: not Copyable {
-    var handle: Int
+    var handle: Int64
 }
 
-let c1 = Connection(handle: 42)
-let c2 = c1  // Move
+let c1 = Connection(handle: 42);
+let c2 = c1;  // Move
 // c1 is invalid after this point
 
-func use(consuming conn: Connection) { ... }
+func use(consuming conn: Connection) { }
 
-let c3 = Connection(handle: 43)
-use(c3)  // Move into function
+let c3 = Connection(handle: 43);
+use(c3);  // Move into function
 // c3 is invalid after this point
 ```
 
+Moves are tracked flow-sensitively by the move checker. Using a value after a definite move is **E500** (`use_after_move`); using it after a move on only *some* control-flow paths is **E501** (`maybe_moved`). Moving into aggregate literals (`[c1]`, `(c1, x)`, `Wrapper(file: c1)`, `.Some(c1)`) counts as a move of the operand. A moved `var` can be **reinitialized** by assigning a fresh value, after which it is usable again. See [diagnostics.md](diagnostics.md) for the full catalog.
+
+## Field Move-Out
+
+Whether you may move a non-Copyable field *out* of a struct depends on how you hold the struct:
+
+**Out of a borrowed value — rejected (E503).** A borrow does not own the value, so extracting a non-Copyable field would either alias it or steal it from the owner:
+
+```kestrel
+struct Wrap {
+    var inner: Connection
+}
+
+func leak(w: Wrap) -> Connection {
+    w.inner   // ERROR(E503): cannot move out of a borrow
+}
+```
+
+**Out of `consuming self` — legal.** The method owns the whole value, so it may destructure it: the requested field is moved out, the *sibling* fields are dropped, and the whole-value `deinit` does not run again for the moved field:
+
+```kestrel
+struct Wrap: not Copyable {
+    var inner: Connection
+    consuming func intoInner() -> Connection { self.inner }
+}
+
+let w = Wrap(inner: Connection(handle: 1));
+let c = w.intoInner();   // OK — exactly one Connection exists afterwards
+```
+
+The same applies to consuming free-function parameters. Reading a *Copyable* field through a borrowed non-Copyable container is always fine — only the non-Copyable payload itself cannot leave a borrow.
+
+## Copyable and Cloneable as Protocols
+
+`Copyable` is a real protocol — a marker protocol in the standard library, tagged for the compiler:
+
+```kestrel
+// lang/std/core/copy.ks
+@builtin(.Copyable)
+public protocol Copyable {}
+
+@builtin(.Cloneable)
+public protocol Cloneable: Copyable {
+    @builtin(.Clone)
+    func clone() -> Self
+}
+```
+
+Conformance is synthesized implicitly by the classification fold; `not Copyable` is the opt-out. Because it is a protocol, it participates in bounds:
+
+```kestrel
+func copyIt[T](value: T) -> T where T: Copyable {
+    value   // relies on copy
+}
+```
+
+Generic parameters are `Copyable`-bounded **by default**; see [generics.md](generics.md) for opting out with `not Copyable` and for conditional conformance (`extend Box[T]: Copyable where T: Copyable`).
+
 ---
 
-## Potential Issues
+## Design Notes
 
-### 1. Transitive NonCopyable Can Be Surprising
+### Transitive NotCopyable Is a Semver Hazard
 
 Adding a non-copyable field to an existing struct silently changes its semantics:
 
@@ -98,110 +171,40 @@ Adding a non-copyable field to an existing struct silently changes its semantics
 // Before: Copyable
 struct Config {
     var name: String
-    var timeout: Int
+    var timeout: Int64
 }
 
 // After: NOT Copyable (breaking change!)
 struct Config {
     var name: String
-    var timeout: Int
+    var timeout: Int64
     var logFile: FileHandle  // Makes Config non-copyable
 }
 ```
 
-**Concern**: This is a silent, potentially breaking change to existing code.
+This is accepted as intentional: adding a resource field *should* change semantics. Library authors should treat a field's copy class as part of their public API.
 
-**Mitigation**: 
-- Compiler warning when adding non-copyable fields to previously-copyable types?
-- Or accept this as intentional: adding a resource field *should* change semantics.
-
-### 2. Copyable Protocol Conformance
-
-Is `Copyable` a real protocol that types conform to, or a compiler intrinsic?
+### Copies in Generic Code Are Implicit
 
 ```kestrel
-// Can you write this?
-func clone[T: Copyable](value: T) -> T {
-    return value  // Relies on copy
+func duplicate[T](item: T) -> (T, T) {
+    (item, item)  // Two uses of item — implicit copies
 }
 ```
 
-**Question**: How does `Copyable` interact with the protocol system?
+This works because `T: Copyable` is the default bound. Developers should be aware that copies (or `clone()` calls, for Cloneable arguments) happen silently in generic code.
 
-**Options**:
-1. `Copyable` is a marker protocol with no methods
-2. `Copyable` is a compiler intrinsic, not a real protocol
-3. `Copyable` has a `copy() -> Self` method (explicit copies)
-
-### 3. Partial Moves
-
-Partial moves are **disallowed**. You cannot move a single field out of a struct:
-
-```kestrel
-struct Pair: not Copyable {
-    var first: Resource
-    var second: Resource
-}
-
-var p = Pair(first: r1, second: r2)
-let x = p.first  // ERROR: cannot partially move out of 'p'
-```
-
-To extract a field, you must consume the entire struct:
-
-```kestrel
-func takeFirst(consuming p: Pair) -> Resource {
-    p.first  // OK: p is being consumed entirely
-}
-```
-
-### 4. Copying in Generic Contexts
-
-When `T` is Copyable, should copies be explicit or implicit?
-
-```kestrel
-func duplicate[T: Copyable](item: T) -> (T, T) {
-    return (item, item)  // Two uses of item - implicit copies?
-}
-```
-
-This works because `T: Copyable` is the default. But it's implicit.
-
-**Concern**: Developers might not realize copies are happening in generic code.
-
-### 5. Large Copyable Types
-
-A type being Copyable doesn't mean copying is cheap:
+### Copyable Does Not Mean Cheap
 
 ```kestrel
 struct BigData {
-    var items: Array[Int]  // 10,000 elements
+    var items: Array[Int64]  // 10,000 elements
 }
-// BigData is Copyable, but copying is expensive
-
-let a = BigData(...)
-let b = a  // Copies 10,000 integers!
+// BigData is Cloneable (Array is), and copying it copies 10,000 integers
 ```
 
-**Mitigation**: 
-- Linter warnings for large Copyable types?
-- Explicit `copy()` method for expensive copies?
-- Accept this as a user responsibility?
+There is no compiler-enforced size limit; expensive-copy detection is a linting concern, not a semantic one.
 
-### 6. `not Copyable` Syntax Verbosity
+### `not Copyable` Spelling
 
-`not Copyable` is 12 characters. For types that are commonly non-copyable, this adds noise:
-
-```kestrel
-struct FileHandle: not Copyable { ... }
-struct MutexGuard: not Copyable { ... }
-struct Connection: not Copyable { ... }
-struct Ticket: not Copyable { ... }
-```
-
-**Alternatives considered**:
-- `@linear` attribute (7 chars, but new concept)
-- `@unique` attribute (7 chars, intuitive)
-- `@move` attribute (5 chars)
-
-**Decision**: `not Copyable` is verbose but self-documenting and consistent with the protocol system.
+`not Copyable` was chosen over attribute spellings (`@linear`, `@unique`, `@move`) because it is self-documenting and composes with the protocol system — the same `not` form is used for bounds (`where T: not Copyable`) and for the `Static` protocol (`where T: not Static`, see [limitations.md](limitations.md)).

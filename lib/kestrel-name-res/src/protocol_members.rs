@@ -179,11 +179,11 @@ mod tests {
         Span::synthetic(0)
     }
 
-    fn fake_syntax() -> SyntaxNode {
+    fn fake_syntax() -> kestrel_syntax_tree::SyntaxNodePtr {
         let mut builder = GreenNodeBuilder::new();
         builder.start_node(SyntaxKind::Root.into());
         builder.finish_node();
-        SyntaxNode::new_root(builder.finish())
+        kestrel_syntax_tree::SyntaxNodePtr::new(&SyntaxNode::new_root(builder.finish()))
     }
 
     fn named_ast(name: &str) -> AstType {
@@ -263,7 +263,7 @@ mod tests {
     fn direct_methods_only() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
 
         let proto = spawn_protocol(&mut world, root, "Proto");
         let greet = spawn_method(&mut world, proto, "greet");
@@ -283,7 +283,7 @@ mod tests {
     fn extension_default_method_is_discovered() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
 
         let proto = spawn_protocol(&mut world, root, "Proto");
         let greet = spawn_method(&mut world, proto, "greet");
@@ -310,7 +310,7 @@ mod tests {
     fn inherited_protocol_methods_are_discovered() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
 
         let base = spawn_protocol(&mut world, root, "Base");
         let base_m = spawn_method(&mut world, base, "baseMethod");
@@ -344,7 +344,7 @@ mod tests {
     fn extension_on_parent_protocol_is_discovered() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
 
         let base = spawn_protocol(&mut world, root, "Base");
         let base_ext = spawn_extension_of_protocol(&mut world, root, "Base");
@@ -379,7 +379,7 @@ mod tests {
         // bindings are specific to the named protocol.
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
 
         let proto = spawn_protocol(&mut world, root, "Proto");
         // Unqualified: `type Output`
@@ -404,7 +404,7 @@ mod tests {
     fn associated_type_query_filters_by_kind() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
 
         let proto = spawn_protocol(&mut world, root, "Iterator");
         let _method = spawn_method(&mut world, proto, "next");
@@ -430,7 +430,7 @@ mod tests {
     fn property_requirement_is_a_member() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
 
         let proto = spawn_protocol(&mut world, root, "HasCount");
         let count = spawn_property(&mut world, proto, "count");
@@ -480,7 +480,7 @@ mod tests {
     fn sentinel_init_matches_nameless_initializer() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
 
         let proto = spawn_protocol(&mut world, root, "Proto");
         let init = spawn_initializer(&mut world, proto);
@@ -501,7 +501,7 @@ mod tests {
     fn sentinel_subscript_matches_nameless_subscript() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
 
         let proto = spawn_protocol(&mut world, root, "Proto");
         let sub = spawn_subscript(&mut world, proto);
@@ -521,7 +521,7 @@ mod tests {
     fn members_by_name_filters_and_includes_extensions() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
 
         let proto = spawn_protocol(&mut world, root, "Proto");
         let _other = spawn_method(&mut world, proto, "other");

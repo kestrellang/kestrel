@@ -17,9 +17,10 @@
 //! must carry a `TODO(copy-drift #n)` comment at its classifier arm and never
 //! be converged silently (#1-#5 were adjudicated and resolved 2026-06-10).
 //!
-//! This crate is a dependency-graph leaf (only `kestrel-hecs`, for `Entity`)
-//! so both the frontend (via kestrel-semantics re-exports) and kestrel-mir can
-//! reach it without coupling their build closures.
+//! This crate is a dependency-graph leaf (only `kestrel-hecs` for `Entity` and
+//! `kestrel-ast` for `FnTypeKind`) so both the frontend (via kestrel-semantics
+//! re-exports) and kestrel-mir can reach it without coupling their build
+//! closures.
 
 use std::borrow::Cow;
 
@@ -40,6 +41,31 @@ pub enum CopyRequirement {
     RequiresCopyable,
     RequiresCloneable,
     MayBeNonCopyable,
+}
+
+/// The copy class of a CLOSURE value, decided by its kind alone — the
+/// representation policy wraps the captured payload, so the payload fold never
+/// enters (docs/design/closures.md §"Copy and Drop"; plan D6 table).
+///
+/// | kind | class | why |
+/// |---|---|---|
+/// | `Normal` | Copyable | 2-word frame view; copies share views nobody writes |
+/// | `Mutating` | NotCopyable | exclusive access keeps write-back sound with no aliasing analysis |
+/// | `Consuming` | NotCopyable | unique owner of a one-shot environment |
+/// | `Escaping` | Cloneable | duplication is the shared box's retain, never a bit-copy |
+///
+/// Single source of truth for the four front-end copy layers (`HirCopyLayer`,
+/// `SolverCopyLayer`, the resolver twin, `MoveCopyLayer`). The MIR layer has
+/// its own `FnKind` mirror and its own arms (they must stay in lockstep with
+/// `needs_drop` — see kestrel-mir/src/ty_query.rs).
+pub fn fn_kind_semantics(kind: kestrel_ast::FnTypeKind) -> CopySemantics {
+    match kind {
+        kestrel_ast::FnTypeKind::Normal => CopySemantics::Copyable,
+        kestrel_ast::FnTypeKind::Mutating | kestrel_ast::FnTypeKind::Consuming => {
+            CopySemantics::NotCopyable
+        },
+        kestrel_ast::FnTypeKind::Escaping => CopySemantics::Cloneable,
+    }
 }
 
 /// Dedups the identical 3-arm mapping previously triplicated in
@@ -146,8 +172,9 @@ pub fn instance_semantics<L: CopyLayer>(layer: &L, entity: Entity, args: &[L::Ty
     }
     // 3. Fold gating args; a missing/out-of-range position is unprovable -> NotCopyable.
     let class = fold_members(positions.iter().map(|&pos| {
-        args.get(pos)
-            .map_or(CopySemantics::NotCopyable, |a| layer.member_semantics(a).class())
+        args.get(pos).map_or(CopySemantics::NotCopyable, |a| {
+            layer.member_semantics(a).class()
+        })
     }));
     layer.sem_from_class(entity, class)
 }
@@ -170,7 +197,11 @@ mod tests {
             (&[NotCopyable], NotCopyable),
         ];
         for (parts, want) in cases {
-            assert_eq!(fold_members(parts.iter().copied()), *want, "parts: {parts:?}");
+            assert_eq!(
+                fold_members(parts.iter().copied()),
+                *want,
+                "parts: {parts:?}"
+            );
         }
     }
 

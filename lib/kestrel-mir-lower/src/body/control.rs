@@ -25,6 +25,25 @@ impl OssaBodyCtx<'_, '_> {
     ) -> ValueId {
         let mark = self.ref_watermark();
         let cond_val = self.lower_expr(condition);
+        // `HirExpr::If` is the single shape that `if`, `else if`, desugared
+        // `while` / `guard … else`, and the non-binding link of both
+        // `if let p = e, cond` and multi-condition `while let p = e, cond` all
+        // lower into — so this one call covers six condition positions.
+        // Must run BEFORE `end_stale_refs_since`: the witness call is part of
+        // computing the condition, so any ref it borrows is still in use here.
+        let kind = if self.hir.while_conditions.contains(&condition) {
+            "while"
+        } else {
+            "if"
+        };
+        // The synthesized scalar is left scope-tracked on purpose. `consume`ing
+        // it here fails OSSA verify ("@owned value is live at block exit but
+        // never consumed" at bb0) because the branch terminator reads it but
+        // does not consume it. Leaving it tracked lets `lower_if`'s existing
+        // liveness threading carry it through both arms to the merge and
+        // destroy it there — no `extra_vals` mechanism needed. It is a trivial
+        // `lang.i1` scalar, and it only exists on the non-`Bool` path.
+        let cond_val = self.coerce_condition_to_i1(cond_val, kind);
         // The condition is a complete expression: any ref (single-use) born
         // inside it and still tracked was fully used — end it now, or the
         // branch terminator reports a false E497
@@ -289,6 +308,12 @@ impl OssaBodyCtx<'_, '_> {
         if !self.is_terminated() {
             let back_edge_vals = self.tracker.values();
             self.destroy_scope_except(&back_edge_vals);
+            // A guarded destroy in the scope exit renames threaded values —
+            // resolve to their current names before the back-edge jump.
+            let back_edge_vals: Vec<ValueId> = back_edge_vals
+                .iter()
+                .map(|v| self.resolve_value(*v))
+                .collect();
             self.pop_scope();
             for &v in &back_edge_vals {
                 self.pop_owned_from_scope(v);
@@ -335,7 +360,12 @@ impl OssaBodyCtx<'_, '_> {
             // Destroy inner scopes (loop body + any nested ones),
             // keeping the values we're threading to the exit block.
             self.destroy_scopes_to_depth(depth, &exit_vals);
+            // A guarded destroy in the exit renames threaded values.
+            let exit_vals: Vec<ValueId> =
+                exit_vals.iter().map(|v| self.resolve_value(*v)).collect();
             self.emit_jump(exit, exit_vals);
+        } else {
+            self.emit_no_enclosing_loop_backstop("break", label);
         }
         self.emit_literal(Immediate::unit())
     }
@@ -363,24 +393,67 @@ impl OssaBodyCtx<'_, '_> {
             // Destroy the crossed scopes (inner loop bodies + nested ones),
             // keeping the values threaded back to the header.
             self.destroy_scopes_to_depth(depth, &header_vals);
+            // A guarded destroy in the exit renames threaded values.
+            let header_vals: Vec<ValueId> =
+                header_vals.iter().map(|v| self.resolve_value(*v)).collect();
             self.emit_jump(header, header_vals);
+        } else {
+            self.emit_no_enclosing_loop_backstop("continue", label);
         }
         self.emit_literal(Immediate::unit())
+    }
+
+    /// Backstop for a `break`/`continue` that reaches MIR with no matching
+    /// enclosing loop.
+    ///
+    /// hir-lower's `validate_break_continue` rejects this first ("'break'
+    /// outside of loop" / "undeclared label"), so this fires only for shapes it
+    /// cannot see. Without it the lowering falls through to a unit literal and
+    /// the `break` becomes a **silent no-op** — the loop runs to completion and
+    /// the program keeps going with a well-formed but wrong body. That is how
+    /// `break` inside a closure inside a loop behaved: the closure body
+    /// inherited the enclosing loop stack, so validation passed, and MIR then
+    /// found no loop to jump to.
+    fn emit_no_enclosing_loop_backstop(&mut self, keyword: &str, label: Option<&str>) {
+        let span = self
+            .current_span
+            .clone()
+            .unwrap_or_else(|| kestrel_span::Span::synthetic(0));
+        let described = match label {
+            Some(l) => format!("`{keyword} {l}`"),
+            None => format!("`{keyword}`"),
+        };
+        self.ctx.query.accumulate(
+            kestrel_reporting::Diagnostic::error()
+                .with_message(format!(
+                    "internal compiler error: {described} reached MIR lowering \
+                     with no matching enclosing loop"
+                ))
+                .with_labels(vec![
+                    kestrel_reporting::Label::primary(span.file_id, span.range())
+                        .with_message("an earlier phase should have diagnosed this"),
+                ])
+                .with_notes(vec![
+                    "this would otherwise compile to a no-op; please file a bug \
+                     with the program that triggered it"
+                        .into(),
+                ]),
+        );
     }
 
     // ================================================================
     // Helpers
     // ================================================================
 
+    /// Resolve a `break`/`continue` label against the enclosing loop stack.
+    ///
+    /// The rule itself lives in `kestrel_hir::label_selects_loop` so that
+    /// analyze and MIR share it by construction. Searching innermost-first with
+    /// an always-true predicate for `None` is exactly `last()`.
     fn find_loop(&self, label: Option<&str>) -> Option<&LoopInfo> {
-        match label {
-            Some(label) => self
-                .loop_stack
-                .iter()
-                .rev()
-                .find(|l| l.label.as_deref() == Some(label)),
-            None => self.loop_stack.last(),
-        }
+        self.loop_stack
+            .iter()
+            .rev()
+            .find(|l| kestrel_hir::label_selects_loop(label, l.label.as_deref()))
     }
-
 }

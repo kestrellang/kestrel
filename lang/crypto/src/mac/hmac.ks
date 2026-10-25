@@ -121,7 +121,7 @@ public struct HMAC[H] where H: Digest {
     ) {
         let bs = H.blockSize;
 
-        var normKey = Array[UInt8]();
+        var normKey: [UInt8] = [];
         if keyBytes.count > bs {
             var h = hasher;
             h.update(keyBytes);
@@ -134,8 +134,8 @@ public struct HMAC[H] where H: Digest {
             normKey.append(0);
         }
 
-        var ipad = Array[UInt8]();
-        opadKey = Array[UInt8]();
+        var ipad: [UInt8] = [];
+        opadKey = [];
         for i in 0..<bs {
             ipad.append(normKey(i) ^ 0x36);
             opadKey.append(normKey(i) ^ 0x5c);

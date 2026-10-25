@@ -150,7 +150,7 @@ _Defined in `lang/std/io/stdio.ks`._
 ## function `eprint`
 
 ```kestrel
-public func eprint[__opaque_0](__opaque_0) -> Result[(), IoError] where __opaque_0: Formattable
+public func eprint(some Formattable) -> Result[(), IoError]
 ```
 
 Stderr counterpart to `print`. Useful for diagnostics that must not
@@ -161,7 +161,7 @@ _Defined in `lang/std/io/stdio.ks`._
 ## function `eprintln`
 
 ```kestrel
-public func eprintln[__opaque_0](__opaque_0) -> Result[(), IoError] where __opaque_0: Formattable
+public func eprintln(some Formattable) -> Result[(), IoError]
 ```
 
 Stderr counterpart to `println`.
@@ -171,7 +171,7 @@ _Defined in `lang/std/io/stdio.ks`._
 ## function `print`
 
 ```kestrel
-public func print[__opaque_0](__opaque_0) -> Result[(), IoError] where __opaque_0: Formattable
+public func print(some Formattable) -> Result[(), IoError]
 ```
 
 Formats `value` with its default `FormatOptions` and writes the
@@ -189,7 +189,7 @@ _Defined in `lang/std/io/stdio.ks`._
 ## function `println`
 
 ```kestrel
-public func println[__opaque_0](__opaque_0) -> Result[(), IoError] where __opaque_0: Formattable
+public func println(some Formattable) -> Result[(), IoError]
 ```
 
 Like `print`, plus a trailing `\n`.
@@ -209,18 +209,21 @@ _Defined in `lang/std/io/stdio.ks`._
 ## function `prompt`
 
 ```kestrel
-public func prompt(String) -> Result[String, IoError]
+public func prompt(String) -> Result[Optional[String], IoError]
 ```
 
 Writes `message` to stdout, flushes, then reads a line from stdin.
 The flush matters for line-buffered terminals — without it the
 prompt would appear after the user's keystrokes.
 
+Returns `.Ok(.None)` on immediate EOF, like `readLine`.
+
 ### Examples
 
 ```
-let name = try prompt("Name: ");
-try println("Hello, " + name);
+if let .Some(name) = try prompt("Name: ") {
+    try println("Hello, " + name);
+}
 ```
 
 _Defined in `lang/std/io/stdio.ks`._
@@ -228,16 +231,17 @@ _Defined in `lang/std/io/stdio.ks`._
 ## function `readLine`
 
 ```kestrel
-public func readLine() -> Result[String, IoError]
+public func readLine() -> Result[Optional[String], IoError]
 ```
 
 Reads a single line from stdin, stripping the trailing `\n` (and
 `\r` if present, for tolerance with Windows-style line endings).
-Returns an empty string on immediate EOF.
 
-TODO: the trailing-bytes are collected but the returned `String` is
-currently empty — see the comment in the body about
-`String.fromUtf8Bytes`.
+Distinguishes EOF from a blank line, following the
+`readByte() -> Result[Optional[UInt8], IoError]` pattern:
+`.Ok(.None)` means EOF with no bytes read, while a bare newline
+yields `.Ok(.Some(""))`. Invalid UTF-8 is decoded lossily
+(invalid sequences become U+FFFD).
 
 _Defined in `lang/std/io/stdio.ks`._
 

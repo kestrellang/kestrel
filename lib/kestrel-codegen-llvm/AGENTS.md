@@ -36,6 +36,12 @@ hoist loads (LICM), and vectorize. Consequences:
 - `Str`/`FuncThick` are `{ ptr@0, <int/ptr>@ptr_size }`: `StrLen` loads the
   length as `I64` (NOT `ptr_scalar`, which is now a `ptr`); the closure fn/env
   slots are both `ptr`.
+- `FuncThick` width is kind-dependent — `kestrel_mir::func_thick_words` is the
+  single source: 2 words `{ fn@0, env@ptr }` at the view kinds, 4 words
+  `{ fn@0, env_handle@ptr, retain_fn@2ptr, release_fn@3ptr }` at the boxed
+  (`escaping`) kind. `compile_thick_call` reads fn@0/env@ptr for EVERY kind, so
+  only `ty.rs`, `compile_apply_partial` and `Op::ClosureWord` care about the
+  extra words (lockstep 9 — layout.rs and both backends must agree).
 
 ## Value model
 

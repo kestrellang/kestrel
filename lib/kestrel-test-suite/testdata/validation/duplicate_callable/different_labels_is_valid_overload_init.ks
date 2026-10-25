@@ -5,6 +5,6 @@ module Test
 struct Point {
     let x: ()
 
-    init(value value: ()) { x = value }
-    init(from from: ()) { x = from }
+    init(value value: ()) { self.x = value }
+    init(from from: ()) { self.x = from }
 }

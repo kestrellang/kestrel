@@ -1,7 +1,8 @@
-//! Simple arena allocator for AST nodes.
+//! Simple arena allocator.
 //!
-//! Vec-backed with phantom-typed `Idx<T>` indices. Used to store expressions,
-//! patterns, and statements in flat arenas within `AstBody`.
+//! Vec-backed with phantom-typed `Idx<T>` indices. HIR stores a body's
+//! expressions, patterns, statements and locals in flat arenas
+//! (`kestrel_hir::body::HirBody`).
 
 use std::fmt;
 use std::marker::PhantomData;

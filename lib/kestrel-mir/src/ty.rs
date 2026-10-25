@@ -11,6 +11,76 @@ pub enum ParamConvention {
     Consuming,
 }
 
+/// The closure tier a `FuncThick` names — the MIR mirror of
+/// `kestrel_ast::FnTypeKind` (this crate does not depend on the AST, exactly
+/// like [`ParamConvention`]). Lowering maps the two 1:1.
+///
+/// The kind is part of the type's interned identity, so it participates in
+/// mangling and witness `match_pattern`: two instantiations differing only in
+/// kind must not collide.
+///
+/// - **View tier** (`Normal` / `Mutating`): the environment holds *addresses*
+///   into the enclosing frame and owns nothing; the value is frame-bound.
+/// - **Owning tier** (`Consuming` / `Escaping`): the environment owns its
+///   captures and may outlive the frame (Phase E2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum FnKind {
+    #[default]
+    Normal,
+    Mutating,
+    Consuming,
+    Escaping,
+}
+
+impl FnKind {
+    /// A view kind holds addresses into the frame and owns no captures.
+    pub fn is_view(self) -> bool {
+        matches!(self, FnKind::Normal | FnKind::Mutating)
+    }
+
+    /// Display/mangle tag — stable, one char per kind.
+    pub fn tag(self) -> char {
+        match self {
+            FnKind::Normal => 'n',
+            FnKind::Mutating => 'm',
+            FnKind::Consuming => 'c',
+            FnKind::Escaping => 'e',
+        }
+    }
+
+    /// This kind heap-boxes its environment and therefore carries the
+    /// type-erased share/release pair inline (4-word layout, `ApplyPartial`
+    /// `retain`/`release`, the `expand.rs` erased dispatch).
+    ///
+    /// BOTH owning kinds are boxed, but with different containers:
+    /// `Escaping` uses the SHARED box (`@builtin(.SharedBox)`, many handles,
+    /// many calls), `Consuming` a UNIQUE one (`@builtin(.UniqueBox)`, one
+    /// owner, one call). The shared box is unusable for `consuming` because
+    /// its release drops the WHOLE environment unconditionally, double-freeing
+    /// the slots a one-shot body already moved out (plan D5).
+    pub fn is_boxed(self) -> bool {
+        matches!(self, FnKind::Consuming | FnKind::Escaping)
+    }
+
+    /// This kind's environment is SHARED — duplicating the value is the box's
+    /// share operation (a retain), so the value is Cloneable and its container
+    /// becomes Cloneable too. `Consuming` is boxed but NOT shared: it is
+    /// `not Copyable`, so no retain path may ever be reachable for it.
+    pub fn is_shared(self) -> bool {
+        matches!(self, FnKind::Escaping)
+    }
+
+    /// Rendering suffix for `display.rs` — `""` for the unmarked `Normal`.
+    pub fn display_suffix(self) -> &'static str {
+        match self {
+            FnKind::Normal => "",
+            FnKind::Mutating => "[mutating]",
+            FnKind::Consuming => "[consuming]",
+            FnKind::Escaping => "[escaping]",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MirTy {
     I8,
@@ -44,6 +114,9 @@ pub enum MirTy {
         ret: TyId,
     },
     FuncThick {
+        /// The closure tier (view vs owning). Part of the interned identity:
+        /// mangling and witness matching are kind-exact.
+        kind: FnKind,
         params: Vec<(TyId, ParamConvention)>,
         ret: TyId,
     },
@@ -65,6 +138,13 @@ pub enum MirTy {
 pub struct TyArena {
     types: Vec<MirTy>,
     intern_map: HashMap<MirTy, TyId>,
+}
+
+/// Machine words in a `FuncThick` value of `kind` — the SINGLE source of the
+/// closure-value width, shared by `passes/layout.rs`, both codegen `ty.rs`
+/// classifiers and both `compile_apply_partial`s (lockstep 9).
+pub fn func_thick_words(kind: FnKind) -> u64 {
+    if kind.is_boxed() { 4 } else { 2 }
 }
 
 impl TyArena {
@@ -173,9 +253,7 @@ impl TyArena {
         match self.get(id) {
             MirTy::Ref { .. } => true,
             MirTy::Tuple(elems) => elems.iter().any(|&e| self.contains_ref(e)),
-            MirTy::Named { type_args, .. } => {
-                type_args.iter().any(|&a| self.contains_ref(a))
-            },
+            MirTy::Named { type_args, .. } => type_args.iter().any(|&a| self.contains_ref(a)),
             _ => false,
         }
     }
@@ -251,6 +329,7 @@ mod tests {
         let ptr = a.pointer(r);
         assert!(!a.contains_ref(ptr));
         let f = a.intern(MirTy::FuncThick {
+            kind: FnKind::Normal,
             params: vec![(r, ParamConvention::Consuming)],
             ret: r,
         });

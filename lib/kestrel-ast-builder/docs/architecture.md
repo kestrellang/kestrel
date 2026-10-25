@@ -7,7 +7,7 @@ Source Text → Tokens → CST (rowan) → AST Builder → ECS World → Queries
               ↑lex      ↑parse       ↑build_declarations    ↑name resolution, type checking
 ```
 
-The AST builder sits between parsing and semantic analysis. It walks the rowan CST and creates **declaration entities** with **components** in the ECS world. Expressions are not processed — they remain as CST subtrees stored in `Valued` components for later phases.
+The AST builder sits between parsing and semantic analysis. It walks the rowan CST and creates **declaration entities** with **components** in the ECS world. Bodies are not processed: a body-carrying declaration keeps a `Valued` pointer to its body's syntax, and `kestrel-hir-lower`'s `LowerBody` lowers it straight from the CST on demand.
 
 ## Mutation Phase
 
@@ -25,9 +25,18 @@ The builder uses an **iterative stack** rather than recursion:
 
 1. Extract the module path from `ModuleDeclaration` (if present)
 2. Find-or-create the module hierarchy under the root entity
-3. Push top-level children onto the stack with the module as parent
-4. Pop nodes, dispatch by `SyntaxKind` to `build_*` functions
-5. Container types (struct/enum/protocol/extension) push their body children back onto the stack
+3. Push the top-level `ast::Item`s onto the stack with the module as parent
+4. Pop items, dispatch on the `ast::Item` variant to `build_*` functions
+5. Container types (struct/enum/protocol/extension) push their member items back onto the stack
+
+Declarations are read through the typed views generated from
+`lib/kestrel-syntax-tree/kestrel.ungram` (`kestrel_syntax_tree::ast`): each
+builder takes its declaration's view (`ast::FunctionDeclaration`, …) and the
+shared helpers take the `Has*` traits (`HasVisibility`, `HasAttributes`,
+`HasGenerics`, `HasConformances`), so no builder matches child kinds by hand.
+Types lower through `ast_type::lower_type(&ast::Ty)`. Function bodies are
+not read here at all (beyond `DefaultReferencesParam`'s check that a parameter
+default is exactly a sibling parameter's name).
 
 ## Module Hierarchy
 
@@ -51,7 +60,7 @@ Components describe **capabilities** — what an entity CAN DO. They are orthogo
 - `Typed` — this entity IS a type (can appear in type positions)
 - `Callable` — has a parameter list, can be invoked
 - `Gettable` / `Settable` — can be read/written as a value
-- `Valued` — has a body or initializer expression
+- `Valued` — has a body or initializer expression to lower (the one "has a body" marker; a pointer to its syntax)
 - `Static` — accessed through a type, not an instance
 
 This is intentionally flat rather than hierarchical. A subscript is `Callable + Gettable + Settable + Subscript`, not a special "subscript type". Downstream queries can pattern-match on capability combinations.

@@ -2,19 +2,22 @@
 
 ## Adding a new `InferError` variant
 
-A new variant must be mirrored in **five** files — miss any and the build fails with non-exhaustive-match errors only after compiling a dependent crate, which is slow to discover.
+A new variant must be mirrored in **three** files — miss any and the build fails with non-exhaustive-match errors only after compiling a dependent crate, which is slow to discover.
 
 1. **`lib/kestrel-type-infer/src/error.rs`**
    - Add the variant to `pub enum InferError`.
    - Add the span arm in `impl InferError::span()`.
+   - Add the arm in `impl InferError::code()` — the diagnostic code. The match
+     has no wildcard on purpose; pick an existing E1xx family or allocate one
+     in `docs/error-codes.md`.
+   - Add the arm in `impl InferError::render()` — message, label, notes.
+     This is the ONE place a user-facing inference message lives; the codespan
+     renderer in `kestrel-compiler/src/diagnostic.rs` is a thin wrapper and
+     needs no change (F15).
 
 2. **`lib/kestrel-type-infer/src/result.rs`** — `describe_error()` match arm (short one-liner used as the `detail` string).
 
-3. **`lib/kestrel-compiler/src/diagnostic.rs`** — match arm on `InferError` that builds the user-facing `Diagnostic` (message + labels + notes).
-
-4. **`lib/kestrel-analyze/src/body/type_check.rs`** — `format_error()` match arm returning `(message, label_text)`.
-
-5. **`lib/kestrel-compiler-driver/src/lib.rs`** — both `describe()` (short name) and `format_error()` (debug-log string).
+3. **`lib/kestrel-compiler-driver/src/lib.rs`** — both `describe()` (short name) and `format_error()` (debug-log string).
 
 ## Reporting diagnostics from the solver
 
@@ -129,3 +132,65 @@ The copy-semantics decision tree lives in `kestrel-copy-fold`
 fold in solver code. Any deliberate divergence from the kernel rule must carry
 a `TODO(copy-drift #n)` comment at its classifier arm — never converge or
 introduce one silently.
+
+## `InferError::render` is the ONLY description of an inference error
+
+Headline message, primary-label text and notes come from `error.rs::render`;
+the code comes from `error.rs::code`, which `render` reads. Adding an
+`InferError` variant means one arm in each.
+
+There used to be two full per-variant `match`es — `ResolvedInferError::to_diagnostic`
+in `kestrel-compiler` and `TypeCheckAnalyzer::format_error` in `kestrel-analyze`.
+They drifted in wording *and* in code: the same closure-kind mistake shipped as
+both `E624` and `E100`, and every type error rendered twice (the CLI and the
+test harness each open-coded a "skip E100" filter to hide it; the LSP had none,
+so editors showed two squiggles on the same range). `TypeCheckAnalyzer` is
+deleted; `to_diagnostic` is a thin wrapper (F15).
+
+Every variant has a specific code (E102–E118, plus E624 / E491 / E492);
+the old umbrella `E100` survives only on `FromHir`, which is never shown.
+A code used in `code()` must also be in `docs/error-codes.md`, which is *not*
+covered by the analyzer-registry doc test (it only walks descriptors).
+
+## A type in expression position must be consumed, or it is an error
+
+MIR lowers a type used as an expression to **unit**. That covers `Def(entity)`
+where the entity is a `TypeParameter`, and `HirExpr::TypeRef` (G17 S5, for
+example `B.Item` in `B.Item.zero()`). So such an expression is only valid as
+the **receiver** of a `MethodCall`, the **callee** of a `Call`, or the **base**
+of a field access. Anywhere else it compiles to a unit value and fails much
+later, in MIR, as a crash or a type confusion.
+
+`gen_expr` inserts every such expression into `ctx.type_param_defs`. Each
+consuming site removes its child (`generate.rs`: callee, receiver, field base).
+Anything left at the end of `generate_body` is reported as
+`InferError::TypeParamAsValue`.
+
+When you add a new expression form that names a type, **register it in
+`type_param_defs`**, and make every legitimate parent remove it. Skip a type
+that already failed to resolve (`HirTy::Error`); it has its own diagnostic.
+G26 found `let x = Item.Sub;` crashing the compiler in post-mono verify because
+`TypeRef` was not yet registered.
+
+## Same-name associated-type checks must go level by level
+
+`ProtocolAssociatedTypes` (`kestrel-name-res`) returns **every** associated type
+a protocol can reach, as one flat list. That includes types inherited through
+refinement **and** through conformances added in extensions (`extend P: Q`).
+Each entry's `declaring_protocol` says where the type came from. The list is
+not grouped by distance.
+
+Any check of the form "does this name refer to exactly one associated type?"
+must look at the nearest level first. That level is the associated types
+declared by the protocols the subject is **directly** bound by, which are the
+entries whose `declaring_protocol` is that protocol and whose `extension` is
+`None`. Go out one level (`kestrel_name_res::protocol_parents`) only when
+nothing at the current level matches. A match wins at the first level that has
+one, and only two matches **at the same level** are ambiguous.
+
+A flat check over the whole list wrongly reports six stdlib clauses as
+ambiguous. `Iterator` reaches `Iterable.Item` through `extend Iterator:
+Iterable`, and `Hashable` reaches `Equal.Output` and `NotEqual.Output` through
+`Equatable`. G29 (`a87b1f9f`) found this and fixed it in one place:
+`where_clauses.rs::single_assoc` decides every `T.Seg` path in a where clause.
+Reuse it; don't write a second candidate gatherer.

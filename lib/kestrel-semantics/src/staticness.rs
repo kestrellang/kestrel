@@ -24,6 +24,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use kestrel_ast_builder::{TypeParams, WhereClause as AstWhereClause, WhereConstraint};
+use kestrel_hecs::guard::OnDrop;
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::{Builtin, HirTy};
 use kestrel_name_res::ResolveBuiltin;
@@ -206,11 +207,15 @@ impl QueryFn for NominalStaticness {
     fn execute(&self, ctx: &QueryContext<'_>) -> StaticnessInfo {
         let key = (self.entity, self.root);
         COMPUTING_STATICNESS.with(|stack| stack.borrow_mut().push(key));
-        let result = nominal_staticness_impl(ctx, self.entity, self.root);
-        COMPUTING_STATICNESS.with(|stack| {
-            stack.borrow_mut().retain(|entry| *entry != key);
+        // Unwind-safe pop — same reasoning as COMPUTING_COPY_SEMANTICS in
+        // lib.rs: a leaked entry would make this nominal answer `Static`
+        // for the rest of the thread's life (F22).
+        let _guard = OnDrop::new(|| {
+            COMPUTING_STATICNESS.with(|stack| {
+                stack.borrow_mut().pop();
+            });
         });
-        result
+        nominal_staticness_impl(ctx, self.entity, self.root)
     }
 
     fn describe(&self) -> String {
@@ -354,10 +359,11 @@ impl StaticLayer for HirStaticWalk<'_, '_> {
             HirTy::SelfType(entity, _) | HirTy::AliasUse { entity, .. } => {
                 !matches!(self.nominal_staticness(*entity), Staticness::NotStatic)
             },
-            // Function types are Static in 2a — the capture-derived Static
-            // bit on function types lands with ref-capturing closures.
-            // TODO(static-2c): thread the fn-type Static bit here.
-            HirTy::Function { .. } => true,
+            // A view-kind closure (normal / `mutating`) holds views into its
+            // defining frame, so it is not Static, exactly like a ref; owning
+            // kinds snapshot their captures (references 2c,
+            // docs/design/closure-fields.md).
+            HirTy::Function { kind, .. } => !kind.is_view(),
             // Conservative never-block leaves, mirroring the copy layer:
             // refs cannot reach these positions in 2a (revisit in 2b).
             HirTy::Protocol { .. }

@@ -50,17 +50,22 @@ impl ToDiagnostic for LexError {
 
 // ===== Parse errors =====
 
-/// A parser error with message and source location.
+/// A parser error with its `E8xx` code, message and source location.
 pub struct ParseError {
     pub message: String,
     pub span: Span,
+    pub code: Option<&'static str>,
 }
 
 impl ToDiagnostic for ParseError {
     fn to_diagnostic(&self) -> Diagnostic<usize> {
-        Diagnostic::error()
+        let mut diag = Diagnostic::error()
             .with_message(self.message.clone())
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())]);
+        if let Some(code) = self.code {
+            diag = diag.with_code(code);
+        }
+        diag
     }
 }
 
@@ -74,257 +79,30 @@ pub struct ResolvedInferError<'a> {
 }
 
 impl ToDiagnostic for ResolvedInferError<'_> {
+    /// Thin wrapper over `InferError::render` — the single owner of every
+    /// inference error's code, message, label and notes (F15). Do not add
+    /// per-variant wording here; add the arm in `kestrel-type-infer`.
     fn to_diagnostic(&self) -> Diagnostic<usize> {
         let span = self.error.span();
-        let file_id = span.file_id;
-        let range = span.range();
-        let detail = self.detail;
+        let r = self.error.render(self.detail);
 
-        match self.error {
-            InferError::TypeMismatch { .. } => Diagnostic::error()
-                .with_message("type mismatch")
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
-
-            InferError::DoesNotConform { .. } => Diagnostic::error()
-                .with_message(
-                    "type mismatch: does not conform to protocol; does not satisfy constraint",
-                )
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
-
-            InferError::NoMember { .. } => Diagnostic::error()
-                // `detail` already includes the lib1-style wording
-                // ("no method 'X' on type 'Y'" or "no member ..."), so we use it
-                // directly instead of prepending a redundant prefix.
-                .with_message(detail)
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
-
-            InferError::AmbiguousMember { receiver, name, .. } => {
-                // Receiver-less (overloaded free-function call) reads as a
-                // "call", not a "member" — and its detail must not leak the
-                // synthetic `Error` placeholder (#210).
-                let msg = if receiver.is_some() {
-                    format!("ambiguous member '{name}'")
-                } else {
-                    format!("ambiguous call to '{name}'")
-                };
-                Diagnostic::error()
-                    .with_message(msg)
-                    .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
-            },
-
-            InferError::MemberNotVisible {
-                name, visibility, ..
-            } => {
-                let vis = match visibility {
-                    kestrel_ast_builder::Vis::Public => "public",
-                    kestrel_ast_builder::Vis::Internal => "internal",
-                    kestrel_ast_builder::Vis::Fileprivate => "fileprivate",
-                    kestrel_ast_builder::Vis::Private => "private",
-                };
-                Diagnostic::error()
-                    .with_message(format!(
-                        "member '{name}' is {vis} and not accessible from this scope"
-                    ))
-                    .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
-            },
-
-            InferError::MemberIsStatic { name, .. } => Diagnostic::error()
-                .with_message(format!(
-                    "'{name}' is a static member and cannot be used on an instance"
-                ))
-                .with_labels(vec![
-                    Label::primary(file_id, range)
-                        .with_message(format!("use the type name to call '{name}'")),
-                ]),
-
-            InferError::NoAssociatedType { name, .. } => Diagnostic::error()
-                .with_message(format!("no associated type '{name}'"))
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
-
-            InferError::InfiniteType { .. } => Diagnostic::error()
-                .with_message("infinite type")
-                .with_labels(vec![
-                    Label::primary(file_id, range).with_message("recursive type detected"),
-                ]),
-
-            InferError::FromHir { .. } => Diagnostic::error()
-                .with_message("error in expression")
-                .with_labels(vec![Label::primary(file_id, range)]),
-
-            InferError::ImplicitMemberNotFound { name, .. } => Diagnostic::error()
-                .with_message(format!("implicit member '.{name}' not found"))
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
-
-            InferError::ArgCountMismatch { expected, got, .. } => Diagnostic::error()
-                .with_message(format!(
-                    "wrong number of arguments: expected {expected}, got {got}"
-                ))
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
-
-            InferError::LabelMismatch { .. } => Diagnostic::error()
-                .with_message("wrong argument label")
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
-
-            InferError::InstanceMethodAsStatic { name, .. } => Diagnostic::error()
-                .with_message(format!(
-                    "instance method '{name}' cannot be called on a type"
-                ))
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
-
-            InferError::TypeParamAsValue { .. } => Diagnostic::error()
-                .with_message("type parameter cannot be used as a value")
-                .with_labels(vec![
-                    Label::primary(file_id, range).with_message("not a value"),
-                ]),
-
-            InferError::TypeArgCountMismatch { expected, got, .. } => {
-                let msg = if *got < *expected {
-                    format!("too few type arguments: expected {expected}, got {got}")
-                } else {
-                    format!("too many type arguments: expected {expected}, got {got}")
-                };
-                Diagnostic::error()
-                    .with_message(&msg)
-                    .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
-            },
-
-            InferError::NoMatchingOverload { name, .. } => Diagnostic::error()
-                .with_message(format!("no matching overload for '{name}'"))
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
-
-            InferError::MemberwiseInitArity {
-                struct_name,
-                expected,
-                got,
-                ..
-            } => Diagnostic::error()
-                .with_message(format!(
-                    "struct '{struct_name}' has {expected} field(s), but {got} argument(s) were provided"
-                ))
-                .with_labels(vec![
-                    Label::primary(file_id, range)
-                        .with_message(format!("expected {expected} argument(s)")),
-                ]),
-
-            InferError::MemberwiseInitLabel {
-                struct_name,
-                expected,
-                got,
-                ..
-            } => {
-                let got_desc = got
-                    .as_deref()
-                    .map(|s| format!("'{}'", s))
-                    .unwrap_or_else(|| "unlabeled".into());
-                Diagnostic::error()
-                    .with_message(format!(
-                        "argument for struct '{struct_name}' has {got_desc} label, but expected '{expected}'"
-                    ))
-                    .with_labels(vec![
-                        Label::primary(file_id, range)
-                            .with_message(format!("expected label '{expected}'")),
-                    ])
-            },
-
-            InferError::ItWrongArity { expected, .. } => Diagnostic::error()
-                .with_message("implicit 'it' parameter requires single-parameter context")
-                .with_labels(vec![
-                    Label::primary(file_id, range)
-                        .with_message(format!("expected {} parameter(s)", expected)),
-                ]),
-
-            InferError::LiteralNotAccepted { .. } => Diagnostic::error()
-                .with_message("type mismatch: does not conform to protocol")
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
-
-            InferError::UnresolvedTypeParam { .. } => Diagnostic::error()
-                .with_message("cannot infer type parameter")
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
-                .with_notes(vec![
-                    "no argument or context constrains this type parameter; \
-                     annotate it explicitly at the call (e.g. `f[_, Int64](...)`) \
-                     or at the binding (e.g. `let x: T = f(...)`)"
-                        .into(),
-                ]),
-
-            InferError::CannotInferType { .. } => Diagnostic::error()
-                .with_message("could not infer type")
-                .with_labels(vec![
-                    Label::primary(file_id, range)
-                        .with_message("add a type annotation to resolve this"),
-                ]),
-
-            InferError::TupleIndexOnNonTuple { index, .. } => Diagnostic::error()
-                .with_message(format!("cannot index into non-tuple type: {detail}"))
-                .with_labels(vec![
-                    Label::primary(file_id, range)
-                        .with_message(format!("'.{index}' requires a tuple receiver")),
-                ]),
-
-            InferError::TupleIndexOutOfBounds { arity, index, .. } => Diagnostic::error()
-                .with_message(format!(
-                    "tuple index {index} out of bounds for {arity}-element tuple"
-                ))
-                .with_labels(vec![
-                    Label::primary(file_id, range)
-                        .with_message(format!("valid indices are 0..{}", arity.saturating_sub(1))),
-                ]),
-
-            InferError::MemberAccessOnPrimitive { name, .. } => Diagnostic::error()
-                .with_message(format!("cannot access member on type: {detail}"))
-                .with_labels(vec![
-                    Label::primary(file_id, range)
-                        .with_message(format!("'{name}' not available")),
-                ]),
-
-            InferError::MethodNotCalled { method, .. } => Diagnostic::error()
-                .with_message(detail.to_string())
-                .with_labels(vec![
-                    Label::primary(file_id, range)
-                        .with_message("add () to call this method".to_string()),
-                ])
-                .with_notes(vec![format!(
-                    "primitive methods cannot be used as first-class values; use '.{method}()' instead"
-                )]),
-
-            InferError::CircularOpaqueReturn { .. } => Diagnostic::error()
-                .with_message("circular opaque return type")
-                .with_labels(vec![
-                    Label::primary(file_id, range)
-                        .with_message("concrete type cannot be determined"),
-                ])
-                .with_notes(vec![
-                    "mutually recursive functions with 'some' return types must have at least one non-opaque base case".into(),
-                ]),
-            InferError::ConventionMismatch { .. } => Diagnostic::error()
-                .with_message(
-                    "convention mismatch: cannot pass a mutating closure where a non-mutating parameter is expected",
-                )
-                .with_labels(vec![
-                    Label::primary(file_id, range)
-                        .with_message("mutating closure not allowed here"),
-                ]),
-            InferError::RefFunctionAsValue { .. } => Diagnostic::error()
-                .with_code("E491")
-                .with_message("a reference-returning function cannot be used as a value")
-                .with_labels(vec![Label::primary(file_id, range).with_message(
-                    "call it instead — `-> &T` is a return convention, not part of a \
-                     function type",
-                )])
-                .with_notes(vec![
-                    "capturing or storing it would erase the ret_borrow calling convention"
-                        .into(),
-                ]),
-            InferError::RefInTypeArgument { .. } => Diagnostic::error()
-                .with_code("E492")
-                .with_message("a reference cannot be a generic type argument")
-                .with_labels(vec![Label::primary(file_id, range).with_message(
-                    "this would store the reference; references are second-class",
-                )])
-                .with_notes(vec![
-                    "bind the value first (`let x = ...;`) to store an owned copy".into(),
-                ]),
+        let mut label = Label::primary(span.file_id, span.range());
+        if let Some(text) = r.label {
+            label = label.with_message(text);
         }
+
+        let mut labels = vec![label];
+        labels.extend(
+            r.secondary
+                .iter()
+                .map(|(s, text)| Label::secondary(s.file_id, s.range()).with_message(text.clone())),
+        );
+
+        Diagnostic::error()
+            .with_code(r.code)
+            .with_message(r.message)
+            .with_labels(labels)
+            .with_notes(r.notes)
     }
 }
 
@@ -340,6 +118,41 @@ fn resolve_span(span: Option<&Span>, entity: Entity, world: &World) -> Span {
         .get::<kestrel_ast_builder::DeclSpan>(entity)
         .map(|s| s.0.clone())
         .unwrap_or_else(|| Span::synthetic(0))
+}
+
+/// `source_order`'s key: (file, start, end, severity — errors first, code,
+/// message). Also a diagnostic's identity for "already printed" tracking.
+pub type SourceOrder = (
+    usize,
+    usize,
+    usize,
+    std::cmp::Reverse<codespan_reporting::diagnostic::Severity>,
+    Option<String>,
+    String,
+);
+
+/// Sort key putting diagnostics in source order: file, then the primary
+/// label's range, errors before warnings at the same spot, then code and
+/// message so that equal positions still order deterministically. A
+/// diagnostic with no label sorts after every located one.
+pub fn source_order(d: &Diagnostic<usize>) -> SourceOrder {
+    use codespan_reporting::diagnostic::LabelStyle;
+    let primary = d
+        .labels
+        .iter()
+        .find(|l| l.style == LabelStyle::Primary)
+        .or(d.labels.first());
+    let (file, start, end) = primary.map_or((usize::MAX, 0, 0), |l| {
+        (l.file_id, l.range.start, l.range.end)
+    });
+    (
+        file,
+        start,
+        end,
+        std::cmp::Reverse(d.severity),
+        d.code.clone(),
+        d.message.clone(),
+    )
 }
 
 pub fn mir_verify_error_to_diagnostic(

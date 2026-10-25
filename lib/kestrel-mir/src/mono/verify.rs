@@ -3,7 +3,7 @@ use kestrel_span::Span;
 
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
-use crate::inst::InstKind;
+use crate::inst::{CalleeSite, InstKind};
 use crate::mono::types::{MonoFunction, MonoModule};
 use crate::ty::MirTy;
 use crate::{BlockId, CopyBehavior, TyId};
@@ -46,6 +46,20 @@ pub fn verify_mono(module: &MonoModule) -> MonoVerifyResult {
         verify_function(module, fi, func, &mut errors);
     }
 
+    // A generic body that copies a value whose instantiation is `not Copyable`
+    // (expansion found it and could only bit-copy it): two owners of one
+    // value, a double free at runtime. Never silent.
+    for f in &module.instantiation_findings {
+        errors.push(MonoVerifyError {
+            user_facing: false,
+            func_idx: f.func_idx,
+            block: Some(BlockId::new(f.block)),
+            inst: Some(f.inst),
+            message: f.message.clone(),
+            span: f.span.clone(),
+        });
+    }
+
     // Check all structs have layouts
     for s in module.structs.values() {
         if s.type_info.layout.is_none() {
@@ -83,7 +97,45 @@ pub fn verify_mono(module: &MonoModule) -> MonoVerifyResult {
     // be constructed — this is pure defense-in-depth.
     verify_copyable_containment(module, &mut errors);
 
+    verify_clone_impl_present(module, &mut errors);
+
     MonoVerifyResult { errors }
+}
+
+/// `copy == CopyBehavior::Clone(_)` ⇒ `clone_impl.is_some()`.
+///
+/// One-directional on purpose. The converse does NOT hold and must not be
+/// asserted: a conditionally-Copyable container (`Optional`) and a
+/// primitive-only struct both get a `__clone$T` while keeping a `None`/`Bitwise`
+/// base, because `refine_mono_copy_behavior` decides their real behavior per
+/// instantiation. What is always wrong is the other direction — a `Clone`
+/// behavior with no function to call, which expands to a bitwise alias with no
+/// retain and double-frees. Before `TypeInfo::clone_impl` these two facts were
+/// derived independently in four places and could disagree silently (F7); this
+/// makes a disagreement loud.
+fn verify_clone_impl_present(module: &MonoModule, errors: &mut Vec<MonoVerifyError>) {
+    let structs = module
+        .structs
+        .values()
+        .map(|s| ("MonoStruct", s.source, &s.type_args, &s.type_info));
+    let enums = module
+        .enums
+        .values()
+        .map(|e| ("MonoEnum", e.source, &e.type_args, &e.type_info));
+    for (kind, source, type_args, type_info) in structs.chain(enums) {
+        if matches!(type_info.copy, CopyBehavior::Clone(_)) && type_info.clone_impl.is_none() {
+            errors.push(MonoVerifyError {
+                user_facing: false,
+                func_idx: 0,
+                block: None,
+                inst: None,
+                message: format!(
+                    "{kind}({source:?}, {type_args:?}) has CopyBehavior::Clone but no clone_impl"
+                ),
+                span: None,
+            });
+        }
+    }
 }
 
 /// Invariant 3b (defense-in-depth): no `Bitwise`/`Clone` type may contain a
@@ -92,6 +144,14 @@ pub fn verify_mono(module: &MonoModule) -> MonoVerifyResult {
 /// fire in a correct build; it converts a silent inconsistency (a bit-copyable
 /// type aliasing a move-only resource) into a loud verification error.
 fn verify_copyable_containment(module: &MonoModule, errors: &mut Vec<MonoVerifyError>) {
+    // Invariant 3b, closure half (plan D6): a `Bitwise` container may never
+    // hold a droppable closure environment either. A boxed (`escaping`) field
+    // must make its container `Clone(_)` (the `clone_shim.rs` overwrite) so the
+    // copy SHARES the handle; a `Bitwise` container would bit-copy the handle
+    // and skip the share — the exact old double-free class this check exists
+    // to make loud. A `NotCopyable`-kind closure field (`consuming`) must make
+    // its container `None` — a unique one-shot owner has no duplication
+    // operation at all, so neither `Bitwise` nor `Clone(_)` is legal for it.
     let child_copy = |ty: TyId| -> Option<CopyBehavior> {
         if let MirTy::Named { entity, type_args } = module.ty_arena.get(ty) {
             let key = (*entity, type_args.clone());
@@ -104,6 +164,21 @@ fn verify_copyable_containment(module: &MonoModule, errors: &mut Vec<MonoVerifyE
             None
         }
     };
+    // Closure half: a duplicable container may never own a droppable closure
+    // environment. A shared (`escaping`) field must push its container to
+    // `Clone(_)` (the `clone_shim.rs` overwrite) so a copy SHARES the handle;
+    // a `Bitwise` container would bit-copy the handle and skip the share —
+    // exactly the old double-free class. A `consuming` field is NotCopyable, so
+    // NEITHER `Bitwise` nor `Clone(_)` is legal for its container (a clone of
+    // the container would have to duplicate a unique one-shot owner);
+    // `child_copy` cannot see it because a FuncThick has no nominal entity.
+    let bad_closure_field = |container: &CopyBehavior, ty: TyId| match module.ty_arena.get(ty) {
+        MirTy::FuncThick { kind, .. } if kind.is_shared() => {
+            matches!(container, CopyBehavior::Bitwise)
+        },
+        MirTy::FuncThick { kind, .. } if kind.is_boxed() => true,
+        _ => false,
+    };
 
     for s in module.structs.values() {
         if !matches!(
@@ -113,7 +188,9 @@ fn verify_copyable_containment(module: &MonoModule, errors: &mut Vec<MonoVerifyE
             continue;
         }
         for f in &s.fields {
-            if matches!(child_copy(f.ty), Some(CopyBehavior::None)) {
+            if matches!(child_copy(f.ty), Some(CopyBehavior::None))
+                || bad_closure_field(&s.type_info.copy, f.ty)
+            {
                 errors.push(MonoVerifyError {
                     user_facing: false,
                     func_idx: 0,
@@ -137,7 +214,9 @@ fn verify_copyable_containment(module: &MonoModule, errors: &mut Vec<MonoVerifyE
         }
         for case in &e.cases {
             for f in &case.payload_fields {
-                if matches!(child_copy(f.ty), Some(CopyBehavior::None)) {
+                if matches!(child_copy(f.ty), Some(CopyBehavior::None))
+                    || bad_closure_field(&e.type_info.copy, f.ty)
+                {
                     errors.push(MonoVerifyError { user_facing: false,
                         func_idx: 0,
                         block: None,
@@ -242,14 +321,12 @@ fn verify_function(
 
         for (ii, inst) in block.insts.iter().enumerate() {
             let inst_span = inst.span.as_ref();
+            for (site, callee) in inst.kind.callees() {
+                check_callee(
+                    module, fi, block_id, ii, inst_span, site, callee, func_count, errors,
+                );
+            }
             match &inst.kind {
-                // Check callees are resolved
-                InstKind::Call { callee, .. } => {
-                    check_callee(
-                        module, fi, block_id, ii, inst_span, callee, func_count, errors,
-                    );
-                },
-
                 // Check FunctionRef is rewritten to MonoFunctionRef
                 InstKind::Literal { value, .. } => {
                     check_literal(
@@ -342,6 +419,26 @@ fn verify_function(
                     );
                 },
 
+                // Op type operands. verify.rs used to have its own copy of the
+                // op-half gap (this fell through the `_` arm below), so a
+                // `SizeOf(GhostG[Int64])` naming a type absent from the module
+                // was never checked. Shares the one canonical variant list with
+                // `mono::substitute_op_type` and `mono::collect_named_types`.
+                InstKind::Op1 { op, .. } | InstKind::Op2 { op, .. } | InstKind::Op3 { op, .. } => {
+                    if let Some(ty) = crate::op::op_type(op) {
+                        check_type_concrete(
+                            module,
+                            fi,
+                            Some(block_id),
+                            Some(ii),
+                            inst_span,
+                            ty,
+                            errors,
+                            "Op type",
+                        );
+                    }
+                },
+
                 // All other instructions: no additional mono verification needed
                 _ => {},
             }
@@ -355,6 +452,7 @@ fn check_callee(
     block: BlockId,
     ii: usize,
     span: Option<&Span>,
+    site: CalleeSite,
     callee: &Callee,
     func_count: usize,
     errors: &mut Vec<MonoVerifyError>,
@@ -383,7 +481,7 @@ fn check_callee(
                 block: Some(block),
                 inst: Some(ii),
                 message: format!(
-                    "Callee::Direct not resolved to Callee::Resolved \
+                    "{site:?} Callee::Direct not resolved to Callee::Resolved \
                      (callee='{name}' {func:?}, type_args=[{}], self_type={stype})",
                     targs.join(", ")
                 ),
@@ -412,8 +510,8 @@ fn check_callee(
                 block: Some(block),
                 inst: Some(ii),
                 message: format!(
-                    "type '{ty}' does not implement '{}' required by '{proto}' \
-                     (no matching conformance for this instantiation)",
+                    "{site:?}: type '{ty}' does not implement '{}' required by '{proto}' \
+                      (no matching conformance for this instantiation)",
                     method.name
                 ),
                 span: span.cloned(),
@@ -435,7 +533,17 @@ fn check_callee(
                 });
             }
         },
-        Callee::Thin(_) | Callee::Thick(_) => {},
+        Callee::Thin(_) | Callee::Thick(_) if site == CalleeSite::Call => {},
+        Callee::Thin(_) | Callee::Thick(_) => {
+            errors.push(MonoVerifyError {
+                user_facing: false,
+                func_idx: fi,
+                block: Some(block),
+                inst: Some(ii),
+                message: format!("{site:?} must be resolved to a mono function: {callee:?}"),
+                span: span.cloned(),
+            });
+        },
     }
 }
 
@@ -578,12 +686,42 @@ fn check_type_concrete(
                 check_type_concrete(module, fi, block, inst, span, elem, errors, context);
             }
         },
-        MirTy::Named { type_args, .. } => {
-            for &arg in type_args {
+        MirTy::Named { entity, type_args } => {
+            let entity = *entity;
+            let type_args = type_args.clone();
+            for &arg in &type_args {
                 check_type_concrete(module, fi, block, inst, span, arg, errors, context);
             }
+            // The real G2 failure mode is ABSENCE from the mono maps, not
+            // presence with a null layout: `MonoStruct`/`MonoEnum` are only
+            // inserted inside `if all_resolved`, one line after `layout =
+            // Some(..)`, so the `layout.is_none()` checks in `verify_mono` are
+            // inert by construction. A `MirTy::Named` is always a genuine user
+            // struct/enum — every primitive has its own `MirTy` variant (see
+            // `passes::layout::primitive_size_and_align`) — so a body naming one
+            // the module never laid out means codegen will fall back to a
+            // pointer-sized scalar and silently mis-size the value.
+            let key = (entity, type_args.clone());
+            if !module.structs.contains_key(&key) && !module.enums.contains_key(&key) {
+                errors.push(MonoVerifyError {
+                    user_facing: false,
+                    func_idx: fi,
+                    block,
+                    inst,
+                    message: format!(
+                        "Named({entity:?}, {type_args:?}) in {context} has no MonoStruct/MonoEnum \
+                         — layout would silently fall back to a pointer-sized scalar"
+                    ),
+                    span: span.cloned(),
+                });
+            }
         },
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+        MirTy::FuncThin { params, ret }
+        | MirTy::FuncThick {
+            params,
+            ret,
+            kind: _,
+        } => {
             for (p, _) in params {
                 check_type_concrete(module, fi, block, inst, span, *p, errors, context);
             }
@@ -671,6 +809,73 @@ mod tests {
             },
         );
 
+        let result = verify_mono(&module);
+        assert!(result.is_ok(), "errors: {:?}", result.errors);
+    }
+
+    /// G2 guard. The pre-existing `layout.is_none()` checks in `verify_mono`
+    /// cannot fire on a real module: a `MonoStruct` is only inserted inside
+    /// `if all_resolved`, on the line after `layout = Some(..)`, so every entry
+    /// has a layout by construction. The failure mode is ABSENCE from the map —
+    /// a body naming a `Named` that mono never laid out, which both backends
+    /// then classify as a pointer-sized scalar.
+    ///
+    /// Body: `%1 = SizeOf(Ghost[]) %0`, with no `MonoStruct` for `Ghost`.
+    #[test]
+    fn named_type_absent_from_module_is_reported() {
+        let mut module = make_module();
+        let unit = module.ty_arena.unit();
+        let i64t = module.ty_arena.i64();
+        let ghost = module.ty_arena.named(entity(9), vec![]);
+
+        let mut block = BasicBlock::new();
+        block.insts = vec![Instruction::new(InstKind::Op1 {
+            result: ValueId::new(1),
+            op: crate::op::Op::SizeOf(ghost),
+            arg: ValueId::new(0),
+        })];
+        block.terminator = Terminator::new(TerminatorKind::Return(ValueId::new(0)));
+        let body = OssaBody {
+            values: vec![ValueDef::owned(unit), ValueDef::owned(i64t)],
+            blocks: vec![block],
+            entry: BlockId::new(0),
+            param_count: 0,
+            value_names: Default::default(),
+        };
+        module.add_function(MonoFunction {
+            name: "_K04_main".into(),
+            source: entity(1),
+            type_args: vec![],
+            self_type: None,
+            params: vec![],
+            ret: unit,
+            body: Some(body),
+            extern_info: None,
+            is_main: false,
+            ret_borrow: false,
+        });
+
+        let result = verify_mono(&module);
+        assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+        assert!(
+            result.errors[0].message.contains("no MonoStruct/MonoEnum"),
+            "{:?}",
+            result.errors[0].message
+        );
+
+        // Same module, now with the layout present: clean.
+        module.structs.insert(
+            (entity(9), vec![]),
+            MonoStruct {
+                source: entity(9),
+                type_args: vec![],
+                fields: vec![],
+                type_info: TypeInfo {
+                    layout: Some(Layout::Struct(StructLayout::new())),
+                    ..TypeInfo::none()
+                },
+            },
+        );
         let result = verify_mono(&module);
         assert!(result.is_ok(), "errors: {:?}", result.errors);
     }
@@ -807,6 +1012,61 @@ mod tests {
         let result = verify_mono(&module);
         assert!(!result.is_ok());
         assert!(result.errors.iter().any(|e| e.message.contains("Direct")));
+    }
+
+    #[test]
+    fn verify_checks_every_apply_partial_callee() {
+        let mut module = make_module();
+        let unit = module.ty_arena.unit();
+        let ret_val = ValueId::new(0);
+        let closure_val = ValueId::new(1);
+        let mut block = BasicBlock::new();
+        block.insts.push(Instruction::new(InstKind::ApplyPartial {
+            result: closure_val,
+            callee: Callee::Resolved(MonoFuncId::new(0)),
+            captures: vec![],
+            retain: Some(Callee::Direct {
+                func: entity(99),
+                type_args: vec![],
+                self_type: None,
+            }),
+            release: Some(Callee::Thin(ret_val)),
+        }));
+        block.terminator = Terminator::new(TerminatorKind::Return(ret_val));
+        let body = OssaBody {
+            values: vec![ValueDef::owned(unit), ValueDef::owned(unit)],
+            blocks: vec![block],
+            entry: BlockId::new(0),
+            param_count: 0,
+            value_names: Default::default(),
+        };
+        module.add_function(MonoFunction {
+            name: "bad".into(),
+            source: entity(1),
+            type_args: vec![],
+            self_type: None,
+            params: vec![],
+            ret: unit,
+            body: Some(body),
+            extern_info: None,
+            is_main: false,
+            ret_borrow: false,
+        });
+
+        let result = verify_mono(&module);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("ApplyPartialRetain") && e.message.contains("Direct"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("ApplyPartialRelease")
+                    && e.message.contains("must be resolved"))
+        );
     }
 
     #[test]

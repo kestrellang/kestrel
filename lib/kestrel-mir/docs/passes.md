@@ -18,7 +18,9 @@ lower_to_ossa        Emit OSSA with copy_value, destroy_value, block args
  v
 monomorphize          Generic → concrete, substitute types, resolve witnesses
  |
- ├─ mono_verify       No TypeParam/Witness remaining
+ ├─ expand            CopyValue/DestroyValue → clone/drop calls, erased
+ |                    closure retain/release dispatch
+ ├─ mono_verify       No TypeParam/Witness remaining; containment invariants
  |
  v
 codegen               Emit native code
@@ -118,6 +120,69 @@ Operates on the OSSA IR. Key points:
   concrete type's `CopyBehavior`. A generic `T` that was Affine may
   become `Int64` (Bitwise → @none). The mono_verify pass catches
   any ownership annotation inconsistencies.
+- A `FuncThick`'s closure kind is part of the type's identity, so it is
+  **kind-exact** in both places identity matters: `mangle.rs` emits a
+  one-char kind tag (`n`/`m`/`c`/`e`), and `witness.rs match_pattern`
+  requires `k1 == k2` — a `mutating (T) -> U` witness does not satisfy a
+  normal `(T) -> U` requirement, because the two differ in environment
+  ownership and copy class.
+
+## Post-Mono Elaboration
+
+Unlike the structural passes above, these run on the `MonoModule` and turn
+the abstract ownership instructions into concrete calls.
+
+### expand
+
+`mono::expand::expand_destroy_copy` rewrites the abstract `CopyValue` /
+`DestroyValue` instructions into real work: a clone-shim call, a drop-shim
+call, an inline tuple walk — or, for a **boxed closure**, the type-erased
+share/release dispatch.
+
+A value of type `escaping (…) -> …` does not name its environment type, so
+expand cannot call anything about it directly. Instead it emits two
+`Op::ClosureWord` projections (the handle, then the retain or release shim)
+and an indirect `Callee::Thin` call:
+
+```
+%handle = op1 closure_word(1) %closure
+%shim   = op1 closure_word(3) %closure   // 2 = retain, 3 = release
+call %shim(%handle)                      // consuming
+```
+
+All actual semantics — allocate, retain, release, destroy the captures —
+live in per-environment shims synthesized by `kestrel-mir-lower` against the
+`@builtin(.SharedBox)` / `@builtin(.UniqueBox)` binding, so swapping the
+binding retargets everything. Only the two-word load and the indirect call
+are compiler-emitted. A capture-free value carries a null handle and no-op
+shims, so no null check is needed (post-mono block splitting is
+unavailable).
+
+Copy uses `is_shared()`, not `is_boxed()`: the copy keeps the bitwise
+4-word copy and adds a retain so the extra handle is counted. A `consuming`
+closure is `not Copyable`, so no clone of it may ever be elaborated and its
+retain word must stay unreachable.
+
+## The Six Resource Predicates
+
+Copy and drop classification for `FuncThick` is decided by the **closure
+kind**, not by folding the environment payload. Six predicates spread across
+pre- and post-mono encode the same three rows and must change as one atomic
+edit — a `Bitwise` reading
+plus a droppable env double-frees; `Clone` without drop leaks:
+
+| Kind | copy | drop |
+|------|------|------|
+| `Normal` / `Mutating` (view) | `Bitwise` | no |
+| `Escaping` (shared box) | `Clone(Cloneable)` | yes (release) |
+| `Consuming` (unique box) | `None` (move-only) | yes (release) |
+
+The six sites: `ty_query::copy_behavior`, `ty_query::needs_drop`,
+`expand::ty_needs_drop`, `audit::mono_needs_drop`,
+`clone_shim::ty_needs_clone_shim`, and `mono::concrete_copy`
+(`drop_fix::field_needs_drop` follows via `needs_drop`). With no stdlib —
+no `Cloneable` protocol in the module — the escaping row degrades to
+`Bitwise`, the only self-consistent answer when nothing can clone anyway.
 
 ## Verification
 
@@ -215,6 +280,21 @@ sub-field tracking. It only needs the field count from `StructDef`,
 which is available before the layout pass runs. This is why `FieldAddr`
 exists as a separate instruction rather than using raw `Op2 PtrOffset` —
 it carries typed field identity that the verifier can reason about.
+
+### mono_verify
+
+Post-mono checks: no `TypeParam`/`Witness` survives, plus containment
+invariants. **Invariant 3b** (defense-in-depth) is that no `Bitwise` or
+`Clone` type may contain a non-Copyable child. Closures extend it, because a
+`FuncThick` has no nominal entity for the ordinary child lookup to see:
+
+- an `Escaping` field may not sit in a `Bitwise` container — the container
+  must be pushed to `Clone(_)` by the clone-shim overwrite so a copy SHARES
+  the handle; bit-copying it would skip the share (the double-free class this
+  check exists to make loud);
+- a `Consuming` field makes *neither* `Bitwise` nor `Clone(_)` legal —
+  cloning the container would have to duplicate a unique one-shot owner — so
+  its container must be `None`.
 
 ## Optional Optimizations
 

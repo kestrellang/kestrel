@@ -3,10 +3,10 @@
 module std.result
 
 import std.core.(Equatable, Comparable, Ordering, Hashable, Hasher, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce, fatalError)
-import std.text.(String, StringBuilder, FormatOptions, Formattable)
+import std.text.(String, StringBuilder, Formatter, FormatOptions, Formattable)
 import std.result.(Result)
 import std.numeric.(Int64, UInt8)
-import std.memory.(ArraySlice, Pointer)
+import std.memory.(ArraySlice, Pointer, swap)
 import std.iter.(Iterator)
 
 /// A type-safe stand-in for nullable references — either `Some(value)` or
@@ -122,17 +122,29 @@ public enum Optional[T]: not Copyable where T: not Static {
         }
     }
 
+    /// Borrows the contained value without consuming this optional.
+    public func asRef() -> Optional[&T] {
+        match self {
+            .Some(value) => {
+                let reference = &value;
+                let result: Optional[&T] = .Some(reference);
+                result
+            },
+            .None => .None
+        }
+    }
+
     /// True when `.Some(value)` and `predicate(value)` returns `true`.
     /// `None` always answers `false` without invoking the predicate.
     ///
     /// # Examples
     ///
     /// ```
-    /// Some(42).isSomeAnd { it > 0 };    // true
-    /// Some(-1).isSomeAnd { it > 0 };    // false
-    /// None.isSomeAnd { it > 0 };        // false
+    /// Some(42).isSomeAnd(where: { it > 0 });    // true
+    /// Some(-1).isSomeAnd(where: { it > 0 });    // false
+    /// None.isSomeAnd(where: { it > 0 });        // false
     /// ```
-    public func isSomeAnd(predicate: (T) -> Bool) -> Bool {
+    public func isSomeAnd(where predicate: (T) -> Bool) -> Bool {
         match self {
             .Some(value) => predicate(value),
             .None => false
@@ -157,7 +169,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(42).unwrap();   // 42
     /// None.unwrap();       // PANIC
     /// ```
-    public func unwrap() -> T {
+    public consuming func unwrap() -> T {
         match self {
             .Some(value) => value,
             .None => fatalError("called unwrap() on None")
@@ -177,7 +189,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// ```
     /// let cfg = loadConfig().expect("Config file required");
     /// ```
-    public func expect(message: String) -> T {
+    public consuming func expect(message: String) -> T {
         match self {
             .Some(value) => value,
             .None => fatalError(message)
@@ -194,7 +206,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(42).unwrap(or: 0);   // 42
     /// None.unwrap(or: 0);       // 0
     /// ```
-    public func unwrap(or default: T) -> T {
+    public consuming func unwrap(consuming or default: T) -> T {
         match self {
             .Some(value) => value,
             .None => default
@@ -210,7 +222,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(42).unwrap(orElse: { expensiveDefault() });   // 42, no call
     /// None.unwrap(orElse: { expensiveDefault() });       // calls fn
     /// ```
-    public func unwrap(orElse defaultFn: () -> T) -> T {
+    public consuming func unwrap(orElse defaultFn: () -> T) -> T {
         match self {
             .Some(value) => value,
             .None => defaultFn()
@@ -231,7 +243,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// None.map { it * 2 };              // None
     /// Some("hello").map { it.len };     // Some(5)
     /// ```
-    public func map[U](transform: (T) -> U) -> Optional[U] {
+    public consuming func map[U](transform: (T) -> U) -> Optional[U] {
         match self {
             .Some(value) => .Some(transform(value)),
             .None => .None
@@ -250,7 +262,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some("abc").flatMap(parse);   // None  (parse failed)
     /// None.flatMap(parse);          // None
     /// ```
-    public func flatMap[U](transform: (T) -> Optional[U]) -> Optional[U] {
+    public consuming func flatMap[U](transform: (T) -> Optional[U]) -> Optional[U] {
         match self {
             .Some(value) => transform(value),
             .None => .None
@@ -267,7 +279,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(None).flatten();       // None
     /// None.flatten();             // None
     /// ```
-    public func flatten[U]() -> Optional[U] where T = Optional[U] {
+    public consuming func flatten[U]() -> Optional[U] where T = Optional[U] {
         match self {
             .Some(inner) => inner,
             .None => Optional[U].None
@@ -280,11 +292,11 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// # Examples
     ///
     /// ```
-    /// Some(4).filter { it % 2 == 0 };   // Some(4)
-    /// Some(3).filter { it % 2 == 0 };   // None
-    /// None.filter { it % 2 == 0 };      // None
+    /// Some(4).filter(where: { it % 2 == 0 });   // Some(4)
+    /// Some(3).filter(where: { it % 2 == 0 });   // None
+    /// None.filter(where: { it % 2 == 0 });      // None
     /// ```
-    public func filter(predicate: (T) -> Bool) -> Optional[T] {
+    public consuming func filter(where predicate: (T) -> Bool) -> Optional[T] {
         match self {
             .Some(value) => {
                 if predicate(value) {
@@ -308,7 +320,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     ///     .inspect { print("Found: \{it.name}") }
     ///     .map { it.email };
     /// ```
-    public func inspect(fn: (T) -> ()) -> Optional[T] {
+    public consuming func inspect(mutating fn: mutating (T) -> ()) -> Optional[T] {
         match self {
             .Some(value) => {
                 fn(value);
@@ -332,7 +344,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(1).then(None);         // None
     /// None.then(Some("a"));       // None
     /// ```
-    public func then[U](other: Optional[U]) -> Optional[U] {
+    public consuming func then[U](consuming other: Optional[U]) -> Optional[U] {
         match self {
             .Some(_) => other,
             .None => .None
@@ -353,7 +365,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// // For unwrapping with a default, prefer ??:
     /// let value = optionalInt ?? 0;
     /// ```
-    public func orElse(alternative: () -> Optional[T]) -> Optional[T] {
+    public consuming func orElse(alternative: () -> Optional[T]) -> Optional[T] {
         match self {
             .Some(value) => .Some(value),
             .None => alternative()
@@ -371,7 +383,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(1).xor(Some(2));    // None
     /// None.xor(None);          // None
     /// ```
-    public func xor(other: Optional[T]) -> Optional[T] {
+    public consuming func xor(consuming other: Optional[T]) -> Optional[T] {
         match (self, other) {
             (.Some(value), .None) => .Some(value),
             (.None, .Some(value)) => .Some(value),
@@ -389,7 +401,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(1).zip(with: None);        // None
     /// None.zip(with: Some("a"));      // None
     /// ```
-    public func zip[U](with other: Optional[U]) -> Optional[(T, U)] {
+    public consuming func zip[U](consuming with other: Optional[U]) -> Optional[(T, U)] {
         match (self, other) {
             (.Some(a), .Some(b)) => .Some((a, b)),
             _ => .None
@@ -409,7 +421,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(42).okOr("missing");   // Ok(42)
     /// None.okOr("missing");       // Err("missing")
     /// ```
-    public func okOr[E](error: E) -> Result[T, E] {
+    public consuming func okOr[E](consuming error: E) -> Result[T, E] {
         match self {
             .Some(value) => .Ok(value),
             .None => .Err(error)
@@ -424,7 +436,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// Some(42).okOrElse { NotFoundError() };   // Ok(42), fn not called
     /// None.okOrElse { NotFoundError() };       // Err(NotFoundError())
     /// ```
-    public func okOrElse[E](error: () -> E) -> Result[T, E] {
+    public consuming func okOrElse[E](error: () -> E) -> Result[T, E] {
         match self {
             .Some(value) => .Ok(value),
             .None => .Err(error())
@@ -446,8 +458,11 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// opt.take();   // None;     opt is still None
     /// ```
     public mutating func take() -> Optional[T] {
-        let result = self;
-        self = .None;
+        // A move, not `let result = self`: copying `self` duplicates a
+        // non-Copyable payload (an iterator owning storage) and the
+        // assignment below would then free what `result` still holds.
+        var result: Optional[T] = .None;
+        swap(self, result);
         result
     }
 
@@ -463,9 +478,10 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// var none: Int64? = null;
     /// none.replace(1);   // None;    none is now Some(1)
     /// ```
-    public mutating func replace(value: T) -> Optional[T] {
-        let old = self;
-        self = .Some(value);
+    public mutating func replace(consuming value: T) -> Optional[T] {
+        // A move, for the same reason as `take`.
+        var old: Optional[T] = .Some(value);
+        swap(self, old);
         old
     }
 
@@ -515,7 +531,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     ///     print(value)   // never executes
     /// };
     /// ```
-    public func iter() -> OptionalIterator[T] {
+    public consuming func iter() -> OptionalIterator[T] {
         OptionalIterator(self)
     }
 }
@@ -632,9 +648,16 @@ extend Optional[T]: Hashable where T: Hashable {
 // EXTENSIONS - CLONE
 // ============================================================================
 
-/// Clone helper available for every `Optional[T]` (the inner clone falls
-/// out of value-semantics on `T`).
-extend Optional[T] {
+/// `Cloneable` on the same terms as the `Copyable` conformance above: the
+/// inner clone falls out of value-semantics on `T`, so `T: Copyable` is the
+/// real requirement — the payload copy in `clone` expands to `T`'s own clone
+/// when `T` has one, and to a bitwise copy when it doesn't. Constraining to
+/// `T: Cloneable` instead would be stricter than the body needs and would drop
+/// `Optional[Int64].clone()`.
+///
+/// The conformance must be *declared*: a method merely named `clone()` does not
+/// make a type Cloneable, and the compiler no longer treats it as if it did.
+extend Optional[T]: Cloneable where T: Copyable {
 
     /// Returns an independent copy. For value types this is a shallow
     /// copy of the payload; for COW types, the underlying buffer is
@@ -732,7 +755,7 @@ extend Optional[T]: Formattable where T: Formattable {
 
     /// Renders `Some(...)` or `None`, forwarding `options` to the inner
     /// `format` for the payload.
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         match self {
             .Some(value) => {
                 writer.append("Some(");
@@ -768,7 +791,7 @@ extend Optional[T]: ExpressibleByNullLiteral {
 ///
 /// ```
 /// let value = optionalInt ?? 0;
-/// let name  = user?.name   ?? "Anonymous";
+/// let name  = user.map { it.name } ?? "Anonymous";
 /// ```
 extend Optional[T]: Coalesce[T] {
     type Coalesce.Output = T
@@ -776,7 +799,7 @@ extend Optional[T]: Coalesce[T] {
     /// Returns the wrapped value or evaluates `default()`. The default is
     /// only invoked on `None`, which is what makes `??` cheap on the
     /// happy path.
-    public func coalesce(default: () -> T) -> T {
+    public consuming func coalesce(default: () -> T) -> T {
         match self {
             .Some(value) => value,
             .None => default()
@@ -812,16 +835,14 @@ public struct OptionalIterator[T]: Iterator where T: not Static {
     /// @name From Optional
     /// Builds an iterator that will yield the contents of `value` on its
     /// first `next()` call (or terminate immediately if `value` is `None`).
-    public init(value: Optional[T]) {
+    public init(consuming value: Optional[T]) {
         self.value = value;
     }
 
     /// Returns and clears the stored value, then returns `None` forever.
     /// `O(1)` and allocation-free.
     public mutating func next() -> Optional[T] {
-        let result = self.value;
-        self.value = .None;
-        result
+        self.value.take()
     }
 }
 

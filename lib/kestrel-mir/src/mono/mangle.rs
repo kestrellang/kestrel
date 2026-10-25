@@ -197,10 +197,15 @@ fn mangle_type(
             out.push('E');
         },
 
-        MirTy::FuncThick { params, ret } => {
+        MirTy::FuncThick { kind, params, ret } => {
             let params = params.clone();
             let ret = *ret;
+            let kind = *kind;
             out.push('C');
+            // The closure kind is part of the type's identity (plan lockstep 4):
+            // two instantiations differing only in kind must mangle apart, or
+            // they collide into one symbol with different representations.
+            out.push(kind.tag());
             out.push_str(&params.len().to_string());
             out.push('_');
             for (p, _conv) in &params {
@@ -407,12 +412,15 @@ mod tests {
         let i64 = a.i64();
         let unit = a.unit();
         let ft = a.intern(MirTy::FuncThick {
+            kind: crate::ty::FnKind::Normal,
             params: vec![(i64, ParamConvention::Consuming)],
             ret: unit,
         });
         let mut out = String::new();
         mangle_type(&a, &n, ft, &mut out);
-        assert_eq!(out, "C1_i8TvEE");
+        // 'n' = the Normal closure-kind tag: the kind is part of the type's
+        // mangled identity (closure-kinds plan, lockstep 4).
+        assert_eq!(out, "Cn1_i8TvEE");
     }
 
     // -- Full function mangling --

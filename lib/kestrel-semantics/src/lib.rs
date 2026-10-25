@@ -16,11 +16,12 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use kestrel_ast::AstType;
-use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_ast_builder::{
-    Computed, ConformanceItem, Conformances, NodeKind, WhereClause as AstWhereClause,
+    ConformanceItem, Conformances, FieldClass, NodeKind, WhereClause as AstWhereClause,
     WhereConstraint,
 };
+use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
+use kestrel_hecs::guard::OnDrop;
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::builtin::BuiltinKind;
 use kestrel_hir::{Builtin, HirTy};
@@ -501,11 +502,19 @@ impl QueryFn for NominalCopySemantics {
         // before invoking the query (see `hir_type_copy_semantics`).
         let key = (self.entity, self.root);
         COMPUTING_COPY_SEMANTICS.with(|stack| stack.borrow_mut().push(key));
-        let result = nominal_copy_semantics_impl(ctx, self.entity, self.root);
-        COMPUTING_COPY_SEMANTICS.with(|stack| {
-            stack.borrow_mut().retain(|entry| *entry != key);
+        // The pop must survive an unwind: hosts catch ICEs per body and keep
+        // the thread (the test harness even reuses worker threads across
+        // `.ks` files), and a leaked entry makes `computing_contains` answer
+        // yes forever — i.e. this nominal reports `Copyable` for the rest of
+        // the process. `pop` is exact: the query framework panics on
+        // re-entering the same key, so `key` is on the stack at most once,
+        // and pushes nest strictly (F22).
+        let _guard = OnDrop::new(|| {
+            COMPUTING_COPY_SEMANTICS.with(|stack| {
+                stack.borrow_mut().pop();
+            });
         });
-        result
+        nominal_copy_semantics_impl(ctx, self.entity, self.root)
     }
 
     fn describe(&self) -> String {
@@ -600,15 +609,25 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
             // No per-instantiation refinement for Self/alias uses (current behavior).
             HirTy::SelfType(entity, _) => self.base_semantics(*entity),
             HirTy::AliasUse { entity, .. } => self.base_semantics(*entity),
-            HirTy::Protocol { .. } | HirTy::Opaque { .. } => CopySemantics::Copyable,
+            HirTy::Protocol { .. } => CopySemantics::Copyable,
+            // `some P and not Copyable` may hide a move-only underlier; the
+            // plain form guarantees a duplicable one (post-solve check).
+            HirTy::Opaque { not_copyable, .. } => {
+                if *not_copyable {
+                    CopySemantics::NotCopyable
+                } else {
+                    CopySemantics::Copyable
+                }
+            },
+            // A closure value's copy class is fixed by its KIND, not by what it
+            // captures (plan D6 / docs/design/closures.md §"Copy and Drop").
+            HirTy::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),
             // Ref is rejected (rewritten to Error) at HIR lowering and should
             // never reach here; treat it exactly like Error if it does.
             // Infer/Error are recovery.
-            HirTy::Function { .. }
-            | HirTy::Never(_)
-            | HirTy::Infer(_)
-            | HirTy::Error(_)
-            | HirTy::Ref { .. } => CopySemantics::Copyable,
+            HirTy::Never(_) | HirTy::Infer(_) | HirTy::Error(_) | HirTy::Ref { .. } => {
+                CopySemantics::Copyable
+            },
             // An associated projection (`I.Item`) is Copyable-by-default, exactly
             // like a type param: the model gives every associated type an implicit
             // `Copyable` bound unless it's declared `: not Copyable`, and only
@@ -727,11 +746,14 @@ fn collect_child_types(
     for &child in ctx.children_of(entity) {
         match ctx.get::<NodeKind>(child) {
             Some(NodeKind::Field) => {
-                // Computed properties (`var x: T { get … }`) store nothing —
-                // they read/write through accessors — so they never affect
-                // whether the containing type is bit-copyable. Only stored
-                // fields contribute to copy semantics.
-                if ctx.get::<Computed>(child).is_some() {
+                // Only inline instance storage contributes to copy semantics.
+                // Computed properties store nothing, and a `static` field is a
+                // global — folding one in made the whole type non-copyable
+                // because of storage the instance does not contain.
+                if !ctx
+                    .get::<FieldClass>(child)
+                    .is_some_and(FieldClass::is_stored_instance)
+                {
                     continue;
                 }
                 if let Some(ty) = ctx.query(LowerTypeAnnotation {

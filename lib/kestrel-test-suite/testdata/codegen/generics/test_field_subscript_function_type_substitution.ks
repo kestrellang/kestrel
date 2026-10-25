@@ -14,7 +14,7 @@ enum MiddlewareResult {
 }
 
 struct Route[T]: Cloneable {
-    var middleware: Array[(Request, T) -> MiddlewareResult]
+    var middleware: Array[escaping (Request, T) -> MiddlewareResult]
 
     func clone() -> Route[T] {
         Route[T](middleware: self.middleware.clone())

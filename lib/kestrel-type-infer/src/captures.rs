@@ -9,7 +9,7 @@
 //! Consumed by:
 //! - MIR lowering (`kestrel-mir-lower`): env-struct fields, parent-side
 //!   projection, and body rewriting (read the env value for `self.cap`).
-//! - `kestrel-analyze` `ClosureAnalyzer` (E603/E605): the captured-root set.
+//! - `kestrel-analyze` `ClosureAnalyzer` (E603): the captured-root set.
 //!
 //! The analysis follows RFC 2229 ("disjoint closure captures"): it records the
 //! *maximal* place each access touches, then reduces per root local to the
@@ -17,7 +17,7 @@
 //! of that root to a single whole-local capture (the safety fallback, which
 //! preserves the historical behavior for non-place receivers).
 
-use std::collections::{HashMap, HashSet};
+use crate::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use kestrel_ast_builder::{Callable, NodeKind, Static};
@@ -51,7 +51,7 @@ pub struct PlaceKey {
 }
 
 impl PlaceKey {
-    fn whole(root: LocalId) -> Self {
+    pub fn whole(root: LocalId) -> Self {
         PlaceKey {
             root,
             path: Vec::new(),
@@ -63,8 +63,10 @@ impl PlaceKey {
     }
 
     /// True if `self.path` is a (non-strict) prefix of `other.path` and they
-    /// share the same root.
-    fn is_prefix_of(&self, other: &PlaceKey) -> bool {
+    /// share the same root. Public because the move checker's freeze rule
+    /// (E507) tests a destroyed place against the frozen set for OVERLAP in
+    /// either direction (plan D8: the freeze is place-granular).
+    pub fn is_prefix_of(&self, other: &PlaceKey) -> bool {
         self.root == other.root
             && self.path.len() <= other.path.len()
             && self.path.iter().zip(&other.path).all(|(a, b)| a == b)
@@ -152,7 +154,7 @@ impl QueryFn for ClosureCaptures {
             return Arc::new(ClosureCaptureMap::default());
         };
 
-        let mut map = HashMap::new();
+        let mut map = HashMap::default();
         for (expr_id, expr) in hir.exprs.iter() {
             if let HirExpr::Closure { params, body, .. } = expr {
                 let places = analyze_closure(query_ctx, &typed, &hir, params, body);
@@ -235,7 +237,7 @@ fn analyze_closure(
     body: &HirBlock,
 ) -> Vec<CapturedPlace> {
     // Locals bound *inside* the closure are never captures of it.
-    let mut internal = HashSet::new();
+    let mut internal = HashSet::default();
     for p in params {
         internal.insert(p.local);
         if let Some(pat) = p.pattern {
@@ -258,7 +260,7 @@ fn analyze_closure(
 /// Reduce raw place uses to a minimal disjoint capture plan, per root local.
 fn reduce(uses: Vec<RawUse>) -> Vec<CapturedPlace> {
     // Group by root.
-    let mut by_root: HashMap<LocalId, Vec<RawUse>> = HashMap::new();
+    let mut by_root: HashMap<LocalId, Vec<RawUse>> = HashMap::default();
     for u in uses {
         by_root.entry(u.key.root).or_default().push(u);
     }
@@ -283,7 +285,7 @@ fn reduce(uses: Vec<RawUse>) -> Vec<CapturedPlace> {
         // Minimal cover: keep a path iff no *other* present path is a strict
         // prefix of it. Every kept path corresponds to an actual access, so a
         // representative expr always exists.
-        let mut kept: HashMap<Vec<ProjElem>, CapturedPlace> = HashMap::new();
+        let mut kept: HashMap<Vec<ProjElem>, CapturedPlace> = HashMap::default();
         for u in &group {
             let subsumed = group.iter().any(|v| {
                 v.key.path.len() < u.key.path.len() && prefix_of(&v.key.path, &u.key.path)

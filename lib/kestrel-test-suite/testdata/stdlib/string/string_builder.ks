@@ -3,6 +3,32 @@
 
 module Test
 
+import std.text.(Formatter, Formattable, FormatOptions, Str, Char, StringBuilder, String)
+
+struct RecordingFormatter: Formatter {
+    var builder: StringBuilder
+
+    mutating func append(other: some Str) {
+        self.builder.append(other)
+    }
+
+    mutating func append(char c: Char) {
+        self.builder.append(char: c)
+    }
+
+    mutating func finish() -> String {
+        self.builder.build()
+    }
+}
+
+struct Badge: Formattable {
+    func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        writer.append("[");
+        writer.append("ok");
+        writer.append(char: ']')
+    }
+}
+
 @main
 func main() -> lang.i64 {
     // ---- Append String ----
@@ -62,6 +88,11 @@ func main() -> lang.i64 {
     b7.append(char: 'B');
     let s7 = b7.build();
     if s7.isEqual(to: "AB") == false { return 8 }
+
+    // ---- Formattable can target a formatter other than StringBuilder ----
+    var formatter = RecordingFormatter(builder: StringBuilder());
+    Badge().format(into: formatter);
+    if formatter.finish().isEqual(to: "[ok]") == false { return 9 }
 
     0
 }

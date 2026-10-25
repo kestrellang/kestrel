@@ -1158,6 +1158,112 @@ static TABLE: &[IntrinsicEntry] = &[
     },
 ];
 
+/// Split a `<base>_unchecked` intrinsic name into its base entry name and the
+/// guard flag. `<base>_unchecked` reuses the base div/rem `TABLE` entry with its
+/// guards dropped, rather than 16 near-duplicate rows, so it stays in lockstep
+/// with the checked entries.
+///
+/// A function rather than an inline `strip_suffix` because the coverage test
+/// below must resolve names exactly the way `try_intrinsic` does — reading the
+/// rule off the source text instead reported all 16 `_unchecked` names as
+/// unlowerable when every one of them works.
+fn split_unchecked(name: &str) -> (&str, bool) {
+    match name.strip_suffix("_unchecked") {
+        Some(base) => (base, true),
+        None => (name, false),
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::split_unchecked;
+    use kestrel_ast_builder::{Name, NodeKind, seed_lang_module};
+    use kestrel_hecs::{Entity, World};
+
+    /// Every name `seed_lang_module` declares under `lang.`, collected by
+    /// actually running the seeder — the seeder builds names with cross-product
+    /// loops, so there is no static list to read.
+    fn seeded_intrinsic_names() -> Vec<String> {
+        let mut world = World::new();
+        let root = world.spawn();
+        let lang = seed_lang_module(&mut world, root);
+
+        let mut names = Vec::new();
+        let mut stack: Vec<Entity> = world.children_of(lang).to_vec();
+        while let Some(e) = stack.pop() {
+            stack.extend_from_slice(world.children_of(e));
+            if world.get::<NodeKind>(e) != Some(&NodeKind::Function) {
+                continue;
+            }
+            if let Some(Name(n)) = world.get::<Name>(e) {
+                names.push(n.clone());
+            }
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// Every `lang.*` intrinsic the AST builder declares must be reachable by
+    /// `try_intrinsic`, which dispatches on the name through several `match`
+    /// blocks plus the `TABLE` fallback.
+    ///
+    /// The check is "does this name appear as a string literal in this file",
+    /// deliberately: the two sides are a cross-product loop in
+    /// `kestrel-ast-builder/src/lang_module.rs` and hand-written arms here, and
+    /// nothing else relates them. A name absent from this source cannot
+    /// possibly be lowered, so the test cannot fail spuriously.
+    ///
+    /// A seeded name that reaches no arm makes `try_intrinsic` return `None`;
+    /// the call stays a `Callee::Direct` to a bodyless `Intrinsic` entity and
+    /// dies at post-mono verification. Verified against `lang.cast_i64_u8`:
+    ///
+    /// ```text
+    /// bug: internal compiler error: post-mono verify failed in
+    /// '_K0N4_Test4_mainERi8' at bb0[4]: Call Callee::Direct not resolved to
+    /// Callee::Resolved (callee='lang.cast_i64_u8' ...)
+    /// ```
+    ///
+    /// So this fails loudly rather than miscompiling — but it is an ICE where
+    /// a diagnostic belongs, and the seeder advertises 121 intrinsics that
+    /// cannot be called. Either lower them or stop seeding them.
+    #[test]
+    fn every_seeded_intrinsic_has_a_lowering() {
+        let source = include_str!("intrinsic.rs");
+        let seeded = seeded_intrinsic_names();
+        assert!(
+            seeded.len() > 50,
+            "seeder produced only {} names — the walk is broken",
+            seeded.len()
+        );
+
+        let missing: Vec<&String> = seeded
+            .iter()
+            .filter(|n| {
+                // Resolve the name the way `try_intrinsic` does before looking
+                // for it, or every `_unchecked` name reads as unlowerable.
+                let (base, _) = split_unchecked(n);
+                !source.contains(&format!("\"{base}\""))
+            })
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "{} of {} seeded `lang.*` intrinsics have no lowering arm in \
+             kestrel-mir-lower/src/body/call/intrinsic.rs — calling any of \
+             these ICEs at post-mono verify (Callee::Direct not resolved). \
+             Either add a lowering arm or stop seeding the name:\n  {}",
+            missing.len(),
+            seeded.len(),
+            missing
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+    }
+}
+
 pub(crate) fn try_intrinsic(
     bctx: &mut OssaBodyCtx,
     expr_id: HirExprId,
@@ -1314,6 +1420,7 @@ pub(crate) fn try_intrinsic(
             bctx.push_inst(kestrel_mir::inst::InstKind::DestroyAddr {
                 address: arg,
                 ty: ty_arg,
+                user_deinit: false,
             });
             return Some(bctx.emit_literal(Immediate::unit()));
         },
@@ -1341,13 +1448,7 @@ pub(crate) fn try_intrinsic(
         _ => {},
     }
 
-    // `<base>_unchecked` reuses the base div/rem entry but drops its guards.
-    // Handled here (rather than 16 extra table rows) so it stays in lockstep
-    // with the checked entries.
-    let (lookup_name, unchecked) = match name.strip_suffix("_unchecked") {
-        Some(base) => (base, true),
-        None => (name.as_str(), false),
-    };
+    let (lookup_name, unchecked) = split_unchecked(name.as_str());
     let entry = TABLE.iter().find(|e| e.name == lookup_name)?;
     let op = if unchecked {
         match entry.op {

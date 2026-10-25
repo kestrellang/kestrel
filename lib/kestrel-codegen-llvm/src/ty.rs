@@ -204,8 +204,11 @@ impl TypeCache {
                 align: ptr_size,
             },
 
-            MirTy::FuncThick { .. } => TypeRepr::Aggregate {
-                size: ptr_size * 2,
+            // `{fn, env}` at the view kinds; `{fn, env_handle, retain_fn,
+            // release_fn}` at the boxed (escaping) kind — see
+            // `kestrel_mir::ty::func_thick_words` (lockstep 9).
+            MirTy::FuncThick { kind, .. } => TypeRepr::Aggregate {
+                size: ptr_size * kestrel_mir::func_thick_words(*kind),
                 align: ptr_size,
             },
 

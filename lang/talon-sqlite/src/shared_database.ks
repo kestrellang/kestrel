@@ -57,7 +57,7 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
         if let .Some(p) = rawPtr {
             self.ptr = p.cast[SharedDbStorage]();
             self.ptr.write(SharedDbStorage(refCount: 1, db: dbRaw));
-            self.cache = RcBox(Dictionary[String, RawPointer]());
+            self.cache = RcBox([:]);
         } else {
              ffi.sqlite3_close(dbRaw);
             fatalError("SharedDatabase allocation failed")
