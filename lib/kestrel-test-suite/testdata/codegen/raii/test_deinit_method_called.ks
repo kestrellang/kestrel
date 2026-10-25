@@ -3,7 +3,7 @@
 
 module Test
 
-struct Resource {
+struct Resource: not Copyable {
     let id: lang.i64
 
     deinit {

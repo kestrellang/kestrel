@@ -1,13 +1,13 @@
 //! # Duplicate Deinit Analyzer
 //!
-//! Checks that a struct has at most one `deinit` declaration. Multiple
-//! deinits are invalid -- a struct can only have a single destructor.
+//! Checks that a struct or enum has at most one `deinit` declaration.
+//! Multiple deinits are invalid -- a type can only have a single destructor.
 //!
 //! ## Diagnostics
 //!
 //! ### E423 -- `duplicate_deinit` (Error, Correctness)
 //!
-//! **Message:** "struct `{name}` already has a deinit"
+//! **Message:** "{kind} `{name}` already has a deinit"
 //!
 //! **Labels:**
 //! - Secondary: the first deinit declaration
@@ -45,7 +45,7 @@ impl Describe for DuplicateDeinitAnalyzer {
 
 impl DeclCheck for DuplicateDeinitAnalyzer {
     fn target_kinds(&self) -> &'static [NodeKind] {
-        &[NodeKind::Struct]
+        &[NodeKind::Struct, NodeKind::Enum]
     }
 
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
@@ -56,6 +56,11 @@ impl DeclCheck for DuplicateDeinitAnalyzer {
             return vec![];
         }
 
+        let kind = if cx.kind == NodeKind::Enum {
+            "enum"
+        } else {
+            "struct"
+        };
         let struct_name = util::entity_name(cx.query, cx.entity);
         let first_span = util::entity_span(cx.query, deinits[0]);
         let dup_span = util::entity_span(cx.query, deinits[1]);
@@ -63,7 +68,7 @@ impl DeclCheck for DuplicateDeinitAnalyzer {
         vec![AnalyzeDiagnostic {
             descriptor_id: DESCRIPTORS[0].id,
             severity: DESCRIPTORS[0].default_severity,
-            message: format!("struct `{}` already has a deinit", struct_name),
+            message: format!("{} `{}` already has a deinit", kind, struct_name),
             labels: vec![
                 DiagLabel {
                     span: first_span,

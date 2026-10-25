@@ -3,7 +3,7 @@
 
 module Test
 
-struct Inner {
+struct Inner: not Copyable {
     let value: lang.i64
 
     deinit {
