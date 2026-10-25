@@ -241,10 +241,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
 
     /// COW write barrier — ensures the storage is uniquely owned.
     fileprivate mutating func makeUnique() {
-        if self.storage.isUnique() == false {
-            var s = self.storage.write();
-            self.storage.setValue(s)
-        }
+        self.storage.ensureUnique()
     }
 
     /// @name From Storage

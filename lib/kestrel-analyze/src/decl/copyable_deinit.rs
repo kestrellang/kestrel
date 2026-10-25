@@ -11,7 +11,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### E507 -- `copyable_with_deinit` (Error, Correctness)
+//! ### E508 -- `copyable_with_deinit` (Error, Correctness)
 //!
 //! **Message:** "Copyable type '{type_name}' cannot have a deinit"
 //!
@@ -31,7 +31,7 @@ use kestrel_ast_builder::NodeKind;
 use kestrel_semantics::{CopySemantics, NominalCopySemantics};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "E507",
+    id: "E508",
     name: "copyable_with_deinit",
     default_severity: Severity::Error,
     category: Category::Correctness,

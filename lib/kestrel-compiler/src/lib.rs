@@ -46,6 +46,10 @@ pub struct Compiler {
     root: Entity,
     /// Compilation target for conditional filtering (@platform, etc.)
     target: TargetConfig,
+    /// Warnings found after monomorphization (E507), from the most recent
+    /// `monomorphize_mir`. They live outside the query system because the
+    /// mono pipeline runs outside it; read them with [`Self::mono_warnings`].
+    mono_warnings: std::sync::Mutex<Vec<codespan_reporting::diagnostic::Diagnostic<usize>>>,
 }
 
 impl Compiler {
@@ -68,6 +72,7 @@ impl Compiler {
             files: HashMap::new(),
             root,
             target: TargetConfig::host(),
+            mono_warnings: Default::default(),
         }
     }
 
@@ -82,6 +87,7 @@ impl Compiler {
             files,
             root,
             target: TargetConfig::host(),
+            mono_warnings: Default::default(),
         }
     }
 
@@ -284,18 +290,16 @@ impl Compiler {
     /// on the codegen path only — `dump mir` / the test harness still inspect a
     /// module that lowered with errors.
     #[allow(clippy::result_large_err)]
-    fn ensure_no_lowering_errors(
-        &self,
-    ) -> Result<(), kestrel_codegen_cranelift::CodegenError> {
+    fn ensure_no_lowering_errors(&self) -> Result<(), kestrel_codegen_cranelift::CodegenError> {
         let errors = self
             .diagnostics()
             .iter()
             .filter(|d| d.severity >= Severity::Error)
             .count();
         if errors > 0 {
-            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(format!(
-                "compilation failed with {errors} error(s)"
-            )));
+            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(
+                format!("compilation failed with {errors} error(s)"),
+            ));
         }
         Ok(())
     }
@@ -333,6 +337,70 @@ impl Compiler {
         kestrel_codegen_llvm::compile_and_link(&mono, &target, options, output_path)
     }
 
+    /// Warnings found after monomorphization by the most recent build
+    /// (currently E507 `observable_drop_unmarked`).
+    pub fn mono_warnings(&self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
+        self.mono_warnings
+            .lock()
+            .map(|w| w.clone())
+            .unwrap_or_default()
+    }
+
+    /// E507: a `Cloneable` type whose deinit reaches an observable extern but
+    /// is not `@observabledrop`. Replaces the previous build's warnings.
+    fn record_mono_warnings(&self, mono: &kestrel_mir::mono::MonoModule) {
+        use codespan_reporting::diagnostic::{Diagnostic, Label};
+        let name = |e: Entity| {
+            self.world
+                .get::<kestrel_ast_builder::Name>(e)
+                .map(|n| n.0.clone())
+                .unwrap_or_default()
+        };
+        let warnings =
+            kestrel_mir::passes::copy_lifetime::unmarked_observable_drops(mono)
+                .into_iter()
+                .filter_map(|f| {
+                    let span = self
+                        .world
+                        .get::<kestrel_ast_builder::DeclSpan>(f.type_entity)?
+                        .0
+                        .clone();
+                    // Name the first source-level function on the path (the
+                    // deinit's direct callee may be a synthesized helper).
+                    let type_name = name(f.type_entity);
+                    let callee = f
+                        .path
+                        .iter()
+                        .map(|e| name(*e))
+                        .find(|n| !n.is_empty())
+                        .unwrap_or_else(|| f.symbol.clone());
+                    let notes = if callee == f.symbol {
+                        vec![]
+                    } else {
+                        vec![format!(
+                            "`{callee}` reaches the external function `{}`",
+                            f.symbol
+                        )]
+                    };
+                    Some(
+                    Diagnostic::warning()
+                        .with_code("E507")
+                        .with_message(format!(
+                            "`Cloneable` type `{type_name}` has a `deinit` that calls `{callee}`; \
+                             mark it `@observabledrop` so its copies are not dropped early"
+                        ))
+                        .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
+                            "copies of this type may be dropped before the end of their scope",
+                        )])
+                        .with_notes(notes),
+                )
+                })
+                .collect();
+        if let Ok(mut slot) = self.mono_warnings.lock() {
+            *slot = warnings;
+        }
+    }
+
     #[allow(clippy::result_large_err)]
     pub fn monomorphize_mir(
         &self,
@@ -363,6 +431,10 @@ impl Compiler {
         // mono-dependent `consuming` value cloned-then-double-dropped class
         // (#127: array literals via `RcBox.init`).
         kestrel_mir::passes::copy_propagation::eliminate_cross_block_copies(&mut mono);
+        // Keep implicit copies from holding COW storage shared: move at last
+        // use, drop at last read, or read through a borrow instead.
+        kestrel_mir::passes::copy_lifetime::run(&mut mono);
+        self.record_mono_warnings(&mono);
         // Recover zero-copy aggregate moves: flip provably-safe Takes to aliasing
         // before expand/codegen turn them into memcpys (#219).
         kestrel_mir::passes::copy_propagation::mark_independent_takes(&mut mono);
@@ -432,6 +504,8 @@ impl Compiler {
 
         kestrel_mir::passes::copy_propagation::eliminate_redundant_copies(&mut mono);
         kestrel_mir::passes::copy_propagation::eliminate_cross_block_copies(&mut mono);
+        kestrel_mir::passes::copy_lifetime::run(&mut mono);
+        self.record_mono_warnings(&mono);
         kestrel_mir::passes::copy_propagation::mark_independent_takes(&mut mono);
         if stop == kestrel_mir::passes::Stage::CopyProp {
             return Ok((mono, Vec::new()));

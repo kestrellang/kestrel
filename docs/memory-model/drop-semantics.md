@@ -275,7 +275,7 @@ let b = a  // Copy - both have deinit
 **Concern**: Copyable + deinit means deinit runs multiple times (once per copy).
 
 **Resolved**: No. A plain Copyable struct/enum may not declare `deinit`; the
-compiler rejects it with E507 (`copyable_with_deinit`). Mark the type
+compiler rejects it with E508 (`copyable_with_deinit`). Mark the type
 `: not Copyable` (move-only, deinit runs once) or `: Cloneable` (explicit
 copies via `clone()`). A type that is already non-Copyable because of a
 non-Copyable field may also declare `deinit`.
