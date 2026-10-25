@@ -74,6 +74,8 @@ pub(super) fn at_expr_start(p: &Parser<'_>) -> bool {
         K::DotDotLess,
         K::DotDotEquals,
         K::Ampersand,
+        // A placeholder inside arguments; elsewhere `primary` reports E811.
+        K::Underscore,
     ])
 }
 
@@ -125,6 +127,7 @@ fn is_compound_assign(kind: Option<K>) -> bool {
 ///
 /// | power | operators |
 /// |------:|-----------|
+/// | 5 | `\|>` (pipe: the whole left side is piped) |
 /// | 10 | `or` |
 /// | 15 | `??` (right-assoc) |
 /// | 20 | `and` |
@@ -139,6 +142,7 @@ fn is_compound_assign(kind: Option<K>) -> bool {
 /// are folded by [`type_operator`] rather than listed here.
 pub(crate) fn binary_binding_power(kind: K) -> Option<(u8, u8)> {
     let prec = match kind {
+        K::PipeGreater => 5,
         K::Or => 10,
         K::QuestionQuestion => return Some((15, 15)),
         K::And => 20,
@@ -418,7 +422,9 @@ fn call(p: &mut Parser<'_>, chain: Chain) -> Chain {
 }
 
 /// `( arg, label: arg, … )` — the caller has opened the `ArgumentList`.
+/// Inside, `_` is a placeholder (see [`argument`] and [`primary`]).
 fn argument_list_body(p: &mut Parser<'_>) {
+    let outer = p.enter_arguments();
     delimited(p, K::LParen, K::RParen, true, |p| {
         if !at_expr_start(p) && !at_label(p) {
             p.error_expected_what("expression");
@@ -427,6 +433,7 @@ fn argument_list_body(p: &mut Parser<'_>) {
         argument(p);
         true
     });
+    p.set_arg_depth(outer);
 }
 
 /// `label:` at the cursor (an identifier or keyword followed by `:`).
@@ -442,7 +449,14 @@ fn argument(p: &mut Parser<'_>) {
         p.bump_as(K::Identifier);
         p.bump(K::Colon);
     }
-    expr(p);
+    if p.at(K::Underscore) && p.at_any_nth(1, &[K::Comma, K::RParen]) {
+        // A hole: `_` is the whole argument (`f(_, 1)`, `f(x: _)`).
+        let h = start2(p);
+        p.bump(K::Underscore);
+        finish2(p, h, K::ExprPlaceholder);
+    } else {
+        expr(p);
+    }
     m.complete(p, K::Argument);
 }
 
@@ -520,12 +534,31 @@ fn primary(p: &mut Parser<'_>) -> Option<Chain> {
         Some(K::LBrace) => closure(p),
         Some(K::Dot) => implicit_member(p),
         Some(K::Identifier) => return Some(path(p)),
+        Some(K::Underscore) => placeholder_use(p),
         _ => {
             p.error_expected_what("expression");
             return None;
         },
     };
     Some(Chain::Done(info.cm, info.kind))
+}
+
+/// `_` inside a larger argument (`_.name`, `_ * 2`): it starts a postfix
+/// chain like any primary. Outside arguments it is E811; the node is still
+/// built so recovery sees one operand.
+fn placeholder_use(p: &mut Parser<'_>) -> ExprInfo {
+    if !p.in_arguments() {
+        let range = p.range_of(p.token_pos());
+        p.push_error(SyntaxError::new(
+            codes::MISPLACED_PLACEHOLDER,
+            "`_` here isn't a placeholder: `_` is a placeholder only inside a call's \
+             arguments (`f(_, 1)`, `map(_.name)`, `map(_ * 2)`); use `{ it … }` otherwise",
+            range,
+        ));
+    }
+    let m = start2(p);
+    p.bump(K::Underscore);
+    finish2(p, m, K::ExprPlaceholderUse)
 }
 
 fn cond_primary(p: &mut Parser<'_>) -> Option<Chain> {
@@ -538,6 +571,7 @@ fn cond_primary(p: &mut Parser<'_>) -> Option<Chain> {
         Some(K::LParen) => paren(p),
         Some(K::Dot) => implicit_member(p),
         Some(K::Identifier) => return Some(path(p)),
+        Some(K::Underscore) => placeholder_use(p),
         _ => {
             p.error_expected_what("expression");
             return None;
@@ -785,8 +819,11 @@ fn implicit_member(p: &mut Parser<'_>) -> ExprInfo {
 }
 
 /// `{ (params) in body }` or `{ body }`.
+/// A closure literal resets the argument depth: `_` in its body is not a
+/// placeholder of an enclosing call (`f({ _.x })` is E811; use `it`).
 pub(super) fn closure(p: &mut Parser<'_>) -> ExprInfo {
     let m = start2(p);
+    let depth = p.set_arg_depth(0);
     p.bump(K::LBrace);
     if p.at(K::LParen) && at_closure_params(p) {
         closure_params(p);
@@ -794,6 +831,7 @@ pub(super) fn closure(p: &mut Parser<'_>) -> ExprInfo {
     }
     blocks::block_items(p, BlockFlavor::Closure);
     p.expect(K::RBrace);
+    p.set_arg_depth(depth);
     finish2(p, m, K::ExprClosure)
 }
 

@@ -88,6 +88,11 @@ pub(crate) struct LowerCtx<'a> {
     /// `it` reference. Lets a nested closure's implicit `it` tell an
     /// enclosing closure's `it` (E142) from any other outer `it` (E143).
     pub implicit_it_locals: HashMap<LocalId, Span>,
+    /// What a `_` placeholder use lowers to, innermost argument last. Pushed
+    /// while lowering an argument placeholder's closure body or a pipe's
+    /// right-hand arguments; cleared for closure literals, which `_` never
+    /// reaches into.
+    pub placeholder_frames: Vec<crate::placeholder::PlaceholderFill>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -112,6 +117,7 @@ impl<'a> LowerCtx<'a> {
             in_callee_position: false,
             or_reuse: None,
             implicit_it_locals: HashMap::new(),
+            placeholder_frames: Vec::new(),
         }
     }
 

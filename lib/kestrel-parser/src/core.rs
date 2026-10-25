@@ -73,6 +73,9 @@ pub(crate) struct Parser<'s> {
     fuel: std::cell::Cell<u32>,
     /// Nesting depth of interpolation holes being parsed.
     hole_depth: u32,
+    /// Open call argument lists since the innermost closure literal. A `_`
+    /// is a placeholder only while this is non-zero.
+    arg_depth: u32,
 }
 
 /// Saved parser state for [`Parser::rollback`].
@@ -126,6 +129,7 @@ impl<'s> Parser<'s> {
             events: Vec::new(),
             fuel: std::cell::Cell::new(FUEL),
             hole_depth: 0,
+            arg_depth: 0,
         }
     }
 
@@ -298,6 +302,25 @@ impl<'s> Parser<'s> {
 
     pub fn exit_hole(&mut self) {
         self.hole_depth -= 1;
+    }
+
+    /// True inside a call's arguments (and not inside a closure literal
+    /// nested in them): where `_` is a placeholder.
+    pub fn in_arguments(&self) -> bool {
+        self.arg_depth > 0
+    }
+
+    /// Enter a call's argument list; returns the depth to restore.
+    pub fn enter_arguments(&mut self) -> u32 {
+        let outer = self.arg_depth;
+        self.arg_depth += 1;
+        outer
+    }
+
+    /// Replace the argument-list depth, returning the old one. Closure
+    /// literals zero it for their body.
+    pub fn set_arg_depth(&mut self, depth: u32) -> u32 {
+        std::mem::replace(&mut self.arg_depth, depth)
     }
 
     /// Byte range of the token at absolute index `idx`.

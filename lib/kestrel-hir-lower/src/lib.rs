@@ -17,6 +17,7 @@ mod expr;
 pub mod format_spec;
 pub mod literal;
 pub(crate) mod pat;
+mod placeholder;
 pub mod source_map;
 mod stmt;
 pub(crate) mod string_token;

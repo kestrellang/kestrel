@@ -3356,6 +3356,9 @@ impl ExprBinary {
     pub fn greater_greater_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::GreaterGreater)
     }
+    pub fn pipe_greater_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::PipeGreater)
+    }
     pub fn rhs(&self) -> Option<Expression> {
         support::children(&self.syntax).nth(1)
     }
@@ -3895,6 +3898,54 @@ impl ExprTypeTest {
 impl AstNode for ExprTypeTest {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::ExprTypeTest
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ExprPlaceholder` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprPlaceholder {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprPlaceholder {
+    pub fn underscore_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Underscore)
+    }
+}
+
+impl AstNode for ExprPlaceholder {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprPlaceholder
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ExprPlaceholderUse` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprPlaceholderUse {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprPlaceholderUse {
+    pub fn underscore_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Underscore)
+    }
+}
+
+impl AstNode for ExprPlaceholderUse {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprPlaceholderUse
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -5132,7 +5183,7 @@ impl From<Expression> for Condition {
     }
 }
 
-/// One of: ExprInteger, ExprFloat, ExprString, ExprRawString, ExprChar, ExprBool, ExprNull, ExprUnit, ExprInterpolatedString, ExprArray, ExprDictionary, ExprTuple, ExprGrouping, ExprPath, ExprTupleIndex, ExprImplicitMemberAccess, ExprUnary, ExprPostfix, ExprBinary, ExprAssignment, ExprCompoundAssignment, ExprCall, ExprIf, ExprWhile, ExprFor, ExprLoop, ExprBreak, ExprContinue, ExprReturn, ExprThrow, ExprTry, ExprClosure, ExprMatch, ExprCast, ExprTypeTest.
+/// One of: ExprInteger, ExprFloat, ExprString, ExprRawString, ExprChar, ExprBool, ExprNull, ExprUnit, ExprInterpolatedString, ExprArray, ExprDictionary, ExprTuple, ExprGrouping, ExprPath, ExprTupleIndex, ExprImplicitMemberAccess, ExprUnary, ExprPostfix, ExprBinary, ExprAssignment, ExprCompoundAssignment, ExprCall, ExprIf, ExprWhile, ExprFor, ExprLoop, ExprBreak, ExprContinue, ExprReturn, ExprThrow, ExprTry, ExprClosure, ExprMatch, ExprCast, ExprTypeTest, ExprPlaceholder, ExprPlaceholderUse.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
     ExprInteger(ExprInteger),
@@ -5170,6 +5221,8 @@ pub enum Expr {
     ExprMatch(ExprMatch),
     ExprCast(ExprCast),
     ExprTypeTest(ExprTypeTest),
+    ExprPlaceholder(ExprPlaceholder),
+    ExprPlaceholderUse(ExprPlaceholderUse),
 }
 
 impl AstNode for Expr {
@@ -5211,6 +5264,8 @@ impl AstNode for Expr {
                 | SyntaxKind::ExprMatch
                 | SyntaxKind::ExprCast
                 | SyntaxKind::ExprTypeTest
+                | SyntaxKind::ExprPlaceholder
+                | SyntaxKind::ExprPlaceholderUse
         )
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
@@ -5256,6 +5311,10 @@ impl AstNode for Expr {
             SyntaxKind::ExprMatch => Expr::ExprMatch(ExprMatch { syntax }),
             SyntaxKind::ExprCast => Expr::ExprCast(ExprCast { syntax }),
             SyntaxKind::ExprTypeTest => Expr::ExprTypeTest(ExprTypeTest { syntax }),
+            SyntaxKind::ExprPlaceholder => Expr::ExprPlaceholder(ExprPlaceholder { syntax }),
+            SyntaxKind::ExprPlaceholderUse => {
+                Expr::ExprPlaceholderUse(ExprPlaceholderUse { syntax })
+            },
             _ => return None,
         })
     }
@@ -5296,6 +5355,8 @@ impl AstNode for Expr {
             Expr::ExprMatch(it) => &it.syntax,
             Expr::ExprCast(it) => &it.syntax,
             Expr::ExprTypeTest(it) => &it.syntax,
+            Expr::ExprPlaceholder(it) => &it.syntax,
+            Expr::ExprPlaceholderUse(it) => &it.syntax,
         }
     }
 }
@@ -5507,6 +5568,18 @@ impl From<ExprCast> for Expr {
 impl From<ExprTypeTest> for Expr {
     fn from(node: ExprTypeTest) -> Expr {
         Expr::ExprTypeTest(node)
+    }
+}
+
+impl From<ExprPlaceholder> for Expr {
+    fn from(node: ExprPlaceholder) -> Expr {
+        Expr::ExprPlaceholder(node)
+    }
+}
+
+impl From<ExprPlaceholderUse> for Expr {
+    fn from(node: ExprPlaceholderUse) -> Expr {
+        Expr::ExprPlaceholderUse(node)
     }
 }
 

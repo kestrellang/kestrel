@@ -483,6 +483,10 @@ pub enum Token {
     #[token("|=")]
     PipeEquals,
 
+    /// `|>` — the pipe operator (`x |> f`).
+    #[token("|>")]
+    PipeGreater,
+
     #[token("^=")]
     CaretEquals,
 

@@ -445,6 +445,8 @@ pub(super) static RULES: &[(K, R)] = &[
             K::ExprMatch,
             K::ExprCast,
             K::ExprTypeTest,
+            K::ExprPlaceholder,
+            K::ExprPlaceholderUse,
         ]),
     ),
     (
@@ -980,6 +982,7 @@ pub(super) static RULES: &[(K, R)] = &[
                 R::Kind(K::Ampersand),
                 R::Kind(K::LessLess),
                 R::Kind(K::GreaterGreater),
+                R::Kind(K::PipeGreater),
             ]),
             R::Kind(K::Expression),
         ]),
@@ -1141,6 +1144,8 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Kind(K::Ty),
         ]),
     ),
+    (K::ExprPlaceholder, R::Kind(K::Underscore)),
+    (K::ExprPlaceholderUse, R::Kind(K::Underscore)),
     (
         K::StringInterpolation,
         R::Seq(&[

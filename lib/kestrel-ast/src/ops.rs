@@ -77,6 +77,9 @@ pub enum BinaryOp {
     Coalesce,
     RangeInclusive,
     RangeExclusive,
+    /// `x |> f`. Not protocol-backed: HIR lowering rewrites it into a call
+    /// before operator desugaring, so it has no row in the operator tables.
+    Pipe,
 }
 
 impl BinaryOp {
@@ -110,6 +113,7 @@ impl BinaryOp {
             BinaryOp::Coalesce => "??",
             BinaryOp::RangeInclusive => "..=",
             BinaryOp::RangeExclusive => "..<",
+            BinaryOp::Pipe => "|>",
         }
     }
 }

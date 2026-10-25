@@ -26,7 +26,7 @@ the type checker, and the code is assigned in one place,
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
 - [E624–E625 — Closure kinds](#e624e625--closure-kinds)
 - [E700–E710 — String & character literals, escapes, format specs](#e700e710--string--character-literals-escapes-format-specs)
-- [E800–E810 — Syntax](#e800e810--syntax)
+- [E800–E811 — Syntax](#e800e811--syntax)
 - [E900–E999 — Attributes & derives](#e900e999--attributes--derives)
 
 ---
@@ -550,7 +550,7 @@ func eachOk(mutating action: mutating (Int64) -> ()) { }   // ok
 | E709 | empty character literal | `''` — a character literal needs one codepoint. |
 | E710 | character literal may only contain one codepoint | `'ab'` — use a string for more than one codepoint. |
 
-## E800–E810 — Syntax
+## E800–E811 — Syntax
 
 Emitted by the parser (`kestrel-parser`, `syntax_error.rs`). Every syntax
 error carries one of these codes; the message names what was expected and
@@ -570,6 +570,7 @@ is reported on the token *before* the gap, where it belongs.
 | E808 | expected pattern, found {token} | A pattern was required (after `let`, `case`-style match arms, parameters). |
 | E809 | expected a name, found {token} | A declaration's name is missing; a keyword in name position (`func case()`) is reported here. |
 | E810 | associated-type binding '{name} = ...' is only allowed in an 'any' bound | `Item = Int64` inside `[...]` pins an associated type of an existential (`any Iterator[Item = Int64]`); anywhere else it has no meaning. |
+| E811 | \`_\` here isn't a placeholder | `_` is a placeholder only inside a call's arguments (`f(_, 1)`, `map(_.name)`). A closure literal is a boundary: inside `{ … }` use `it`. |
 
 ## E900–E999 — Attributes & derives
 

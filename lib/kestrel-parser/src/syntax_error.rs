@@ -29,6 +29,8 @@ pub mod codes {
     pub const EXPECTED_NAME: &str = "E809";
     /// An associated-type binding (`Item = Int64`) outside an `any` bound.
     pub const MISPLACED_ASSOC_BINDING: &str = "E810";
+    /// `_` outside a call's arguments, where it is not a placeholder.
+    pub const MISPLACED_PLACEHOLDER: &str = "E811";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,6 +226,7 @@ pub(crate) fn kind_spelling(kind: SyntaxKind) -> &'static str {
         K::Percent => "%",
         K::Ampersand => "&",
         K::Pipe => "|",
+        K::PipeGreater => "|>",
         K::Caret => "^",
         K::Less => "<",
         K::Greater => ">",

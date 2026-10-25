@@ -134,6 +134,13 @@ pub enum SugarKind {
     /// `consuming x as? T` — `inner` is the Block `{ let $boxed = x; if
     /// $boxed is T { .Ok(TakePayload($boxed)) } else { .Err($boxed) } }`.
     ConsumingCast,
+    /// `lhs |> rhs` — `inner` is the call it rewrites to (`rhs(lhs)`, or
+    /// `rhs` with its `_` slots filled), wrapped in `{ let $pipe = lhs; … }`
+    /// when `lhs` is not a place. No protocol: pipe is function application.
+    Pipe,
+    /// `f(_, 1)` / `map(_.name)` — `inner` is the synthesized `Closure` whose
+    /// parameters stand for the `_`s.
+    Placeholder,
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).
@@ -1027,6 +1034,8 @@ mod tests {
             BinaryOp::Coalesce,
             BinaryOp::RangeInclusive,
             BinaryOp::RangeExclusive,
+            // BinaryOp::Pipe is intentionally absent: it is rewritten into a
+            // call by HIR lowering, not desugared to a protocol.
         ];
 
         for op in &all_ops {

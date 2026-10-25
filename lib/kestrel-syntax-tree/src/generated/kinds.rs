@@ -416,6 +416,12 @@ pub enum SyntaxKind {
     IsPattern,
     /// Item = Int64 inside a type argument list (existential bounds)
     TypeArgBinding,
+    /// x |> f - pipe operator
+    PipeGreater,
+    /// `_` as a whole call argument: a hole (`f(_, 1)`)
+    ExprPlaceholder,
+    /// `_` inside a larger argument (`map(_.name)`, `map(_ * 2)`)
+    ExprPlaceholderUse,
     /// Not a syntax kind — the end-of-enum marker. Its discriminant is the
     /// variant count, which lets `syntax_kind_table_round_trips` prove `ALL`
     /// complete. Never construct it.
@@ -698,6 +704,9 @@ impl SyntaxKind {
         SyntaxKind::ExprTypeTest,
         SyntaxKind::IsPattern,
         SyntaxKind::TypeArgBinding,
+        SyntaxKind::PipeGreater,
+        SyntaxKind::ExprPlaceholder,
+        SyntaxKind::ExprPlaceholderUse,
     ];
 }
 
@@ -815,6 +824,7 @@ impl From<Token> for SyntaxKind {
             Token::StringEnd => SyntaxKind::StringEnd,
             Token::Is => SyntaxKind::Is,
             Token::AsQuestion => SyntaxKind::AsQuestion,
+            Token::PipeGreater => SyntaxKind::PipeGreater,
         }
     }
 }

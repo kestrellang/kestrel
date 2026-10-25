@@ -1087,6 +1087,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // its desugared accumulator calls are not user receivers.
             let interp = matches!(kind, kestrel_hir::body::SugarKind::StringInterpolation);
             ctx.interpolation_depth += interp as u32;
+            // A placeholder closure (`map(_.name)`) is the closure literal it
+            // stands for: the expected function type types its parameter.
+            if matches!(kind, kestrel_hir::body::SugarKind::Placeholder) {
+                ctx.expectation = expect;
+            }
             let result_tv = gen_expr(ctx, hir, *inner);
             ctx.interpolation_depth -= interp as u32;
 
@@ -1166,6 +1171,8 @@ fn mark_sugar_primary(
         },
         // No protocol call to poison: the type-test match carries the errors.
         SugarKind::TypeTest | SugarKind::Cast | SugarKind::ConsumingCast => {},
+        // Plain calls and closures: their own constraints report errors.
+        SugarKind::Pipe | SugarKind::Placeholder => {},
         SugarKind::CompoundAssign => {
             // inner is the addAssign ProtocolCall (or HirExpr::Error if the
             // AST place check rejected the LHS at desugar time).
@@ -2414,7 +2421,7 @@ fn gen_call_args_phased(
     let args = args
         .iter()
         .map(|arg| {
-            let ty = if matches!(hir.exprs[arg.value], HirExpr::Closure { .. }) {
+            let ty = if is_closure_literal(hir, arg.value) {
                 let placeholder = ctx.fresh();
                 // The call's own coercion treats it as the closure literal it
                 // stands for.
@@ -2432,6 +2439,20 @@ fn gen_call_args_phased(
         })
         .collect();
     (args, postponed)
+}
+
+/// A closure literal as written, or the closure a placeholder argument
+/// (`map(_.name)`, `f(_, 1)`) desugars to.
+fn is_closure_literal(hir: &HirBody, id: HirExprId) -> bool {
+    match &hir.exprs[id] {
+        HirExpr::Closure { .. } => true,
+        HirExpr::Sugar {
+            kind: kestrel_hir::body::SugarKind::Placeholder,
+            inner,
+            ..
+        } => is_closure_literal(hir, *inner),
+        _ => false,
+    }
 }
 
 /// Phase 2: solve what the call and its other arguments determined, then

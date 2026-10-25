@@ -279,3 +279,6 @@ node    ExprCast                         # x as? T / consuming x as? T - existen
 node    ExprTypeTest                     # x is T / x is not T - existential type test
 node    IsPattern                        # is T / name is T / name is T { fields } - type-test pattern
 node    TypeArgBinding                   # Item = Int64 inside a type argument list (existential bounds)
+token   PipeGreater '|>'                 # x |> f - pipe operator
+node    ExprPlaceholder                  # `_` as a whole call argument: a hole (`f(_, 1)`)
+node    ExprPlaceholderUse               # `_` inside a larger argument (`map(_.name)`, `map(_ * 2)`)

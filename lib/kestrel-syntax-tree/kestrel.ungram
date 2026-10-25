@@ -400,6 +400,8 @@ Expr =
 | ExprMatch
 | ExprCast
 | ExprTypeTest
+| ExprPlaceholder
+| ExprPlaceholderUse
 
 ExprInteger = 'int'
 ExprFloat = 'float'
@@ -461,7 +463,7 @@ ExprBinary =
   | '..=' | '..<'
   | '+' | '-' | '|' | '^'
   | '*' | '/' | '%' | '&'
-  | '<<' | '>>' )
+  | '<<' | '>>' | '|>' )
   rhs:Expression
 
 ExprAssignment =
@@ -534,6 +536,12 @@ ExprCast =
 
 ExprTypeTest =
   Expression 'is' 'not'? Ty
+
+// `_` as a whole call argument: the call becomes a closure over the slot.
+ExprPlaceholder = '_'
+
+// `_` inside a larger argument: the argument becomes a closure over it.
+ExprPlaceholderUse = '_'
 
 ExprClosure =
   '{' (ClosureParams 'in')? BlockItem* '}'

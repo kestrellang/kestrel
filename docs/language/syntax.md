@@ -285,12 +285,40 @@ for i in 0..=9 { }       // inclusive range
 // Null Coalescing
 let val = optional ?? defaultVal;
 
+// Pipe — `x |> f` is `f(x)`; a `_` slot takes the value directly
+let report = path |> read |> parse |> render;
+let n = text |> Int64.parse(_, radix: 16) |> clamp(_, min: 0, max: 255);
+
+// Placeholders — `_` in a call's arguments builds a closure (see closures.md)
+let addOne = add(_, 1);           // { (a) in add(a, 1) }
+let names = users.map(_.name);    // users.map { it.name }
+
 // Chaining - (Future)
 // let x = foo?.bar?.baz
 
 // String interpolation — see string-interpolation.md
 let greeting = "Hello, \(name)!";
 ```
+
+### Operator precedence
+
+Loosest first. Every binary operator is left-associative except `??`.
+
+| Operators | Notes |
+|-----------|-------|
+| `\|>` | pipe: the whole left side is piped (`a + b \|> f` is `f(a + b)`) |
+| `or` | |
+| `??` | right-associative |
+| `and` | |
+| `==` `!=` `<` `>` `<=` `>=` `is` | |
+| `..=` `..<` | |
+| `+` `-` `\|` `^` | |
+| `*` `/` `%` `&` | |
+| `<<` `>>` | |
+| `as?` | |
+
+Because `|>` binds loosest, `x |> f ?? d` is `x |> (f ?? d)`. Write
+`(x |> f) ?? d` to default the result.
 
 ## Error Handling
 
