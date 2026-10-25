@@ -247,18 +247,22 @@ impl Compiler {
             // an invalid ret_borrow body are noise — report only the coded
             // ones. Uncoded errors alone are real ICEs and surface as such.
             let has_coded = errors.iter().any(|e| e.diag.is_some());
-            for error in errors.iter().filter(|e| !has_coded || e.diag.is_some()) {
+            let reported: Vec<_> = errors
+                .iter()
+                .filter(|e| !has_coded || e.diag.is_some())
+                .collect();
+            for error in &reported {
                 ctx.accumulate(diagnostic::mir_verify_error_to_diagnostic(
                     error,
                     self.world(),
                 ));
             }
             // Coded errors are ordinary user diagnostics (escape check); only
-            // uncoded ones are internal verify failures.
-            let msg = if errors.iter().all(|e| e.diag.is_some()) {
-                format!("compilation failed with {} error(s)", errors.len())
+            // uncoded ones are internal verify failures. Count what was shown.
+            let msg = if has_coded {
+                format!("compilation failed with {} error(s)", reported.len())
             } else {
-                format!("OSSA verification failed with {} error(s)", errors.len())
+                format!("OSSA verification failed with {} error(s)", reported.len())
             };
             return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(msg));
         }

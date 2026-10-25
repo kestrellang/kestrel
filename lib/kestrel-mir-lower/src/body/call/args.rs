@@ -36,6 +36,13 @@ fn conventions_from_callable(callable: &Callable, is_extern: bool) -> Vec<ParamC
     convs
 }
 
+thread_local! {
+    /// Default-argument entities whose bodies are being inlined right now; a
+    /// re-entry is a self-referential default.
+    static INLINING_DEFAULTS: std::cell::RefCell<Vec<Entity>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 impl OssaBodyCtx<'_, '_> {
     /// Lower call args with the callee's resolved conventions.
     /// `offset` skips receiver slots in `conventions` (e.g. 1 if
@@ -276,6 +283,35 @@ impl OssaBodyCtx<'_, '_> {
             );
             return self.emit_literal(Immediate::error());
         };
+        // A default whose expression calls its own function relying on that
+        // same default (`func f(x: Int64 = f()) -> Int64`) would inline
+        // forever. Report the cycle once and substitute an error value.
+        if INLINING_DEFAULTS.with(|s| s.borrow().contains(&default_entity)) {
+            let span = default_hir
+                .tail_expr
+                .map(|e| crate::body::expr_span(&default_hir, e))
+                .unwrap_or_else(|| Span::synthetic(0));
+            self.ctx.query.accumulate(
+                Diagnostic::error()
+                    .with_code("E631")
+                    .with_message("default argument value depends on itself")
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range()).with_message(
+                            "evaluating this default calls the function with the same default",
+                        ),
+                    ])
+                    .with_notes(vec![
+                        "pass the argument explicitly in the recursive call".into(),
+                    ]),
+            );
+            return self.emit_literal(Immediate::error());
+        }
+        INLINING_DEFAULTS.with(|s| s.borrow_mut().push(default_entity));
+        let _inlining = kestrel_hecs::guard::OnDrop::new(|| {
+            INLINING_DEFAULTS.with(|s| {
+                s.borrow_mut().pop();
+            });
+        });
         let default_typed = self.ctx.query.query(InferBody {
             entity: default_entity,
             root: self.ctx.root,

@@ -313,16 +313,24 @@ impl OssaBodyCtx<'_, '_> {
                         .push(ParamDef::new(name, val, ty, ParamConvention::MutBorrow));
                     closure_local_map.insert(cp.local, LocalBinding::Var(val));
                 },
-                _ => {
-                    // Consuming (default) / Borrow: keep the @owned SSA binding
-                    // (unchanged from pre-#106 behavior).
-                    let val = closure_body.alloc_value(
-                        ValueDef::owned(ty).with_root(RootProvenance::Param((i + 1) as u32)),
-                    );
+                ParamConvention::Borrow | ParamConvention::Consuming => {
+                    // Indirect calls pass every non-`mutating` arg `@borrow`
+                    // (`lower_indirect_call`; an un-annotated fn-type param is
+                    // spelled `Consuming` but means "not mutating"). Bind it
+                    // @guaranteed like a function's `Borrow` param, so a
+                    // consuming use in the body copies instead of taking the
+                    // caller's value (which the caller still releases).
+                    let val = closure_body.alloc_value(ValueDef {
+                        ty,
+                        ownership: Ownership::Guaranteed,
+                        borrow_source: None,
+                        root: RootProvenance::Param((i + 1) as u32),
+                        span: None,
+                    });
                     closure_body.value_names.insert(val, name.clone());
                     func_def
                         .params
-                        .push(ParamDef::new(name, val, ty, ParamConvention::Consuming));
+                        .push(ParamDef::new(name, val, ty, ParamConvention::Borrow));
                     closure_local_map.insert(cp.local, LocalBinding::Ssa(val));
                 },
             }
@@ -381,13 +389,22 @@ impl OssaBodyCtx<'_, '_> {
             let env = self.emit_unique_take(binding, env_val, env_named);
             let fields = self.emit_destructure_struct(env, &slot_tys);
             for (i, slot) in slots.iter().enumerate() {
+                // Each capture lives in a frame slot (like a `var`), so writes
+                // inside the body persist and the slot's drop tracking
+                // releases whatever was not moved out.
+                let ty = slot_tys[i];
+                let addr = self.emit_uninit(ty);
+                self.emit_store_init(addr, fields[i]);
+                let flag = self.maybe_alloc_var_flag(ty);
                 match slot {
                     CaptureSlot::Whole(root) => {
-                        self.local_map.insert(*root, LocalBinding::Ssa(fields[i]));
+                        self.local_map.insert(*root, LocalBinding::Var(addr));
+                        self.track_var(addr, ty, Some(*root), flag);
                     },
                     CaptureSlot::Place(cp) => {
                         self.place_capture_map
-                            .insert(cp.key.clone(), PlaceCapture::Value(fields[i]));
+                            .insert(cp.key.clone(), PlaceCapture::Addr(addr));
+                        self.track_var(addr, ty, None, flag);
                     },
                 }
             }

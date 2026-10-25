@@ -84,6 +84,12 @@ impl OssaBodyCtx<'_, '_> {
         // better be the binding's LAST use, or the branch terminator
         // reports the binding E497 (bindings never cross blocks).
         if self.ref_results.contains(&val) {
+            // A non-copyable pointee cannot be copied out: match through the
+            // view itself, like a borrowed parameter (arm bindings are then
+            // views into the referent).
+            if !self.is_copy_type(self.body.value(val).ty) {
+                return val;
+            }
             let owned = self.emit_copy_value(val);
             self.end_ref_if_single_use(val);
             return owned;
@@ -306,6 +312,14 @@ impl OssaBodyCtx<'_, '_> {
         let reaching: Vec<&super::ArmExit> = exits.iter().collect();
         self.fold_var_inits(&reaching);
 
+        // Every arm diverged: the merge has no predecessors. Leave no open
+        // block, or an enclosing `if`/loop would treat the dead merge as a
+        // live exit (with every arm's moves applied) and thread or drop
+        // values on a path that never runs.
+        if exits.is_empty() {
+            self.current_block = None;
+        }
+
         result_param
     }
 
@@ -505,21 +519,30 @@ impl OssaBodyCtx<'_, '_> {
                 {
                     // String is Copyable — extract-copy is fine here (place
                     // mode: through an intra-block view, see the bool path).
-                    let test_val = if place {
+                    // Place mode copies the projection out once, through an
+                    // intra-block view. Value mode instead borrows the CURRENT
+                    // scrutinee for each test (below): the branch threads the
+                    // scrutinee into its successors, so a value computed before
+                    // the chain is stale after the first test, and an owned
+                    // projection taken here would never be released.
+                    let place_test_val = place.then(|| {
                         let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
                         let (proj, _) = self.apply_access_path(view, scrutinee_ty, path);
                         let owned = self.emit_copy_value(proj);
                         self.emit_end_borrow(view);
                         owned
-                    } else {
-                        self.apply_access_path(scrutinee, scrutinee_ty, path).0
-                    };
+                    });
                     let test_mir_ty = lower_resolved_ty(self.ctx, ty);
                     let mut current_scrutinee = scrutinee;
                     // Snapshot before the chain so each iteration starts clean.
                     let chain_snapshot = self.snapshot_scope();
                     let chain_live: Vec<ValueId> =
                         self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
+                    // The chain's live values as currently named: each miss
+                    // block renames them, and the next test must thread the
+                    // renamed values (`chain_live` stays the pre-chain names
+                    // that `restore_scope(&chain_snapshot)` brings back).
+                    let mut cur_chain_live = chain_live.clone();
                     let chain_descs: Vec<(TyId, Ownership)> = chain_live
                         .iter()
                         .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
@@ -528,7 +551,23 @@ impl OssaBodyCtx<'_, '_> {
                         let Constructor::StringLiteral(lit) = ctor else {
                             continue;
                         };
-                        let cmp = self.emit_string_match_test(test_val, test_mir_ty, lit);
+                        let cmp = match place_test_val {
+                            Some(test_val) => {
+                                self.emit_string_match_test(test_val, test_mir_ty, lit)
+                            },
+                            None => {
+                                let borrow = (self.body.value(current_scrutinee).ownership
+                                    != Ownership::Guaranteed)
+                                    .then(|| self.emit_begin_borrow(current_scrutinee));
+                                let base = borrow.unwrap_or(current_scrutinee);
+                                let test_val = self.apply_access_path(base, scrutinee_ty, path).0;
+                                let cmp = self.emit_string_match_test(test_val, test_mir_ty, lit);
+                                if let Some(b) = borrow {
+                                    self.emit_end_borrow(b);
+                                }
+                                cmp
+                            },
+                        };
                         // Use the chain-level live set (not the inflated post-test set)
                         // so intermediates from emit_string_match_test are destroyed
                         // in each arm rather than forwarded and accumulated.
@@ -545,7 +584,7 @@ impl OssaBodyCtx<'_, '_> {
                             hit_block,
                             str_live.clone(),
                             miss_block,
-                            chain_live.clone(),
+                            cur_chain_live.clone(),
                         );
 
                         self.switch_to(hit_block);
@@ -553,7 +592,7 @@ impl OssaBodyCtx<'_, '_> {
                         // Destroy test intermediates — they're only needed
                         // for the branch condition, not the arm body.
                         let chain_set: std::collections::HashSet<ValueId> =
-                            chain_live.iter().copied().collect();
+                            cur_chain_live.iter().copied().collect();
                         for (old, new) in str_live.iter().zip(hit_params.iter()) {
                             if !chain_set.contains(old) {
                                 self.emit_destroy_value(*new);
@@ -573,7 +612,8 @@ impl OssaBodyCtx<'_, '_> {
                         self.switch_to(miss_block);
                         self.rebind_scope_values(&chain_live, &miss_params);
                         current_scrutinee =
-                            rebound_value(current_scrutinee, &chain_live, &miss_params);
+                            rebound_value(current_scrutinee, &cur_chain_live, &miss_params);
+                        cur_chain_live = miss_params;
                     }
                     if let Some(def_tree) = default {
                         self.emit_decision_tree_threaded(
@@ -1014,8 +1054,7 @@ impl OssaBodyCtx<'_, '_> {
                     // value (the direct-view binding is the legacy
                     // borrowed-scrutinee behavior).
                     let owned = self.emit_copy_value(proj);
-                    self.local_map
-                        .insert(binding.local_id, super::LocalBinding::Ssa(owned));
+                    self.bind_pattern_local(binding.local_id, owned);
                 },
             }
         }
@@ -1048,8 +1087,29 @@ impl OssaBodyCtx<'_, '_> {
         } else {
             extracted
         };
-        self.local_map
-            .insert(local_id, super::LocalBinding::Ssa(bound_val));
+        self.bind_pattern_local(local_id, bound_val);
+    }
+
+    /// Bind a pattern variable to an owned (or borrowed) value. A `var`
+    /// binding of an owned value gets a frame slot, like a `var` statement
+    /// (#107), so writes through it (`r.v = 1`, mutating calls) update the
+    /// binding instead of consuming an immutable SSA value.
+    fn bind_pattern_local(&mut self, local: kestrel_hir::LocalId, value: ValueId) {
+        let is_var = self.hir.locals[local].is_mut;
+        if !is_var || self.body.value(value).ownership != Ownership::Owned {
+            self.local_map
+                .insert(local, super::LocalBinding::Ssa(value));
+            return;
+        }
+        let ty = self.body.value(value).ty;
+        let addr = self.emit_uninit(ty);
+        self.emit_store_init(addr, value);
+        self.body
+            .value_names
+            .insert(addr, self.hir.locals[local].name.clone());
+        self.local_map.insert(local, super::LocalBinding::Var(addr));
+        let flag = self.maybe_alloc_var_flag(ty);
+        self.track_var(addr, ty, Some(local), flag);
     }
 
     /// Bind pattern variables for a guard condition **without consuming** the
@@ -1208,8 +1268,7 @@ impl OssaBodyCtx<'_, '_> {
     fn emit_moveout(&mut self, value: ValueId, value_ty: TyId, items: Vec<MoveItem>) {
         // A binding that ends here owns the whole (already @owned) value.
         if let Some(item) = items.iter().find(|it| it.path.is_empty()) {
-            self.local_map
-                .insert(item.local_id, super::LocalBinding::Ssa(value));
+            self.bind_pattern_local(item.local_id, value);
             return;
         }
 

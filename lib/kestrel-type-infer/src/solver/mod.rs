@@ -433,8 +433,12 @@ pub(crate) fn validate_ref_placement(ctx: &mut InferCtx<'_>, hir: &HirBody) {
 }
 
 pub(crate) fn fixpoint(ctx: &mut InferCtx<'_>) {
-    const MAX_ROUNDS: usize = 256;
-    for _ in 0..MAX_ROUNDS {
+    // The cap only guards against a non-converging solver. A long dependency
+    // chain (512 nested operators) can need one round per link, so it scales
+    // with the body: a fixed 256 rejected valid deep expressions.
+    const MIN_ROUNDS: usize = 256;
+    let max_rounds = MIN_ROUNDS.max(ctx.constraints.len() * 2);
+    for _ in 0..max_rounds {
         let progress = solve_round(ctx);
         if !progress {
             return;
@@ -999,8 +1003,9 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
             scrutinee,
             name,
             arg_tys,
+            labels,
             span,
-        } => solve_implicit_pat(ctx, scrutinee, &name, arg_tys, span),
+        } => solve_implicit_pat(ctx, scrutinee, &name, arg_tys, labels, span),
         Constraint::TupleRestPat {
             scrutinee,
             prefix_tys,

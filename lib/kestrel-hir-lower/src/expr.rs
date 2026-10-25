@@ -27,6 +27,8 @@ enum MethodOnTypeUse {
     Call,
     /// `apply(Box.doubled, 7)`
     Value,
+    /// `Box.width` — an instance property named through the type.
+    Property,
 }
 
 /// The `else` of an `if`.
@@ -492,6 +494,15 @@ impl LowerCtx<'_> {
         {
             let last = &segments[segments.len() - 1];
             return self.emit_instance_method_on_type(&last.name, span, MethodOnTypeUse::Value);
+        }
+        // Likewise an instance property: `S.v` has no instance to read from
+        // (it used to lower as a global and fail in codegen).
+        if segments.len() >= 2
+            && let ValueResolution::Def(entity) = result
+            && self.is_instance_property(entity)
+        {
+            let last = &segments[segments.len() - 1];
+            return self.emit_instance_method_on_type(&last.name, span, MethodOnTypeUse::Property);
         }
 
         // Check for empty type argument brackets (e.g., `identity[]`)
@@ -1113,6 +1124,17 @@ impl LowerCtx<'_> {
                 .is_some_and(|c| c.receiver.is_some())
     }
 
+    /// A non-static property of a type (stored or computed), which needs an
+    /// instance to be read from.
+    fn is_instance_property(&self, entity: kestrel_hecs::Entity) -> bool {
+        use kestrel_ast_builder::{FieldClass, FieldOwner, NodeKind};
+
+        self.ctx.get::<NodeKind>(entity) == Some(&NodeKind::Field)
+            && self.ctx.get::<FieldClass>(entity).is_some_and(|c| {
+                !c.is_static && matches!(c.owner, FieldOwner::Nominal | FieldOwner::Extension)
+            })
+    }
+
     /// One rule, one message, one place: an instance method named through its
     /// *type* (`Box.doubled`) has no receiver to bind. Reported for both
     /// misuses — the call `Box.doubled(b, 7)` and the value `apply(Box.doubled, 7)`
@@ -1128,6 +1150,11 @@ impl LowerCtx<'_> {
             MethodOnTypeUse::Call => (
                 format!("instance method '{method}' cannot be called on a type"),
                 "call this on an instance, not the type",
+                Vec::new(),
+            ),
+            MethodOnTypeUse::Property => (
+                format!("instance property '{method}' cannot be accessed on a type"),
+                "access this on an instance, not the type",
                 Vec::new(),
             ),
             MethodOnTypeUse::Value => (

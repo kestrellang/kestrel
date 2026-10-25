@@ -807,7 +807,8 @@ fn compile_op1<'ctx>(
             let name = match kind {
                 FloatMathKind::Floor => "llvm.floor",
                 FloatMathKind::Ceil => "llvm.ceil",
-                FloatMathKind::Round => "llvm.roundeven",
+                // Ties away from zero (the documented `round()`), not to even.
+                FloatMathKind::Round => "llvm.round",
                 FloatMathKind::Trunc => "llvm.trunc",
                 FloatMathKind::Sqrt => "llvm.sqrt",
             };

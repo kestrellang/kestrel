@@ -640,7 +640,7 @@ fn is_array_type(query: &QueryContext<'_>, root: Entity, ty: &ResolvedTy) -> boo
 /// sub-pattern positions index into the scrutinee's fields. Including computed
 /// properties here made a pattern read past the end of the struct — an OSSA
 /// block-arg type mismatch rather than a diagnostic.
-pub(super) fn collect_fields(query: &QueryContext<'_>, entity: Entity) -> Vec<Entity> {
+pub(crate) fn collect_fields(query: &QueryContext<'_>, entity: Entity) -> Vec<Entity> {
     query
         .children_of(entity)
         .iter()
@@ -691,7 +691,7 @@ fn resolve_field_type(
 /// uniformly — the previous "first type arg" shortcut only worked when
 /// `Element == the first type param`. Falls back to the first type arg if the
 /// binding can't be found.
-pub(super) fn array_element_ty(
+pub(crate) fn array_element_ty(
     query: &QueryContext<'_>,
     root: Entity,
     array_ty: &ResolvedTy,

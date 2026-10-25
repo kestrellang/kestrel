@@ -496,6 +496,53 @@ fn resolve_variant_field_types(
     ctor.field_types(query, root, scrutinee_ty)
 }
 
+/// Payload types of a (possibly implicit) variant pattern matched against
+/// `scrutinee_ty`, in declaration order. Empty for any other pattern.
+pub(crate) fn variant_pattern_field_types(
+    query: &QueryContext<'_>,
+    root: Entity,
+    pat: &HirPat,
+    scrutinee_ty: &ResolvedTy,
+) -> Vec<ResolvedTy> {
+    match pat {
+        HirPat::Variant { entity, .. } => {
+            resolve_variant_field_types(query, root, *entity, scrutinee_ty)
+        },
+        HirPat::ImplicitVariant { name, args, .. } => {
+            resolve_implicit_variant(
+                query,
+                root,
+                name.as_str_or_empty(),
+                args.len(),
+                scrutinee_ty,
+            )
+            .1
+        },
+        _ => Vec::new(),
+    }
+}
+
+/// The type of struct `entity`'s field `name` within `scrutinee_ty`.
+pub(crate) fn struct_field_type(
+    query: &QueryContext<'_>,
+    root: Entity,
+    entity: Entity,
+    name: &str,
+    scrutinee_ty: &ResolvedTy,
+) -> ResolvedTy {
+    let all_fields = collect_fields(query, entity);
+    let ctor = Constructor::Struct {
+        entity,
+        arity: all_fields.len(),
+    };
+    let field_types = ctor.field_types(query, root, scrutinee_ty);
+    all_fields
+        .iter()
+        .position(|&f| query.get::<Name>(f).is_some_and(|n| n.0 == name))
+        .and_then(|i| field_types.get(i).cloned())
+        .unwrap_or(ResolvedTy::Error)
+}
+
 /// Resolve an implicit variant name to its entity, searching the scrutinee type's cases.
 fn resolve_implicit_variant(
     query: &QueryContext<'_>,

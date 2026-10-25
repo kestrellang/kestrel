@@ -100,6 +100,15 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    // A reference (`&x`, possibly inside a struct or enum value) stored into a
+    // binding that outlives `x`: the reference analogue of E507's
+    // `Outlives` reason. Returns are checked by the MIR escape check (E494).
+    DiagnosticDescriptor {
+        id: "E509",
+        name: "reference_outlives_referent",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct MoveTrackingAnalyzer;
@@ -141,13 +150,26 @@ impl BodyCheck for MoveTrackingAnalyzer {
         };
         let mut diags = Vec::new();
         let state = State::empty();
-        let _ = analyze_block(
+        let mut end = analyze_block(
             &mcx,
             &cx.hir.statements,
             cx.hir.tail_expr,
             state,
             &mut diags,
         );
+        // Falling off the end is an exit too (`return` checks its own).
+        let end_span = cx
+            .hir
+            .tail_expr
+            .map(|t| util::expr_span(cx.hir, t))
+            .or_else(|| {
+                cx.query
+                    .get::<kestrel_ast_builder::DeclSpan>(cx.entity)
+                    .map(|d| d.0.clone())
+            });
+        if let Some(span) = end_span {
+            check_mutating_params_restored(&mcx, &mut end, &mut diags, span);
+        }
         diags
     }
 }
@@ -293,7 +315,12 @@ fn analyze_block(
         if state.diverged {
             break;
         }
+        // A statement is the extent of its temporaries: a freeze it created
+        // that no binding carries (`let n = { r.v }();`) ends here, not at
+        // the end of the block.
+        let stmt_entry_frozen = state.frozen.clone();
         state = analyze_stmt(mcx, stmt_id, state, diags);
+        state.frozen = restore_frozen(stmt_entry_frozen, &state, usize::MAX);
     }
     if !state.diverged
         && let Some(tail) = tail
@@ -414,13 +441,25 @@ fn analyze_stmt(
                 // Pragmatic approach: use the first HirExprId that contains
                 // this local read. In practice tests only check _that_ the
                 // diagnostic fires, so any valid site works.
-                state.moves.insert(
-                    place,
-                    MoveInfo {
-                        kind: MoveKind::Definite,
-                        site: deinit_site(mcx.cx.hir, *local_id),
-                    },
-                );
+                if is_unowned_param(mcx.cx, *local_id) && state.reported.insert(*local_id) {
+                    diags.push(unowned_param_move(
+                        mcx.cx,
+                        *local_id,
+                        span.clone(),
+                        "destroy",
+                    ));
+                }
+                // A body with no expressions has no later use to anchor a
+                // move site to (and nothing to report one against).
+                if let Some(site) = deinit_site(mcx.cx.hir, *local_id) {
+                    state.moves.insert(
+                        place,
+                        MoveInfo {
+                            kind: MoveKind::Definite,
+                            site,
+                        },
+                    );
+                }
             }
         },
     }
@@ -556,6 +595,15 @@ fn analyze_expr(
                 }
                 if let Some(guard) = arm.guard {
                     s = analyze_expr(mcx, guard, s, false, diags);
+                }
+                // An arm that binds a non-copyable part by value moves it out
+                // of the scrutinee (MIR consumes the scrutinee to do so), so a
+                // later use of the scrutinee is a use after move.
+                // (A borrowed scrutinee is reported per binding, E503 below.)
+                if pattern_binds_non_copyable_by_value(mcx, arm.pattern)
+                    && scrutinee_is_owned(mcx, *scrutinee)
+                {
+                    record_operand_move(mcx, &mut s, diags, *scrutinee, FreezeReason::Move);
                 }
                 s = analyze_expr(mcx, arm.body, s, false, diags);
                 arm_states.push(s);
@@ -707,6 +755,7 @@ fn analyze_expr(
                 // `memory_model/closure_kinds/view/returning_view_closure_*`
                 // shape.
             }
+            check_mutating_params_restored(mcx, &mut state, diags, util::expr_span(hir, id));
         },
 
         // ===== Break / Continue (divergence handled below via Never) =====
@@ -806,6 +855,21 @@ fn analyze_expr(
             // other reopens the "consumed more than once" OSSA ICE.
             if !kind.is_view() {
                 for place in captured_moves {
+                    // An owning capture moves the place INTO the closure, so it
+                    // must still be live here (a capture in a loop body sees the
+                    // previous iteration's move through the back-edge state).
+                    let prior = state
+                        .moves
+                        .get(&place)
+                        .or_else(|| state.moves.get(&PlaceKey::whole(place.root)))
+                        .copied();
+                    if let Some(info) = prior
+                        && state.reported.insert(place.root)
+                    {
+                        let name = hir.locals[place.root].name.clone();
+                        let span = util::expr_span(hir, id);
+                        emit_move_diagnostic(mcx.cx, diags, info, id, span, &name);
+                    }
                     record_move(mcx, &mut state, diags, place, id, FreezeReason::Move);
                 }
             }
@@ -1326,6 +1390,37 @@ fn collect_expr_bound_locals(hir: &HirBody, id: HirExprId, out: &mut HashSet<Loc
 
 /// Collect every binding local introduced by a pattern (recursing through
 /// tuple/variant/struct/array/or/at sub-patterns) into `out`.
+/// Whether `pat` binds a non-copyable value by value (not `&`), which moves it
+/// out of the matched value.
+fn pattern_binds_non_copyable_by_value(mcx: &MoveCtx<'_>, pat: HirPatId) -> bool {
+    let mut bound = HashSet::new();
+    collect_pattern_bindings(mcx.cx.hir, pat, &mut bound);
+    let by_ref = by_ref_bindings(mcx.cx.hir, pat);
+    bound
+        .into_iter()
+        .any(|local| !by_ref.contains(&local) && local_is_non_copyable(mcx, local))
+}
+
+/// Whether a match scrutinee is a place this body owns (not a borrowed or
+/// `mutating` parameter, whose bindings are borrow-bound instead).
+fn scrutinee_is_owned(mcx: &MoveCtx<'_>, scrutinee: HirExprId) -> bool {
+    place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, scrutinee)
+        .is_some_and(|place| local_is_owned_place(mcx.cx, place.root))
+}
+
+/// The bindings in `pat` written `&name` (borrowing, never moving).
+fn by_ref_bindings(hir: &HirBody, pat: HirPatId) -> HashSet<LocalId> {
+    let mut all = HashSet::new();
+    collect_pattern_bindings(hir, pat, &mut all);
+    all.into_iter()
+        .filter(|&local| {
+            hir.pats.iter().any(|(_, p)| {
+                matches!(p, HirPat::Binding { local: l, by_ref: Some(_), .. } if *l == local)
+            })
+        })
+        .collect()
+}
+
 fn collect_pattern_bindings(hir: &HirBody, pat: HirPatId, out: &mut HashSet<LocalId>) {
     match &hir.pats[pat] {
         HirPat::Binding { local, .. } => {
@@ -1435,6 +1530,17 @@ fn record_move(
                 ],
             });
         }
+    } else if is_unowned_param(mcx.cx, root)
+        && !is_mutating_param(mcx.cx, root)
+        && !is_consuming_closure_local(mcx, root)
+        && state.reported.insert(root)
+    {
+        diags.push(unowned_param_move(
+            mcx.cx,
+            root,
+            util::expr_span(mcx.cx.hir, site),
+            "move",
+        ));
     } else if mcx.borrow_bound.contains(&root) && state.reported.insert(root) {
         let name = mcx.cx.hir.locals[root].name.clone();
         let span = util::expr_span(mcx.cx.hir, site);
@@ -1528,6 +1634,28 @@ fn check_outlives(
     let span = util::expr_span(mcx.cx.hir, site);
     for place in carried {
         let Some(info) = state.frozen.get(place).cloned() else {
+            // Not a view-closure freeze: a reference to `place`. It dangles
+            // once `place`'s binding goes out of scope.
+            let referent_depth = state.local_depth.get(&place.root).copied().unwrap_or(0);
+            if referent_depth > dest_depth && state.freeze_reported.insert(place.root) {
+                let name = mcx.cx.hir.locals[place.root].name.clone();
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[5].id,
+                    severity: DESCRIPTORS[5].default_severity,
+                    message: format!(
+                        "a reference to '{name}' is stored somewhere that outlives '{name}'"
+                    ),
+                    labels: vec![DiagLabel {
+                        span: span.clone(),
+                        message: format!("this value carries a reference to '{name}'"),
+                        is_primary: true,
+                    }],
+                    notes: vec![format!(
+                        "'{name}' goes out of scope before the destination does, so the \
+                         reference would dangle"
+                    )],
+                });
+            }
             continue;
         };
         if info.captured_scope_depth <= dest_depth {
@@ -1707,9 +1835,15 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
                 out.extend(places.iter().cloned());
             }
         },
-        HirExpr::Sugar { inner, .. } | HirExpr::Borrow { inner, .. } => {
+        // `&x` carries the place it refers to (checked against the
+        // destination's lifetime by `check_outlives`).
+        HirExpr::Borrow { inner, .. } => {
+            if let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, hir, *inner) {
+                out.push(place);
+            }
             collect_carried(mcx, state, *inner, out)
         },
+        HirExpr::Sugar { inner, .. } => collect_carried(mcx, state, *inner, out),
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
             collect_carried(mcx, state, *base, out)
         },
@@ -2266,20 +2400,125 @@ fn emit_use_after_move(
 /// for a `deinit` statement. The HIR arena's deinit-stmt doesn't have its
 /// own expression, so we use the first expression whose span contains the
 /// deinit token. Falls back to the first local-read of this name.
-fn deinit_site(hir: &HirBody, local: LocalId) -> HirExprId {
+fn deinit_site(hir: &HirBody, local: LocalId) -> Option<HirExprId> {
     // Scan for any expression that reads this local — good enough as a span
     // anchor for downstream secondary labels.
     for (id, expr) in hir.exprs.iter() {
         if let HirExpr::Local(l, _) = expr
             && *l == local
         {
-            return id;
+            return Some(id);
         }
     }
-    // Fallback: the first expression in the arena.
-    hir.exprs
+    // Fallback: the first expression in the arena, if the body has any.
+    hir.exprs.iter().next().map(|(id, _)| id)
+}
+
+/// A parameter the body does not own: borrowed (the default) or `mutating`.
+/// Moving or destroying it would release a value the caller still owns.
+fn is_unowned_param(cx: &BodyContext<'_>, local: LocalId) -> bool {
+    cx.hir.params.contains(&local) && !local_is_owned_place(cx, local)
+}
+
+/// A local of `consuming` closure type. Calling it consumes it; a borrowed
+/// parameter of that type is already rejected at the signature (E625), so its
+/// call is not reported again as a move out of a borrow.
+fn is_consuming_closure_local(mcx: &MoveCtx<'_>, local: LocalId) -> bool {
+    matches!(
+        mcx.cx.typed.local_types.get(&local),
+        Some(ResolvedTy::Function {
+            kind: kestrel_ast::FnTypeKind::Consuming,
+            ..
+        })
+    )
+}
+
+/// A `mutating` parameter (or `mutating self`): the body may move its value
+/// out, as long as it puts one back before returning (the caller still owns
+/// the slot). Checked at each exit by `check_mutating_params_restored`.
+fn is_mutating_param(cx: &BodyContext<'_>, local: LocalId) -> bool {
+    if !cx.hir.params.contains(&local) {
+        return false;
+    }
+    let Some(callable) = cx.query.get::<Callable>(cx.entity) else {
+        return false;
+    };
+    let name = cx.hir.locals[local].name.as_str();
+    if name == "self" {
+        return matches!(callable.receiver, Some(ReceiverKind::Mutating));
+    }
+    callable
+        .params
         .iter()
-        .next()
-        .map(|(id, _)| id)
-        .expect("body has at least one expression")
+        .find(|p| p.name == name)
+        .is_some_and(|p| p.is_mut && !p.is_consuming)
+}
+
+/// At a function exit, every `mutating` parameter must hold a value again: a
+/// value moved out and never replaced would leave the caller's slot empty
+/// (and the caller would drop it a second time).
+fn check_mutating_params_restored(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    exit_span: kestrel_span::Span,
+) {
+    let cx = mcx.cx;
+    for &local in &cx.hir.params {
+        if !is_mutating_param(cx, local) {
+            continue;
+        }
+        let Some(info) = state.moves.get(&PlaceKey::whole(local)).copied() else {
+            continue;
+        };
+        if !state.reported.insert(local) {
+            continue;
+        }
+        let name = cx.hir.locals[local].name.clone();
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[2].id,
+            severity: DESCRIPTORS[2].default_severity,
+            message: format!(
+                "mutating parameter '{name}' is moved out and not replaced before returning"
+            ),
+            labels: vec![
+                DiagLabel {
+                    span: exit_span.clone(),
+                    message: format!("returns while '{name}' holds no value"),
+                    is_primary: true,
+                },
+                DiagLabel {
+                    span: util::expr_span(cx.hir, info.site),
+                    message: "moved out here".into(),
+                    is_primary: false,
+                },
+            ],
+            notes: vec![format!(
+                "assign a new value to '{name}' before returning; the caller still owns it"
+            )],
+        });
+    }
+}
+
+/// E503 for moving (`verb` = "move") or destroying a non-owned parameter.
+fn unowned_param_move(
+    cx: &BodyContext<'_>,
+    local: LocalId,
+    span: kestrel_span::Span,
+    verb: &str,
+) -> AnalyzeDiagnostic {
+    let name = cx.hir.locals[local].name.clone();
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[2].id,
+        severity: DESCRIPTORS[2].default_severity,
+        message: format!("cannot {verb} parameter '{name}': it is borrowed, not owned"),
+        labels: vec![DiagLabel {
+            span,
+            message: format!("'{name}' still belongs to the caller"),
+            is_primary: true,
+        }],
+        notes: vec![format!(
+            "mark the parameter `consuming` to take ownership of '{name}'"
+        )],
+    }
 }

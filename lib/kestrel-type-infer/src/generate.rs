@@ -2502,16 +2502,23 @@ fn instantiate_entity_inner(
     // For methods/functions inside extensions, the extension target's type params
     // need fresh TyVars even without explicit type args. Without this, return types
     // like `Box[T]` stay unresolved when calling `Box.wrap(42)` directly.
+    // The same holds for a static member declared in the generic type itself
+    // (`struct Box[T] { static func make(x: T) -> Box[T] }` called as
+    // `Box.make(3)`): its `T` is inferred per use, not left rigid.
     if explicit_type_args.is_empty()
         && type_param_entities.is_empty()
         && let Some(parent) = qctx.parent_of(entity)
-        && qctx.get::<NodeKind>(parent) == Some(&NodeKind::Extension)
     {
-        // Get the extension target's type params (e.g., Box's T)
-        if let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity {
-            extension: parent,
-            root,
-        }) {
+        // The type whose params the member sees (e.g., Box's T).
+        let owner = match qctx.get::<NodeKind>(parent) {
+            Some(NodeKind::Extension) => qctx.query(kestrel_name_res::ExtensionTargetEntity {
+                extension: parent,
+                root,
+            }),
+            Some(NodeKind::Struct | NodeKind::Enum) => Some(parent),
+            _ => None,
+        };
+        if let Some(target) = owner {
             let target_type_params: Vec<Entity> = qctx
                 .get::<TypeParams>(target)
                 .map(|tp| tp.0.clone())
@@ -3394,6 +3401,8 @@ fn gen_variant_pat(
 ) {
     let qctx = ctx.query_ctx;
     let root = ctx.root;
+    let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
+    check_variant_pattern_labels(ctx, entity, &labels, span);
 
     // Build substitution map: enum type params → fresh TyVars linked to scrutinee.
     // This ensures payload types like HirTy::Param(T) resolve to the scrutinee's
@@ -3441,6 +3450,33 @@ fn gen_variant_pat(
     }
 }
 
+/// Payload sub-patterns bind by position, like call arguments: a label, when
+/// written, must name the payload at that position. `.A(y: b, x: a)` against
+/// `case A(x:, y:)` is rejected rather than silently binding `b` to `x`.
+pub(crate) fn check_variant_pattern_labels(
+    ctx: &mut InferCtx<'_>,
+    case: Entity,
+    labels: &[Option<String>],
+    span: &Span,
+) {
+    let params = ctx
+        .query_ctx
+        .get::<kestrel_ast_builder::Callable>(case)
+        .map(|c| c.params.clone())
+        .unwrap_or_default();
+    for (i, label) in labels.iter().enumerate() {
+        let Some(got) = label else { continue };
+        let expected = params.get(i).and_then(|p| p.label.clone());
+        if expected.as_deref() != Some(got.as_str()) {
+            ctx.report_error(InferError::LabelMismatch {
+                expected,
+                got: Some(got.clone()),
+                span: span.clone(),
+            });
+        }
+    }
+}
+
 /// Generate constraints for an implicit variant pattern (.CaseName).
 /// Creates fresh TyVars for each sub-pattern binding and emits an
 /// ImplicitPat constraint. The solver defers until the scrutinee type
@@ -3462,6 +3498,7 @@ fn gen_implicit_variant_pat(
         scrutinee: scrutinee_tv,
         name: name.to_string(),
         arg_tys: arg_tys.clone(),
+        labels: args.iter().map(|a| a.label.clone()).collect(),
         span: span.clone(),
     };
     if receiver_open(ctx, scrutinee_tv) {

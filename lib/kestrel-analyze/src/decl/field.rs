@@ -35,6 +35,11 @@
 //!
 //! **Notes:** (none)
 //!
+//! ### E628 -- `extension_stored_field` (Error, Correctness)
+//!
+//! An `extend` block cannot add instance storage: the extended type's layout
+//! is fixed by its declaration. Use a computed property, or `static`.
+//!
 //! ### E416 -- `generic_type_static_stored_property` (Error, Correctness)
 //!
 //! **Message:** "static stored properties not supported in generic types"
@@ -119,6 +124,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E466",
         name: "some_in_field_type",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E628",
+        name: "extension_stored_field",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -226,6 +237,26 @@ impl DeclCheck for FieldAnalyzer {
                     is_primary: true,
                 }],
                 notes: vec![],
+            });
+            return diags;
+        }
+
+        // Check: an extension cannot add instance storage to its target.
+        if matches!(parent_kind, Some(NodeKind::Extension)) && !is_static && !is_computed {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[5].id,
+                severity: DESCRIPTORS[5].default_severity,
+                message: "extensions cannot add stored properties".into(),
+                labels: vec![DiagLabel {
+                    span: span.clone(),
+                    message: "stored property declared in an extension".into(),
+                    is_primary: true,
+                }],
+                notes: vec![
+                    "a type's storage is fixed by its declaration; use a computed \
+                     property or a `static` one"
+                        .into(),
+                ],
             });
             return diags;
         }

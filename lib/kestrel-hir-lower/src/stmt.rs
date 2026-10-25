@@ -185,6 +185,33 @@ impl LowerCtx<'_> {
             });
         }
 
+        // The parser already reported a missing pattern: keep the value for
+        // inference, but don't destructure a synthetic temp (whose internal
+        // name would leak into follow-on errors like an uninitialized read).
+        let pattern_missing = match &pat {
+            PatSrc::Error(_) => true,
+            PatSrc::Node(n) => n.kind() == SyntaxKind::Error || n.text_range().is_empty(),
+            PatSrc::ArgBinding(_) => false,
+        };
+        if pattern_missing {
+            return match lowered_value {
+                Some(value) => self.alloc_stmt(HirStmt::Expr {
+                    expr: value,
+                    span: span.clone(),
+                }),
+                None => {
+                    let unit = self.alloc_expr(HirExpr::Tuple {
+                        elements: Vec::new(),
+                        span: span.clone(),
+                    });
+                    self.alloc_stmt(HirStmt::Expr {
+                        expr: unit,
+                        span: span.clone(),
+                    })
+                },
+            };
+        }
+
         // Complex pattern: allocate temp, then destructure via match
         // Emits: { let $let_tmp = value; match $let_tmp { pattern => () } }
         let temp = self.define_local("$let_tmp", is_mut, span.clone());

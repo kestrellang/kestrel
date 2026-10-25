@@ -193,3 +193,71 @@ fn alias_target(ctx: &QueryContext<'_>, alias: Entity, root: Entity) -> Option<E
         _ => None,
     }
 }
+
+// ===== Type sugar (`[T]`, `T?`, `[K: V]`) =====
+
+/// Resolve the type that a piece of type sugar (`[T]`, `T?`, `[K: V]`,
+/// `T throws E`) denotes.
+///
+/// Goes through the `@builtin(.XTypeOperator)` lang item, which is what the
+/// stdlib annotation is *for*. Before this, the four annotations in `lang/std`
+/// had zero readers and the sugar resolved the hardcoded name `"Array"` in the
+/// **user's** scope — so `struct Array[T] {}` in a user file silently captured
+/// `[Int]`, and every array literal in that file failed to conform to
+/// `_ExpressibleByArrayLiteral`.
+///
+/// Falls back to the name for worlds built without the stdlib (unit tests,
+/// `--no-std`), where there is no lang item to find.
+pub fn resolve_sugar_type(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    builtin: Builtin,
+    name: &str,
+) -> Option<Entity> {
+    if let Some(alias) = ctx.query(ResolveBuiltin { builtin, root })
+        && let Some(target) = sugar_alias_target(ctx, root, alias)
+    {
+        return Some(target);
+    }
+    resolve_std_type(ctx, owner, root, name)
+}
+
+/// Follow `@builtin(.ArrayTypeOperator) type ArrayTypeOperator[T] = Array[T]`
+/// to `Array`.
+///
+/// The target is resolved with the **alias** as context, so it lands in the
+/// stdlib's own scope no matter what the user file declares or imports.
+fn sugar_alias_target(ctx: &QueryContext<'_>, root: Entity, alias: Entity) -> Option<Entity> {
+    let annotation = ctx.get::<TypeAnnotation>(alias)?;
+    let AstType::Named { segments, .. } = &annotation.0 else {
+        return None;
+    };
+    let segments: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    match ctx.query(ResolveTypePath {
+        segments,
+        context: alias,
+        root,
+    }) {
+        TypeResolution::Found(entity) => Some(entity),
+        _ => None,
+    }
+}
+
+/// Resolve a well-known standard library type name (e.g. "Array", "Optional").
+fn resolve_std_type(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    name: &str,
+) -> Option<Entity> {
+    let result = ctx.query(ResolveTypePath {
+        segments: vec![name.to_string()],
+        context: owner,
+        root,
+    });
+    match result {
+        TypeResolution::Found(entity) => Some(entity),
+        _ => None,
+    }
+}

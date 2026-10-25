@@ -90,6 +90,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::field_method_collision::FieldMethodCollisionAnalyzer);
     r.add_decl_check(decl::extension_conflict::ExtensionConflictAnalyzer);
     r.add_decl_check(decl::extension_validation::ExtensionValidationAnalyzer);
+    r.add_decl_check(decl::conformance_target::ConformanceTargetAnalyzer);
     r.add_decl_check(decl::recursive_enum::RecursiveEnumAnalyzer);
     r.add_decl_check(decl::indirect_enum::IndirectEnumAnalyzer);
     r.add_decl_check(decl::parent_protocol_conformance::ParentProtocolConformanceAnalyzer);

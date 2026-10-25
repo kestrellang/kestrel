@@ -82,7 +82,10 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
     let mut frozen_at: Vec<FxHashSet<ValueId>> = Vec::with_capacity(insts.len());
 
     for inst in insts {
-        frozen_at.push(frozen.keys().filter(|k| frozen[k] > 0).copied().collect());
+        // `frozen` holds only live borrows (zero counts are removed below), so
+        // this snapshot costs the number of active borrows, not every borrow
+        // the block has seen (quadratic in long straight-line bodies).
+        frozen_at.push(frozen.keys().copied().collect());
         match &inst.kind {
             InstKind::BeginBorrow { result, operand }
             | InstKind::BeginMutBorrow { result, operand } => {
@@ -95,6 +98,9 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
                     && let Some(count) = frozen.get_mut(&src)
                 {
                     *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        frozen.remove(&src);
+                    }
                 }
             },
             _ => {},

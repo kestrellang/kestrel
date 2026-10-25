@@ -142,9 +142,11 @@ fn parse_block_comment(lex: &mut logos::Lexer<Token>) -> bool {
         }
     }
 
-    // Unclosed comment - bump to end
+    // Unclosed comment: consume to the end and report it as a lex error
+    // (an unterminated comment silently swallowing the rest of the file hid
+    // every later declaration).
     lex.bump(offset);
-    true
+    false
 }
 
 #[derive(Logos, Debug, Clone, PartialEq, Eq, Hash)]
@@ -152,7 +154,9 @@ pub enum Token {
     // ===== Trivia =====
     // Whitespace and comments are emitted as tokens so rowan can calculate
     // correct source positions. The parser treats these as trivia.
-    #[regex(r"[ \t\f]+")]
+    // U+FEFF (a UTF-8 byte-order mark some editors write at the start of a
+    // file) is whitespace.
+    #[regex(r"[ \t\f\u{FEFF}]+")]
     Whitespace,
 
     #[regex(r"\r\n|\n|\r")]

@@ -75,6 +75,14 @@ impl UsefulnessResult {
 
 /// Check exhaustiveness and redundancy for a match expression.
 ///
+/// Whether no value of `ty` can exist: `Never`, or an enum with no cases.
+/// An empty `match` is exhaustive exactly on these.
+pub fn is_uninhabited(query: &QueryContext<'_>, root: Entity, ty: &ResolvedTy) -> bool {
+    matches!(ty, ResolvedTy::Never)
+        || matches!(ty, ResolvedTy::Named { .. })
+            && Constructor::all_for_type(query, root, ty).is_some_and(|all| all.is_empty())
+}
+
 /// Converts HirPat arms to FlatPat, builds the pattern matrix, and runs
 /// the Maranget algorithm to detect missing patterns and unreachable arms.
 pub fn check_match(
@@ -85,7 +93,7 @@ pub fn check_match(
     arms: &[HirMatchArm],
 ) -> ExhaustivenessResult {
     if arms.is_empty() {
-        let is_never = matches!(scrutinee_ty, ResolvedTy::Never);
+        let is_never = is_uninhabited(query, root, scrutinee_ty);
         return ExhaustivenessResult {
             is_exhaustive: is_never,
             missing_patterns: if is_never {
@@ -232,7 +240,29 @@ fn is_wildcard_useful(
     root: Entity,
     ctx: &QueryContext<'_>,
 ) -> UsefulnessResult {
-    // If any row has a wildcard in this column, use the default matrix
+    // When the head constructors already form a complete signature (every
+    // case of a finite type appears), the wildcard is useful only under some
+    // case: specialize on each (Maranget). Wildcard rows still take part,
+    // since specialization keeps them. Dropping to the default matrix here
+    // would discard the constructor rows and report `(true, false) |
+    // (_, true) | (false, false)` as missing `_`.
+    let heads = matrix.head_constructors(col);
+    if !heads.is_empty()
+        && let Some(all_ctors) = Constructor::all_for_type(ctx, root, col_type)
+        && !all_ctors.is_empty()
+        && all_ctors.iter().all(|c| heads.contains(c))
+    {
+        for ctor in &all_ctors {
+            let result = is_constructor_useful(matrix, query, col, ctor, col_type, root, ctx);
+            if result.is_useful {
+                return result;
+            }
+        }
+        return UsefulnessResult::not_useful();
+    }
+
+    // Otherwise, if any row has a wildcard in this column, use the default
+    // matrix.
     let has_catch_all = matrix
         .rows
         .iter()
@@ -248,7 +278,6 @@ fn is_wildcard_useful(
     }
 
     // Get covered constructors
-    let heads = matrix.head_constructors(col);
     let covered: HashSet<Constructor> = heads.iter().cloned().collect();
 
     match Constructor::all_for_type(ctx, root, col_type) {

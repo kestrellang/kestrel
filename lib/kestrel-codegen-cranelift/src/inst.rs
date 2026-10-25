@@ -689,7 +689,26 @@ fn compile_op1(
         },
         Op::FloatMath(_, FloatMathKind::Floor) => builder.ins().floor(arg),
         Op::FloatMath(_, FloatMathKind::Ceil) => builder.ins().ceil(arg),
-        Op::FloatMath(_, FloatMathKind::Round) => builder.ins().nearest(arg),
+        // Ties away from zero (the documented `round()`; Cranelift's `nearest`
+        // rounds ties to even): truncate, then step one away from zero when
+        // the dropped fraction is at least one half.
+        Op::FloatMath(fb, FloatMathKind::Round) => {
+            let (half, one) = match fb {
+                FloatBits::F16 | FloatBits::F32 => {
+                    (builder.ins().f32const(0.5), builder.ins().f32const(1.0))
+                },
+                FloatBits::F64 => (builder.ins().f64const(0.5), builder.ins().f64const(1.0)),
+            };
+            let truncated = builder.ins().trunc(arg);
+            let fraction = builder.ins().fsub(arg, truncated);
+            let magnitude = builder.ins().fabs(fraction);
+            let step = builder.ins().fcopysign(one, arg);
+            let away = builder.ins().fadd(truncated, step);
+            let round_up = builder
+                .ins()
+                .fcmp(FloatCC::GreaterThanOrEqual, magnitude, half);
+            builder.ins().select(round_up, away, truncated)
+        },
         Op::FloatMath(_, FloatMathKind::Trunc) => builder.ins().trunc(arg),
         Op::FloatMath(_, FloatMathKind::Sqrt) => builder.ins().sqrt(arg),
         _ => {

@@ -214,7 +214,9 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
     // Flush diagnostics before codegen — better to fail fast on type errors
     // than to surface a confusing MIR-lowering cascade downstream.
     // `emit_diagnostics`/`has_errors` cover both diagnostic halves (F17).
-    driver.emit_diagnostics().ok();
+    // Analyzer warnings print here too (E461 unknown attribute, …); without
+    // them a build silently accepted what `kestrel dump diagnostics` flags.
+    driver.emit_diagnostics_with_warnings().ok();
     if driver.has_errors() {
         return Err(ExitCode::FAILURE);
     }

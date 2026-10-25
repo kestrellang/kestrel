@@ -138,7 +138,15 @@ pub fn compile(
     }
 
     let col_paths = vec![vec![]]; // single column = scrutinee root
-    compile_matrix(hir, query, root, &matrix, &col_paths, arm_pat_ids)
+    compile_matrix(
+        hir,
+        query,
+        root,
+        &matrix,
+        &col_paths,
+        arm_pat_ids,
+        scrutinee_ty,
+    )
 }
 
 /// Recursive matrix compilation.
@@ -149,15 +157,25 @@ fn compile_matrix(
     matrix: &PatternMatrix,
     col_paths: &[AccessPath],
     arm_pat_ids: &[HirPatId],
+    scrutinee_ty: &ResolvedTy,
 ) -> DecisionTree {
     // Base: empty matrix = no patterns match
     if matrix.is_empty() {
         return DecisionTree::Failure;
     }
 
-    // Base: zero-width matrix = first row wins
-    if matrix.is_unit() {
-        return compile_leaf(hir, query, &matrix.rows, arm_pat_ids);
+    // Base: zero-width matrix, or a first row that matches anything in every
+    // remaining column = first row wins. Splitting further would only copy
+    // that row into every branch: a match of n boolean columns whose first
+    // row is all wildcards otherwise builds 2^n - 1 switches (H25). A guard
+    // on that row falls through to the remaining rows inside the leaf.
+    if matrix.is_unit()
+        || matrix
+            .rows
+            .first()
+            .is_some_and(|row| row.pats.iter().all(|p| p.is_wildcard_like()))
+    {
+        return compile_leaf(hir, query, root, &matrix.rows, arm_pat_ids, scrutinee_ty);
     }
 
     // Select best column (most distinct constructors)
@@ -179,7 +197,15 @@ fn compile_matrix(
     for ctor in &head_ctors {
         let specialized = matrix.specialize(query, root, col, ctor);
         let new_paths = build_specialized_paths(col_paths, col, ctor, query);
-        let subtree = compile_matrix(hir, query, root, &specialized, &new_paths, arm_pat_ids);
+        let subtree = compile_matrix(
+            hir,
+            query,
+            root,
+            &specialized,
+            &new_paths,
+            arm_pat_ids,
+            scrutinee_ty,
+        );
         cases.push((ctor.clone(), subtree));
     }
 
@@ -195,6 +221,7 @@ fn compile_matrix(
                 &default_matrix,
                 &default_paths,
                 arm_pat_ids,
+                scrutinee_ty,
             )))
         } else {
             Some(Box::new(DecisionTree::Failure))
@@ -215,8 +242,10 @@ fn compile_matrix(
 fn compile_leaf(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     rows: &[PatternRow],
     arm_pat_ids: &[HirPatId],
+    scrutinee_ty: &ResolvedTy,
 ) -> DecisionTree {
     let Some(row) = rows.first() else {
         return DecisionTree::Failure;
@@ -229,7 +258,13 @@ fn compile_leaf(
         .get(row.arm_index)
         .map(|&pat_id| {
             let mut bindings = Vec::new();
-            collect_bindings(hir, query, pat_id, &vec![], &row.matched, &mut bindings);
+            let cx = BindCx {
+                hir,
+                query,
+                root,
+                matched: &row.matched,
+            };
+            collect_bindings(&cx, pat_id, scrutinee_ty, &vec![], &mut bindings);
             bindings
         })
         .unwrap_or_default();
@@ -244,7 +279,7 @@ fn compile_leaf(
         let failure = if remaining.is_empty() {
             DecisionTree::Failure
         } else {
-            compile_leaf(hir, query, &remaining, arm_pat_ids)
+            compile_leaf(hir, query, root, &remaining, arm_pat_ids, scrutinee_ty)
         };
 
         DecisionTree::Guard {
@@ -333,8 +368,14 @@ fn build_specialized_paths(
             Constructor::Tuple { .. } | Constructor::Array { .. } => {
                 field_path.push(PathElement::Index(i));
             },
-            Constructor::Struct { .. } => {
-                field_path.push(PathElement::Index(i));
+            // Struct children are in declaration order (`flatten` expands to
+            // every field); address each by name, not as a tuple element.
+            Constructor::Struct { entity, .. } => {
+                let field = crate::constructor::collect_fields(query, *entity)
+                    .get(i)
+                    .and_then(|&f| query.get::<Name>(f).map(|n| n.0.clone()))
+                    .unwrap_or_default();
+                field_path.push(PathElement::Field(field));
             },
             _ => {}, // Literals have no sub-fields
         }
@@ -362,14 +403,25 @@ fn build_default_paths(col_paths: &[AccessPath], col: usize) -> Vec<AccessPath> 
 // ===== Binding collection =====
 
 /// Recursively collect bindings from a HirPat.
+/// Fixed inputs to `collect_bindings`.
+struct BindCx<'a, 'q> {
+    hir: &'a HirBody,
+    query: &'a QueryContext<'q>,
+    root: Entity,
+    /// The constructor trail the leaf was reached through.
+    matched: &'a [Constructor],
+}
+
+/// Collect `pat_id`'s bindings. `ty` is the type of the value `pat_id`
+/// matches; tuple suffix indices depend on its arity.
 fn collect_bindings(
-    hir: &HirBody,
-    query: &QueryContext<'_>,
+    cx: &BindCx<'_, '_>,
     pat_id: HirPatId,
+    ty: &ResolvedTy,
     path: &AccessPath,
-    matched: &[Constructor],
     bindings: &mut Vec<Binding>,
 ) {
+    let (hir, query) = (cx.hir, cx.query);
     match &hir.pats[pat_id] {
         HirPat::Binding { local, by_ref, .. } => {
             let local_data = &hir.locals[*local];
@@ -397,22 +449,29 @@ fn collect_bindings(
                 ty: ResolvedTy::Error,
                 path: path.clone(),
             });
-            collect_bindings(hir, query, *subpattern, path, matched, bindings);
+            collect_bindings(cx, *subpattern, ty, path, bindings);
         },
 
         HirPat::Tuple { prefix, suffix, .. } => {
-            // Prefix elements: index from start
-            for (i, &elem) in prefix.iter().enumerate() {
+            let elem_tys = match ty {
+                ResolvedTy::Tuple(tys) => tys.as_slice(),
+                _ => &[],
+            };
+            // Suffix elements sit at the END of the tuple: with a `..` the
+            // arity exceeds `prefix + suffix` (flattening agrees).
+            let arity = elem_tys.len().max(prefix.len() + suffix.len());
+            let suffix_start = arity - suffix.len();
+            let positioned = prefix.iter().enumerate().chain(
+                suffix
+                    .iter()
+                    .enumerate()
+                    .map(|(j, e)| (suffix_start + j, e)),
+            );
+            for (i, &elem) in positioned {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(i));
-                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
-            }
-            // Suffix elements: actual indices depend on tuple arity (set during flattening)
-            // For now, use placeholder indices — codegen will resolve from the decision tree
-            for (j, &elem) in suffix.iter().enumerate() {
-                let mut elem_path = path.clone();
-                elem_path.push(PathElement::Index(prefix.len() + j));
-                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
+                let elem_ty = elem_tys.get(i).unwrap_or(&ResolvedTy::Error);
+                collect_bindings(cx, elem, elem_ty, &elem_path, bindings);
             }
         },
 
@@ -425,11 +484,14 @@ fn collect_bindings(
                     .unwrap_or_else(|| format!("{:?}", entity)),
                 _ => unreachable!(),
             };
+            let field_tys =
+                crate::flat_pat::variant_pattern_field_types(query, cx.root, &hir.pats[pat_id], ty);
             for (i, arg) in args.iter().enumerate() {
                 let mut arg_path = path.clone();
                 arg_path.push(PathElement::Downcast(case_name.clone()));
                 arg_path.push(PathElement::Index(i));
-                collect_bindings(hir, query, arg.pattern, &arg_path, matched, bindings);
+                let arg_ty = field_tys.get(i).unwrap_or(&ResolvedTy::Error);
+                collect_bindings(cx, arg.pattern, arg_ty, &arg_path, bindings);
             }
         },
 
@@ -439,11 +501,12 @@ fn collect_bindings(
             suffix,
             ..
         } => {
+            let elem_ty = crate::constructor::array_element_ty(query, cx.root, ty);
             // Prefix: indexed from the start.
             for (i, &elem) in prefix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(i));
-                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
+                collect_bindings(cx, elem, &elem_ty, &elem_path, bindings);
             }
             // Suffix: when a rest is present, suffix elements are positioned
             // from the end (runtime `len - offset`); without a rest the
@@ -457,7 +520,7 @@ fn collect_bindings(
                 } else {
                     elem_path.push(PathElement::Index(prefix.len() + j));
                 }
-                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
+                collect_bindings(cx, elem, &elem_ty, &elem_path, bindings);
             }
             // Named rest binding → Slice[T] extracted via matchSlice.
             if let Some(Some(local)) = rest {
@@ -478,14 +541,15 @@ fn collect_bindings(
             }
         },
 
-        HirPat::Struct { fields, .. } => {
+        HirPat::Struct { entity, fields, .. } => {
             for field in fields {
                 if let Some(pat) = field.pattern {
+                    let name = field.field_name.as_str_or_empty();
+                    let field_ty =
+                        crate::flat_pat::struct_field_type(query, cx.root, *entity, name, ty);
                     let mut field_path = path.clone();
-                    field_path.push(PathElement::Field(
-                        field.field_name.as_str_or_empty().to_string(),
-                    ));
-                    collect_bindings(hir, query, pat, &field_path, matched, bindings);
+                    field_path.push(PathElement::Field(name.to_string()));
+                    collect_bindings(cx, pat, &field_ty, &field_path, bindings);
                 }
             }
         },
@@ -503,10 +567,10 @@ fn collect_bindings(
             let chosen = alternatives
                 .iter()
                 .copied()
-                .find(|&alt| or_alternative_matches(hir, query, alt, matched))
+                .find(|&alt| or_alternative_matches(hir, query, alt, cx.matched))
                 .or_else(|| alternatives.first().copied());
             if let Some(alt) = chosen {
-                collect_bindings(hir, query, alt, path, matched, bindings);
+                collect_bindings(cx, alt, ty, path, bindings);
             }
         },
 

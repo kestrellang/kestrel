@@ -8,6 +8,7 @@ pub mod cloneable_field;
 pub mod closure_field;
 pub mod closure_kind_convention;
 pub mod conformance_rules;
+pub mod conformance_target;
 pub mod default_param_ordering;
 pub mod duplicate_builtin;
 pub mod duplicate_callable;

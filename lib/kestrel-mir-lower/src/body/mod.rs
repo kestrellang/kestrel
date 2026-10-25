@@ -40,6 +40,9 @@ pub(crate) struct LoopInfo {
     /// Number of slots in the loop's tracker. Break takes the first
     /// N values from the active tracker to thread to the exit block.
     pub tracker_len: usize,
+    /// `var` init-states at each `break` (the loop's only exits), joined at
+    /// the exit block: a var moved before a break is uninit after the loop.
+    pub break_var_inits: Vec<Vec<(HirLocalId, VarInit)>>,
 }
 
 pub(crate) enum HirRef<'a> {
@@ -1604,6 +1607,28 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             if !already {
                 frame.entries.push(ScopeEntry::Owned(value));
             }
+        }
+    }
+
+    /// Destroy an expression statement's discarded `result` now if it is an
+    /// owned temporary the statement itself introduced (tracked in the
+    /// innermost scope at or after `mark`) and nothing borrows from it.
+    pub(crate) fn drop_discarded_result(&mut self, result: ValueId, mark: usize) {
+        if self.is_terminated() {
+            return;
+        }
+        let Some(frame) = self.scope_stack.last() else {
+            return;
+        };
+        let since = &frame.entries[mark.min(frame.entries.len())..];
+        let owned_here = since
+            .iter()
+            .any(|e| matches!(e, ScopeEntry::Owned(v) if *v == result));
+        let borrowed = since.iter().any(|e| {
+            matches!(e, ScopeEntry::Borrow(b) if self.body.value(*b).borrow_source == Some(result))
+        });
+        if owned_here && !borrowed {
+            self.emit_destroy_value(result);
         }
     }
 
@@ -3855,6 +3880,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             if let Some(arg) = self.try_lower_accessor_place_mut(expr_id) {
                 return arg;
             }
+            // A stored field / tuple element of an accessor element
+            // (`arr(0).i.x += v`): mutate it inside the accessor's writeback
+            // slot so the setter stores it back.
+            if matches!(
+                self.hir.exprs[expr_id],
+                HirExpr::Field { .. } | HirExpr::TupleIndex { .. }
+            ) && let Some(addr) = self.accessor_writeback_place(expr_id)
+            {
+                let pointee = self.resolve_expr_type(expr_id);
+                let borrow = self.emit_begin_mut_borrow_addr(addr, pointee);
+                return CallArg {
+                    value: borrow,
+                    convention,
+                };
+            }
             let val = self.lower_expr(expr_id);
             return self.prepare_call_arg(val, convention);
         }
@@ -4103,6 +4143,38 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // The pending writeback drains at the owning statement boundary,
         // calling `member`'s setter with the mutated slot.
         true
+    }
+
+    /// The address to write through for a place whose root is an accessor
+    /// (`arr(0)`, `o.proxy`) reached through stored fields and tuple elements
+    /// (`arr(0).i.x`, `arr(0).0`): the accessor's value is gotten into a
+    /// writeback slot (its setter runs when pending writebacks drain) and the
+    /// stored projections are field addresses into that slot. `None` when the
+    /// chain does not bottom out on a settable accessor. Without this a
+    /// nested store mutated a temporary copy and was lost.
+    pub(crate) fn accessor_writeback_place(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        if let Some((receiver, index_args, member, _)) = self.accessor_member_prelude(expr_id)
+            && self.ctx.find_setter_child(member).is_some()
+        {
+            return self.fabricate_setter_writeback_slot(expr_id, &receiver, &index_args, member);
+        }
+        let (base, idx) = match &self.hir.exprs[expr_id] {
+            HirExpr::Field { base, name, .. } => {
+                let base = *base;
+                let name = name.as_str_or_empty().to_string();
+                let base_ty = self.resolve_expr_type(base);
+                let entity = match self.ctx.module.ty_arena.get(base_ty) {
+                    MirTy::Named { entity, .. } => *entity,
+                    _ => return None,
+                };
+                (base, self.ctx.resolve_field_idx(entity, &name)?)
+            },
+            HirExpr::TupleIndex { base, index, .. } => (*base, FieldIdx::new(*index as usize)),
+            _ => return None,
+        };
+        let base_ty = self.resolve_expr_type(base);
+        let base_addr = self.accessor_writeback_place(base)?;
+        Some(self.emit_field_addr(base_addr, base_ty, idx))
     }
 
     /// Resolve an accessor-backed member expression (`x(i)`, `x.first`,

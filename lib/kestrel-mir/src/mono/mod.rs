@@ -92,6 +92,7 @@ pub fn monomorphize(
             &witnesses,
             &entity_names,
             key,
+            cloneable_protocol,
         );
         mono_bodies.push(result);
     }
@@ -397,6 +398,7 @@ fn monomorphize_body(
     witnesses: &[WitnessDef],
     entity_names: &IndexMap<Entity, String>,
     key: &InstantiationKey,
+    cloneable_protocol: Option<Entity>,
 ) -> MonoBodyResult {
     let func = functions
         .get(&key.func_entity)
@@ -465,6 +467,17 @@ fn monomorphize_body(
                     ..
                 }
             );
+            // `Cloneable.clone()` on an escaping closure: the closure is a
+            // shared handle with no witness function; cloning it is a retain.
+            if let Some(copy) =
+                closure_clone_as_copy(arena, &inst.kind, &subst, witnesses, cloneable_protocol)
+            {
+                adapted.push(Instruction {
+                    kind: copy,
+                    span: inst.span.clone(),
+                });
+                continue;
+            }
             substitute_inst(
                 arena,
                 witnesses,
@@ -548,6 +561,45 @@ fn monomorphize_body(
         extern_info,
         is_main,
     }
+}
+
+/// `x.clone()` dispatched through `Cloneable` at an `escaping` closure type
+/// becomes `copy_value x` (a refcount retain of the shared environment):
+/// closure types conform to `Cloneable` structurally, without a witness.
+fn closure_clone_as_copy(
+    arena: &mut TyArena,
+    kind: &InstKind,
+    subst: &SubstMap,
+    witnesses: &[WitnessDef],
+    cloneable_protocol: Option<Entity>,
+) -> Option<InstKind> {
+    let InstKind::Call {
+        result: Some(result),
+        callee:
+            Callee::Witness {
+                protocol,
+                method,
+                self_type,
+                ..
+            },
+        args,
+    } = kind
+    else {
+        return None;
+    };
+    if Some(*protocol) != cloneable_protocol || method.name != "clone" {
+        return None;
+    }
+    let concrete = collect::substitute_and_resolve(arena, witnesses, *self_type, subst);
+    let is_shared_closure = matches!(
+        arena.get(concrete),
+        MirTy::FuncThick { kind, .. } if kind.is_shared()
+    );
+    let receiver = args.first()?;
+    is_shared_closure.then_some(InstKind::CopyValue {
+        result: *result,
+        operand: receiver.value,
+    })
 }
 
 /// A requirement may take an argument `consuming` while the witness that

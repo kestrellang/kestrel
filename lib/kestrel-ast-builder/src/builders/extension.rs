@@ -207,13 +207,18 @@ fn collect_lhs_target_names(world: &World, entity: Entity) -> Vec<String> {
         }
         return names;
     }
-    let AstType::Named { segments, .. } = &target.0 else {
-        return names;
+    // The target's type arguments: `Array[T]`, or the sugar spellings
+    // `[T]`, `T?` and `[K: V]`.
+    let args: Vec<&AstType> = match &target.0 {
+        AstType::Named { segments, .. } => match segments.last() {
+            Some(last) => last.type_args.iter().collect(),
+            None => return names,
+        },
+        AstType::Array(elem, _) | AstType::Optional(elem, _) => vec![elem.as_ref()],
+        AstType::Dictionary(key, val, _) => vec![key.as_ref(), val.as_ref()],
+        _ => return names,
     };
-    let Some(last) = segments.last() else {
-        return names;
-    };
-    for arg in &last.type_args {
+    for arg in args {
         if let AstType::Named { segments: segs, .. } = arg
             && segs.len() == 1
             && segs[0].type_args.is_empty()

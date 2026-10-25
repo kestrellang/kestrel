@@ -569,6 +569,11 @@ impl OssaBodyCtx<'_, '_> {
                 } else {
                     self.emit_literal(Immediate::unit())
                 };
+                // The value itself diverged (`return return x`, `return
+                // panic()`): its own exit already terminated the block.
+                if self.is_terminated() {
+                    return ret_val;
+                }
                 let ret_val = self.prepare_return_value(ret_val);
                 let ret_val = if is_failure_return {
                     self.emit_init_partial_drops(ret_val)
@@ -1286,6 +1291,10 @@ impl OssaBodyCtx<'_, '_> {
                 {
                     // `o.proxy.field = v` through a get/set computed property:
                     // handled by a get→modify→set rewrite (#139).
+                } else if let Some(base_addr) = self.accessor_writeback_place(base) {
+                    // `arr(0).i.x = v`: the same rewrite through stored fields.
+                    let addr = self.emit_field_addr(base_addr, base_ty, field_idx);
+                    self.emit_store_assign(addr, rhs);
                 } else {
                     let base_val = self.lower_expr(base);
                     let base_addr = self.emit_begin_mut_borrow(base_val);
@@ -1305,6 +1314,10 @@ impl OssaBodyCtx<'_, '_> {
                 if let Some(base_addr) = self.try_field_addr_chain(base) {
                     let elem_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
                     self.emit_store_assign(elem_addr, rhs);
+                } else if let Some(base_addr) = self.accessor_writeback_place(base) {
+                    // `arr(0).0 = v`: get→modify→set through the accessor.
+                    let addr = self.emit_field_addr(base_addr, base_ty, field_idx);
+                    self.emit_store_assign(addr, rhs);
                 } else {
                     let base_val = self.lower_expr(base);
                     let base_addr = self.emit_begin_mut_borrow(base_val);

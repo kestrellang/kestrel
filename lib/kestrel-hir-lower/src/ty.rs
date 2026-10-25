@@ -23,6 +23,13 @@ use crate::ctx::LowerCtx;
 
 // ===== Standalone type lowering =====
 
+thread_local! {
+    /// Trivial aliases currently being expanded by `lower_ast_type` (a
+    /// re-entry is a cycle). Pushes nest strictly; popped on unwind too.
+    static EXPANDING_ALIASES: std::cell::RefCell<Vec<Entity>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Lower an AstType to HirTy using name resolution.
 ///
 /// This is the shared core used by both body lowering (LowerCtx::lower_type)
@@ -292,6 +299,17 @@ fn build_hir_ty_for_entity(
                 && args.is_empty()
                 && let Some(ann) = ctx.get::<TypeAnnotation>(entity)
             {
+                // A cyclic alias (`type A = B; type B = A`) would expand
+                // forever; the E447 analyzer reports it, so stop here.
+                if EXPANDING_ALIASES.with(|s| s.borrow().contains(&entity)) {
+                    return HirTy::Error(span.clone());
+                }
+                EXPANDING_ALIASES.with(|s| s.borrow_mut().push(entity));
+                let _guard = kestrel_hecs::guard::OnDrop::new(|| {
+                    EXPANDING_ALIASES.with(|s| {
+                        s.borrow_mut().pop();
+                    });
+                });
                 return lower_ast_type(ctx, owner, root, &ann.0);
             }
             // Non-associated aliases (parameterized or constrained) flow as
@@ -808,7 +826,7 @@ fn lower_sugar_type(
         .map(|t| lower_ast_type(ctx, owner, root, t))
         .collect();
 
-    if let Some(entity) = resolve_sugar_type(ctx, owner, root, builtin, name) {
+    if let Some(entity) = kestrel_name_res::resolve_sugar_type(ctx, owner, root, builtin, name) {
         let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
         // Dispatch by NodeKind — Optional is an enum, Array/Dictionary are structs.
         match ctx.get::<NodeKind>(entity).cloned() {
@@ -867,72 +885,6 @@ fn fill_type_arg_defaults(
         }
     }
     args
-}
-
-/// Resolve the type that a piece of type sugar (`[T]`, `T?`, `[K: V]`,
-/// `T throws E`) denotes.
-///
-/// Goes through the `@builtin(.XTypeOperator)` lang item, which is what the
-/// stdlib annotation is *for*. Before this, the four annotations in `lang/std`
-/// had zero readers and the sugar resolved the hardcoded name `"Array"` in the
-/// **user's** scope — so `struct Array[T] {}` in a user file silently captured
-/// `[Int]`, and every array literal in that file failed to conform to
-/// `_ExpressibleByArrayLiteral`.
-///
-/// Falls back to the name for worlds built without the stdlib (unit tests,
-/// `--no-std`), where there is no lang item to find.
-fn resolve_sugar_type(
-    ctx: &QueryContext<'_>,
-    owner: Entity,
-    root: Entity,
-    builtin: Builtin,
-    name: &str,
-) -> Option<Entity> {
-    if let Some(alias) = ctx.query(ResolveBuiltin { builtin, root })
-        && let Some(target) = sugar_alias_target(ctx, root, alias)
-    {
-        return Some(target);
-    }
-    resolve_std_type(ctx, owner, root, name)
-}
-
-/// Follow `@builtin(.ArrayTypeOperator) type ArrayTypeOperator[T] = Array[T]`
-/// to `Array`.
-///
-/// The target is resolved with the **alias** as context, so it lands in the
-/// stdlib's own scope no matter what the user file declares or imports.
-fn sugar_alias_target(ctx: &QueryContext<'_>, root: Entity, alias: Entity) -> Option<Entity> {
-    let annotation = ctx.get::<TypeAnnotation>(alias)?;
-    let AstType::Named { segments, .. } = &annotation.0 else {
-        return None;
-    };
-    let segments: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-    match ctx.query(ResolveTypePath {
-        segments,
-        context: alias,
-        root,
-    }) {
-        TypeResolution::Found(entity) => Some(entity),
-        _ => None,
-    }
-}
-
-/// Resolve a well-known standard library type name (e.g. "Array", "Optional").
-fn resolve_std_type(
-    ctx: &QueryContext<'_>,
-    owner: Entity,
-    root: Entity,
-    name: &str,
-) -> Option<Entity> {
-    let result = ctx.query(ResolveTypePath {
-        segments: vec![name.to_string()],
-        context: owner,
-        root,
-    });
-    match result {
-        TypeResolution::Found(entity) => Some(entity),
-        _ => None,
-    }
 }
 
 // ===== LowerCtx delegation =====
@@ -1287,6 +1239,20 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
             let lowered =
                 reject_ref_types(ctx, lowered, RefPosition::GenericArg, RefPolicy::Strict);
             return Some(vec![lowered]);
+        }
+        // Sugar targets (`extend [T]`, `extend T?`, `extend [K: V]`) carry
+        // their type arguments inline.
+        let sugar_args: Option<Vec<&AstType>> = match &target.0 {
+            AstType::Array(elem, _) | AstType::Optional(elem, _) => Some(vec![elem.as_ref()]),
+            AstType::Dictionary(key, val, _) => Some(vec![key.as_ref(), val.as_ref()]),
+            _ => None,
+        };
+        if let Some(args) = sugar_args {
+            return Some(
+                args.into_iter()
+                    .map(|a| lower_ast_type(ctx, self.extension, self.root, a))
+                    .collect(),
+            );
         }
         let AstType::Named { segments, .. } = &target.0 else {
             return Some(vec![]);

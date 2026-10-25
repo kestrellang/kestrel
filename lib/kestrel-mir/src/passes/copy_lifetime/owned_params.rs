@@ -41,12 +41,17 @@ pub(super) fn run(mono: &mut MonoModule) -> usize {
     let original_count = mono.functions.len();
     for fi in 0..original_count {
         // One site at a time: a rewrite deletes instructions, so sites found
-        // in the same scan could overlap and hold stale indices.
+        // in the same scan could overlap and hold stale indices. A rewrite
+        // only touches instructions from the site's borrow on, so the next
+        // scan resumes there (the rewritten call itself may specialize again)
+        // instead of rescanning the whole body each time.
+        let mut from = (0, 0);
         while let Some(site) = mono.functions[fi]
             .body
             .as_ref()
-            .and_then(|b| find_site(b, &consumable, &variants))
+            .and_then(|b| find_site(b, &consumable, &variants, from))
         {
+            from = (site.block, site.borrow_i);
             let vid = variants.get_or_make(mono, site.origin, &site.owned);
             let body = mono.functions[fi].body.as_mut().expect("site has a body");
             rewrite_site(body, &site, vid);
@@ -169,9 +174,11 @@ fn find_site(
     body: &OssaBody,
     consumable: &FxHashSet<(usize, usize)>,
     variants: &Variants,
+    (from_block, from_inst): (usize, usize),
 ) -> Option<Site> {
-    for (bi, block) in body.blocks.iter().enumerate() {
-        for (ci, inst) in block.insts.iter().enumerate() {
+    for (bi, block) in body.blocks.iter().enumerate().skip(from_block) {
+        let start = if bi == from_block { from_inst } else { 0 };
+        for (ci, inst) in block.insts.iter().enumerate().skip(start) {
             let InstKind::Call {
                 result,
                 callee: Callee::Resolved(fid),

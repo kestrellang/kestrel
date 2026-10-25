@@ -224,6 +224,8 @@ pub enum Constraint {
         name: String,
         /// TyVars for each sub-pattern binding (one per payload field).
         arg_tys: Vec<TyVar>,
+        /// Each sub-pattern's label (`.A(x: a)`), checked against the case.
+        labels: Vec<Option<String>>,
         span: Span,
     },
 

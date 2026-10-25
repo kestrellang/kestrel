@@ -80,7 +80,11 @@ impl OssaBodyCtx<'_, '_> {
                 }
             },
             HirStmt::Expr { expr, .. } => {
-                self.lower_expr(*expr);
+                // A discarded owned result drops at the end of its statement,
+                // not at scope exit (drop-semantics.md §6).
+                let mark = self.scope_stack.last().map_or(0, |f| f.entries.len());
+                let result = self.lower_expr(*expr);
+                self.drop_discarded_result(result, mark);
             },
             HirStmt::Deinit {
                 local: Some(hir_local),

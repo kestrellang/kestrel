@@ -36,6 +36,7 @@ pub use protocol_members::{
 };
 pub use resolve_builtin::{
     BuiltinIndex, BuiltinMap, EntityBuiltin, ResolveBuiltin, builtin_annotation_allowed,
+    resolve_sugar_type,
 };
 pub use resolve_module::{ResolveModulePath, StdModules};
 pub use resolve_name::{NameResolution, ResolveName};

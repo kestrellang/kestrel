@@ -631,6 +631,18 @@ pub(super) fn solve_member(
         },
     };
 
+    // An enum case names a value of the enum TYPE (`E.b`); reaching one
+    // through a value (`E.a.b`, `x.b`) is not member access (it used to
+    // type-check as the case's constructor result).
+    if ctx.query_ctx.get::<NodeKind>(resolution.entity) == Some(&NodeKind::EnumCase) {
+        ctx.poison(result);
+        return SolveResult::Error(InferError::MemberIsStatic {
+            receiver,
+            name: name.to_string(),
+            span,
+        });
+    }
+
     // Applicability (bidi §5.1 steps 4 and 6): the declaring extension's
     // target pattern and where clauses — equality clauses included (N2) —
     // must hold for this receiver. A member resolved THROUGH a protocol (the
@@ -1236,6 +1248,23 @@ pub(super) fn solve_implicit(
         },
     };
 
+    // `.name` has no receiver, so it can only name a static member, an enum
+    // case or an initializer. An instance method/field has nothing to bind
+    // `self` to (it used to be called with no `self` argument).
+    let is_instance_member = matches!(
+        ctx.query_ctx.get::<NodeKind>(resolution.entity),
+        Some(NodeKind::Function | NodeKind::Field)
+    ) && ctx
+        .query_ctx
+        .get::<kestrel_ast_builder::Static>(resolution.entity)
+        .is_none();
+    if is_instance_member {
+        return SolveResult::Error(InferError::InstanceMethodAsStatic {
+            name: name.to_string(),
+            span,
+        });
+    }
+
     // Check labels match for enum case calls (e.g., .Circle(radius: 5.0))
     if ctx.query_ctx.get::<NodeKind>(resolution.entity) == Some(&NodeKind::EnumCase)
         && let Some(callable) = ctx.query_ctx.get::<Callable>(resolution.entity)
@@ -1300,6 +1329,7 @@ pub(super) fn solve_implicit_pat(
     scrutinee: TyVar,
     name: &str,
     arg_tys: Vec<TyVar>,
+    labels: Vec<Option<String>>,
     span: Span,
 ) -> SolveResult {
     let resolved = ctx.resolve(scrutinee);
@@ -1308,6 +1338,7 @@ pub(super) fn solve_implicit_pat(
             scrutinee,
             name: name.to_string(),
             arg_tys,
+            labels,
             span,
         });
     }
@@ -1361,6 +1392,8 @@ pub(super) fn solve_implicit_pat(
         }
         return SolveResult::Solved;
     };
+
+    crate::generate::check_variant_pattern_labels(ctx, case_entity, &labels, &span);
 
     // Build substitution map: enum type params → scrutinee type args
     let type_params: Vec<Entity> = ctx
