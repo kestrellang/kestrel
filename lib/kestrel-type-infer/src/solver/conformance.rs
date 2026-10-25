@@ -29,13 +29,15 @@ pub(super) fn solve_applicable(
                 span,
             })
         },
-        kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => SolveResult::Deferred(Constraint::Applicable {
-            receiver,
-            source,
-            name,
-            is_call,
-            span,
-        }),
+        kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => {
+            SolveResult::Deferred(Constraint::Applicable {
+                receiver,
+                source,
+                name,
+                is_call,
+                span,
+            })
+        },
     }
 }
 
@@ -51,7 +53,9 @@ pub(super) fn applicability(
         ApplicableSource::Extension(ext) => {
             crate::solver_entail::extension_applicability(ctx, ext, recv)
         },
-        ApplicableSource::Protocol(proto) => crate::solver_entail::kind_conformance(ctx, recv, proto),
+        ApplicableSource::Protocol(proto) => {
+            crate::solver_entail::kind_conformance(ctx, recv, proto)
+        },
     }
 }
 
@@ -564,7 +568,11 @@ pub(super) struct ApplicableConformance {
 /// nominal-vs-nominal entity mismatch (recursively through args) counts;
 /// unresolved vars, `Param` patterns, and every non-nominal shape are
 /// "can't rule out" — this must never reject on incompleteness.
-pub(super) fn tv_definitely_incompatible(ctx: &InferCtx<'_>, tv: TyVar, hir: &kestrel_hir::ty::HirTy) -> bool {
+pub(super) fn tv_definitely_incompatible(
+    ctx: &InferCtx<'_>,
+    tv: TyVar,
+    hir: &kestrel_hir::ty::HirTy,
+) -> bool {
     use kestrel_hir::ty::HirTy;
     let (h_entity, h_args) = match hir {
         HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => (*entity, args),

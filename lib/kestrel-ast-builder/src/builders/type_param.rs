@@ -31,7 +31,7 @@ pub fn build_type_parameters(
         world.set(entity, Name(name));
         world.set(entity, FileId(file_entity));
         world.set(entity, DeclSpan(get_decl_span(param.syntax(), file_id)));
-        world.set(entity, CstNode(SyntaxNodePtr::new(&param.syntax())));
+        world.set(entity, CstNode(SyntaxNodePtr::new(param.syntax())));
         world.set_parent(entity, parent);
 
         if let Some(ty) = param

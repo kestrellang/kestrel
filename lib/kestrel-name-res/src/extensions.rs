@@ -124,10 +124,7 @@ impl QueryFn for ExtensionLhsParams {
             .0
             .iter()
             .copied()
-            .filter(|&tp| {
-                ctx.get::<Name>(tp)
-                    .is_some_and(|n| lhs.0.iter().any(|l| *l == n.0))
-            })
+            .filter(|&tp| ctx.get::<Name>(tp).is_some_and(|n| lhs.0.contains(&n.0)))
             .collect()
     }
 }

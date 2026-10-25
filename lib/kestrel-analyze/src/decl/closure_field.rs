@@ -87,7 +87,9 @@ impl DeclCheck for ClosureFieldAnalyzer {
             },
             _ => return vec![],
         };
-        let Some(kind) = types.iter().find_map(|t| view_closure_kind(cx.query, cx.root, t, 0))
+        let Some(kind) = types
+            .iter()
+            .find_map(|t| view_closure_kind(cx.query, cx.root, t, 0))
         else {
             return vec![];
         };

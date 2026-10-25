@@ -482,8 +482,7 @@ fn count_int_literal(hir: &HirBody, marker: i128) -> usize {
 /// dedup them (fragility audit F31).
 #[test]
 fn a_conditions_else_body_is_lowered_once_per_chain() {
-    let source =
-        "module TestMod\nfunc foo(x: T, y: T) { if let .Some(a) = x, let .Some(b) = y { 1 } else { 999 } }";
+    let source = "module TestMod\nfunc foo(x: T, y: T) { if let .Some(a) = x, let .Some(b) = y { 1 } else { 999 } }";
     let (world, root) = build_from_source(source);
     let ctx = world.query_context();
     let hir = lower_func(&ctx, root, "TestMod", "foo");

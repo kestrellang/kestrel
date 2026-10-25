@@ -574,7 +574,8 @@ public struct B {}
         );
         let lets = count_nodes(&result.tree(), SyntaxKind::VariableDeclaration);
         assert_eq!(
-            lets, 2,
+            lets,
+            2,
             "both `let` statements must still parse around the garbage; tree:\n{:#?}",
             result.tree()
         );
@@ -600,7 +601,8 @@ public struct B {}
 
         let lets = count_nodes(&result.tree(), SyntaxKind::VariableDeclaration);
         assert_eq!(
-            lets, 2,
+            lets,
+            2,
             "both `let` statements must survive the stray `??`; tree:\n{:#?}",
             result.tree()
         );

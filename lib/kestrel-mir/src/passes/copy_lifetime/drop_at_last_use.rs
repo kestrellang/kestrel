@@ -336,7 +336,7 @@ fn scan_copy(
     if super::terminator_value_use(term).is_some_and(|v| family.contains(&v)) {
         return None;
     }
-    if destroy.is_some() == !forwards.is_empty() {
+    if destroy.is_some() != forwards.is_empty() {
         return None; // must leave the block exactly one way
     }
     Some(CopyPlan {
@@ -397,7 +397,12 @@ fn scan_let_slot(
     let mut addrs: FxHashSet<ValueId> = FxHashSet::from_iter([slot]);
     for (b, block) in body.blocks.iter().enumerate() {
         let term_uses = block.terminator.kind.operands();
-        if b != bi && block.insts.iter().any(|i| i.kind.operands().contains(&slot)) {
+        if b != bi
+            && block
+                .insts
+                .iter()
+                .any(|i| i.kind.operands().contains(&slot))
+        {
             return None;
         }
         if term_uses.contains(&slot) {
@@ -418,9 +423,9 @@ fn scan_let_slot(
         }
         match inst.kind {
             InstKind::StoreInit { address, value } if address == slot && store.is_none() => {
-                let is_copy = block.insts[..j].iter().any(|d| {
-                    matches!(d.kind, InstKind::CopyValue { result, .. } if result == value)
-                });
+                let is_copy = block.insts[..j].iter().any(
+                    |d| matches!(d.kind, InstKind::CopyValue { result, .. } if result == value),
+                );
                 if !is_copy || facts.observable(mono, body.value(value).ty) {
                     return None;
                 }
@@ -439,12 +444,17 @@ fn scan_let_slot(
                 addrs.insert(result);
                 continue;
             },
-            InstKind::BeginBorrowAddr { result, address, .. } if addrs.contains(&address) => {
+            InstKind::BeginBorrowAddr {
+                result, address, ..
+            } if addrs.contains(&address) => {
                 family.insert(result);
             },
             _ if touches_addr => return None, // a write, take, or escape of the address
             _ if !super::reads_only(&inst.kind)
-                && !matches!(inst.kind, InstKind::Call { .. } | InstKind::EndBorrow { .. }) =>
+                && !matches!(
+                    inst.kind,
+                    InstKind::Call { .. } | InstKind::EndBorrow { .. }
+                ) =>
             {
                 return None;
             },
@@ -468,7 +478,11 @@ fn scan_let_slot(
     store?;
     // A borrow (or projection) carried out of the block outlives the move.
     let term = &block.terminator.kind;
-    if term.operands().iter().any(|o| family.contains(o) || addrs.contains(o)) {
+    if term
+        .operands()
+        .iter()
+        .any(|o| family.contains(o) || addrs.contains(o))
+    {
         return None;
     }
     (last_use < destroy_i).then_some((destroy_i, last_use))

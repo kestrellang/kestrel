@@ -31,7 +31,7 @@ pub fn build_function(
     world.set(entity, NodeKind::Function);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
+    world.set(entity, CstNode(SyntaxNodePtr::new(syntax)));
     world.set_parent(entity, parent);
 
     if let Some(name) = node.name_text() {
@@ -109,7 +109,7 @@ pub fn build_initializer(
     world.set(entity, NodeKind::Initializer);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
+    world.set(entity, CstNode(SyntaxNodePtr::new(syntax)));
     world.set_parent(entity, parent);
 
     let params = extract_params(world, node.parameter_list(), entity, file_entity, file_id);
@@ -173,7 +173,7 @@ pub fn build_deinit(
     world.set(entity, NodeKind::Deinit);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
+    world.set(entity, CstNode(SyntaxNodePtr::new(syntax)));
     world.set_parent(entity, parent);
 
     // Deinits receive &var self. The caller owns the memory and handles
@@ -230,7 +230,7 @@ fn desugar_opaque_params(
             world.set(tp, Name(tp_name.clone()));
             world.set(tp, FileId(file_entity));
             world.set(tp, DeclSpan(tp_span.clone()));
-            world.set(tp, CstNode(SyntaxNodePtr::new(&cst_node)));
+            world.set(tp, CstNode(SyntaxNodePtr::new(cst_node)));
             world.set_parent(tp, func_entity);
             synthetic_params.push(tp);
 
@@ -246,7 +246,7 @@ fn desugar_opaque_params(
             new_where_constraints.push(WhereConstraint::Bound {
                 subject: tp_ast.clone(),
                 protocols: bounds.clone(),
-                node: SyntaxNodePtr::new(&cst_node),
+                node: SyntaxNodePtr::new(cst_node),
             });
 
             // `some P and not Copyable` in param position desugars to the
@@ -255,7 +255,7 @@ fn desugar_opaque_params(
                 new_where_constraints.push(WhereConstraint::NegativeBound {
                     subject: tp_ast.clone(),
                     protocol: (**negative).clone(),
-                    node: SyntaxNodePtr::new(&cst_node),
+                    node: SyntaxNodePtr::new(cst_node),
                 });
             }
 

@@ -252,7 +252,7 @@ fn member_uses(
         }
     }
     // Leaves the block exactly one way: destroyed here, or forwarded.
-    if destroyed == !forwards.is_empty() {
+    if destroyed != forwards.is_empty() {
         return None;
     }
     Some(forwards)

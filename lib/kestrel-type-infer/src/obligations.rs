@@ -37,24 +37,36 @@ const DEFAULT_RULES: &[(&str, DefaultRule)] = &[
     ("rule L", solver::apply_operator_literal_adoption),
     // Rule C, then literal defaults, holding back arguments of calls still
     // waiting on their receiver and interpolation accumulators.
-    ("literal defaults (strict)", |ctx| solver::apply_literal_defaults(ctx, 0)),
+    ("literal defaults (strict)", |ctx| {
+        solver::apply_literal_defaults(ctx, 0)
+    }),
     // A ref-initialized binding nothing else pinned takes its copy-out
     // decay; it can gate the literals the next rule would default.
     ("ref decay", solver::apply_ref_decay_defaults),
     // Interpolation accumulators default too (so `"\(n)".bytes` resolves).
-    ("literal defaults (relaxed)", |ctx| solver::apply_literal_defaults(ctx, 1)),
+    ("literal defaults (relaxed)", |ctx| {
+        solver::apply_literal_defaults(ctx, 1)
+    }),
 ];
 
 /// Finish inference for a body: flush, default, report.
 pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // P5 audit: which constraint kinds the walker left for the flush.
-    for c in ctx.constraints.iter().filter(|_| kestrel_debug::is_enabled("p5")) {
+    for c in ctx
+        .constraints
+        .iter()
+        .filter(|_| kestrel_debug::is_enabled("p5"))
+    {
         let kind = format!("{c:?}");
         let kind = kind.split([' ', '{', '(']).next().unwrap_or("");
         kestrel_debug::ktrace!("p5", "{kind}");
     }
     fixpoint(ctx);
-    for c in ctx.constraints.iter().filter(|_| kestrel_debug::is_enabled("p5")) {
+    for c in ctx
+        .constraints
+        .iter()
+        .filter(|_| kestrel_debug::is_enabled("p5"))
+    {
         let kind = format!("{c:?}");
         let kind = kind.split([' ', '{', '(']).next().unwrap_or("");
         kestrel_debug::ktrace!("p5", "after-flush {kind}");

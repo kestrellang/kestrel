@@ -5,6 +5,7 @@
 
 pub mod builtin_marker_protocol;
 pub mod cloneable_field;
+pub mod closure_field;
 pub mod closure_kind_convention;
 pub mod conformance_rules;
 pub mod default_param_ordering;
@@ -30,7 +31,6 @@ pub mod recursive_enum;
 pub mod ref_return;
 pub mod static_context;
 pub mod static_value_type;
-pub mod closure_field;
 pub mod subscript;
 pub mod type_alias_validation;
 pub mod visibility;

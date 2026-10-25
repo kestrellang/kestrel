@@ -346,8 +346,13 @@ pub(crate) fn lower_where_clauses(ctx: &mut LowerCtx, owner: Entity, out: &mut W
                 let Some(subject) = subject_entity(subject) else {
                     continue;
                 };
-                let args = protocol_type_args.iter().filter_map(type_arg_entity).collect();
-                out.add_constraint(WhereConstraint::implements_with_args(subject, *protocol, args));
+                let args = protocol_type_args
+                    .iter()
+                    .filter_map(type_arg_entity)
+                    .collect();
+                out.add_constraint(WhereConstraint::implements_with_args(
+                    subject, *protocol, args,
+                ));
             },
             Clause::NotBound { subject, protocol } => {
                 if let Some(subject) = subject_entity(subject) {
@@ -394,7 +399,9 @@ fn type_arg_entity(ty: &kestrel_hir::ty::HirTy) -> Option<Entity> {
 
 /// A where-clause subject as a type. `Self` has no type at this vantage (it
 /// is the receiver mono judges), so a `Self`-rooted subject is skipped.
-fn subject_hir(subject: &kestrel_type_infer::resolve::WhereSubject) -> Option<kestrel_hir::ty::HirTy> {
+fn subject_hir(
+    subject: &kestrel_type_infer::resolve::WhereSubject,
+) -> Option<kestrel_hir::ty::HirTy> {
     use kestrel_hir::ty::HirTy;
     use kestrel_type_infer::resolve::WhereSubject;
     let span = kestrel_span::Span::synthetic(0);

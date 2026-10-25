@@ -680,8 +680,8 @@ fn compile_op1<'ctx>(
         // NaN -> 0, +inf -> INT_MAX, -inf -> INT_MIN, out-of-range clamped.
         // Uses llvm.fptosi.sat (available since LLVM 13) to avoid UB.
         Op::FloatToInt(fb, ib) => {
-            let int_ty: BasicTypeEnum = int_bits_to_scalar(ib).llvm(cx).into();
-            let float_ty: BasicTypeEnum = float_bits_to_scalar(fb).llvm(cx).into();
+            let int_ty: BasicTypeEnum = int_bits_to_scalar(ib).llvm(cx);
+            let float_ty: BasicTypeEnum = float_bits_to_scalar(fb).llvm(cx);
             call_intrinsic(
                 &fc.ctx.llmod,
                 builder,
@@ -696,12 +696,11 @@ fn compile_op1<'ctx>(
                 kestrel_mir::FloatBits::F32 => int_bits_to_scalar(kestrel_mir::IntBits::I32),
                 _ => int_bits_to_scalar(kestrel_mir::IntBits::I64),
             }
-            .llvm(cx)
-            .into();
+            .llvm(cx);
             builder.build_bit_cast(arg, int_ty, "f2bits").unwrap()
         },
         Op::BitsToFloat(fb) => {
-            let float_ty: BasicTypeEnum = float_bits_to_scalar(fb).llvm(cx).into();
+            let float_ty: BasicTypeEnum = float_bits_to_scalar(fb).llvm(cx);
             builder.build_bit_cast(arg, float_ty, "bits2f").unwrap()
         },
         Op::FloatWiden(_, to) => builder

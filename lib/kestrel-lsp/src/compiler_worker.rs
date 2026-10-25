@@ -776,14 +776,22 @@ mod tests {
         let mut state = WorkerState::fresh();
         sync_stdlib(&mut state, &HashMap::new());
 
-        sync_user(&mut state, &[("/tmp/a.ks".to_string(), v1.to_string())].into(), false);
+        sync_user(
+            &mut state,
+            &[("/tmp/a.ks".to_string(), v1.to_string())].into(),
+            false,
+        );
         let before = full_check_messages(&state);
         assert!(
             before.iter().any(|m| m.contains("nope")),
             "v1 should report the undefined name: {before:?}"
         );
 
-        sync_user(&mut state, &[("/tmp/a.ks".to_string(), v2.to_string())].into(), false);
+        sync_user(
+            &mut state,
+            &[("/tmp/a.ks".to_string(), v2.to_string())].into(),
+            false,
+        );
         let worker = full_check_messages(&state);
         assert_eq!(
             worker,
@@ -807,7 +815,11 @@ mod tests {
         sync_user(&mut state, &both, false);
         assert!(!full_check_messages(&state).is_empty());
 
-        sync_user(&mut state, &[("/tmp/b.ks".to_string(), b.to_string())].into(), false);
+        sync_user(
+            &mut state,
+            &[("/tmp/b.ks".to_string(), b.to_string())].into(),
+            false,
+        );
         assert_eq!(
             full_check_messages(&state),
             fresh_build_messages(&[("/tmp/b.ks", b)]),

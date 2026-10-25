@@ -1094,13 +1094,12 @@ fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> Re
     // ResolvedTy (`Tuple([])` / `Never`) — a witness spelling `()`/`!` directly
     // lowers to that, so a `Named(lang.())` self would never compare equal and a
     // `-> Self` requirement false-fires E458 (#215).
-    if kestrel_name_res::extensions::resolve_lang_child(&cx.query, cx.root, "()")
+    if kestrel_name_res::extensions::resolve_lang_child(cx.query, cx.root, "()")
         == Some(type_entity)
     {
         return ResolvedTy::Tuple(Vec::new());
     }
-    if kestrel_name_res::extensions::resolve_lang_child(&cx.query, cx.root, "!")
-        == Some(type_entity)
+    if kestrel_name_res::extensions::resolve_lang_child(cx.query, cx.root, "!") == Some(type_entity)
     {
         return ResolvedTy::Never;
     }
@@ -1682,10 +1681,12 @@ fn substitute_clause(
             subject: substitute_subject(subject, proto_subs)?,
             rhs: rhs.try_rename_params(&mut |p| rename_param(p, proto_subs))?,
         }),
-        ResolvedWhereClause::NotBound { subject, protocol } => Some(ResolvedWhereClause::NotBound {
-            subject: substitute_subject(subject, proto_subs)?,
-            protocol: *protocol,
-        }),
+        ResolvedWhereClause::NotBound { subject, protocol } => {
+            Some(ResolvedWhereClause::NotBound {
+                subject: substitute_subject(subject, proto_subs)?,
+                protocol: *protocol,
+            })
+        },
     }
 }
 

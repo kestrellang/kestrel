@@ -367,7 +367,6 @@ pub struct InferCtx<'a> {
     /// wins. Keyed structurally, not by TyVar, because the duplicate sites
     /// form independent TyVar trees for the same concrete type.
     pub(crate) reported_typearg_conformance: HashSet<(String, Entity)>,
-
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -850,8 +849,17 @@ impl<'a> InferCtx<'a> {
     /// referenced TyVars to `TyKind::Error`.
     pub fn report_error(&mut self, err: InferError) -> TyVar {
         let detail = crate::result::describe_error(self, &err);
-        kestrel_debug::ktrace!("infer-err", "{detail:?} in {:?}", self.query_ctx.get::<kestrel_ast_builder::Name>(self.owner).map(|n| n.0.clone()));
-        let cascade = err.mentioned_types().into_iter().any(|tv| self.contains_error(tv));
+        kestrel_debug::ktrace!(
+            "infer-err",
+            "{detail:?} in {:?}",
+            self.query_ctx
+                .get::<kestrel_ast_builder::Name>(self.owner)
+                .map(|n| n.0.clone())
+        );
+        let cascade = err
+            .mentioned_types()
+            .into_iter()
+            .any(|tv| self.contains_error(tv));
         self.errors.push(err);
         self.error_details.push(detail);
         self.error_is_cascade.push(cascade);
@@ -915,14 +923,18 @@ impl<'a> InferCtx<'a> {
             | TyKind::Protocol { args, .. }
             | TyKind::TypeAlias { args, .. } => args.clone(),
             TyKind::Tuple(elems) => elems.clone(),
-            TyKind::Function { params, ret, .. } => {
-                params.iter().copied().chain(std::iter::once(*ret)).collect()
-            },
+            TyKind::Function { params, ret, .. } => params
+                .iter()
+                .copied()
+                .chain(std::iter::once(*ret))
+                .collect(),
             TyKind::Ref { pointee, .. } => vec![*pointee],
             TyKind::AssocProjection { base, .. } => vec![*base],
             _ => Vec::new(),
         };
-        children.into_iter().any(|c| self.contains_error_at(c, depth + 1))
+        children
+            .into_iter()
+            .any(|c| self.contains_error_at(c, depth + 1))
     }
 
     pub fn poison(&mut self, tv: TyVar) {

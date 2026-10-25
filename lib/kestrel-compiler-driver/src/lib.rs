@@ -476,7 +476,10 @@ fn format_error(err: &InferError) -> String {
             format!("TypeParamAsValue at {}:{}", span.file_id, span.start)
         },
         InferError::TypeMustBeKnown { member, .. } => {
-            format!("TypeMustBeKnown '{}' at {}:{}", member, span.file_id, span.start)
+            format!(
+                "TypeMustBeKnown '{}' at {}:{}",
+                member, span.file_id, span.start
+            )
         },
         InferError::TypeArgCountMismatch { expected, got, .. } => {
             format!(

@@ -115,7 +115,10 @@ pub(crate) fn char_interval(ctor: &Constructor) -> Option<(i128, i128)> {
 /// Cut `intervals` at every start and every end + 1, keeping the pieces that
 /// some interval covers. Returned sorted and disjoint.
 fn split_intervals(intervals: &[(i128, i128)]) -> Vec<(i128, i128)> {
-    let mut cuts: Vec<i128> = intervals.iter().flat_map(|&(lo, hi)| [lo, hi + 1]).collect();
+    let mut cuts: Vec<i128> = intervals
+        .iter()
+        .flat_map(|&(lo, hi)| [lo, hi + 1])
+        .collect();
     cuts.sort_unstable();
     cuts.dedup();
     cuts.windows(2)
@@ -139,8 +142,16 @@ fn int_piece(lo: i128, hi: i128) -> Constructor {
 /// A char piece. Surrogate codepoints are not chars, so a piece's ends are
 /// pulled out of the surrogate block; a piece inside it holds no char at all.
 fn char_piece(lo: i128, hi: i128) -> Option<Constructor> {
-    let lo = if (SURROGATE_LO..=SURROGATE_HI).contains(&lo) { SURROGATE_HI + 1 } else { lo };
-    let hi = if (SURROGATE_LO..=SURROGATE_HI).contains(&hi) { SURROGATE_LO - 1 } else { hi };
+    let lo = if (SURROGATE_LO..=SURROGATE_HI).contains(&lo) {
+        SURROGATE_HI + 1
+    } else {
+        lo
+    };
+    let hi = if (SURROGATE_LO..=SURROGATE_HI).contains(&hi) {
+        SURROGATE_LO - 1
+    } else {
+        hi
+    };
     if lo > hi {
         return None;
     }
@@ -150,7 +161,11 @@ fn char_piece(lo: i128, hi: i128) -> Option<Constructor> {
     }
     Some(Constructor::CharRange {
         start: if lo == 0 { None } else { Some(as_char(lo)?) },
-        end: if hi == CHAR_MAX { None } else { Some(as_char(hi)?) },
+        end: if hi == CHAR_MAX {
+            None
+        } else {
+            Some(as_char(hi)?)
+        },
     })
 }
 
@@ -175,7 +190,11 @@ fn split_array_lengths(arrays: &[(usize, usize, bool)]) -> Vec<Constructor> {
         .filter(|a| !a.2)
         .map(|&(p, s, _)| p + s)
         .collect();
-    let rests: Vec<(usize, usize)> = arrays.iter().filter(|a| a.2).map(|&(p, s, _)| (p, s)).collect();
+    let rests: Vec<(usize, usize)> = arrays
+        .iter()
+        .filter(|a| a.2)
+        .map(|&(p, s, _)| (p, s))
+        .collect();
 
     if rests.is_empty() {
         fixed.sort_unstable();

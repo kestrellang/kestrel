@@ -132,9 +132,9 @@ impl<V> MemoEntry<V> {
     /// Whether this memo read a component (or the children) of one of
     /// `entities` itself — not through a sub-query.
     fn reads_any(&self, entities: &FxHashSet<Entity>) -> bool {
-        self.deps.iter().any(|dep| {
-            matches!(dep, Dependency::Component { entity, .. } if entities.contains(entity))
-        })
+        self.deps.iter().any(
+            |dep| matches!(dep, Dependency::Component { entity, .. } if entities.contains(entity)),
+        )
     }
 }
 
@@ -175,9 +175,7 @@ impl QueryStorage {
 
     fn update_verified<Q: QueryFn>(&mut self, key: &Q, revision: Revision) {
         if let Some(store) = self.stores.get_mut(&TypeId::of::<Q>())
-            && let Some(map) = store
-                .data
-                .downcast_mut::<MemoMap<Q>>()
+            && let Some(map) = store.data.downcast_mut::<MemoMap<Q>>()
             && let Some(memo) = map.get_mut(key)
         {
             memo.verified_at = revision;

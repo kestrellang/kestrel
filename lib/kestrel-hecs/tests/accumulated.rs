@@ -69,7 +69,11 @@ fn a_snapshot_keeps_the_values_of_its_cached_queries() {
 
     let snap = world.snapshot();
     snap.query_context().query(Summary { e: es[0] });
-    assert_eq!(snap.query_exec_count(), 0, "the snapshot should hit the cache");
+    assert_eq!(
+        snap.query_exec_count(),
+        0,
+        "the snapshot should hit the cache"
+    );
     assert_eq!(messages(&snap), ["check 7", "summary true"]);
 }
 

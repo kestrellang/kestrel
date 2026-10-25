@@ -561,8 +561,11 @@ pub(super) fn solve_member(
             // candidate may turn out not to apply (bidi §5.1 step 6).
             let winner_unknown = top.iter().any(|(_, ext)| {
                 ext.is_some_and(|e| {
-                    applicability(ctx, crate::constraint::ApplicableSource::Extension(e), &recv_kind)
-                        == kestrel_entail::Tri::Unknown
+                    applicability(
+                        ctx,
+                        crate::constraint::ApplicableSource::Extension(e),
+                        &recv_kind,
+                    ) == kestrel_entail::Tri::Unknown
                 })
             });
             if winner_unknown && crate::solver_entail::has_open_var(ctx, receiver) {
@@ -658,13 +661,15 @@ pub(super) fn solve_member(
                     span,
                 });
             },
-            kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => ctx.constraints.push(Constraint::Applicable {
-                receiver,
-                source,
-                name: name.to_string(),
-                is_call,
-                span: span.clone(),
-            }),
+            kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => {
+                ctx.constraints.push(Constraint::Applicable {
+                    receiver,
+                    source,
+                    name: name.to_string(),
+                    is_call,
+                    span: span.clone(),
+                })
+            },
         }
     }
 

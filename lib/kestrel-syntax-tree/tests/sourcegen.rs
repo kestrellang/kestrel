@@ -287,7 +287,9 @@ fn gen_kinds(kinds: &[KindDef]) -> String {
     let mut s = String::from(HEADER);
     s.push_str("use kestrel_lexer::Token;\n\n");
     s.push_str("/// Every node and token kind of the Kestrel CST.\n///\n/// The discriminant order is `kinds.txt`'s line order, which is append-only:\n/// rowan stores kinds as raw `u16`s.\n");
-    s.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]\npub enum SyntaxKind {\n");
+    // `__NotAKind` is a variant-count sentinel (see below), not an attempt
+    // at `#[non_exhaustive]`, which is what the clippy lint assumes.
+    s.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]\n#[allow(clippy::manual_non_exhaustive)] // `__NotAKind` counts the variants\npub enum SyntaxKind {\n");
     for k in kinds {
         if let Some(doc) = &k.doc {
             writeln!(s, "    /// {doc}").unwrap();

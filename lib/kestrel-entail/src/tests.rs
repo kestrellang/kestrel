@@ -97,8 +97,14 @@ fn poison_holds() {
 
 #[test]
 fn refinement_source_recurses() {
-    assert_eq!(conforms(nom(BOX, vec![nom(INT, vec![])]), EQUATABLE), Tri::Holds);
-    assert_eq!(conforms(nom(BOX, vec![nom(STR, vec![])]), EQUATABLE), Tri::Fails);
+    assert_eq!(
+        conforms(nom(BOX, vec![nom(INT, vec![])]), EQUATABLE),
+        Tri::Holds
+    );
+    assert_eq!(
+        conforms(nom(BOX, vec![nom(STR, vec![])]), EQUATABLE),
+        Tri::Fails
+    );
 }
 
 #[test]
@@ -109,9 +115,18 @@ fn equality_clause_gates_applicability() {
     let ok = nom(BOX, vec![nom(INT, vec![])]);
     let bad = nom(BOX, vec![nom(STR, vec![])]);
     let open = nom(BOX, vec![ETy::Var]);
-    assert_eq!(extension_applies(&World, &target, &clauses, &ok), Tri::Holds);
-    assert_eq!(extension_applies(&World, &target, &clauses, &bad), Tri::Fails);
-    assert_eq!(extension_applies(&World, &target, &clauses, &open), Tri::Unknown);
+    assert_eq!(
+        extension_applies(&World, &target, &clauses, &ok),
+        Tri::Holds
+    );
+    assert_eq!(
+        extension_applies(&World, &target, &clauses, &bad),
+        Tri::Fails
+    );
+    assert_eq!(
+        extension_applies(&World, &target, &clauses, &open),
+        Tri::Unknown
+    );
 }
 
 #[test]
@@ -137,8 +152,14 @@ fn literal_var_prunes_impossible_patterns() {
     let int_target = vec![nom(INT, vec![])];
     let str_target = vec![nom(STR, vec![])];
     let recv = nom(BOX, vec![ETy::LitVar(0)]);
-    assert_eq!(extension_applies(&World, &int_target, &[], &recv), Tri::Unknown);
-    assert_eq!(extension_applies(&World, &str_target, &[], &recv), Tri::Fails);
+    assert_eq!(
+        extension_applies(&World, &int_target, &[], &recv),
+        Tri::Unknown
+    );
+    assert_eq!(
+        extension_applies(&World, &str_target, &[], &recv),
+        Tri::Fails
+    );
 }
 
 #[test]
@@ -164,7 +185,15 @@ fn self_and_projection_subjects() {
 
 #[test]
 fn not_conforms() {
-    let g = |ty| entails(&World, &Goal::NotConforms { ty, protocol: e(SHOW) });
+    let g = |ty| {
+        entails(
+            &World,
+            &Goal::NotConforms {
+                ty,
+                protocol: e(SHOW),
+            },
+        )
+    };
     assert_eq!(g(nom(STR, vec![])), Tri::Holds);
     assert_eq!(g(nom(INT, vec![])), Tri::Fails);
     assert_eq!(g(ETy::Var), Tri::Unknown);

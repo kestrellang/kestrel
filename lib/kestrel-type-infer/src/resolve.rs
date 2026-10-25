@@ -264,7 +264,10 @@ pub enum WhereClause {
     Equality { subject: WhereSubject, rhs: HirTy },
     /// `T: not P` — a negative bound. Decided by the entailment kernel
     /// (`Goal::NotConforms`) and lowered to MIR's `NotImplements`.
-    NotBound { subject: WhereSubject, protocol: Entity },
+    NotBound {
+        subject: WhereSubject,
+        protocol: Entity,
+    },
 }
 
 /// The source name of an associated-type entity. The `Associated` constraint

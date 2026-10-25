@@ -37,7 +37,7 @@ pub fn build_extension(
     world.set(entity, NodeKind::Extension);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
+    world.set(entity, CstNode(SyntaxNodePtr::new(syntax)));
     world.set_parent(entity, parent);
 
     if let Some(target_ty) = lower_opt_type(node.ty(), file_id) {
@@ -95,7 +95,7 @@ fn introduce_rhs_free_type_params(
     let mut new_params: Vec<(String, Span, SyntaxNodePtr)> = Vec::new();
 
     let cst = match world.get::<CstNode>(entity) {
-        Some(node) => node.0.clone(),
+        Some(node) => node.0,
         None => return,
     };
 
@@ -132,7 +132,7 @@ fn introduce_rhs_free_type_params(
                 continue;
             }
             seen.insert(seg.name.clone());
-            new_params.push((seg.name.clone(), span.clone(), cst.clone()));
+            new_params.push((seg.name.clone(), span.clone(), cst));
         }
     }
 

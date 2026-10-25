@@ -144,7 +144,10 @@ fn report_instantiation_findings(findings: &[InstantiationFinding]) {
         findings.len(),
     );
     for f in findings {
-        eprintln!("  {}: block {} inst {}: {}", f.func_name, f.block, f.inst, f.message);
+        eprintln!(
+            "  {}: block {} inst {}: {}",
+            f.func_name, f.block, f.inst, f.message
+        );
     }
 }
 
@@ -297,10 +300,7 @@ fn build_drop_impl_to_nominal_map(
 /// later release over-decremented the count → double-free of the storage.
 fn build_clone_impl_to_nominal_map(module: &MonoModule) -> HashMap<Entity, Entity> {
     let mut map = HashMap::new();
-    let structs = module
-        .structs
-        .values()
-        .map(|s| (s.source, &s.type_info));
+    let structs = module.structs.values().map(|s| (s.source, &s.type_info));
     let enums = module.enums.values().map(|e| (e.source, &e.type_info));
     for (source, type_info) in structs.chain(enums) {
         if let Some(func) = type_info.clone_impl {
@@ -667,7 +667,6 @@ fn expand_function(
     findings: &mut Vec<InstantiationFinding>,
 ) {
     let Some(body) = &mut func.body else { return };
-
 
     // value_remap tracks CopyValue removals: result -> operand
     let mut value_remap: HashMap<ValueId, ValueId> = HashMap::new();

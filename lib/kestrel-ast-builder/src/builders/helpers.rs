@@ -252,7 +252,7 @@ pub fn set_where_clause(
             ast::WhereConstraint::TypeEquality(e) => Some(WhereConstraint::Equality {
                 lhs: assoc_target_to_ast_type(&e.associated_type_target()?, file_id)?,
                 rhs: lower_opt_type(e.ty(), file_id)?,
-                node: SyntaxNodePtr::new(&e.syntax()),
+                node: SyntaxNodePtr::new(e.syntax()),
             }),
         })
         .collect();
@@ -383,7 +383,7 @@ pub fn spawn_setter(
     world.set(setter, NodeKind::Setter);
     world.set(setter, FileId(file_entity));
     world.set(setter, DeclSpan(get_decl_span(setter_clause, file_id)));
-    world.set(setter, CstNode(SyntaxNodePtr::new(&setter_clause)));
+    world.set(setter, CstNode(SyntaxNodePtr::new(setter_clause)));
     world.set_parent(setter, parent);
     // Setter → Subscript/Field → Container. Record the container so
     // downstream code can skip the intermediate hop without walking.
@@ -423,7 +423,7 @@ pub fn spawn_ref_accessor(
     world.set(acc, NodeKind::RefAccessor);
     world.set(acc, FileId(file_entity));
     world.set(acc, DeclSpan(get_decl_span(clause, file_id)));
-    world.set(acc, CstNode(SyntaxNodePtr::new(&clause)));
+    world.set(acc, CstNode(SyntaxNodePtr::new(clause)));
     world.set_parent(acc, parent);
     // RefAccessor → Subscript/Field → Container (same hop-skip as Setter).
     if let Some(container) = world.parent_of(parent) {

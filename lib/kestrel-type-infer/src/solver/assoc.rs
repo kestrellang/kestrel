@@ -8,7 +8,12 @@ use super::*;
 /// args for the alias's type params, and equates `result` with the substituted
 /// TyVar. Also emits conformance obligations from the alias's TypeParam bounds
 /// (e.g. `type Pair[T: Hashable] = (T, T)` requires `T: Hashable`).
-pub(super) fn solve_reduce(ctx: &mut InferCtx<'_>, alias: TyVar, result: TyVar, span: Span) -> SolveResult {
+pub(super) fn solve_reduce(
+    ctx: &mut InferCtx<'_>,
+    alias: TyVar,
+    result: TyVar,
+    span: Span,
+) -> SolveResult {
     let resolved = ctx.resolve(alias);
     if !ctx.is_concrete(resolved) {
         return SolveResult::Deferred(Constraint::Reduce {

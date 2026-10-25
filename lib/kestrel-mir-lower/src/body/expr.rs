@@ -786,8 +786,8 @@ impl OssaBodyCtx<'_, '_> {
         // function value, not a call. A protocol requirement named through a
         // type param / projection dispatches through the witness of the
         // receiver type, so mono binds it to the conformer's implementation.
-        let is_method =
-            resolved.is_some_and(|e| self.ctx.world.get::<NodeKind>(e) == Some(&NodeKind::Function));
+        let is_method = resolved
+            .is_some_and(|e| self.ctx.world.get::<NodeKind>(e) == Some(&NodeKind::Function));
         let value_ty = self.resolve_expr_type(expr_id);
         if is_method
             && is_static

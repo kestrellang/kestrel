@@ -359,7 +359,9 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
 /// Print cranelift IR for the whole module. Errors are returned, not printed,
 /// so `dump` can flush accumulated diagnostics first (F18).
 fn dump_cranelift(globals: &Globals, compiler: &Compiler) -> Result<(), String> {
-    let target = globals.codegen_target().map_err(|_| "invalid target".to_string())?;
+    let target = globals
+        .codegen_target()
+        .map_err(|_| "invalid target".to_string())?;
     let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
     let mono = compiler.monomorphize_mir(mir).map_err(|e| e.to_string())?;
     let options = cranelift_backend::CodegenOptions {
@@ -622,4 +624,3 @@ fn emit_mono_warnings(compiler: &Compiler) {
         kestrel_compiler::diagnostic::WorldFiles::from_world(compiler.world(), compiler.files());
     kestrel_reporting::emit_all(&files, &warnings).ok();
 }
-

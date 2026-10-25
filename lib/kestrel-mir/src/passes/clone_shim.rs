@@ -302,10 +302,11 @@ fn clone_witness_key(module: &MirModule, cloneable_proto: Entity) -> WitnessMeth
         "clone-shim",
         "Cloneable did not lower with exactly one requirement (got {:?}) — \
          falling back to the literal `clone` key",
-        module
-            .protocols
-            .get(&cloneable_proto)
-            .map(|p| p.methods.iter().map(|m| m.name.as_str()).collect::<Vec<_>>())
+        module.protocols.get(&cloneable_proto).map(|p| p
+            .methods
+            .iter()
+            .map(|m| m.name.as_str())
+            .collect::<Vec<_>>())
     );
     WitnessMethodKey::simple("clone")
 }
@@ -335,7 +336,11 @@ fn collect_user_clone_funcs(
     clone_key: &WitnessMethodKey,
 ) -> HashMap<Entity, Entity> {
     let mut map: HashMap<Entity, Entity> = HashMap::new();
-    for w in module.witnesses.iter().filter(|w| w.protocol == cloneable_proto) {
+    for w in module
+        .witnesses
+        .iter()
+        .filter(|w| w.protocol == cloneable_proto)
+    {
         let MirTy::Named { entity, .. } = module.ty_arena.get(w.implementing_type) else {
             continue;
         };

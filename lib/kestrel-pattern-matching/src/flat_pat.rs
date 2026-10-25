@@ -143,12 +143,28 @@ fn decompose_array(
     // (`k == 1` is the last). A rest row knows only its prefix and suffix; its
     // children are `prefix, rest slot, suffix`.
     let from_front = |i: usize| -> FlatPat {
-        let known = if src_rest { i < src_prefix } else { i < children.len() };
-        if known { children[i].clone() } else { FlatPat::Wildcard }
+        let known = if src_rest {
+            i < src_prefix
+        } else {
+            i < children.len()
+        };
+        if known {
+            children[i].clone()
+        } else {
+            FlatPat::Wildcard
+        }
     };
     let from_back = |k: usize| -> FlatPat {
-        let known = if src_rest { k <= src_suffix } else { k <= children.len() };
-        if known { children[children.len() - k].clone() } else { FlatPat::Wildcard }
+        let known = if src_rest {
+            k <= src_suffix
+        } else {
+            k <= children.len()
+        };
+        if known {
+            children[children.len() - k].clone()
+        } else {
+            FlatPat::Wildcard
+        }
     };
 
     if !tgt_rest {
@@ -400,7 +416,9 @@ fn flatten_literal(value: &HirLiteral) -> FlatPat {
         // Pattern matching ranges are computed in `i64`; an out-of-range
         // pattern literal is itself diagnosed by the range analyzer (E121).
         HirLiteral::Integer(n) => Constructor::IntLiteral(*n as i64),
-        HirLiteral::Char { value: c, .. } => Constructor::CharLiteral(char::from_u32(*c).unwrap_or('\0')),
+        HirLiteral::Char { value: c, .. } => {
+            Constructor::CharLiteral(char::from_u32(*c).unwrap_or('\0'))
+        },
         HirLiteral::String { value, .. } => Constructor::StringLiteral(value.clone()),
         HirLiteral::Float(_) => Constructor::NonExhaustive,
         HirLiteral::Null => Constructor::NonExhaustive,

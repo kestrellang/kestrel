@@ -120,7 +120,9 @@ pub fn check_match(
 
         // An empty range (`10..=0`) matches nothing; bounds validation reports
         // it, so it is not also called unreachable.
-        let is_empty_range = range.as_ref().is_some_and(|r| split::split(&[r.clone()]).is_empty());
+        let is_empty_range = range
+            .as_ref()
+            .is_some_and(|r| split::split(std::slice::from_ref(r)).is_empty());
 
         let query_row = PatternRow::new(vec![flat_pat.clone()], i, has_guard);
         let is_redundant =
@@ -130,7 +132,10 @@ pub fn check_match(
             redundant_arms.push(i);
         } else if let Some(range) = range.filter(|_| !has_guard && !is_empty_range) {
             // Reachable, but shares values with an earlier range: E307.
-            if prior_ranges.iter().any(|prior| ranges_overlap(prior, &range)) {
+            if prior_ranges
+                .iter()
+                .any(|prior| ranges_overlap(prior, &range))
+            {
                 overlapping_arms.push(i);
             }
             prior_ranges.push(range);
@@ -272,7 +277,8 @@ fn is_wildcard_useful(
             // useful under some piece — the OTHER columns may still be open.
             if covers_whole_domain(&heads) {
                 for ctor in &heads {
-                    let result = is_constructor_useful(matrix, query, col, ctor, col_type, root, ctx);
+                    let result =
+                        is_constructor_useful(matrix, query, col, ctor, col_type, root, ctx);
                     if result.is_useful {
                         return result;
                     }

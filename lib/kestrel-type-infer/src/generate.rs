@@ -133,7 +133,13 @@ fn check_expr(
 
 /// Check a leaf against `expected`: push into a nested introduction form,
 /// or synthesize and coerce (the one place `FromValue` promotion may fire).
-fn check_leaf(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, expected: TyVar, reason: Reason) {
+fn check_leaf(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    id: HirExprId,
+    expected: TyVar,
+    reason: Reason,
+) {
     let (tv, pushed) = check_expr(ctx, hir, id, expected, reason.clone());
     if !pushed {
         mark_synth_pending(ctx, hir, id, tv);
@@ -149,13 +155,24 @@ fn mark_synth_pending(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, tv: 
         hir.exprs[id],
         HirExpr::Call { .. } | HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. }
     );
-    if computed && matches!(ctx.slot(ctx.resolve(tv)), TySlot::Unresolved { literal: None }) {
+    if computed
+        && matches!(
+            ctx.slot(ctx.resolve(tv)),
+            TySlot::Unresolved { literal: None }
+        )
+    {
         ctx.synth_pending_exprs.insert(id);
     }
 }
 
 /// `check` for a block: its statements, then its tail as a leaf.
-fn check_block(ctx: &mut InferCtx<'_>, hir: &HirBody, block: &HirBlock, expected: TyVar, reason: Reason) {
+fn check_block(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    block: &HirBlock,
+    expected: TyVar,
+    reason: Reason,
+) {
     for &stmt_id in &block.stmts {
         gen_stmt(ctx, hir, stmt_id);
     }
@@ -194,7 +211,10 @@ fn expectation_known(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
 /// A ref expectation (`-> &T`) keeps the synth path: ref decay and the
 /// return-position borrow rules live in `solve_coerce` / `EqualDecayed`.
 fn expected_is_ref(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
-    matches!(ctx.slot(ctx.resolve(tv)), TySlot::Resolved(TyKind::Ref { .. }))
+    matches!(
+        ctx.slot(ctx.resolve(tv)),
+        TySlot::Resolved(TyKind::Ref { .. })
+    )
 }
 
 // ===== Expression generation =====
@@ -535,7 +555,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // annotation on the result can pin the literal (bidi P5: the
             // walker, not the end of the body).
             if *from_operator && open_literal(ctx, recv_tv).is_some() {
-                crate::solver::project_operator_shape(ctx, recv_tv, result_tv, method_str, &arg_tvs);
+                crate::solver::project_operator_shape(
+                    ctx, recv_tv, result_tv, method_str, &arg_tvs,
+                );
             }
             // Resolve method on the protocol
             ctx.member(
@@ -1938,7 +1960,10 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     if !matches!(ctx.slot(open), TySlot::Unresolved { literal: None }) {
         return;
     }
-    kestrel_debug::ktrace!("e106", "receiver of '{member}' unknown at its use: {open:?}");
+    kestrel_debug::ktrace!(
+        "e106",
+        "receiver of '{member}' unknown at its use: {open:?}"
+    );
     ctx.report_error(InferError::TypeMustBeKnown {
         member: member.to_string(),
         span: span.clone(),
@@ -2084,7 +2109,6 @@ fn peel_ref_var(ctx: &InferCtx<'_>, tv: TyVar) -> TyVar {
         _ => ctx.resolve(tv),
     }
 }
-
 
 /// Default every open literal `recv` is built from, walking back through
 /// the pending constraints that produce it. Returns true on progress.

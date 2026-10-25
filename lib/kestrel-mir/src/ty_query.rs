@@ -283,7 +283,12 @@ pub fn copy_is_mono_dependent(
             .structs
             .get(&entity)
             .map(|s| s.conditionally_copyable.clone())
-            .or_else(|| module.enums.get(&entity).map(|e| e.conditionally_copyable.clone()))
+            .or_else(|| {
+                module
+                    .enums
+                    .get(&entity)
+                    .map(|e| e.conditionally_copyable.clone())
+            })
     };
     copy_is_mono_dependent_by(arena, module, ty, where_clause, &gating)
 }
@@ -324,9 +329,9 @@ pub fn copy_is_mono_dependent_by(
         MirTy::AssociatedProjection { .. } => true,
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
-            elems.iter().any(|&e| {
-                copy_is_mono_dependent_by(arena, module, e, where_clause, gating_of)
-            })
+            elems
+                .iter()
+                .any(|&e| copy_is_mono_dependent_by(arena, module, e, where_clause, gating_of))
         },
         MirTy::Named { entity, type_args } => {
             let entity = *entity;

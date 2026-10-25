@@ -36,20 +36,20 @@ use kestrel_semantics::{
 };
 use kestrel_span::Span;
 
-mod equality;
-mod conformance;
 mod assoc;
 mod call;
-mod member;
+mod conformance;
 mod defaults;
+mod equality;
 mod lower;
-pub(crate) use equality::*;
-pub(crate) use conformance::*;
+mod member;
 use assoc::*;
 use call::*;
-use member::*;
+pub(crate) use conformance::*;
 pub(crate) use defaults::*;
+pub(crate) use equality::*;
 use lower::*;
+use member::*;
 
 /// Diagnose type parameters at generic call sites that inference couldn't
 /// pin down. Lib1 silently defaulted these to `Never` (RFC 1216-style
@@ -851,7 +851,15 @@ pub(super) fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
     ctx.solving_depth += 1;
     kestrel_debug::ktrace!("p5-solve", "d={} {:?}", ctx.solving_depth, c);
     let r = try_solve_inner(ctx, c);
-    kestrel_debug::ktrace!("p5-solve", "  -> {}", match &r { SolveResult::Solved => "solved", SolveResult::Deferred(_) => "deferred", SolveResult::Error(_) => "ERROR" });
+    kestrel_debug::ktrace!(
+        "p5-solve",
+        "  -> {}",
+        match &r {
+            SolveResult::Solved => "solved",
+            SolveResult::Deferred(_) => "deferred",
+            SolveResult::Error(_) => "ERROR",
+        }
+    );
     ctx.solving_depth -= 1;
     r
 }

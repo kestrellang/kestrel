@@ -60,9 +60,7 @@ impl FlowMode {
     fn current() -> FlowMode {
         use std::sync::OnceLock;
         static MODE: OnceLock<FlowMode> = OnceLock::new();
-        *MODE.get_or_init(|| {
-            FlowMode::parse(std::env::var("KESTREL_VERIFY_FLOW").ok().as_deref())
-        })
+        *MODE.get_or_init(|| FlowMode::parse(std::env::var("KESTREL_VERIFY_FLOW").ok().as_deref()))
     }
 
     /// Split out from `current` so the parse is testable: `current` memoises
@@ -217,7 +215,14 @@ pub fn verify_ossa(
             crate::item::function::RetConvention::RefBorrow { .. }
         )
     });
-    verify_ossa_with_mode(body, module, func_name, entity, ret_borrow, FlowMode::current())
+    verify_ossa_with_mode(
+        body,
+        module,
+        func_name,
+        entity,
+        ret_borrow,
+        FlowMode::current(),
+    )
 }
 
 /// The same ownership walk over a MONOMORPHIZED body.
@@ -237,7 +242,14 @@ pub fn verify_ossa_mono(
     entity: Entity,
     ret_borrow: bool,
 ) -> Vec<VerifyError> {
-    verify_ossa_with_mode(body, module, func_name, entity, ret_borrow, FlowMode::current())
+    verify_ossa_with_mode(
+        body,
+        module,
+        func_name,
+        entity,
+        ret_borrow,
+        FlowMode::current(),
+    )
 }
 
 /// `verify_ossa` with the flow mode supplied rather than read from the
@@ -288,7 +300,7 @@ fn verify_ossa_with_mode(
                 if !dominance_findings.is_empty() {
                     report_flow_findings(func_name, &dominance_findings);
                 }
-            }
+            },
         }
     }
 
@@ -636,10 +648,10 @@ fn check_dominance(
         }
 
         let check = |operand: ValueId,
-                         inst: Option<u32>,
-                         span: Option<Span>,
-                         available: &FxHashSet<ValueId>,
-                         errors: &mut Vec<VerifyError>| {
+                     inst: Option<u32>,
+                     span: Option<Span>,
+                     available: &FxHashSet<ValueId>,
+                     errors: &mut Vec<VerifyError>| {
             if available.contains(&operand) {
                 return;
             }
@@ -786,7 +798,10 @@ impl AddrAliases {
         for block in &body.blocks {
             for inst in &block.insts {
                 if let InstKind::FieldAddr {
-                    result, base, field, ..
+                    result,
+                    base,
+                    field,
+                    ..
                 } = &inst.kind
                     && let Some(&base_root) = aliases.root.get(base)
                 {
@@ -1007,10 +1022,7 @@ impl AddrKind {
     fn join(&self, other: &AddrKind) -> Option<AddrKind> {
         let merged = match (self, other) {
             (AddrKind::Whole(a), AddrKind::Whole(b)) => AddrKind::Whole(a.join(*b)),
-            (
-                AddrKind::SubField { ty, fields: fa },
-                AddrKind::SubField { fields: fb, .. },
-            ) => {
+            (AddrKind::SubField { ty, fields: fa }, AddrKind::SubField { fields: fb, .. }) => {
                 let mut fields = fa.clone();
                 for (&idx, &b) in fb {
                     let merged = match fa.get(&idx) {
@@ -1024,14 +1036,15 @@ impl AddrKind {
             // Mixed tracking granularity — collapse to whole.
             (AddrKind::Whole(a), AddrKind::SubField { fields, .. })
             | (AddrKind::SubField { fields, .. }, AddrKind::Whole(a)) => {
-                let collapsed = fields
-                    .values()
-                    .copied()
-                    .fold(*a, |acc, f| acc.join(f));
+                let collapsed = fields.values().copied().fold(*a, |acc, f| acc.join(f));
                 AddrKind::Whole(collapsed)
             },
         };
-        if merged.same_as(self) { None } else { Some(merged) }
+        if merged.same_as(self) {
+            None
+        } else {
+            Some(merged)
+        }
     }
 
     fn same_as(&self, other: &AddrKind) -> bool {
@@ -1647,7 +1660,10 @@ impl<'a> FlowVerifier<'a> {
                 from,
                 to,
             } => {
-                if matches!((from, to), (crate::FnKind::Escaping, crate::FnKind::Consuming)) {
+                if matches!(
+                    (from, to),
+                    (crate::FnKind::Escaping, crate::FnKind::Consuming)
+                ) {
                     self.try_consume(*operand, idx);
                 } else {
                     self.assert_readable(*operand, idx);
@@ -1951,7 +1967,8 @@ impl<'a> FlowVerifier<'a> {
                 }
                 if let Some(r) = result {
                     let ty = self.body.value(*r).ty;
-                    let is_never = matches!(self._module.ty_arena().get(ty), crate::ty::MirTy::Never);
+                    let is_never =
+                        matches!(self._module.ty_arena().get(ty), crate::ty::MirTy::Never);
                     if self.body.value(*r).ownership == Ownership::Owned && !is_never {
                         self.define_owned(*r);
                     }
@@ -2000,11 +2017,13 @@ impl<'a> FlowVerifier<'a> {
                     for i in 0..count {
                         fields.insert(FieldIdx::new(i), InitState::Uninit);
                     }
-                    self.state.addrs
+                    self.state
+                        .addrs
                         .insert(*result, AddrKind::SubField { ty: *ty, fields });
                 } else {
                     // Non-struct type: whole tracking, starts uninit.
-                    self.state.addrs
+                    self.state
+                        .addrs
                         .insert(*result, AddrKind::Whole(InitState::Uninit));
                 }
             },
@@ -2052,7 +2071,11 @@ impl<'a> FlowVerifier<'a> {
         for (i, n) in seen.iter().enumerate() {
             if *n != 1 {
                 let span = self.inst_span(idx);
-                let what = if *n == 0 { "never written" } else { "written twice or more" };
+                let what = if *n == 0 {
+                    "never written"
+                } else {
+                    "written twice or more"
+                };
                 self.push_err(
                     idx,
                     span,
@@ -2193,9 +2216,7 @@ impl<'a> FlowVerifier<'a> {
             .state
             .owned
             .iter()
-            .filter(|(v, state)| {
-                **state == ValueState::Live && self.defined_here.contains(v)
-            })
+            .filter(|(v, state)| **state == ValueState::Live && self.defined_here.contains(v))
             .map(|(&v, _)| v)
             .collect();
         for v in unconsumed {
@@ -2325,8 +2346,11 @@ pub fn verify_mono_flow(module: &crate::mono::types::MonoModule) -> Vec<VerifyEr
         .collect();
     // Deterministic order — `seen` is a hash map, and this feeds diagnostics.
     out.sort_by(|a, b| {
-        (a.func_name.as_str(), a.block.index(), a.inst)
-            .cmp(&(b.func_name.as_str(), b.block.index(), b.inst))
+        (a.func_name.as_str(), a.block.index(), a.inst).cmp(&(
+            b.func_name.as_str(),
+            b.block.index(),
+            b.inst,
+        ))
     });
 
     if !out.is_empty() {
@@ -2336,7 +2360,10 @@ pub fn verify_mono_flow(module: &crate::mono::types::MonoModule) -> Vec<VerifyEr
             out.len(),
         );
         for e in &out {
-            eprintln!("  {}: {:?}[{:?}]: {}", e.func_name, e.block, e.inst, e.message);
+            eprintln!(
+                "  {}: {:?}[{:?}]: {}",
+                e.func_name, e.block, e.inst, e.message
+            );
         }
     }
     out
@@ -2774,7 +2801,9 @@ mod tests {
             &mut errors,
         );
         assert!(
-            errors.iter().any(|e| e.message.contains("does not dominate")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("does not dominate")),
             "a def on one arm of a diamond must not be usable on the other: {:?}",
             errors,
         );
@@ -2892,9 +2921,7 @@ mod tests {
 
         let aliases = AddrAliases::build(&body);
         let mut incoming = FlowState::default();
-        incoming
-            .owned
-            .insert(ValueId::new(0), ValueState::Consumed);
+        incoming.owned.insert(ValueId::new(0), ValueState::Consumed);
 
         let mut v = FlowVerifier::new(
             &body,
@@ -3917,7 +3944,10 @@ mod tests {
         let v0 = b.emit_literal(Immediate::i64(1));
         let v1 = b.emit_literal(Immediate::i64(2));
 
-        let s = b.emit_struct(struct_ty, vec![(FieldIdx::new(0), v0), (FieldIdx::new(1), v1)]);
+        let s = b.emit_struct(
+            struct_ty,
+            vec![(FieldIdx::new(0), v0), (FieldIdx::new(1), v1)],
+        );
         b.emit_destroy_value(s);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -3940,7 +3970,10 @@ mod tests {
         let v1 = b.emit_literal(Immediate::i64(2));
 
         // Both arguments land in slot 0 — field 1 is left uninitialized.
-        let s = b.emit_struct(struct_ty, vec![(FieldIdx::new(0), v0), (FieldIdx::new(0), v1)]);
+        let s = b.emit_struct(
+            struct_ty,
+            vec![(FieldIdx::new(0), v0), (FieldIdx::new(0), v1)],
+        );
         b.emit_destroy_value(s);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -3975,9 +4008,7 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors
-                .iter()
-                .any(|e| e.message.contains("only 2 field(s)")),
+            errors.iter().any(|e| e.message.contains("only 2 field(s)")),
             "expected an out-of-range error, got: {:?}",
             errors
         );

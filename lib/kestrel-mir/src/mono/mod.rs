@@ -735,21 +735,17 @@ fn rewrite_callees(
             for (_, callee) in inst.kind.callees_mut() {
                 rewrite_callee(callee, func_id_map, functions);
             }
-            match &mut inst.kind {
-                InstKind::Literal { value, .. } => {
-                    if let ImmediateKind::FunctionRef {
-                        func,
-                        type_args,
-                        self_type,
-                    } = &value.kind
-                    {
-                        let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
-                        if let Some(&mono_id) = func_id_map.get(&key) {
-                            value.kind = ImmediateKind::MonoFunctionRef(mono_id);
-                        }
-                    }
-                },
-                _ => {},
+            if let InstKind::Literal { value, .. } = &mut inst.kind
+                && let ImmediateKind::FunctionRef {
+                    func,
+                    type_args,
+                    self_type,
+                } = &value.kind
+            {
+                let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                if let Some(&mono_id) = func_id_map.get(&key) {
+                    value.kind = ImmediateKind::MonoFunctionRef(mono_id);
+                }
             }
         }
     }
@@ -760,24 +756,22 @@ fn rewrite_callee(
     func_id_map: &HashMap<InstantiationKey, MonoFuncId>,
     functions: &IndexMap<Entity, FunctionDef>,
 ) {
-    match callee {
-        Callee::Direct {
-            func,
-            type_args,
-            self_type,
-        } => {
-            // Mirror collection's arity normalization (collect::scan_callee) so
-            // the lookup key matches the key the instance was enqueued under.
-            let mut targs = type_args.clone();
-            if let Some(f) = functions.get(&*func) {
-                collect::normalize_direct_arity(&mut targs, f.type_params.len());
-            }
-            let key = InstantiationKey::new(*func, targs, *self_type);
-            if let Some(&mono_id) = func_id_map.get(&key) {
-                *callee = Callee::Resolved(mono_id);
-            }
-        },
-        _ => {},
+    if let Callee::Direct {
+        func,
+        type_args,
+        self_type,
+    } = callee
+    {
+        // Mirror collection's arity normalization (collect::scan_callee) so
+        // the lookup key matches the key the instance was enqueued under.
+        let mut targs = type_args.clone();
+        if let Some(f) = functions.get(&*func) {
+            collect::normalize_direct_arity(&mut targs, f.type_params.len());
+        }
+        let key = InstantiationKey::new(*func, targs, *self_type);
+        if let Some(&mono_id) = func_id_map.get(&key) {
+            *callee = Callee::Resolved(mono_id);
+        }
     }
 }
 
@@ -1319,10 +1313,10 @@ mod tests {
     use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
     use crate::item::protocol::ProtocolDef;
     use crate::item::witness::{WitnessDef, WitnessMethodBinding};
+    use crate::op::Op;
     use crate::terminator::{Terminator, TerminatorKind};
     use crate::ty::ParamConvention;
     use crate::value::ValueDef;
-    use crate::op::Op;
     use crate::{BlockId, ValueId, WitnessMethodKey};
 
     fn entity(id: u32) -> Entity {

@@ -584,8 +584,33 @@ fn compile_op1(
         Op::IntWiden(_, to) => builder.ins().sextend(int_bits_to_cl(to), arg),
         Op::IntUnsignedWiden(_, to) => builder.ins().uextend(int_bits_to_cl(to), arg),
         Op::IntTruncate(_, to) => builder.ins().ireduce(int_bits_to_cl(to), arg),
-        Op::IntToFloat(_, fb) => builder.ins().fcvt_from_sint(float_bits_to_cl(fb), arg),
-        Op::FloatToInt(_, ib) => builder.ins().fcvt_to_sint_sat(int_bits_to_cl(ib), arg),
+        // Cranelift converts only 32/64-bit integers: widen an 8/16-bit
+        // source first (sign-extend; the cast is signed).
+        Op::IntToFloat(ib, fb) => {
+            let arg = match ib {
+                IntBits::I8 | IntBits::I16 => builder.ins().sextend(ir::types::I32, arg),
+                IntBits::I32 | IntBits::I64 => arg,
+            };
+            builder.ins().fcvt_from_sint(float_bits_to_cl(fb), arg)
+        },
+        // Saturating, like LLVM's `llvm.fptosi.sat` at the TARGET width: an
+        // 8/16-bit target converts at 32 bits, clamps to its own range, then
+        // narrows.
+        Op::FloatToInt(_, ib) => match ib {
+            IntBits::I8 | IntBits::I16 => {
+                let (lo, hi) = match ib {
+                    IntBits::I8 => (i8::MIN as i64, i8::MAX as i64),
+                    _ => (i16::MIN as i64, i16::MAX as i64),
+                };
+                let wide = builder.ins().fcvt_to_sint_sat(ir::types::I32, arg);
+                let lo = builder.ins().iconst(ir::types::I32, lo);
+                let hi = builder.ins().iconst(ir::types::I32, hi);
+                let clamped = builder.ins().smax(wide, lo);
+                let clamped = builder.ins().smin(clamped, hi);
+                builder.ins().ireduce(int_bits_to_cl(ib), clamped)
+            },
+            IntBits::I32 | IntBits::I64 => builder.ins().fcvt_to_sint_sat(int_bits_to_cl(ib), arg),
+        },
         // Pure bitcast (no value conversion): float ↔ same-width integer.
         Op::FloatToBits(fb) => {
             let int_ty = match fb {
