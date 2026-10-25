@@ -82,7 +82,7 @@ impl BodyCheck for ForLoopPatternAnalyzer {
             if !kestrel_pattern_matching::is_irrefutable(
                 cx.hir,
                 cx.query,
-                cx.root,
+                kestrel_pattern_matching::MatchSite::of(cx.query, cx.root, cx.entity),
                 user_pat,
                 &element_ty,
             ) {

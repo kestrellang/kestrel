@@ -42,7 +42,8 @@ use crate::context::CompilationContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Attributes, DeclSpan, NodeKind, TypeAnnotation};
+use kestrel_ast_builder::attrs::attrs_of;
+use kestrel_ast_builder::{DeclSpan, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_hir::builtin::Builtin;
 use kestrel_hir::ty::HirTy;
@@ -130,9 +131,7 @@ impl CompilationCheck for EntryPointAnalyzer {
 /// Walk the entity tree collecting every entity that carries a `@main`
 /// attribute (valid or not — validity is judged afterwards).
 fn collect_mains(cx: &CompilationContext<'_>, entity: Entity, out: &mut Vec<Entity>) {
-    if let Some(attrs) = cx.query.get::<Attributes>(entity)
-        && attrs.0.iter().any(|a| a.name == "main")
-    {
+    if attrs_of(cx.query, entity).mentions("main") {
         out.push(entity);
     }
     for &child in cx.query.children_of(entity) {

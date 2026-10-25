@@ -3,8 +3,8 @@
 
 module Test
 
-@platform(.darwin)
+@platform(.Darwin)
 func value() -> lang.i64 { 1 }
 
-@platform(.linux)
+@platform(.Linux)
 func value() -> lang.i64 { 2 }

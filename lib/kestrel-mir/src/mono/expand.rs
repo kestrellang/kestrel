@@ -1477,6 +1477,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         }
     }
 
@@ -1546,6 +1547,7 @@ mod tests {
                 extern_info: None,
                 is_main: false,
                 provides_protocol_default: false,
+                inline: None,
             },
         );
         expand_destroy_copy(&mut module, &generic_functions);
@@ -1723,6 +1725,7 @@ mod tests {
                 extern_info: None,
                 is_main: false,
                 provides_protocol_default: false,
+                inline: None,
             },
         );
         expand_destroy_copy(&mut module, &generic_functions);

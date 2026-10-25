@@ -8,7 +8,7 @@
 
 module Test
 
-@platform(.linux)
+@platform(.Linux)
 struct ExcludedStruct {
     var x: lang.i64
 }

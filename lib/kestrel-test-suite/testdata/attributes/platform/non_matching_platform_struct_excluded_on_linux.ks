@@ -8,7 +8,7 @@
 
 module Test
 
-@platform(.darwin)
+@platform(.Darwin)
 struct ExcludedStruct {
     var x: lang.i64
 }

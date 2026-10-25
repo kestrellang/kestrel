@@ -49,6 +49,7 @@ pub(super) static RULES: &[(K, R)] = &[
     (
         K::ExtensionDeclaration,
         R::Seq(&[
+            R::Opt(&R::Kind(K::AttributeList)),
             R::Kind(K::Extend),
             R::Kind(K::Ty),
             R::Opt(&R::Kind(K::ConformanceList)),
@@ -170,7 +171,11 @@ pub(super) static RULES: &[(K, R)] = &[
     ),
     (
         K::DeinitDeclaration,
-        R::Seq(&[R::Kind(K::Deinit), R::Kind(K::FunctionBody)]),
+        R::Seq(&[
+            R::Opt(&R::Kind(K::AttributeList)),
+            R::Kind(K::Deinit),
+            R::Kind(K::FunctionBody),
+        ]),
     ),
     (
         K::EnumCaseDeclaration,
@@ -195,6 +200,7 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Opt(&R::Seq(&[R::Kind(K::As), R::Kind(K::Identifier)])),
         ]),
     ),
+    (K::AttributeList, R::Rep(&R::Kind(K::Attribute))),
     (
         K::Ty,
         R::Any(&[
@@ -257,7 +263,6 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Kind(K::RBrace),
         ]),
     ),
-    (K::AttributeList, R::Rep(&R::Kind(K::Attribute))),
     (
         K::Visibility,
         R::Opt(&R::Alt(&[

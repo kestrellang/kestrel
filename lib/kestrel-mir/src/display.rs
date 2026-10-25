@@ -72,7 +72,11 @@ pub fn display_module_filtered(module: &MirModule, filter: &str) -> String {
                 out.push('\n');
             }
             first = false;
-            writeln!(out, "; function: {}", func.name).unwrap();
+            write!(out, "; function: {}", func.name).unwrap();
+            if let Some(mode) = func.inline {
+                write!(out, " [{}]", mode.as_str()).unwrap();
+            }
+            out.push('\n');
             out.push_str(&display_body(body, module));
             out.push('\n');
         }
@@ -98,7 +102,11 @@ pub fn display_mono_module_filtered(module: &crate::mono::MonoModule, filter: &s
                 out.push('\n');
             }
             first = false;
-            writeln!(out, "; function: {}", func.name).unwrap();
+            write!(out, "; function: {}", func.name).unwrap();
+            if let Some(mode) = func.inline {
+                write!(out, " [{}]", mode.as_str()).unwrap();
+            }
+            out.push('\n');
             out.push_str(&display_body(body, module));
             out.push('\n');
         }

@@ -300,19 +300,26 @@ impl TypeCache {
                 // construction (the body builds a slot and returns its `ptr`,
                 // which is not an integer scalar). See IoError (a newtype over a
                 // payload-carrying enum).
-                if let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module) {
+                // Only when the layout is the field's own: `@align` or
+                // `@layout(.Packed)` give the newtype a different size or
+                // alignment, so it stays in memory.
+                if let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module)
+                    && t.bytes() == size
+                    && t.bytes() == align
+                {
                     return TypeRepr::Scalar(t);
                 }
                 return TypeRepr::Aggregate { size, align };
             }
-            // Pure-discriminant enum: a small integer discriminant.
-            let scalar = match size {
-                1 => ScalarTy::I8,
-                2 => ScalarTy::I16,
-                3..=4 => ScalarTy::I32,
-                _ => ScalarTy::I64,
-            };
-            return TypeRepr::Scalar(scalar);
+            // Pure-discriminant enum: its discriminant, unless `@align`
+            // padded it.
+            if let Some(e) = module.enums.get(&key) {
+                let t = int_bits_to_scalar(e.discriminant_width);
+                if t.bytes() == size && t.bytes() == align {
+                    return TypeRepr::Scalar(t);
+                }
+            }
+            return TypeRepr::Aggregate { size, align };
         }
 
         TypeRepr::Aggregate { size, align }

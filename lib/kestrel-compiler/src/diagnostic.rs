@@ -155,6 +155,104 @@ pub fn source_order(d: &Diagnostic<usize>) -> SourceOrder {
     )
 }
 
+/// Where diagnostics inside the source `@derive` generated (which is never
+/// shown) go: onto the attribute that asked for it. One set of rules for both
+/// diagnostic halves (accumulated and analyzer):
+///
+/// - Warnings there are dropped: generated code is not the user's to tidy.
+/// - Errors there are dropped when the `DeriveSite` analyzer reported the
+///   attribute: its diagnostic names the cause (a field that does not
+///   conform, a missing `@default`); the generated body only echoes it.
+/// - Any other error is kept, at the attribute, with a note saying so.
+pub struct DerivedSources {
+    /// Derived file index → (the attribute's span, whether `DeriveSite`
+    /// already explains errors there).
+    files: HashMap<usize, (Span, bool)>,
+}
+
+/// What happens to one diagnostic.
+enum Placement {
+    /// Not in derived code.
+    Keep,
+    Drop,
+    /// Moved onto the attribute.
+    At(Span),
+}
+
+const DERIVED_NOTE: &str = "in the code '@derive' generated for this declaration";
+
+impl DerivedSources {
+    pub fn new(world: &World, root: Entity) -> Self {
+        let ctx = world.query_context();
+        let files = world
+            .iter_component::<kestrel_ast_builder::DerivedFile>()
+            .map(|(file, d)| {
+                let explained = ctx
+                    .query(kestrel_analyze::Analyze {
+                        analyzer: kestrel_analyze::AnalyzerId::DeriveSite,
+                        entity: d.site,
+                        root,
+                    })
+                    .iter()
+                    .any(|a| a.severity == kestrel_analyze::Severity::Error);
+                (file.index(), (d.attr_span.clone(), explained))
+            })
+            .collect();
+        Self { files }
+    }
+
+    fn place(&self, is_error: bool, files: impl IntoIterator<Item = usize>) -> Placement {
+        let Some((attr, explained)) = files.into_iter().find_map(|f| self.files.get(&f)) else {
+            return Placement::Keep;
+        };
+        if !is_error || *explained {
+            return Placement::Drop;
+        }
+        Placement::At(attr.clone())
+    }
+
+    /// Apply the rules to an accumulated diagnostic.
+    pub fn remap(&self, mut d: Diagnostic<usize>) -> Option<Diagnostic<usize>> {
+        use codespan_reporting::diagnostic::Severity;
+        let is_error = d.severity >= Severity::Error;
+        match self.place(is_error, d.labels.iter().map(|l| l.file_id)) {
+            Placement::Keep => Some(d),
+            Placement::Drop => None,
+            Placement::At(attr) => {
+                for label in &mut d.labels {
+                    if self.files.contains_key(&label.file_id) {
+                        label.file_id = attr.file_id;
+                        label.range = attr.range();
+                    }
+                }
+                d.notes.push(DERIVED_NOTE.into());
+                Some(d)
+            },
+        }
+    }
+
+    /// Apply the rules to an analyzer diagnostic.
+    pub fn remap_analyze(
+        &self,
+        mut d: kestrel_analyze::AnalyzeDiagnostic,
+    ) -> Option<kestrel_analyze::AnalyzeDiagnostic> {
+        let is_error = d.severity == kestrel_analyze::Severity::Error;
+        match self.place(is_error, d.labels.iter().map(|l| l.span.file_id)) {
+            Placement::Keep => Some(d),
+            Placement::Drop => None,
+            Placement::At(attr) => {
+                for label in &mut d.labels {
+                    if self.files.contains_key(&label.span.file_id) {
+                        label.span = attr.clone();
+                    }
+                }
+                d.notes.push(DERIVED_NOTE.into());
+                Some(d)
+            },
+        }
+    }
+}
+
 pub fn mir_verify_error_to_diagnostic(
     error: &kestrel_mir::verify::VerifyError,
     world: &World,

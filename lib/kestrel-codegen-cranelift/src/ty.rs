@@ -242,19 +242,26 @@ impl TypeCache {
                 // bytes of ADDRESS instead of contents. See IoError (a newtype over
                 // a payload-carrying enum). Must stay in lockstep with
                 // `kestrel_codegen_llvm::ty::TypeCache::classify_named`.
-                if let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module) {
+                // Only when the layout is the field's own: `@align` or
+                // `@layout(.Packed)` give the newtype a different size or
+                // alignment, so it stays in memory.
+                if let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module)
+                    && u64::from(t.bytes()) == size
+                    && u64::from(t.bytes()) == align
+                {
                     return TypeRepr::Scalar(t);
                 }
                 return TypeRepr::Aggregate { size, align };
             }
-            // Pure-discriminant enum: a small integer discriminant.
-            let cl_ty = match size {
-                1 => ir::types::I8,
-                2 => ir::types::I16,
-                3..=4 => ir::types::I32,
-                _ => ir::types::I64,
-            };
-            return TypeRepr::Scalar(cl_ty);
+            // Pure-discriminant enum: its discriminant, unless `@align`
+            // padded it.
+            if let Some(e) = module.enums.get(&key) {
+                let t = int_bits_to_cl(e.discriminant_width);
+                if u64::from(t.bytes()) == size && u64::from(t.bytes()) == align {
+                    return TypeRepr::Scalar(t);
+                }
+            }
+            return TypeRepr::Aggregate { size, align };
         }
 
         TypeRepr::Aggregate { size, align }

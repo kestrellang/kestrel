@@ -2,7 +2,7 @@
 // stdlib: false
 
 module Test
-@first // WARN: unknown attribute
-@second("arg") // WARN: unknown attribute
-@third(a: 1, b: 2) // WARN: unknown attribute
+@first // ERROR: unknown attribute
+@second("arg") // ERROR: unknown attribute
+@third(a: 1, b: 2) // ERROR: unknown attribute
 struct Foo {}

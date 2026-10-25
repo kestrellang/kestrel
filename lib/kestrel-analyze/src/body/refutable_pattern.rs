@@ -75,7 +75,7 @@ impl BodyCheck for RefutablePatternAnalyzer {
             if kestrel_pattern_matching::is_irrefutable(
                 cx.hir,
                 cx.query,
-                cx.root,
+                kestrel_pattern_matching::MatchSite::of(cx.query, cx.root, cx.entity),
                 arm.pattern,
                 scrutinee_ty,
             ) {

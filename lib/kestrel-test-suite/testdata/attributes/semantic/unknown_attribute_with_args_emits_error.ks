@@ -2,5 +2,5 @@
 // stdlib: false
 
 module Test
-@customThing(key: "value") // WARN: unknown attribute
+@customThing(key: "value") // ERROR: unknown attribute
 func bar() {}

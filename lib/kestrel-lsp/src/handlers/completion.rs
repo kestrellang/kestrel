@@ -24,7 +24,8 @@ use kestrel_name_res::{Scope, ScopeFor};
 use kestrel_type_infer::InferBody;
 use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, InsertTextFormat,
+    CompletionItem, CompletionItemKind, CompletionItemTag, CompletionParams, CompletionResponse,
+    InsertTextFormat,
 };
 
 use crate::semantic;
@@ -143,6 +144,7 @@ fn member_completion(
         root,
         &receiver_ty,
         body_entity,
+        prefix,
         &mut out,
         &mut seen,
     );
@@ -294,6 +296,7 @@ fn push_members_for_type(
     root: Entity,
     ty: &ResolvedTy,
     context: Entity,
+    prefix: &str,
     out: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
 ) {
@@ -313,7 +316,7 @@ fn push_members_for_type(
             world.get::<NodeKind>(child),
             Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol)
         ) {
-            push_member_if_visible(ctx, world, child, context, out, seen);
+            push_member_if_visible(ctx, world, child, context, prefix, out, seen);
         }
     }
 
@@ -329,7 +332,7 @@ fn push_members_for_type(
             root,
         });
         for member in members.iter() {
-            push_member_if_visible(ctx, world, member.entity, context, out, seen);
+            push_member_if_visible(ctx, world, member.entity, context, prefix, out, seen);
         }
         return;
     }
@@ -342,7 +345,7 @@ fn push_members_for_type(
         root,
     });
     for member in members.iter() {
-        push_member_if_visible(ctx, world, member.entity, context, out, seen);
+        push_member_if_visible(ctx, world, member.entity, context, prefix, out, seen);
     }
 }
 
@@ -359,6 +362,7 @@ fn push_member_if_visible(
     world: &World,
     entity: Entity,
     context: Entity,
+    prefix: &str,
     out: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
 ) {
@@ -368,16 +372,21 @@ fn push_member_if_visible(
     }) {
         return;
     }
-    push_member_entity(world, entity, out, seen);
+    push_member_entity(ctx, world, entity, prefix, out, seen);
 }
 
 fn push_member_entity(
+    ctx: &QueryContext<'_>,
     world: &World,
     entity: Entity,
+    prefix: &str,
     out: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
 ) {
     let Some(name) = world.get::<Name>(entity) else {
+        return;
+    };
+    let Some(tags) = completion_tags(ctx, entity, prefix) else {
         return;
     };
     let kind = world.get::<NodeKind>(entity).cloned();
@@ -398,8 +407,28 @@ fn push_member_entity(
         label: name.0.clone(),
         kind: Some(item_kind),
         detail,
+        tags,
         ..Default::default()
     });
+}
+
+/// How completion shows a declaration. `None` leaves it out: it is
+/// `@doc(.Hidden)` and the typed prefix doesn't already spell at least three
+/// characters of its name (the caller has checked the prefix matches).
+/// Otherwise the item's tags: `@deprecated` (or `@unavailable`) strikes it
+/// through.
+fn completion_tags(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    prefix: &str,
+) -> Option<Option<Vec<CompletionItemTag>>> {
+    if prefix.len() < 3 && kestrel_ast_builder::attrs::is_doc_hidden(ctx, entity) {
+        return None;
+    }
+    let restricted = ctx
+        .query(kestrel_ast_builder::attrs::UseRestrictionOf { entity })
+        .is_some();
+    Some(restricted.then(|| vec![CompletionItemTag::DEPRECATED]))
 }
 
 /// Build a one-line signature for `detail` — function arity, field type, etc.
@@ -468,11 +497,11 @@ fn scope_completion(
             entity: scope_entity,
             root,
         });
-        push_scope_names(world, &scope, prefix, &mut items);
+        push_scope_names(ctx, world, &scope, prefix, &mut items);
         // Wildcard imports: walk their immediate children and offer names.
         for &source in &scope.wildcard_imports {
             for &child in world.children_of(source) {
-                push_decl_name(world, child, prefix, &mut items);
+                push_decl_name(ctx, world, child, prefix, &mut items);
             }
         }
         cursor = scope.parent;
@@ -484,7 +513,7 @@ fn scope_completion(
     while let Some(e) = cursor {
         if let Some(tps) = world.get::<TypeParams>(e) {
             for &tp in &tps.0 {
-                push_decl_name(world, tp, prefix, &mut items);
+                push_decl_name(ctx, world, tp, prefix, &mut items);
             }
         }
         cursor = world.parent_of(e);
@@ -494,6 +523,7 @@ fn scope_completion(
 }
 
 fn push_scope_names(
+    ctx: &QueryContext<'_>,
     world: &World,
     scope: &Scope,
     prefix: &str,
@@ -504,7 +534,7 @@ fn push_scope_names(
             continue;
         }
         let entity = entities[0];
-        push_decl_name(world, entity, prefix, out);
+        push_decl_name(ctx, world, entity, prefix, out);
         let _ = name;
     }
     for (name, entities) in &scope.selective_imports {
@@ -512,12 +542,13 @@ fn push_scope_names(
             continue;
         }
         let entity = entities[0];
-        push_decl_name(world, entity, prefix, out);
+        push_decl_name(ctx, world, entity, prefix, out);
         let _ = name;
     }
 }
 
 fn push_decl_name(
+    ctx: &QueryContext<'_>,
     world: &World,
     entity: Entity,
     prefix: &str,
@@ -529,6 +560,9 @@ fn push_decl_name(
     if !name.0.starts_with(prefix) || name.is_root() {
         return;
     }
+    let Some(tags) = completion_tags(ctx, entity, prefix) else {
+        return;
+    };
     let kind = world.get::<NodeKind>(entity).cloned();
     let item_kind = match kind {
         Some(NodeKind::Function) => CompletionItemKind::FUNCTION,
@@ -545,6 +579,7 @@ fn push_decl_name(
         label: name.0.clone(),
         kind: Some(item_kind),
         detail,
+        tags,
         ..Default::default()
     });
 }
@@ -1049,5 +1084,45 @@ mod tests {
         let ctx = world.query_context();
         let items = member_completion(&ctx, world, root, f, cursor, "");
         assert!(items.is_none(), "should fall through to scope: {:?}", items);
+    }
+
+    /// `@doc(.Hidden)` members stay out of completion until the typed prefix
+    /// spells three characters of the name; `@deprecated` ones are offered
+    /// with the deprecated tag.
+    #[test]
+    fn member_completion_hides_doc_hidden_and_tags_deprecated() {
+        let src = "module T\n\
+                   struct P {\n\
+                   \x20   var x: lang.i64;\n\
+                   \x20   @doc(.Hidden) func secretHook() -> lang.i64 { 1 }\n\
+                   \x20   @deprecated func oldName() -> lang.i64 { 2 }\n\
+                   }\n\
+                   func f(p: P) { p. }\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/hidden.ks", src.into());
+        c.build(f);
+        let cur = src.rfind("p. ").unwrap() + 2;
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire on `p.`");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(
+            !labels.contains("secretHook"),
+            "hidden member offered: {:?}",
+            labels
+        );
+        let old = items
+            .iter()
+            .find(|i| i.label == "oldName")
+            .expect("oldName offered");
+        assert_eq!(old.tags, Some(vec![CompletionItemTag::DEPRECATED]));
+
+        let typed = member_completion(&ctx, world, root, f, cur, "sec").unwrap_or_default();
+        assert!(
+            typed.iter().any(|i| i.label == "secretHook"),
+            "a 3-character prefix match must offer the hidden member"
+        );
     }
 }

@@ -3,5 +3,5 @@
 
 module Test
 
-@platform(.darwin)
+@platform(.Darwin)
 func foo() {}

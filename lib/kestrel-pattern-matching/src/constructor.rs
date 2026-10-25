@@ -27,6 +27,8 @@
 //! - `Constructor::matches()` — compatibility check for specialization
 //! - `Constructor::field_types()` — sub-pattern types for a constructor
 //! - `Constructor::all_for_type()` — enumerate all constructors (via TypeShape)
+//! - `Constructor::all_at_site()` — the same, seen from a match's module:
+//!   a `@nonExhaustive` enum from another module is open there
 
 use std::collections::HashSet;
 
@@ -270,6 +272,22 @@ impl Constructor {
     ) -> Option<Vec<Constructor>> {
         let shape = TypeShape::classify(query, root, ty);
         shape.constructors(query)
+    }
+
+    /// [`Self::all_for_type`] as seen from a match at `site`: outside a
+    /// `@nonExhaustive` enum's module the case list also holds
+    /// [`Constructor::NonExhaustive`], the cases a later version may add,
+    /// which only a catch-all covers.
+    pub fn all_at_site(
+        query: &QueryContext<'_>,
+        site: MatchSite,
+        ty: &ResolvedTy,
+    ) -> Option<Vec<Constructor>> {
+        let mut all = Self::all_for_type(query, site.root, ty)?;
+        if open_enum_at(query, site, ty).is_some() {
+            all.push(Constructor::NonExhaustive);
+        }
+        Some(all)
     }
 
     /// Find constructors not covered by `covered`. Returns `None` if impossible.
@@ -558,6 +576,49 @@ impl TypeShape {
             TypeShape::Infinite | TypeShape::Unknown => None,
         }
     }
+}
+
+// ===== Match sites =====
+
+/// Where a match is written, for `@nonExhaustive` enums.
+#[derive(Clone, Copy, Debug)]
+pub struct MatchSite {
+    pub root: Entity,
+    /// The `internal_boundary` (top-level module) of the matching code.
+    /// `None` treats every enum as closed: code generation compiles the
+    /// cases that exist today.
+    pub boundary: Option<Entity>,
+}
+
+impl MatchSite {
+    /// A site that sees every enum as closed.
+    pub fn closed(root: Entity) -> Self {
+        Self {
+            root,
+            boundary: None,
+        }
+    }
+
+    /// The site of code in `owner` (a function, initializer, accessor, ...).
+    pub fn of(query: &QueryContext<'_>, root: Entity, owner: Entity) -> Self {
+        Self {
+            root,
+            boundary: kestrel_name_res::internal_boundary(query, owner),
+        }
+    }
+}
+
+/// The enum `ty` names if it is `@nonExhaustive` and `site` is outside its
+/// module, so its case list is open there.
+pub fn open_enum_at(query: &QueryContext<'_>, site: MatchSite, ty: &ResolvedTy) -> Option<Entity> {
+    let ResolvedTy::Named { entity, .. } = ty else {
+        return None;
+    };
+    let boundary = site.boundary?;
+    (query.get::<NodeKind>(*entity) == Some(&NodeKind::Enum)
+        && kestrel_ast_builder::attrs::attrs_of(query, *entity).is_non_exhaustive()
+        && kestrel_name_res::internal_boundary(query, *entity) != Some(boundary))
+    .then_some(*entity)
 }
 
 // ===== Helpers =====

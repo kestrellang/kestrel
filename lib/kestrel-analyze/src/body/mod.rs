@@ -41,3 +41,9 @@ pub mod string_escape;
 
 // Integer-literal range check (E121)
 pub mod integer_literal_range;
+
+// Uses of `@deprecated` / `@unavailable` declarations (E908, E913)
+pub mod restricted_use;
+
+// Borrows of `@layout(.Packed)` fields (E912)
+pub mod packed_field_borrow;

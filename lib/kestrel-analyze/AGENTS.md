@@ -178,6 +178,7 @@ IDs follow the pattern `E<NNN>`:
 - **E800–E899**: Syntax — parser diagnostics. Not analyzer descriptors:
   `kestrel-parser/src/syntax_error.rs` is the only place they are assigned,
   and they reach codespan via `with_code`. E800–E809 allocated (2026-10); E810 (misplaced associated-type binding) added with existentials.
+- **E900–E999**: Attributes and derives. E900–E949 are attributes, E950–E999 are derives. The shape checks (unknown attribute, wrong target, arguments, duplicates, conflicts: E900–E907, E909, E914) are decided in `kestrel-ast-builder/src/attrs/parse.rs` as `AttrError`s and only forwarded by `compilation/attribute_validation.rs`; add a new shape code there and to its `DESCRIPTORS`. Meaning checks get their own analyzer (`decl/attribute_semantics.rs` E910/E911, `body/restricted_use.rs` E908/E913, `body/packed_field_borrow.rs` E912).
 
 Current allocations:
 - E001: `missing_return` (exhaustive_return.rs)

@@ -329,8 +329,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Struct construction: Def(struct) used as callee. Free-standing
             // type aliases are already dereferenced by name resolution, so
             // `type C = Counter; C(42)` reaches here with Def(Counter).
+            // An enum's initializers (`Mode()`, from a derived `Defaultable`
+            // or written by hand) resolve the same way, minus memberwise.
             if let HirExpr::Def(entity, explicit_type_args, _) = &hir.exprs[*callee]
-                && ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Struct)
+                && matches!(
+                    ctx.query_ctx.get::<NodeKind>(*entity),
+                    Some(NodeKind::Struct | NodeKind::Enum)
+                )
             {
                 let arg_tvs = gen_call_args(ctx, hir, args);
                 return gen_struct_init(ctx, *entity, explicit_type_args, &arg_tvs, id, span);
@@ -1578,6 +1583,20 @@ fn gen_struct_init(
         }
     }
 
+    // A derived `Defaultable` adds `init()`, but deriving must not take the
+    // memberwise init away: with no hand-written init, the derived ones are
+    // only candidates for a call they match (`Point()`).
+    let is_derived = |init: &Entity| {
+        qctx.parent_of(*init)
+            .is_some_and(|ext| qctx.has::<kestrel_ast_builder::DerivedFrom>(ext))
+    };
+    if inits.iter().all(is_derived) {
+        inits.retain(|&init| {
+            qctx.get::<Callable>(init)
+                .is_some_and(|c| labels_match(&c.params, &arg_labels))
+        });
+    }
+
     // Track the matched init entity for effect wrapping
     let mut matched_init: Option<Entity> = None;
 
@@ -1671,6 +1690,16 @@ fn gen_struct_init(
             ctx.expr_types.insert(expr_id, result_tv);
             return result_tv;
         }
+    } else if qctx.get::<NodeKind>(struct_entity) == Some(&NodeKind::Enum) {
+        // An enum has no memberwise init: it is built through its cases.
+        let name = qctx
+            .get::<Name>(struct_entity)
+            .map(|n| n.0.clone())
+            .unwrap_or_else(|| "<enum>".into());
+        ctx.report_error(InferError::NoMatchingOverload {
+            name,
+            span: span.clone(),
+        });
     } else {
         // Memberwise init: match args against stored field types (in order).
         // This list must be index-aligned with the MIR layout in

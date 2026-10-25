@@ -3,7 +3,7 @@
 //! Determines whether a declaration is visible from a given context,
 //! respecting public/private/internal/fileprivate modifiers.
 
-use kestrel_ast_builder::{FileId, Name, NodeKind, Vis};
+use kestrel_ast_builder::{DerivedFrom, FileId, Name, NodeKind, Vis};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::helpers::{ancestor_module, is_ancestor_of};
@@ -24,6 +24,7 @@ impl QueryFn for IsVisibleFrom {
     type Output = bool;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> bool {
+        let context = derived_context(ctx, self.context);
         match ctx.get::<Vis>(self.target) {
             // No visibility modifier → always visible (default)
             None => true,
@@ -33,12 +34,12 @@ impl QueryFn for IsVisibleFrom {
                 let Some(scope) = ctx.parent_of(self.target) else {
                     return true;
                 };
-                is_ancestor_of(ctx, scope, self.context)
+                is_ancestor_of(ctx, scope, context)
             },
             Some(Vis::Fileprivate) => {
                 // Visible within the same file
                 let target_file = find_file_id(ctx, self.target);
-                let context_file = find_file_id(ctx, self.context);
+                let context_file = find_file_id(ctx, context);
                 match (target_file, context_file) {
                     (Some(t), Some(c)) => t == c,
                     // If no file info, fall back to parent scope check
@@ -46,24 +47,36 @@ impl QueryFn for IsVisibleFrom {
                         let Some(scope) = ctx.parent_of(self.target) else {
                             return true;
                         };
-                        is_ancestor_of(ctx, scope, self.context)
+                        is_ancestor_of(ctx, scope, context)
                     },
                 }
             },
             Some(Vis::Internal) => {
                 // Visible within the same top-level module subtree
-                let target_mod = ancestor_module(ctx, self.target);
-                let context_mod = ancestor_module(ctx, self.context);
-                match (target_mod, context_mod) {
-                    (Some(t), Some(c)) => {
-                        // Walk to find the top-level module (child of root)
-                        let t_top = top_level_module(ctx, t);
-                        let c_top = top_level_module(ctx, c);
-                        t_top == c_top
-                    },
+                match (
+                    internal_boundary(ctx, self.target),
+                    internal_boundary(ctx, context),
+                ) {
+                    (Some(t), Some(c)) => t == c,
                     _ => true,
                 }
             },
+        }
+    }
+}
+
+/// Code `@derive` generated reads the type's private fields, so it sees
+/// what code written inside the type would: the context inside a
+/// `DerivedFrom` extension is the type itself.
+fn derived_context(ctx: &QueryContext<'_>, context: Entity) -> Entity {
+    let mut current = context;
+    loop {
+        if let Some(derived) = ctx.get::<DerivedFrom>(current) {
+            return derived.ty;
+        }
+        match ctx.parent_of(current) {
+            Some(parent) => current = parent,
+            None => return context,
         }
     }
 }
@@ -77,6 +90,14 @@ fn find_file_id(ctx: &QueryContext<'_>, entity: Entity) -> Option<Entity> {
         }
         current = ctx.parent_of(current)?;
     }
+}
+
+/// The module subtree `internal` visibility stops at: the top-level module
+/// (direct child of the root) enclosing `entity`. Two entities with the same
+/// boundary see each other's `internal` declarations, and `@nonExhaustive`
+/// enums are closed inside it. `None` when `entity` is in no module.
+pub fn internal_boundary(ctx: &QueryContext<'_>, entity: Entity) -> Option<Entity> {
+    ancestor_module(ctx, entity).map(|m| top_level_module(ctx, m))
 }
 
 /// Find the top-level module (direct child of root) for a given module.

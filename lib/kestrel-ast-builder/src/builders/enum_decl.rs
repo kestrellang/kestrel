@@ -55,7 +55,8 @@ pub fn build_enum(
 
 /// Build an enum case declaration entity from CST.
 ///
-/// Components: NodeKind::EnumCase, Name, FileId, [Callable], [Documentation]
+/// Components: NodeKind::EnumCase, Name, FileId, [Callable], [Documentation],
+/// [Attributes]
 pub fn build_enum_case(
     world: &mut World,
     node: &ast::EnumCaseDeclaration,
@@ -76,6 +77,7 @@ pub fn build_enum_case(
         world.set(entity, Name(name));
     }
     set_documentation(world, entity, syntax);
+    set_attributes(world, entity, node, file_id);
 
     // Associated values: `case some(value: T)`. The label is the name.
     let params: Vec<AstParam> = node

@@ -60,11 +60,11 @@ func libc_closedir(dirp: RawPointer) -> Int32
 func libc_getcwd(buf: RawPointer, size: Int64) -> RawPointer
 
 // errno access
-@platform(.darwin)
+@platform(.Darwin)
 @extern(.C, mangleName: "__error")
 func __errno_ptr() -> Pointer[Int32]
 
-@platform(.linux)
+@platform(.Linux)
 @extern(.C, mangleName: "__errno_location")
 func __errno_ptr() -> Pointer[Int32]
 
@@ -79,11 +79,11 @@ func F_OK() -> Int32 { 0 }
 func STAT_BUF_SIZE() -> Int64 { 144 }
 
 /// Byte offset of `st_mode` within `struct stat` on darwin (after `st_dev`).
-@platform(.darwin)
+@platform(.Darwin)
 func ST_MODE_OFFSET() -> Int64 { 4 }
 
 /// Byte offset of `st_mode` within `struct stat` on linux (`st_dev` + `st_ino` + padding).
-@platform(.linux)
+@platform(.Linux)
 func ST_MODE_OFFSET() -> Int64 { 24 }
 
 /// `S_IFMT` — bitmask isolating the file-type bits of `st_mode`.
@@ -96,11 +96,11 @@ func S_IFDIR() -> Int32 { 16384 }
 func S_IFREG() -> Int32 { 32768 }
 
 /// Byte offset of `d_name` within `struct dirent` on darwin.
-@platform(.darwin)
+@platform(.Darwin)
 func DIRENT_NAME_OFFSET() -> Int64 { 21 }
 
 /// Byte offset of `d_name` within `struct dirent` on linux.
-@platform(.linux)
+@platform(.Linux)
 func DIRENT_NAME_OFFSET() -> Int64 { 19 }
 
 /// Default mode for new directories — `0o755` (`rwxr-xr-x`).

@@ -259,6 +259,15 @@ pub enum Builtin {
     FormattableProtocol,
     FormattableFormatIntoMethod,
 
+    // ===== Derivable protocols (`@derive`) =====
+    // With `FormattableProtocol`, the protocols `@derive` has a built-in
+    // deriver for. A protocol is derivable iff it is the target of one of
+    // these, never by its name.
+    EquatableProtocol,
+    HashableProtocol,
+    ComparableProtocol,
+    DefaultableProtocol,
+
     // ===== Exitable / @main return =====
     Exitable,
     ExitableReport,
@@ -507,6 +516,12 @@ impl Builtin {
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
 
+            // Derivable protocols
+            Self::EquatableProtocol => "EquatableProtocol",
+            Self::HashableProtocol => "HashableProtocol",
+            Self::ComparableProtocol => "ComparableProtocol",
+            Self::DefaultableProtocol => "DefaultableProtocol",
+
             // Exitable — `Exitable`/`ExitCode` resolve by source name; the method
             // by its `@builtin` attribute name.
             Self::Exitable => "Exitable",
@@ -740,6 +755,12 @@ impl Builtin {
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
 
+            // Derivable protocols
+            "EquatableProtocol" => Some(Self::EquatableProtocol),
+            "HashableProtocol" => Some(Self::HashableProtocol),
+            "ComparableProtocol" => Some(Self::ComparableProtocol),
+            "DefaultableProtocol" => Some(Self::DefaultableProtocol),
+
             // Exitable / @main return
             "Exitable" => Some(Self::Exitable),
             "ExitableReport" => Some(Self::ExitableReport),
@@ -969,6 +990,10 @@ impl Builtin {
             | Self::DefaultStringInterpolationBuild => BuiltinKind::Function,
             Self::FormattableProtocol => BuiltinKind::protocol(),
             Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
+            Self::EquatableProtocol
+            | Self::HashableProtocol
+            | Self::ComparableProtocol
+            | Self::DefaultableProtocol => BuiltinKind::protocol(),
 
             // Exitable: non-marker protocol with a required `report()` method.
             Self::Exitable => BuiltinKind::protocol(),

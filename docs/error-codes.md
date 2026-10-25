@@ -27,6 +27,7 @@ the type checker, and the code is assigned in one place,
 - [E624–E625 — Closure kinds](#e624e625--closure-kinds)
 - [E700–E710 — String & character literals, escapes, format specs](#e700e710--string--character-literals-escapes-format-specs)
 - [E800–E810 — Syntax](#e800e810--syntax)
+- [E900–E999 — Attributes & derives](#e900e999--attributes--derives)
 
 ---
 
@@ -232,7 +233,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E458 | method '{name}' has wrong return type for protocol '{proto}' | A witness method's return type doesn't match the requirement. |
 | E459 | circular protocol inheritance: '{A}' -> ... -> '{A}' | Protocols inherit from each other in a cycle. |
 | E460 | property '{name}' requires a setter to satisfy protocol '{proto}' | The protocol requires `get set` but the witness property is read-only. |
-| E461 *(warning)* | unknown attribute '{name}' | An `@attribute` isn't recognized by the compiler. |
+| E461 | unknown attribute '{name}' (; did you mean '@{x}'?) | An `@attribute` isn't in the attribute registry (`kestrel-ast-builder/src/attrs/registry.rs`). An error since 0.18: a misspelled attribute used to be a warning and then did nothing. |
 | E462 | conflicting associated type '{name}' inherited by protocol '{proto}' | Two inherited protocols declare incompatible versions of the same associated type. |
 | E463 | method '{name}' is ambiguous: satisfies requirements of multiple protocols ({list}) | One method would witness several unrelated protocols; implement each conformance in its own `extend Type: Protocol` block. |
 | E464 | init has wrong effect for protocol '{proto}' | A witness `init`'s failability/throwing effect doesn't match the protocol requirement. |
@@ -432,7 +433,7 @@ func outlives() -> Int64 {
 | E609 | @extern functions cannot be generic | Generic functions have no stable ABI to export. |
 | E610 | @extern functions cannot have a body | Extern functions are implemented in external code. |
 | E611 | @extern function parameter '{name}' must use consuming access mode | Extern functions receive values, not references. |
-| E612 | @extern requires a calling convention | Write e.g. `@extern(.C)`. |
+| E612 | '@extern' needs a calling convention: '@extern(.C)' | Reported by attribute validation (the registry's missing-argument check, keeping its pre-registry code). |
 | E613 | required parameter '{name}' cannot follow parameter '{default_name}' which has a default value | Defaulted parameters must come last. |
 | E614 | default value cannot reference parameter '{name}' | Defaults are evaluated at each call site and can't see other parameters. |
 | E623 | function '{name}' requires a body | A non-protocol, non-extern function was declared without a body. |
@@ -569,3 +570,36 @@ is reported on the token *before* the gap, where it belongs.
 | E808 | expected pattern, found {token} | A pattern was required (after `let`, `case`-style match arms, parameters). |
 | E809 | expected a name, found {token} | A declaration's name is missing; a keyword in name position (`func case()`) is reported here. |
 | E810 | associated-type binding '{name} = ...' is only allowed in an 'any' bound | `Item = Int64` inside `[...]` pins an associated type of an existential (`any Iterator[Item = Int64]`); anywhere else it has no meaning. |
+
+## E900–E999 — Attributes & derives
+
+E900–E949 are attributes, E950–E999 are derives. The shape checks (E900–E907,
+E914, plus E461 and E612 above) are decided next to the attribute registry
+(`kestrel-ast-builder/src/attrs/`) and reported by the `attribute_validation`
+analyzer. The derive checks (E950–E958) are the `derive_site` analyzer's.
+See `docs/plans/attributes/attributes-design.md`.
+
+| Code | Message | Explanation |
+|---|---|---|
+| E900 | '@{name}' cannot be applied to {target}; it applies to {targets} | The attribute isn't allowed on this kind of declaration. |
+| E901 | duplicate attribute '@{name}' | A non-repeatable attribute is written twice; the second is ignored. `@platform` says "'@platform' appears twice; list every platform in one '@platform(...)'". |
+| E902 | '@{name}' needs {what} | A required argument is missing (`@fileconstant` without a path). |
+| E903 | '.{case}' is not {a noun}; expected {cases} | An argument has an unknown case or the wrong kind of value (`expected a string literal, found '42'`, `unknown builtin '.Foo'`). |
+| E904 | '@{name}' has no argument '{label}' | An unknown, repeated (`argument '{label}' given twice`) or misplaced (`positional argument after a labeled one`) label. |
+| E905 | '@{name}' needs a body; {target} has none | `@inline` on a bodiless protocol requirement. |
+| E906 | '@{a}' cannot be combined with '@{b}': {reason} | Two attributes that contradict each other (`@inline` + `@extern`, `@main` + `@extern`, `@layout(.Packed)` + `@align`). |
+| E907 | '@{name}' takes at most one argument | Too many positional arguments. |
+| E908 *(warning)* | '{name}' is deprecated[ since {since}][: {message}][; use '{replacement}' instead] | A use of a `@deprecated` declaration: a call, reference, member access, enum case, or a type named in a body or signature. Not reported inside a declaration that is itself deprecated or unavailable, or nested in one. |
+| E909 | '@align({n})' must be a power of two between 1 and 4096 | `@align` takes a power of two; 4096 is the most `posix_memalign` and the stack provide without a special path. |
+| E910 | '@nonExhaustive' has no effect: '{name}' is not visible outside its module | An attribute that does not fit this type: `@nonExhaustive` on an enum that isn't `public` (only other modules must add a catch-all arm, so it does nothing); `'@layout(.Packed)' cannot be applied to an enum`; `'@layout(.Packed)' cannot be applied to a type with an unsized tail`; `'@layout(.C)' on an enum needs every case to be payload-less; 'Shape.Circle' has a payload`. |
+| E911 | field '{field}' of packed struct '{name}' is not Copyable; packed fields are copied on every read | Every field of a `@layout(.Packed)` struct must be bitwise `Copyable`: it may sit at a misaligned address, so a read copies it out first. |
+| E912 | cannot borrow '{place}' in place: '{name}' is packed, so the field may be misaligned | `&h.length`, `&mutating h.length`, a `mutating` method on `h.length`, or `h.length` passed to a `mutating` parameter. Copy it first: `var n = h.length`. Reads and whole-field writes are fine. |
+| E913 | '{name}' is unavailable[: {message}][; use '{replacement}' instead] | A use of an `@unavailable` declaration. Reported everywhere, including inside other unavailable code. An unavailable protocol requirement needs no witness. |
+| E914 *(warning)* | '.{old}' is the old spelling; write '.{New}' | `@platform(.linux)` / `.darwin`: accepted for one release, renamed to `.Linux` / `.Darwin` in 0.18. |
+| E950 | cannot find protocol '{P}' | A `@derive` argument doesn't resolve, or resolves to something that isn't a protocol (`'Point' in '@derive' is not a protocol`). |
+| E951 | '{P}' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable and Defaultable | The protocol has no built-in deriver. `Copyable` and `Cloneable` say why instead: `'Cloneable' is not derived: whether 'Doc' is Cloneable follows from its fields`. |
+| E952 | cannot derive '{P}' for '{S}': field '{f}' has type '{T}', which is not '{P}' | A field (or enum payload: `payload 'radius' of case 'Circle'`) doesn't conform. For a generic type the derived bound `T: P` is assumed. `Defaultable` skips fields with an initializer and reads only the `@default` case. |
+| E953 | '{S}' already declares '{P}' | The type also declares the protocol itself, or a member written for it implements a requirement (`'Point' derives 'Equatable' but also implements 'isEqual'; remove one`), or `@derive` names the protocol twice. |
+| E954 | '@derive' on an extension needs a type declared in this module | `@derive` on an extension of another module's type, or (0.18) of a type declared in another file; also `cannot derive 'P' for 'S': its last field is unsized`. |
+| E957 | cannot derive 'Defaultable' for '{E}': mark exactly one case '@default' | An enum derives `Defaultable` by building its one `@default` case. |
+| E958 | deriving '{P}' requires '{S}' to be '{Q}'; add '{Q}' to '@derive' | A parent protocol doesn't hold. Parents are never derived implicitly: derive them alongside, declare them, or derive them in another `@derive`. |

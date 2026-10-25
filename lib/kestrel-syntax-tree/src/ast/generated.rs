@@ -113,6 +113,9 @@ pub struct ExtensionDeclaration {
 }
 
 impl ExtensionDeclaration {
+    pub fn attribute_list(&self) -> Option<AttributeList> {
+        support::child(&self.syntax)
+    }
     pub fn extend_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Extend)
     }
@@ -548,6 +551,9 @@ pub struct DeinitDeclaration {
 }
 
 impl DeinitDeclaration {
+    pub fn attribute_list(&self) -> Option<AttributeList> {
+        support::child(&self.syntax)
+    }
     pub fn deinit_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Deinit)
     }
@@ -649,6 +655,30 @@ impl ImportItem {
 impl AstNode for ImportItem {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::ImportItem
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `AttributeList` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AttributeList {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl AttributeList {
+    pub fn attributes(&self) -> AstChildren<Attribute> {
+        support::children(&self.syntax)
+    }
+}
+
+impl AstNode for AttributeList {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::AttributeList
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -763,30 +793,6 @@ impl ExtensionBody {
 impl AstNode for ExtensionBody {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::ExtensionBody
-    }
-    fn cast(syntax: SyntaxNode) -> Option<Self> {
-        Self::can_cast(syntax.kind()).then_some(Self { syntax })
-    }
-    fn syntax(&self) -> &SyntaxNode {
-        &self.syntax
-    }
-}
-
-/// `AttributeList` node.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AttributeList {
-    pub(crate) syntax: SyntaxNode,
-}
-
-impl AttributeList {
-    pub fn attributes(&self) -> AstChildren<Attribute> {
-        support::children(&self.syntax)
-    }
-}
-
-impl AstNode for AttributeList {
-    fn can_cast(kind: SyntaxKind) -> bool {
-        kind == SyntaxKind::AttributeList
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })

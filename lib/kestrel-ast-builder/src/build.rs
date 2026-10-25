@@ -5,10 +5,12 @@
 //! (struct/enum/protocol/extension) push their member items onto the stack.
 
 use kestrel_hecs::{Entity, World};
+use kestrel_syntax_tree::SyntaxNode;
 use kestrel_syntax_tree::ast::{self, AstNode, HasAttributes};
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::components::{FileSyntax, Os, TargetConfig};
+use crate::attrs::{self, ParsedAttr};
+use crate::builders::helpers::extract_attribute;
+use crate::components::{FileSyntax, TargetConfig};
 
 use crate::builders::{
     enum_decl, extension, field, function, import, module, protocol, struct_decl, subscript,
@@ -35,7 +37,6 @@ pub fn build_declarations(
     root: Entity,
     target: Option<&TargetConfig>,
 ) {
-    let file_id = file_entity.index();
     let Some(file) = ast::SourceFile::cast(tree.clone()) else {
         return;
     };
@@ -52,61 +53,116 @@ pub fn build_declarations(
         .map(|m| module::resolve_module_path(world, root, &m))
         .unwrap_or(root);
 
+    let built = build_items(
+        world,
+        file_entity,
+        file.items().collect(),
+        module_parent,
+        target,
+    );
+    crate::derive::expand(world, file_entity, module_parent, target, &built);
+}
+
+/// What [`build_items`] built, for passes that run after it.
+#[derive(Default)]
+pub(crate) struct Built {
+    /// Container entities built directly under `outer`.
+    pub top_level: Vec<Entity>,
+    /// Every struct, enum and extension, with its syntax.
+    pub containers: Vec<(Entity, ast::Item)>,
+}
+
+/// Build `items` (and, recursively, their members) under `outer`.
+pub(crate) fn build_items(
+    world: &mut World,
+    file_entity: Entity,
+    items: Vec<ast::Item>,
+    outer: Entity,
+    target: Option<&TargetConfig>,
+) -> Built {
+    let file_id = file_entity.index();
+    let mut built = Built::default();
     // (item, parent). Pushed in reverse so items are built in source order.
     let mut stack: Vec<(ast::Item, Entity)> = Vec::new();
-    push_items(&mut stack, file.items().collect(), module_parent);
+    push_items(&mut stack, items, outer);
 
-    while let Some((item, parent)) = stack.pop() {
+    while let Some((item, item_parent)) = stack.pop() {
         // Skip declarations excluded by target-conditional attributes (@platform, etc.)
         if is_excluded_by_target(&item, target) {
             continue;
         }
+        let parent = item_parent;
         use ast::Item as I;
-        match &item {
+        let entity = match &item {
             I::StructDeclaration(n) => {
                 let (entity, members) =
                     struct_decl::build_struct(world, n, parent, file_entity, file_id);
                 push_items(&mut stack, members, entity);
+                built.containers.push((entity, item.clone()));
+                Some(entity)
             },
             I::EnumDeclaration(n) => {
                 let (entity, members) =
                     enum_decl::build_enum(world, n, parent, file_entity, file_id);
                 push_items(&mut stack, members, entity);
+                built.containers.push((entity, item.clone()));
+                Some(entity)
             },
             I::ProtocolDeclaration(n) => {
                 let (entity, members) =
                     protocol::build_protocol(world, n, parent, file_entity, file_id);
                 push_items(&mut stack, members, entity);
+                Some(entity)
             },
             I::ExtensionDeclaration(n) => {
                 let (entity, members) =
                     extension::build_extension(world, n, parent, file_entity, file_id);
                 push_items(&mut stack, members, entity);
+                built.containers.push((entity, item.clone()));
+                Some(entity)
             },
             I::EnumCaseDeclaration(n) => {
-                enum_decl::build_enum_case(world, n, parent, file_entity, file_id)
+                enum_decl::build_enum_case(world, n, parent, file_entity, file_id);
+                None
             },
             I::FunctionDeclaration(n) => {
-                function::build_function(world, n, parent, file_entity, file_id)
+                function::build_function(world, n, parent, file_entity, file_id);
+                None
             },
             I::InitializerDeclaration(n) => {
-                function::build_initializer(world, n, parent, file_entity, file_id)
+                function::build_initializer(world, n, parent, file_entity, file_id);
+                None
             },
             I::DeinitDeclaration(n) => {
-                function::build_deinit(world, n, parent, file_entity, file_id)
+                function::build_deinit(world, n, parent, file_entity, file_id);
+                None
             },
-            I::FieldDeclaration(n) => field::build_field(world, n, parent, file_entity, file_id),
+            I::FieldDeclaration(n) => {
+                field::build_field(world, n, parent, file_entity, file_id);
+                None
+            },
             I::SubscriptDeclaration(n) => {
-                subscript::build_subscript(world, n, parent, file_entity, file_id)
+                subscript::build_subscript(world, n, parent, file_entity, file_id);
+                None
             },
             I::TypeAliasDeclaration(n) => {
-                type_alias::build_type_alias(world, n, parent, file_entity, file_id)
+                type_alias::build_type_alias(world, n, parent, file_entity, file_id);
+                None
             },
-            I::ImportDeclaration(n) => import::build_import(world, n, parent, file_entity, file_id),
-            // Handled above, before any item is built.
-            I::ModuleDeclaration(_) => {},
+            I::ImportDeclaration(n) => {
+                import::build_import(world, n, parent, file_entity, file_id);
+                None
+            },
+            // Handled by `build_declarations`, before any item is built.
+            I::ModuleDeclaration(_) => None,
+        };
+        if let Some(entity) = entity
+            && item_parent == outer
+        {
+            built.top_level.push(entity);
         }
     }
+    built
 }
 
 /// Push `items` so they pop in source order.
@@ -127,52 +183,35 @@ fn item_attributes(item: &ast::Item) -> Vec<ast::Attribute> {
         I::InitializerDeclaration(n) => n.attributes().collect(),
         I::SubscriptDeclaration(n) => n.attributes().collect(),
         I::EnumCaseDeclaration(n) => n.attributes().collect(),
-        I::ModuleDeclaration(_)
-        | I::ImportDeclaration(_)
-        | I::ExtensionDeclaration(_)
-        | I::DeinitDeclaration(_) => Vec::new(),
+        I::ExtensionDeclaration(n) => n.attributes().collect(),
+        I::DeinitDeclaration(n) => n.attributes().collect(),
+        I::ModuleDeclaration(_) | I::ImportDeclaration(_) => Vec::new(),
     }
 }
 
 /// Whether a target-conditional attribute (`@platform`, …) excludes the
 /// item: excluded if ANY conditional attribute doesn't match the target.
-fn is_excluded_by_target(item: &ast::Item, target: Option<&TargetConfig>) -> bool {
-    let Some(target) = target else {
-        return false;
-    };
-    item_attributes(item).iter().any(|attr| {
-        // Future: "arch" => is_excluded_by_arch(...)
-        attr.identifier_token()
-            .is_some_and(|name| name.text() == "platform")
-            && is_excluded_by_platform(attr, target)
-    })
-}
-
-/// Whether `@platform(.os)` excludes the declaration for `target`.
-fn is_excluded_by_platform(attr: &ast::Attribute, target: &TargetConfig) -> bool {
-    let Some(target_os) = target.os else {
+///
+/// Runs before entities exist, so it parses the syntax node with the same
+/// registry schema and parser `AttrsOf` uses. A malformed `@platform` (bad
+/// arguments, or written twice) never excludes: the declaration is kept so
+/// `AttrsOf` can report it.
+pub(crate) fn is_excluded_by_target(item: &ast::Item, target: Option<&TargetConfig>) -> bool {
+    let Some(target_os) = target.and_then(|t| t.os) else {
         return false; // no OS target set — don't filter
     };
-    // `@platform` with no args — let validation report
-    let Some(arg) = attr
-        .attribute_args()
-        .and_then(|a| a.attribute_args().next())
-    else {
+    let attrs: Vec<_> = item_attributes(item)
+        .iter()
+        .filter_map(|a| extract_attribute(a, 0))
+        .collect();
+    // Future: an `@arch` attribute gets the same treatment.
+    let platforms: Vec<_> = attrs.iter().filter(|a| a.name == "platform").collect();
+    let [only] = platforms[..] else {
         return false;
     };
-    // The implicit member `.os` of the first argument.
-    let Some(os) = arg
-        .syntax()
-        .children_with_tokens()
-        .filter_map(|c| c.into_token())
-        .skip_while(|t| t.kind() != SyntaxKind::Dot)
-        .find(|t| t.kind() == SyntaxKind::Identifier)
-    else {
-        return false; // no implicit member — don't exclude
-    };
-    match Os::from_name(os.text()) {
-        Some(declared) => declared != target_os,
-        None => false, // unknown platform — let validation report
+    match attrs::parse::parse_standalone(only) {
+        Some(ParsedAttr::Platform(oses)) => !oses.contains(&target_os),
+        _ => false,
     }
 }
 

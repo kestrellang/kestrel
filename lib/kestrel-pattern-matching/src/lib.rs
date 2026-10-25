@@ -73,6 +73,7 @@ pub mod usefulness;
 pub mod witness;
 
 // Re-export key types for convenient use
+pub use constructor::{MatchSite, open_enum_at};
 pub use decision_tree::DecisionTree;
 pub use usefulness::ExhaustivenessResult;
 pub use witness::Witness;
@@ -85,11 +86,11 @@ use kestrel_type_infer::result::ResolvedTy;
 pub fn check_match(
     hir: &HirBody,
     query: &QueryContext<'_>,
-    root: Entity,
+    site: MatchSite,
     scrutinee_ty: &ResolvedTy,
     arms: &[HirMatchArm],
 ) -> ExhaustivenessResult {
-    usefulness::check_match(hir, query, root, scrutinee_ty, arms)
+    usefulness::check_match(hir, query, site, scrutinee_ty, arms)
 }
 
 /// Type-aware irrefutability check.
@@ -102,19 +103,19 @@ pub fn check_match(
 pub fn is_irrefutable(
     hir: &HirBody,
     query: &QueryContext<'_>,
-    root: Entity,
+    site: MatchSite,
     pat_id: HirPatId,
     ty: &ResolvedTy,
 ) -> bool {
-    let flat = flat_pat::flatten(hir, query, root, pat_id, ty);
-    check_irrefutable(&flat, query, root, ty)
+    let flat = flat_pat::flatten(hir, query, site.root, pat_id, ty);
+    check_irrefutable(&flat, query, site, ty)
 }
 
 /// Recursive irrefutability check on a FlatPat.
 fn check_irrefutable(
     pat: &flat_pat::FlatPat,
     query: &QueryContext<'_>,
-    root: Entity,
+    site: MatchSite,
     ty: &ResolvedTy,
 ) -> bool {
     match pat {
@@ -137,7 +138,7 @@ fn check_irrefutable(
             }
 
             // Check if this constructor is the only one for the type
-            let all = constructor::Constructor::all_for_type(query, root, ty);
+            let all = constructor::Constructor::all_at_site(query, site, ty);
             let is_sole_ctor = all
                 .as_ref()
                 .is_some_and(|ctors| ctors.len() == 1 && ctors[0] == *ctor);
@@ -147,17 +148,17 @@ fn check_irrefutable(
             }
 
             // Constructor is sole — check all children recursively
-            let field_types = ctor.field_types(query, root, ty);
+            let field_types = ctor.field_types(query, site.root, ty);
             children.iter().enumerate().all(|(i, child)| {
                 let child_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
-                check_irrefutable(child, query, root, child_ty)
+                check_irrefutable(child, query, site, child_ty)
             })
         },
 
         // Or-pattern is irrefutable if ANY alternative is irrefutable
         flat_pat::FlatPat::Or(alts) => alts
             .iter()
-            .any(|alt| check_irrefutable(alt, query, root, ty)),
+            .any(|alt| check_irrefutable(alt, query, site, ty)),
     }
 }
 

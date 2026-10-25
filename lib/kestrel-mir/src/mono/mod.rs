@@ -252,6 +252,7 @@ pub fn monomorphize(
             extern_info: body_result.extern_info.clone(),
             is_main: body_result.is_main,
             ret_borrow,
+            inline: body_result.inline,
         });
     }
 
@@ -411,6 +412,7 @@ struct MonoBodyResult {
     ret: TyId,
     extern_info: Option<crate::item::function::ExternInfo>,
     is_main: bool,
+    inline: Option<crate::item::function::InlineMode>,
 }
 
 fn monomorphize_body(
@@ -451,6 +453,7 @@ fn monomorphize_body(
 
     let extern_info = func.extern_info.clone();
     let is_main = func.is_main;
+    let inline = func.inline;
 
     let Some(body) = &func.body else {
         return MonoBodyResult {
@@ -459,6 +462,7 @@ fn monomorphize_body(
             ret,
             extern_info,
             is_main,
+            inline,
         };
     };
 
@@ -537,6 +541,7 @@ fn monomorphize_body(
         ret,
         extern_info,
         is_main,
+        inline,
     }
 }
 
@@ -869,7 +874,7 @@ fn resolve_types_and_layouts(
                     let subst =
                         build_type_subst(sdef.type_params.iter().map(|tp| tp.entity), type_args);
 
-                    let mut layout = StructLayout::new();
+                    let mut layout = StructLayout::with_attrs(sdef.layout_attrs);
                     let mut all_resolved = true;
                     let mut fields = Vec::new();
 
@@ -917,9 +922,7 @@ fn resolve_types_and_layouts(
                     }
 
                     if all_resolved {
-                        if !layout.unsized_tail {
-                            layout.pad_to_align();
-                        }
+                        let layout = layout.finish();
                         layout_cache.insert(cache_key, (layout.size, layout.align));
                         let mut ms = MonoStruct::new(*entity, type_args.clone());
                         ms.fields = fields;
@@ -977,7 +980,11 @@ fn resolve_types_and_layouts(
                     }
 
                     if all_resolved {
-                        let enum_layout = build_enum_layout(&variant_layouts, edef.cases.len());
+                        let enum_layout = build_enum_layout(
+                            &variant_layouts,
+                            edef.cases.len(),
+                            edef.layout_attrs,
+                        );
                         layout_cache.insert(cache_key, (enum_layout.size, enum_layout.align));
                         let mut me = MonoEnum::new(
                             *entity,
@@ -1455,6 +1462,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
         module.add_function(func);
         module.register_name(entity(1), "main");
@@ -1539,6 +1547,7 @@ mod tests {
                 extern_info: None,
                 is_main: true,
                 provides_protocol_default: false,
+                inline: None,
             });
             module.register_name(entity(1), "main");
 
@@ -1602,6 +1611,7 @@ mod tests {
             extern_info: None,
             is_main: true,
             provides_protocol_default: false,
+            inline: None,
         });
         module.register_name(entity(1), "main");
 
@@ -1654,6 +1664,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         // main() calls identity[Int64]
@@ -1693,6 +1704,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         module.add_function(main_fn);
@@ -1758,6 +1770,7 @@ mod tests {
                 extern_info: None,
                 is_main: false,
                 provides_protocol_default: false,
+                inline: None,
             }
         };
 
@@ -1799,6 +1812,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
         module.add_function(maker);
 
@@ -1823,6 +1837,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         });
 
         let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
@@ -1891,6 +1906,7 @@ mod tests {
                 extern_info: None,
                 is_main: false,
                 provides_protocol_default: false,
+                inline: None,
             });
         }
 
@@ -1923,6 +1939,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         });
         module.register_name(protocol_entity, "ClosureLifecycle");
 
@@ -1967,6 +1984,7 @@ mod tests {
             }),
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
         module.add_function(func);
         module.register_name(entity(1), "malloc");

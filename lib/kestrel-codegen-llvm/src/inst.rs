@@ -69,9 +69,8 @@ pub fn compile_inst<'ctx>(
                     fc.map_value(*result, slot.into());
                 },
                 TypeRepr::Scalar(t) if operand_is_guaranteed => {
-                    let loaded = builder
-                        .build_load(t.llvm(cx), val.into_pointer_value(), "cv")
-                        .unwrap();
+                    let loaded =
+                        mem::load(builder, t.llvm(cx), val.into_pointer_value(), "cv").unwrap();
                     fc.map_value(*result, loaded);
                 },
                 _ => {
@@ -121,13 +120,13 @@ pub fn compile_inst<'ctx>(
             );
             if operand_is_ref && !result_is_ref {
                 let v = if is_guaranteed {
-                    builder
-                        .build_load(
-                            cx.ptr_type(inkwell::AddressSpace::default()),
-                            val.into_pointer_value(),
-                            "ref_peel",
-                        )
-                        .unwrap()
+                    mem::load(
+                        builder,
+                        cx.ptr_type(inkwell::AddressSpace::default()),
+                        val.into_pointer_value(),
+                        "ref_peel",
+                    )
+                    .unwrap()
                 } else {
                     val
                 };
@@ -138,7 +137,7 @@ pub fn compile_inst<'ctx>(
                     TypeRepr::Aggregate { .. } | TypeRepr::Zst => fc.map_value(*result, val),
                     TypeRepr::Scalar(_) => {
                         let slot = fc.alloca(repr.size(), repr.align());
-                        builder.build_store(slot, val).unwrap();
+                        mem::store(builder, slot, val).unwrap();
                         fc.map_value(*result, slot.into());
                     },
                 }
@@ -258,10 +257,14 @@ pub fn compile_inst<'ctx>(
                     // compared the tag against garbage and always took the default.
                     // For a pure-discriminant enum `scalar_ty == disc_scalar`, so
                     // this is a no-op there.
-                    let loaded = builder
-                        .build_load(scalar_ty.llvm(cx), base.into_pointer_value(), "disc")
-                        .unwrap()
-                        .into_int_value();
+                    let loaded = mem::load(
+                        builder,
+                        scalar_ty.llvm(cx),
+                        base.into_pointer_value(),
+                        "disc",
+                    )
+                    .unwrap()
+                    .into_int_value();
                     if scalar_ty.bytes() == disc_scalar.bytes() {
                         loaded.into()
                     } else if scalar_ty.bytes() > disc_scalar.bytes() {
@@ -279,9 +282,9 @@ pub fn compile_inst<'ctx>(
                 // A non-integer scalar (`Ptr`/float) has no integer tag to widen:
                 // load at the tag width as before rather than panicking in
                 // `into_int_value`.
-                TypeRepr::Scalar(_) if is_guaranteed => builder
-                    .build_load(disc_ty, base.into_pointer_value(), "disc")
-                    .unwrap(),
+                TypeRepr::Scalar(_) if is_guaranteed => {
+                    mem::load(builder, disc_ty, base.into_pointer_value(), "disc").unwrap()
+                },
                 TypeRepr::Scalar(_) => {
                     // Enum carried as a scalar: a real integer discriminant (enums
                     // never collapse to `Ptr`).
@@ -302,9 +305,7 @@ pub fn compile_inst<'ctx>(
                             .into()
                     }
                 },
-                _ => builder
-                    .build_load(disc_ty, base.into_pointer_value(), "disc")
-                    .unwrap(),
+                _ => mem::load(builder, disc_ty, base.into_pointer_value(), "disc").unwrap(),
             };
             fc.map_value(*result, val);
         },
@@ -1166,7 +1167,7 @@ fn compile_struct<'ctx>(
             let slot = fc.alloca(repr.size(), repr.align());
             mem::zero_memory(cx, builder, ptr_size, slot, repr.size());
             store_struct_fields(fc, builder, ty, fields, slot)?;
-            Ok(builder.build_load(t.llvm(cx), slot, "struct").unwrap())
+            Ok(mem::load(builder, t.llvm(cx), slot, "struct").unwrap())
         },
         TypeRepr::Aggregate { size, align } => {
             let slot = fc.alloca(size, align);
@@ -1291,9 +1292,9 @@ fn compile_enum<'ctx>(
                 .llvm(cx)
                 .into_int_type()
                 .const_int(disc_value as u64, false);
-            builder.build_store(slot, disc).unwrap();
+            mem::store(builder, slot, disc).unwrap();
             store_variant_payload(fc, builder, enum_ty, variant, payload, slot, payload_offset)?;
-            Ok(builder.build_load(t.llvm(cx), slot, "enum").unwrap())
+            Ok(mem::load(builder, t.llvm(cx), slot, "enum").unwrap())
         },
         TypeRepr::Aggregate { size, align } => {
             let slot = fc.alloca(size, align);
@@ -1302,7 +1303,7 @@ fn compile_enum<'ctx>(
                 .llvm(cx)
                 .into_int_type()
                 .const_int(disc_value as u64, false);
-            builder.build_store(slot, disc).unwrap();
+            mem::store(builder, slot, disc).unwrap();
             store_variant_payload(fc, builder, enum_ty, variant, payload, slot, payload_offset)?;
             Ok(slot.into())
         },
@@ -1547,9 +1548,13 @@ fn compile_struct_extract<'ctx>(
                 MirTy::Ref { .. }
             )
         {
-            return Ok(builder
-                .build_load(cx.ptr_type(inkwell::AddressSpace::default()), addr, "ref")
-                .unwrap());
+            return Ok(mem::load(
+                builder,
+                cx.ptr_type(inkwell::AddressSpace::default()),
+                addr,
+                "ref",
+            )
+            .unwrap());
         }
         return Ok(addr.into());
     }
@@ -1605,9 +1610,13 @@ fn compile_tuple_extract<'ctx>(
                 MirTy::Ref { .. }
             )
         {
-            return Ok(builder
-                .build_load(cx.ptr_type(inkwell::AddressSpace::default()), addr, "ref")
-                .unwrap());
+            return Ok(mem::load(
+                builder,
+                cx.ptr_type(inkwell::AddressSpace::default()),
+                addr,
+                "ref",
+            )
+            .unwrap());
         }
         return Ok(addr.into());
     }
@@ -1676,9 +1685,13 @@ fn compile_enum_payload<'ctx>(
                 MirTy::Ref { .. }
             )
         {
-            return Ok(builder
-                .build_load(cx.ptr_type(inkwell::AddressSpace::default()), addr, "ref")
-                .unwrap());
+            return Ok(mem::load(
+                builder,
+                cx.ptr_type(inkwell::AddressSpace::default()),
+                addr,
+                "ref",
+            )
+            .unwrap());
         }
         return Ok(addr.into());
     }
@@ -1752,9 +1765,7 @@ fn coerce_byval_arg<'ctx>(
             .tc
             .repr(arg_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
         if let TypeRepr::Scalar(t) = arg_repr {
-            return builder
-                .build_load(t.llvm(cx), val.into_pointer_value(), "argld")
-                .unwrap();
+            return mem::load(builder, t.llvm(cx), val.into_pointer_value(), "argld").unwrap();
         }
         return val;
     }

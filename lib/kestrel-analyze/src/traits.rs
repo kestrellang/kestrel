@@ -35,6 +35,8 @@ pub enum AnalyzerId {
     StringEscape,
     IntegerLiteralRange,
     TypeTest,
+    RestrictedUse,
+    PackedFieldBorrow,
 
     // Decl checks
     FunctionBody,
@@ -71,6 +73,9 @@ pub enum AnalyzerId {
     TypeArgArity,
     Visibility,
     TypeAliasValidation,
+    RestrictedSignature,
+    AttributeSemantics,
+    DeriveSite,
 
     // Compilation checks (run via `analyze_compilation`, never the `Analyze` query)
     TypeAliasCycles,
@@ -80,7 +85,7 @@ pub enum AnalyzerId {
     ExtensionConflict,
     ConformanceCompleteness,
     TypeAnnotationResolution,
-    UnknownAttribute,
+    AttributeValidation,
     EntryPoint,
 }
 
@@ -107,6 +112,8 @@ impl AnalyzerId {
             AnalyzerId::StringEscape => "string_escape",
             AnalyzerId::IntegerLiteralRange => "integer_literal_range",
             AnalyzerId::TypeTest => "type_test",
+            AnalyzerId::RestrictedUse => "restricted_use",
+            AnalyzerId::PackedFieldBorrow => "packed_field_borrow",
             AnalyzerId::FunctionBody => "function_body",
             AnalyzerId::ProtocolMethod => "protocol_method",
             AnalyzerId::StaticContext => "static_context",
@@ -141,6 +148,9 @@ impl AnalyzerId {
             AnalyzerId::TypeArgArity => "type_arg_arity",
             AnalyzerId::Visibility => "visibility",
             AnalyzerId::TypeAliasValidation => "type_alias_validation",
+            AnalyzerId::RestrictedSignature => "restricted_signature",
+            AnalyzerId::AttributeSemantics => "attribute_semantics",
+            AnalyzerId::DeriveSite => "derive_site",
             AnalyzerId::TypeAliasCycles => "type_alias_cycles",
             AnalyzerId::StructCycles => "struct_cycles",
             AnalyzerId::ProtocolCycles => "protocol_cycles",
@@ -148,7 +158,7 @@ impl AnalyzerId {
             AnalyzerId::ExtensionConflict => "extension_conflict",
             AnalyzerId::ConformanceCompleteness => "conformance_completeness",
             AnalyzerId::TypeAnnotationResolution => "type_annotation_resolution",
-            AnalyzerId::UnknownAttribute => "unknown_attribute",
+            AnalyzerId::AttributeValidation => "attribute_validation",
             AnalyzerId::EntryPoint => "entry_point",
         }
     }
