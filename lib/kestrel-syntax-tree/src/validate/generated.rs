@@ -1219,8 +1219,10 @@ pub(super) static RULES: &[(K, R)] = &[
     (
         K::LiteralPattern,
         R::Alt(&[
-            R::Kind(K::Integer),
-            R::Kind(K::Float),
+            R::Seq(&[
+                R::Opt(&R::Kind(K::Minus)),
+                R::Alt(&[R::Kind(K::Integer), R::Kind(K::Float)]),
+            ]),
             R::Kind(K::String),
             R::Kind(K::Boolean),
             R::Kind(K::Char),
@@ -1230,17 +1232,29 @@ pub(super) static RULES: &[(K, R)] = &[
         K::RangePattern,
         R::Alt(&[
             R::Seq(&[
-                R::Alt(&[R::Kind(K::Integer), R::Kind(K::Char)]),
+                R::Alt(&[
+                    R::Seq(&[R::Opt(&R::Kind(K::Minus)), R::Kind(K::Integer)]),
+                    R::Kind(K::Char),
+                ]),
                 R::Kind(K::DotDot),
             ]),
             R::Seq(&[
-                R::Alt(&[R::Kind(K::Integer), R::Kind(K::Char)]),
+                R::Alt(&[
+                    R::Seq(&[R::Opt(&R::Kind(K::Minus)), R::Kind(K::Integer)]),
+                    R::Kind(K::Char),
+                ]),
                 R::Alt(&[R::Kind(K::DotDotEquals), R::Kind(K::DotDotLess)]),
-                R::Alt(&[R::Kind(K::Integer), R::Kind(K::Char)]),
+                R::Alt(&[
+                    R::Seq(&[R::Opt(&R::Kind(K::Minus)), R::Kind(K::Integer)]),
+                    R::Kind(K::Char),
+                ]),
             ]),
             R::Seq(&[
                 R::Alt(&[R::Kind(K::DotDotEquals), R::Kind(K::DotDotLess)]),
-                R::Alt(&[R::Kind(K::Integer), R::Kind(K::Char)]),
+                R::Alt(&[
+                    R::Seq(&[R::Opt(&R::Kind(K::Minus)), R::Kind(K::Integer)]),
+                    R::Kind(K::Char),
+                ]),
             ]),
         ]),
     ),

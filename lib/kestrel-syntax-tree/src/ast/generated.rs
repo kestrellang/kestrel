@@ -4271,6 +4271,9 @@ pub struct LiteralPattern {
 }
 
 impl LiteralPattern {
+    pub fn minus_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Minus)
+    }
     pub fn integer_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Integer)
     }
@@ -4307,6 +4310,9 @@ pub struct RangePattern {
 }
 
 impl RangePattern {
+    pub fn minus_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Minus)
+    }
     pub fn integer_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Integer)
     }
