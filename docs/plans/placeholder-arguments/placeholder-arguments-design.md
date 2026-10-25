@@ -1,6 +1,6 @@
 # Placeholder Arguments (`f(_, 1)`, `map(_.name)`, `map(_ * 2)`) Design
 
-> **Status: design, not started.** Milestone 0.19 ("Expression sugar").
+> **Status: implemented on `future/0.19`.** Milestone 0.19 ("Expression sugar").
 > Base commit `def25459` (`future/0.18`). File and line anchors refer to that
 > tree. Companion designs: [pipe operator](../pipe-operator/pipe-operator-design.md),
 > [optional chaining](../optional-chaining/optional-chaining-design.md).

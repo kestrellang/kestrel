@@ -3955,6 +3955,60 @@ impl AstNode for ExprPlaceholderUse {
     }
 }
 
+/// `ExprOptionalBind` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprOptionalBind {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprOptionalBind {
+    pub fn expression(&self) -> Option<Expression> {
+        support::child(&self.syntax)
+    }
+    pub fn question_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Question)
+    }
+    pub fn dot_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Dot)
+    }
+}
+
+impl AstNode for ExprOptionalBind {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprOptionalBind
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ExprOptionalChain` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprOptionalChain {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprOptionalChain {
+    pub fn expression(&self) -> Option<Expression> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ExprOptionalChain {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprOptionalChain
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
 /// `StringInterpolation` node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StringInterpolation {
@@ -5183,7 +5237,7 @@ impl From<Expression> for Condition {
     }
 }
 
-/// One of: ExprInteger, ExprFloat, ExprString, ExprRawString, ExprChar, ExprBool, ExprNull, ExprUnit, ExprInterpolatedString, ExprArray, ExprDictionary, ExprTuple, ExprGrouping, ExprPath, ExprTupleIndex, ExprImplicitMemberAccess, ExprUnary, ExprPostfix, ExprBinary, ExprAssignment, ExprCompoundAssignment, ExprCall, ExprIf, ExprWhile, ExprFor, ExprLoop, ExprBreak, ExprContinue, ExprReturn, ExprThrow, ExprTry, ExprClosure, ExprMatch, ExprCast, ExprTypeTest, ExprPlaceholder, ExprPlaceholderUse.
+/// One of: ExprInteger, ExprFloat, ExprString, ExprRawString, ExprChar, ExprBool, ExprNull, ExprUnit, ExprInterpolatedString, ExprArray, ExprDictionary, ExprTuple, ExprGrouping, ExprPath, ExprTupleIndex, ExprImplicitMemberAccess, ExprUnary, ExprPostfix, ExprBinary, ExprAssignment, ExprCompoundAssignment, ExprCall, ExprIf, ExprWhile, ExprFor, ExprLoop, ExprBreak, ExprContinue, ExprReturn, ExprThrow, ExprTry, ExprClosure, ExprMatch, ExprCast, ExprTypeTest, ExprPlaceholder, ExprPlaceholderUse, ExprOptionalBind, ExprOptionalChain.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
     ExprInteger(ExprInteger),
@@ -5223,6 +5277,8 @@ pub enum Expr {
     ExprTypeTest(ExprTypeTest),
     ExprPlaceholder(ExprPlaceholder),
     ExprPlaceholderUse(ExprPlaceholderUse),
+    ExprOptionalBind(ExprOptionalBind),
+    ExprOptionalChain(ExprOptionalChain),
 }
 
 impl AstNode for Expr {
@@ -5266,6 +5322,8 @@ impl AstNode for Expr {
                 | SyntaxKind::ExprTypeTest
                 | SyntaxKind::ExprPlaceholder
                 | SyntaxKind::ExprPlaceholderUse
+                | SyntaxKind::ExprOptionalBind
+                | SyntaxKind::ExprOptionalChain
         )
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
@@ -5315,6 +5373,8 @@ impl AstNode for Expr {
             SyntaxKind::ExprPlaceholderUse => {
                 Expr::ExprPlaceholderUse(ExprPlaceholderUse { syntax })
             },
+            SyntaxKind::ExprOptionalBind => Expr::ExprOptionalBind(ExprOptionalBind { syntax }),
+            SyntaxKind::ExprOptionalChain => Expr::ExprOptionalChain(ExprOptionalChain { syntax }),
             _ => return None,
         })
     }
@@ -5357,6 +5417,8 @@ impl AstNode for Expr {
             Expr::ExprTypeTest(it) => &it.syntax,
             Expr::ExprPlaceholder(it) => &it.syntax,
             Expr::ExprPlaceholderUse(it) => &it.syntax,
+            Expr::ExprOptionalBind(it) => &it.syntax,
+            Expr::ExprOptionalChain(it) => &it.syntax,
         }
     }
 }
@@ -5580,6 +5642,18 @@ impl From<ExprPlaceholder> for Expr {
 impl From<ExprPlaceholderUse> for Expr {
     fn from(node: ExprPlaceholderUse) -> Expr {
         Expr::ExprPlaceholderUse(node)
+    }
+}
+
+impl From<ExprOptionalBind> for Expr {
+    fn from(node: ExprOptionalBind) -> Expr {
+        Expr::ExprOptionalBind(node)
+    }
+}
+
+impl From<ExprOptionalChain> for Expr {
+    fn from(node: ExprOptionalChain) -> Expr {
+        Expr::ExprOptionalChain(node)
     }
 }
 

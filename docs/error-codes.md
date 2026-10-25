@@ -103,6 +103,8 @@ the type checker, and the code is assigned in one place,
 | E152 | 'is' needs an existential on the left: '{T}' {is known at compile time / is a generic parameter} | `x is T` (and `as?`, `is` patterns) only test an existential's payload. A concrete type's answer is static; a generic parameter is rejected for now. |
 | E153 | an 'is' pattern binds a borrow of the payload, so it cannot be 'var' | `var c is Circle`: the binding refers to the payload in place. |
 | E154 | '{type}' in an 'any' bound is not a protocol | Every bound of `any` must be a protocol. |
+| E157 | \`?.\` requires a type that conforms to \`OptionalChain\`, found '{T}' | `a?.b` on a value with no payload to chain on (not an `Optional`, a `Result`, or another `OptionalChain` type). Use `.` for a non-optional value. Emitted by type inference. |
+| E158 | can't consume through \`?.\` on a place | A chain on a variable or field lends its payload by reference, so a `consuming` method or argument can't take it. Move the value out first: `a.take()?.…`. Emitted by the `optional_chain` analyzer. |
 
 ### Example — E109 (type mismatch)
 

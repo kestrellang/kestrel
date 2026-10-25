@@ -394,6 +394,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::KindMismatch { .. } => "KindMismatch",
         InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
         InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
+        InferError::OptionalChainNotConforming { .. } => "OptionalChainNotConforming",
     }
 }
 
@@ -406,6 +407,12 @@ fn format_error(err: &InferError) -> String {
         },
         InferError::DoesNotConform { .. } => {
             format!("DoesNotConform at {}:{}", span.file_id, span.start)
+        },
+        InferError::OptionalChainNotConforming { .. } => {
+            format!(
+                "OptionalChainNotConforming at {}:{}",
+                span.file_id, span.start
+            )
         },
         InferError::NoMember { name, .. } => {
             format!("NoMember '{}' at {}:{}", name, span.file_id, span.start)

@@ -147,6 +147,7 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 | MatchSource::LetDestructure
                 | MatchSource::ParamDestructure
                 | MatchSource::TryOp
+                | MatchSource::OptionalChain
                 | MatchSource::TypeTest => {},
             }
         }

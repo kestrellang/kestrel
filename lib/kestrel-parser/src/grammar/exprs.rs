@@ -11,6 +11,7 @@
 //!           | primary tight* trailing* ('.' member tight*)*
 //! tight     = '(' args ')'                            // no line break before `(`
 //!           | '.' member                              // `.` touching the operand
+//!           | '?' '.' member | '?' '.' '(' args ')'   // optional chain bind
 //!           | '!' | '..'
 //! trailing  = ('Identifier' ':')? closure             // same line as the call
 //! ```
@@ -331,36 +332,65 @@ fn close(p: &mut Parser<'_>, chain: Chain) -> ExprInfo {
     }
 }
 
+/// A postfix chain. When it holds a `?.` bind it is wrapped in
+/// `ExprOptionalChain`, so the chain's extent — what `.None` skips — is
+/// fixed here: everything up to the first binary operator, cast or closing
+/// delimiter.
 fn postfix(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
-    if cond {
+    let mut binds = false;
+    let info = if cond {
         let chain = cond_primary(p)?;
-        let chain = tight_ops(p, chain, true);
-        return Some(close(p, chain));
-    }
-    if at_stmt_like(p) {
+        let chain = tight_ops(p, chain, true, &mut binds);
+        close(p, chain)
+    } else if at_stmt_like(p) {
         let info = stmt_like(p);
-        let chain = tight_ops(p, Chain::Done(info.cm, info.kind), false);
-        return Some(close(p, chain));
+        let chain = tight_ops(p, Chain::Done(info.cm, info.kind), false, &mut binds);
+        close(p, chain)
+    } else {
+        let chain = primary(p)?;
+        let mut chain = tight_ops(p, chain, false, &mut binds);
+        chain = trailing_closures(p, chain);
+        // Continuation: `.member` on a later line, followed by tight operators.
+        while p.at(K::Dot) {
+            chain = member(p, chain, true);
+            chain = tight_ops(p, chain, false, &mut binds);
+        }
+        close(p, chain)
+    };
+    if !binds {
+        return Some(info);
     }
-    let chain = primary(p)?;
-    let mut chain = tight_ops(p, chain, false);
-    chain = trailing_closures(p, chain);
-    // Continuation: `.member` on a later line, followed by tight operators.
-    while p.at(K::Dot) {
-        chain = member(p, chain, true);
-        chain = tight_ops(p, chain, false);
-    }
-    Some(close(p, chain))
+    Some(wrap(p, info.cm, K::ExprOptionalChain, |_| {}))
 }
 
-/// Calls, adjacent member accesses, `!` and `..`. In a condition, `.`
-/// may also follow a line break and `init` is not a member name.
-fn tight_ops(p: &mut Parser<'_>, mut chain: Chain, cond: bool) -> Chain {
+/// `?` joined to a following `.`: an optional-chain bind.
+fn at_optional_bind(p: &Parser<'_>) -> bool {
+    p.at(K::Question) && p.nth_at(1, K::Dot) && p.joined_at(p.token_pos() + 1)
+}
+
+/// Calls, adjacent member accesses, `?.` binds, `!` and `..`. In a
+/// condition, `.` may also follow a line break and `init` is not a member
+/// name. Sets `binds` when a `?.` is consumed.
+fn tight_ops(p: &mut Parser<'_>, mut chain: Chain, cond: bool, binds: &mut bool) -> Chain {
     loop {
         match p.current() {
             Some(K::LParen) if !p.nl_before() => chain = call(p, chain),
             Some(K::Dot) if cond || p.joined_at(p.token_pos()) => {
                 chain = member(p, chain, !cond);
+            },
+            Some(K::Question) if at_optional_bind(p) => {
+                // `a?.b` keeps the `.` for the member access; `f?.(x)` has
+                // no member, so the bind owns it and the call follows.
+                let info = close(p, chain);
+                let w = wrap(p, info.cm, K::ExprOptionalBind, |p| {
+                    p.bump(K::Question);
+                    if p.nth_at(1, K::LParen) {
+                        p.bump(K::Dot);
+                    }
+                });
+                *binds = true;
+                // `?.b` / `?.0`: the joined-`.` arm takes the member next.
+                chain = Chain::Done(w.cm, w.kind);
             },
             Some(K::Bang | K::DotDot) => {
                 let info = close(p, chain);

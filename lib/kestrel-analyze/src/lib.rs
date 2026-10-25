@@ -52,6 +52,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::initializer::InitializerAnalyzer);
     r.add_body_check(body::closure::ClosureAnalyzer);
     r.add_body_check(body::access_mode::AccessModeAnalyzer);
+    r.add_body_check(body::optional_chain::OptionalChainAnalyzer);
     // TODO(move-checker): retire in favor of a MIR/OSSA-level move check.
     r.add_body_check(body::move_tracking::MoveTrackingAnalyzer);
     r.add_body_check(body::dangle_ref::DangleRefAnalyzer);

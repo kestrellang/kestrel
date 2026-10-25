@@ -37,6 +37,7 @@ pub enum AnalyzerId {
     TypeTest,
     RestrictedUse,
     PackedFieldBorrow,
+    OptionalChain,
 
     // Decl checks
     FunctionBody,
@@ -114,6 +115,7 @@ impl AnalyzerId {
             AnalyzerId::TypeTest => "type_test",
             AnalyzerId::RestrictedUse => "restricted_use",
             AnalyzerId::PackedFieldBorrow => "packed_field_borrow",
+            AnalyzerId::OptionalChain => "optional_chain",
             AnalyzerId::FunctionBody => "function_body",
             AnalyzerId::ProtocolMethod => "protocol_method",
             AnalyzerId::StaticContext => "static_context",

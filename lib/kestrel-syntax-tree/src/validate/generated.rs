@@ -447,6 +447,8 @@ pub(super) static RULES: &[(K, R)] = &[
             K::ExprTypeTest,
             K::ExprPlaceholder,
             K::ExprPlaceholderUse,
+            K::ExprOptionalBind,
+            K::ExprOptionalChain,
         ]),
     ),
     (
@@ -1146,6 +1148,15 @@ pub(super) static RULES: &[(K, R)] = &[
     ),
     (K::ExprPlaceholder, R::Kind(K::Underscore)),
     (K::ExprPlaceholderUse, R::Kind(K::Underscore)),
+    (
+        K::ExprOptionalBind,
+        R::Seq(&[
+            R::Kind(K::Expression),
+            R::Kind(K::Question),
+            R::Opt(&R::Kind(K::Dot)),
+        ]),
+    ),
+    (K::ExprOptionalChain, R::Kind(K::Expression)),
     (
         K::StringInterpolation,
         R::Seq(&[

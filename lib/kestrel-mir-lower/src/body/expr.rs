@@ -545,14 +545,22 @@ impl OssaBodyCtx<'_, '_> {
                 type_args: hir_type_args,
                 args,
                 ..
-            } => self.lower_protocol_call_expr(
-                expr_id,
-                *receiver,
-                *protocol,
-                method.as_str_or_empty(),
-                hir_type_args.as_deref(),
-                args,
-            ),
+            } => {
+                // A `?.` bind calls the method inference settled on.
+                let written = method.as_str_or_empty();
+                let method = match self.typed.as_ref() {
+                    Some(typed) => typed.protocol_method_name(expr_id, written),
+                    None => written,
+                };
+                self.lower_protocol_call_expr(
+                    expr_id,
+                    *receiver,
+                    *protocol,
+                    method,
+                    hir_type_args.as_deref(),
+                    args,
+                )
+            },
 
             // === Control flow — delegate to control module (stubbed until Phase C) ===
             HirExpr::If {

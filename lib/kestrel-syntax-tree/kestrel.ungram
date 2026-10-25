@@ -402,6 +402,8 @@ Expr =
 | ExprTypeTest
 | ExprPlaceholder
 | ExprPlaceholderUse
+| ExprOptionalBind
+| ExprOptionalChain
 
 ExprInteger = 'int'
 ExprFloat = 'float'
@@ -542,6 +544,15 @@ ExprPlaceholder = '_'
 
 // `_` inside a larger argument: the argument becomes a closure over it.
 ExprPlaceholderUse = '_'
+
+// `a?` in `a?.b` / `f?.(x)`: asks `a` for its payload. The `.` of `?.(`
+// belongs here; the `.` of `?.b` belongs to the member access.
+ExprOptionalBind =
+  Expression '?' '.'?
+
+// The maximal postfix chain holding one or more binds: `a?.b?.c()`.
+ExprOptionalChain =
+  Expression
 
 ExprClosure =
   '{' (ClosureParams 'in')? BlockItem* '}'

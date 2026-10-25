@@ -160,6 +160,13 @@ impl OssaBodyCtx<'_, '_> {
         let pointee = self.body.value(view).ty;
         let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
         let addr = self.emit_op1(Op::PtrTo(pointee), view, ptr_ty);
+        // The address lives where the viewed storage lives: inherit its
+        // provenance root (as `FieldAddr` does). Otherwise it self-roots
+        // `Local` and a `&mutating` payload binder on a `mutating` receiver
+        // (`match self { .Some(&mutating v) => .Some(v), … }`) fails E494
+        // "borrows local" when returned.
+        let view_root = self.body.value(view).root;
+        self.stamp_root(addr, view_root);
         // The view's job is done — the address stays valid while the
         // underlying storage lives (var slot / pinned temp / borrowed
         // receiver). Named bindings keep their own lifecycle.

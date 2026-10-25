@@ -72,6 +72,34 @@ Argument lists open a new `_` scope and closure literals close them all. The
 closure is a literal for inference (`is_closure_literal` sees through the
 sugar), so it takes its parameter types from the expected function type.
 
+## Optional Chaining
+
+The parser wraps the maximal postfix chain holding a `?.` in
+`ExprOptionalChain`, and each `a?` in `ExprOptionalBind`. HIR lowering
+(`kestrel-hir-lower/src/optional_chain.rs`) turns each bind into a match on a
+`OptionalChain` protocol call, last bind innermost, wrapped in
+`Sugar { kind: OptionalChain }`:
+
+```text
+a?.b?.c()   →   match a.chainBorrow() {
+                    .Some($o₁) => match $o₁.b.chainBorrow() {
+                        .Some($o₂) => $o₂.c(),
+                        .None => .None },
+                    .None => .None }
+```
+
+The matches are `MatchSource::OptionalChain`; inference checks every arm
+against `Optional[α]`, so a plain tail is promoted and an optional tail
+flattens. An assignment or compound assignment through a chain
+(`a?.n = v`, `a?.n += v`) is lowered inside the innermost arm, so `v` runs
+only on success.
+
+The method name is provisional: `chainBorrow` for a place base, `chainTake`
+for a temporary. After solving, inference upgrades a borrowed bind to
+`chainMutate` when the chain mutates its payload, and records each bind's
+mode in `TypedBody::chain_modes`. MIR lowering and the analyzers read the
+method through `TypedBody::protocol_method_name`, never the HIR name.
+
 ## Unary Operators
 
 `-x` becomes `ProtocolCall { receiver: x, protocol: Negatable, method: "negate", args: [] }`

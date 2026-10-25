@@ -422,6 +422,10 @@ pub enum SyntaxKind {
     ExprPlaceholder,
     /// `_` inside a larger argument (`map(_.name)`, `map(_ * 2)`)
     ExprPlaceholderUse,
+    /// `a?` before `.member` / `.(args)`: one bind of an optional chain
+    ExprOptionalBind,
+    /// the whole postfix chain holding a `?.` (`a?.b.c()`)
+    ExprOptionalChain,
     /// Not a syntax kind — the end-of-enum marker. Its discriminant is the
     /// variant count, which lets `syntax_kind_table_round_trips` prove `ALL`
     /// complete. Never construct it.
@@ -707,6 +711,8 @@ impl SyntaxKind {
         SyntaxKind::PipeGreater,
         SyntaxKind::ExprPlaceholder,
         SyntaxKind::ExprPlaceholderUse,
+        SyntaxKind::ExprOptionalBind,
+        SyntaxKind::ExprOptionalChain,
     ];
 }
 

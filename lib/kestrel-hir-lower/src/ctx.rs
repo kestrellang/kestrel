@@ -93,6 +93,10 @@ pub(crate) struct LowerCtx<'a> {
     /// right-hand arguments; cleared for closure literals, which `_` never
     /// reaches into.
     pub placeholder_frames: Vec<crate::placeholder::PlaceholderFill>,
+    /// The `?.` binds of each optional chain being lowered, innermost chain
+    /// last. A bind is recorded where it is lowered; the chain's matches are
+    /// built when its tail is done.
+    pub chain_frames: Vec<Vec<crate::optional_chain::ChainBind>>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -118,6 +122,7 @@ impl<'a> LowerCtx<'a> {
             or_reuse: None,
             implicit_it_locals: HashMap::new(),
             placeholder_frames: Vec::new(),
+            chain_frames: Vec::new(),
         }
     }
 

@@ -19,6 +19,7 @@ pub mod entailment;
 mod entail_layer;
 mod solver_entail;
 pub mod obligations;
+mod optional_chain;
 pub mod error;
 mod existential;
 pub mod generate;
@@ -109,6 +110,9 @@ impl QueryFn for InferBody {
 
         // Solve
         obligations::finish_body(&mut infer_ctx, &hir);
+
+        // Settle each `?.` bind's method now that members are resolved.
+        optional_chain::decide_chain_modes(&mut infer_ctx, &hir);
 
         // Detect circular opaque returns: if the concrete type behind `some P`
         // is itself another opaque, the body never grounded to a real type.

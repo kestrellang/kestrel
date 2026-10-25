@@ -282,3 +282,5 @@ node    TypeArgBinding                   # Item = Int64 inside a type argument l
 token   PipeGreater '|>'                 # x |> f - pipe operator
 node    ExprPlaceholder                  # `_` as a whole call argument: a hole (`f(_, 1)`)
 node    ExprPlaceholderUse               # `_` inside a larger argument (`map(_.name)`, `map(_ * 2)`)
+node    ExprOptionalBind                 # `a?` before `.member` / `.(args)`: one bind of an optional chain
+node    ExprOptionalChain                # the whole postfix chain holding a `?.` (`a?.b.c()`)

@@ -1128,6 +1128,12 @@ fn solve_tuple_index(
     if matches!(kind, TyKind::Error) {
         return SolveResult::Solved;
     }
+    // Index through a reference like field access does: `r.0` on
+    // `r: &(A, B)` reads the pointee's element (the `?.` binder is a ref).
+    if let TyKind::Ref { pointee, .. } = kind {
+        let pointee = *pointee;
+        return solve_tuple_index(ctx, pointee, index, result, span);
+    }
     if let TyKind::Tuple(elems) = kind {
         if index < elems.len() {
             let elem = elems[index];
@@ -1712,6 +1718,12 @@ fn solve_coerce(
         if ctx.is_error(fr) && matches!(ctx.slot(tr), TySlot::Unresolved { .. }) {
             ctx.poison(to);
         }
+        // A failed `?.` arm leaves the chain's `Optional[α]` with nothing
+        // to pin `α`; poison it so the root cause (E157) isn't buried
+        // under "could not infer type".
+        if ctx.is_error(fr) && ctx.optional_chain_leaves.contains(&expr) {
+            poison_unresolved_type_args(ctx, to);
+        }
         if ctx.is_error(tr) && matches!(ctx.slot(fr), TySlot::Unresolved { .. }) {
             ctx.poison(from);
         }
@@ -1812,7 +1824,7 @@ fn solve_coerce(
 
     // Check-mode leaf with a pending synthesized type (see
     // `InferCtx::synth_pending_exprs`): wait for it, so promotion can apply.
-    if ctx.synth_gate
+    if (ctx.synth_gate || ctx.optional_chain_leaves.contains(&expr))
         && ctx.synth_pending_exprs.contains(&expr)
         && matches!(ctx.slot(fr), TySlot::Unresolved { literal: None })
         && matches!(ctx.slot(tr), TySlot::Resolved(_))
@@ -2215,6 +2227,19 @@ fn solve_conforms(
             } else if typearg_failure_is_duplicate(ctx, resolved, protocol, origin) {
                 SolveResult::Solved
             } else {
+                // E157: `?.` on a type with no payload names that type, so
+                // keep a copy of it before poisoning overwrites the slot.
+                if ctx.resolver.builtin(Builtin::OptionalChainProtocol) == Some(protocol) {
+                    let shown = ctx.fresh();
+                    ctx.types[shown.0 as usize] = ctx.slot(resolved).clone();
+                    if poison_ty_on_failure {
+                        ctx.poison(ty);
+                    }
+                    return SolveResult::Error(InferError::OptionalChainNotConforming {
+                        ty: shown,
+                        span,
+                    });
+                }
                 if poison_ty_on_failure {
                     ctx.poison(ty);
                 }

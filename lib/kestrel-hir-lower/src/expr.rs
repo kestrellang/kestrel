@@ -234,6 +234,19 @@ impl LowerCtx<'_> {
             },
             SyntaxKind::ExprAssignment => {
                 let (lhs, rhs) = self.operands(node, &span);
+                // `a?.b = v`: the assignment is the chain's tail, so `v` is
+                // evaluated only when the chain reaches its target.
+                if let Some(chain) = optional_chain_node(&lhs) {
+                    return self.lower_optional_chain(&chain, &span, |this, target| {
+                        let target = this.lower_expr_src(target);
+                        let value = this.lower_expr_src(&rhs);
+                        this.alloc_expr(HirExpr::Assign {
+                            target,
+                            value,
+                            span: span.clone(),
+                        })
+                    });
+                }
                 let target = self.lower_expr_src(&lhs);
                 let value = self.lower_expr_src(&rhs);
                 self.alloc_expr(HirExpr::Assign {
@@ -247,6 +260,11 @@ impl LowerCtx<'_> {
                     return self.alloc_expr(HirExpr::Error { span });
                 };
                 let (lhs, rhs) = self.operands(node, &span);
+                if let Some(chain) = optional_chain_node(&lhs) {
+                    return self.lower_optional_chain(&chain, &span, |this, target| {
+                        this.desugar_compound_assign(target, &op, &rhs, &span)
+                    });
+                }
                 self.desugar_compound_assign(&lhs, &op, &rhs, &span)
             },
             SyntaxKind::ExprCall => self.lower_call(node, &span, None),
@@ -332,6 +350,10 @@ impl LowerCtx<'_> {
             SyntaxKind::ExprCast => self.desugar_cast(node, &span),
             SyntaxKind::ExprTypeTest => self.desugar_type_test(node, &span),
             SyntaxKind::ExprPlaceholderUse => self.lower_placeholder_use(&span),
+            SyntaxKind::ExprOptionalChain => {
+                self.lower_optional_chain(node, &span, |this, inner| this.lower_expr_src(inner))
+            },
+            SyntaxKind::ExprOptionalBind => self.lower_optional_bind(node, &span),
             // A hole outside an argument list is never built by the parser;
             // `lower_call_args_filling` consumes the ones it builds.
             _ => self.alloc_expr(HirExpr::Error { span }),
@@ -2131,6 +2153,12 @@ impl LowerCtx<'_> {
 
 /// The text of a literal's token (empty when the parser recovered without
 /// one).
+/// The `ExprOptionalChain` an assignment's left side is, if any.
+fn optional_chain_node(lhs: &ExprSrc) -> Option<SyntaxNode> {
+    lhs.inner()
+        .filter(|n| n.kind() == SyntaxKind::ExprOptionalChain)
+}
+
 fn literal_text(node: &SyntaxNode) -> String {
     first_token(node)
         .map(|t| t.text().to_string())

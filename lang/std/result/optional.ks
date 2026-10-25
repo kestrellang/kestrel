@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable, Comparable, Ordering, Hashable, Hasher, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce, fatalError)
+import std.core.(Equatable, Comparable, Ordering, Hashable, Hasher, Bool, ControlFlow, Tryable, FromResidual, FromValue, ExpressibleByNullLiteral, Coalesce, OptionalChain, fatalError)
 import std.text.(String, StringBuilder, Formatter, FormatOptions, Formattable)
 import std.result.(Result)
 import std.numeric.(Int64, UInt8)
@@ -800,6 +800,40 @@ extend Optional[T]: Coalesce[T] {
             .Some(value) => value,
             .None => default()
         }
+    }
+}
+
+/// `OptionalChain` — backs the `?.` operator: the chain continues on the
+/// wrapped value, or is skipped on `None`.
+///
+/// # Examples
+///
+/// ```
+/// let len = name?.bytes.count;    // Int64?
+/// cache?.items.push(entry);       // mutates the payload in place
+/// ```
+extend Optional[T]: OptionalChain {
+    type Wrapped = T
+
+    /// A borrow of the wrapped value, for read-only chains.
+    public func chainBorrow() -> Optional[&T] {
+        self.asRef()
+    }
+
+    /// A mutable borrow of the wrapped value, for chains that mutate it.
+    public mutating func chainMutate() -> Optional[&mutating T] {
+        match self {
+            .Some(&mutating value) => {
+                let result: Optional[&mutating T] = .Some(value);
+                result
+            },
+            .None => .None
+        }
+    }
+
+    /// The wrapped value itself, for chains on a temporary.
+    public consuming func chainTake() -> Optional[T] {
+        self
     }
 }
 

@@ -1,6 +1,6 @@
 # Pipe Operator (`|>`) Design
 
-> **Status: design, not started.** Milestone 0.19 ("Expression sugar").
+> **Status: implemented on `future/0.19`.** Milestone 0.19 ("Expression sugar").
 > Base commit `def25459` (`future/0.18`). File and line anchors refer to that
 > tree. Depends on [placeholder arguments](../placeholder-arguments/placeholder-arguments-design.md)
 > for the `_` slot.

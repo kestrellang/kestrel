@@ -20,6 +20,7 @@ Welcome to the Kestrel programming language documentation.
 - **[Pattern Matching](pattern-matching.md)** - Destructuring and matching
 - **[References](references.md)** - Borrowed references (`&T`)
 - **[Error Handling](error-handling.md)** - `Result`, `throws`, and `try`
+- **[Optional Chaining](optional-chaining.md)** - `a?.b`, mutation through `?.`, and the `OptionalChain` protocol
 - **[Modules](modules.md)** - Module system and imports
 - **[Extensions](extensions.md)** - Adding functionality to existing types
 - **[Variables and Properties](let-var-static-computed.md)** - `let`, `var`, static, and computed declarations

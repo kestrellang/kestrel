@@ -147,9 +147,21 @@ fn check_leaf(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, expected: Ty
 /// Record a leaf whose type its own call/method/operator constraint will
 /// produce (see `InferCtx::synth_pending_exprs`).
 fn mark_synth_pending(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, tv: TyVar) {
+    // A field or tuple index is typed by its member resolution, so it waits
+    // too: `let x: Int64? = s.count` must not unify `count` with the target.
+    // Sugar is transparent: `a?.n += 1` checks `Sugar(CompoundAssign,
+    // addAssign(…))`, whose type is the protocol call's.
+    let mut leaf = id;
+    while let HirExpr::Sugar { inner, .. } = hir.exprs[leaf] {
+        leaf = inner;
+    }
     let computed = matches!(
-        hir.exprs[id],
-        HirExpr::Call { .. } | HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. }
+        hir.exprs[leaf],
+        HirExpr::Call { .. }
+            | HirExpr::MethodCall { .. }
+            | HirExpr::ProtocolCall { .. }
+            | HirExpr::Field { .. }
+            | HirExpr::TupleIndex { .. }
     );
     if computed && matches!(ctx.slot(ctx.resolve(tv)), TySlot::Unresolved { literal: None }) {
         ctx.synth_pending_exprs.insert(id);
@@ -767,6 +779,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // rather than from a deferred ImplicitPat.
             settle_scrutinee(ctx, scrut_tv);
             let result_tv = ctx.fresh();
+            // An optional-chain bind is always checked against `Optional[α]`
+            // (wrap-or-flatten at the tail leaf); an outer expectation pins α.
+            let had_expect = expect.is_some();
+            let expect = match source {
+                MatchSource::OptionalChain => optional_chain_expectation(ctx, expect, span),
+                _ => expect,
+            };
 
             // Empty match has no arms to pin the result type. An analyzer
             // reports the `empty match` diagnostic — poison the result so a
@@ -799,10 +818,18 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // ref return at the tail of a `-> &T` function containing a
                 // `guard let`. The remaining sources have synthetic arm
                 // values (unit/Never/ControlFlow).
-                if matches!(*source, MatchSource::UserMatch | MatchSource::IfLet) {
+                if matches!(
+                    *source,
+                    MatchSource::UserMatch | MatchSource::IfLet | MatchSource::OptionalChain
+                ) {
                     mark_arm_value(ctx, hir, arm.body);
                 }
                 if let Some((expected, reason)) = expect.clone() {
+                    if *source == MatchSource::OptionalChain {
+                        // Wrap vs flatten is decided by the tail's own
+                        // type: never by unifying it early (Q4).
+                        ctx.optional_chain_leaves.insert(arm.body);
+                    }
                     check_leaf(ctx, hir, arm.body, expected, reason);
                     continue;
                 }
@@ -819,7 +846,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             }
             if let Some((expected, _)) = expect.filter(|_| !arms.is_empty()) {
                 ctx.equal(result_tv, expected, span.clone());
-                ctx.expectation_pushed = true;
+                // Only an expectation the caller pushed was consumed here.
+                ctx.expectation_pushed |= had_expect;
             }
             result_tv
         },
@@ -1173,6 +1201,25 @@ fn mark_sugar_primary(
         SugarKind::TypeTest | SugarKind::Cast | SugarKind::ConsumingCast => {},
         // Plain calls and closures: their own constraints report errors.
         SugarKind::Pipe | SugarKind::Placeholder => {},
+        SugarKind::OptionalChain => {
+            // inner is `Match { scrutinee: chainBorrow/chainTake pcall, source: OptionalChain }`,
+            // later binds nested in the `.Some` arm. Poison every bind's call so a
+            // non-conforming base reports E157 once instead of cascading.
+            let mut cur = inner;
+            while let HirExpr::Match {
+                scrutinee,
+                arms,
+                source: kestrel_hir::body::MatchSource::OptionalChain,
+                ..
+            } = &hir.exprs[cur]
+            {
+                ctx.poison_protocol_call_recv_on_failure.insert(*scrutinee);
+                let Some(some_arm) = arms.first() else {
+                    break;
+                };
+                cur = some_arm.body;
+            }
+        },
         SugarKind::CompoundAssign => {
             // inner is the addAssign ProtocolCall (or HirExpr::Error if the
             // AST place check rejected the LHS at desugar time).
@@ -2439,6 +2486,31 @@ fn gen_call_args_phased(
         })
         .collect();
     (args, postponed)
+}
+
+/// `Optional[α]` for an optional-chain match, unified first with the outer
+/// expectation when there is one (`let x: Int64? = a?.b` pins α).
+fn optional_chain_expectation(
+    ctx: &mut InferCtx<'_>,
+    expect: Option<(TyVar, Reason)>,
+    span: &Span,
+) -> Option<(TyVar, Reason)> {
+    let Some(optional) = ctx.query_ctx.query(kestrel_name_res::ResolveBuiltin {
+        builtin: kestrel_hir::Builtin::OptionalEnum,
+        root: ctx.root,
+    }) else {
+        return expect;
+    };
+    let payload = ctx.fresh();
+    let optional_tv = ctx.named(optional, vec![payload]);
+    let reason = match expect {
+        Some((outer, reason)) => {
+            ctx.equal_because(outer, optional_tv, span.clone(), reason.clone());
+            reason
+        },
+        None => Reason::Unspecified,
+    };
+    Some((optional_tv, reason))
 }
 
 /// A closure literal as written, or the closure a placeholder argument

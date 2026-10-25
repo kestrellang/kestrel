@@ -293,8 +293,9 @@ let n = text |> Int64.parse(_, radix: 16) |> clamp(_, min: 0, max: 255);
 let addOne = add(_, 1);           // { (a) in add(a, 1) }
 let names = users.map(_.name);    // users.map { it.name }
 
-// Chaining - (Future)
-// let x = foo?.bar?.baz
+// Optional chaining — see optional-chaining.md
+let city = user?.address?.city;   // String?, .None if any link is .None
+cache?.items.push(entry);         // mutates the payload in place
 
 // String interpolation — see string-interpolation.md
 let greeting = "Hello, \(name)!";

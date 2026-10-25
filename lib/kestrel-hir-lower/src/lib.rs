@@ -16,6 +16,7 @@ mod existential;
 mod expr;
 pub mod format_spec;
 pub mod literal;
+mod optional_chain;
 pub(crate) mod pat;
 mod placeholder;
 pub mod source_map;

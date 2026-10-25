@@ -1897,11 +1897,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 let d = self.body.value(old);
                 (d.ownership, d.root, d.ty)
             };
+            // Any ADDRESS keeps its stamped root too: a derived address
+            // (`FieldAddr`, a pinned match scrutinee) names the storage it
+            // points into, and borrows taken through it after the merge must
+            // still root there (`match self { .Some(&mutating v) => .Some(v) }`
+            // threads the scrutinee address into each arm).
             let carries_taint = self.ctx.module.ty_arena.contains_ref(ty)
-                || matches!(
-                    self.ctx.module.ty_arena.get(ty),
-                    MirTy::Pointer(p) if self.ctx.module.ty_arena.contains_ref(*p)
-                );
+                || matches!(self.ctx.module.ty_arena.get(ty), MirTy::Pointer(_));
             if ownership == Ownership::Owned && root != RootProvenance::Local(old) && carries_taint
             {
                 let remapped = match root {

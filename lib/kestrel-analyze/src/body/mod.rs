@@ -17,6 +17,8 @@ pub mod access_mode;
 pub mod closure;
 pub mod definite_assignment;
 pub mod initializer;
+// `?.` consuming through a borrowed bind (E158)
+pub mod optional_chain;
 // HIR-level move/use-after-move checker (E500/E501). Restored from the
 // pre-MIR-rewrite (0.15) tree: it models `while-let` loops, pattern re-binding
 // across iterations, and other control-flow shapes the OSSA verifier currently

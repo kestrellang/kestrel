@@ -251,6 +251,10 @@ pub enum InferError {
         span: Span,
     },
 
+    /// `a?.b` on a type that does not conform to `OptionalChain` (E157). The
+    /// `DoesNotConform` for that protocol, reworded for the operator.
+    OptionalChainNotConforming { ty: TyVar, span: Span },
+
     /// Circular opaque type inference: the concrete type behind `some P`
     /// is itself another `some P` from a mutually recursive call, so no
     /// concrete type can be determined.
@@ -596,6 +600,16 @@ impl InferError {
                 secondary: Vec::new(),
             },
 
+            Self::OptionalChainNotConforming { .. } => RenderedInferError {
+                code: self.code(),
+                message: format!(
+                    "`?.` requires a type that conforms to `OptionalChain`, found `{detail}`"
+                ),
+                label: Some("this has no payload to chain on".into()),
+                notes: vec!["use `.` for a non-optional value".into()],
+                secondary: Vec::new(),
+            },
+
             Self::CircularOpaqueReturn { .. } => RenderedInferError {
                 code: self.code(),
                 message: "circular opaque return type".into(),
@@ -718,6 +732,7 @@ impl InferError {
             Self::InfiniteType { .. } => "E117",
             Self::TypeMustBeKnown { .. } => "E106",
             Self::CircularOpaqueReturn { .. } | Self::OpaqueUnderlierNotCopyable { .. } => "E118",
+            Self::OptionalChainNotConforming { .. } => "E157",
             Self::KindMismatch { .. } => "E624",
             Self::RefFunctionAsValue { .. } => "E491",
             Self::RefInTypeArgument { .. } => "E492",
@@ -729,7 +744,9 @@ impl InferError {
     pub fn mentioned_types(&self) -> Vec<TyVar> {
         match self {
             Self::TypeMismatch { expected, got, .. } => vec![*expected, *got],
-            Self::DoesNotConform { ty, .. } => vec![*ty],
+            Self::DoesNotConform { ty, .. } | Self::OptionalChainNotConforming { ty, .. } => {
+                vec![*ty]
+            },
             Self::NoMember { receiver, .. }
             | Self::MemberNotVisible { receiver, .. }
             | Self::MemberIsStatic { receiver, .. } => vec![*receiver],
@@ -775,6 +792,7 @@ impl InferError {
             | Self::MemberAccessOnPrimitive { span, .. }
             | Self::MethodNotCalled { span, .. }
             | Self::CircularOpaqueReturn { span }
+            | Self::OptionalChainNotConforming { span, .. }
             | Self::OpaqueUnderlierNotCopyable { span, .. }
             | Self::RefFunctionAsValue { span }
             | Self::RefInTypeArgument { span }

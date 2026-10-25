@@ -63,6 +63,60 @@ impl HirBody {
             while_conditions: Vec::new(),
         }
     }
+
+    /// Every `?.` bind in the body: its scrutinee `ProtocolCall` and the
+    /// `.Some` arm's binder `$o` (see `MatchSource::OptionalChain`).
+    pub fn optional_chain_binds(&self) -> Vec<OptionalChainBind> {
+        let mut binds = Vec::new();
+        for (_, expr) in self.exprs.iter() {
+            let HirExpr::Match {
+                scrutinee,
+                arms,
+                source: MatchSource::OptionalChain,
+                ..
+            } = expr
+            else {
+                continue;
+            };
+            // Arm 0 is `.Some($o)` by construction.
+            let Some(HirPat::ImplicitVariant { args, .. }) =
+                arms.first().map(|a| &self.pats[a.pattern])
+            else {
+                continue;
+            };
+            let Some(HirPat::Binding { local, .. }) = args.first().map(|a| &self.pats[a.pattern])
+            else {
+                continue;
+            };
+            binds.push(OptionalChainBind {
+                scrutinee: *scrutinee,
+                binder: *local,
+            });
+        }
+        binds
+    }
+
+    /// The local a place expression projects from, through fields, tuple
+    /// elements and transparent sugar (`a.b.0` → `a`).
+    pub fn place_root(&self, mut expr: HirExprId) -> Option<LocalId> {
+        loop {
+            match &self.exprs[expr] {
+                HirExpr::Local(local, _) => return Some(*local),
+                HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => expr = *base,
+                HirExpr::Sugar { inner, .. } => expr = *inner,
+                _ => return None,
+            }
+        }
+    }
+}
+
+/// One `?.` bind (`HirBody::optional_chain_binds`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct OptionalChainBind {
+    /// `ProtocolCall(base, OptionalChain, …)`.
+    pub scrutinee: HirExprId,
+    /// `$o`: the payload binder of the `.Some` arm.
+    pub binder: LocalId,
 }
 
 /// Where a `HirExpr::Match` came from. Drives diagnostic phrasing and lets
@@ -94,6 +148,11 @@ pub enum MatchSource {
     TryOp,
     /// Desugared from `x is T` or `x as? T`: one `is T` arm and `_`.
     TypeTest,
+    /// One `?.` bind of an optional chain: the scrutinee is
+    /// `ProtocolCall(base, OptionalChain, chainBorrow | chainTake)`, the arms
+    /// are `.Some($o) => <rest of the chain>` and `.None => .None`. Arms are
+    /// checked against `Optional[α]`, so the tail is wrapped or flattened.
+    OptionalChain,
 }
 
 impl MatchSource {
@@ -141,6 +200,9 @@ pub enum SugarKind {
     /// `f(_, 1)` / `map(_.name)` — `inner` is the synthesized `Closure` whose
     /// parameters stand for the `_`s.
     Placeholder,
+    /// `a?.b.c` — `inner` is the outermost `Match { source: OptionalChain }`;
+    /// each further bind is a nested match in the `.Some` arm.
+    OptionalChain,
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).

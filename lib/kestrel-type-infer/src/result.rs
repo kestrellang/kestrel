@@ -78,6 +78,45 @@ pub struct TypedBody {
     /// Every `is T` pattern, with the type of the value it tests (an
     /// existential box when well-typed; analyzers report E152 otherwise).
     pub type_tests: HashMap<kestrel_hir::body::HirPatId, ResolvedTy>,
+
+    /// The method each `?.` bind calls, keyed by its scrutinee
+    /// `ProtocolCall` (optional-chaining design §2). Overrides the
+    /// provisional name HIR lowering wrote; MIR lowering and `access_mode`
+    /// read it through `protocol_method_name`.
+    pub chain_modes: HashMap<HirExprId, ChainMode>,
+}
+
+/// How a `?.` bind reaches its payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ChainMode {
+    /// `chainBorrow`: the chain only reads the payload.
+    Borrow,
+    /// `chainMutate`: the chain mutates the payload of a place base.
+    Mutate,
+    /// `chainTake`: the base is a temporary; the chain owns its payload.
+    Take,
+}
+
+impl ChainMode {
+    /// The `OptionalChain` requirement this mode calls.
+    pub fn method_name(self) -> &'static str {
+        match self {
+            ChainMode::Borrow => "chainBorrow",
+            ChainMode::Mutate => "chainMutate",
+            ChainMode::Take => "chainTake",
+        }
+    }
+}
+
+impl TypedBody {
+    /// The method a `ProtocolCall` really calls: the written name, unless
+    /// it is a `?.` bind whose mode inference settled.
+    pub fn protocol_method_name<'a>(&self, expr: HirExprId, written: &'a str) -> &'a str {
+        match self.chain_modes.get(&expr) {
+            Some(mode) => mode.method_name(),
+            None => written,
+        }
+    }
 }
 
 /// How a value becomes an existential (existentials design §4).
@@ -142,6 +181,7 @@ impl Hash for TypedBody {
             kind_coercions,
             existential_conversions,
             type_tests,
+            chain_modes,
         } = self;
         hash_sorted(expr_types, state);
         hash_sorted(local_types, state);
@@ -156,6 +196,7 @@ impl Hash for TypedBody {
         hash_sorted(kind_coercions, state);
         hash_sorted(existential_conversions, state);
         hash_sorted(type_tests, state);
+        hash_sorted(chain_modes, state);
     }
 }
 
@@ -449,6 +490,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
             .iter()
             .map(|(&pat, &tv)| (pat, resolve_to_concrete(ctx, tv)))
             .collect(),
+        chain_modes: ctx.chain_modes.clone(),
     }
 }
 
@@ -660,6 +702,7 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 describe_tyvar(ctx, *got)
             )
         },
+        InferError::OptionalChainNotConforming { ty, .. } => describe_tyvar(ctx, *ty),
         InferError::DoesNotConform { ty, protocol, .. } => {
             let ty_name = describe_tyvar(ctx, *ty);
             let proto_name = ctx
@@ -990,6 +1033,7 @@ mod tests {
             kind_coercions: HashMap::default(),
             existential_conversions: HashMap::default(),
             type_tests: HashMap::default(),
+            chain_modes: HashMap::default(),
         }
     }
 

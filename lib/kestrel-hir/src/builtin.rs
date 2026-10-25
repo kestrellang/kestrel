@@ -223,6 +223,12 @@ pub enum Builtin {
     FromResidualProtocol,
     FromResidualMethod,
 
+    // ===== Optional chaining (`a?.b`) =====
+    OptionalChainProtocol,
+    OptionalChainBorrowMethod,
+    OptionalChainMutateMethod,
+    OptionalChainTakeMethod,
+
     // ===== Value promotion =====
     FromValueProtocol,
     FromValueMethod,
@@ -476,6 +482,12 @@ impl Builtin {
             Self::FromResidualProtocol => "FromResidualProtocol",
             Self::FromResidualMethod => "FromResidualMethod",
 
+            // Optional chaining
+            Self::OptionalChainProtocol => "OptionalChain",
+            Self::OptionalChainBorrowMethod => "OptionalChainBorrowMethod",
+            Self::OptionalChainMutateMethod => "OptionalChainMutateMethod",
+            Self::OptionalChainTakeMethod => "OptionalChainTakeMethod",
+
             // Value promotion
             Self::FromValueProtocol => "FromValue",
             Self::FromValueMethod => "FromValueMethod",
@@ -714,6 +726,12 @@ impl Builtin {
             "TryExtractMethod" => Some(Self::TryExtractMethod),
             "FromResidualProtocol" => Some(Self::FromResidualProtocol),
             "FromResidualMethod" => Some(Self::FromResidualMethod),
+
+            // Optional chaining
+            "OptionalChainProtocol" => Some(Self::OptionalChainProtocol),
+            "OptionalChainBorrowMethod" => Some(Self::OptionalChainBorrowMethod),
+            "OptionalChainMutateMethod" => Some(Self::OptionalChainMutateMethod),
+            "OptionalChainTakeMethod" => Some(Self::OptionalChainTakeMethod),
 
             // Value promotion
             "FromValueProtocol" => Some(Self::FromValueProtocol),
@@ -960,6 +978,12 @@ impl Builtin {
             Self::ControlFlowEnum => BuiltinKind::Enum,
             Self::TryableProtocol | Self::FromResidualProtocol => BuiltinKind::protocol(),
             Self::TryExtractMethod | Self::FromResidualMethod => BuiltinKind::ProtocolMethod,
+
+            // Optional chaining
+            Self::OptionalChainProtocol => BuiltinKind::protocol(),
+            Self::OptionalChainBorrowMethod
+            | Self::OptionalChainMutateMethod
+            | Self::OptionalChainTakeMethod => BuiltinKind::ProtocolMethod,
 
             // Value promotion
             Self::FromValueProtocol => BuiltinKind::protocol(),
