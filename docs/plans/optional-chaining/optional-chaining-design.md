@@ -350,3 +350,25 @@ mutate". Only the first half is cheap, so it's worth prototyping
 - **Q1.** Should `Result` conform to `OptionalChain` (dropping the error)? This
   design says no.
 - **Q2.** Should the `try a?.b()` interaction (§6) get a lint in 0.19?
+- **Q3. The binder's type before the mode is known.** §2 types `$o` as
+  `&W` provisionally and may switch the mode to `chainMutate` later. If
+  `unify` distinguishes `&W` from `&mutating W`, the switch invalidates
+  types already solved. **Recommendation:** type the binder as `&W` for
+  the whole solve and treat mutability purely as `ChainMode` (enforced by
+  `access_mode`, lowered by MIR). This matches how `Ref` mutability is
+  "analyze's job, not typing's" today. A prototype must confirm that member
+  resolution of a `mutating` method on a `&W` receiver isn't rejected during
+  solving.
+- **Q4. A tail type that's still unknown when the synth gate drops.** §3
+  defers the coerce until the tail resolves. If the gate drops first (the
+  stall-breaker), `Coerce` unifies and *assumes flattening*.
+  **Recommendation:** for `OptionalChain` arms, never unify on stall. Keep
+  deferring, and report "can't infer the type of this `?.` chain" if it never
+  resolves. A wrong flatten would be a silent miscompile.
+- **Q5. `Optional[&T]` bases.** `chainBorrow` on `Optional[&T]` returns
+  `Optional[& &T]`. **Recommendation:** rely on the existing ref-of-ref peel
+  and add a test. If the peel doesn't apply to protocol returns, specialize
+  `Optional[&T]`'s conformance to return `Optional[&T]`.
+- **Q6. Smaller syntax points (no decision needed).** `a?.0` (tuple index)
+  works through `member()`, so it's added to the tests.
+  `x as? T?.y` stays a parse error, as today; write `(x as? T)?.y`.

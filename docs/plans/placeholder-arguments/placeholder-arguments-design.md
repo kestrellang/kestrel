@@ -238,3 +238,11 @@ About 3–5 days: parser with `arg_depth` (1 day), HIR hole and member lowering
 - **Q1.** In `f(g(_))`, should a hole inside a nested call be an error
   ("ambiguous placeholder") instead of binding to `g`? This design binds to the
   nearest call, like Scala.
+- **Q2. Member placeholders inside a nested call.** `xs.map(f(_.x))` binds
+  `_.x` to `f`'s argument, giving `xs.map(f({ p in p.x }))`, not
+  `xs.map({ p in f(p.x) })`. The second is usually what's meant.
+  **Recommendation:** keep "nearest argument" because it's predictable and
+  needs no types. When `f`'s parameter isn't a function type, emit a note:
+  "`_` binds to the innermost argument; write `{ f(it.x) }`".
+- **Q3. Pipe interaction.** See the pipe design, Q2: inside a pipe's right
+  side, `_` is the piped value, not a placeholder.

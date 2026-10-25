@@ -208,3 +208,18 @@ hour), HIR lowering (half a day), tests and diagnostics (1 day).
 - **Q1.** Evaluation order for rvalue left sides: substitute (argument order)
   or temporary (reading order)? This design recommends temporary for rvalues
   and direct substitution for places.
+- **Q2. `_.member` on the right of `|>`.** Under the placeholder rules,
+  `x |> f(_.name)` makes `_.name` its own closure and then calls
+  `f({ p in p.name })(x)`. Most readers would expect `f(x.name)`.
+  **Recommendation:** inside the top-level argument list of a pipe's right
+  side, *every* `_` (a hole or a chain head) is the piped value, Hack-style.
+  So `x |> f(_.name)` is `f(x.name)` and `x |> f(_, _.id)` is `f(x, x.id)`.
+  When `_` is used more than once, `x` is bound to a temporary first, which
+  needs `x` to be Copyable or a place (borrowed). Nested argument lists keep
+  the ordinary placeholder meaning: in `x |> f(g(_.y))`, `_.y` is a closure.
+  This replaces E156 (more than one `_`) with the temporary rule.
+- **Q3. Trailing closures on the right.** `xs |> map { it * 2 }` is a call
+  with no `_`, so by §1 it means `map({ … })(xs)`, not `xs.map { … }`.
+  **Recommendation:** keep the rule, which is consistent, and add a targeted
+  note when the callee is a method name that exists on the piped type: "did you
+  mean `xs.map { … }`?".
