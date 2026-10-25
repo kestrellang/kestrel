@@ -4,8 +4,8 @@
 
 // `asRef()` on an `Optional[&T]` is generic `asRef` at `T = &Point`, so its
 // result is `Optional[& &Point]`, which typing peels to one level. The value
-// read through it must be the point's field. Today it reads garbage: the
-// generic body's `&value` makes a real pointer-to-pointer.
+// read through it must be the point's field: the generic body's `&value`
+// stores the payload's pointer, not the address of the payload slot.
 
 module Test
 struct Point {

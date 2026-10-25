@@ -1130,16 +1130,23 @@ fn compile_op3<'ctx>(
 
 /// Resolve an aggregate-slot operand's store value. A REF slot (stage 2b)
 /// stores the ADDRESS: a @guaranteed pointee-typed operand's codegen value
-/// IS that address, and an @owned `MirTy::Ref` operand already carries the
-/// pointer scalar — neither may go through `resolve_scalar` (it would load
-/// a scalar POINTEE through the address). Twin of the Cranelift helper.
+/// IS that address, so it must not go through `resolve_scalar` (that would
+/// load a scalar POINTEE through it). Twin of the Cranelift helper.
 fn resolve_slot_value<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
     slot_ty: TyId,
     value_id: ValueId,
 ) -> BasicValueEnum<'ctx> {
-    if matches!(fc.ctx.module.ty_arena.get(slot_ty), MirTy::Ref { .. }) {
+    // See the cranelift twin: a ref-typed operand into a ref slot is the
+    // `&&U = &U` collapse and stores the operand's pointer.
+    let arena = &fc.ctx.module.ty_arena;
+    let slot_is_ref = matches!(arena.get(slot_ty), MirTy::Ref { .. });
+    let operand_is_ref = matches!(
+        arena.get(fc.body.values[value_id.index()].ty),
+        MirTy::Ref { .. }
+    );
+    if slot_is_ref && !operand_is_ref {
         fc.get_value(value_id)
     } else {
         fc.resolve_scalar(builder, value_id)

@@ -134,11 +134,3 @@ optional.
 - `xs.map(_?.name)` and `{ it?.name }` are closures whose body is a chain.
 - A chain inside a closure that mutates a captured `var` makes the closure a
   mutating one, as any other mutation would.
-
-## Known limitations
-
-- A chain on a *named* `Optional[&T]` (`let r = o.asRef(); r?.x`) reads the
-  wrong value today. The generic `chainBorrow` makes a reference to a
-  reference there. Chaining on the call directly (`o.asRef()?.x`) works.
-  `references/composition/optional_ref_payload_as_ref.ks` and
-  `expressions/optional_chaining/chain_ref_base.ks` pin the bug.
