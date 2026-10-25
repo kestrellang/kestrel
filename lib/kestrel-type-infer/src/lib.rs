@@ -20,6 +20,7 @@ mod entail_layer;
 mod solver_entail;
 pub mod obligations;
 mod optional_chain;
+mod pipe;
 pub mod error;
 mod existential;
 pub mod generate;
@@ -113,6 +114,9 @@ impl QueryFn for InferBody {
 
         // Settle each `?.` bind's method now that members are resolved.
         optional_chain::decide_chain_modes(&mut infer_ctx, &hir);
+
+        // A failed `|>` reports one fix-it instead of its call's errors.
+        pipe::reword_pipe_errors(&mut infer_ctx, &hir);
 
         // Detect circular opaque returns: if the concrete type behind `some P`
         // is itself another opaque, the body never grounded to a real type.

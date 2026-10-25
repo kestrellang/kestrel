@@ -137,10 +137,6 @@ optional.
 
 ## Known limitations
 
-- `a?.add(a.count())` reads `a` while the bind holds a mutable borrow of it.
-  That should be an exclusivity error, but the compiler has no exclusivity
-  check yet, so it compiles (`chain_exclusivity.ks` pins it).
-
 - A chain on a *named* `Optional[&T]` (`let r = o.asRef(); r?.x`) reads the
   wrong value today. The generic `chainBorrow` makes a reference to a
   reference there. Chaining on the call directly (`o.asRef()?.x`) works.

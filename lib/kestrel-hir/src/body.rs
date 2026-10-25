@@ -43,6 +43,39 @@ pub struct HirBody {
     /// Original condition expressions from while-loop desugaring.
     /// Used by the condition type analyzer to check that while conditions are Bool.
     pub while_conditions: Vec<HirExprId>,
+    /// Every `|>` in the body, with what its right side was. Type inference
+    /// rewords a failed pipe's errors into a fix-it from this.
+    pub pipes: Vec<PipeSite>,
+}
+
+/// One `lhs |> rhs` (`SugarKind::Pipe`), as HIR lowering saw its right side.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct PipeSite {
+    /// The whole pipe's span; the call it builds carries it too.
+    pub span: Span,
+    /// The right side's span.
+    pub rhs_span: Span,
+    /// The right side, as written.
+    pub rhs_text: String,
+    pub shape: PipeShape,
+}
+
+/// What a pipe's right side was, for its fix-it.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum PipeShape {
+    /// A call with `_` in its arguments: the slot is explicit, no fix-it.
+    Slotted,
+    /// A path, called with the piped value: `x |> f`. `call` is that call.
+    Path { call: HirExprId },
+    /// A call with no `_`, whose result is called: `x |> f(a)`.
+    /// `suggestion` is the call with a leading slot: `f(_, a)`.
+    CallValue { suggestion: String },
+    /// `x |> f ?? d`, which is `x |> (f ?? d)`.
+    Coalesce,
+    /// A closure literal: its own errors say what's wrong.
+    Closure,
+    /// Anything else, called with the piped value.
+    Value,
 }
 
 impl HirBody {
@@ -61,6 +94,7 @@ impl HirBody {
             tail_expr: None,
             guard_stmts: Vec::new(),
             while_conditions: Vec::new(),
+            pipes: Vec::new(),
         }
     }
 

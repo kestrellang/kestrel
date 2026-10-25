@@ -255,6 +255,15 @@ pub enum InferError {
     /// `DoesNotConform` for that protocol, reworded for the operator.
     OptionalChainNotConforming { ty: TyVar, span: Span },
 
+    /// A failed `x |> rhs`, reworded with a fix-it for the right side's
+    /// shape (`pipe::reword_pipe_errors`). Keeps the replaced error's code.
+    PipeFixIt {
+        code: &'static str,
+        message: String,
+        note: String,
+        span: Span,
+    },
+
     /// Circular opaque type inference: the concrete type behind `some P`
     /// is itself another `some P` from a mutually recursive call, so no
     /// concrete type can be determined.
@@ -610,6 +619,14 @@ impl InferError {
                 secondary: Vec::new(),
             },
 
+            Self::PipeFixIt { message, note, .. } => RenderedInferError {
+                code: self.code(),
+                message: message.clone(),
+                label: Some("this pipe".into()),
+                notes: vec![note.clone()],
+                secondary: Vec::new(),
+            },
+
             Self::CircularOpaqueReturn { .. } => RenderedInferError {
                 code: self.code(),
                 message: "circular opaque return type".into(),
@@ -733,6 +750,7 @@ impl InferError {
             Self::TypeMustBeKnown { .. } => "E106",
             Self::CircularOpaqueReturn { .. } | Self::OpaqueUnderlierNotCopyable { .. } => "E118",
             Self::OptionalChainNotConforming { .. } => "E157",
+            Self::PipeFixIt { code, .. } => code,
             Self::KindMismatch { .. } => "E624",
             Self::RefFunctionAsValue { .. } => "E491",
             Self::RefInTypeArgument { .. } => "E492",
@@ -793,6 +811,7 @@ impl InferError {
             | Self::MethodNotCalled { span, .. }
             | Self::CircularOpaqueReturn { span }
             | Self::OptionalChainNotConforming { span, .. }
+            | Self::PipeFixIt { span, .. }
             | Self::OpaqueUnderlierNotCopyable { span, .. }
             | Self::RefFunctionAsValue { span }
             | Self::RefInTypeArgument { span }

@@ -57,6 +57,13 @@ A place `a` (`buf`, `self.items`) is substituted at each use, so it is
 borrowed exactly as in the hand-written call. Any other `a` is evaluated
 first: `{ let $pipe = a; f(…, $pipe) }`.
 
+Lowering also records each pipe in `HirBody::pipes` (its span, the right
+side's span and text, and a `PipeShape`). When the pipe fails, inference
+(`kestrel-type-infer/src/pipe.rs`) replaces the errors reported at the pipe
+or at its right side with one `PipeFixIt` error: `f(_, a)` for a call with
+no `_`, `f(label: _)` for a path whose first parameter is labeled,
+parentheses for `x |> f ?? d`, and "not callable" for any other value.
+
 ## Placeholder Arguments
 
 `_` inside a call's arguments is sugar for a closure literal, wrapped in

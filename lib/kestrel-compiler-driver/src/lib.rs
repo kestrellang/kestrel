@@ -395,6 +395,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
         InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
         InferError::OptionalChainNotConforming { .. } => "OptionalChainNotConforming",
+        InferError::PipeFixIt { .. } => "PipeFixIt",
     }
 }
 
@@ -413,6 +414,9 @@ fn format_error(err: &InferError) -> String {
                 "OptionalChainNotConforming at {}:{}",
                 span.file_id, span.start
             )
+        },
+        InferError::PipeFixIt { .. } => {
+            format!("PipeFixIt at {}:{}", span.file_id, span.start)
         },
         InferError::NoMember { name, .. } => {
             format!("NoMember '{}' at {}:{}", name, span.file_id, span.start)

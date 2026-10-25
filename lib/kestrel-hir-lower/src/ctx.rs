@@ -55,6 +55,8 @@ pub(crate) struct LowerCtx<'a> {
     /// Original condition expressions from while-loop desugaring.
     /// Populated during lowering, used by condition type analyzer.
     pub while_conditions: Vec<HirExprId>,
+    /// Every `|>` lowered so far (`HirBody::pipes`).
+    pub pipes: Vec<kestrel_hir::body::PipeSite>,
 
     /// Stack of active loop labels (innermost last). `None` = unlabeled loop.
     /// Used to validate break/continue labels during lowering.
@@ -114,6 +116,7 @@ impl<'a> LowerCtx<'a> {
             params: Vec::new(),
             scopes: vec![HashMap::new()], // start with one scope for params
             guard_stmts: Vec::new(),
+            pipes: Vec::new(),
             while_conditions: Vec::new(),
             loop_labels: Vec::new(),
             local_depths: HashMap::new(),

@@ -24,7 +24,7 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::ctx::LowerCtx;
 use crate::desugar::is_place_syntax;
-use crate::syntax::{ArgSyntax, ExprSrc, arguments};
+use crate::syntax::{ArgSyntax, ExprSrc, arguments, binary_op, unwrap_expr};
 
 /// What a `_` lowers to.
 #[derive(Clone)]
@@ -236,6 +236,7 @@ impl LowerCtx<'_> {
         };
 
         let rhs_node = rhs.inner();
+        let mut path_call = None;
         let call = match rhs_node.as_ref().map(|n| (n.kind(), n)) {
             Some((SyntaxKind::ExprCall, call))
                 if call_has_top_level_placeholder(call, self.file_id) =>
@@ -248,7 +249,9 @@ impl LowerCtx<'_> {
                     label: None,
                     value: arg,
                 }];
-                self.lower_call_with_args(&rhs, args, span)
+                let call = self.lower_call_with_args(&rhs, args, span);
+                path_call = Some(call);
+                call
             },
             _ => {
                 let arg = self.lower_fill(&fill, span);
@@ -264,6 +267,9 @@ impl LowerCtx<'_> {
             },
         };
         self.pop_scope();
+        if let Some(rhs_node) = rhs.node() {
+            self.record_pipe(rhs_node, path_call, span);
+        }
 
         let inner = if stmts.is_empty() {
             call
@@ -281,6 +287,61 @@ impl LowerCtx<'_> {
             inner,
             span: span.clone(),
         })
+    }
+}
+
+impl LowerCtx<'_> {
+    /// Remember what a pipe's right side was, so a failed pipe can be
+    /// reworded into a fix-it after inference (`HirBody::pipes`).
+    fn record_pipe(&mut self, rhs: &SyntaxNode, path_call: Option<HirExprId>, span: &Span) {
+        let inner = unwrap_expr(rhs);
+        let shape = match (inner.kind(), path_call) {
+            (_, Some(call)) => PipeShape::Path { call },
+            (SyntaxKind::ExprCall, None)
+                if call_has_top_level_placeholder(&inner, self.file_id) =>
+            {
+                PipeShape::Slotted
+            },
+            (SyntaxKind::ExprCall, None) => PipeShape::CallValue {
+                suggestion: slotted_call_text(&inner),
+            },
+            (SyntaxKind::ExprBinary, None)
+                if binary_op(&inner) == Some(kestrel_ast::BinaryOp::Coalesce) =>
+            {
+                PipeShape::Coalesce
+            },
+            (SyntaxKind::ExprClosure, None) => PipeShape::Closure,
+            _ => PipeShape::Value,
+        };
+        self.pipes.push(PipeSite {
+            span: span.clone(),
+            rhs_span: self.span(&inner),
+            rhs_text: inner.text().to_string().trim().to_string(),
+            shape,
+        });
+    }
+}
+
+/// `f(a, b)` written with a leading slot: `f(_, a, b)`.
+fn slotted_call_text(call: &SyntaxNode) -> String {
+    let text = call.text().to_string();
+    let Some(list) = call
+        .children()
+        .find(|c| c.kind() == SyntaxKind::ArgumentList)
+    else {
+        return text.trim().to_string();
+    };
+    let list_text = list.text().to_string();
+    let callee = &text[..usize::from(list.text_range().start() - call.text_range().start())];
+    let args = list_text
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')')
+        .trim();
+    if args.is_empty() {
+        format!("{}(_)", callee.trim())
+    } else {
+        format!("{}(_, {args})", callee.trim())
     }
 }
 

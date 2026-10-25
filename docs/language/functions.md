@@ -430,6 +430,15 @@ closure. `|>` never guesses a slot.
   evaluated first, before the call's other arguments, and only once.
 - A line may start with `|>`.
 
+When a pipe fails, the error names the likely mistake:
+
+| You wrote | The error suggests |
+|-----------|--------------------|
+| `5 \|> sub(1)` | `sub(_, 1)`: a call with no `_` is called with its result |
+| `5 \|> scale` (first parameter labeled `by`) | `scale(by: _)` |
+| `o \|> double ?? 0` | `(o \|> double) ?? 0`: `\|>` binds looser than `??` |
+| `5 \|> 3` | the right side is not callable |
+
 ## Nested Functions
 
 Functions can be declared inside other functions (though this is not commonly used):

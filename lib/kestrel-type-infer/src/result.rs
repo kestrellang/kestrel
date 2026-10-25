@@ -703,6 +703,7 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             )
         },
         InferError::OptionalChainNotConforming { ty, .. } => describe_tyvar(ctx, *ty),
+        InferError::PipeFixIt { message, .. } => message.clone(),
         InferError::DoesNotConform { ty, protocol, .. } => {
             let ty_name = describe_tyvar(ctx, *ty);
             let proto_name = ctx
