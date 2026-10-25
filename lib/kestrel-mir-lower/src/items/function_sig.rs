@@ -336,6 +336,13 @@ pub(crate) fn lower_where_clauses(ctx: &mut LowerCtx, owner: Entity, out: &mut W
             root: ctx.root,
         })
         .clauses;
+    // A `Self` subject constrains `TypeParam(protocol)` when `owner` sits in a
+    // protocol or protocol extension (how abstract `Self` lowers).
+    let self_param = self_protocol(ctx, owner);
+    let subject_entity = |s: &kestrel_type_infer::resolve::WhereSubject| match s {
+        kestrel_type_infer::resolve::WhereSubject::SelfType => self_param,
+        _ => subject_entity(s),
+    };
     for clause in &clauses {
         match clause {
             Clause::Bound {
@@ -414,6 +421,28 @@ fn subject_hir(
             span,
         }),
     }
+}
+
+/// The protocol whose abstract `Self` is in scope at `owner` (a protocol, a
+/// protocol extension, or anything nested in one), if any.
+fn self_protocol(ctx: &LowerCtx, owner: Entity) -> Option<Entity> {
+    let mut current = Some(owner);
+    while let Some(entity) = current {
+        let target = match ctx.world.get::<NodeKind>(entity) {
+            Some(NodeKind::Protocol) => Some(entity),
+            Some(NodeKind::Extension) => ctx.query.query(kestrel_name_res::ExtensionTargetEntity {
+                extension: entity,
+                root: ctx.root,
+            }),
+            Some(NodeKind::Struct | NodeKind::Enum) => return None,
+            _ => {
+                current = ctx.world.parent_of(entity);
+                continue;
+            },
+        };
+        return target.filter(|t| ctx.world.get::<NodeKind>(*t) == Some(&NodeKind::Protocol));
+    }
+    None
 }
 
 /// Walk the parent chain from a function entity to find the enclosing

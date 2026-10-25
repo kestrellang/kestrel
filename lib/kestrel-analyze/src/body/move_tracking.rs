@@ -1859,8 +1859,14 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
     fn member_semantics(&self, ty: &ResolvedTy) -> CopySemantics {
         match ty {
             ResolvedTy::Named { entity, args } => instance_semantics(self, *entity, args),
-            // No per-instantiation refinement for Self (current behavior).
-            ResolvedTy::SelfType { entity } => self.base_semantics(*entity),
+            // A protocol's abstract `Self` is only as copyable as the protocol
+            // (or a `where Self:` bound) guarantees; a concrete `Self` is its nominal.
+            ResolvedTy::SelfType { entity } => kestrel_semantics::self_type_copy_semantics(
+                self.mcx.cx.query,
+                *entity,
+                self.mcx.cx.entity,
+                self.mcx.cx.root,
+            ),
             // HOOK: body-owner context scopes the bound lookup.
             ResolvedTy::Param { entity } => self
                 .mcx

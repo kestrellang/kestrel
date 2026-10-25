@@ -731,7 +731,20 @@ pub(crate) fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> Co
         TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
             instance_semantics(&SolverCopyLayer { ctx, depth }, entity, &args)
         },
-        // Empty args: a gated base folds to NotCopyable, as today.
+        // A protocol's abstract `Self` is only as copyable as its refinements;
+        // a concrete `Self` is its nominal (empty args: a gated base folds to
+        // NotCopyable).
+        TyKind::SelfType { entity }
+            if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(entity)
+                == Some(&kestrel_ast_builder::NodeKind::Protocol) =>
+        {
+            ctx.query_ctx
+                .query(kestrel_semantics::ProtocolSelfCopySemantics {
+                    protocol: entity,
+                    context: ctx.owner,
+                    root: ctx.root,
+                })
+        },
         TyKind::SelfType { entity } => {
             instance_semantics(&SolverCopyLayer { ctx, depth }, entity, &[])
         },

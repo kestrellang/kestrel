@@ -220,6 +220,13 @@ pub fn copy_behavior(
                     return CopyBehavior::None;
                 }
             }
+            // A protocol's abstract `Self` (lowered as `TypeParam(protocol)`):
+            // move-only types may conform, so it is only as copyable as the
+            // protocol's refinements guarantee (mirrors
+            // `kestrel_semantics::ProtocolSelfCopySemantics`).
+            if module.protocols.contains_key(&entity) {
+                return protocol_self_copy_behavior(module, entity);
+            }
             CopyBehavior::Bitwise
         },
 
@@ -400,6 +407,30 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
 // the `@builtin` lang item recorded on the module (see `MirModule`), not from
 // the protocol's name. A name-suffix test also matched user protocols like
 // `MyCopyable` and would silently match nothing if the stdlib renamed either.
+
+/// Copy behavior of protocol `Self` from its (transitive) parents alone.
+fn protocol_self_copy_behavior(module: &MirModule, protocol: Entity) -> CopyBehavior {
+    let mut stack = vec![protocol];
+    let mut seen = std::collections::HashSet::new();
+    let mut copyable = false;
+    while let Some(p) = stack.pop() {
+        if !seen.insert(p) {
+            continue;
+        }
+        if is_cloneable_protocol(module, p) {
+            return CopyBehavior::Clone(p);
+        }
+        copyable |= is_copyable_protocol(module, p);
+        if let Some(def) = module.protocols.get(&p) {
+            stack.extend(def.parent_protocols.iter().copied());
+        }
+    }
+    if copyable {
+        CopyBehavior::Bitwise
+    } else {
+        CopyBehavior::None
+    }
+}
 
 pub fn is_cloneable_protocol(module: &MirModule, entity: Entity) -> bool {
     module.cloneable_protocol == Some(entity)

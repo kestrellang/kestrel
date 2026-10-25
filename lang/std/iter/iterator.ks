@@ -115,7 +115,7 @@ public protocol Iterable {
 
     /// Builds a fresh iterator over the contents.
     @builtin(.IterableIterMethod)
-    func iter() -> TargetIterator
+    consuming func iter() -> TargetIterator
 }
 
 // ============================================================================
@@ -132,7 +132,7 @@ extend Iterator: Iterable {
 
     /// Returns `self`. The blanket conformance pivot — iterators *are*
     /// iterables.
-    func iter() -> Self { self }
+    consuming func iter() -> Self { self }
 }
 
 /// An iterator that can also yield from the back. Powers `rev()` and
