@@ -278,14 +278,6 @@ Tests first, under `lib/kestrel-test-suite/testdata/expressions/placeholders/`:
 About 3–5 days: parser with `arg_depth` (1 day), HIR hole and member lowering
 (1–1.5 days), tests and diagnostics (1–2 days), docs.
 
-## Open questions
-
-- **Q1.** In `f(g(_))`, should a hole inside a nested call be an error
-  ("ambiguous placeholder") instead of binding to `g`? This design binds to the
-  nearest call, like Scala.
-- **Q3. Pipe interaction.** See the pipe design, Q2: inside a pipe's right
-  side, `_` is the piped value, not a placeholder.
-
 ## Decisions
 
 - **Every `_` in one argument is the same parameter** (2026-10-25). `_ + _` is
@@ -300,3 +292,5 @@ About 3–5 days: parser with `arg_depth` (1 day), HIR hole and member lowering
 - **`_` passes through string interpolation, `if`/`match`, literals and all
   operators** (2026-10-25). Only argument lists and closure literals are
   boundaries.
+- **A hole in a nested call binds to that call** (2026-10-25). `f(g(_))` is
+  `f({ p in g(p) })`, consistent with "nearest" everywhere else.
