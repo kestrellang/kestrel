@@ -46,6 +46,8 @@ pub struct MonoModule {
     /// Duplications of a `not Copyable` instantiation found by
     /// `expand_destroy_copy`; `verify_mono` reports each one as an error.
     pub instantiation_findings: Vec<crate::mono::expand::InstantiationFinding>,
+    /// Carried over from [`crate::MirModule::observable_drop`].
+    pub observable_drop: indexmap::IndexSet<Entity>,
 }
 
 impl MonoModule {
@@ -58,6 +60,7 @@ impl MonoModule {
             ty_arena,
             entity_names: IndexMap::new(),
             instantiation_findings: Vec::new(),
+            observable_drop: indexmap::IndexSet::new(),
         }
     }
 

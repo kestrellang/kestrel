@@ -165,6 +165,12 @@ impl TestCompiler {
             .map_err(|e| format!("MIR lowering failed: {e}"))
     }
 
+    /// Warnings found after monomorphization (E508) by the most recent build
+    /// (`run` / `run_on`).
+    pub fn mono_warnings(&self) -> Vec<TestDiagnostic> {
+        from_codespan_diagnostics(&self.compiler.mono_warnings(), &self.source_map())
+    }
+
     /// Compile, link, and run on the env-default backend.
     pub fn run(&self) -> Result<RunResult, String> {
         self.run_on(runner::Backend::default_from_env())

@@ -124,23 +124,13 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
 
     // @extern
     if is_extern && let Some(attrs) = ctx.world.get::<Attributes>(entity) {
-        for attr in &attrs.0 {
-            if attr.name == "extern" {
-                let symbol_name = attr
-                    .args
-                    .iter()
-                    .find(|a| a.label.as_deref() == Some("mangleName"))
-                    .map(|a| a.value.trim_matches('"').to_string())
-                    .unwrap_or_else(|| {
-                        def.name.rsplit('.').next().unwrap_or(&def.name).to_string()
-                    });
-                def.extern_info = Some(ExternInfo {
-                    calling_convention: CallingConvention::C,
-                    symbol_name,
-                });
-                break;
-            }
-        }
+        let symbol_name = attrs
+            .extern_mangle_name()
+            .unwrap_or_else(|| def.name.rsplit('.').next().unwrap_or(&def.name).to_string());
+        def.extern_info = Some(ExternInfo {
+            calling_convention: CallingConvention::C,
+            symbol_name,
+        });
     }
 
     // Intrinsic functions have no body

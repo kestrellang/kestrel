@@ -107,7 +107,10 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
 /// Reference-counted shared ownership of the fd. Cloning is a refcount
 /// bump (the same socket), and `close(2)` runs exactly once — when the
 /// last handle drops. This is a shared handle, not a `dup(2)`; use
-/// `dup(2)` explicitly if you need an independent fd.
+/// `dup(2)` explicitly if you need an independent fd. Marked
+/// `@observabledrop`: since the last drop closes the socket, the compiler
+/// keeps every copy alive until the end of its scope.
+@observabledrop
 public struct TcpStream: Readable, Writable, Cloneable {
     // The fd lives in a reference-counted box so the socket is `close(2)`d
     // exactly once — by whichever handle drops last. A plain `var fd: Int32`
@@ -354,8 +357,9 @@ extend TcpStream {
 ///
 /// # Memory Model
 ///
-/// Owns its fd; closed on drop.
-public struct TcpListener {
+/// Owns its fd; closed on drop. `not Copyable`: a copy would close the
+/// same fd twice. Move it, or borrow it to call `accept()`.
+public struct TcpListener: not Copyable {
     var fd: Int32
 
     /// @name From Fd

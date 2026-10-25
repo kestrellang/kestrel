@@ -63,6 +63,7 @@ pub fn monomorphize(
         // `Callee::Witness` is resolved by the ordinary witness machinery.
         boolean_conditional_protocol: _,
         bool_struct: _,
+        observable_drop,
     } = module;
 
     // Phase 1: Instantiation discovery
@@ -236,6 +237,7 @@ pub fn monomorphize(
     }
 
     mono_module.entity_names = entity_names;
+    mono_module.observable_drop = observable_drop;
     mono_module.structs = mono_structs;
     mono_module.enums = mono_enums;
 

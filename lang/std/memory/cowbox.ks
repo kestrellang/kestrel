@@ -52,12 +52,21 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
         self.inner.getValue().clone()
     }
 
+    /// COW barrier — makes the storage uniquely owned, cloning it if shared.
+    ///
+    /// The clone reads through a reference to the heap value, so a shared
+    /// box is deep-copied exactly once. Every mutating entry point (`write`,
+    /// `modify`, `pointeeMutRef`) goes through here.
+    public mutating func ensureUnique() {
+        if self.inner.isUnique() == false {
+            self.inner = RcBox(self.inner.valuePtr().value.clone())
+        }
+    }
+
     /// Write access — clones storage if shared, then returns the
     /// (now unique) value. Caller modifies and calls `setValue`.
     public mutating func write() -> T {
-        if self.inner.isUnique() == false {
-            self.inner = RcBox(self.inner.getValue().clone())
-        }
+        self.ensureUnique();
         self.inner.getValue()
     }
 
@@ -74,9 +83,7 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
     /// to mutate directly — no per-call clone or write-back. This is the O(1)
     /// replacement for the `read()` → modify → `setValue()` dance.
     public mutating func modify[R](body: (mutating T) -> R) -> R {
-        if self.inner.isUnique() == false {
-            self.inner = RcBox(self.inner.getValue().clone())
-        }
+        self.ensureUnique();
         self.inner.modify(body)
     }
 
@@ -113,9 +120,7 @@ extend CowBox[T]: MutableIndirection where T: Cloneable {
     type Target = T
     public func pointeeRef() -> &T { self.valuePtr().value }
     public mutating func pointeeMutRef() -> &mutating T {
-        if self.inner.isUnique() == false {
-            self.inner = RcBox(self.inner.getValue().clone())
-        }
+        self.ensureUnique();
         self.valuePtr().mutatingValue
     }
 }

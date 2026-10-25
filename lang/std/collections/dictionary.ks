@@ -361,10 +361,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// COW write barrier — ensures the storage is uniquely owned.
     private mutating func makeUnique() {
-        if self.storage.isUnique() == false {
-            var s = self.storage.write();
-            self.storage.setValue(s)
-        }
+        self.storage.ensureUnique()
     }
 
     /// @name From Storage

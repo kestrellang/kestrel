@@ -66,6 +66,18 @@ impl<'w> LowerCtx<'w> {
         name
     }
 
+    /// Record a nominal type marked `@observabledrop` (dropping it has an
+    /// observable effect). Called from struct and enum lowering.
+    pub fn record_observable_drop(&mut self, entity: Entity) {
+        let marked = self
+            .world
+            .get::<kestrel_ast_builder::Attributes>(entity)
+            .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "observabledrop"));
+        if marked {
+            self.module.observable_drop.insert(entity);
+        }
+    }
+
     /// Intern a MirTy into the arena, returning its TyId.
     pub fn intern(&mut self, ty: MirTy) -> TyId {
         self.module.ty_arena.intern(ty)

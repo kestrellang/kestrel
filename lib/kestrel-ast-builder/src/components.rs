@@ -457,6 +457,21 @@ pub struct Intrinsic;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Attributes(pub Vec<AstAttribute>);
 
+impl Attributes {
+    /// The explicit C symbol of an `@extern(.., mangleName: "sym")` function,
+    /// if any. Callers fall back to the function's own name. Single source of
+    /// truth for MIR lowering and analyzers.
+    pub fn extern_mangle_name(&self) -> Option<String> {
+        self.0
+            .iter()
+            .find(|a| a.name == "extern")?
+            .args
+            .iter()
+            .find(|a| a.label.as_deref() == Some("mangleName"))
+            .map(|a| a.value.trim_matches('"').to_string())
+    }
+}
+
 /// A single attribute (e.g. `@inline(always)`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AstAttribute {

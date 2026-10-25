@@ -20,7 +20,7 @@ the type checker, and the code is assigned in one place,
 - [E300–E321 — Patterns & exhaustiveness](#e300e321--patterns--exhaustiveness)
 - [E400, E411–E479 — Declarations, generics & protocol conformance](#e400-e411e479--declarations-generics--protocol-conformance)
 - [E480–E499 — References & escape checking](#e480e499--references--escape-checking)
-- [E500–E507 — Moves & ownership](#e500e507--moves--ownership)
+- [E500–E508 — Moves & ownership](#e500e508--moves--ownership)
 - [E600–E614, E623 — Closures, externs & declaration shape](#e600e614-e623--closures-externs--declaration-shape)
 - [E615–E618 — Entry point](#e615e618--entry-point)
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
@@ -317,7 +317,7 @@ Only parameter-rooted or `Pointer`-derived references can be returned. The
 same rule rejects returning a closure that captures a local (the closure's
 environment is rooted at its captures).
 
-## E500–E507 — Moves & ownership
+## E500–E508 — Moves & ownership
 
 These apply to non-`Copyable` types, which move instead of copy.
 
@@ -331,6 +331,7 @@ These apply to non-`Copyable` types, which move instead of copy.
 | E505 | static variable '{name}' has non-Static type '{ty}' | A global lives for the whole program, so its type must be `Static` (reference-free). |
 | E506 | cannot move captured value '{name}' out of a closure | A `normal` / `mutating` / `escaping` closure may be called more than once but holds a single non-copyable value, so its body can't move that capture out. **Lifted inside a `consuming` body** — a one-shot closure runs at most once, so moving captures out is exactly what it is for. (A `consuming` body moving a capture the frame only *borrows* is still rejected.) |
 | E507 | cannot move / consume / destroy '{name}' while a closure capturing it is live · a closure viewing '{name}' cannot outlive '{name}' | The freeze rule (docs/design/closures.md). While a live `normal` / `mutating` closure carries a view of a place, that place cannot be moved, passed to a `consuming` parameter, or `deinit`ed, and a value carrying the view cannot be stored into a longer-lived binding. Plain reassignment stays legal. The closure analogue of E498. |
+| E508 *(warning)* | `Cloneable` type `{name}` has a `deinit` that calls `{extern}`; mark it `@observabledrop` | Emitted after monomorphization. A `Cloneable` type whose `deinit` reaches an observable extern (closing a file or socket) may have a copy dropped early by the copy lifetime passes; `@observabledrop` keeps its drops at scope end. See `docs/plans/observable_drop/observable_drop-design.md`. |
 
 ### Example — E500 / E501 (use after move)
 

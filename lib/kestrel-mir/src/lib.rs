@@ -18,7 +18,7 @@ pub mod ty_query;
 pub mod value;
 pub mod verify;
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use kestrel_hecs::Entity;
 
 pub use body::OssaBody;
@@ -113,6 +113,10 @@ pub struct MirModule {
     /// stdlib — implicit conditions then branch raw, as they always did.
     pub boolean_conditional_protocol: Option<Entity>,
     pub bool_struct: Option<Entity>,
+    /// Nominal types marked `@observabledrop`: dropping one has an observable
+    /// effect (closing a connection), so copy lifetime passes must not drop
+    /// copies of it — or of anything containing it — earlier than scope end.
+    pub observable_drop: IndexSet<Entity>,
 }
 
 impl MirModule {
@@ -131,6 +135,7 @@ impl MirModule {
             cloneable_protocol: None,
             boolean_conditional_protocol: None,
             bool_struct: None,
+            observable_drop: IndexSet::new(),
         }
     }
 

@@ -24,6 +24,7 @@ use walkdir::WalkDir;
 
 use kestrel_test_suite::TestCompiler;
 use kestrel_test_suite::annotation::{self, TestMode};
+use kestrel_test_suite::diagnostic_matcher;
 use kestrel_test_suite::mir_snapshot;
 use kestrel_test_suite::runner::Backend;
 
@@ -225,6 +226,16 @@ fn run_ks_test_inner(
             let result = tc
                 .run_on(backend)
                 .map_err(Into::<Box<dyn std::error::Error>>::into)?;
+
+            // Post-monomorphization warnings (E508) only exist once the
+            // program is built, so execution tests are where they are checked.
+            let warn_annotations: Vec<_> = annotation::parse_annotations(source)
+                .into_iter()
+                .filter(|a| matches!(a.kind, annotation::AnnotationKind::Warning { .. }))
+                .collect();
+            if config.warnings_checked || !warn_annotations.is_empty() {
+                diagnostic_matcher::check(&warn_annotations, &tc.mono_warnings(), file_id)?;
+            }
 
             let expected_exit = config.expect_exit.unwrap_or(0);
             if result.exit_code != expected_exit {

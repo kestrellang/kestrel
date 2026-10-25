@@ -12,6 +12,7 @@ use crate::ty::resolve_type_annotation;
 pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) {
     let name = ctx.register_name(entity);
     let mut def = StructDef::new(entity, name);
+    ctx.record_observable_drop(entity);
 
     def.type_params = collect_type_params(ctx, entity);
     def.type_info = TypeInfo {
