@@ -1018,18 +1018,12 @@ fn ty_shape_compatible(a: &HirTy, b: &HirTy) -> bool {
                 ..
             },
         ) => ea == eb && args_compatible(aa, ab),
-        (
-            HirTy::AliasUse {
-                entity: ea,
-                args: aa,
-                ..
-            },
-            HirTy::AliasUse {
-                entity: eb,
-                args: ab,
-                ..
-            },
-        ) => ea == eb && args_compatible(aa, ab),
+        (HirTy::Alias { expanded, .. }, other) | (other, HirTy::Alias { expanded, .. }) => {
+            ty_shape_compatible(expanded, other)
+        },
+        (HirTy::AbstractAssoc { entity: ea, .. }, HirTy::AbstractAssoc { entity: eb, .. }) => {
+            ea == eb
+        },
         (HirTy::Tuple(aa, _), HirTy::Tuple(ab, _)) => args_compatible(aa, ab),
         (
             HirTy::Function {
@@ -1518,14 +1512,12 @@ impl WorldResolver<'_> {
                         source_extension: None,
                     });
                 }
-                // Abstract associated type (no TypeAnnotation) — keep as AliasUse
-                // so the solver can detect the missing definition and dispatch via
-                // protocol bounds. (Inference reduces AliasUse with a TypeAnnotation;
-                // an AliasUse without one stays abstract.)
+                // Abstract associated type (no TypeAnnotation) — kept abstract
+                // so the solver can detect the missing definition and dispatch
+                // via protocol bounds.
                 return Some(AssociatedTypeResolution {
-                    resolved: kestrel_hir::ty::HirTy::AliasUse {
+                    resolved: kestrel_hir::ty::HirTy::AbstractAssoc {
                         entity: child,
-                        args: vec![],
                         span: kestrel_span::Span::synthetic(0),
                     },
                     source_extension: None,
@@ -1597,12 +1589,11 @@ impl WorldResolver<'_> {
                         source_extension: None,
                     });
                 }
-                // Abstract associated type — keep as AliasUse so the solver
+                // Abstract associated type — kept abstract so the solver
                 // detects the missing definition and dispatches via bounds.
                 return Some(AssociatedTypeResolution {
-                    resolved: kestrel_hir::ty::HirTy::AliasUse {
+                    resolved: kestrel_hir::ty::HirTy::AbstractAssoc {
                         entity: m.entity,
-                        args: vec![],
                         span: kestrel_span::Span::synthetic(0),
                     },
                     source_extension: None,

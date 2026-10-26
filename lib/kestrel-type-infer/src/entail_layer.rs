@@ -78,8 +78,9 @@ impl<'q, 'c> FrontEndLayer<'q, 'c> {
             },
             HirTy::Infer(_) => ETy::Var,
             HirTy::Error(_) => ETy::Poison,
+            HirTy::Alias { expanded, .. } => self.hir_to_ety(expanded),
             HirTy::Function { .. }
-            | HirTy::AliasUse { .. }
+            | HirTy::AbstractAssoc { .. }
             | HirTy::SelfType(..)
             | HirTy::Opaque { .. } => self.abstract_of(ty.clone()),
         }

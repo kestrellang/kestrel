@@ -7,10 +7,9 @@
 
 use crate::collections::HashMap;
 
-use kestrel_ast_builder::{Name, TypeAnnotation, TypeParams};
+use kestrel_ast_builder::Name;
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::ty::HirTy;
-use kestrel_hir_lower::LowerTypeAnnotation;
 
 use crate::result::ResolvedTy;
 
@@ -53,7 +52,6 @@ impl TypeCompareResult {
 #[derive(Clone, Default)]
 struct NormalizeState {
     param_subs: HashMap<Entity, ResolvedTy>,
-    alias_stack: Vec<Entity>,
     assoc_stack: Vec<Entity>,
 }
 
@@ -109,7 +107,9 @@ fn normalize_hir_type(
         },
         // Opaque types don't have a single entity; treat as Error for now
         HirTy::Opaque { .. } => ResolvedTy::Error,
-        HirTy::AliasUse { entity, args, .. } => {
+        // Aliases arrive expanded; a bounded one compares as its expansion.
+        HirTy::Alias { expanded, .. } => normalize_hir_type(qctx, root, expanded, env, state),
+        HirTy::AbstractAssoc { entity, .. } => {
             if let Some(sub) = state.param_subs.get(entity) {
                 return sub.clone();
             }
@@ -122,53 +122,9 @@ fn normalize_hir_type(
                 state.assoc_stack.pop();
                 return normalized;
             }
-
-            let norm_args: Vec<ResolvedTy> = args
-                .iter()
-                .map(|arg| normalize_hir_type(qctx, root, arg, env, state))
-                .collect();
-
-            if state.alias_stack.contains(entity) {
-                return ResolvedTy::Named {
-                    entity: *entity,
-                    args: norm_args,
-                };
-            }
-
-            if qctx.get::<TypeAnnotation>(*entity).is_some()
-                && let Some(alias_ty) = qctx.query(LowerTypeAnnotation {
-                    entity: *entity,
-                    root,
-                })
-            {
-                let type_params = qctx
-                    .get::<TypeParams>(*entity)
-                    .map(|tp| tp.0.clone())
-                    .unwrap_or_default();
-                let old_subs: Vec<(Entity, Option<ResolvedTy>)> = type_params
-                    .iter()
-                    .zip(norm_args.iter())
-                    .map(|(&param, arg)| (param, state.param_subs.insert(param, arg.clone())))
-                    .collect();
-
-                state.alias_stack.push(*entity);
-                let normalized = normalize_hir_type(qctx, root, &alias_ty, env, state);
-                state.alias_stack.pop();
-
-                for (param, old) in old_subs {
-                    if let Some(old) = old {
-                        state.param_subs.insert(param, old);
-                    } else {
-                        state.param_subs.remove(&param);
-                    }
-                }
-
-                return normalized;
-            }
-
             ResolvedTy::Named {
                 entity: *entity,
-                args: norm_args,
+                args: Vec::new(),
             }
         },
         HirTy::Param(entity, _) => state

@@ -248,9 +248,23 @@ pub(super) fn lower_hir_ty_sub(
             emit_static_wellformedness(ctx, *entity, &arg_tvs, span);
             ctx.named(*entity, arg_tvs)
         },
-        HirTy::AliasUse { entity, args, .. } => {
-            // Associated-type style alias use: check substitution maps first.
-            if args.is_empty() {
+        // An alias arrives expanded; a bounded one also checks its bounds.
+        HirTy::Alias {
+            alias,
+            args,
+            expanded,
+            span,
+        } => {
+            let arg_tvs: Vec<TyVar> = args
+                .iter()
+                .map(|a| lower_hir_ty_sub(ctx, a, self_entity, recv_tv, subs))
+                .collect();
+            super::assoc::emit_alias_bounds(ctx, *alias, &arg_tvs, span);
+            lower_hir_ty_sub(ctx, expanded, self_entity, recv_tv, subs)
+        },
+        HirTy::AbstractAssoc { entity, .. } => {
+            // Associated-type use: check substitution maps first.
+            {
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
                     return tv;
                 }
@@ -261,11 +275,13 @@ pub(super) fn lower_hir_ty_sub(
                 // right here — but that reading (C2) never diverges from the
                 // baseless one across the corpus, so it stays an audit probe.
                 ctx.probe_assoc_sub(
-                    "solver:lower_hir_ty_sub:AliasUse(recv_tv-probe)",
+                    "solver:lower_hir_ty_sub:AbstractAssoc(recv_tv-probe)",
                     Some(recv_tv),
                     *entity,
                 );
-                if let Some(tv) = ctx.assoc_sub("solver:lower_hir_ty_sub:AliasUse", None, *entity) {
+                if let Some(tv) =
+                    ctx.assoc_sub("solver:lower_hir_ty_sub:AbstractAssoc", None, *entity)
+                {
                     return tv;
                 }
             }
@@ -299,11 +315,7 @@ pub(super) fn lower_hir_ty_sub(
                 }
             }
 
-            let arg_tvs: Vec<TyVar> = args
-                .iter()
-                .map(|a| lower_hir_ty_sub(ctx, a, self_entity, recv_tv, subs))
-                .collect();
-            ctx.type_alias(*entity, arg_tvs)
+            ctx.type_alias(*entity, Vec::new())
         },
         HirTy::AssocProjection { base, assoc, span } => {
             let base_tv = lower_hir_ty_sub(ctx, base, self_entity, recv_tv, subs);

@@ -399,7 +399,8 @@ fn type_arg_entity(ty: &kestrel_hir::ty::HirTy) -> Option<Entity> {
         | HirTy::Struct { entity: e, .. }
         | HirTy::Enum { entity: e, .. }
         | HirTy::Protocol { entity: e, .. }
-        | HirTy::AliasUse { entity: e, .. } => Some(*e),
+        | HirTy::AbstractAssoc { entity: e, .. } => Some(*e),
+        HirTy::Alias { expanded, .. } => type_arg_entity(expanded),
         _ => None,
     }
 }

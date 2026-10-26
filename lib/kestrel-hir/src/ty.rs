@@ -3,9 +3,12 @@
 //! Type-level sugar is resolved before reaching HIR:
 //! `Int?` → `Struct(Optional, [Struct(Int)])`, `[Int]` → `Struct(Array, [Struct(Int)])`, etc.
 //!
-//! The `Named` variant is split into explicit Struct/Enum/Protocol/AliasUse variants
+//! The `Named` variant is split into explicit Struct/Enum/Protocol variants
 //! so that consumers can't silently forget to disambiguate. Abstract associated types
-//! have their own variant (`AssocProjection`) that carries the receiver explicitly.
+//! have their own variants (`AssocProjection` carries the receiver explicitly,
+//! `AbstractAssoc` is the receiverless form). Type aliases are expanded during
+//! lowering: there is no variant for an unexpanded alias; `Alias` (bounded
+//! aliases only) always carries its expansion.
 
 use kestrel_hecs::Entity;
 use kestrel_span::Span;
@@ -47,11 +50,20 @@ pub enum HirTy {
         ret: Box<HirTy>,
         span: Span,
     },
-    /// Use of a regular (non-associated) type alias. Inference reduces this
-    /// to the substituted definition and emits any bound obligations.
-    AliasUse {
-        entity: Entity,
+    /// An abstract associated type named without a receiver (a protocol's
+    /// `type Item` with no definition, as type resolution reports it).
+    /// Never a regular alias: those are expanded during lowering.
+    AbstractAssoc { entity: Entity, span: Span },
+    /// A use of a bounded type alias
+    /// (`Keyed[Int64]` with `type Keyed[K] where K: Equatable = Array[K]`).
+    /// `expanded` is the definition with `args` substituted and is always
+    /// present, so an alias cannot reach later stages unexpanded: every
+    /// consumer uses `expanded`. `alias` and `args` remain only for the bound
+    /// check. An unbounded alias is lowered to its expansion directly.
+    Alias {
+        alias: Entity,
         args: Vec<HirTy>,
+        expanded: Box<HirTy>,
         span: Span,
     },
     /// Type parameter resolved to its declaring entity.
@@ -156,17 +168,20 @@ impl HirTy {
                 },
             )
             | (
-                HirTy::AliasUse {
-                    entity: e1,
+                HirTy::Alias {
+                    alias: e1,
                     args: a1,
                     ..
                 },
-                HirTy::AliasUse {
-                    entity: e2,
+                HirTy::Alias {
+                    alias: e2,
                     args: a2,
                     ..
                 },
             ) => e1 == e2 && all(a1, a2),
+            (HirTy::AbstractAssoc { entity: e1, .. }, HirTy::AbstractAssoc { entity: e2, .. }) => {
+                e1 == e2
+            },
             (HirTy::Tuple(a1, _), HirTy::Tuple(a2, _)) => all(a1, a2),
             (
                 HirTy::Function {
@@ -239,35 +254,67 @@ impl HirTy {
         &self,
         rename: &mut impl FnMut(Entity) -> Option<Entity>,
     ) -> Option<HirTy> {
+        self.try_map_params(&mut |e, span| Some(HirTy::Param(rename(e)?, span.clone())))
+    }
+
+    /// Replace each `Param(e)` that `subs` maps with its type (an alias's
+    /// parameters with the use site's arguments); other params stay.
+    pub fn substitute_params(&self, subs: &[(Entity, HirTy)]) -> HirTy {
+        self.try_map_params(&mut |e, span| {
+            Some(
+                subs.iter()
+                    .find(|(p, _)| *p == e)
+                    .map_or_else(|| HirTy::Param(e, span.clone()), |(_, t)| t.clone()),
+            )
+        })
+        .expect("substitution never fails")
+    }
+
+    /// Rebuild this type with every `Param(e)` replaced by `map(e)`, at any
+    /// depth; `None` from `map` aborts the whole rebuild.
+    pub fn try_map_params(
+        &self,
+        map: &mut impl FnMut(Entity, &Span) -> Option<HirTy>,
+    ) -> Option<HirTy> {
         fn list(
             tys: &[HirTy],
-            rename: &mut impl FnMut(Entity) -> Option<Entity>,
+            map: &mut impl FnMut(Entity, &Span) -> Option<HirTy>,
         ) -> Option<Vec<HirTy>> {
-            tys.iter().map(|t| t.try_rename_params(rename)).collect()
+            tys.iter().map(|t| t.try_map_params(map)).collect()
         }
         Some(match self {
-            HirTy::Param(e, span) => HirTy::Param(rename(*e)?, span.clone()),
+            HirTy::Param(e, span) => map(*e, span)?,
             HirTy::Struct { entity, args, span } => HirTy::Struct {
                 entity: *entity,
-                args: list(args, rename)?,
+                args: list(args, map)?,
                 span: span.clone(),
             },
             HirTy::Enum { entity, args, span } => HirTy::Enum {
                 entity: *entity,
-                args: list(args, rename)?,
+                args: list(args, map)?,
                 span: span.clone(),
             },
             HirTy::Protocol { entity, args, span } => HirTy::Protocol {
                 entity: *entity,
-                args: list(args, rename)?,
+                args: list(args, map)?,
                 span: span.clone(),
             },
-            HirTy::AliasUse { entity, args, span } => HirTy::AliasUse {
+            HirTy::Alias {
+                alias,
+                args,
+                expanded,
+                span,
+            } => HirTy::Alias {
+                alias: *alias,
+                args: list(args, map)?,
+                expanded: Box::new(expanded.try_map_params(map)?),
+                span: span.clone(),
+            },
+            HirTy::AbstractAssoc { entity, span } => HirTy::AbstractAssoc {
                 entity: *entity,
-                args: list(args, rename)?,
                 span: span.clone(),
             },
-            HirTy::Tuple(elems, span) => HirTy::Tuple(list(elems, rename)?, span.clone()),
+            HirTy::Tuple(elems, span) => HirTy::Tuple(list(elems, map)?, span.clone()),
             HirTy::Function {
                 kind,
                 params,
@@ -276,13 +323,13 @@ impl HirTy {
                 span,
             } => HirTy::Function {
                 kind: *kind,
-                params: list(params, rename)?,
+                params: list(params, map)?,
                 param_conventions: param_conventions.clone(),
-                ret: Box::new(ret.try_rename_params(rename)?),
+                ret: Box::new(ret.try_map_params(map)?),
                 span: span.clone(),
             },
             HirTy::AssocProjection { base, assoc, span } => HirTy::AssocProjection {
-                base: Box::new(base.try_rename_params(rename)?),
+                base: Box::new(base.try_map_params(map)?),
                 assoc: *assoc,
                 span: span.clone(),
             },
@@ -291,7 +338,7 @@ impl HirTy {
                 not_copyable,
                 span,
             } => HirTy::Opaque {
-                bounds: list(bounds, rename)?,
+                bounds: list(bounds, map)?,
                 not_copyable: *not_copyable,
                 span: span.clone(),
             },
@@ -300,7 +347,7 @@ impl HirTy {
                 mutating,
                 span,
             } => HirTy::Ref {
-                inner: Box::new(inner.try_rename_params(rename)?),
+                inner: Box::new(inner.try_map_params(map)?),
                 mutating: *mutating,
                 span: span.clone(),
             },

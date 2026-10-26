@@ -114,10 +114,18 @@ fn collect_hir_ty_entities(ty: &HirTy, out: &mut Vec<(Entity, Span)>) {
         HirTy::Struct { entity, args, span }
         | HirTy::Enum { entity, args, span }
         | HirTy::Protocol { entity, args, span }
-        | HirTy::AliasUse { entity, args, span } => {
+        | HirTy::Alias {
+            alias: entity,
+            args,
+            span,
+            ..
+        } => {
+            // An alias reports its own name; its expansion's spans belong to
+            // the alias's definition, not this use.
             out.push((*entity, span.clone()));
             args.iter().for_each(|a| collect_hir_ty_entities(a, out));
         },
+        HirTy::AbstractAssoc { entity, span } => out.push((*entity, span.clone())),
         HirTy::Param(entity, span) | HirTy::SelfType(entity, span) => {
             out.push((*entity, span.clone()));
         },

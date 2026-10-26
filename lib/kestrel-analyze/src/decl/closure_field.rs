@@ -131,13 +131,7 @@ fn view_closure_kind(
         HirTy::Tuple(elems, _) => elems
             .iter()
             .find_map(|e| view_closure_kind(ctx, root, e, depth + 1)),
-        HirTy::AliasUse { entity, .. } => {
-            let target = ctx.query(LowerTypeAnnotation {
-                entity: *entity,
-                root,
-            })?;
-            view_closure_kind(ctx, root, &target, depth + 1)
-        },
+        HirTy::Alias { expanded, .. } => view_closure_kind(ctx, root, expanded, depth + 1),
         _ => None,
     }
 }

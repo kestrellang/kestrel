@@ -577,6 +577,11 @@ pub(super) fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallA
         let Some(hir_ty) = param_ty else {
             continue; // unannotated param — compatible with anything
         };
+        // A bounded alias is checked as the type it expands to.
+        let hir_ty = match hir_ty {
+            kestrel_hir::ty::HirTy::Alias { expanded, .. } => expanded.as_ref(),
+            other => other,
+        };
 
         // Get the concrete arg type
         let mut arg_resolved = ctx.resolve(arg.ty);
@@ -607,7 +612,7 @@ pub(super) fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallA
                 entity: param_entity,
                 ..
             }
-            | kestrel_hir::ty::HirTy::AliasUse {
+            | kestrel_hir::ty::HirTy::AbstractAssoc {
                 entity: param_entity,
                 ..
             } => {

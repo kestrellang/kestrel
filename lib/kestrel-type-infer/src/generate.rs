@@ -3114,28 +3114,36 @@ pub(crate) fn lower_hir_ty_with_subs(
         // `create_return_type` intercepts. If we get here, fall through to a
         // fresh TyVar (defensive — shouldn't be reached in normal flow).
         HirTy::Opaque { .. } => ctx.fresh(),
-        HirTy::AliasUse { entity, args, .. } => {
-            // Zero-arg alias uses participate in associated-type substitution:
-            // where clauses map specific TypeAlias entities to TyVars.
-            if args.is_empty() {
-                if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
-                    return tv;
-                }
-                // R1 — the one genuinely baseless read: a bare `Item` here has
-                // no receiver in scope, so C3's unambiguity rule applies —
-                // a lone candidate answers, two or more fall through below.
-                if let Some(tv) = ctx.assoc_sub("generate:AliasUse", None, *entity) {
-                    return tv;
-                }
-                if let Some(&tv) = ctx.param_tyvars.get(entity) {
-                    return tv;
-                }
-            }
+        // An alias arrives expanded; a bounded one also checks its bounds.
+        HirTy::Alias {
+            alias,
+            args,
+            expanded,
+            span,
+        } => {
             let arg_tvs: Vec<TyVar> = args
                 .iter()
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
-            ctx.type_alias(*entity, arg_tvs)
+            crate::solver::assoc::emit_alias_bounds(ctx, *alias, &arg_tvs, span);
+            lower_hir_ty_with_subs(ctx, expanded, subs)
+        },
+        // Abstract associated types participate in associated-type
+        // substitution: where clauses map specific TypeAlias entities to TyVars.
+        HirTy::AbstractAssoc { entity, .. } => {
+            if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
+                return tv;
+            }
+            // R1 — the one genuinely baseless read: a bare `Item` here has
+            // no receiver in scope, so C3's unambiguity rule applies —
+            // a lone candidate answers, two or more fall through below.
+            if let Some(tv) = ctx.assoc_sub("generate:AbstractAssoc", None, *entity) {
+                return tv;
+            }
+            if let Some(&tv) = ctx.param_tyvars.get(entity) {
+                return tv;
+            }
+            ctx.type_alias(*entity, Vec::new())
         },
         HirTy::AssocProjection { base, assoc, span } => {
             let base_tv = lower_hir_ty_with_subs(ctx, base, subs);
@@ -3375,7 +3383,8 @@ pub(crate) fn hir_ty_span(ty: &HirTy) -> Span {
         HirTy::Struct { span, .. }
         | HirTy::Enum { span, .. }
         | HirTy::Protocol { span, .. }
-        | HirTy::AliasUse { span, .. }
+        | HirTy::Alias { span, .. }
+        | HirTy::AbstractAssoc { span, .. }
         | HirTy::AssocProjection { span, .. }
         | HirTy::Tuple(_, span)
         | HirTy::Function { span, .. }

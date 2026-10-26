@@ -61,18 +61,56 @@ pub(super) fn solve_reduce(
     // Lower the annotation with substitutions applied.
     let substituted_tv = crate::generate::lower_hir_ty_with_subs(ctx, &ann_hir, &subs);
 
-    // Emit conformance obligations from the alias's TypeParam bounds.
-    for &param in &type_params {
-        if let Some(&(_, arg_tv)) = subs.iter().find(|(e, _)| *e == param) {
-            let bound_protocols = direct_param_bound_protocols(ctx, param);
-            for protocol in bound_protocols {
-                ctx.conforms_typearg(arg_tv, protocol, span.clone());
-            }
-        }
-    }
+    let arg_tvs: Vec<TyVar> = subs.iter().map(|&(_, tv)| tv).collect();
+    emit_alias_bounds(ctx, entity, &arg_tvs, &span);
 
     ctx.equal(result, substituted_tv, span);
     SolveResult::Solved
+}
+
+/// The conformance obligations a use of type alias `alias` with `arg_tvs`
+/// must meet: each parameter's inline bounds (`[T: Comparable]`) and the
+/// alias's `where T: P` clauses, checked against the matching argument. The
+/// single source for alias bounds (lowering emits them for `Alias`).
+pub(crate) fn emit_alias_bounds(
+    ctx: &mut InferCtx<'_>,
+    alias: Entity,
+    arg_tvs: &[TyVar],
+    span: &Span,
+) {
+    let params: Vec<Entity> = ctx
+        .query_ctx
+        .get::<TypeParams>(alias)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let arg_of = |p: Entity| {
+        params
+            .iter()
+            .position(|&q| q == p)
+            .and_then(|i| arg_tvs.get(i).copied())
+    };
+    for &param in &params {
+        let Some(arg_tv) = arg_of(param) else {
+            continue;
+        };
+        for protocol in direct_param_bound_protocols(ctx, param) {
+            ctx.conforms_typearg(arg_tv, protocol, span.clone());
+        }
+    }
+    for clause in ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
+        entity: alias,
+        root: ctx.root,
+    }) {
+        if let crate::resolve::WhereClause::Bound {
+            subject: crate::resolve::WhereSubject::Param(param),
+            protocol,
+            ..
+        } = clause
+            && let Some(arg_tv) = arg_of(param)
+        {
+            ctx.conforms_typearg(arg_tv, protocol, span.clone());
+        }
+    }
 }
 
 pub(super) fn solve_associated(
@@ -218,15 +256,15 @@ pub(super) fn solve_associated(
             // resolving. Pass the container's entity and TyVar so `lower_hir_ty_sub`
             // substitutes SelfType → container (via its `recv_tv` path).
             let container_entity = kind.entity();
-            // Abstract associated types come back as HirTy::AliasUse; concrete ones
-            // as Struct/Enum/Protocol/Tuple/etc. For the abstract case, consult
+            // Abstract associated types come back as HirTy::AbstractAssoc; concrete
+            // ones as Struct/Enum/Protocol/Tuple/etc. For the abstract case, consult
             // where_clause substitutions to find the TyVar already bound to this
             // associated type, otherwise fall through to lower_hir_ty_sub with
             // container_subs applied (handles `type Element = T` on Array[i32]).
-            let assoc_tv = if let kestrel_hir::ty::HirTy::AliasUse { entity, args, .. } =
+            let assoc_tv = if let kestrel_hir::ty::HirTy::AbstractAssoc { entity, .. } =
                 &assoc.resolved
             {
-                if args.is_empty() {
+                {
                     // R3 — `container` is the receiver being projected off, and
                     // since C3 the memo only answers for that same receiver.
                     if let Some(tv) =
@@ -290,8 +328,6 @@ pub(super) fn solve_associated(
                             &all_subs,
                         )
                     }
-                } else {
-                    lower_hir_ty_sub(ctx, &assoc.resolved, container_entity, container, &all_subs)
                 }
             } else {
                 lower_hir_ty_sub(ctx, &assoc.resolved, container_entity, container, &all_subs)
@@ -300,7 +336,7 @@ pub(super) fn solve_associated(
             // Emit where clause constraints from the resolved TypeAlias entity.
             // E.g., `type Iter: Iterator where Iter.Item = Item` — when we resolve
             // `T.Iter`, emit constraints equating `T.Iter.Item` with `T.Item`.
-            if let kestrel_hir::ty::HirTy::AliasUse { entity, .. } = &assoc.resolved {
+            if let kestrel_hir::ty::HirTy::AbstractAssoc { entity, .. } = &assoc.resolved {
                 emit_type_alias_where_clauses(ctx, *entity, assoc_tv, container, &span);
             }
 

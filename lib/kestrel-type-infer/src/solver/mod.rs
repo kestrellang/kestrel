@@ -36,7 +36,7 @@ use kestrel_semantics::{
 };
 use kestrel_span::Span;
 
-mod assoc;
+pub(crate) mod assoc;
 mod call;
 mod conformance;
 mod defaults;

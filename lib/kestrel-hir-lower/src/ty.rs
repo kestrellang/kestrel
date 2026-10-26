@@ -292,33 +292,7 @@ fn build_hir_ty_for_entity(
                     span: span.clone(),
                 };
             }
-            // Trivial (non-generic, bound-free) aliases with a concrete
-            // TypeAnnotation are eagerly expanded — avoids constraint bloat
-            // for `type Fd = Int32` style declarations.
-            if is_trivial_alias(ctx, entity)
-                && args.is_empty()
-                && let Some(ann) = ctx.get::<TypeAnnotation>(entity)
-            {
-                // A cyclic alias (`type A = B; type B = A`) would expand
-                // forever; the E447 analyzer reports it, so stop here.
-                if EXPANDING_ALIASES.with(|s| s.borrow().contains(&entity)) {
-                    return HirTy::Error(span.clone());
-                }
-                EXPANDING_ALIASES.with(|s| s.borrow_mut().push(entity));
-                let _guard = kestrel_hecs::guard::OnDrop::new(|| {
-                    EXPANDING_ALIASES.with(|s| {
-                        s.borrow_mut().pop();
-                    });
-                });
-                return lower_ast_type(ctx, owner, root, &ann.0);
-            }
-            // Non-associated aliases (parameterized or constrained) flow as
-            // AliasUse. The solver reduces concrete ones via Reduce.
-            HirTy::AliasUse {
-                entity,
-                args,
-                span: span.clone(),
-            }
+            expand_alias(ctx, root, entity, args, span)
         },
         Some(NodeKind::Enum) => HirTy::Enum {
             entity,
@@ -377,11 +351,73 @@ fn is_bare_self_ast(ty: &AstType) -> bool {
 
 /// True if an alias entity is trivial — has no type params, no protocol bounds,
 /// no where clause. These aliases can be safely expanded at HIR lowering.
+/// Expand a use of type alias `alias` with `args`: its definition, lowered in
+/// its own scope, with its type parameters replaced by `args`. This is the
+/// only place an alias name becomes a type, and `HirTy::Alias` cannot be
+/// built without the expansion, so no later stage ever sees an unexpanded
+/// alias. A bounded alias keeps its name and arguments in that wrapper for
+/// the bound check; an alias with no definition is an abstract associated
+/// type.
+fn expand_alias(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    alias: Entity,
+    args: Vec<HirTy>,
+    span: &Span,
+) -> HirTy {
+    let Some(ann) = ctx.get::<TypeAnnotation>(alias) else {
+        return HirTy::AbstractAssoc {
+            entity: alias,
+            span: span.clone(),
+        };
+    };
+    // A cyclic alias (`type A = B; type B = A`) would expand forever; the
+    // E447 analyzer reports it, so stop here.
+    if EXPANDING_ALIASES.with(|s| s.borrow().contains(&alias)) {
+        return HirTy::Error(span.clone());
+    }
+    EXPANDING_ALIASES.with(|s| s.borrow_mut().push(alias));
+    let _guard = kestrel_hecs::guard::OnDrop::new(|| {
+        EXPANDING_ALIASES.with(|s| {
+            s.borrow_mut().pop();
+        });
+    });
+    let definition = lower_ast_type(ctx, alias, root, &ann.0);
+    let params: Vec<Entity> = ctx
+        .get::<TypeParams>(alias)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let subs: Vec<(Entity, HirTy)> = params.iter().copied().zip(args.iter().cloned()).collect();
+    let expanded = definition.substitute_params(&subs);
+    // Only a bounded alias keeps a wrapper (inference checks the bounds);
+    // any other is exactly its expansion, so code that reads a type's shape
+    // (`-> Item` with `type Item = &T` is a reference return) sees it as is.
+    if !alias_has_bounds(ctx, alias) {
+        return expanded;
+    }
+    HirTy::Alias {
+        alias,
+        args,
+        expanded: Box::new(expanded),
+        span: span.clone(),
+    }
+}
+
+/// Whether an alias states bounds (`type Keyed[K] where K: Equatable = ...`
+/// or a conformance list), which inference must check at every use.
+fn alias_has_bounds(ctx: &QueryContext<'_>, alias: Entity) -> bool {
+    ctx.get::<kestrel_ast_builder::WhereClause>(alias).is_some()
+        || ctx
+            .get::<kestrel_ast_builder::Conformances>(alias)
+            .is_some()
+}
+
+/// Whether an alias is non-generic and carries no bounds of its own (no
+/// conformances, no `where` clause).
 fn is_trivial_alias(ctx: &QueryContext<'_>, entity: Entity) -> bool {
     let has_type_params = ctx
         .get::<TypeParams>(entity)
-        .map(|tp| !tp.0.is_empty())
-        .unwrap_or(false);
+        .is_some_and(|tp| !tp.0.is_empty());
     if has_type_params {
         return false;
     }
@@ -532,7 +568,8 @@ fn override_span(ty: &mut HirTy, span: &Span) {
         HirTy::Struct { span: s, .. }
         | HirTy::Enum { span: s, .. }
         | HirTy::Protocol { span: s, .. }
-        | HirTy::AliasUse { span: s, .. }
+        | HirTy::Alias { span: s, .. }
+        | HirTy::AbstractAssoc { span: s, .. }
         | HirTy::Tuple(_, s)
         | HirTy::Function { span: s, .. }
         | HirTy::Param(_, s)
@@ -687,12 +724,18 @@ pub fn reject_ref_types(
             args: reject_ref_args(ctx, args, RefPolicy::Strict),
             span,
         },
-        // Alias args stay Strict too: trivial aliases expand at the use
-        // site BEFORE this walk, so a ref smuggled through an alias arg
-        // would bypass the positional rules (the R5 smuggling class).
-        HirTy::AliasUse { entity, args, span } => HirTy::AliasUse {
-            entity,
+        // Aliases are expanded before this walk, so the positional rules see
+        // the real type. A bounded alias's args stay Strict as well: they are
+        // also checked against the alias's bounds, which never admit a ref.
+        HirTy::Alias {
+            alias,
+            args,
+            expanded,
+            span,
+        } => HirTy::Alias {
+            alias,
             args: reject_ref_args(ctx, args, RefPolicy::Strict),
+            expanded: Box::new(reject_ref_types(ctx, *expanded, pos, policy)),
             span,
         },
         HirTy::Tuple(elems, span) => HirTy::Tuple(
@@ -741,6 +784,7 @@ pub fn reject_ref_types(
             span,
         },
         leaf @ (HirTy::Param(..)
+        | HirTy::AbstractAssoc { .. }
         | HirTy::SelfType(..)
         | HirTy::Never(_)
         | HirTy::Infer(_)
@@ -1006,8 +1050,8 @@ impl QueryFn for LowerTypeAnnotation {
         // is restricted to TRIVIAL member aliases: those are eagerly
         // expanded at every named use (`let x: Foo.Item` re-applies the
         // use-site position rules, E482/E480 — nothing smuggles), while
-        // non-trivial aliases flow as AliasUse through solver Reduce with
-        // no position re-check, so they stay Strict. Protocol-parented
+        // generic or bounded aliases stay Strict (their RHS is reused across
+        // instantiations). Protocol-parented
         // aliases (assoc DECLS and their defaults) also stay Strict.
         let parent_kind = ctx
             .parent_of(self.entity)
@@ -1410,11 +1454,12 @@ mod tests {
         }
     }
 
-    /// Non-associated TypeAliases (parent is Module, not Protocol) still
-    /// lower to `HirTy::AliasUse`. Guards against over-broadening the
-    /// `parent_is_protocol` branch.
+    /// Non-associated TypeAliases (parent is Module, not Protocol) never
+    /// become an `AssocProjection`. Guards against over-broadening the
+    /// `parent_is_protocol` branch. Without a definition there is nothing to
+    /// expand, so the alias stays abstract.
     #[test]
-    fn module_level_alias_stays_alias_use() {
+    fn module_level_alias_is_not_a_projection() {
         let mut world = World::new();
         world.begin_revision();
 
@@ -1426,9 +1471,7 @@ mod tests {
         world.set(alias, NodeKind::TypeAlias);
         world.set(alias, Name("Fd".into()));
         world.set(alias, Typed);
-        // no TypeAnnotation → non-trivial; stays as AliasUse
-        let tp = world.spawn();
-        world.set(alias, kestrel_ast_builder::TypeParams(vec![tp]));
+        // no TypeAnnotation → nothing to expand
         world.set_parent(alias, root);
 
         let ctx = world.query_context();
@@ -1437,6 +1480,78 @@ mod tests {
             span: span(),
         };
         let lowered = lower_ast_type(&ctx, root, root, &ast_ty);
-        matches!(lowered, HirTy::AliasUse { .. });
+        assert!(
+            matches!(lowered, HirTy::AbstractAssoc { entity, .. } if entity == alias),
+            "got {lowered:?}"
+        );
+    }
+
+    /// A generic alias expands at lowering: `Pair[Int64]` with
+    /// `type Pair[T] = (T, T)` is the tuple itself, so no later stage can
+    /// see an unexpanded alias.
+    #[test]
+    fn generic_alias_expands_with_its_arguments() {
+        let mut world = World::new();
+        world.begin_revision();
+
+        let root = world.spawn();
+        world.set(root, NodeKind::Module);
+        world.set(root, Name(Name::ROOT.into()));
+
+        let int = world.spawn();
+        world.set(int, NodeKind::Struct);
+        world.set(int, Name("Int64".into()));
+        world.set(int, Typed);
+        world.set_parent(int, root);
+
+        let alias = world.spawn();
+        world.set(alias, NodeKind::TypeAlias);
+        world.set(alias, Name("Pair".into()));
+        world.set(alias, Typed);
+        world.set_parent(alias, root);
+        let t = world.spawn();
+        world.set(t, NodeKind::TypeParameter);
+        world.set(t, Name("T".into()));
+        world.set_parent(t, alias);
+        world.set(alias, kestrel_ast_builder::TypeParams(vec![t]));
+        world.set(
+            alias,
+            TypeAnnotation(AstType::Tuple(
+                vec![
+                    AstType::Named {
+                        segments: vec![seg("T")],
+                        span: span(),
+                    },
+                    AstType::Named {
+                        segments: vec![seg("T")],
+                        span: span(),
+                    },
+                ],
+                span(),
+            )),
+        );
+
+        let ctx = world.query_context();
+        let mut pair = seg("Pair");
+        pair.type_args = vec![AstType::Named {
+            segments: vec![seg("Int64")],
+            span: span(),
+        }];
+        let ast_ty = AstType::Named {
+            segments: vec![pair],
+            span: span(),
+        };
+        match lower_ast_type(&ctx, root, root, &ast_ty) {
+            HirTy::Tuple(elems, _) => {
+                assert_eq!(elems.len(), 2);
+                for e in elems {
+                    assert!(
+                        matches!(e, HirTy::Struct { entity, .. } if entity == int),
+                        "{e:?}"
+                    );
+                }
+            },
+            other => panic!("expected the expanded tuple, got {other:?}"),
+        }
     }
 }

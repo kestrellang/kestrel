@@ -585,10 +585,10 @@ fn contains_hir_opaque(ty: &kestrel_hir::ty::HirTy) -> bool {
     use kestrel_hir::ty::HirTy;
     match ty {
         HirTy::Opaque { .. } => true,
-        HirTy::Struct { args, .. }
-        | HirTy::Enum { args, .. }
-        | HirTy::Protocol { args, .. }
-        | HirTy::AliasUse { args, .. } => args.iter().any(contains_hir_opaque),
+        HirTy::Struct { args, .. } | HirTy::Enum { args, .. } | HirTy::Protocol { args, .. } => {
+            args.iter().any(contains_hir_opaque)
+        },
+        HirTy::Alias { expanded, .. } => contains_hir_opaque(expanded),
         HirTy::Tuple(elems, _) => elems.iter().any(contains_hir_opaque),
         HirTy::Function { params, ret, .. } => {
             params.iter().any(contains_hir_opaque) || contains_hir_opaque(ret)

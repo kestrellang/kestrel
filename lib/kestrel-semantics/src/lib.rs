@@ -745,7 +745,8 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
             HirTy::SelfType(entity, _) => {
                 self_type_copy_semantics(self.ctx, *entity, self.context, self.root)
             },
-            HirTy::AliasUse { entity, .. } => self.base_semantics(*entity),
+            HirTy::AbstractAssoc { entity, .. } => self.base_semantics(*entity),
+            HirTy::Alias { expanded, .. } => self.member_semantics(expanded),
             HirTy::Protocol { .. } => CopySemantics::Copyable,
             // `some P and not Copyable` may hide a move-only underlier; the
             // plain form guarantees a duplicable one (post-solve check).
