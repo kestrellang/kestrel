@@ -624,6 +624,17 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 if ctx.is_error(ctx.resolve(ty)) {
                     continue;
                 }
+                // A literal default's well-formedness check (`Array[?E]: E:
+                // Static`) on an element var that never resolved (`[]` with
+                // no context): the var gets its own "could not infer".
+                if matches!(ctx.slot(ctx.resolve(ty)), TySlot::Unresolved { .. })
+                    && ctx
+                        .literal_default_args
+                        .iter()
+                        .any(|&a| ctx.resolve(a) == ctx.resolve(ty))
+                {
+                    continue;
+                }
                 // Re-queued as Unknown because a type arg never resolved: the
                 // open var gets its own "could not infer" diagnostic; a
                 // "does not conform" on top would blame the wrong thing.

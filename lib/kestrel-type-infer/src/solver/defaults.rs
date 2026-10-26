@@ -458,6 +458,20 @@ pub(crate) fn default_literal_var(
         .map(|tp| tp.0.len())
         .unwrap_or(0);
     let args: Vec<TyVar> = (0..type_param_count).map(|_| ctx.fresh()).collect();
+    // The default forms a type like an annotation does, so it gets the same
+    // well-formedness: `[{ k }]` is `Array[() -> Int64]` and must be Static
+    // (a view closure used to escape and dangle), and `[R(...)]` must be
+    // Copyable, as `Array[R]` is (reading it out used to trap at run time).
+    // `resolved` is the literal var's representative, so match by resolution.
+    let span = ctx
+        .literal_spans
+        .iter()
+        .find(|(lit, _)| ctx.resolve(**lit) == resolved)
+        .map(|(_, span)| span.clone());
+    if let Some(span) = span {
+        crate::generate::emit_copyable_wellformedness(ctx, entity, &args, &span);
+        ctx.literal_default_args.extend(&args);
+    }
     let default_tv = ctx.named(entity, args);
     ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
     true

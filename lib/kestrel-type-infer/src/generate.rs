@@ -940,6 +940,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // `MyList` with `type Element = Int64`) the element type flows back
             // to each literal element. Falls back to fresh on the default path.
             let arr_tv = ctx.fresh_literal(LiteralKind::Array);
+            ctx.literal_spans.insert(arr_tv, span.clone());
             let elem_tv = ctx.fresh();
             ctx.associated(arr_tv, "Element", elem_tv, span.clone());
             // Bidirectional hint: if the enclosing `let` annotated this array
@@ -987,6 +988,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         HirExpr::Dict { entries, span } => {
             let dict_tv = ctx.fresh_literal(LiteralKind::Dictionary);
+            ctx.literal_spans.insert(dict_tv, span.clone());
             let key_tv = ctx.fresh();
             let val_tv = ctx.fresh();
             ctx.associated(dict_tv, "Key", key_tv, span.clone());
@@ -2728,7 +2730,7 @@ fn emit_where_clause_constraints_with_subs(
 /// larger change. The helper only pushes `conforms` constraints (it never
 /// re-enters `lower_hir_ty`), so it can't recurse — nested args get their own
 /// well-formedness from the recursive lowering of `arg_tvs` above.
-fn emit_copyable_wellformedness(
+pub(crate) fn emit_copyable_wellformedness(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
     arg_tvs: &[TyVar],

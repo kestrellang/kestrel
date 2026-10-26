@@ -223,6 +223,15 @@ pub struct InferCtx<'a> {
     /// the solver.
     pub(crate) type_arg_spans: HashMap<HirExprId, Span>,
 
+    /// Source span of each collection-literal TyVar (array / dictionary), so
+    /// the type it defaults to (`Array[?E]`) is well-formedness-checked at
+    /// the literal, like an annotation.
+    pub(crate) literal_spans: HashMap<TyVar, Span>,
+
+    /// Type-arg vars created for collection-literal defaults (`?E` in
+    /// `Array[?E]`); see `report_unsolved`.
+    pub(crate) literal_default_args: Vec<TyVar>,
+
     // === Bookkeeping ===
     /// Type assigned to each HirExpr during constraint generation.
     pub(crate) expr_types: HashMap<HirExprId, TyVar>,
@@ -431,6 +440,8 @@ impl<'a> InferCtx<'a> {
             promotions: HashMap::default(),
             type_args: HashMap::default(),
             type_arg_spans: HashMap::default(),
+            literal_spans: HashMap::default(),
+            literal_default_args: Vec::new(),
             expr_types: HashMap::default(),
             local_types: HashMap::default(),
             return_ty: TyVar(0),
