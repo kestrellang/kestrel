@@ -105,6 +105,10 @@ pub enum Builtin {
     ExpressibleByBoolLiteral,
     ExpressibleByCharLiteral,
     ExpressibleByNullLiteral,
+    /// Marker on the unsigned integer types (`UInt8`…`UInt64`): their raw
+    /// bits are unsigned, which integer patterns need for range tests and
+    /// exhaustiveness.
+    UnsignedInteger,
     InternalExpressibleByArrayLiteral,
     InternalExpressibleByDictionaryLiteral,
 
@@ -326,6 +330,7 @@ impl Builtin {
             Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
             Self::ExpressibleByCharLiteral => "ExpressibleByCharLiteral",
             Self::ExpressibleByNullLiteral => "ExpressibleByNullLiteral",
+            Self::UnsignedInteger => "UnsignedInteger",
             Self::InternalExpressibleByArrayLiteral => "_ExpressibleByArrayLiteral",
             Self::InternalExpressibleByDictionaryLiteral => "_ExpressibleByDictionaryLiteral",
 
@@ -542,6 +547,7 @@ impl Builtin {
             "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
             "ExpressibleByCharLiteral" => Some(Self::ExpressibleByCharLiteral),
             "ExpressibleByNullLiteral" => Some(Self::ExpressibleByNullLiteral),
+            "UnsignedInteger" => Some(Self::UnsignedInteger),
             "_ExpressibleByArrayLiteral" => Some(Self::InternalExpressibleByArrayLiteral),
             "_ExpressibleByDictionaryLiteral" => Some(Self::InternalExpressibleByDictionaryLiteral),
 
@@ -788,6 +794,7 @@ impl Builtin {
             | Self::ExpressibleByBoolLiteral
             | Self::ExpressibleByCharLiteral
             | Self::ExpressibleByNullLiteral
+            | Self::UnsignedInteger
             | Self::InternalExpressibleByArrayLiteral
             | Self::InternalExpressibleByDictionaryLiteral => BuiltinKind::protocol(),
 

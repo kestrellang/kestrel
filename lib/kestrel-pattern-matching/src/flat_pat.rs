@@ -413,9 +413,9 @@ fn flatten_literal(value: &HirLiteral) -> FlatPat {
     let ctor = match value {
         HirLiteral::Bool(true) => Constructor::True,
         HirLiteral::Bool(false) => Constructor::False,
-        // Pattern matching ranges are computed in `i64`; an out-of-range
-        // pattern literal is itself diagnosed by the range analyzer (E121).
-        HirLiteral::Integer(n) => Constructor::IntLiteral(*n as i64),
+        // Kept at full `i128` width so `UInt64` values above `Int64.max`
+        // survive; an out-of-range literal is diagnosed by E121.
+        HirLiteral::Integer(n) => Constructor::IntLiteral(*n),
         HirLiteral::Char { value: c, .. } => {
             Constructor::CharLiteral(char::from_u32(*c).unwrap_or('\0'))
         },
@@ -438,13 +438,11 @@ fn flatten_range(start: &Option<HirLiteral>, end: &Option<HirLiteral>, inclusive
 
     let ctor = if is_int {
         let s = match start {
-            Some(HirLiteral::Integer(v)) => Some(*v as i64),
+            Some(HirLiteral::Integer(v)) => Some(*v),
             _ => None,
         };
         let e = match end {
-            Some(HirLiteral::Integer(v)) => {
-                Some(if inclusive { *v as i64 } else { (v - 1) as i64 })
-            },
+            Some(HirLiteral::Integer(v)) => Some(if inclusive { *v } else { v - 1 }),
             _ => None,
         };
         Constructor::IntRange { start: s, end: e }

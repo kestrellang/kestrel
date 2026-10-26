@@ -62,11 +62,11 @@ pub enum Constructor {
     /// Struct (single constructor for the type)
     Struct { entity: Entity, arity: usize },
     /// Integer literal
-    IntLiteral(i64),
+    IntLiteral(i128),
     /// Integer range (both ends inclusive after normalization, None = unbounded)
     IntRange {
-        start: Option<i64>,
-        end: Option<i64>,
+        start: Option<i128>,
+        end: Option<i128>,
     },
     /// Character literal
     CharLiteral(char),
@@ -590,6 +590,73 @@ fn classify_by_conformances(
     }
 
     None
+}
+
+/// The value range of an integer type: its bit width and signedness.
+/// Integer patterns test and tile against it (a `UInt8` switch covers
+/// `[0, 255]`, compared unsigned), so width and signedness have ONE source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IntDomain {
+    pub bits: u32,
+    pub signed: bool,
+}
+
+impl IntDomain {
+    pub fn min(self) -> i128 {
+        if self.signed {
+            -(1i128 << (self.bits - 1))
+        } else {
+            0
+        }
+    }
+
+    pub fn max(self) -> i128 {
+        if self.signed {
+            (1i128 << (self.bits - 1)) - 1
+        } else {
+            (1i128 << self.bits) - 1
+        }
+    }
+}
+
+/// The integer domain of `ty`: a `lang.iN` intrinsic (signed), or a stdlib
+/// integer struct (`ExpressibleByIntegerLiteral` wrapping a single `lang.iN`
+/// field), unsigned when it conforms to the `UnsignedInteger` builtin.
+pub fn int_domain(query: &QueryContext<'_>, root: Entity, ty: &ResolvedTy) -> Option<IntDomain> {
+    let ResolvedTy::Named { entity, args } = ty else {
+        return None;
+    };
+    if let Some(bits) = intrinsic_int_bits(query, *entity) {
+        return Some(IntDomain { bits, signed: true });
+    }
+    if !conforms_to_builtin(query, root, *entity, Builtin::ExpressibleByIntegerLiteral) {
+        return None;
+    }
+    let [field] = collect_fields(query, *entity)[..] else {
+        return None;
+    };
+    let ResolvedTy::Named { entity: raw, .. } =
+        resolve_field_type(query, root, field, *entity, args)
+    else {
+        return None;
+    };
+    let bits = intrinsic_int_bits(query, raw)?;
+    let signed = !conforms_to_builtin(query, root, *entity, Builtin::UnsignedInteger);
+    Some(IntDomain { bits, signed })
+}
+
+/// Bit width of a `lang.i8`…`lang.i64` intrinsic.
+fn intrinsic_int_bits(query: &QueryContext<'_>, entity: Entity) -> Option<u32> {
+    if !query.has::<Intrinsic>(entity) {
+        return None;
+    }
+    match query.get::<Name>(entity)?.0.as_str() {
+        "i8" => Some(8),
+        "i16" => Some(16),
+        "i32" => Some(32),
+        "i64" => Some(64),
+        _ => None,
+    }
 }
 
 /// Test whether an entity transitively conforms to a builtin protocol.

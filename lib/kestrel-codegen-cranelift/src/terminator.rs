@@ -290,21 +290,36 @@ fn compile_switch(
                 emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
             },
             SwitchCase::IntLiteral(v) => {
-                let cmp = builder.ins().icmp_imm(IntCC::Equal, disc_val, *v);
+                let width = builder.func.dfg.value_type(disc_val).bits();
+                let cmp = builder
+                    .ins()
+                    .icmp_imm(IntCC::Equal, disc_val, imm_at_width(*v, width));
                 emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
             },
             SwitchCase::CharLiteral(c) => {
                 let cmp = builder.ins().icmp_imm(IntCC::Equal, disc_val, *c as i64);
                 emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
             },
-            SwitchCase::IntRange { start, end } => {
+            SwitchCase::IntRange { start, end, signed } => {
+                let (ge, le) = if *signed {
+                    (
+                        IntCC::SignedGreaterThanOrEqual,
+                        IntCC::SignedLessThanOrEqual,
+                    )
+                } else {
+                    (
+                        IntCC::UnsignedGreaterThanOrEqual,
+                        IntCC::UnsignedLessThanOrEqual,
+                    )
+                };
+                let width = builder.func.dfg.value_type(disc_val).bits();
                 let in_range = range_predicate(
                     builder,
                     disc_val,
-                    *start,
-                    *end,
-                    IntCC::SignedGreaterThanOrEqual,
-                    IntCC::SignedLessThanOrEqual,
+                    start.map(|v| imm_at_width(v, width)),
+                    end.map(|v| imm_at_width(v, width)),
+                    ge,
+                    le,
                 );
                 emit_case_branch(
                     builder,
@@ -343,6 +358,16 @@ fn compile_switch(
 /// Build the in-range boolean for a range pattern, skipping any open bound.
 /// A `None` lower/upper bound is left untested (an open-ended `N..` / `..<N`);
 /// both `None` is a vacuous always-true match.
+/// A case constant's raw bits at the switch value's width, sign-extended to
+/// `i64` (Cranelift's canonical immediate form): `UInt8` 255 is `-1` at 8 bits.
+fn imm_at_width(v: i64, bits: u32) -> i64 {
+    if bits >= 64 {
+        return v;
+    }
+    let shift = 64 - bits;
+    (v << shift) >> shift
+}
+
 fn range_predicate(
     builder: &mut FunctionBuilder,
     disc_val: Value,

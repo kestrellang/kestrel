@@ -16,7 +16,7 @@ use kestrel_mir::{
     FieldIdx, Immediate, IntBits, MirTy, Op, Ownership, ParamConvention, Signedness, TyId, ValueId,
     VariantIdx,
 };
-use kestrel_pattern_matching::constructor::Constructor;
+use kestrel_pattern_matching::constructor::{Constructor, IntDomain};
 use kestrel_pattern_matching::decision_tree::{Binding, DecisionTree, PathElement};
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -671,7 +671,22 @@ impl OssaBodyCtx<'_, '_> {
                 } else {
                     disc_operand
                 };
-                let discriminant = self.emit_discriminant(disc_operand);
+                // An integer switch reads the value at its own width and
+                // signedness (the enum-tag default is 32-bit, which truncated
+                // `5000000000` to `705032704`).
+                let domain = if is_array_switch {
+                    None
+                } else {
+                    kestrel_pattern_matching::constructor::int_domain(
+                        &self.ctx.query,
+                        self.ctx.root,
+                        ty,
+                    )
+                };
+                let discriminant = match domain {
+                    Some(d) => self.emit_int_discriminant(disc_operand, d.bits),
+                    None => self.emit_discriminant(disc_operand),
+                };
                 if let Some(borrow) = borrow_to_end {
                     self.emit_end_borrow(borrow);
                 }
@@ -688,7 +703,7 @@ impl OssaBodyCtx<'_, '_> {
                 let mut switch_arms: Vec<SwitchArm> = Vec::with_capacity(cases.len());
                 let mut case_blocks = Vec::with_capacity(cases.len());
                 for (ctor, _) in cases.iter() {
-                    let pattern = constructor_to_switch_case(self, ctor);
+                    let pattern = constructor_to_switch_case(self, ctor, domain);
                     let (block, params) = self.new_block_with_params(&switch_descs);
                     switch_arms.push(SwitchArm {
                         pattern,
@@ -2118,7 +2133,14 @@ impl OssaBodyCtx<'_, '_> {
 }
 
 /// Map a decision-tree Constructor to an OSSA SwitchCase.
-fn constructor_to_switch_case(bctx: &mut OssaBodyCtx, ctor: &Constructor) -> SwitchCase {
+/// `domain` is the switched integer type's width and signedness (`None` for
+/// a non-integer switch): bounds become its raw bits, compared accordingly.
+fn constructor_to_switch_case(
+    bctx: &mut OssaBodyCtx,
+    ctor: &Constructor,
+    domain: Option<IntDomain>,
+) -> SwitchCase {
+    let signed = domain.is_none_or(|d| d.signed);
     match ctor {
         Constructor::True => SwitchCase::Bool(true),
         Constructor::False => SwitchCase::Bool(false),
@@ -2146,13 +2168,16 @@ fn constructor_to_switch_case(bctx: &mut OssaBodyCtx, ctor: &Constructor) -> Swi
                 });
             SwitchCase::Variant(idx)
         },
-        Constructor::IntLiteral(v) => SwitchCase::IntLiteral(*v),
+        // Values are within the type's domain (E121 rejects the rest), so
+        // the `as i64` keeps exactly the type's raw bits.
+        Constructor::IntLiteral(v) => SwitchCase::IntLiteral(*v as i64),
         // Keep open ends as `None` — they must be left untested rather than
         // filled with a sentinel that truncates under the switch discriminant
         // width (#186).
         Constructor::IntRange { start, end } => SwitchCase::IntRange {
-            start: *start,
-            end: *end,
+            start: start.map(|v| v as i64),
+            end: end.map(|v| v as i64),
+            signed,
         },
         Constructor::CharLiteral(c) => SwitchCase::CharLiteral(*c as u32),
         Constructor::CharRange { start, end } => SwitchCase::CharRange {
@@ -2176,6 +2201,7 @@ fn constructor_to_switch_case(bctx: &mut OssaBodyCtx, ctor: &Constructor) -> Swi
                 SwitchCase::IntRange {
                     start: Some(min),
                     end: None,
+                    signed: true,
                 }
             } else {
                 SwitchCase::IntLiteral(min)

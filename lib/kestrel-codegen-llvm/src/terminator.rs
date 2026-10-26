@@ -349,25 +349,20 @@ fn compile_switch<'ctx>(
             // Open bounds (`None`) are left untested — filling them with a
             // sentinel truncates under the discriminant width and always fails
             // (#186). Both-open is a vacuous always-true match.
-            SwitchCase::IntRange { start, end } => {
+            SwitchCase::IntRange { start, end, signed } => {
+                let (ge, le) = if *signed {
+                    (IntPredicate::SGE, IntPredicate::SLE)
+                } else {
+                    (IntPredicate::UGE, IntPredicate::ULE)
+                };
                 let lo = start.map(|s| {
                     builder
-                        .build_int_compare(
-                            IntPredicate::SGE,
-                            disc_val,
-                            cmp_ty.const_int(s as u64, true),
-                            "ge",
-                        )
+                        .build_int_compare(ge, disc_val, cmp_ty.const_int(s as u64, true), "ge")
                         .unwrap()
                 });
                 let hi = end.map(|e| {
                     builder
-                        .build_int_compare(
-                            IntPredicate::SLE,
-                            disc_val,
-                            cmp_ty.const_int(e as u64, true),
-                            "le",
-                        )
+                        .build_int_compare(le, disc_val, cmp_ty.const_int(e as u64, true), "le")
                         .unwrap()
                 });
                 combine_range_bounds(builder, cmp_ty, lo, hi)

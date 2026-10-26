@@ -241,6 +241,7 @@ pub fn compile_inst(
                 == kestrel_mir::value::Ownership::Guaranteed;
             let disc_width = discriminant_width(
                 operand_ty,
+                fc.body.values[result.index()].ty,
                 &fc.ctx.module.ty_arena,
                 fc.ctx.module,
                 &fc.ctx.tc,
@@ -2131,7 +2132,16 @@ fn compile_thick_call(
 // Layout helpers
 // ======================================================================
 
-fn discriminant_width(ty: TyId, arena: &TyArena, module: &MonoModule, tc: &TypeCache) -> ir::Type {
+/// Width of a `Discriminant` read: an enum's tag width, else the result
+/// type's (an integer switch reads its value at its own width; see
+/// `emit_int_discriminant`), else the 32-bit tag default.
+fn discriminant_width(
+    ty: TyId,
+    result_ty: TyId,
+    arena: &TyArena,
+    module: &MonoModule,
+    tc: &TypeCache,
+) -> ir::Type {
     if let MirTy::Named { entity, type_args } = arena.get(ty) {
         let entity = *entity;
         let type_args = type_args.clone();
@@ -2139,7 +2149,12 @@ fn discriminant_width(ty: TyId, arena: &TyArena, module: &MonoModule, tc: &TypeC
             return int_bits_to_cl(e.discriminant_width);
         }
     }
-    ir::types::I32
+    match arena.get(result_ty) {
+        MirTy::I8 => ir::types::I8,
+        MirTy::I16 => ir::types::I16,
+        MirTy::I64 => ir::types::I64,
+        _ => ir::types::I32,
+    }
 }
 
 fn struct_field_offset(

@@ -31,7 +31,7 @@ use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 
-use super::constructor::Constructor;
+use super::constructor::{Constructor, IntDomain, int_domain};
 use super::flat_pat::{self, FlatPat};
 use super::matrix::{PatternMatrix, PatternRow};
 use super::split;
@@ -304,7 +304,7 @@ fn is_wildcard_useful(
             // would report a false non-exhaustive, so treat the split pieces
             // like a finite constructor set: the wildcard is useful iff it is
             // useful under some piece — the OTHER columns may still be open.
-            if covers_whole_domain(&heads) {
+            if covers_whole_domain(&heads, int_domain(ctx, root, col_type)) {
                 for ctor in &heads {
                     let result =
                         is_constructor_useful(matrix, query, col, ctor, col_type, root, ctx);
@@ -468,8 +468,10 @@ fn ranges_overlap(a: &Constructor, b: &Constructor) -> bool {
 }
 
 /// Do these split int (or char) pieces cover every value of their type?
-/// Pieces are sorted and disjoint, so they cover it iff they tile it.
-fn covers_whole_domain(pieces: &[Constructor]) -> bool {
+/// Pieces are sorted and disjoint, so they cover it iff they tile it. An
+/// integer column tiles its type's own domain (`[0, 255]` for `UInt8`);
+/// an unknown integer type falls back to `Int64`'s.
+fn covers_whole_domain(pieces: &[Constructor], int_domain: Option<IntDomain>) -> bool {
     let tiles = |mut intervals: Vec<(i128, i128)>, lo: i128, hi: i128| {
         intervals.sort_unstable();
         let mut next = lo;
@@ -483,7 +485,9 @@ fn covers_whole_domain(pieces: &[Constructor]) -> bool {
     };
     let ints: Option<Vec<_>> = pieces.iter().map(split::int_interval).collect();
     if let Some(ints) = ints.filter(|v| !v.is_empty()) {
-        return tiles(ints, i64::MIN as i128, i64::MAX as i128);
+        let (lo, hi) =
+            int_domain.map_or((i64::MIN as i128, i64::MAX as i128), |d| (d.min(), d.max()));
+        return tiles(ints, lo, hi);
     }
     let chars: Option<Vec<_>> = pieces.iter().map(split::char_interval).collect();
     // The surrogate block holds no char, so a tiling may skip it.

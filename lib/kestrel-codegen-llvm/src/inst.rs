@@ -242,8 +242,12 @@ pub fn compile_inst<'ctx>(
                 .tc
                 .repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let is_guaranteed = fc.body.values[operand.index()].ownership == Ownership::Guaranteed;
-            let disc_scalar =
-                discriminant_width(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            let disc_scalar = discriminant_width(
+                operand_ty,
+                fc.body.values[result.index()].ty,
+                &fc.ctx.module.ty_arena,
+                fc.ctx.module,
+            );
             let disc_ty = disc_scalar.llvm(cx).into_int_type();
             let val: BasicValueEnum = match repr {
                 // Twin of the Cranelift `Discriminant` handling in
@@ -2125,7 +2129,11 @@ fn compile_thick_call<'ctx>(
 // Layout helpers
 // ======================================================================
 
-fn discriminant_width(ty: TyId, arena: &TyArena, module: &MonoModule) -> ScalarTy {
+/// Width of a `Discriminant` read: an enum's tag width, else the result
+/// type's (an integer switch reads its value at its own width; see
+/// `emit_int_discriminant`), else the 32-bit tag default. Twin of the
+/// Cranelift `discriminant_width`.
+fn discriminant_width(ty: TyId, result_ty: TyId, arena: &TyArena, module: &MonoModule) -> ScalarTy {
     if let MirTy::Named { entity, type_args } = arena.get(ty) {
         let entity = *entity;
         let type_args = type_args.clone();
@@ -2133,7 +2141,12 @@ fn discriminant_width(ty: TyId, arena: &TyArena, module: &MonoModule) -> ScalarT
             return int_bits_to_scalar(e.discriminant_width);
         }
     }
-    ScalarTy::I32
+    match arena.get(result_ty) {
+        MirTy::I8 => ScalarTy::I8,
+        MirTy::I16 => ScalarTy::I16,
+        MirTy::I64 => ScalarTy::I64,
+        _ => ScalarTy::I32,
+    }
 }
 
 fn struct_field_offset(

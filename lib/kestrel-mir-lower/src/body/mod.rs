@@ -2753,6 +2753,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         results
     }
 
+    /// The raw `bits`-wide integer of an integer scrutinee, for a switch.
+    /// Codegen reads the value at the result type's width.
+    pub fn emit_int_discriminant(&mut self, operand: ValueId, bits: u32) -> ValueId {
+        let arena = &mut self.ctx.module.ty_arena;
+        let ty = match bits {
+            8 => arena.i8(),
+            16 => arena.i16(),
+            32 => arena.i32(),
+            _ => arena.i64(),
+        };
+        let result = self.alloc_value(ty, Ownership::Owned);
+        self.push_inst(InstKind::Discriminant { result, operand });
+        self.track_owned(result);
+        result
+    }
+
     pub fn emit_discriminant(&mut self, operand: ValueId) -> ValueId {
         let i32_ty = self.ctx.module.ty_arena.i32();
         let result = self.alloc_value(i32_ty, Ownership::Owned);
