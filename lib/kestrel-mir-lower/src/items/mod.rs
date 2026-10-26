@@ -55,8 +55,17 @@ fn lower_types(ctx: &mut LowerCtx, parent: Entity) {
         };
         match kind {
             NodeKind::Module => lower_types(ctx, child),
-            NodeKind::Struct => struct_lower::lower_struct(ctx, child),
-            NodeKind::Enum => enum_lower::lower_enum(ctx, child),
+            // Types may nest inside types and extensions, so every type
+            // container is walked for further type declarations.
+            NodeKind::Struct => {
+                struct_lower::lower_struct(ctx, child);
+                lower_types(ctx, child);
+            },
+            NodeKind::Enum => {
+                enum_lower::lower_enum(ctx, child);
+                lower_types(ctx, child);
+            },
+            NodeKind::Extension => lower_types(ctx, child),
             NodeKind::Protocol => protocol_lower::lower_protocol(ctx, child),
             _ => {},
         }
@@ -116,6 +125,8 @@ fn lower_member_functions(ctx: &mut LowerCtx, parent: Entity) {
             NodeKind::Field if ctx.world.get::<Static>(child).is_some() => {
                 static_lower::lower_static(ctx, child);
             },
+            // A type nested in this one: lower its members too.
+            NodeKind::Struct | NodeKind::Enum => lower_member_functions(ctx, child),
             _ => {},
         }
     }
