@@ -2623,16 +2623,26 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
             };
             match root {
                 RootProvenance::Local(local) => {
-                    let name = body
-                        .value_names
-                        .get(&local)
-                        .map(|n| format!(" `{n}`"))
-                        .unwrap_or_default();
+                    // An unnamed root is a temporary the frame created — most
+                    // often an `if`/`match` result, since arms always yield an
+                    // owned value (arm-value decay). Say so rather than print
+                    // a bare "local" the user can't find in their source.
+                    let (subject, label) = match body.value_names.get(&local) {
+                        Some(n) => (
+                            format!("local `{n}`"),
+                            format!("the borrowed local `{n}` is defined here"),
+                        ),
+                        None => (
+                            "a temporary".to_string(),
+                            "this temporary is created here".to_string(),
+                        ),
+                    };
+                    let is_temp = !body.value_names.contains_key(&local);
                     let secondary = body
                         .values
                         .get(local.index())
                         .and_then(|d| d.span.clone())
-                        .map(|s| (s, format!("the borrowed local{name} is defined here")));
+                        .map(|s| (s, label));
                     // FIX-IT (docs/design/closures.md, Diagnostics table:
                     // E494's "message gains a fix-it suggesting an `escaping`
                     // or `consuming` owning type"). Fix-its are `notes`
@@ -2645,6 +2655,13 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                             .into(),
                         "Pointer-derived references are not verified by the compiler".into(),
                     ];
+                    if is_temp && !is_closure {
+                        notes.push(
+                            "an `if`/`match` arm yields a new value, not a reference to the \
+                             variable it names"
+                                .into(),
+                        );
+                    }
                     if is_closure {
                         notes = vec![
                             "a normal or `mutating` closure holds VIEWS into this frame, so it \
@@ -2659,9 +2676,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                     }
                     push(
                         "E494",
-                        format!(
-                            "cannot return {what} local{name}, which does not outlive the call"
-                        ),
+                        format!("cannot return {what} {subject}, which does not outlive the call"),
                         secondary,
                         notes,
                     );
