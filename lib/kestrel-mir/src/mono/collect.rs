@@ -1433,9 +1433,10 @@ mod tests {
 }
 
 /// Instantiation type args nested deeper than this are treated as runaway
-/// polymorphic recursion. Real types nest a few levels; 64 leaves room for
-/// generated code.
-const MAX_INSTANTIATION_DEPTH: usize = 64;
+/// polymorphic recursion. It must stay above any type a program writes out
+/// (a 300-deep `Array[Array[...]]` instantiates `Array.init` at that depth),
+/// so it is generous; long symbol names are hashed, so reaching it is cheap.
+const MAX_INSTANTIATION_DEPTH: usize = 512;
 
 /// Nesting depth of `ty`, counting only up to `cap + 1` (enough to know it
 /// is over the limit without walking a huge type).

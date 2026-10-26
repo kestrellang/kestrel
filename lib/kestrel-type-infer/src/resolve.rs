@@ -244,6 +244,21 @@ fn subject_receiver_of(subject: &WhereSubject, assoc: Entity) -> SubjectReceiver
     }
 }
 
+/// The receiver spine of a projection base written as a type (`U` in
+/// `T.A = U.A`, `U.Iter` in `T.A = U.Iter.A`) — the HIR twin of
+/// [`WhereSubject::spine`].
+fn hir_spine(ty: &HirTy) -> Option<Vec<Entity>> {
+    match ty {
+        HirTy::Param(e, _) => Some(vec![*e]),
+        HirTy::AssocProjection { base, assoc, .. } => {
+            let mut spine = hir_spine(base)?;
+            spine.push(*assoc);
+            Some(spine)
+        },
+        _ => None,
+    }
+}
+
 /// Where clause on a declaration.
 #[derive(Clone, Debug, Hash)]
 pub enum WhereClause {
@@ -643,6 +658,9 @@ impl TypeResolver for WorldResolver<'_> {
         // *structured* subject (`WhereClausesOf`) so the receiver survives
         // instead of `gather_bounds_from_where_clause`'s last-segment collapse,
         // which is the aliasing this check exists to undo.
+        // `where T.A = U.A` makes `T.A` and `U.A` one type: a bound on either
+        // receiver holds for both (M14).
+        let receivers = self.same_type_spines(assoc, base_spine);
         let mut saw_other_receiver = false;
         let mut checked = crate::collections::HashSet::default();
         let mut current = Some(self.body_owner);
@@ -669,7 +687,7 @@ impl TypeResolver for WorldResolver<'_> {
                         // a bare `Item`, or a `Self`-rooted chain (D8). Permit.
                         SubjectReceiver::Unnamed => return true,
                         SubjectReceiver::Spine(spine) => {
-                            if spine == base_spine {
+                            if receivers.contains(&spine) {
                                 return true;
                             }
                             saw_other_receiver = true;
@@ -1083,6 +1101,55 @@ fn extract_protocol_type_args(
 }
 
 impl WorldResolver<'_> {
+    /// Every receiver spine the owner's same-type clauses equate with
+    /// `base_spine` for `assoc` (including `base_spine` itself):
+    /// `where T.A = U.A` makes `[T]` and `[U]` interchangeable receivers of
+    /// `A`, transitively.
+    fn same_type_spines(&self, assoc: Entity, base_spine: &[Entity]) -> Vec<Vec<Entity>> {
+        let mut pairs: Vec<(Vec<Entity>, Vec<Entity>)> = Vec::new();
+        let mut checked = crate::collections::HashSet::default();
+        let mut current = Some(self.body_owner);
+        while let Some(entity) = current {
+            if checked.insert(entity) {
+                for clause in self.ctx.query(crate::where_clauses::WhereClausesOf {
+                    entity,
+                    root: self.root,
+                }) {
+                    let WhereClause::Equality { subject, rhs } = clause else {
+                        continue;
+                    };
+                    let SubjectReceiver::Spine(lhs) = subject_receiver_of(&subject, assoc) else {
+                        continue;
+                    };
+                    let HirTy::AssocProjection { base, assoc: a, .. } = &rhs else {
+                        continue;
+                    };
+                    if *a != assoc {
+                        continue;
+                    }
+                    if let Some(rhs) = hir_spine(base) {
+                        pairs.push((lhs, rhs));
+                    }
+                }
+            }
+            current = self.ctx.parent_of(entity);
+        }
+        let mut class = vec![base_spine.to_vec()];
+        loop {
+            let before = class.len();
+            for (l, r) in &pairs {
+                if class.contains(l) && !class.contains(r) {
+                    class.push(r.clone());
+                } else if class.contains(r) && !class.contains(l) {
+                    class.push(l.clone());
+                }
+            }
+            if class.len() == before {
+                return class;
+            }
+        }
+    }
+
     /// Member lookup on a protocol's abstract `Self` through the protocol and
     /// its parents (requirements + extension defaults), like a `T: P` bound.
     fn resolve_protocol_self_member(
