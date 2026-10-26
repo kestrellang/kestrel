@@ -20,7 +20,10 @@ use kestrel_name_res::{
 };
 
 use crate::context::LowerCtx;
-use crate::ty::{lower_named_type, lower_type, resolve_callable_types, resolve_type_annotation};
+use crate::ty::{
+    lower_named_type, lower_type, resolve_callable_return_type, resolve_callable_types,
+    resolve_type_annotation,
+};
 
 /// Generate witness tables for all struct and enum entities.
 pub fn lower_witnesses(ctx: &mut LowerCtx) {
@@ -257,13 +260,22 @@ fn bind_witness_methods(
     prefer_source: bool,
 ) {
     for (method_key, method_name, member) in method_entries {
-        let expected_param_types = expected_param_types_for(ctx, member.entity, proto_subst);
+        let expected = expected_signature_for(ctx, member.entity, proto_subst);
 
         let lookup_name = method_name.strip_suffix(".set").unwrap_or(method_name);
 
+        // A member that only a protocol extension declares (not a
+        // requirement) is not overridable: it binds to that extension
+        // function even when the type has a same-named method of its own
+        // (`extend P { func g() }` vs `S.g()`), as a direct call would.
+        let extension_only = member.extension.is_some()
+            && !method_entries
+                .iter()
+                .any(|(key, _, m)| m.extension.is_none() && key == method_key);
+
         // Specialized concrete witness: try the source extension's own impls first.
         let mut impl_func = None;
-        if prefer_source {
+        if prefer_source && !extension_only {
             let source_children: Vec<Entity> = ctx.world.children_of(source).to_vec();
             impl_func = if method_name.ends_with(".set") {
                 find_setter_among(ctx, &source_children)
@@ -273,7 +285,7 @@ fn bind_witness_methods(
                     &source_children,
                     method_name,
                     Some(&method_key.labels),
-                    expected_param_types.as_deref(),
+                    &expected,
                 )
             };
         }
@@ -295,6 +307,7 @@ fn bind_witness_methods(
             });
             let type_side: Vec<(Entity, TypeMemberSource)> = candidates
                 .iter()
+                .filter(|tm| !extension_only || tm.entity == member.entity)
                 .filter(|tm| {
                     matches!(
                         tm.source,
@@ -315,7 +328,7 @@ fn bind_witness_methods(
                     &entities,
                     method_name,
                     Some(&method_key.labels),
-                    expected_param_types.as_deref(),
+                    &expected,
                 )
             };
 
@@ -481,7 +494,10 @@ fn bind_witness_methods(
                     &ext_children,
                     lookup_name,
                     Some(&method_key.labels),
-                    None,
+                    &ExpectedSignature {
+                        params: None,
+                        ret: None,
+                    },
                 )
             };
             if let Some(impl_func) = ext_impl {
@@ -633,25 +649,31 @@ fn protocol_type_param_entities(ctx: &LowerCtx, protocol: Entity) -> Vec<Entity>
         .unwrap_or_default()
 }
 
-fn expected_param_types_for(
+fn expected_signature_for(
     ctx: &mut LowerCtx,
     member_entity: Entity,
     proto_subst: &std::collections::HashMap<Entity, TyId>,
-) -> Option<Vec<TyId>> {
-    ctx.world.get::<Callable>(member_entity)?;
+) -> ExpectedSignature {
+    if ctx.world.get::<Callable>(member_entity).is_none() {
+        return ExpectedSignature {
+            params: None,
+            ret: None,
+        };
+    }
+    let mut subst = SubstMap::new();
+    for (entity, ty_id) in proto_subst {
+        subst.type_params.insert(*entity, *ty_id);
+    }
     let tys = resolve_callable_types(ctx, member_entity);
-    let tys: Option<Vec<TyId>> = tys.into_iter().collect();
-    tys.map(|v| {
+    let params: Option<Vec<TyId>> = tys.into_iter().collect();
+    let params = params.map(|v| {
         v.into_iter()
-            .map(|t| {
-                let mut subst = SubstMap::new();
-                for (entity, ty_id) in proto_subst {
-                    subst.type_params.insert(*entity, *ty_id);
-                }
-                substitute(&mut ctx.module.ty_arena, t, &subst)
-            })
+            .map(|t| substitute(&mut ctx.module.ty_arena, t, &subst))
             .collect()
-    })
+    });
+    let ret = resolve_callable_return_type(ctx, member_entity);
+    let ret = Some(substitute(&mut ctx.module.ty_arena, ret, &subst));
+    ExpectedSignature { params, ret }
 }
 
 fn protocol_member_name(ctx: &LowerCtx, member: &ProtocolMember) -> String {
@@ -672,18 +694,62 @@ fn find_impl_among(
     candidates: &[Entity],
     method_name: &str,
     required_labels: Option<&[Option<String>]>,
-    expected_param_types: Option<&[TyId]>,
+    expected: &ExpectedSignature,
 ) -> Option<Entity> {
     // Two-pass: param-type matching first, label-only fallback
-    for &c in candidates {
-        if matches_candidate(ctx, c, method_name, required_labels, expected_param_types) {
-            return Some(c);
-        }
+    let matching: Vec<Entity> = candidates
+        .iter()
+        .copied()
+        .filter(|&c| {
+            matches_candidate(
+                ctx,
+                c,
+                method_name,
+                required_labels,
+                expected.params.as_deref(),
+            )
+        })
+        .collect();
+    if let Some(chosen) = prefer_return_type(ctx, &matching, expected.ret) {
+        return Some(chosen);
     }
     candidates
         .iter()
         .find(|&&c| matches_candidate(ctx, c, method_name, required_labels, None))
         .copied()
+}
+
+/// Among candidates that match by name, labels and parameter types, pick the
+/// one whose return type is the requirement's (`S: Conv[Int64], Conv[String]`
+/// has two `conv()`; the `Conv[String]` witness needs `-> String`). The return
+/// type only breaks ties: a requirement mentioning `Self` or an associated
+/// type need not compare equal, so a lone candidate is kept as is.
+fn prefer_return_type(
+    ctx: &mut LowerCtx,
+    matching: &[Entity],
+    expected_ret: Option<TyId>,
+) -> Option<Entity> {
+    let (&first, rest) = matching.split_first()?;
+    if rest.is_empty() {
+        return Some(first);
+    }
+    let Some(want) = expected_ret else {
+        return Some(first);
+    };
+    Some(
+        matching
+            .iter()
+            .copied()
+            .find(|&c| resolve_callable_return_type(ctx, c) == want)
+            .unwrap_or(first),
+    )
+}
+
+/// A requirement's parameter and return types, with the protocol's type
+/// arguments substituted in (`Conv[String].conv` returns `String`).
+struct ExpectedSignature {
+    params: Option<Vec<TyId>>,
+    ret: Option<TyId>,
 }
 
 /// A stored (non-computed) `static var` named `name` on `type_entity`, if any —

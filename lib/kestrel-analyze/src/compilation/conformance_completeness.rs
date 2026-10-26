@@ -38,8 +38,9 @@ use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, InitEffect, NodeKind, QualifiedTarget, Settable,
-    TypeAnnotation, TypeParams, WhereClause, WhereConstraint,
+    Callable, ConformanceItem, Conformances, ExtensionTarget, InitEffect, NodeKind,
+    QualifiedTarget, ReceiverKind, Settable, TypeAnnotation, TypeParams, WhereClause,
+    WhereConstraint,
 };
 use kestrel_hecs::Entity;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
@@ -115,6 +116,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E464",
         name: "init_effect_mismatch",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E632",
+        name: "wrong_method_parameter_type",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -329,22 +336,34 @@ fn check_protocol_requirements(
                             .collect()
                     })
                     .unwrap_or_default();
-                let sig_match = if sig_candidates.len() > 1
-                    && !matches!(child_kind, Some(NodeKind::Initializer))
-                {
+                // Overloads on parameter type (`String: Equal[String],
+                // Equal[StringSlice]`) are told apart the same way.
+                let sig_match = if sig_candidates.len() > 1 {
+                    let is_init = matches!(child_kind, Some(NodeKind::Initializer));
+                    let fits = |c: Entity| {
+                        method_param_types_mismatch(
+                            cx,
+                            child,
+                            c,
+                            type_entity,
+                            member.declaring_protocol,
+                            proto_param_subs,
+                        )
+                        .is_none()
+                            && (is_init
+                                || method_return_type_matches(
+                                    cx,
+                                    child,
+                                    c,
+                                    type_entity,
+                                    member.declaring_protocol,
+                                    proto_param_subs,
+                                ))
+                    };
                     sig_candidates
                         .iter()
                         .copied()
-                        .find(|&c| {
-                            method_return_type_matches(
-                                cx,
-                                child,
-                                c,
-                                type_entity,
-                                member.declaring_protocol,
-                                proto_param_subs,
-                            )
-                        })
+                        .find(|&c| fits(c))
                         .or_else(|| sig_candidates.first().copied())
                 } else {
                     sig_candidates.first().copied()
@@ -356,8 +375,11 @@ fn check_protocol_requirements(
                     if !receivers_match(proto_call, impl_call) {
                         let impl_span = util::entity_span(cx.query, impl_method);
                         let expected = match proto_call.and_then(|c| c.receiver.as_ref()) {
-                            Some(_) => "instance",
-                            None => "static",
+                            Some(kind) if impl_call.and_then(|c| c.receiver.as_ref()).is_some() => {
+                                receiver_word(kind)
+                            },
+                            Some(_) => "an instance",
+                            None => "a static",
                         };
                         diags.push(AnalyzeDiagnostic {
                             descriptor_id: DESCRIPTORS[5].id,
@@ -405,6 +427,17 @@ fn check_protocol_requirements(
                     // so skip the structural return type check — check_init_effect validates
                     // effect compatibility instead. Without this skip, widening (non-failable
                     // satisfying failable) triggers a spurious E458 for () vs Optional[()].
+                    check_method_param_types(
+                        cx,
+                        child,
+                        impl_method,
+                        type_entity,
+                        member.declaring_protocol,
+                        proto_param_subs,
+                        &name,
+                        &proto_name,
+                        diags,
+                    );
                     if !matches!(child_kind, Some(NodeKind::Initializer)) {
                         check_method_return_type(
                             cx,
@@ -974,7 +1007,99 @@ fn method_return_type_compare(
         entity: impl_method,
         root: cx.root,
     });
+    let env = method_compare_env(
+        cx,
+        proto_method,
+        impl_method,
+        type_entity,
+        protocol,
+        proto_param_subs,
+    );
+    compare_hir_types(cx.query, cx.root, &expected, &actual, &env)
+}
+
+/// The comparison environment for a requirement against its witness: the
+/// conformance's `Self` and associated types, the protocol's type params
+/// mapped to the conforming type's, and method-level type params aligned
+/// positionally. Shared by the return- and parameter-type checks.
+fn method_compare_env(
+    cx: &CompilationContext<'_>,
+    proto_method: Entity,
+    impl_method: Entity,
+    type_entity: Entity,
+    protocol: Entity,
+    proto_param_subs: &[(Entity, ResolvedTy)],
+) -> TypeCompareEnv {
     let mut env = type_compare_env_for_conformance(cx, type_entity, protocol);
+    // A witness declared in an extension speaks that extension's vocabulary:
+    // `extend RcBox[Account]` fixes `RcBox`'s `T` to `Account`, and
+    // `extend Range[T]` names its own `T`. Map the conforming type's params
+    // to the extension's target args (positionally when none are written).
+    if let Some(parent) = cx.query.parent_of(impl_method)
+        && parent != type_entity
+        && cx.query.get::<NodeKind>(parent) == Some(&NodeKind::Extension)
+    {
+        let type_params = cx
+            .query
+            .get::<TypeParams>(type_entity)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        let target_args: Vec<AstType> = match cx.query.get::<ExtensionTarget>(parent) {
+            Some(ExtensionTarget(AstType::Named { segments, .. })) => segments
+                .last()
+                .map(|s| s.type_args.clone())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        // The extension's own params map positionally, exactly as
+        // `build_proto_param_subs` maps them for the protocol's args.
+        let ext_params = cx
+            .query
+            .get::<TypeParams>(parent)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        for (&e, &t) in ext_params.iter().zip(type_params.iter()) {
+            env.param_subs.push((e, ResolvedTy::Param { entity: t }));
+        }
+        // A concrete target arg fixes the type's param (`RcBox[Account]`),
+        // and `Self` is that specialization (`param_subs` do not rewrite
+        // `self_ty`).
+        let mut specialized = false;
+        for (&t, arg) in type_params.iter().zip(target_args.iter()) {
+            if let Some(ty) = resolve_conformance_type_arg(cx, arg, parent, &HashMap::new())
+                && !matches!(ty, ResolvedTy::Param { .. })
+            {
+                env.param_subs.push((t, ty));
+                specialized = true;
+            }
+        }
+        if specialized {
+            let args = target_args
+                .iter()
+                .map(|a| {
+                    resolve_conformance_type_arg(cx, a, parent, &HashMap::new())
+                        .unwrap_or(ResolvedTy::Error)
+                })
+                .collect();
+            env.self_ty = Some(ResolvedTy::Named {
+                entity: type_entity,
+                args,
+            });
+        }
+    }
+    // A requirement inherited through a refinement (`Equatable: Equal`) can
+    // name a protocol param the conformance never bound; it compares as
+    // unknown rather than as a mismatch.
+    let declared: Vec<Entity> = cx
+        .query
+        .get::<TypeParams>(protocol)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    for p in declared {
+        if !proto_param_subs.iter().any(|(e, _)| *e == p) {
+            env.param_subs.push((p, ResolvedTy::Error));
+        }
+    }
 
     // Map protocol-level type parameters to the conforming type's params.
     // e.g. for `Array[T]: Slice[T]`, maps Slice's T → Array's T so that
@@ -1001,8 +1126,89 @@ fn method_return_type_compare(
         env.param_subs
             .push((proto_param, ResolvedTy::Param { entity: impl_param }));
     }
+    env
+}
 
-    compare_hir_types(cx.query, cx.root, &expected, &actual, &env)
+/// Index of the first witness parameter whose type provably differs from the
+/// requirement's, if any.
+fn method_param_types_mismatch(
+    cx: &CompilationContext<'_>,
+    proto_method: Entity,
+    impl_method: Entity,
+    type_entity: Entity,
+    protocol: Entity,
+    proto_param_subs: &[(Entity, ResolvedTy)],
+) -> Option<usize> {
+    let lower = |entity| {
+        cx.query.query(LowerCallableTypes {
+            entity,
+            root: cx.root,
+        })
+    };
+    let (Some(expected), Some(actual)) = (lower(proto_method), lower(impl_method)) else {
+        return None;
+    };
+    let env = method_compare_env(
+        cx,
+        proto_method,
+        impl_method,
+        type_entity,
+        protocol,
+        proto_param_subs,
+    );
+    expected.iter().zip(actual.iter()).position(|(e, a)| {
+        let (Some(e), Some(a)) = (e, a) else {
+            return false;
+        };
+        !compare_hir_types(cx.query, cx.root, e, a, &env).is_equal_or_unknown()
+    })
+}
+
+/// E632: a witness parameter whose type is not the requirement's
+/// (`f(x: String)` for `f(x: Int64)`). Arity and labels already matched;
+/// this used to be all that was checked, and the call passed an `Int64`
+/// where a `String` was expected.
+fn check_method_param_types(
+    cx: &CompilationContext<'_>,
+    proto_method: Entity,
+    impl_method: Entity,
+    type_entity: Entity,
+    protocol: Entity,
+    proto_param_subs: &[(Entity, ResolvedTy)],
+    method_name: &str,
+    proto_name: &str,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let Some(index) = method_param_types_mismatch(
+        cx,
+        proto_method,
+        impl_method,
+        type_entity,
+        protocol,
+        proto_param_subs,
+    ) else {
+        return;
+    };
+    let param = cx
+        .query
+        .get::<Callable>(impl_method)
+        .and_then(|c| c.params.get(index))
+        .map(|p| p.name.clone())
+        .unwrap_or_default();
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[10].id,
+        severity: DESCRIPTORS[10].default_severity,
+        message: format!(
+            "parameter '{param}' of method '{method_name}' has the wrong type for protocol \
+             '{proto_name}'"
+        ),
+        labels: vec![DiagLabel {
+            span: util::entity_span(cx.query, impl_method),
+            message: "parameter type does not match the requirement".into(),
+            is_primary: true,
+        }],
+        notes: vec![],
+    });
 }
 
 fn check_method_return_type(
@@ -1118,6 +1324,19 @@ fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> Re
     {
         return ResolvedTy::Never;
     }
+    // `extend &T: P` / `extend &mutating T: P`: `Self` is the reference
+    // `&T` itself, structurally, like `()` and `!` above.
+    if let Some(mutating) = kestrel_name_res::extensions::lang_ref_mutability(cx.query, type_entity)
+        && let Some(&pointee) = cx
+            .query
+            .get::<TypeParams>(type_entity)
+            .and_then(|tp| tp.0.first())
+    {
+        return ResolvedTy::Ref {
+            pointee: Box::new(ResolvedTy::Param { entity: pointee }),
+            mutating,
+        };
+    }
     let args = cx
         .query
         .get::<TypeParams>(type_entity)
@@ -1167,11 +1386,14 @@ fn build_proto_param_subs(
             .get::<TypeParams>(type_entity)
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
-        return proto_params
+        let mut subs: Vec<(Entity, ResolvedTy)> = proto_params
             .iter()
             .zip(type_params.iter())
+            .filter(|&(&pp, _)| default_type_arg(cx, pp, type_entity).is_none())
             .map(|(&pp, &tp)| (pp, ResolvedTy::Param { entity: tp }))
             .collect();
+        add_default_type_args(cx, &proto_params, type_entity, &mut subs);
+        return subs;
     }
 
     // If the conformance is on an extension, its type params are distinct
@@ -1207,7 +1429,45 @@ fn build_proto_param_subs(
             subs.push((proto_param, resolved));
         }
     }
+    add_default_type_args(cx, &proto_params, type_entity, &mut subs);
     subs
+}
+
+/// A protocol type param's declared default as the conforming type sees it:
+/// `Addable[Other = Self]` defaults `Other` to the conforming type itself.
+fn default_type_arg(
+    cx: &CompilationContext<'_>,
+    proto_param: Entity,
+    type_entity: Entity,
+) -> Option<ResolvedTy> {
+    let ast = &cx.query.get::<TypeAnnotation>(proto_param)?.0;
+    if let AstType::Named { segments, .. } = ast
+        && let [only] = &segments[..]
+        && only.name == "Self"
+        && only.type_args.is_empty()
+    {
+        return Some(self_type_for_compare(cx, type_entity));
+    }
+    let owner = cx.query.parent_of(proto_param)?;
+    resolve_conformance_type_arg(cx, ast, owner, &HashMap::new())
+}
+
+/// Fill every protocol type param no written argument covered with its
+/// declared default (`: Addable` is `: Addable[Self]`).
+fn add_default_type_args(
+    cx: &CompilationContext<'_>,
+    proto_params: &[Entity],
+    type_entity: Entity,
+    subs: &mut Vec<(Entity, ResolvedTy)>,
+) {
+    for &pp in proto_params {
+        if subs.iter().any(|(p, _)| *p == pp) {
+            continue;
+        }
+        if let Some(ty) = default_type_arg(cx, pp, type_entity) {
+            subs.push((pp, ty));
+        }
+    }
 }
 
 /// Resolve a single AST type argument from a conformance declaration to a
@@ -1457,10 +1717,27 @@ fn signatures_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
 }
 
 /// Both sides are instance methods, or both are static.
+/// Whether `imp`'s receiver can witness `proto`'s: both static, or both
+/// instance with a compatible mode. A borrowing impl may witness any mode
+/// (it does less), but a `mutating` or `consuming` impl only its own: a
+/// `mutating` impl behind a borrowing requirement writes through the
+/// caller's read-only borrow (it mutated a `let`).
 fn receivers_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
-    match (proto, imp) {
-        (Some(p), Some(i)) => p.receiver.is_some() == i.receiver.is_some(),
-        _ => true,
+    let (Some(p), Some(i)) = (proto, imp) else {
+        return true;
+    };
+    match (&p.receiver, &i.receiver) {
+        (None, None) => true,
+        (Some(p), Some(i)) => p == i || *i == ReceiverKind::Borrowing,
+        _ => false,
+    }
+}
+
+fn receiver_word(kind: &ReceiverKind) -> &'static str {
+    match kind {
+        ReceiverKind::Borrowing => "a non-mutating",
+        ReceiverKind::Mutating => "a `mutating`",
+        ReceiverKind::Consuming => "a `consuming`",
     }
 }
 

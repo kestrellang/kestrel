@@ -454,6 +454,7 @@ An executable build (`kestrel build`, `flock build`/`run`) requires exactly one
 | E629 | cannot find '{path}' / module '{path}' has no member '{name}' | An `import` names no module (nor, as `import A.B.T`, a member of one), or a selective import names a member the module does not have. |
 | E630 | '{name}' is a {kind}, not a protocol | A conformance list entry (`struct S: P`, `extend T: P`, `protocol Q: P`) names a struct, enum or other non-protocol type. |
 | E631 | default argument value depends on itself | A parameter's default value calls the same function without passing that argument, so inlining the default would never end. Pass the argument explicitly in the recursive call. |
+| E632 | parameter '{param}' of method '{method}' has the wrong type for protocol '{proto}' | A conformance's method has the requirement's arity and labels but a different parameter type. |
 
 ### Example
 
