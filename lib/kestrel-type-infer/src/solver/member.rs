@@ -357,6 +357,14 @@ pub(super) fn solve_member(
         });
     };
 
+    // A `Never` receiver is unreachable code: it conforms to every protocol,
+    // so any member exists. Its result is never produced either, so it
+    // coerces to whatever the context wants (`(return 1) + 2`).
+    if matches!(recv_kind, TyKind::Never) {
+        ctx.coerce(resolved, result, expr, span);
+        return SolveResult::Solved;
+    }
+
     // THE transparent-place peel: a ref-typed receiver requeues with the
     // POINTEE as the receiver, so nominal lookup, Self-substitution,
     // conformance and witness constraints all see `T`. One arm covers every

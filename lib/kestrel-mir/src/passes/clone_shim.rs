@@ -688,12 +688,9 @@ fn ty_contains_unresolvable(ty: TyId, arena: &TyArena) -> bool {
             .any(|&t| ty_contains_unresolvable(t, arena)),
         MirTy::Pointer(inner) => ty_contains_unresolvable(*inner, arena),
         MirTy::Tuple(elems) => elems.iter().any(|&t| ty_contains_unresolvable(t, arena)),
-        MirTy::FuncThick { params, ret, .. } => {
-            params
-                .iter()
-                .any(|&(t, _)| ty_contains_unresolvable(t, arena))
-                || ty_contains_unresolvable(*ret, arena)
-        },
+        // A closure is cloned by retaining its environment whatever its
+        // signature, so a projection in it (`escaping (I.A) -> Bool`) does
+        // not block the shim.
         _ => false,
     }
 }

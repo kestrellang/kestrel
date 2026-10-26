@@ -109,6 +109,13 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    // One call both borrows and consumes the same non-Copyable value.
+    DiagnosticDescriptor {
+        id: "E510",
+        name: "consumed_while_lent_to_call",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct MoveTrackingAnalyzer;
@@ -1071,6 +1078,7 @@ fn apply_call_moves(
         record_operand_move(mcx, state, diags, recv_id, FreezeReason::Consume);
     }
 
+    check_consumed_while_lent(mcx, callable, args, receiver, diags);
     for (i, arg) in args.iter().enumerate() {
         let Some(param) = callable.params.get(i) else {
             continue;
@@ -1079,6 +1087,52 @@ fn apply_call_moves(
             continue;
         }
         record_operand_move(mcx, state, diags, arg.value, FreezeReason::Consume);
+    }
+}
+
+/// E510: one call both borrows a non-Copyable value (a borrowing or
+/// `mutating` argument, or a non-consuming receiver) and consumes it
+/// (`f(x, x)` with `f(mutating a: R, consuming b: R)`). The borrow is live for
+/// the whole call, so the move would leave it dangling.
+fn check_consumed_while_lent(
+    mcx: &MoveCtx<'_>,
+    callable: &Callable,
+    args: &[HirCallArg],
+    receiver: Option<HirExprId>,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let hir = mcx.cx.hir;
+    let consuming = |i: usize| callable.params.get(i).is_some_and(|p| p.is_consuming);
+    let mut lent: Vec<LocalId> = args
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| !consuming(i))
+        .filter_map(|(_, a)| place_root(hir, a.value))
+        .collect();
+    if !matches!(callable.receiver, Some(ReceiverKind::Consuming)) {
+        lent.extend(receiver.and_then(|r| place_root(hir, r)));
+    }
+    for (i, arg) in args.iter().enumerate() {
+        if !consuming(i) || !expr_is_non_copyable(mcx, arg.value) {
+            continue;
+        }
+        let Some(root) = place_root(hir, arg.value).filter(|r| lent.contains(r)) else {
+            continue;
+        };
+        let name = hir.locals[root].name.clone();
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[6].id,
+            severity: DESCRIPTORS[6].default_severity,
+            message: format!("cannot consume '{name}' while the same call borrows it"),
+            labels: vec![DiagLabel {
+                span: util::expr_span(hir, arg.value),
+                message: "consumed here".into(),
+                is_primary: true,
+            }],
+            notes: vec![format!(
+                "another argument of this call borrows '{name}' for the whole call"
+            )],
+        });
     }
 }
 

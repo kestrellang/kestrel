@@ -240,7 +240,7 @@ public struct FormatOptions: Equatable {
     /// Minimum field width in characters; shorter values are padded with `fill` according to `alignment`.
     public var width: Int64?
 
-    /// For floats: number of decimal places (or significant digits in `Auto` mode). For strings: maximum character count.
+    /// For floats: number of decimal places (an explicit precision prints `Auto` in fixed notation). For strings: maximum character count.
     public var precision: Int64?
 
     /// How to position the value inside `width` when padding is required.

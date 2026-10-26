@@ -706,6 +706,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 // stay @guaranteed and carry their provenance root — the
                 // owned-copy path would re-root at a fresh Local and always
                 // escape-fail (E494 instead of the precise E496 etc.).
+                // The tail is not a statement, so nothing else gives its
+                // diagnostics (e.g. the E503 backstop) a location.
+                let prev_span = self.current_span.replace(tail_span);
                 let value = if self.ret_borrow {
                     self.lower_expr_for_ref_return(tail)
                 } else {
@@ -715,13 +718,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     let value = self.prepare_return_value(value);
 
                     self.drain_deferred_borrows();
-                    let prev = self.current_span.replace(tail_span);
                     self.destroy_scopes_to_depth(0, &[value]);
                     // A guarded destroy in the exit renames threaded values.
                     let value = self.resolve_value(value);
                     self.set_terminator(TerminatorKind::Return(value));
-                    self.current_span = prev;
                 }
+                self.current_span = prev_span;
             } else {
                 let unit = self.emit_literal(Immediate::unit());
                 self.destroy_scopes_to_depth(0, &[unit]);

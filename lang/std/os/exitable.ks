@@ -9,7 +9,7 @@ module std.os
 import std.numeric.(Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64)
 import std.text.(Formattable)
 import std.result.(Result)
-import std.io.(eprintln)
+import std.io.stdio.(eprintln)
 
 /// A process exit code.
 ///

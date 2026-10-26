@@ -6,7 +6,8 @@
 // Releasing memory is not observable: no warning.
 module Test
 
-import std.ffi.(RawPointer, malloc, free)
+import std.memory.(RawPointer)
+import std.ffi.(malloc, free)
 
 struct Block: Cloneable {
     var ptr: RawPointer

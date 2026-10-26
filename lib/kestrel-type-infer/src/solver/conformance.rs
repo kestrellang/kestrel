@@ -134,7 +134,9 @@ pub(super) fn solve_conforms(
             poison_ty_on_failure,
             origin,
         }),
-        TySlot::Resolved(TyKind::Error) => SolveResult::Solved,
+        // `Never` has no values, so it vacuously conforms to every protocol
+        // (`(return 1) + 2` needs `Never: Addable`).
+        TySlot::Resolved(TyKind::Error | TyKind::Never) => SolveResult::Solved,
         // The ref matrix (stage 2b, conformances via `extend &T`):
         // - Static: a ref is the one thing that is never Static — reject
         //   regardless of origin (judging the pointee would let `&T` slip

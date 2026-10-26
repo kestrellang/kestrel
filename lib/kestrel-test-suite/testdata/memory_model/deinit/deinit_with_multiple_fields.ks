@@ -2,7 +2,6 @@
 // stdlib: false
 
 module Test
-import Prelude
 
 struct Connection: not Copyable {
     var host: lang.str

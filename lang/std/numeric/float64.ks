@@ -1191,17 +1191,10 @@ public struct Float64:
             } else {
                 // Explicit precision (or percent): exact rounding to that many
                 // fractional / mantissa digits.
-                var decExp: Int64 = 0;
-                if m != UInt64.zero {
-                    decExp = floatSigDigits(m, e, 1).decExp
-                }
-
+                // An explicit precision counts decimal places, so `Auto`
+                // prints fixed notation (`12.34:.1` is "12.3", not "1.2e1").
                 if style == .Auto {
-                    if m == UInt64.zero or (decExp >= -4 and decExp < precision) {
-                        style = .Fixed
-                    } else {
-                        style = .Scientific
-                    }
+                    style = .Fixed
                 }
 
                 if style == .Scientific or style == .ScientificUpper {

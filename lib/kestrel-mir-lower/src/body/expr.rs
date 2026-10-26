@@ -276,21 +276,18 @@ impl OssaBodyCtx<'_, '_> {
             params,
             ret,
         });
-        let source_root = self.body.value(value).root;
         let result = self.alloc_value(result_ty, kestrel_mir::value::Ownership::Owned);
         let root = if matches!(
             (from, to),
             (kestrel_mir::FnKind::Escaping, kestrel_mir::FnKind::Normal)
         ) {
-            match source_root {
-                RootProvenance::Static => RootProvenance::Static,
-                // A truncated view owns no retain. Root it in this body's
-                // backing value so it cannot escape even when that backing is
-                // a borrowed parameter owned by the caller.
-                _ => RootProvenance::Local(value),
-            }
+            // A truncated view owns no retain: it lives only as long as the
+            // box `value` holds. Root it at `value` even when the source is
+            // `Static` (an owning closure with no frame borrows) or a
+            // borrowed parameter owned by the caller, so it cannot escape.
+            RootProvenance::Local(value)
         } else {
-            source_root
+            self.body.value(value).root
         };
         self.stamp_root(result, root);
         self.push_inst(kestrel_mir::inst::InstKind::CoerceFnKind {

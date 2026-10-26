@@ -2,7 +2,6 @@
 // stdlib: true
 
 module Test
-import Prelude
 
 struct NotFFISafe {
     let value: lang.i64

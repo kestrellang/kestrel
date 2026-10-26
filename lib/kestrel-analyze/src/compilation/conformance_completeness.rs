@@ -263,9 +263,24 @@ fn check_protocol_requirements(
     // Check callable/property requirements, including inherited ones. Members
     // from protocol extensions are defaults and therefore already satisfy the
     // requirement without an implementation on the conforming type.
+    // A default counts only when its extension's `where` clauses hold for
+    // this conformance (`extend P where Self: Q` gives `R: P` nothing unless
+    // `R: Q`) — the same entailment `provided` applies.
+    let context_clauses = collect_context_where_clauses(cx, type_entity, decl_entity);
+    let mut subs_cache: HashMap<Entity, HashMap<Entity, ResolvedTy>> = HashMap::new();
     let default_methods: Vec<Entity> = members
         .iter()
-        .filter(|member| member.extension.is_some())
+        .filter(|member| {
+            let Some(extension) = member.extension else {
+                return false;
+            };
+            let subs = subs_cache
+                .entry(member.declaring_protocol)
+                .or_insert_with(|| {
+                    build_protocol_param_substitution(cx, type_entity, member.declaring_protocol)
+                });
+            extension_clauses_entailed(cx, extension, type_entity, subs, &context_clauses)
+        })
         .map(|member| member.entity)
         .collect();
 
@@ -1572,7 +1587,7 @@ fn collect_provided_members_for_conformance(
             let subs = subs_cache
                 .entry(protocol)
                 .or_insert_with(|| build_protocol_param_substitution(cx, type_entity, protocol));
-            if !extension_clauses_entailed(cx, extension, subs, &context_clauses) {
+            if !extension_clauses_entailed(cx, extension, type_entity, subs, &context_clauses) {
                 continue;
             }
         }
@@ -1622,6 +1637,7 @@ fn resolved_ty_to_hir(ty: &ResolvedTy) -> kestrel_hir::ty::HirTy {
 fn extension_clauses_entailed(
     cx: &CompilationContext<'_>,
     extension: Entity,
+    type_entity: Entity,
     proto_subs: &HashMap<Entity, ResolvedTy>,
     context_clauses: &[ResolvedWhereClause],
 ) -> bool {
@@ -1629,7 +1645,26 @@ fn extension_clauses_entailed(
         entity: extension,
         root: cx.root,
     });
+    // A concrete conformer (a struct or enum, not a protocol's blanket
+    // conformance) answers `Self: Q` with a real conformance check: `C: P`
+    // gets `extend P where Self: Copyable` exactly when `C` is Copyable.
+    let concrete_self = matches!(
+        cx.query.get::<NodeKind>(type_entity),
+        Some(NodeKind::Struct | NodeKind::Enum)
+    )
+    .then(|| resolved_ty_to_hir(&self_type_for_compare(cx, type_entity)));
     ext_clauses.iter().all(|c| {
+        if let (
+            ResolvedWhereClause::Bound {
+                subject: WhereSubject::SelfType,
+                protocol,
+                ..
+            },
+            Some(self_ty),
+        ) = (c, &concrete_self)
+        {
+            return type_satisfies(cx.query, self_ty, *protocol, cx.root);
+        }
         // A bound whose param maps to a CONCRETE type can't be discharged by
         // param-to-param entailment — it needs a real conforms-to check
         // (`Int64: Equatable`). `extend Container[T] where T: Equatable`

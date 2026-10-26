@@ -3,7 +3,7 @@
 
 module Test
 
-import std.net.TcpListener
+import std.net.socket.TcpListener
 
 // `TcpListener` owns a socket fd and closes it in `deinit`. It must be
 // `not Copyable`: a copy would run that deinit twice and close the same fd

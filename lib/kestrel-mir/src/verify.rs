@@ -1301,7 +1301,16 @@ impl<'a> FlowVerifier<'a> {
         if blocking.is_empty() {
             return;
         }
-        if let Some(ref_val) = self.live_ref_rooted_at(addr) {
+        // A named reference binding (`let r = &a`) is a plain borrow, not a
+        // call result; it is user-attributable too.
+        let named = || {
+            self.borrows
+                .keys()
+                .copied()
+                .filter(|b| self.body.value_names.contains_key(b))
+                .find(|&b| self.borrow_chain_reaches(b, addr))
+        };
+        if let Some(ref_val) = self.live_ref_rooted_at(addr).or_else(named) {
             self.err_consume_while_ref_live(addr, inst, ref_val);
         } else {
             self.err_val(
@@ -1366,6 +1375,20 @@ impl<'a> FlowVerifier<'a> {
             }
             None
         })
+    }
+
+    /// Whether borrow `b`'s source chain reaches `v` (bounded like
+    /// `live_ref_rooted_at`).
+    fn borrow_chain_reaches(&self, b: ValueId, v: ValueId) -> bool {
+        let mut cur = b;
+        for _ in 0..=self.borrows.len() {
+            match self.borrows.get(&cur) {
+                Some(info) if info.source == v => return true,
+                Some(info) => cur = info.source,
+                None => return false,
+            }
+        }
+        false
     }
 
     /// E498: user-attributable consume-while-borrowed — the value is consumed

@@ -12,7 +12,6 @@
 // `copy_semantics/move_out_of_borrowed_match_payload.ks`.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

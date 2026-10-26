@@ -333,6 +333,7 @@ These apply to non-`Copyable` types, which move instead of copy.
 | E507 | cannot move / consume / destroy '{name}' while a closure capturing it is live · a closure viewing '{name}' cannot outlive '{name}' | The freeze rule (docs/design/closures.md). While a live `normal` / `mutating` closure carries a view of a place, that place cannot be moved, passed to a `consuming` parameter, or `deinit`ed, and a value carrying the view cannot be stored into a longer-lived binding. Plain reassignment stays legal. The closure analogue of E498. |
 | E508 *(warning)* | `Cloneable` type `{name}` has a `deinit` that calls `{extern}`; mark it `@observabledrop` | Emitted after monomorphization. A `Cloneable` type whose `deinit` reaches an observable extern (closing a file or socket) may have a copy dropped early by the copy lifetime passes; `@observabledrop` keeps its drops at scope end. See `docs/plans/observable_drop/observable_drop-design.md`. |
 | E509 | a reference to '{name}' is stored somewhere that outlives '{name}' | A value carrying `&x` (directly or inside a struct or enum value) is stored into a binding declared in an outer scope, which outlives `x`, so the reference would dangle. Returns are covered by E494. |
+| E510 | cannot consume '{name}' while the same call borrows it | One call passes a non-Copyable value both to a borrowing (or `mutating`) parameter or receiver and to a `consuming` parameter, as in `f(x, x)`. |
 
 ### Example — E500 / E501 (use after move)
 
@@ -449,6 +450,7 @@ An executable build (`kestrel build`, `flock build`/`run`) requires exactly one
 | E618 | no entry point: an executable build requires a \`@main\` function | Building an executable with no `@main` anywhere in the program. |
 | E627 | \`@main\` function '{name}' cannot take parameters | The entry point is called with no arguments; read program arguments through the standard library instead. |
 | E628 | extensions cannot add stored properties | An `extend` block declares a non-static stored `var`/`let`. A type's storage is fixed by its declaration; use a computed property or a `static` one. |
+| E629 | cannot find '{path}' / module '{path}' has no member '{name}' | An `import` names no module (nor, as `import A.B.T`, a member of one), or a selective import names a member the module does not have. |
 | E630 | '{name}' is a {kind}, not a protocol | A conformance list entry (`struct S: P`, `extend T: P`, `protocol Q: P`) names a struct, enum or other non-protocol type. |
 | E631 | default argument value depends on itself | A parameter's default value calls the same function without passing that argument, so inlining the default would never end. Pass the argument explicitly in the recursive call. |
 
