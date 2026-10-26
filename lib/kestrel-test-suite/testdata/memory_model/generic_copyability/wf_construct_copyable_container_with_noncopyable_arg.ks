@@ -22,5 +22,7 @@ struct Box[T] {
 // Regression: previously this escaped the frontend and tripped the post-mono
 // containment ICE (Inv-3b / BUG-04 "Copyable mono-substitution gap").
 func use(r: Res) {
-    let b = Box(value: r); // ERROR: !: Copyable
+    let b = Box( // ERROR: !: Copyable
+        value: r // ERROR: cannot move parameter 'r'
+    );
 }

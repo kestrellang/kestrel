@@ -33,7 +33,7 @@ protocol Container[T] {
     func item() -> T
 }
 
-extend Container[T] where T: Cloneable {
+extend Container[T] where T: Cloneable, Self: Copyable {
     public func dup() -> Self { self }
 }
 
