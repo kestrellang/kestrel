@@ -256,6 +256,10 @@ fn build_hir_ty_for_entity(
 
     // Type parameter: no args, no projection.
     if kind == Some(NodeKind::TypeParameter) {
+        if let Some(nested) = nested_type_capturing_param(ctx, owner, root, entity) {
+            report_outer_param_in_nested_type(ctx, nested, entity, segments, span);
+            return HirTy::Error(span.clone());
+        }
         return HirTy::Param(entity, span.clone());
     }
 
@@ -1554,4 +1558,76 @@ mod tests {
             other => panic!("expected the expanded tuple, got {other:?}"),
         }
     }
+}
+
+/// If `param` is used from inside a struct/enum nested in the declaration
+/// that binds it, return that nested type. Nested types don't inherit their
+/// container's type parameters (fuzz M13): `Outer[Int64].Inner` has no slot
+/// for `T`, so a use would leave `T` unbound after specialization. Uses
+/// directly in the binder — or its methods — are fine.
+fn nested_type_capturing_param(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    param: Entity,
+) -> Option<Entity> {
+    let binder = ctx.parent_of(param)?;
+    let mut nested = None;
+    let mut cur = Some(owner);
+    while let Some(e) = cur {
+        if e == binder {
+            return nested;
+        }
+        match ctx.get::<NodeKind>(e) {
+            // The innermost nominal type we pass through is the offender.
+            Some(NodeKind::Struct | NodeKind::Enum) if nested.is_none() => nested = Some(e),
+            // `extend Outer[T] { struct Inner { ... T ... } }` binds Outer's
+            // own parameter, so the extension stands in for the binder.
+            Some(NodeKind::Extension) => {
+                let lhs = ctx.query(kestrel_name_res::ExtensionLhsParams { extension: e, root });
+                if lhs.contains(&param) {
+                    return nested;
+                }
+            },
+            _ => {},
+        }
+        cur = ctx.parent_of(e);
+    }
+    None
+}
+
+fn report_outer_param_in_nested_type(
+    ctx: &QueryContext<'_>,
+    nested: Entity,
+    param: Entity,
+    segments: &[kestrel_ast::PathSegment],
+    span: &Span,
+) {
+    let name = segments.last().map(|s| s.name.clone()).unwrap_or_default();
+    let nested_name = ctx
+        .get::<kestrel_ast_builder::Name>(nested)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    let mut labels = vec![
+        Label::primary(span.file_id, span.range())
+            .with_message(format!("'{name}' belongs to an enclosing type")),
+    ];
+    if let Some(decl) = ctx.get::<DeclSpan>(param) {
+        labels.push(
+            Label::secondary(decl.0.file_id, decl.0.range())
+                .with_message(format!("'{name}' is declared here")),
+        );
+    }
+    ctx.accumulate(
+        Diagnostic::error()
+            .with_code("E634")
+            .with_message(format!(
+                "nested type '{nested_name}' cannot use type parameter '{name}' of an enclosing type"
+            ))
+            .with_labels(labels)
+            .with_notes(vec![format!(
+                "nested types do not inherit their container's type parameters; give \
+                 '{nested_name}' its own parameter, e.g. `{nested_name}[{name}2]`"
+            )]),
+    );
 }
