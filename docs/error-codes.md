@@ -334,6 +334,7 @@ These apply to non-`Copyable` types, which move instead of copy.
 | E508 *(warning)* | `Cloneable` type `{name}` has a `deinit` that calls `{extern}`; mark it `@observabledrop` | Emitted after monomorphization. A `Cloneable` type whose `deinit` reaches an observable extern (closing a file or socket) may have a copy dropped early by the copy lifetime passes; `@observabledrop` keeps its drops at scope end. See `docs/plans/observable_drop/observable_drop-design.md`. |
 | E509 | a reference to '{name}' is stored somewhere that outlives '{name}' | A value carrying `&x` (directly or inside a struct or enum value) is stored into a binding declared in an outer scope, which outlives `x`, so the reference would dangle. Returns are covered by E494. |
 | E510 | cannot consume '{name}' while the same call borrows it | One call passes a non-Copyable value both to a borrowing (or `mutating`) parameter or receiver and to a `consuming` parameter, as in `f(x, x)`. |
+| E511 | cannot move a field out of '{type}', which has a deinit | Moving a non-Copyable field out of a value would take it apart without running its type's `deinit`. Borrow or copy the field instead. |
 
 ### Example — E500 / E501 (use after move)
 

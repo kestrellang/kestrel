@@ -116,6 +116,14 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    // A field moved out of a value whose type has a `deinit`: taking the
+    // value apart would skip the deinit.
+    DiagnosticDescriptor {
+        id: "E511",
+        name: "field_move_out_of_deinit_type",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct MoveTrackingAnalyzer;
@@ -164,6 +172,10 @@ impl BodyCheck for MoveTrackingAnalyzer {
             state,
             &mut diags,
         );
+        // The body's tail is returned by value.
+        if let Some(tail) = cx.hir.tail_expr {
+            check_field_move_out(&mcx, &mut end, &mut diags, tail);
+        }
         // Falling off the end is an exit too (`return` checks its own).
         let end_span = cx
             .hir
@@ -386,6 +398,7 @@ fn analyze_stmt(
                     check_outlives(mcx, &mut state, diags, &carried, depth, *val);
                     state.carriers.insert(*local, carried);
                 }
+                check_field_move_out(mcx, &mut state, diags, *val);
                 // A `let b = x` on a non-Copyable `x` moves `x` into `b`.
                 // Only simple Local-on-RHS triggers a move — field/method/call
                 // RHS is never a partial move (matches lib1).
@@ -503,6 +516,7 @@ fn analyze_expr(
         // ===== Assignment =====
         HirExpr::Assign { target, value, .. } => {
             state = analyze_expr(mcx, *value, state, false, diags);
+            check_field_move_out(mcx, &mut state, diags, *value);
             state = analyze_expr(mcx, *target, state, true, diags);
             // THE SCOPE-DEPTH RULE (plan D8). Assignment is the one
             // propagation point that can widen a view's extent: storing a
@@ -743,6 +757,7 @@ fn analyze_expr(
         HirExpr::Return { value, span: _ } => {
             if let Some(val) = value {
                 state = analyze_expr(mcx, *val, state, false, diags);
+                check_field_move_out(mcx, &mut state, diags, *val);
                 if let Some(src) = rhs_local(hir, *val)
                     && local_is_non_copyable(mcx, src)
                 {
@@ -1090,6 +1105,70 @@ fn apply_call_moves(
     }
 }
 
+/// The first struct along `place`'s field path that declares a `deinit`.
+/// Moving a field out of such a struct would take the struct apart without
+/// running its `deinit`.
+fn deinit_owner_on_path(mcx: &MoveCtx<'_>, place: &PlaceKey) -> Option<Entity> {
+    place.path.iter().find_map(|elem| {
+        let ProjElem::Field(field) = elem else {
+            return None;
+        };
+        let owner = mcx.cx.query.parent_of(*field)?;
+        // The type's own deinit takes `self` apart; that is its job.
+        let in_own_deinit = mcx.cx.query.get::<NodeKind>(mcx.cx.entity) == Some(&NodeKind::Deinit)
+            && mcx.cx.query.parent_of(mcx.cx.entity) == Some(owner);
+        (!in_own_deinit
+            && !util::children_of_kind(mcx.cx.query, owner, NodeKind::Deinit).is_empty())
+        .then_some(owner)
+    })
+}
+
+/// E511 check for an expression consumed by value (returned, bound,
+/// assigned, or passed `consuming`): a non-Copyable field projection out of
+/// a struct with a `deinit`. Checked on the expression's own place, since
+/// the move itself is recorded on the whole root (`effective_move_place`).
+fn check_field_move_out(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    expr: HirExprId,
+) {
+    let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, expr) else {
+        return;
+    };
+    if place.is_whole() || !expr_is_non_copyable(mcx, expr) {
+        return;
+    }
+    if let Some(owner) = deinit_owner_on_path(mcx, &place)
+        && state.reported.insert(place.root)
+    {
+        let span = util::expr_span(mcx.cx.hir, expr);
+        diags.push(field_move_out_of_deinit_type(mcx, owner, span));
+    }
+}
+
+/// E511: moving a field out of a value whose type has a `deinit`.
+fn field_move_out_of_deinit_type(
+    mcx: &MoveCtx<'_>,
+    owner: Entity,
+    span: kestrel_span::Span,
+) -> AnalyzeDiagnostic {
+    let ty = util::entity_name(mcx.cx.query, owner);
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[7].id,
+        severity: DESCRIPTORS[7].default_severity,
+        message: format!("cannot move a field out of '{ty}', which has a deinit"),
+        labels: vec![DiagLabel {
+            span,
+            message: "field moved out here".into(),
+            is_primary: true,
+        }],
+        notes: vec![format!(
+            "moving a field out would skip '{ty}'s deinit; borrow or copy the field instead"
+        )],
+    }
+}
+
 /// E510: one call both borrows a non-Copyable value (a borrowing or
 /// `mutating` argument, or a non-consuming receiver) and consumes it
 /// (`f(x, x)` with `f(mutating a: R, consuming b: R)`). The borrow is live for
@@ -1174,6 +1253,7 @@ fn record_operand_move(
     operand: HirExprId,
     reason: FreezeReason,
 ) {
+    check_field_move_out(mcx, state, diags, operand);
     let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, operand) else {
         return;
     };
