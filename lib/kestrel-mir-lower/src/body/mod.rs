@@ -1612,25 +1612,57 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
     }
 
-    /// Destroy an expression statement's discarded `result` now if it is an
-    /// owned temporary the statement itself introduced (tracked in the
-    /// innermost scope at or after `mark`) and nothing borrows from it.
-    pub(crate) fn drop_discarded_result(&mut self, result: ValueId, mark: usize) {
+    /// Destroy the owned temporaries an expression statement introduced
+    /// (tracked in the innermost scope at or after `mark`) once it ends: its
+    /// discarded result and any argument temporaries (`peek(mk(1))` borrows
+    /// `mk(1)` only for the call). Only unbound values an instruction of the
+    /// current block defined count: a statement-level `if` re-tracks the
+    /// function's live locals as its merge block's params, and those live on. A
+    /// temporary something still borrows is left for scope exit. Innermost
+    /// first, like scope exit.
+    pub(crate) fn drop_statement_temporaries(&mut self, mark: usize, result: ValueId) {
         if self.is_terminated() {
             return;
         }
-        let Some(frame) = self.scope_stack.last() else {
+        let (Some(frame), Some(block)) = (self.scope_stack.last(), self.current_block) else {
             return;
         };
-        let since = &frame.entries[mark.min(frame.entries.len())..];
-        let owned_here = since
+        // A desugared `let (a, b) = ...` is an expression statement that
+        // binds locals: those values are variables, not temporaries.
+        let bound: std::collections::HashSet<ValueId> = self
+            .local_map
+            .values()
+            .map(|b| match b {
+                LocalBinding::Ssa(v) | LocalBinding::Var(v) => *v,
+            })
+            .collect();
+        let defined_here: std::collections::HashSet<ValueId> = self.body.blocks[block.index()]
+            .insts
             .iter()
-            .any(|e| matches!(e, ScopeEntry::Owned(v) if *v == result));
-        let borrowed = since.iter().any(|e| {
-            matches!(e, ScopeEntry::Borrow(b) if self.body.value(*b).borrow_source == Some(result))
-        });
-        if owned_here && !borrowed {
-            self.emit_destroy_value(result);
+            .flat_map(|i| i.kind.results())
+            // The statement's own result counts even when it is a merge
+            // param (`if c { a() } else { b() };`).
+            .chain(std::iter::once(self.resolve_value(result)))
+            .filter(|v| !bound.contains(v))
+            .collect();
+        let since = &frame.entries[mark.min(frame.entries.len())..];
+        let owned: Vec<ValueId> = since
+            .iter()
+            .rev()
+            .filter_map(|e| match e {
+                ScopeEntry::Owned(v) if defined_here.contains(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        for v in owned {
+            let borrowed = self.scope_stack.iter().any(|f| {
+                f.entries.iter().any(|e| {
+                    matches!(e, ScopeEntry::Borrow(b) if self.body.value(*b).borrow_source == Some(v))
+                })
+            });
+            if !borrowed {
+                self.emit_destroy_value(v);
+            }
         }
     }
 
@@ -1959,10 +1991,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 let d = self.body.value(old);
                 (d.ownership, d.root, d.ty)
             };
-            let carries_taint = self.ctx.module.ty_arena.contains_ref(ty)
+            // Refs AND frame-borrowing closures carry escape taint (#174):
+            // `escape_carry`, not `contains_ref` (a closure has no ref type).
+            let carries_taint = self.ctx.module.escape_carry(ty).any()
                 || matches!(
                     self.ctx.module.ty_arena.get(ty),
-                    MirTy::Pointer(p) if self.ctx.module.ty_arena.contains_ref(*p)
+                    MirTy::Pointer(p) if self.ctx.module.escape_carry(*p).any()
                 );
             if ownership == Ownership::Owned && root != RootProvenance::Local(old) && carries_taint
             {
@@ -2567,6 +2601,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 if self.slot_is_ref(&slot_tys, i) {
                     self.prep_ref_slot_element(v, &mut taint, &mut end_after)
                 } else {
+                    // By-value escape-carrying payload taints the case, as
+                    // in structs and tuples (`.Some({ k })`).
+                    self.collect_by_value_escape_taint(v, slot_tys.get(i).copied(), &mut taint);
                     self.own_aggregate_element(v)
                 }
             })
@@ -3357,7 +3394,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 // refs at its params (mirror of the ret_borrow source rule).
                 // No candidate args ⇒ the callee used statics/pointers —
                 // inherit the unverified pointer contract.
-                if self.ctx.module.ty_arena.contains_ref(ty) {
+                if self.ctx.module.escape_carry(ty).any() {
                     let convs = self.current_param_convs();
                     let mut joined: Option<RootProvenance> = None;
                     for a in &args {
@@ -3367,7 +3404,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         };
                         let candidate = a_guaranteed
                             || (a.convention == ParamConvention::Consuming
-                                && self.ctx.module.ty_arena.contains_ref(a_ty));
+                                && self.ctx.module.escape_carry(a_ty).any());
                         if candidate {
                             joined = Some(match joined {
                                 None => a_root,

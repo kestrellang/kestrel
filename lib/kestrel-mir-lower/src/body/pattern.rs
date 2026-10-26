@@ -281,7 +281,7 @@ impl OssaBodyCtx<'_, '_> {
         }
         // Stage 2b: a ref-bearing result's escape taint must survive the
         // merge — join the per-edge result roots (mirror of `lower_if`).
-        if self.ctx.module.ty_arena.contains_ref(result_ty) {
+        if self.ctx.module.escape_carry(result_ty).any() {
             let convs = self.current_param_convs();
             let mut joined: Option<kestrel_mir::value::RootProvenance> = None;
             for exit in &exits {

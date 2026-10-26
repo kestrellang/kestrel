@@ -2438,8 +2438,57 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
             let r = roots.get(&v).copied().unwrap_or(body.value(v).root);
             (r != RootProvenance::Local(v) && !r.is_derived_placeholder()).then_some(r)
         };
+        // Join `src`'s effective root into `dst`; true if `dst` changed.
+        let flow = |roots: &mut FxHashMap<ValueId, RootProvenance>, src: ValueId, dst: ValueId| {
+            let r = roots.get(&src).copied().unwrap_or(body.value(src).root);
+            if r == RootProvenance::Local(src) || r.is_derived_placeholder() {
+                return false;
+            }
+            // Start from `dst`'s own stamped root when it has one, so the
+            // flowed taint joins it rather than replacing it.
+            let own = body.value(dst).root;
+            let base = roots
+                .get(&dst)
+                .copied()
+                .or(
+                    (own != RootProvenance::Local(dst) && !own.is_derived_placeholder())
+                        .then_some(own),
+                );
+            let next = match base {
+                Some(c) => c.join(r, convs),
+                None => r,
+            };
+            if roots.get(&dst) == Some(&next) {
+                return false;
+            }
+            roots.insert(dst, next);
+            true
+        };
         loop {
             let mut changed = false;
+            // Taint also rides through a slot: a store taints the slot, and
+            // a read of the slot inherits it. Lowering stamps these once, in
+            // order, so a store reaching a read only over a branch join or a
+            // loop back edge (`if c { f = { k } }; return f`) was missed.
+            for block in &body.blocks {
+                for inst in &block.insts {
+                    changed |= match &inst.kind {
+                        InstKind::StoreInit { address, value }
+                        | InstKind::StoreAssign { address, value } => {
+                            flow(&mut roots, *value, *address)
+                        },
+                        InstKind::Take {
+                            result, address, ..
+                        }
+                        | InstKind::Load { result, address } => flow(&mut roots, *address, *result),
+                        InstKind::CopyValue { result, operand }
+                        | InstKind::MoveValue { result, operand } => {
+                            flow(&mut roots, *operand, *result)
+                        },
+                        _ => false,
+                    };
+                }
+            }
             for block in &body.blocks {
                 for (target, args) in block.terminator.kind.successor_args() {
                     for (i, &arg) in args.iter().enumerate() {

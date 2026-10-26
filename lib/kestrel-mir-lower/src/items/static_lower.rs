@@ -54,6 +54,7 @@ pub fn synthesize_static_inits(ctx: &mut LowerCtx) {
         .filter(|s| ctx.world.get::<Valued>(s.entity).is_some())
         .map(|s| (s.entity, s.ty))
         .collect();
+    let with_init = dependency_order(ctx, with_init);
 
     // Per-static thunks + master init (only when there are statics to initialize).
     let master = if with_init.is_empty() {
@@ -72,6 +73,37 @@ pub fn synthesize_static_inits(ctx: &mut LowerCtx) {
     // The entry point itself — synthesized whenever a `@main` exists, even with
     // no statics to initialize.
     synthesize_main_wrapper(ctx, master);
+}
+
+/// Order initializers so each runs after the globals it reads
+/// (`let a = b + 1; let b = 2` initializes `b` first). Post-order DFS over
+/// `GlobalInitDeps`; a cycle is already an analyzer error (E633), so the
+/// visited set only has to stop the walk.
+fn dependency_order(ctx: &mut LowerCtx, statics: Vec<(Entity, TyId)>) -> Vec<(Entity, TyId)> {
+    let ty_of: std::collections::HashMap<Entity, TyId> = statics.iter().copied().collect();
+    let mut order = Vec::with_capacity(statics.len());
+    let mut visited = std::collections::HashSet::new();
+    let mut stack: Vec<(Entity, bool)> = statics.iter().rev().map(|&(e, _)| (e, false)).collect();
+    while let Some((e, children_done)) = stack.pop() {
+        if children_done {
+            order.push((e, ty_of[&e]));
+            continue;
+        }
+        if !visited.insert(e) {
+            continue;
+        }
+        stack.push((e, true));
+        let deps = ctx.query.query(kestrel_hir_lower::GlobalInitDeps {
+            entity: e,
+            root: ctx.root,
+        });
+        for d in deps.into_iter().rev() {
+            if ty_of.contains_key(&d) && !visited.contains(&d) {
+                stack.push((d, false));
+            }
+        }
+    }
+    order
 }
 
 /// Synthesize the real C `main`: a wrapper `__kestrel_main() -> i64` that runs

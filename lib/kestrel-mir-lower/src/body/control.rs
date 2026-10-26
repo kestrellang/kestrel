@@ -159,7 +159,7 @@ impl OssaBodyCtx<'_, '_> {
         // edges contribute nothing, so `if c { .Some(&local) } else { .None }`
         // joins to the local taint (conservative on the .None path — the
         // sound direction).
-        if self.ctx.module.ty_arena.contains_ref(result_ty) {
+        if self.ctx.module.escape_carry(result_ty).any() {
             let convs = self.current_param_convs();
             let mut joined: Option<kestrel_mir::value::RootProvenance> = None;
             for exit in &reaching {

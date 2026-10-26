@@ -53,6 +53,7 @@ impl CompilerHandle {
         let (tx, rx) = mpsc::unbounded_channel();
         std::thread::Builder::new()
             .name("kestrel-compiler-worker".into())
+            .stack_size(kestrel_compiler::COMPILER_STACK_SIZE)
             .spawn(move || run_worker(rx))
             .expect("failed to spawn compiler worker");
         Self { tx }

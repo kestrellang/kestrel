@@ -15,6 +15,12 @@
 //! let diagnostics = compiler.diagnostics();
 //! ```
 
+/// Stack size for a thread that runs the compiler. The front end and MIR
+/// lowering recurse once per nesting level, so the default 2–8 MB overflowed
+/// on a few thousand levels (long generated `+` chains, deep `else if`
+/// ladders). 256 MB is reserved virtual memory, committed only as used.
+pub const COMPILER_STACK_SIZE: usize = 256 * 1024 * 1024;
+
 pub mod components;
 pub mod diagnostic;
 pub mod queries;

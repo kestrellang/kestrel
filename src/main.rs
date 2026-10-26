@@ -29,9 +29,17 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(code) => code,
+    // Compile on a thread with a large stack: deeply nested input recurses
+    // once per level (see `COMPILER_STACK_SIZE`).
+    let worker = std::thread::Builder::new()
+        .name("kestrel".into())
+        .stack_size(kestrel_compiler::COMPILER_STACK_SIZE)
+        .spawn(run)
+        .expect("failed to spawn the compiler thread");
+    match worker.join() {
+        Ok(Ok(())) => ExitCode::SUCCESS,
+        Ok(Err(code)) => code,
+        Err(panic) => std::panic::resume_unwind(panic),
     }
 }
 

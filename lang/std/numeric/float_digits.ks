@@ -653,3 +653,52 @@ func floatSciString(m: UInt64, e: Int64, precision: Int64, upper: Bool) -> Strin
     };
     appendExponent(out, sr.decExp, upper)
 }
+
+/// Hexadecimal floating-point string (C's `%a`) of a non-negative finite
+/// value from its raw IEEE-754 fields: `0x1.ffp+7` for 255.5, `0x0p+0` for
+/// zero, `0x0.8p-1022` for a subnormal. Exact: every binary digit shows.
+/// `mantBits` is the stored fraction width (52 or 23) and `bias` the exponent
+/// bias (1023 or 127). The caller applies sign and padding.
+func floatHexString(rawExp: Int64, rawMant: UInt64, mantBits: Int64, bias: Int64, upper: Bool) -> String {
+    let xChar: Int64 = if upper { 88 } else { 120 };   // 'X' / 'x'
+    let pChar: Int64 = if upper { 80 } else { 112 };   // 'P' / 'p'
+    var out = String();
+    out.appendByte(UInt8(from: 48));   // '0'
+    out.appendByte(UInt8(from: xChar));
+    let isZero = rawExp == 0 and rawMant == UInt64.zero;
+    // A subnormal (and zero) has a leading 0 and the minimum exponent.
+    let lead: Int64 = if rawExp == 0 { 0 } else { 1 };
+    let exp: Int64 = if isZero { 0 } else if rawExp == 0 { 1 - bias } else { rawExp - bias };
+    out.appendByte(UInt8(from: 48 + lead));
+
+    // Left-align the fraction to whole hex digits, then drop trailing zeros.
+    let pad = (4 - mantBits % 4) % 4;
+    let total = (mantBits + pad) / 4;
+    let frac = rawMant.shiftLeft(by: pad);
+    var count = total;
+    while count > 0 and frac.shiftRight(by: (total - count) * 4).bitwiseAnd(UInt64(from: 15)) == UInt64.zero {
+        count = count - 1
+    };
+    if count > 0 {
+        out.appendByte(UInt8(from: 46));   // '.'
+        var i: Int64 = 0;
+        while i < count {
+            let d = Int64(from: frac.shiftRight(by: (total - 1 - i) * 4).bitwiseAnd(UInt64(from: 15)));
+            let base: Int64 = if d < 10 { 48 } else if upper { 55 } else { 87 };
+            out.appendByte(UInt8(from: base + d));
+            i = i + 1
+        }
+    };
+
+    out.appendByte(UInt8(from: pChar));
+    out.appendByte(UInt8(from: if exp < 0 { 45 } else { 43 }));   // '-' / '+'
+    // Decimal exponent digits, most significant first.
+    let magnitude: Int64 = if exp < 0 { 0 - exp } else { exp };
+    var place: Int64 = 1;
+    while place * 10 <= magnitude { place = place * 10 };
+    while place > 0 {
+        out.appendByte(UInt8(from: 48 + (magnitude / place) % 10));
+        place = place / 10
+    };
+    out
+}

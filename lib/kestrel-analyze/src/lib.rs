@@ -103,6 +103,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
 
     // Compilation checks
     r.add_compilation_check(compilation::type_alias_cycles::TypeAliasCycleAnalyzer);
+    r.add_compilation_check(compilation::global_init_cycles::GlobalInitCycleAnalyzer);
     r.add_compilation_check(compilation::struct_cycles::StructCycleAnalyzer);
     r.add_compilation_check(compilation::protocol_cycles::ProtocolCycleAnalyzer);
     r.add_compilation_check(compilation::constraint_cycles::ConstraintCycleAnalyzer);

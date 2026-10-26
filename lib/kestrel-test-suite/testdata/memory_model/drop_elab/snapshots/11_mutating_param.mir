@@ -5,7 +5,7 @@ bb0:
     store_assign %v2, %v1
     %v3 = literal ()  // @owned ()
     destroy_value %v3
-    %v4 = literal ()  // @owned ()
     destroy_value %v2
+    %v4 = literal ()  // @owned ()
     return %v4
 

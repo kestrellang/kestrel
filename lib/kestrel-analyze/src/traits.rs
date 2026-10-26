@@ -73,6 +73,7 @@ pub enum AnalyzerId {
 
     // Compilation checks (run via `analyze_compilation`, never the `Analyze` query)
     TypeAliasCycles,
+    GlobalInitCycles,
     StructCycles,
     ProtocolCycles,
     ConstraintCycles,
@@ -140,6 +141,7 @@ impl AnalyzerId {
             AnalyzerId::Visibility => "visibility",
             AnalyzerId::TypeAliasValidation => "type_alias_validation",
             AnalyzerId::TypeAliasCycles => "type_alias_cycles",
+            AnalyzerId::GlobalInitCycles => "global_init_cycles",
             AnalyzerId::StructCycles => "struct_cycles",
             AnalyzerId::ProtocolCycles => "protocol_cycles",
             AnalyzerId::ConstraintCycles => "constraint_cycles",

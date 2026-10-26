@@ -1169,7 +1169,10 @@ public struct Float32:
                 e = rawExp - 150
             }
 
-            if precisionProvided == false and suffixPercent == false {
+            if options.radix == 16 {
+                // `:x` / `:X`: exact hexadecimal floating point (C's `%a`).
+                number = floatHexString(rawExp, rawMant, 23, 127, options.uppercase)
+            } else if precisionProvided == false and suffixPercent == false {
                 // No explicit precision: print the SHORTEST decimal that round-
                 // trips back to this exact value (Dragon4 boundary search). The
                 // lower gap is a half-ulp only at a binade boundary (fraction

@@ -67,6 +67,51 @@ impl QueryFn for LowerBody {
     }
 }
 
+/// Query: the stored globals a global's initializer reads directly
+/// (`let a = b + 1` depends on `b`), sorted and deduplicated. The single
+/// source for initialization order (MIR's static-init thunks) and for the
+/// initializer-cycle diagnostic. Reads through function calls are not
+/// followed.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct GlobalInitDeps {
+    pub entity: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for GlobalInitDeps {
+    type Output = Vec<Entity>;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Vec<Entity> {
+        let Some(body) = ctx.query(LowerBody {
+            entity: self.entity,
+            root: self.root,
+        }) else {
+            return Vec::new();
+        };
+        let mut deps: Vec<Entity> = body
+            .exprs
+            .iter()
+            .filter_map(|(_, expr)| match expr {
+                kestrel_hir::body::HirExpr::Def(e, _, _) if is_initialized_global(ctx, *e) => {
+                    Some(*e)
+                },
+                _ => None,
+            })
+            .collect();
+        deps.sort_by_key(|e| e.index());
+        deps.dedup();
+        deps
+    }
+}
+
+/// A stored global with an initializer: a module-level or static `let`/`var`
+/// (`Field` without `Callable`) that has a value.
+pub fn is_initialized_global(ctx: &QueryContext<'_>, entity: Entity) -> bool {
+    ctx.get::<kestrel_ast_builder::NodeKind>(entity) == Some(&kestrel_ast_builder::NodeKind::Field)
+        && ctx.get::<kestrel_ast_builder::Callable>(entity).is_none()
+        && ctx.get::<kestrel_ast_builder::Valued>(entity).is_some()
+}
+
 /// A lowered body and its source map. Both are `Send + Sync`: the map holds
 /// syntax *pointers*, resolved against the file's tree on demand.
 #[derive(Clone, Debug, Hash)]

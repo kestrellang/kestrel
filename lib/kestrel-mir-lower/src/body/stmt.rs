@@ -15,6 +15,7 @@ impl OssaBodyCtx<'_, '_> {
         let stmt = self.hir.stmts[stmt_id].clone();
         let span = stmt_span(&self.hir.stmts[stmt_id]);
         let prev_span = self.current_span.replace(span);
+        let mut temporaries: Option<(usize, kestrel_mir::ValueId)> = None;
 
         match &stmt {
             HirStmt::Let { local, value, .. } => {
@@ -80,11 +81,12 @@ impl OssaBodyCtx<'_, '_> {
                 }
             },
             HirStmt::Expr { expr, .. } => {
-                // A discarded owned result drops at the end of its statement,
-                // not at scope exit (drop-semantics.md §6).
+                // A discarded owned result and argument temporaries drop at
+                // the end of their statement, not at scope exit
+                // (drop-semantics.md §6) — after the writebacks below.
                 let mark = self.scope_stack.last().map_or(0, |f| f.entries.len());
                 let result = self.lower_expr(*expr);
-                self.drop_discarded_result(result, mark);
+                temporaries = Some((mark, result));
             },
             HirStmt::Deinit {
                 local: Some(hir_local),
@@ -125,6 +127,11 @@ impl OssaBodyCtx<'_, '_> {
             // correctly ordered relative to later statements.
             self.drain_writebacks(0);
             self.end_stale_refs_since(0);
+        }
+        // Temporaries drop last: a get→set writeback above still reads its
+        // slot (`arr(0).i.x = 10`).
+        if let Some((mark, result)) = temporaries {
+            self.drop_statement_temporaries(mark, result);
         }
 
         self.current_span = prev_span;

@@ -455,6 +455,7 @@ An executable build (`kestrel build`, `flock build`/`run`) requires exactly one
 | E630 | '{name}' is a {kind}, not a protocol | A conformance list entry (`struct S: P`, `extend T: P`, `protocol Q: P`) names a struct, enum or other non-protocol type. |
 | E631 | default argument value depends on itself | A parameter's default value calls the same function without passing that argument, so inlining the default would never end. Pass the argument explicitly in the recursive call. |
 | E632 | parameter '{param}' of method '{method}' has the wrong type for protocol '{proto}' | A conformance's method has the requirement's arity and labels but a different parameter type. |
+| E633 | global initializer depends on itself: '{a}' -> ... -> '{a}' | A global's initializer reads that global, directly or through other globals' initializers, so no initialization order exists. |
 
 ### Example
 
