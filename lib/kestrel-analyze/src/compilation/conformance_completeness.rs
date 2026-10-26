@@ -988,7 +988,7 @@ fn property_type_compare(
     for (entity, ty) in proto_param_subs {
         env.param_subs.push((*entity, ty.clone()));
     }
-    compare_hir_types(cx.query, cx.root, &expected, &actual, &env)
+    compare_hir_types(cx.query, &expected, &actual, &env)
 }
 
 fn method_return_type_compare(
@@ -1015,7 +1015,7 @@ fn method_return_type_compare(
         protocol,
         proto_param_subs,
     );
-    compare_hir_types(cx.query, cx.root, &expected, &actual, &env)
+    compare_hir_types(cx.query, &expected, &actual, &env)
 }
 
 /// The comparison environment for a requirement against its witness: the
@@ -1160,7 +1160,7 @@ fn method_param_types_mismatch(
         let (Some(e), Some(a)) = (e, a) else {
             return false;
         };
-        !compare_hir_types(cx.query, cx.root, e, a, &env).is_equal_or_unknown()
+        !compare_hir_types(cx.query, e, a, &env).is_equal_or_unknown()
     })
 }
 
@@ -2238,7 +2238,7 @@ fn param_types_match(
         let (Some(proto_ty), Some(impl_ty)) = (proto_ty, impl_ty) else {
             continue;
         };
-        if !compare_hir_types(cx.query, cx.root, proto_ty, impl_ty, &env).is_equal_or_unknown() {
+        if !compare_hir_types(cx.query, proto_ty, impl_ty, &env).is_equal_or_unknown() {
             return false;
         }
     }
