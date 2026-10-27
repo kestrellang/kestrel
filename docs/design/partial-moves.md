@@ -1,7 +1,7 @@
 # Partial Moves
 
-Status: **draft**, open for review (2026-10-27). Base commit: `8c5d3191`.
-Fixes fuzz **M6** and **M8**. Related: E511 (C23), E635 (H12).
+Status: **draft**, decisions recorded (2026-10-27). Base commit: `8c5d3191`.
+Fixes fuzz **M6** and **M8**, and narrows E635 (H12). Related: E511 (C23).
 
 ## Problem
 
@@ -78,13 +78,21 @@ flags cover moves that happen on only some paths.
 6. **Loops.** As for whole moves today: moving a field inside a loop body
    without reinitializing it before the next iteration is E500 on the second
    iteration.
-7. **Out of scope.**
-   - Enum payloads. `match` destructuring already moves those out.
+7. **`match` on an owned value moves only the matched parts.** A by-value
+   pattern that binds a non-Copyable field moves that field and nothing
+   else. Fields the pattern ignores (`_`, unmentioned fields) stay in place
+   and usable. Today the whole scrutinee is moved.
+8. **A `mutating` closure captures only the places it writes.** In
+   `w(p.a, { p.b = 3 })` the closure captures `p.b`, not all of `p`, so it no
+   longer conflicts with `mutating p.a` (E635).
+9. **Out of scope.**
    - Moves out of array elements or through accessors (get/set or `ref`
      members). Those are not stored places.
 
 Diagnostics reuse E500, with the "partially moved" wording when the use
-names a containing place. No new code is needed.
+names a containing place. No new code is needed. Rule 3 applies to `self`
+in a `consuming` method too: after moving `self.a`, calling another method
+on `self` is E500, as in Rust.
 
 ### Move checker (`kestrel-analyze`)
 
@@ -115,8 +123,8 @@ sub-places:
 - **Unchanged:**
   - The one-diagnostic-per-local dedup (`reported`, keyed by root).
   - The nested-closure `force_whole` collapse.
-  - Match moves on an owned scrutinee (widened to the root in lockstep with
-    `emit_moveout`). These can be done separately later.
+- **Match moves** (rule 7) record the bound payload places instead of
+  widening to the scrutinee root, in lockstep with MIR's `emit_moveout`.
 
 ### MIR lowering (`kestrel-mir-lower`)
 
@@ -166,6 +174,26 @@ This generalizes the init-body per-field machinery (`field_inits`,
 - **No user deinit is involved.** Rule 2 guarantees no type on the path has
   one, so skipping the struct's drop shim is sound. The shim only destroys
   the fields, in reverse order.
+
+### Field-granular write captures (rule 8)
+
+This part is independent of drop tracking, so it gets its own phase. It
+changes how a view closure's environment points into the frame, not what
+gets dropped.
+
+- **Today:** `plan_slots` (`kestrel-mir-lower/src/body/closure.rs`) keeps
+  a projected place as its own capture slot only for a duplicable
+  read-only capture. A write capture is collapsed to the whole local.
+- **Change:** a view closure (normal or `mutating`) captures a written
+  place by its field address. The parent side already does this:
+  `view_addr_of_place` → `try_field_addr_chain`. The closure body's
+  `place_capture_map` then routes writes through that pointer as well as
+  reads.
+- **Analyzer:** `exclusive_args.rs` (E635) uses the captured place itself
+  instead of `PlaceKey::whole(root)`. The move checker's freeze set for
+  `mutating` closures uses the written place too.
+- **Owning closures** (`escaping`, `consuming`) are unaffected. They own
+  their environment and never write back to the frame.
 
 ### OSSA verifier (`kestrel-mir`)
 
@@ -226,7 +254,11 @@ Each phase leaves the suite green:
 3. **Move checker.** Delete `effective_move_place`, add the overlap-aware
    use check and field reinitialization. This fixes M8. Re-baseline the
    pinned tests listed below.
-4. **Owning projected captures.** Move only the captured projection.
+4. **Owning projected captures and match moves.** An owning closure moves
+   only the captured projection. `match` moves only the matched parts
+   (rule 7).
+5. **Field-granular write captures** (rule 8). Narrows E635. This phase
+   does not depend on the others and can be done at any point.
 
 ## Tests
 
@@ -263,17 +295,12 @@ Pinned tests to re-baseline (user approval needed per CLAUDE.md):
 - `memory_model/drop_elab/14_struct_with_non_copy_field.ks`: root-only
   move paths.
 
-## Open questions
+## Decisions
 
-1. **Partially moved `self` in a `consuming` method.** Calling another
-   method on `self` after moving a field is an error under rule 3. Rust
-   agrees. Confirm.
-2. **E500 vs a new code** for "use of partially moved value". The proposal
-   reuses E500 with distinct wording.
-3. **Match on an owned scrutinee.** Moving only the bound payload fields,
-   instead of widening to the root, is a natural follow-up. Include it here,
-   or leave it for later?
-4. **E635 (H12).** A `mutating` closure that writes `p.b` still captures
-   all of `p`, so `w(p.a, { p.b = 3 })` stays rejected. Field-granular
-   write captures are a separate change to `plan_slots` and are not part of
-   this design.
+1. Calling a method on a partially moved `self` in a `consuming` method is
+   an error (rule 3), as in Rust.
+2. "Use of partially moved value" reuses E500.
+3. `match` on an owned value moves only the matched parts (rule 7).
+4. Field-granular write captures are included (rule 8, phase 5). They are
+   a separate phase because they change closure environments, not drop
+   tracking.
