@@ -1,6 +1,6 @@
 # Indirect Enums Implementation Plan (0.19)
 
-**Status:** rev 2 — open questions Q1–Q5 answered (see [Decisions](#decisions-from-review)). **Design inputs:** [shared-box.md](../../design/shared-box.md)
+**Status:** rev 3 — all review questions (Q1–Q6) answered (see [Decisions](#decisions-from-review)). **Design inputs:** [shared-box.md](../../design/shared-box.md)
 (`indirect enum` client row), [enums.md](../../language/enums.md) §Recursive Enums.
 **Method:** TDD — Phase 0 baselines the test matrix red before any compiler change.
 
@@ -135,8 +135,10 @@ bug, and indirect enums make recursion the common case.
 Replace them with framework-level fixpoint recovery in `kestrel-hecs`
 `query.rs`, in the shape of Salsa's cycle handling:
 
-- `QueryFn` gains an opt-in `fn cycle_initial(&self) -> Option<Self::Output>`
-  (default `None` = keep today's panic).
+- `QueryFn` gains an opt-in `fn cycle_mode(&self) -> CycleMode<Self::Output>`:
+  `Panic` (default, today's behavior), `Fixpoint { initial }` (iterate to a
+  fixpoint), or `Fallback { value }` (every member of the cycle answers
+  `value`, no iteration — for cycles that are genuinely errors).
 - Re-entering an opted-in key on the stack returns its provisional value
   (initially `cycle_initial`) and marks the cycle head.
 - The head re-executes until its output stops changing; members computed
@@ -147,8 +149,27 @@ Replace them with framework-level fixpoint recovery in `kestrel-hecs`
   (copy semantics: Copyable → Cloneable → NotCopyable). Debug-assert
   monotonicity; hard iteration cap → ICE.
 
-Migrate `NominalCopySemantics` first (needed here). Staticness, sizedness and
-the opaque stack follow the same recipe; see Q6.
+All four side stacks migrate in 0.19 (Q6), and each thread-local is deleted:
+
+| guard | query | mode | initial / fallback | lattice |
+|---|---|---|---|---|
+| `COMPUTING_COPY_SEMANTICS` | `NominalCopySemantics` | Fixpoint | Copyable (today's self-reference assumption) | Copyable → Cloneable → NotCopyable |
+| `COMPUTING_STATICNESS` | `NominalStaticness` | Fixpoint | Static (today's assumption) | Static → conditional → not Static |
+| `COMPUTING_SIZEDNESS` | `NominalSizedness` | Fixpoint | `Sized` | `Sized` → `ConditionalOn(positions)` with positions only growing (bounded by the param count) |
+| `OPAQUE_RESOLVE_STACK` | **new** `OpaqueConcreteTy { origin }` | Fallback | `error()` | n/a |
+
+The opaque guard is different in kind: it guards a plain recursive function
+(`lower_resolved_ty` lowering an opaque type whose concrete type mentions
+itself), not query re-entry. Migrating it means lifting "concrete type of this
+opaque origin, lowered" into its own query so the framework can see the cycle.
+A cycle there is a user error (`func f() -> some P { f() }`), so the fallback
+also emits a diagnostic instead of silently yielding `error()` — new ID, owned
+by the analyzer that already reports opaque-type errors.
+
+Migration order: copy semantics (indirect enums need it), then staticness and
+sizedness (same shape, mechanical), then opaque (new query + diagnostic). Each
+is its own commit with the full suite green, so one regression doesn't block
+the rest.
 
 MIR `copy_behavior_in` reads `type_info.copy`, which is fed from that query, and
 the physical field is `OwnedBox`, whose own conditional `Cloneable` agrees — so
@@ -176,8 +197,12 @@ count); an indirect enum with no recursive case (warning, Copyable); one
 
 **Phase 1a — Cycle recovery** (A7) in `kestrel-hecs`, with framework unit tests
 (direct cycle, mutual cycle, invalidation of one member reruns the cycle,
-non-opted query still panics). Migrate `NominalCopySemantics`, delete
-`COMPUTING_COPY_SEMANTICS`; full suite must stay green before moving on.
+non-opted query still panics, `Fallback` answers every member). Then migrate
+all four guards in the A7 order, deleting each thread-local; the full suite
+must stay green after each one. Recursive-type tests for staticness and
+sizedness (struct containing itself through a box, generic self-reference) and
+a recursive opaque-return test land first, red where they expose today's
+stale-memo behavior.
 
 **Phase 1b — Front end.** Remove `IndirectEnumAnalyzer` and retire E465 (ID stays
 reserved). Add `IndirectCases` (A6) and point E429 at it. Make A5 see boxed
@@ -206,7 +231,7 @@ does this for closure environments. (2) The ownership verifier around
 recursion making mono non-terminating — mono has no instantiation depth limit
 today.
 
-**Estimate:** ~1–1.5 weeks for the feature (Phase 4 is half of it) plus ~3–5 days for Phase 1a.
+**Estimate:** ~1–1.5 weeks for the feature (Phase 4 is half of it) plus ~1–1.5 weeks for Phase 1a (framework ~3–5 days, then four migrations; opaque is the largest because it adds a query and a diagnostic).
 
 ## Decisions from review
 
@@ -220,13 +245,8 @@ today.
   stdlib `OwnedBox`, `indirect enum` is an error.
 - **Q4. Deep drop recursion** ships as a known issue with a test documenting it.
 - **Q5. Replace the re-entrancy guard now** with query cycle recovery (A7).
-
-## Open questions
-
-- **Q6. Scope of A7 migration.** Migrate only `NominalCopySemantics` in 0.19 (the
-  one indirect enums need) and file staticness / sizedness / opaque as
-  follow-ups, or migrate all four now? *Recommend: copy semantics now, the
-  framework general enough for the rest, others as follow-up PRs.*
+- **Q6. Migrate all four guards** (copy semantics, staticness, sizedness,
+  opaque types) in 0.19.
 
 ## Deferred
 
