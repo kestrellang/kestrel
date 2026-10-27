@@ -49,5 +49,5 @@ pub mod world;
 // Re-export primary types at crate root
 pub use entity::Entity;
 pub use fingerprint::Fingerprint;
-pub use query::{QueryContext, QueryFn, QueryKey};
+pub use query::{CycleMode, QueryContext, QueryFn, QueryKey};
 pub use world::{Revision, World};
