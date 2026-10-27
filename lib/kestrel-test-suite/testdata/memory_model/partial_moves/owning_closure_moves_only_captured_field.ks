@@ -4,7 +4,7 @@
 
 // An owning closure (`escaping`/`consuming`) whose captures of a local are all
 // field reads moves just the non-Copyable field it reads; the local's other
-// fields stay usable and drop exactly once (partial-moves.md rule 9).
+// fields stay usable and drop exactly once (partial-moves.md, phase 4).
 module Test
 
 import std.numeric.(Int64)

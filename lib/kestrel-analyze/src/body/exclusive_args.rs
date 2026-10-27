@@ -16,9 +16,8 @@
 //!
 //! Place identity is `kestrel_type_infer::captures::place_key_of`, the same
 //! function the capture analysis uses, so `t(p.a, p.b)` (disjoint stored
-//! fields) passes. A writing closure
-//! counts as accessing its captured locals WHOLE, matching how lowering
-//! captures them (field-granular capture is tracked as fuzz M8).
+//! fields) passes, and so does a closure writing a field disjoint from a
+//! `mutating` argument (a view closure captures written fields by address).
 //!
 //! ## Diagnostics
 //!
@@ -135,13 +134,13 @@ fn exclusive_accesses(
     }
     for (i, arg) in args.iter().enumerate() {
         if matches!(cx.hir.exprs[arg.value], HirExpr::Closure { .. }) {
-            // A closure literal's WRITE captures are exclusive accesses —
-            // of the WHOLE root: lowering captures a written place by its
-            // whole local (`plan_slots`), so `w(p.a, { p.b = 3 })` really
-            // does borrow all of `p`. Field-granular capture is fuzz M8.
+            // A closure literal's WRITE captures are exclusive accesses of
+            // exactly the written place: a view closure captures a projected
+            // place by its own address (`plan_slots`), so `w(p.a, { p.b = 3 })`
+            // touches only `p.b`.
             for cp in captures.get(arg.value) {
                 if cp.kind == CaptureKind::Write {
-                    out.push((PlaceKey::whole(cp.key.root), arg.value, true));
+                    out.push((cp.key.clone(), arg.value, true));
                 }
             }
             continue;

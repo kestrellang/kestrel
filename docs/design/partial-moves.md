@@ -1,6 +1,6 @@
 # Partial Moves
 
-Status: **draft**, decisions recorded (2026-10-27). Base commit: `8c5d3191`.
+Status: **implemented** (2026-10-27), phases 1–5. Design base commit: `8c5d3191`.
 Fixes fuzz **M6** and **M8**, and narrows E635 (H12). Related: E511 (C23).
 
 ## Problem
@@ -294,6 +294,28 @@ Pinned tests to re-baseline (user approval needed per CLAUDE.md):
   changes from take-and-destructure to a field take.
 - `memory_model/drop_elab/14_struct_with_non_copy_field.ks`: root-only
   move paths.
+
+## Implementation notes
+
+Where the implementation differs from the plan above, and what stays whole:
+
+- **No function-exit check in the verifier.** Slots of Copyable types are
+  never destroyed (their drop is a no-op), so "every slot is uninit at exit"
+  would flag every Copyable local. The verifier's precision is the per-path
+  slot tree (`SlotState` in `kestrel-mir/src/verify.rs`): a whole read, take,
+  destroy, or `StoreAssign` of a partially moved place is an error.
+- **Field-move planning** is `kestrel-mir-lower/src/body/partial_move.rs`:
+  one pass per body finds the projections in consuming positions (plus
+  owning-closure captures and part-moving matches) and allocates a presence
+  flag per moved path where the variable is declared.
+- **Shared rules** live in `kestrel_type_infer::captures`, used by both MIR
+  lowering and the move checker: `field_capturable_roots` (owning closures, phase 4) and
+  `match_bound_places` (rule 7).
+- **Still moved whole:** `let`/parameter destructuring patterns, match
+  patterns that reach a binding through an enum variant, an array, an `@`
+  binding, a tuple suffix after `..`, or a shorthand struct field; calling
+  a `consuming` closure stored in a field (`(h.f)()`); and moves out of a
+  `mutating` parameter's field (still E503 at lowering).
 
 ## Decisions
 

@@ -680,8 +680,17 @@ impl OssaBodyCtx<'_, '_> {
             // Gating on `is_copy_type` (Bitwise only) here would force a Clone
             // field to fall back to whole-receiver capture, which can wrongly
             // consume a move-only receiver. See [[closure_cloneable_capture_clone]].
-            let by_place = cp.kind == CaptureKind::Read
-                && (self.captures_by_value(pty) || field_roots.contains(&cp.key.root));
+            // A VIEW closure captures a projected place by its address
+            // (`view_addr_of_place`), read or written, Copyable or not — so
+            // `{ p.b = 3 }` aliases only `p.b`, not all of `p`
+            // (partial-moves.md rule 8). An owning closure copies duplicable
+            // fields and moves the rest only when `field_roots` allows it.
+            let by_place = if owning {
+                cp.kind == CaptureKind::Read
+                    && (self.captures_by_value(pty) || field_roots.contains(&cp.key.root))
+            } else {
+                !self.is_protocol_self(pty)
+            };
             if !by_place {
                 whole_roots.insert(cp.key.root);
             }

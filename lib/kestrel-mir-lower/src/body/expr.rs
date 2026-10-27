@@ -1069,6 +1069,11 @@ impl OssaBodyCtx<'_, '_> {
         if self.store_into_partially_moved(target, rhs) {
             return self.emit_literal(Immediate::unit());
         }
+        // A closure body writing a field it captured by address (`{ p.b = 3 }`).
+        if let Some(super::PlaceCapture::Addr(addr)) = self.captured_place_value(target) {
+            self.emit_store_assign(addr, rhs);
+            return self.emit_literal(Immediate::unit());
+        }
 
         let target_expr = self.hir.exprs[target].clone();
         match target_expr {

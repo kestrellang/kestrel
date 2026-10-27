@@ -193,7 +193,7 @@ pub fn resolved_is_stored_field(world: &QueryContext<'_>, entity: Entity) -> boo
 /// Roots an OWNING closure (`escaping`/`consuming`) can capture field by
 /// field: every capture of the root is a read of a projected place. Such a
 /// closure moves (or copies) just those fields and leaves the rest of the
-/// local in place (docs/design/partial-moves.md, rule 9 phase 4); any whole
+/// local in place (docs/design/partial-moves.md, phase 4); any whole
 /// or written capture takes the whole local. The single rule MIR lowering
 /// (`plan_slots`) and the move checker both apply, so they agree on what moved.
 pub fn field_capturable_roots(plan: &[CapturedPlace]) -> HashSet<LocalId> {
