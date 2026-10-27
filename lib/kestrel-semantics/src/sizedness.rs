@@ -13,14 +13,12 @@
 //! only the tail field can gate: every other stored field must be Sized
 //! (E403 enforces that).
 
-use std::cell::RefCell;
 
 use kestrel_ast_builder::WhereConstraint;
 use kestrel_ast_builder::{
     FieldClass, Intrinsic, NodeKind, TypeParams, WhereClause as AstWhereClause,
 };
-use kestrel_hecs::guard::OnDrop;
-use kestrel_hecs::{Entity, QueryContext, QueryFn};
+use kestrel_hecs::{CycleMode, Entity, QueryContext, QueryFn};
 use kestrel_hir::{Builtin, HirTy};
 use kestrel_hir_lower::LowerTypeAnnotation;
 use kestrel_name_res::ResolveBuiltin;
@@ -194,40 +192,25 @@ pub struct NominalSizedness {
     pub root: Entity,
 }
 
-// Re-entrancy guard for recursive types, same caveat as COMPUTING_STATICNESS:
-// side-channel state the dependency tracker can't see, present only because
-// re-entrant queries panic.
-thread_local! {
-    static COMPUTING_SIZEDNESS: RefCell<Vec<(Entity, Entity)>> = const { RefCell::new(Vec::new()) };
-}
-
 impl QueryFn for NominalSizedness {
     type Output = Sizedness;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Sizedness {
-        let key = (self.entity, self.root);
-        COMPUTING_SIZEDNESS.with(|stack| stack.borrow_mut().push(key));
-        let _guard = OnDrop::new(|| {
-            COMPUTING_SIZEDNESS.with(|stack| {
-                stack.borrow_mut().pop();
-            });
-        });
         nominal_sizedness_impl(ctx, self.entity, self.root)
+    }
+
+    /// A struct whose unsized tail reaches itself is an infinite type,
+    /// reported elsewhere. Start at Sized and let the gating positions grow
+    /// (bounded by the param count) to the fixpoint.
+    fn cycle_mode(&self) -> CycleMode<Sizedness> {
+        CycleMode::Fixpoint {
+            initial: Sizedness::Sized,
+        }
     }
 
     fn describe(&self) -> String {
         format!("NominalSizedness({:?})", self.entity)
     }
-}
-
-/// Cycle-guarded lookup: a nominal that reaches itself through its tail is
-/// an infinite type, reported elsewhere; treat it as Sized here.
-fn query_nominal_sizedness(ctx: &QueryContext<'_>, entity: Entity, root: Entity) -> Sizedness {
-    let cycle = COMPUTING_SIZEDNESS.with(|stack| stack.borrow().contains(&(entity, root)));
-    if cycle {
-        return Sizedness::Sized;
-    }
-    ctx.query(NominalSizedness { entity, root })
 }
 
 fn nominal_sizedness_impl(ctx: &QueryContext<'_>, entity: Entity, root: Entity) -> Sizedness {
@@ -299,7 +282,10 @@ fn tail_positions(
                 _ => Vec::new(),
             }
         },
-        HirTy::Struct { entity, args, .. } => match query_nominal_sizedness(ctx, *entity, root) {
+        HirTy::Struct { entity, args, .. } => match ctx.query(NominalSizedness {
+            entity: *entity,
+            root,
+        }) {
             Sizedness::Sized => Vec::new(),
             Sizedness::ConditionalOn(gating) => gating
                 .iter()
@@ -323,7 +309,10 @@ impl SizedLayer for HirSizedWalk<'_, '_> {
     type Ty = HirTy;
 
     fn nominal_sizedness(&self, entity: Entity) -> Sizedness {
-        query_nominal_sizedness(self.ctx, entity, self.root)
+        self.ctx.query(NominalSizedness {
+            entity,
+            root: self.root,
+        })
     }
 
     fn member_is_sized(&self, ty: &HirTy) -> bool {
