@@ -28,6 +28,9 @@ pub enum InferError {
     DoesNotConform {
         ty: TyVar,
         protocol: Entity,
+        /// The protocol's type args the obligation named (empty when it
+        /// judged the protocol alone) — shown as `P[A]` in the message.
+        protocol_args: Vec<TyVar>,
         span: Span,
     },
 

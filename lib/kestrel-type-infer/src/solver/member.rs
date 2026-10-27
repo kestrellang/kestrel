@@ -942,7 +942,7 @@ pub(super) fn solve_member(
     // `expected_proto_args`), then the method's own fresh params. Without
     // the proto args here, dispatch through `extend Type: Proto[FreeParams]`
     // can't recover the extension's free TypeParams from the witness.
-    let mut recorded_type_args = proto_type_args_tvs;
+    let mut recorded_type_args = proto_type_args_tvs.clone();
     recorded_type_args.extend(fresh_params.iter().copied());
     if !recorded_type_args.is_empty() {
         ctx.record_type_args(expr, recorded_type_args, span.clone());
@@ -1072,8 +1072,11 @@ pub(super) fn solve_member(
 
     // When resolved through a protocol conformance, emit a Conforms constraint
     // to verify the receiver conforms to this protocol with the inferred type args.
+    // The protocol's args ride along: `Int8(from: x)` resolves through
+    // `Convertible[From]`, and `Int8: Convertible` alone holds for ANY
+    // declared `From` — the obligation is `Int8: Convertible[typeof x]`.
     if let Some(protocol) = resolution.via_protocol {
-        ctx.conforms(receiver, protocol, span.clone());
+        ctx.conforms_with_args(receiver, protocol, proto_type_args_tvs, span.clone());
     }
 
     // Bind arguments to parameters in declaration order, allowing defaulted

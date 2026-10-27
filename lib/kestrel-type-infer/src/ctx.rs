@@ -1057,6 +1057,27 @@ impl<'a> InferCtx<'a> {
             span,
             poison_ty_on_failure: false,
             origin: crate::constraint::ConformsOrigin::Expr,
+            protocol_args: Vec::new(),
+        });
+    }
+
+    /// `ty: protocol[protocol_args]` — a value-level conformance whose
+    /// protocol args must match one of the receiver's declared
+    /// instantiations (a call resolved through a generic protocol's member).
+    pub fn conforms_with_args(
+        &mut self,
+        ty: TyVar,
+        protocol: Entity,
+        protocol_args: Vec<TyVar>,
+        span: Span,
+    ) {
+        self.emit(Constraint::Conforms {
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure: false,
+            origin: crate::constraint::ConformsOrigin::Expr,
+            protocol_args,
         });
     }
 
@@ -1070,6 +1091,7 @@ impl<'a> InferCtx<'a> {
             span,
             poison_ty_on_failure: false,
             origin: crate::constraint::ConformsOrigin::TypeArg,
+            protocol_args: Vec::new(),
         });
     }
 
@@ -1084,6 +1106,7 @@ impl<'a> InferCtx<'a> {
             span,
             poison_ty_on_failure: true,
             origin: crate::constraint::ConformsOrigin::Expr,
+            protocol_args: Vec::new(),
         });
     }
 

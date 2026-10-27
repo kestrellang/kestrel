@@ -620,8 +620,17 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 span,
                 poison_ty_on_failure,
                 origin: _,
+                protocol_args,
             } => {
                 if ctx.is_error(ctx.resolve(ty)) {
+                    continue;
+                }
+                // A protocol arg that never resolved gets its own "could not
+                // infer"; judging the conformance without it would guess.
+                if protocol_args
+                    .iter()
+                    .any(|&a| crate::solver_entail::has_open_var(ctx, a))
+                {
                     continue;
                 }
                 // A literal default's well-formedness check (`Array[?E]: E:
@@ -647,7 +656,15 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 if poison_ty_on_failure {
                     ctx.poison(ty);
                 }
-                (InferError::DoesNotConform { ty, protocol, span }, Some(ty))
+                (
+                    InferError::DoesNotConform {
+                        ty,
+                        protocol,
+                        protocol_args,
+                        span,
+                    },
+                    Some(ty),
+                )
             },
             Constraint::Associated {
                 container,
@@ -934,7 +951,16 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
             span,
             poison_ty_on_failure,
             origin,
-        } => solve_conforms(ctx, ty, protocol, span, poison_ty_on_failure, origin),
+            protocol_args,
+        } => solve_conforms(
+            ctx,
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure,
+            origin,
+            protocol_args,
+        ),
         Constraint::Associated {
             container,
             key,
