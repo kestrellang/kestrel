@@ -355,6 +355,25 @@ impl OssaBodyCtx<'_, '_> {
         scrutinee_expr: HirExprId,
         arm: &HirMatchArm,
     ) -> ValueId {
+        // A destructure that moves only some parts of an owned place
+        // (`let (x, _) = t`) keeps the place and takes just those parts.
+        let part_moves = self
+            .partial
+            .matches
+            .get(&_expr_id)
+            .cloned()
+            .filter(|(root, _)| {
+                matches!(
+                    self.var_entry(*root),
+                    Some(super::ScopeEntry::Var {
+                        borrowed: false,
+                        ..
+                    })
+                )
+            });
+        if part_moves.is_some() {
+            return self.lower_destructure_in_place(scrutinee_expr, arm, part_moves);
+        }
         let scrutinee_val = self.lower_expr(scrutinee_expr);
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
         let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
@@ -372,6 +391,32 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_bindings(&bindings, scrutinee_val, scrutinee_ty);
 
         // Lower the arm body (typically `()` for let destructures).
+        self.lower_expr(arm.body)
+    }
+
+    /// `lower_irrefutable_destructure` for a partial move: bind from the
+    /// pinned scrutinee address; moving bindings take their fields out of
+    /// the slot (`emit_bindings_place`), the rest copy or borrow as usual.
+    fn lower_destructure_in_place(
+        &mut self,
+        scrutinee_expr: HirExprId,
+        arm: &HirMatchArm,
+        part_moves: Option<(LocalId, Vec<(LocalId, Vec<FieldIdx>)>)>,
+    ) -> ValueId {
+        let addr = self.lower_match_scrutinee_place(scrutinee_expr, false);
+        let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
+        let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
+        let tree = kestrel_pattern_matching::compile_decision_tree(
+            &self.hir,
+            &self.ctx.query,
+            self.ctx.root,
+            &scrutinee_resolved_ty,
+            std::slice::from_ref(arm),
+        );
+        let bindings = Self::extract_irrefutable_bindings(&tree);
+        let saved = std::mem::replace(&mut self.active_match_moves, part_moves);
+        self.emit_bindings_place(&bindings, addr, scrutinee_ty);
+        self.active_match_moves = saved;
         self.lower_expr(arm.body)
     }
 

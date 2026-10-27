@@ -209,11 +209,11 @@ pub fn field_capturable_roots(plan: &[CapturedPlace]) -> HashSet<LocalId> {
 /// For a `match` (or `if let`/`while let`) on an owned place whose arm
 /// patterns only destructure structs and tuples on the way to their bindings,
 /// the place each by-value binding names (`match p { P(a: x, ..) => … }`:
-/// `x` ↦ `p.a`). Such a match moves just those places and leaves the rest of
-/// the scrutinee in place (docs/design/partial-moves.md rule 7). `None` when
-/// the scrutinee is not a place, the match is a `let`/parameter destructure,
-/// or a pattern reaches a binding through an enum variant, array or `@`
-/// binding — those consume the whole scrutinee.
+/// `x` ↦ `p.a`). Such a match — or `let`/parameter destructure — moves just
+/// those places and leaves the rest of the scrutinee in place
+/// (docs/design/partial-moves.md rule 7). `None` when the scrutinee is not a
+/// place, or a pattern reaches a binding through an enum variant, array or
+/// `@` binding — those consume the whole scrutinee.
 ///
 /// The single rule MIR lowering and the move checker both apply. Callers
 /// keep only the bindings whose type actually moves (non-Copyable).
@@ -225,28 +225,28 @@ pub fn match_bound_places(
     arms: &[kestrel_hir::body::HirMatchArm],
     source: kestrel_hir::body::MatchSource,
 ) -> Option<Vec<(LocalId, PlaceKey)>> {
-    use kestrel_hir::body::MatchSource;
-    if matches!(
-        source,
-        MatchSource::LetDestructure | MatchSource::ParamDestructure
-    ) {
-        return None;
-    }
+    let _ = source;
     let base = place_key_of(world, typed, hir, scrutinee)?;
+    let ty = typed.expr_types.get(&scrutinee).cloned();
     let mut out = Vec::new();
     for arm in arms {
-        bound_places(world, hir, arm.pattern, base.clone(), &mut out)?;
+        bound_places(world, hir, arm.pattern, base.clone(), ty.clone(), &mut out)?;
     }
     Some(out)
 }
 
+/// `ty` is the type of the place at `here` when it is known (it is carried
+/// through tuple elements; a struct field's type is not needed and dropped),
+/// so a tuple pattern's suffix after `..` can be indexed from the end.
 fn bound_places(
     world: &QueryContext<'_>,
     hir: &kestrel_hir::body::HirBody,
     pat: kestrel_hir::body::HirPatId,
     here: PlaceKey,
+    ty: Option<crate::result::ResolvedTy>,
     out: &mut Vec<(LocalId, PlaceKey)>,
 ) -> Option<()> {
+    use crate::result::ResolvedTy;
     use kestrel_hir::body::HirPat;
     match &hir.pats[pat] {
         HirPat::Binding { local, by_ref, .. } => {
@@ -256,14 +256,27 @@ fn bound_places(
         },
         HirPat::Wildcard { .. } | HirPat::Literal { .. } | HirPat::Range { .. } => {},
         HirPat::Tuple { prefix, suffix, .. } => {
-            // A suffix element's index depends on the arity; keep it simple.
-            if !suffix.is_empty() {
-                return None;
-            }
-            for (i, &p) in prefix.iter().enumerate() {
+            let elems = match &ty {
+                Some(ResolvedTy::Tuple(elems)) => Some(elems.clone()),
+                _ => None,
+            };
+            // A suffix after `..` counts from the end: it needs the arity.
+            let suffix_start = match (&elems, suffix.is_empty()) {
+                (_, true) => 0,
+                (Some(elems), false) => elems.len().checked_sub(suffix.len())?,
+                (None, false) => return None,
+            };
+            let positioned = prefix.iter().enumerate().chain(
+                suffix
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| (suffix_start + i, p)),
+            );
+            for (i, &p) in positioned {
                 let mut at = here.clone();
                 at.path.push(ProjElem::TupleIndex(i as u32));
-                bound_places(world, hir, p, at, out)?;
+                let elem_ty = elems.as_ref().and_then(|e| e.get(i).cloned());
+                bound_places(world, hir, p, at, elem_ty, out)?;
             }
         },
         HirPat::Struct { entity, fields, .. } => {
@@ -278,7 +291,7 @@ fn bound_places(
                 })?;
                 let mut at = here.clone();
                 at.path.push(ProjElem::Field(field));
-                bound_places(world, hir, sub, at, out)?;
+                bound_places(world, hir, sub, at, None, out)?;
             }
         },
         _ => return None,

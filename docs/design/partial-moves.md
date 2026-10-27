@@ -311,11 +311,14 @@ Where the implementation differs from the plan above, and what stays whole:
 - **Shared rules** live in `kestrel_type_infer::captures`, used by both MIR
   lowering and the move checker: `field_capturable_roots` (owning closures, phase 4) and
   `match_bound_places` (rule 7).
-- **Still moved whole:** `let`/parameter destructuring patterns, match
-  patterns that reach a binding through an enum variant, an array, an `@`
-  binding, a tuple suffix after `..`, or a shorthand struct field; calling
-  a `consuming` closure stored in a field (`(h.f)()`); and moves out of a
-  `mutating` parameter's field (still E503 at lowering).
+- **`let` destructuring** of a place without a type annotation matches the
+  place directly (`let (x, _) = t` is `match t { … }`), so it moves only the
+  bound parts; with an annotation it still goes through a temporary.
+- **Still moved whole:** match patterns that reach a binding through an enum
+  variant (the payload has no place of its own), an array, or an `@`
+  binding; calling a `consuming` closure stored in a field (`(h.f)()`); and
+  moves out of a `mutating` parameter's field (the caller owns that storage;
+  still E503).
 
 ## Decisions
 
