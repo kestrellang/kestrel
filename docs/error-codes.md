@@ -18,7 +18,7 @@ the type checker, and the code is assigned in one place,
 - [E100–E141 — Type checking, names, parameters & literals](#e100e141--type-checking-names-parameters--literals)
 - [E200–E213 — Mutability, access modes & assignment](#e200e213--mutability-access-modes--assignment)
 - [E300–E321 — Patterns & exhaustiveness](#e300e321--patterns--exhaustiveness)
-- [E400–E404, E408, E411–E479 — Declarations, generics & protocol conformance](#e400e404-e408-e411e479--declarations-generics--protocol-conformance)
+- [E400–E408, E411–E479 — Declarations, generics & protocol conformance](#e400e408-e411e479--declarations-generics--protocol-conformance)
 - [E480–E499 — References & escape checking](#e480e499--references--escape-checking)
 - [E500–E507 — Moves & ownership](#e500e507--moves--ownership)
 - [E600–E614, E623 — Closures, externs & declaration shape](#e600e614-e623--closures-externs--declaration-shape)
@@ -177,7 +177,7 @@ func unwrap(opt: Int64?) -> Int64 {
 }
 ```
 
-## E400–E404, E408, E411–E479 — Declarations, generics & protocol conformance
+## E400–E408, E411–E479 — Declarations, generics & protocol conformance
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -186,6 +186,9 @@ func unwrap(opt: Int64?) -> Int64 {
 | E402 | '{B}' cannot box an existential: {reason} | `any[B] P` names a box that cannot hold a raw existential. `B` needs exactly one type parameter declared `not Sized`, a conformance to `ExistentialBox`, and no stored field holding `T` by value. Reasons: `it must have exactly one type parameter`, `its type parameter is not declared 'not Sized'`, `it does not conform to 'ExistentialBox'`, `field '{f}' stores '{T}' by value`. |
 | E403 | '{T}' may be unsized here ('where {T}: not Sized'), so it can only be used behind a pointer or as the last stored field | A `not Sized` type parameter used by value in a signature or a non-tail field. Move by-value members into an extension `where T: Sized`. |
 | E404 | the box in 'any[...]' is written without type arguments: '{suggestion}' / must name a box type | `any[B] P` takes the box unapplied (`any[RcBox] P`, not `any[RcBox[T]] P`), and it must be a type name. Emitted by HIR lowering. |
+| E405 | `indirect` has no effect: enum '{name}' has no recursive case | *(warning)* An `indirect enum` none of whose cases contains the enum boxes nothing. |
+| E406 | indirect enums require the standard library | Boxing a recursive case uses `std.memory.OwnedBox`, which `--no-std` programs lack. |
+| E407 | indirect enum '{name}' contains itself with different type arguments | Polymorphic recursion (`case Nest(Nested[Array[T]])` in `Nested[T]`): every level would need a new instantiation. |
 | E408 | opaque return type of '{name}' contains itself | Functions whose `some P` bodies wrap each other's opaque returns (`g` returns `W(inner: h())`, `h` returns `W(inner: g())`) describe an infinite type. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
@@ -204,7 +207,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E426 | duplicate {kind} signature: {signature} | Two functions/inits/subscripts have identical signatures — overloads must differ. |
 | E427 | duplicate enum case '{case_name}' | The same case name is declared twice in one enum. |
 | E428 | duplicate label '{label}' in case '{case_name}' | An enum case payload uses the same label twice. |
-| E429 | enum '{name}' is recursive without 'indirect' | A case payload contains the enum itself; recursion needs `indirect` (heap boxing). |
+| E429 | recursive enum requires `indirect` | A case payload contains the enum itself by value (directly, or through a tuple, struct field or `Optional`); mark the enum `indirect` to box its recursive cases. |
 | E430 | return type of '{name}' is less visible than the function | A `public` function can't expose a non-public type in its return. |
 | E431 | parameter type in '{name}' is less visible than the function | A `public` function can't take a non-public parameter type. |
 | E432 | aliased type in '{name}' is less visible than the type alias | A `public` alias can't point at a non-public type. |
@@ -240,7 +243,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E462 | conflicting associated type '{name}' inherited by protocol '{proto}' | Two inherited protocols declare incompatible versions of the same associated type. |
 | E463 | method '{name}' is ambiguous: satisfies requirements of multiple protocols ({list}) | One method would witness several unrelated protocols; implement each conformance in its own `extend Type: Protocol` block. |
 | E464 | init has wrong effect for protocol '{proto}' | A witness `init`'s failability/throwing effect doesn't match the protocol requirement. |
-| E465 | indirect enums are not yet supported | `indirect` is recognized but not implemented in this version. |
+| E465 | *(retired in 0.19)* | Was "indirect enums are not yet supported"; `indirect enum` is implemented. The ID stays reserved. |
 | E466 | 'some' (opaque type) is not allowed in a field type | Opaque `some P` types can only appear in return position. |
 | E467 | method '{name}' shadows the stored field '{name}' of '{type}' | A zero-arg extension method with a stored field's name would recurse instead of reading the field. |
 | E473 | struct \`{name}\` already has a deinit | A type may declare at most one `deinit`. |
@@ -264,9 +267,14 @@ extend Box { func show() -> String { "b" } }  // error[E412]: duplicate method '
 ### Example — E429 (recursive enum)
 
 ```kestrel
-enum Tree {
+enum Tree {             // error[E429]: recursive enum requires `indirect`
     case leaf(Int64)
-    case node(Tree, Tree)  // error[E429]: enum 'Tree' is recursive without 'indirect'
+    case node(Tree, Tree)
+}
+
+indirect enum Tree2 {   // OK: `node` is stored behind a box
+    case leaf(Int64)
+    case node(Tree2, Tree2)
 }
 ```
 

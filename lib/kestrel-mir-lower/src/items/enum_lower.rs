@@ -5,7 +5,7 @@
 
 use kestrel_ast_builder::{Callable, NodeKind};
 use kestrel_hecs::Entity;
-use kestrel_mir::item::enum_def::{EnumCaseDef, EnumDef};
+use kestrel_mir::item::enum_def::{EnumCaseDef, EnumDef, IndirectPayload};
 use kestrel_mir::item::struct_def::FieldDef;
 use kestrel_mir::{DropBehavior, TypeInfo};
 
@@ -34,6 +34,10 @@ pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) {
         });
     def.layout_attrs = lower_layout_attrs(ctx, entity);
 
+    let boxed = ctx.query.query(kestrel_semantics::IndirectCases {
+        entity,
+        root: ctx.root,
+    });
     let children: Vec<Entity> = ctx.world.children_of(entity).to_vec();
     for child in children {
         if ctx.world.get::<NodeKind>(child) != Some(&NodeKind::EnumCase) {
@@ -64,11 +68,11 @@ pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) {
         }
 
         let discriminant = def.cases.len() as u32;
-        def.add_case(EnumCaseDef::with_payload(
-            case_name,
-            discriminant,
-            payload_fields,
-        ));
+        let mut case = EnumCaseDef::with_payload(case_name, discriminant, payload_fields);
+        if boxed.contains(&child) {
+            box_case(ctx, &mut case);
+        }
+        def.add_case(case);
     }
 
     ctx.module.add_enum(def);
@@ -84,4 +88,34 @@ fn lower_enum_drop_behavior(ctx: &LowerCtx, entity: Entity) -> DropBehavior {
     } else {
         DropBehavior::None
     }
+}
+
+/// Store a recursive `indirect enum` case behind one `OwnedBox` holding its
+/// whole payload (A1 of the indirect-enums plan): the declared fields move to
+/// `indirect`, and the physical payload becomes the single box field, so
+/// layout, drop/clone shims, mono and codegen need no indirect-specific code.
+/// Without a stdlib `OwnedBox` the case stays inline (E406 is reported).
+fn box_case(ctx: &mut LowerCtx, case: &mut EnumCaseDef) {
+    let Some(owned_box) = ctx.query.query(kestrel_name_res::ResolveBuiltin {
+        builtin: kestrel_hir::Builtin::OwnedBox,
+        root: ctx.root,
+    }) else {
+        return;
+    };
+    ctx.register_name(owned_box);
+    let logical_fields = std::mem::take(&mut case.payload_fields);
+    let payload_ty = match logical_fields.as_slice() {
+        [single] => single.ty,
+        many => ctx
+            .module
+            .ty_arena
+            .intern(kestrel_mir::MirTy::Tuple(many.iter().map(|f| f.ty).collect())),
+    };
+    let box_ty = ctx.module.ty_arena.named(owned_box, vec![payload_ty]);
+    case.payload_fields = vec![FieldDef::new("$box", box_ty)];
+    case.indirect = Some(IndirectPayload {
+        logical_fields,
+        payload_ty,
+        box_ty,
+    });
 }

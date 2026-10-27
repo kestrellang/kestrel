@@ -11,7 +11,7 @@ use kestrel_hecs::Entity;
 use crate::layout::{EnumLayout, StructLayout};
 use crate::{FieldIdx, VariantIdx};
 
-pub use enum_def::{EnumCaseDef, EnumDef};
+pub use enum_def::{EnumCaseDef, EnumDef, IndirectPayload};
 pub use function::{
     CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef, WhereClause,
     WhereConstraint,

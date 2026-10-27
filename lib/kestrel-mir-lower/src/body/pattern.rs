@@ -1340,8 +1340,12 @@ impl OssaBodyCtx<'_, '_> {
             .get(&entity)
             .and_then(|edef| edef.cases.get(variant_idx.index()).map(|c| (c, edef)))
         {
-            Some((case, edef)) => (
-                case.payload_fields.iter().map(|f| f.ty).collect(),
+            // Logical: a boxed `indirect` case answers its declared fields.
+            Some((_, edef)) => (
+                edef.logical_fields(variant_idx.index())
+                    .iter()
+                    .map(|f| f.ty)
+                    .collect(),
                 edef.type_params.iter().map(|tp| tp.entity).collect(),
             ),
             None => (vec![], vec![]),
@@ -1981,6 +1985,9 @@ impl OssaBodyCtx<'_, '_> {
         field: FieldIdx,
         result_ty: TyId,
     ) -> ValueId {
+        if let Some(case) = self.indirect_case(self.body.value(operand).ty, variant) {
+            return self.emit_indirect_payload(operand, variant, field, result_ty, &case);
+        }
         // Stage 2b ref slot: extraction LOADS the stored address — the
         // result IS the ref (@guaranteed pointee, rooted at the aggregate's
         // root, borrowing nothing: the loaded pointer doesn't depend on the
@@ -2020,6 +2027,45 @@ impl OssaBodyCtx<'_, '_> {
             self.emit_end_borrow(borrow);
             result
         }
+    }
+
+    /// `emit_enum_payload` for a boxed `indirect` case: view the box, read
+    /// the payload in place through it, then pick the declared `field`. An
+    /// @owned operand gets a copy, as for an inline payload.
+    fn emit_indirect_payload(
+        &mut self,
+        operand: ValueId,
+        variant: VariantIdx,
+        field: FieldIdx,
+        result_ty: TyId,
+        case: &super::indirect::IndirectCase,
+    ) -> ValueId {
+        let owned = self.body.value(operand).ownership != Ownership::Guaranteed;
+        let base = if owned {
+            self.emit_begin_borrow(operand)
+        } else {
+            operand
+        };
+        let box_view = self.alloc_guaranteed(case.box_ty, base);
+        self.push_inst(kestrel_mir::inst::InstKind::EnumPayload {
+            result: box_view,
+            operand: base,
+            variant,
+            field: FieldIdx::new(0),
+        });
+        let payload = self.emit_indirect_view(box_view, case);
+        let view = if case.is_tuple {
+            self.emit_tuple_extract(payload, field.index() as u32, result_ty)
+        } else {
+            payload
+        };
+        if !owned {
+            return view;
+        }
+        let result = self.emit_copy_value(view);
+        self.emit_end_borrow(payload);
+        self.emit_end_borrow(base);
+        result
     }
 
     // ================================================================
@@ -2087,7 +2133,8 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
-    /// Resolve an enum variant payload field to its index and type.
+    /// Resolve an enum variant payload field to its LOGICAL index and type
+    /// (a boxed `indirect` case answers its declared fields).
     ///
     /// Finds the enum definition, looks up the variant by index, and
     /// resolves the field within that variant's payload. Applies type
@@ -2107,13 +2154,12 @@ impl OssaBodyCtx<'_, '_> {
 
         if let Some(entity) = entity
             && let Some(edef) = self.ctx.module.enums.get(&entity)
-            && let Some(case) = edef.cases.get(variant_idx.index())
-            && let Some(idx) = case
-                .payload_fields
+            && let Some(idx) = edef
+                .logical_fields(variant_idx.index())
                 .iter()
                 .position(|f| f.name == field_name)
         {
-            let mut field_ty = case.payload_fields[idx].ty;
+            let mut field_ty = edef.logical_fields(variant_idx.index())[idx].ty;
 
             // Substitute generic type params if needed
             if !type_args.is_empty() {
@@ -2147,8 +2193,7 @@ impl OssaBodyCtx<'_, '_> {
 
         if let Some(entity) = entity
             && let Some(edef) = self.ctx.module.enums.get(&entity)
-            && let Some(case) = edef.cases.get(variant_idx.index())
-            && let Some(field) = case.payload_fields.get(field_idx.index())
+            && let Some(field) = edef.logical_fields(variant_idx.index()).get(field_idx.index())
         {
             let mut field_ty = field.ty;
             if !type_args.is_empty() {

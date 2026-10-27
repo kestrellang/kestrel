@@ -5,6 +5,7 @@
 //! lowering do not each reinterpret raw conformance syntax differently.
 
 pub mod existential;
+pub mod recursive_enum;
 pub mod sizedness;
 pub mod staticness;
 
@@ -12,6 +13,7 @@ pub use existential::{
     Dispatch, ExistentialLayout, Layout, RequirementDispatch, SelfConformance, bound_closure,
     is_requirement, reachable_protocols, self_conformance,
 };
+pub use recursive_enum::{IndirectCases, RecursiveCase, RecursiveCases, case_payload_types};
 pub use sizedness::{
     NominalSizedness, SizeRequirement, SizedLayer, Sizedness, TypeParamSizeRequirement,
     assoc_may_be_unsized, hir_type_is_sized, instance_is_sized, last_stored_field,
@@ -36,7 +38,7 @@ use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_hecs::{CycleMode, Entity, QueryContext, QueryFn};
 use kestrel_hir::builtin::BuiltinKind;
 use kestrel_hir::{Builtin, HirTy};
-use kestrel_hir_lower::{LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
+use kestrel_hir_lower::{LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
 use kestrel_name_res::{
     ConformingProtocolInstantiations, ConformingProtocols, EntityBuiltin, ResolveBuiltin,
     ResolveTypePath, TypeResolution,
@@ -789,6 +791,28 @@ fn nominal_copy_semantics_impl(
     CopySemanticsInfo::copyable()
 }
 
+/// The physical storage of a boxed `indirect enum` case: `OwnedBox[P]`, where
+/// `P` is the lone payload type or the tuple of all of them. `None` when the
+/// stdlib binds no `OwnedBox` (an error reported by the indirect-enum
+/// analyzer). MIR `enum_lower` builds the same shape as a `TyId`.
+pub fn indirect_box_type(ctx: &QueryContext<'_>, payload: Vec<HirTy>, root: Entity) -> Option<HirTy> {
+    let owned_box = ctx.query(ResolveBuiltin {
+        builtin: Builtin::OwnedBox,
+        root,
+    })?;
+    // Never shown: this type is synthesized for classification only.
+    let span = Span::synthetic(0);
+    let inner = match <[HirTy; 1]>::try_from(payload) {
+        Ok([single]) => single,
+        Err(many) => HirTy::Tuple(many, span.clone()),
+    };
+    Some(HirTy::Struct {
+        entity: owned_box,
+        args: vec![inner],
+        span,
+    })
+}
+
 /// `Copyable`-name fallback for stdlib-less fixtures. Returns true when
 /// `ast_ty` is a single-segment named type whose last segment matches
 /// `name`. Matches the previous HIR-tracker behavior so tests like
@@ -806,6 +830,7 @@ fn collect_child_types(
     entity: Entity,
     root: Entity,
 ) -> Vec<(Entity, HirTy)> {
+    let boxed = ctx.query(IndirectCases { entity, root });
     let mut out = Vec::new();
     for &child in ctx.children_of(entity) {
         match ctx.get::<NodeKind>(child) {
@@ -830,14 +855,18 @@ fn collect_child_types(
             Some(NodeKind::EnumCase) => {
                 // Enum case payloads live in the Callable component's params,
                 // not as child Field entities. Lower them via LowerCallableTypes.
-                if let Some(tys) = ctx.query(LowerCallableTypes {
-                    entity: child,
-                    root,
-                }) {
-                    for ty in tys.into_iter().flatten() {
-                        out.push((child, ty));
-                    }
+                let payload = case_payload_types(ctx, child, root);
+                // A boxed case of an `indirect enum` stores ONE field, the
+                // `OwnedBox` its payload lowers to (MIR `enum_lower`): it
+                // contributes "never bitwise; Cloneable iff the payload is",
+                // which the box's own conditional `Cloneable` encodes.
+                if boxed.contains(&child)
+                    && let Some(boxed_ty) = indirect_box_type(ctx, payload.clone(), root)
+                {
+                    out.push((child, boxed_ty));
+                    continue;
                 }
+                out.extend(payload.into_iter().map(|ty| (child, ty)));
             },
             _ => {},
         }

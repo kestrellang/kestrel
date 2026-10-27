@@ -4,6 +4,7 @@ pub mod closure_box;
 pub mod control;
 mod existential;
 pub mod expr;
+pub(crate) mod indirect;
 pub mod literal;
 pub mod pattern;
 pub mod place;
@@ -2496,7 +2497,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         variant: VariantIdx,
         payload: Vec<ValueId>,
     ) -> ValueId {
-        let slot_tys = self.enum_variant_payload_tys(enum_ty, variant);
+        // A boxed `indirect` case: `payload` is the declared fields; the
+        // physical payload is their box (`body/indirect.rs`).
+        let (payload, slot_tys) = match self.indirect_case(enum_ty, variant) {
+            Some(case) => {
+                let boxed = self.emit_indirect_box(&case, payload);
+                (vec![boxed], vec![case.box_ty])
+            },
+            None => (payload, self.enum_variant_payload_tys(enum_ty, variant)),
+        };
         let result = self.alloc_value(enum_ty, Ownership::Owned);
         let mut taint: Option<RootProvenance> = None;
         let mut end_after: Vec<ValueId> = Vec::new();
@@ -2636,6 +2645,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         variant: VariantIdx,
         field_tys: &[TyId],
     ) -> Vec<ValueId> {
+        // A boxed `indirect` case: move the box out, then its payload.
+        if let Some(case) = self.indirect_case(self.body.value(operand).ty, variant) {
+            let boxed = self.alloc_value(case.box_ty, Ownership::Owned);
+            self.push_inst(InstKind::DestructureEnum {
+                results: vec![boxed],
+                operand,
+                variant,
+            });
+            self.consume(operand);
+            self.track_owned(boxed);
+            return self.emit_indirect_unbox(&case, boxed);
+        }
         let results: Vec<ValueId> = field_tys
             .iter()
             .map(|&ty| self.alloc_value(ty, Ownership::Owned))

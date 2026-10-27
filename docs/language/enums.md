@@ -80,25 +80,63 @@ enum Result[T, E] {
 }
 ```
 
-### Recursive Enums *(Future)*
+### Recursive Enums
 
-A recursive enum (one whose cases mention the enum itself) is rejected with error E429 unless it is marked `indirect`. However, `indirect` enums themselves are **not yet supported** — declaring one is rejected with error E465 ("indirect enums are not yet supported"). So directly recursive enums are currently unavailable.
+An enum that contains itself by value would have infinite size, so a plain enum
+may not be recursive (E429). Mark it `indirect` and the compiler stores each
+**recursive case** behind a heap box:
 
 ```kestrel
-// error[E429]: recursive enum requires `indirect`
-enum Tree {
-    case Leaf(value: Int64)
-    case Node(left: Tree, right: Tree)
+indirect enum List[T] {
+    case Nil
+    case Cons(head: T, tail: List[T])
 }
 
-// error[E465]: indirect enums are not yet supported
-indirect enum List[T] {
-    case Cons(head: T, tail: List[T])
-    case Empty
+indirect enum Tree {
+    case Leaf
+    case Node(Tree, Int64, Tree)
 }
 ```
 
-When implemented, the `indirect` keyword (contextual — only special in this position) will tell the compiler to use indirection (heap allocation) for recursive references, preventing infinite-size types.
+`indirect` is a contextual keyword, special only in this position.
+
+**Which cases are boxed.** Exactly the cases whose payload reaches the enum by
+value — directly (`Tree`), inside a tuple, through a struct field, through
+`Optional[Self]`, or through another indirect enum. The whole payload of such a
+case lives in one `std.memory.OwnedBox`, so a case costs one allocation however
+many fields it has. Cases that don't recurse (`Nil`, `Leaf`) stay inline and
+allocate nothing. An `indirect enum` with no recursive case boxes nothing and
+gets a warning (E405).
+
+**Using one.** Construction and pattern matching look exactly like any other
+enum: `.Cons(head: 1, tail: .Nil)`, `match list { .Cons(h, t) => … }`. Matching
+a borrowed value reads the payload in place; a consuming match moves it out
+and frees the box; `&mutating` bindings write into the box in place:
+
+```kestrel
+extend Tree {
+    mutating func insert(_ v: Int64) {
+        match self {
+            .Leaf => { self = .Node(.Leaf, v, .Leaf); },
+            .Node(&mutating l, x, &mutating r) => if v < x { l.insert(v) } else { r.insert(v) }
+        }
+    }
+}
+```
+
+**Copying.** Copy semantics come from the fields as usual — the box is never
+bit-copied. An indirect enum whose payloads are all copyable is `Copyable`,
+and **a copy clones every box**: `let b = a` duplicates the whole list or
+tree, which is O(n). Mark the enum `not Copyable` when values should only
+move (then `list = .Cons(x, list)` moves the old list in instead of copying
+it). A move-only payload makes the enum move-only.
+
+**Limits (0.19).**
+- The recursive reference must use the enum's own type parameters:
+  `case Nest(Nested[Array[T]])` inside `Nested[T]` is rejected (E407).
+- Indirect enums need the standard library's `OwnedBox` (E406 under `--no-std`).
+- Dropping a very long chain recurses once per node, so dropping a list of
+  about 100,000 nodes can overflow the stack.
 
 ## Instantiation
 
@@ -162,20 +200,35 @@ error: recursive enum requires `indirect` [E429]
  = add 'indirect' before the enum declaration to allow recursive cases
 ```
 
-(Adding `indirect` doesn't help yet — see E465 below.)
-
-#### E465: Indirect enums are not yet supported
+#### E405: `indirect` has no effect (warning)
 
 ```kestrel
-indirect enum List {    // error!
-    case Cons(head: Int64)
-    case Empty
+indirect enum Shape {    // warning: no case contains `Shape`
+    case Circle(Int64)
+    case Square(Int64)
 }
 ```
 
 ```
-error: indirect enums are not yet supported [E465]
+warning: `indirect` has no effect: enum 'Shape' has no recursive case [E405]
 ```
+
+#### E406: Indirect enums require the standard library
+
+Boxing a recursive case uses `std.memory.OwnedBox`, so `indirect enum` is an
+error under `--no-std`.
+
+#### E407: Indirect enum contains itself with different type arguments
+
+```kestrel
+indirect enum Nested[T] {
+    case Flat(T)
+    case Nest(Nested[Array[T]])  // error!
+}
+```
+
+Every level would be a new instantiation of `Nested`; a recursive case must
+use the enum's own type parameters unchanged.
 
 #### E427: Duplicate case name
 
@@ -280,7 +333,7 @@ enum Color {
 
 - `EnumSymbol` with `CaseSymbol` children
 - Cases have `CallableBehavior` for associated values
-- Detect recursion and require `indirect`
+- Detect recursion and require `indirect` (shared `kestrel_semantics::RecursiveCases` query; MIR boxes the cases `IndirectCases` names)
 - Validate associated value types
 
 ### Type Inference

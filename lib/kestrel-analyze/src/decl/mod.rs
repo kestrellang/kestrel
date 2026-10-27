@@ -24,7 +24,6 @@ pub mod field_method_collision;
 pub mod function_body;
 pub mod opaque_cycle;
 pub mod generics;
-pub mod indirect_enum;
 pub mod parent_protocol_conformance;
 pub mod place_accessor;
 pub mod protocol_field_conformance;
