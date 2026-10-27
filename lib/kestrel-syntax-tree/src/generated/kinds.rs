@@ -9,6 +9,7 @@ use kestrel_lexer::Token;
 /// The discriminant order is `kinds.txt`'s line order, which is append-only:
 /// rowan stores kinds as raw `u16`s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(clippy::manual_non_exhaustive)] // `__NotAKind` counts the variants
 pub enum SyntaxKind {
     Root,
     SourceFile,

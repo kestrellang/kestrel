@@ -500,7 +500,9 @@ public struct Float32:
     /// Absolute value — clears the sign bit. NaN stays NaN; `-0.0` becomes
     /// `+0.0`.
     public func abs() -> Float32 {
-        if Bool(boolLiteral: lang.f32_lt(self.raw, 0.0)) { self.negate() } else { self }
+        // `copysign` from +0.0 clears the sign bit: `-0.0` and NaN payloads
+        // keep their magnitude (a `< 0` test misses `-0.0`).
+        Float32(raw: lang.f32_copysign(self.raw, 0.0))
     }
 
     /// Largest integer ≤ `self`. Rounds toward `-infinity`.
@@ -1167,7 +1169,10 @@ public struct Float32:
                 e = rawExp - 150
             }
 
-            if precisionProvided == false and suffixPercent == false {
+            if options.radix == 16 {
+                // `:x` / `:X`: exact hexadecimal floating point (C's `%a`).
+                number = floatHexString(rawExp, rawMant, 23, 127, options.uppercase)
+            } else if precisionProvided == false and suffixPercent == false {
                 // No explicit precision: print the SHORTEST decimal that round-
                 // trips back to this exact value (Dragon4 boundary search). The
                 // lower gap is a half-ulp only at a binade boundary (fraction
@@ -1189,17 +1194,10 @@ public struct Float32:
             } else {
                 // Explicit precision (or percent): exact rounding to that many
                 // fractional / mantissa digits.
-                var decExp: Int64 = 0;
-                if m != UInt64.zero {
-                    decExp = floatSigDigits(m, e, 1).decExp
-                }
-
+                // An explicit precision counts decimal places, so `Auto`
+                // prints fixed notation (`12.34:.1` is "12.3", not "1.2e1").
                 if style == .Auto {
-                    if m == UInt64.zero or (decExp >= -4 and decExp < precision) {
-                        style = .Fixed
-                    } else {
-                        style = .Scientific
-                    }
+                    style = .Fixed
                 }
 
                 if style == .Scientific or style == .ScientificUpper {

@@ -54,6 +54,15 @@ impl QueryFn for ExtensionTargetEntity {
                 let name = if *mutating { "&mutating" } else { "&" };
                 return resolve_lang_child(ctx, self.root, name);
             },
+            // Type sugar names its standard type: `extend [T]` is
+            // `extend Array[T]` (and likewise `T?`, `[K: V]`).
+            kestrel_ast::AstType::Array(..)
+            | kestrel_ast::AstType::Optional(..)
+            | kestrel_ast::AstType::Dictionary(..) => {
+                let (builtin, name) = sugar_builtin(ast_type)?;
+                let context = ctx.parent_of(self.extension).unwrap_or(self.root);
+                return crate::resolve_sugar_type(ctx, context, self.root, builtin, name);
+            },
             _ => {},
         }
 
@@ -124,10 +133,7 @@ impl QueryFn for ExtensionLhsParams {
             .0
             .iter()
             .copied()
-            .filter(|&tp| {
-                ctx.get::<Name>(tp)
-                    .is_some_and(|n| lhs.0.iter().any(|l| *l == n.0))
-            })
+            .filter(|&tp| ctx.get::<Name>(tp).is_some_and(|n| lhs.0.contains(&n.0)))
             .collect()
     }
 }
@@ -214,6 +220,17 @@ fn collect_extensions(
             _ => {},
         }
     }
+}
+
+/// The lang item and standard type name a piece of type sugar denotes.
+pub fn sugar_builtin(ty: &kestrel_ast::AstType) -> Option<(kestrel_hir::Builtin, &'static str)> {
+    use kestrel_hir::Builtin;
+    Some(match ty {
+        kestrel_ast::AstType::Array(..) => (Builtin::ArrayTypeOperator, "Array"),
+        kestrel_ast::AstType::Optional(..) => (Builtin::OptionalTypeOperator, "Optional"),
+        kestrel_ast::AstType::Dictionary(..) => (Builtin::DictionaryTypeOperator, "Dictionary"),
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

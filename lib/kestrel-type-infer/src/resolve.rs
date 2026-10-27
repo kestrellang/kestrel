@@ -244,6 +244,21 @@ fn subject_receiver_of(subject: &WhereSubject, assoc: Entity) -> SubjectReceiver
     }
 }
 
+/// The receiver spine of a projection base written as a type (`U` in
+/// `T.A = U.A`, `U.Iter` in `T.A = U.Iter.A`) — the HIR twin of
+/// [`WhereSubject::spine`].
+fn hir_spine(ty: &HirTy) -> Option<Vec<Entity>> {
+    match ty {
+        HirTy::Param(e, _) => Some(vec![*e]),
+        HirTy::AssocProjection { base, assoc, .. } => {
+            let mut spine = hir_spine(base)?;
+            spine.push(*assoc);
+            Some(spine)
+        },
+        _ => None,
+    }
+}
+
 /// Where clause on a declaration.
 #[derive(Clone, Debug, Hash)]
 pub enum WhereClause {
@@ -264,7 +279,10 @@ pub enum WhereClause {
     Equality { subject: WhereSubject, rhs: HirTy },
     /// `T: not P` — a negative bound. Decided by the entailment kernel
     /// (`Goal::NotConforms`) and lowered to MIR's `NotImplements`.
-    NotBound { subject: WhereSubject, protocol: Entity },
+    NotBound {
+        subject: WhereSubject,
+        protocol: Entity,
+    },
 }
 
 /// The source name of an associated-type entity. The `Associated` constraint
@@ -429,266 +447,20 @@ impl TypeResolver for WorldResolver<'_> {
         &self,
         receiver_ty: &TyKind,
         name: &str,
-        _args: &[crate::constraint::CallArg],
+        args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError> {
-        // Type parameters: search protocol bounds for the member
-        if let TyKind::Param { entity } = receiver_ty {
-            return self.resolve_param_member(*entity, name, _args);
-        }
-
-        // Abstract associated-type projection: member-lookup through the
-        // assoc entity's bounds (same machinery as TypeAlias below). No base
-        // spine reaches this entry point, so nothing is filtered — callers
-        // that can name the base use `resolve_member_with_base` (G17 S4).
-        if let TyKind::AssocProjection { assoc, .. } = receiver_ty {
-            return self.resolve_projection_member(*assoc, None, name, _args);
-        }
-
-        // TypeAlias receiver: abstract associated types consult protocol bounds;
-        // concrete aliases should have been reduced by the solver's Reduce rule
-        // before reaching here (but handle defensively in case they show up).
-        // A bare alias has already lost its base, so it cannot be filtered.
-        if let TyKind::TypeAlias { entity, .. } = receiver_ty {
-            return self.resolve_projection_member(*entity, None, name, _args);
-        }
-
-        // Opaque types: delegate member resolution to the protocol bounds.
-        // Only the protocol interface and protocol extensions are visible;
-        // concrete-type extensions must NOT leak through.
-        if let TyKind::Opaque { bounds, .. } = receiver_ty {
-            let bound_protocols: Vec<Entity> = bounds.iter().map(|(p, _)| *p).collect();
-            let arg_labels: Vec<Option<&str>> = _args.iter().map(|a| a.label.as_deref()).collect();
-            match self.select_bound_candidate(&bound_protocols, name, &arg_labels)? {
-                Some(m) => return self.build_member_resolution(m),
-                None => {
-                    // Expand to parent protocols for the full closure
-                    let mut expanded = bound_protocols;
-                    let mut visited = crate::collections::HashSet::default();
-                    for p in &expanded {
-                        visited.insert(*p);
-                    }
-                    kestrel_name_res::expand_protocol_closure_in_place(
-                        self.ctx,
-                        self.root,
-                        &mut expanded,
-                        &mut visited,
-                    );
-                    match self.select_bound_candidate(&expanded, name, &arg_labels)? {
-                        Some(m) => return self.build_member_resolution(m),
-                        None => return Err(MemberError::NotFound),
-                    }
-                },
-            }
-        }
-
-        let entity = match receiver_ty.entity() {
-            Some(e) => e,
-            // Structural singletons resolve members via their synthetic `lang`
-            // entities, so a direct `().foo()` / `().tag()` call finds members
-            // and conformances added by `extend ()` / `extend (): P`.
-            None => {
-                let lang_name = match receiver_ty {
-                    TyKind::Tuple(elems) if elems.is_empty() => "()",
-                    TyKind::Never => "!",
-                    _ => return Err(MemberError::NotFound),
-                };
-                match kestrel_name_res::extensions::resolve_lang_child(
-                    self.ctx, self.root, lang_name,
-                ) {
-                    Some(e) => e,
-                    None => return Err(MemberError::NotFound),
-                }
-            },
-        };
-        let entity = &entity;
-
-        // Discover every type-side candidate by name in one pass: direct
-        // children, own-extension members, and conformed-protocol-extension
-        // defaults (transitively, via parent protocols). Provenance lets us
-        // partition by priority below.
-        let type_members = self.ctx.query(TypeMembersByName {
-            type_entity: *entity,
-            name: name.to_string(),
-            context: self.body_owner,
-            root: self.root,
-        });
-
-        // Direct + own-extension candidates compete equally; protocol-extension
-        // defaults are held back as fallback (see below).
-        let mut all_candidates: Vec<Entity> = Vec::new();
-        let mut candidate_extensions: Vec<(Entity, Entity)> = Vec::new();
-        for tm in &type_members {
-            match tm.source {
-                TypeMemberSource::Direct => {
-                    all_candidates.push(tm.entity);
-                },
-                TypeMemberSource::Extension(ext) => {
-                    all_candidates.push(tm.entity);
-                    candidate_extensions.push((tm.entity, ext));
-                },
-                TypeMemberSource::ProtocolExtension { .. } => { /* fallback */ },
-            }
-        }
-
-        // `extensions` is still needed downstream for the "exists but hidden"
-        // probe (visibility error reporting) and for the init/subscript
-        // NodeKind fallbacks below.
-        let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-            target: *entity,
-            root: self.root,
-        });
-
-        // Protocol-extension defaults (e.g. `lessThan` from `extend Comparable`,
-        // or `isEqual` from `extend Slice[T] where T: Equatable` reached via
-        // Array's `Slice` conformance) are a fallback. They fire only when no
-        // direct/own-ext candidate matches the call's labels — preserving
-        // overload precedence so `Slice.sorted()` can fall through to the
-        // protocol default when `Array` only declares `sorted(by:)` /
-        // `sorted(byKey:)` (different signatures), but a direct overload that
-        // does match wins.
-        let arg_labels_for_fallback: Vec<Option<&str>> =
-            _args.iter().map(|a| a.label.as_deref()).collect();
-        let direct_label_match = !all_candidates.is_empty()
-            && all_candidates
-                .iter()
-                .any(|&c| self.matches_labels(c, &arg_labels_for_fallback));
-        if !direct_label_match {
-            let mut seen_signatures: crate::collections::HashSet<_> = all_candidates
-                .iter()
-                .map(|&c| self.label_signature(c))
-                .collect();
-            for tm in &type_members {
-                let TypeMemberSource::ProtocolExtension { extension, .. } = tm.source else {
-                    continue;
-                };
-                let sig = self.label_signature(tm.entity);
-                if seen_signatures.insert(sig) {
-                    all_candidates.push(tm.entity);
-                    candidate_extensions.push((tm.entity, extension));
-                }
-            }
-        }
-
-        // If receiver is a protocol and we're inside a protocol extension with
-        // where clauses like `Self: Sortable`, also search those constraint protocols.
-        // `ProtocolMembersByName` walks the constraint protocol's direct children,
-        // extension defaults, parent protocols, and parents' extension defaults in
-        // one pass — so a `where Self: Comparable` extension can resolve methods
-        // declared on `Equatable` (Comparable's parent).
-        if all_candidates.is_empty()
-            && self.ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Protocol)
-        {
-            let extra_protocols = self.collect_extension_where_clause_protocols(*entity);
-            for proto in &extra_protocols {
-                let members = self.ctx.query(kestrel_name_res::ProtocolMembersByName {
-                    protocol: *proto,
-                    name: name.to_string(),
-                    context: self.body_owner,
-                    root: self.root,
-                });
-                all_candidates.extend(members.into_iter().map(|m| m.entity));
-            }
-        }
-
-        // (Initializers and subscripts are nameless but `TypeMembersByName`
-        // recognizes the keyword sentinels `"init"` / `"subscript"`, so the
-        // discovery above already covers them on direct + own-extension +
-        // protocol-extension targets.)
-
-        // Filter out static members (we're resolving on an instance)
-        let instance_candidates: Vec<Entity> = all_candidates
-            .into_iter()
-            .filter(|&c| !self.ctx.has::<Static>(c))
-            .collect();
-
-        if instance_candidates.is_empty() {
-            // Check if any candidates were filtered for being static.
-            // all_candidates was consumed by the filter, so re-check the
-            // original type members for a static match.
-            if let Some(static_member) = type_members
-                .iter()
-                .find(|tm| self.ctx.has::<Static>(tm.entity))
+        let found = self.resolve_member_nominal(receiver_ty, name, args);
+        // A protocol's abstract `Self` also sees its parents' requirements,
+        // which the nominal lookup (children + extensions) does not list.
+        match receiver_ty {
+            TyKind::SelfType { entity }
+                if matches!(found, Err(MemberError::NotFound))
+                    && self.ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Protocol) =>
             {
-                return Err(MemberError::IsStatic {
-                    candidate: static_member.entity,
-                });
-            }
-            // A matching member that was filtered out by visibility?
-            if let Some((candidate, visibility)) =
-                self.find_hidden_member(*entity, name, &extensions)
-            {
-                return Err(MemberError::NotVisible {
-                    candidate,
-                    visibility,
-                });
-            }
-            return Err(MemberError::NotFound);
-        }
-
-        // Overload resolution: filter by matching argument labels and arity
-        let arg_labels: Vec<Option<&str>> = _args.iter().map(|a| a.label.as_deref()).collect();
-        let matches: Vec<Entity> = instance_candidates
-            .iter()
-            .copied()
-            .filter(|&c| self.matches_labels(c, &arg_labels))
-            .collect();
-
-        let member = match matches.len() {
-            0 => {
-                // No label match — recover a representative candidate so the
-                // downstream arg-binding emits a precise "wrong argument label"
-                // diagnostic instead of a vague "no member". Safe when exactly
-                // one candidate is arity-compatible, OR when several share ONE
-                // label signature: a type conforming to the same parameterized
-                // protocol more than once contributes `conv(x: Int64)` +
-                // `conv(x: Int32)` — the same requirement, expecting the same
-                // labels, so any one of them yields the same label diagnostic.
-                // Genuinely distinct overloads (different label signatures) stay
-                // NotFound — there's no single label to suggest.
-                let arity_ok: Vec<Entity> = instance_candidates
-                    .iter()
-                    .copied()
-                    .filter(|&c| self.matches_arity(c, arg_labels.len()))
-                    .collect();
-                match arity_ok.first() {
-                    Some(&first)
-                        if arity_ok
-                            .iter()
-                            .all(|&c| self.label_signature(c) == self.label_signature(first)) =>
-                    {
-                        first
-                    },
-                    _ => return Err(MemberError::NotFound),
-                }
+                self.resolve_protocol_self_member(*entity, name, args)
             },
-            1 => matches[0],
-            _ => {
-                // Multiple candidates with same labels — try protocol-based resolution.
-                // This is only valid when every concrete match is an implementation
-                // of the same protocol requirement. Unrelated overloads sharing a
-                // label signature (e.g., Array's internal `_arrayLiteralPointer:`
-                // protocol init alongside its separate `count:generator:` overload)
-                // must fall through to genuine ambiguity, not be silently resolved
-                // to the protocol's method.
-                if let Some(proto_res) =
-                    self.try_resolve_through_protocol(*entity, name, _args, &matches)
-                {
-                    return Ok(proto_res);
-                }
-
-                // Rank by extension specificity: more concrete type args = more specific.
-                // Return candidates sorted by specificity for solver-side filtering.
-                let ranked = self.rank_by_extension_specificity(&matches, &candidate_extensions);
-                return Err(MemberError::Ambiguous(ranked));
-            },
-        };
-
-        let mut resolution = self.build_member_resolution(member)?;
-        // Track which extension the member came from (for solver-side type arg filtering)
-        if let Some(&(_, ext)) = candidate_extensions.iter().find(|(c, _)| *c == member) {
-            resolution.from_extension = Some(ext);
+            _ => found,
         }
-        Ok(resolution)
     }
 
     fn resolve_single_member(
@@ -766,13 +538,16 @@ impl TypeResolver for WorldResolver<'_> {
                 all_protocols.contains(&protocol)
             },
             TyKind::SelfType { entity } => {
-                // Abstract Self of protocol P conforms to P (and P's parents).
-                // Use the same conforming-protocols walk as for Protocol.
-                let all_protocols = self.ctx.query(kestrel_name_res::ConformingProtocols {
-                    entity: *entity,
-                    root: self.root,
-                });
-                all_protocols.contains(&protocol)
+                // Abstract Self of protocol P conforms to P itself and P's
+                // parents. `ConformingProtocols(P)` lists only the parents.
+                *entity == protocol
+                    || self
+                        .ctx
+                        .query(kestrel_name_res::ConformingProtocols {
+                            entity: *entity,
+                            root: self.root,
+                        })
+                        .contains(&protocol)
             },
             TyKind::TypeAlias { entity, .. } => {
                 // Associated-type bounds (e.g. `type Item: Equatable`) live on
@@ -883,6 +658,9 @@ impl TypeResolver for WorldResolver<'_> {
         // *structured* subject (`WhereClausesOf`) so the receiver survives
         // instead of `gather_bounds_from_where_clause`'s last-segment collapse,
         // which is the aliasing this check exists to undo.
+        // `where T.A = U.A` makes `T.A` and `U.A` one type: a bound on either
+        // receiver holds for both (M14).
+        let receivers = self.same_type_spines(assoc, base_spine);
         let mut saw_other_receiver = false;
         let mut checked = crate::collections::HashSet::default();
         let mut current = Some(self.body_owner);
@@ -909,7 +687,7 @@ impl TypeResolver for WorldResolver<'_> {
                         // a bare `Item`, or a `Self`-rooted chain (D8). Permit.
                         SubjectReceiver::Unnamed => return true,
                         SubjectReceiver::Spine(spine) => {
-                            if spine == base_spine {
+                            if receivers.contains(&spine) {
                                 return true;
                             }
                             saw_other_receiver = true;
@@ -1240,18 +1018,12 @@ fn ty_shape_compatible(a: &HirTy, b: &HirTy) -> bool {
                 ..
             },
         ) => ea == eb && args_compatible(aa, ab),
-        (
-            HirTy::AliasUse {
-                entity: ea,
-                args: aa,
-                ..
-            },
-            HirTy::AliasUse {
-                entity: eb,
-                args: ab,
-                ..
-            },
-        ) => ea == eb && args_compatible(aa, ab),
+        (HirTy::Alias { expanded, .. }, other) | (other, HirTy::Alias { expanded, .. }) => {
+            ty_shape_compatible(expanded, other)
+        },
+        (HirTy::AbstractAssoc { entity: ea, .. }, HirTy::AbstractAssoc { entity: eb, .. }) => {
+            ea == eb
+        },
         (HirTy::Tuple(aa, _), HirTy::Tuple(ab, _)) => args_compatible(aa, ab),
         (
             HirTy::Function {
@@ -1323,6 +1095,347 @@ fn extract_protocol_type_args(
 }
 
 impl WorldResolver<'_> {
+    /// Every receiver spine the owner's same-type clauses equate with
+    /// `base_spine` for `assoc` (including `base_spine` itself):
+    /// `where T.A = U.A` makes `[T]` and `[U]` interchangeable receivers of
+    /// `A`, transitively.
+    fn same_type_spines(&self, assoc: Entity, base_spine: &[Entity]) -> Vec<Vec<Entity>> {
+        let mut pairs: Vec<(Vec<Entity>, Vec<Entity>)> = Vec::new();
+        let mut checked = crate::collections::HashSet::default();
+        let mut current = Some(self.body_owner);
+        while let Some(entity) = current {
+            if checked.insert(entity) {
+                for clause in self.ctx.query(crate::where_clauses::WhereClausesOf {
+                    entity,
+                    root: self.root,
+                }) {
+                    let WhereClause::Equality { subject, rhs } = clause else {
+                        continue;
+                    };
+                    let SubjectReceiver::Spine(lhs) = subject_receiver_of(&subject, assoc) else {
+                        continue;
+                    };
+                    let HirTy::AssocProjection { base, assoc: a, .. } = &rhs else {
+                        continue;
+                    };
+                    if *a != assoc {
+                        continue;
+                    }
+                    if let Some(rhs) = hir_spine(base) {
+                        pairs.push((lhs, rhs));
+                    }
+                }
+            }
+            current = self.ctx.parent_of(entity);
+        }
+        let mut class = vec![base_spine.to_vec()];
+        loop {
+            let before = class.len();
+            for (l, r) in &pairs {
+                if class.contains(l) && !class.contains(r) {
+                    class.push(r.clone());
+                } else if class.contains(r) && !class.contains(l) {
+                    class.push(l.clone());
+                }
+            }
+            if class.len() == before {
+                return class;
+            }
+        }
+    }
+
+    /// Member lookup on a protocol's abstract `Self` through the protocol and
+    /// its parents (requirements + extension defaults), like a `T: P` bound.
+    fn resolve_protocol_self_member(
+        &self,
+        protocol: Entity,
+        name: &str,
+        args: &[crate::constraint::CallArg],
+    ) -> Result<MemberResolution, MemberError> {
+        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let mut protocols = vec![protocol];
+        let mut visited = crate::collections::HashSet::default();
+        visited.insert(protocol);
+        kestrel_name_res::expand_protocol_closure_in_place(
+            self.ctx,
+            self.root,
+            &mut protocols,
+            &mut visited,
+        );
+        match self.select_bound_candidate(&protocols, name, &arg_labels)? {
+            Some(m) => self.build_member_resolution(m),
+            None => Err(MemberError::NotFound),
+        }
+    }
+
+    /// Nominal member lookup (the trait entry point minus the protocol-`Self`
+    /// fallback).
+    fn resolve_member_nominal(
+        &self,
+        receiver_ty: &TyKind,
+        name: &str,
+        _args: &[crate::constraint::CallArg],
+    ) -> Result<MemberResolution, MemberError> {
+        // Type parameters: search protocol bounds for the member
+        if let TyKind::Param { entity } = receiver_ty {
+            return self.resolve_param_member(*entity, name, _args);
+        }
+
+        // Abstract associated-type projection: member-lookup through the
+        // assoc entity's bounds (same machinery as TypeAlias below). No base
+        // spine reaches this entry point, so nothing is filtered — callers
+        // that can name the base use `resolve_member_with_base` (G17 S4).
+        if let TyKind::AssocProjection { assoc, .. } = receiver_ty {
+            return self.resolve_projection_member(*assoc, None, name, _args);
+        }
+
+        // TypeAlias receiver: abstract associated types consult protocol bounds;
+        // concrete aliases should have been reduced by the solver's Reduce rule
+        // before reaching here (but handle defensively in case they show up).
+        // A bare alias has already lost its base, so it cannot be filtered.
+        if let TyKind::TypeAlias { entity, .. } = receiver_ty {
+            return self.resolve_projection_member(*entity, None, name, _args);
+        }
+
+        // Opaque types: delegate member resolution to the protocol bounds.
+        // Only the protocol interface and protocol extensions are visible;
+        // concrete-type extensions must NOT leak through.
+        if let TyKind::Opaque { bounds, .. } = receiver_ty {
+            let bound_protocols: Vec<Entity> = bounds.iter().map(|(p, _)| *p).collect();
+            let arg_labels: Vec<Option<&str>> = _args.iter().map(|a| a.label.as_deref()).collect();
+            match self.select_bound_candidate(&bound_protocols, name, &arg_labels)? {
+                Some(m) => return self.build_member_resolution(m),
+                None => {
+                    // Expand to parent protocols for the full closure
+                    let mut expanded = bound_protocols;
+                    let mut visited = crate::collections::HashSet::default();
+                    for p in &expanded {
+                        visited.insert(*p);
+                    }
+                    kestrel_name_res::expand_protocol_closure_in_place(
+                        self.ctx,
+                        self.root,
+                        &mut expanded,
+                        &mut visited,
+                    );
+                    match self.select_bound_candidate(&expanded, name, &arg_labels)? {
+                        Some(m) => return self.build_member_resolution(m),
+                        None => return Err(MemberError::NotFound),
+                    }
+                },
+            }
+        }
+
+        let entity = match receiver_ty.entity() {
+            Some(e) => e,
+            // Structural singletons resolve members via their synthetic `lang`
+            // entities, so a direct `().foo()` / `().tag()` call finds members
+            // and conformances added by `extend ()` / `extend (): P`.
+            None => {
+                let lang_name = match receiver_ty {
+                    TyKind::Tuple(elems) if elems.is_empty() => "()",
+                    TyKind::Never => "!",
+                    _ => return Err(MemberError::NotFound),
+                };
+                match kestrel_name_res::extensions::resolve_lang_child(
+                    self.ctx, self.root, lang_name,
+                ) {
+                    Some(e) => e,
+                    None => return Err(MemberError::NotFound),
+                }
+            },
+        };
+        let entity = &entity;
+
+        // Discover every type-side candidate by name in one pass: direct
+        // children, own-extension members, and conformed-protocol-extension
+        // defaults (transitively, via parent protocols). Provenance lets us
+        // partition by priority below.
+        let type_members = self.ctx.query(TypeMembersByName {
+            type_entity: *entity,
+            name: name.to_string(),
+            context: self.body_owner,
+            root: self.root,
+        });
+
+        // Direct + own-extension candidates compete equally; protocol-extension
+        // defaults are held back as fallback (see below).
+        let mut all_candidates: Vec<Entity> = Vec::new();
+        let mut candidate_extensions: Vec<(Entity, Entity)> = Vec::new();
+        for tm in &type_members {
+            match tm.source {
+                TypeMemberSource::Direct => {
+                    all_candidates.push(tm.entity);
+                },
+                TypeMemberSource::Extension(ext) => {
+                    all_candidates.push(tm.entity);
+                    candidate_extensions.push((tm.entity, ext));
+                },
+                TypeMemberSource::ProtocolExtension { .. } => { /* fallback */ },
+            }
+        }
+
+        // `extensions` is still needed downstream for the "exists but hidden"
+        // probe (visibility error reporting) and for the init/subscript
+        // NodeKind fallbacks below.
+        let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
+            target: *entity,
+            root: self.root,
+        });
+
+        // Protocol-extension defaults (e.g. `lessThan` from `extend Comparable`,
+        // or `isEqual` from `extend Slice[T] where T: Equatable` reached via
+        // Array's `Slice` conformance) are a fallback. They fire only when no
+        // direct/own-ext candidate matches the call's labels — preserving
+        // overload precedence so `Slice.sorted()` can fall through to the
+        // protocol default when `Array` only declares `sorted(by:)` /
+        // `sorted(byKey:)` (different signatures), but a direct overload that
+        // does match wins.
+        let arg_labels_for_fallback: Vec<Option<&str>> =
+            _args.iter().map(|a| a.label.as_deref()).collect();
+        let direct_label_match = !all_candidates.is_empty()
+            && all_candidates
+                .iter()
+                .any(|&c| self.matches_labels(c, &arg_labels_for_fallback));
+        if !direct_label_match {
+            let mut seen_signatures: crate::collections::HashSet<_> = all_candidates
+                .iter()
+                .map(|&c| self.label_signature(c))
+                .collect();
+            for tm in &type_members {
+                let TypeMemberSource::ProtocolExtension { extension, .. } = tm.source else {
+                    continue;
+                };
+                let sig = self.label_signature(tm.entity);
+                if seen_signatures.insert(sig) {
+                    all_candidates.push(tm.entity);
+                    candidate_extensions.push((tm.entity, extension));
+                }
+            }
+        }
+
+        // If receiver is a protocol and we're inside a protocol extension with
+        // where clauses like `Self: Sortable`, also search those constraint protocols.
+        // `ProtocolMembersByName` walks the constraint protocol's direct children,
+        // extension defaults, parent protocols, and parents' extension defaults in
+        // one pass — so a `where Self: Comparable` extension can resolve methods
+        // declared on `Equatable` (Comparable's parent).
+        if all_candidates.is_empty()
+            && self.ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Protocol)
+        {
+            let extra_protocols = self.collect_extension_where_clause_protocols(*entity);
+            for proto in &extra_protocols {
+                let members = self.ctx.query(kestrel_name_res::ProtocolMembersByName {
+                    protocol: *proto,
+                    name: name.to_string(),
+                    context: self.body_owner,
+                    root: self.root,
+                });
+                all_candidates.extend(members.into_iter().map(|m| m.entity));
+            }
+        }
+
+        // (Initializers and subscripts are nameless but `TypeMembersByName`
+        // recognizes the keyword sentinels `"init"` / `"subscript"`, so the
+        // discovery above already covers them on direct + own-extension +
+        // protocol-extension targets.)
+
+        // Filter out static members (we're resolving on an instance)
+        let instance_candidates: Vec<Entity> = all_candidates
+            .into_iter()
+            .filter(|&c| !self.ctx.has::<Static>(c))
+            .collect();
+
+        if instance_candidates.is_empty() {
+            // Check if any candidates were filtered for being static.
+            // all_candidates was consumed by the filter, so re-check the
+            // original type members for a static match.
+            if let Some(static_member) = type_members
+                .iter()
+                .find(|tm| self.ctx.has::<Static>(tm.entity))
+            {
+                return Err(MemberError::IsStatic {
+                    candidate: static_member.entity,
+                });
+            }
+            // A matching member that was filtered out by visibility?
+            if let Some((candidate, visibility)) =
+                self.find_hidden_member(*entity, name, &extensions)
+            {
+                return Err(MemberError::NotVisible {
+                    candidate,
+                    visibility,
+                });
+            }
+            return Err(MemberError::NotFound);
+        }
+
+        // Overload resolution: filter by matching argument labels and arity
+        let arg_labels: Vec<Option<&str>> = _args.iter().map(|a| a.label.as_deref()).collect();
+        let matches: Vec<Entity> = instance_candidates
+            .iter()
+            .copied()
+            .filter(|&c| self.matches_labels(c, &arg_labels))
+            .collect();
+
+        let member = match matches.len() {
+            0 => {
+                // No label match — recover a representative candidate so the
+                // downstream arg-binding emits a precise "wrong argument label"
+                // diagnostic instead of a vague "no member". Safe when exactly
+                // one candidate is arity-compatible, OR when several share ONE
+                // label signature: a type conforming to the same parameterized
+                // protocol more than once contributes `conv(x: Int64)` +
+                // `conv(x: Int32)` — the same requirement, expecting the same
+                // labels, so any one of them yields the same label diagnostic.
+                // Genuinely distinct overloads (different label signatures) stay
+                // NotFound — there's no single label to suggest.
+                let arity_ok: Vec<Entity> = instance_candidates
+                    .iter()
+                    .copied()
+                    .filter(|&c| self.matches_arity(c, arg_labels.len()))
+                    .collect();
+                match arity_ok.first() {
+                    Some(&first)
+                        if arity_ok
+                            .iter()
+                            .all(|&c| self.label_signature(c) == self.label_signature(first)) =>
+                    {
+                        first
+                    },
+                    _ => return Err(MemberError::NotFound),
+                }
+            },
+            1 => matches[0],
+            _ => {
+                // Multiple candidates with same labels — try protocol-based resolution.
+                // This is only valid when every concrete match is an implementation
+                // of the same protocol requirement. Unrelated overloads sharing a
+                // label signature (e.g., Array's internal `_arrayLiteralPointer:`
+                // protocol init alongside its separate `count:generator:` overload)
+                // must fall through to genuine ambiguity, not be silently resolved
+                // to the protocol's method.
+                if let Some(proto_res) =
+                    self.try_resolve_through_protocol(*entity, name, _args, &matches)
+                {
+                    return Ok(proto_res);
+                }
+
+                // Rank by extension specificity: more concrete type args = more specific.
+                // Return candidates sorted by specificity for solver-side filtering.
+                let ranked = self.rank_by_extension_specificity(&matches, &candidate_extensions);
+                return Err(MemberError::Ambiguous(ranked));
+            },
+        };
+
+        let mut resolution = self.build_member_resolution(member)?;
+        // Track which extension the member came from (for solver-side type arg filtering)
+        if let Some(&(_, ext)) = candidate_extensions.iter().find(|(c, _)| *c == member) {
+            resolution.from_extension = Some(ext);
+        }
+        Ok(resolution)
+    }
+
     /// Probe for a member that `VisibleChildrenByName` filtered out due to
     /// visibility. Walks direct children of the type and its extensions for a
     /// name match, returning the first hit along with its declared `Vis`.
@@ -1399,14 +1512,12 @@ impl WorldResolver<'_> {
                         source_extension: None,
                     });
                 }
-                // Abstract associated type (no TypeAnnotation) — keep as AliasUse
-                // so the solver can detect the missing definition and dispatch via
-                // protocol bounds. (Inference reduces AliasUse with a TypeAnnotation;
-                // an AliasUse without one stays abstract.)
+                // Abstract associated type (no TypeAnnotation) — kept abstract
+                // so the solver can detect the missing definition and dispatch
+                // via protocol bounds.
                 return Some(AssociatedTypeResolution {
-                    resolved: kestrel_hir::ty::HirTy::AliasUse {
+                    resolved: kestrel_hir::ty::HirTy::AbstractAssoc {
                         entity: child,
-                        args: vec![],
                         span: kestrel_span::Span::synthetic(0),
                     },
                     source_extension: None,
@@ -1478,12 +1589,11 @@ impl WorldResolver<'_> {
                         source_extension: None,
                     });
                 }
-                // Abstract associated type — keep as AliasUse so the solver
+                // Abstract associated type — kept abstract so the solver
                 // detects the missing definition and dispatches via bounds.
                 return Some(AssociatedTypeResolution {
-                    resolved: kestrel_hir::ty::HirTy::AliasUse {
+                    resolved: kestrel_hir::ty::HirTy::AbstractAssoc {
                         entity: m.entity,
-                        args: vec![],
                         span: kestrel_span::Span::synthetic(0),
                     },
                     source_extension: None,
@@ -2516,9 +2626,13 @@ impl WorldResolver<'_> {
     /// `copy_behavior` + `copy_check` backstop a genuinely non-copyable element).
     fn copy_semantics_of(&self, ty: &TyKind) -> CopySemantics {
         match ty {
-            TyKind::Struct { entity, .. }
-            | TyKind::Enum { entity, .. }
-            | TyKind::SelfType { entity } => {
+            TyKind::SelfType { entity } => kestrel_semantics::self_type_copy_semantics(
+                self.ctx,
+                *entity,
+                self.body_owner,
+                self.root,
+            ),
+            TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. } => {
                 self.ctx
                     .query(NominalCopySemantics {
                         entity: *entity,

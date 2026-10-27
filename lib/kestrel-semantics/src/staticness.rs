@@ -356,9 +356,10 @@ impl StaticLayer for HirStaticWalk<'_, '_> {
             // Base-only treatment for Self/alias uses (mirrors the copy
             // layer): a conditional base is treated permissively — Self
             // inside its own definition is covered by the cycle guard.
-            HirTy::SelfType(entity, _) | HirTy::AliasUse { entity, .. } => {
+            HirTy::SelfType(entity, _) | HirTy::AbstractAssoc { entity, .. } => {
                 !matches!(self.nominal_staticness(*entity), Staticness::NotStatic)
             },
+            HirTy::Alias { expanded, .. } => self.member_is_static(expanded),
             // A view-kind closure (normal / `mutating`) holds views into its
             // defining frame, so it is not Static, exactly like a ref; owning
             // kinds snapshot their captures (references 2c,

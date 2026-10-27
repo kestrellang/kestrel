@@ -40,16 +40,13 @@ pub(super) fn emit_type_alias_where_clauses(
                     continue;
                 }
                 // Emit conformance: e.g., `Iter: Iterator` → Conforms(alias_tv, Iterator)
-                ctx.conforms_typearg(alias_tv, protocol, span.clone());
                 // Cache protocol args so projecting through this alias's bound
                 // protocol can substitute extension free TypeParams.
                 let arg_tvs: Vec<TyVar> = protocol_type_args
                     .iter()
                     .map(|hir_ty| lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &[]))
                     .collect();
-                if !arg_tvs.is_empty() {
-                    ctx.record_witness_args(alias_tv, protocol, arg_tvs);
-                }
+                ctx.bound_typearg(alias_tv, protocol, arg_tvs, span.clone());
             },
             // About this alias (`Iter.Item = Item`); the root is not re-read.
             crate::resolve::WhereClause::Equality { subject, rhs } => {
@@ -130,66 +127,6 @@ pub(super) fn lower_opaque_aware(
     }
 }
 
-/// Solver-side twin of `generate::emit_copyable_wellformedness`, scoped to
-/// the STATIC bound (the ref-containment soundness line). Pushes a
-/// TypeArg-origin Conforms for each formed arg whose param carries the
-/// (implicit or explicit) Static bound. Copyable/Cloneable stay
-/// generate-side only — widening them here would newly flag code the
-/// move checker already governs (orthogonal, larger change).
-pub(super) fn emit_static_wellformedness(
-    ctx: &mut InferCtx<'_>,
-    entity: kestrel_hecs::Entity,
-    arg_tvs: &[TyVar],
-    span: &Span,
-) {
-    if arg_tvs.is_empty() {
-        return;
-    }
-    let Some(static_proto) = ctx.query_ctx.query(ResolveBuiltin {
-        builtin: Builtin::Static,
-        root: ctx.root,
-    }) else {
-        return;
-    };
-    let Some(params) = ctx
-        .query_ctx
-        .get::<kestrel_ast_builder::TypeParams>(entity)
-        .map(|tp| tp.0.clone())
-    else {
-        return;
-    };
-    let where_clauses = ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
-        entity,
-        root: ctx.root,
-    });
-    for clause in where_clauses {
-        let crate::resolve::WhereClause::Bound {
-            subject, protocol, ..
-        } = clause
-        else {
-            continue;
-        };
-        // TODO(G17 stage 3a): projection subjects are skipped here, as they
-        // were when `ProjectionBound` was a separate variant.
-        let Some(param) = subject.as_param() else {
-            continue;
-        };
-        if protocol != static_proto {
-            continue;
-        }
-        let Some(pos) = params.iter().position(|p| *p == param) else {
-            continue;
-        };
-        if let Some(&tv) = arg_tvs.get(pos) {
-            kestrel_debug::ktrace!("static-wf", "emit Static wf for {entity:?} arg {tv:?}");
-            // The formed type's own span (the declared signature site) —
-            // a synthetic span here renders as NOTHING and the build
-            // fails silently.
-            ctx.conforms_typearg(tv, static_proto, span.clone());
-        }
-    }
-}
-
 /// Convert HirTy to TyVar with substitutions.
 /// - Self entity → receiver TyVar
 /// - Type params in `subs` → their mapped TyVars (struct type params + method type params)
@@ -245,12 +182,32 @@ pub(super) fn lower_hir_ty_sub(
             // Abstract args stay conservative: the obligation defers until
             // the arg resolves, and Param/assoc kinds pass through the
             // usual entailment arms.
-            emit_static_wellformedness(ctx, *entity, &arg_tvs, span);
+            crate::generate::emit_formation_wellformedness(
+                ctx,
+                *entity,
+                &arg_tvs,
+                span,
+                crate::generate::FormationScope::Inferred,
+            );
             ctx.named(*entity, arg_tvs)
         },
-        HirTy::AliasUse { entity, args, .. } => {
-            // Associated-type style alias use: check substitution maps first.
-            if args.is_empty() {
+        // An alias arrives expanded; a bounded one also checks its bounds.
+        HirTy::Alias {
+            alias,
+            args,
+            expanded,
+            span,
+        } => {
+            let arg_tvs: Vec<TyVar> = args
+                .iter()
+                .map(|a| lower_hir_ty_sub(ctx, a, self_entity, recv_tv, subs))
+                .collect();
+            super::assoc::emit_alias_bounds(ctx, *alias, &arg_tvs, span);
+            lower_hir_ty_sub(ctx, expanded, self_entity, recv_tv, subs)
+        },
+        HirTy::AbstractAssoc { entity, .. } => {
+            // Associated-type use: check substitution maps first.
+            {
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
                     return tv;
                 }
@@ -261,11 +218,13 @@ pub(super) fn lower_hir_ty_sub(
                 // right here — but that reading (C2) never diverges from the
                 // baseless one across the corpus, so it stays an audit probe.
                 ctx.probe_assoc_sub(
-                    "solver:lower_hir_ty_sub:AliasUse(recv_tv-probe)",
+                    "solver:lower_hir_ty_sub:AbstractAssoc(recv_tv-probe)",
                     Some(recv_tv),
                     *entity,
                 );
-                if let Some(tv) = ctx.assoc_sub("solver:lower_hir_ty_sub:AliasUse", None, *entity) {
+                if let Some(tv) =
+                    ctx.assoc_sub("solver:lower_hir_ty_sub:AbstractAssoc", None, *entity)
+                {
                     return tv;
                 }
             }
@@ -299,11 +258,7 @@ pub(super) fn lower_hir_ty_sub(
                 }
             }
 
-            let arg_tvs: Vec<TyVar> = args
-                .iter()
-                .map(|a| lower_hir_ty_sub(ctx, a, self_entity, recv_tv, subs))
-                .collect();
-            ctx.type_alias(*entity, arg_tvs)
+            ctx.type_alias(*entity, Vec::new())
         },
         HirTy::AssocProjection { base, assoc, span } => {
             let base_tv = lower_hir_ty_sub(ctx, base, self_entity, recv_tv, subs);

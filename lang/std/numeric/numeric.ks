@@ -41,5 +41,7 @@ public protocol SignedInteger {
 
 /// Marker protocol for unsigned integer types. Carries no requirements —
 /// it exists so generic code can constrain on signedness without naming
-/// every concrete `UInt*` type.
+/// every concrete `UInt*` type. The compiler also reads it: integer patterns
+/// on a conforming type test and tile its raw bits as unsigned.
+@builtin(.UnsignedInteger)
 public protocol UnsignedInteger {}

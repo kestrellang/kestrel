@@ -185,6 +185,62 @@ impl LowerCtx<'_> {
             });
         }
 
+        // The parser already reported a missing pattern: keep the value for
+        // inference, but don't destructure a synthetic temp (whose internal
+        // name would leak into follow-on errors like an uninitialized read).
+        let pattern_missing = match &pat {
+            PatSrc::Error(_) => true,
+            PatSrc::Node(n) => n.kind() == SyntaxKind::Error || n.text_range().is_empty(),
+            PatSrc::ArgBinding(_) => false,
+        };
+        if pattern_missing {
+            return match lowered_value {
+                Some(value) => self.alloc_stmt(HirStmt::Expr {
+                    expr: value,
+                    span: span.clone(),
+                }),
+                None => {
+                    let unit = self.alloc_expr(HirExpr::Tuple {
+                        elements: Vec::new(),
+                        span: span.clone(),
+                    });
+                    self.alloc_stmt(HirStmt::Expr {
+                        expr: unit,
+                        span: span.clone(),
+                    })
+                },
+            };
+        }
+
+        // A place value with no annotation (`let (x, _) = t`) is matched in
+        // place: copying it into a temp first would move all of `t`, where
+        // the pattern may only move some of its fields (partial moves,
+        // docs/design/partial-moves.md). Emits `match t { pattern => () }`.
+        if lowered_ty.is_none()
+            && let Some(value) = lowered_value
+            && self.is_place_expr(value)
+        {
+            let hir_pat = self.lower_pat_forcing_mut(&pat, is_mut);
+            let unit = self.alloc_expr(HirExpr::Tuple {
+                elements: Vec::new(),
+                span: span.clone(),
+            });
+            let match_expr = self.alloc_expr(HirExpr::Match {
+                scrutinee: value,
+                arms: vec![HirMatchArm {
+                    pattern: hir_pat,
+                    guard: None,
+                    body: unit,
+                }],
+                source: MatchSource::LetDestructure,
+                span: span.clone(),
+            });
+            return self.alloc_stmt(HirStmt::Expr {
+                expr: match_expr,
+                span: span.clone(),
+            });
+        }
+
         // Complex pattern: allocate temp, then destructure via match
         // Emits: { let $let_tmp = value; match $let_tmp { pattern => () } }
         let temp = self.define_local("$let_tmp", is_mut, span.clone());
@@ -234,6 +290,17 @@ impl LowerCtx<'_> {
             expr: block_expr,
             span: span.clone(),
         })
+    }
+
+    /// A local, or a stored-field / tuple-element chain rooted at one.
+    fn is_place_expr(&self, expr: HirExprId) -> bool {
+        match &self.exprs[expr] {
+            HirExpr::Local(..) => true,
+            HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
+                self.is_place_expr(*base)
+            },
+            _ => false,
+        }
     }
 
     /// A guard statement's conditions and else block.

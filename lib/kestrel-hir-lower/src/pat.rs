@@ -173,10 +173,13 @@ impl LowerCtx<'_> {
             },
 
             SyntaxKind::LiteralPattern => {
-                let kind = crate::syntax::first_token(node)
-                    .map(|t| lit_pat(&t).unwrap_or(LitPat::Integer(t.text().to_string())))
+                let negative = has_token(node, SyntaxKind::Minus);
+                let kind = node
+                    .children_with_tokens()
+                    .filter_map(SyntaxElement::into_token)
+                    .find_map(|t| lit_pat(&t))
                     .unwrap_or(LitPat::Integer("0".into()));
-                let value = lower_lit_pat(&kind, &span);
+                let value = negate_if(lower_lit_pat(&kind, &span), negative);
                 self.alloc_pat(HirPat::Literal { value, span })
             },
 
@@ -361,6 +364,8 @@ impl LowerCtx<'_> {
         let mut before_op = true;
         let mut start = None;
         let mut end = None;
+        // A `-` applies to the bound that follows it.
+        let mut minus = false;
         for token in node
             .children_with_tokens()
             .filter_map(SyntaxElement::into_token)
@@ -369,20 +374,26 @@ impl LowerCtx<'_> {
                 SyntaxKind::DotDotEquals | SyntaxKind::DotDotLess | SyntaxKind::DotDot => {
                     before_op = false;
                 },
+                SyntaxKind::Minus => minus = true,
                 _ => {
                     let Some(lit) = lit_pat(&token) else {
                         continue;
                     };
+                    let bound = (lit, std::mem::take(&mut minus));
                     if before_op {
-                        start = Some(lit);
+                        start = Some(bound);
                     } else {
-                        end = Some(lit);
+                        end = Some(bound);
                     }
                 },
             }
         }
-        let hir_start = start.as_ref().map(|k| lower_lit_pat(k, &span));
-        let hir_end = end.as_ref().map(|k| lower_lit_pat(k, &span));
+        let hir_start = start
+            .as_ref()
+            .map(|(k, neg)| negate_if(lower_lit_pat(k, &span), *neg));
+        let hir_end = end
+            .as_ref()
+            .map(|(k, neg)| negate_if(lower_lit_pat(k, &span), *neg));
 
         // Validate: start must be <= end (inclusive) or < end (exclusive)
         if let (Some(s), Some(e)) = (&hir_start, &hir_end) {
@@ -693,6 +704,15 @@ impl LowerCtx<'_> {
 /// Convert a literal pattern kind to an HIR literal. `span` is the span of
 /// the literal's source text, used to compute escape-error sub-spans for
 /// string patterns.
+/// A numeric pattern literal written with a leading `-`.
+fn negate_if(lit: HirLiteral, negative: bool) -> HirLiteral {
+    match lit {
+        HirLiteral::Integer(n) if negative => HirLiteral::Integer(-n),
+        HirLiteral::Float(f) if negative => HirLiteral::Float(-f),
+        other => other,
+    }
+}
+
 fn lower_lit_pat(kind: &LitPat, span: &Span) -> HirLiteral {
     match kind {
         LitPat::Integer(s) => HirLiteral::Integer(parse_int(s)),

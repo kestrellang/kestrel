@@ -15,8 +15,8 @@
 module Main
 import std.numeric.Int32
 import std.text.(Formattable, Formatter)
-import std.text.format.StringBuilder
-import std.text.format.FormatOptions
+import std.text.StringBuilder
+import std.text.FormatOptions
 
 struct MyErr: Formattable {
     func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {

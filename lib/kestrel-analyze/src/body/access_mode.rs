@@ -226,10 +226,10 @@ fn check_borrow_init(
             Some(NodeKind::Subscript | NodeKind::Field)
         )
         && util::accessor_place_mut_base(cx, inner).is_some()
-        && !cx
+        && cx
             .query
             .query(kestrel_hir_lower::PlaceAccessors { entity: member })
-            .is_some_and(|info| info.mutating_ref_accessor.is_some())
+            .is_none_or(|info| info.mutating_ref_accessor.is_none())
     {
         push(
             diags,

@@ -36,6 +36,14 @@ pub enum MonoError {
         source_entity: Entity,
         span: Option<Span>,
     },
+    /// An instantiation whose type arguments nest deeper than
+    /// `MAX_INSTANTIATION_DEPTH`: polymorphic recursion (`recur([x])` from
+    /// `recur[T]`) asks for ever-larger types and would never finish.
+    InstantiationTooDeep {
+        function: String,
+        source_entity: Entity,
+        span: Option<Span>,
+    },
 }
 
 impl fmt::Display for MonoError {
@@ -64,6 +72,11 @@ impl fmt::Display for MonoError {
                 f,
                 "type arg arity mismatch for {function}: expected {expected}, got {got}"
             ),
+            MonoError::InstantiationTooDeep { function, .. } => write!(
+                f,
+                "{function} instantiates itself with ever-larger types (polymorphic \
+                 recursion); generic recursion must call itself at the same type"
+            ),
         }
     }
 }
@@ -73,7 +86,8 @@ impl MonoError {
         match self {
             MonoError::WitnessNotFound { source_entity, .. }
             | MonoError::MethodNotFound { source_entity, .. }
-            | MonoError::TypeArgArityMismatch { source_entity, .. } => *source_entity,
+            | MonoError::TypeArgArityMismatch { source_entity, .. }
+            | MonoError::InstantiationTooDeep { source_entity, .. } => *source_entity,
         }
     }
 
@@ -81,7 +95,8 @@ impl MonoError {
         match self {
             MonoError::WitnessNotFound { span, .. }
             | MonoError::MethodNotFound { span, .. }
-            | MonoError::TypeArgArityMismatch { span, .. } => span.as_ref(),
+            | MonoError::TypeArgArityMismatch { span, .. }
+            | MonoError::InstantiationTooDeep { span, .. } => span.as_ref(),
         }
     }
 }

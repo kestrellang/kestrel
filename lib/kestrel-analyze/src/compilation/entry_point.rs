@@ -27,6 +27,11 @@
 //! are rejected. The compiler synthesizes the C entry point as a wrapper that
 //! calls `Exitable.report()` on the returned value.
 //!
+//! ### E627 — `main_has_parameters` (Error, Correctness)
+//!
+//! A `@main` function takes no parameters: the synthesized C entry point
+//! calls it with none (program arguments come from the stdlib, not `main`).
+//!
 //! ### E617 — `multiple_main` (Error, Correctness)
 //!
 //! More than one `@main` in the compilation. Labeled on each offender.
@@ -75,6 +80,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E627",
+        name: "main_has_parameters",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct EntryPointAnalyzer;
@@ -118,6 +129,9 @@ impl CompilationCheck for EntryPointAnalyzer {
             }
             if !main_return_type_ok(cx, entity) {
                 diags.push(invalid_return_diag(cx, entity));
+            }
+            if main_has_parameters(cx, entity) {
+                diags.push(main_parameters_diag(cx, entity));
             }
         }
 
@@ -254,6 +268,13 @@ fn entry_module_span(cx: &CompilationContext<'_>) -> Span {
 }
 
 fn last_decl_span(cx: &CompilationContext<'_>, entity: Entity, out: &mut Option<Span>) {
+    // Anchor on the program's own code, never on the standard library (which
+    // loads alongside it and would otherwise supply the last declaration).
+    if cx.query.get::<NodeKind>(entity) == Some(&NodeKind::Module)
+        && util::entity_name(cx.query, entity) == "std"
+    {
+        return;
+    }
     if let Some(DeclSpan(s)) = cx.query.get::<DeclSpan>(entity) {
         *out = Some(s.clone());
     }
@@ -293,6 +314,31 @@ fn invalid_return_diag(cx: &CompilationContext<'_>, entity: Entity) -> AnalyzeDi
         notes: vec![
             "`Exitable` types include `ExitCode`, the integer types, and a throwing `main`".into(),
         ],
+    }
+}
+
+fn main_has_parameters(cx: &CompilationContext<'_>, entity: Entity) -> bool {
+    cx.query
+        .get::<kestrel_ast_builder::Callable>(entity)
+        .is_some_and(|c| !c.params.is_empty())
+}
+
+fn main_parameters_diag(cx: &CompilationContext<'_>, entity: Entity) -> AnalyzeDiagnostic {
+    let name = util::entity_name(cx.query, entity);
+    let d = DESCRIPTORS
+        .iter()
+        .find(|d| d.id == "E627")
+        .expect("E627 descriptor");
+    AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message: format!("`@main` function '{name}' cannot take parameters"),
+        labels: vec![DiagLabel {
+            span: util::entity_span(cx.query, entity),
+            message: "the program entry point is called with no arguments".into(),
+            is_primary: true,
+        }],
+        notes: vec!["read program arguments through the standard library instead".into()],
     }
 }
 

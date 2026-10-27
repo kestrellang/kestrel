@@ -139,7 +139,10 @@ pub enum WhereConstraint {
     /// `where I.Item = U`), lowered from the front end's resolved
     /// `WhereClausesOf`. Decided at witness selection by the entailment
     /// kernel (`mono::entail`).
-    Equal { subject: crate::TyId, rhs: crate::TyId },
+    Equal {
+        subject: crate::TyId,
+        rhs: crate::TyId,
+    },
 }
 
 impl WhereConstraint {

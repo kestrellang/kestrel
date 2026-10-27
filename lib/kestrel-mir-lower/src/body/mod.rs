@@ -4,6 +4,7 @@ pub mod closure_box;
 pub mod control;
 pub mod expr;
 pub mod literal;
+pub mod partial_move;
 pub mod pattern;
 pub mod place;
 pub mod stmt;
@@ -40,6 +41,9 @@ pub(crate) struct LoopInfo {
     /// Number of slots in the loop's tracker. Break takes the first
     /// N values from the active tracker to thread to the exit block.
     pub tracker_len: usize,
+    /// `var` init-states at each `break` (the loop's only exits), joined at
+    /// the exit block: a var moved before a break is uninit after the loop.
+    pub break_var_inits: Vec<Vec<(HirLocalId, VarState)>>,
 }
 
 pub(crate) enum HirRef<'a> {
@@ -155,6 +159,40 @@ impl VarInit {
     }
 }
 
+/// One field path of a `var` that this body may move out on its own
+/// (`plan_partial_moves`). Its state and flag mirror the whole var's until the
+/// path itself is moved or reinitialized.
+#[derive(Clone, Debug)]
+pub(crate) struct PathState {
+    pub path: Vec<FieldIdx>,
+    pub init: VarInit,
+    /// In-memory presence flag (`true` = the field holds a value), allocated
+    /// where the var is declared so it dominates every exit.
+    pub flag: ValueId,
+}
+
+/// Static init-state of a `var`: the whole slot, plus each tracked field path
+/// (index-aligned with its `ScopeEntry::Var::paths`). Joined at merges.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct VarState {
+    pub whole: VarInit,
+    pub paths: Vec<VarInit>,
+}
+
+impl VarState {
+    pub fn join(&self, other: &VarState) -> VarState {
+        VarState {
+            whole: self.whole.join(other.whole),
+            paths: self
+                .paths
+                .iter()
+                .zip(&other.paths)
+                .map(|(a, b)| a.join(*b))
+                .collect(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum ScopeEntry {
     Owned(ValueId),
@@ -176,6 +214,10 @@ pub(crate) enum ScopeEntry {
         /// stores drop-vs-StoreInit correctly) but must NOT be DestroyAddr'd at
         /// scope exit — the caller owns and drops the value.
         borrowed: bool,
+        /// Field paths this body may move out (partial moves). Empty for
+        /// nearly every var; non-empty paths make scope exit drop per field
+        /// once any path's state differs from the whole slot's.
+        paths: Vec<PathState>,
     },
     /// @guaranteed borrow needing EndBorrow at scope exit.
     Borrow(ValueId),
@@ -302,7 +344,7 @@ pub(crate) struct ArmExit {
     pub slots: Vec<(ValueId, bool)>,
     /// Static init-state of each in-scope `var` (by HIR local) at this arm's exit,
     /// for drop-flag reconciliation at the merge.
-    pub var_inits: Vec<(HirLocalId, VarInit)>,
+    pub var_inits: Vec<(HirLocalId, VarState)>,
     /// Static init-state of each tracked `self` field (init bodies only) at this
     /// arm's exit, joined by `fold_field_inits` at the merge (#154).
     pub field_inits: Vec<(FieldIdx, VarInit)>,
@@ -334,12 +376,23 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// `HirExprId`. Computed once (post-inference) and consumed by
     /// `lower_closure_expr`. Arc-shared with the query memo cache.
     pub(crate) captures: Arc<ClosureCaptureMap>,
+    /// Which field paths of which locals this body moves out on their own
+    /// (`plan_partial_moves`), computed once at `lower_body` entry.
+    pub(crate) partial: Arc<partial_move::PartialMovePlan>,
     /// Inside a closure body: how each captured *place* (e.g. `self.cap`) is
     /// presented. Consulted when lowering reads/borrows so projected captures
     /// go through the env instead of projecting from a (non-captured)
     /// receiver. Whole-local captures use `local_map` instead. Saved/restored
     /// across nested closure bodies like `local_map`.
     pub(crate) place_capture_map: HashMap<PlaceKey, PlaceCapture>,
+    /// Closure-literal call arguments whose read captures overlap a
+    /// `mutating` argument of the same call: closure expr → (captured local,
+    /// address of its call-time copy). Filled by
+    /// `prepare_closure_arg_snapshots`, consumed by `lower_closure_expr`.
+    pub(crate) closure_arg_snapshots: HashMap<HirExprId, Vec<(HirLocalId, ValueId)>>,
+    /// While lowering a match that moves only its bound parts: the
+    /// scrutinee's root local and each moving binding's full field path.
+    pub(crate) active_match_moves: Option<(HirLocalId, Vec<(HirLocalId, Vec<FieldIdx>)>)>,
     /// Per-droppable-`self`-field drop-flag tracking in an init body: one entry
     /// per droppable stored field, as `(field index, substituted field type,
     /// drop-flag pointer)`. Populated for EVERY init with droppable fields (see
@@ -460,7 +513,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             hir: HirRef::Borrowed(hir),
             typed: typed.map(TypedRef::Borrowed),
             captures,
+            partial: Arc::default(),
             place_capture_map: HashMap::new(),
+            closure_arg_snapshots: HashMap::new(),
+            active_match_moves: None,
             func_entity,
             body_context: if in_protocol_extension {
                 BodyContext::ProtocolExtension
@@ -509,6 +565,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn lower_body(&mut self) {
+        self.partial = Arc::new(self.plan_partial_moves());
         // Build use counts for SSA locals — enables move-on-last-use.
         self.local_use_counts = self.count_local_uses();
         self.local_read_counts = self.count_local_reads();
@@ -686,6 +743,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // Consuming params stay as SSA @owned values — no var_local
         // promotion. Mutating calls use BeginMutBorrow on the SSA value
         // directly, and last-use forwarding avoids unnecessary clones.
+        // Exception: a consuming param whose fields this body moves out
+        // (`consuming self` returning `self.inner`) gets a slot, so its other
+        // fields stay in place with per-field drop tracking.
+        self.spill_partially_moved_params(params_len);
 
         // Lower top-level statements
         for &stmt_id in &statements {
@@ -703,6 +764,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 // stay @guaranteed and carry their provenance root — the
                 // owned-copy path would re-root at a fresh Local and always
                 // escape-fail (E494 instead of the precise E496 etc.).
+                // The tail is not a statement, so nothing else gives its
+                // diagnostics (e.g. the E503 backstop) a location.
+                let prev_span = self.current_span.replace(tail_span);
                 let value = if self.ret_borrow {
                     self.lower_expr_for_ref_return(tail)
                 } else {
@@ -712,13 +776,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     let value = self.prepare_return_value(value);
 
                     self.drain_deferred_borrows();
-                    let prev = self.current_span.replace(tail_span);
                     self.destroy_scopes_to_depth(0, &[value]);
                     // A guarded destroy in the exit renames threaded values.
                     let value = self.resolve_value(value);
                     self.set_terminator(TerminatorKind::Return(value));
-                    self.current_span = prev;
                 }
+                self.current_span = prev_span;
             } else {
                 let unit = self.emit_literal(Immediate::unit());
                 self.destroy_scopes_to_depth(0, &[unit]);
@@ -1191,6 +1254,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         flag: Option<ValueId>,
         borrowed: bool,
     ) {
+        // A var whose fields this body moves gets a presence flag per path,
+        // allocated here (the declaration) so it dominates every exit.
+        let planned: Vec<Vec<FieldIdx>> = match (local, borrowed) {
+            (Some(l), false) => self.partial.paths_of(l).to_vec(),
+            _ => Vec::new(),
+        };
+        let paths = planned
+            .into_iter()
+            .map(|path| PathState {
+                path,
+                init: VarInit::DefInit,
+                flag: self.alloc_var_flag(),
+            })
+            .collect();
         if let Some(frame) = self.scope_stack.last_mut() {
             frame.entries.push(ScopeEntry::Var {
                 addr: address,
@@ -1199,6 +1276,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 flag,
                 local,
                 borrowed,
+                paths,
             });
         }
     }
@@ -1223,21 +1301,84 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         None
     }
 
-    /// Set the static init-state of the `var` slot for HIR `local`.
-    pub fn set_var_init(&mut self, local: HirLocalId, new_init: VarInit) {
-        for scope in self.scope_stack.iter_mut().rev() {
-            for entry in scope.entries.iter_mut().rev() {
-                if let ScopeEntry::Var {
-                    local: Some(l),
-                    init,
-                    ..
-                } = entry
-                    && *l == local
-                {
-                    *init = new_init;
-                    return;
-                }
+    /// Set the whole-and-paths static state of `local` (a merge join).
+    pub fn set_var_state(&mut self, local: HirLocalId, state: &VarState) {
+        if let Some(ScopeEntry::Var { init, paths, .. }) = self.var_entry_mut(local) {
+            *init = state.whole;
+            for (p, st) in paths.iter_mut().zip(&state.paths) {
+                p.init = *st;
             }
+        }
+    }
+
+    /// The innermost scope entry tracking `local`.
+    fn var_entry_mut(&mut self, local: HirLocalId) -> Option<&mut ScopeEntry> {
+        self.scope_stack
+            .iter_mut()
+            .rev()
+            .flat_map(|scope| scope.entries.iter_mut().rev())
+            .find(|e| matches!(e, ScopeEntry::Var { local: Some(l), .. } if *l == local))
+    }
+
+    pub(crate) fn var_entry(&self, local: HirLocalId) -> Option<&ScopeEntry> {
+        self.scope_stack
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.entries.iter().rev())
+            .find(|e| matches!(e, ScopeEntry::Var { local: Some(l), .. } if *l == local))
+    }
+
+    /// The whole var was moved out (`DefUninit`) or (re)initialized
+    /// (`DefInit`): update its static state and drop flag, and every tracked
+    /// field path with it — a field is present exactly when the slot is.
+    /// Single funnel for whole-var transitions, so field paths never drift.
+    pub fn record_var_whole(&mut self, local: HirLocalId, st: VarInit) {
+        let full = match st {
+            VarInit::DefInit => true,
+            VarInit::DefUninit => false,
+            VarInit::MaybeUninit => unreachable!("a single program point is never Maybe"),
+        };
+        let mut flags = Vec::new();
+        if let Some(ScopeEntry::Var {
+            init, flag, paths, ..
+        }) = self.var_entry_mut(local)
+        {
+            *init = st;
+            flags.extend(*flag);
+            for p in paths.iter_mut() {
+                p.init = st;
+                flags.push(p.flag);
+            }
+        }
+        for f in flags {
+            self.store_drop_flag(f, full);
+        }
+    }
+
+    /// Set one tracked field path (and every tracked path under it) of
+    /// `local` to `st`, with their presence flags.
+    pub fn record_var_path(&mut self, local: HirLocalId, path: &[FieldIdx], st: VarInit) {
+        let full = st == VarInit::DefInit;
+        let mut flags = Vec::new();
+        if let Some(ScopeEntry::Var { paths, .. }) = self.var_entry_mut(local) {
+            for p in paths.iter_mut().filter(|p| p.path.starts_with(path)) {
+                p.init = st;
+                flags.push(p.flag);
+            }
+        }
+        for f in flags {
+            self.store_drop_flag(f, full);
+        }
+    }
+
+    /// Whether any tracked field path of `local` at or under `prefix` is not
+    /// fully initialized — the place is partially moved.
+    pub fn var_partially_moved(&self, local: HirLocalId, prefix: &[FieldIdx]) -> bool {
+        match self.var_entry(local) {
+            Some(ScopeEntry::Var { paths, .. }) => paths
+                .iter()
+                .any(|p| p.path.starts_with(prefix) && p.init != VarInit::DefInit),
+            _ => false,
         }
     }
 
@@ -1607,6 +1748,60 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
     }
 
+    /// Destroy the owned temporaries an expression statement introduced
+    /// (tracked in the innermost scope at or after `mark`) once it ends: its
+    /// discarded result and any argument temporaries (`peek(mk(1))` borrows
+    /// `mk(1)` only for the call). Only unbound values an instruction of the
+    /// current block defined count: a statement-level `if` re-tracks the
+    /// function's live locals as its merge block's params, and those live on. A
+    /// temporary something still borrows is left for scope exit. Innermost
+    /// first, like scope exit.
+    pub(crate) fn drop_statement_temporaries(&mut self, mark: usize, result: ValueId) {
+        if self.is_terminated() {
+            return;
+        }
+        let (Some(frame), Some(block)) = (self.scope_stack.last(), self.current_block) else {
+            return;
+        };
+        // A desugared `let (a, b) = ...` is an expression statement that
+        // binds locals: those values are variables, not temporaries.
+        let bound: std::collections::HashSet<ValueId> = self
+            .local_map
+            .values()
+            .map(|b| match b {
+                LocalBinding::Ssa(v) | LocalBinding::Var(v) => *v,
+            })
+            .collect();
+        let defined_here: std::collections::HashSet<ValueId> = self.body.blocks[block.index()]
+            .insts
+            .iter()
+            .flat_map(|i| i.kind.results())
+            // The statement's own result counts even when it is a merge
+            // param (`if c { a() } else { b() };`).
+            .chain(std::iter::once(self.resolve_value(result)))
+            .filter(|v| !bound.contains(v))
+            .collect();
+        let since = &frame.entries[mark.min(frame.entries.len())..];
+        let owned: Vec<ValueId> = since
+            .iter()
+            .rev()
+            .filter_map(|e| match e {
+                ScopeEntry::Owned(v) if defined_here.contains(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        for v in owned {
+            let borrowed = self.scope_stack.iter().any(|f| {
+                f.entries.iter().any(|e| {
+                    matches!(e, ScopeEntry::Borrow(b) if self.body.value(*b).borrow_source == Some(v))
+                })
+            });
+            if !borrowed {
+                self.emit_destroy_value(v);
+            }
+        }
+    }
+
     pub fn consume(&mut self, value: ValueId) {
         // A genuinely consumed (moved) value must no longer be forwarded
         // through a branch merge.
@@ -1668,10 +1863,34 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if self.is_terminated() {
             return;
         }
+        // Partially moved vars drop field by field (guarded where needed).
+        // Same pass as the flag-guarded destroys: both rename threaded values,
+        // so both must precede the callers' destroy snapshots.
+        let split: Vec<ScopeEntry> = self.scope_stack[target_depth..]
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.entries.iter().rev())
+            .filter(|e| Self::var_entry_is_split(e))
+            .cloned()
+            .collect();
+        for entry in split {
+            if let ScopeEntry::Var {
+                addr,
+                ty,
+                init,
+                flag,
+                paths,
+                ..
+            } = entry
+            {
+                self.drop_var_parts(addr, ty, &[], (init, flag), &paths);
+            }
+        }
         let pending: Vec<(ValueId, ValueId, TyId)> = self.scope_stack[target_depth..]
             .iter()
             .rev()
             .flat_map(|scope| scope.entries.iter().rev())
+            .filter(|e| !Self::var_entry_is_split(e))
             .filter_map(|e| match e {
                 ScopeEntry::Var {
                     init: VarInit::MaybeUninit,
@@ -1728,6 +1947,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 ScopeEntry::Borrow(_) => false,
             });
             for entry in &entries {
+                if Self::var_entry_is_split(entry) {
+                    continue; // dropped per field above
+                }
                 match entry {
                     ScopeEntry::Owned(v) if !keep.contains(v) => {
                         self.push_inst(InstKind::DestroyValue { operand: *v });
@@ -1800,6 +2022,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .flat_map(|scope| scope.entries.iter().rev().cloned())
             .collect();
         for entry in &entries {
+            if Self::var_entry_is_split(entry) {
+                continue; // dropped per field above
+            }
             match entry {
                 ScopeEntry::Owned(v) if !keep.contains(v) => {
                     self.push_inst(InstKind::DestroyValue { operand: *v });
@@ -1932,10 +2157,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 let d = self.body.value(old);
                 (d.ownership, d.root, d.ty)
             };
-            let carries_taint = self.ctx.module.ty_arena.contains_ref(ty)
+            // Refs AND frame-borrowing closures carry escape taint (#174):
+            // `escape_carry`, not `contains_ref` (a closure has no ref type).
+            let carries_taint = self.ctx.module.escape_carry(ty).any()
                 || matches!(
                     self.ctx.module.ty_arena.get(ty),
-                    MirTy::Pointer(p) if self.ctx.module.ty_arena.contains_ref(*p)
+                    MirTy::Pointer(p) if self.ctx.module.escape_carry(*p).any()
                 );
             if ownership == Ownership::Owned && root != RootProvenance::Local(old) && carries_taint
             {
@@ -2042,18 +2269,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     /// Per-`var` static init-state (keyed by HIR local) across all in-scope
     /// frames, innermost wins. Used to reconcile conditional moves at merges.
-    pub fn scope_var_inits(&self) -> Vec<(HirLocalId, VarInit)> {
-        let mut out: Vec<(HirLocalId, VarInit)> = Vec::new();
+    pub fn scope_var_inits(&self) -> Vec<(HirLocalId, VarState)> {
+        let mut out: Vec<(HirLocalId, VarState)> = Vec::new();
         for scope in self.scope_stack.iter().rev() {
             for entry in scope.entries.iter().rev() {
                 if let ScopeEntry::Var {
                     local: Some(l),
                     init,
+                    paths,
                     ..
                 } = entry
                     && !out.iter().any(|(k, _)| k == l)
                 {
-                    out.push((*l, *init));
+                    let state = VarState {
+                        whole: *init,
+                        paths: paths.iter().map(|p| p.init).collect(),
+                    };
+                    out.push((*l, state));
                 }
             }
         }
@@ -2540,6 +2772,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 if self.slot_is_ref(&slot_tys, i) {
                     self.prep_ref_slot_element(v, &mut taint, &mut end_after)
                 } else {
+                    // By-value escape-carrying payload taints the case, as
+                    // in structs and tuples (`.Some({ k })`).
+                    self.collect_by_value_escape_taint(v, slot_tys.get(i).copied(), &mut taint);
                     self.own_aggregate_element(v)
                 }
             })
@@ -2724,6 +2959,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             self.track_owned(r);
         }
         results
+    }
+
+    /// The raw `bits`-wide integer of an integer scrutinee, for a switch.
+    /// Codegen reads the value at the result type's width.
+    pub fn emit_int_discriminant(&mut self, operand: ValueId, bits: u32) -> ValueId {
+        let arena = &mut self.ctx.module.ty_arena;
+        let ty = match bits {
+            8 => arena.i8(),
+            16 => arena.i16(),
+            32 => arena.i32(),
+            _ => arena.i64(),
+        };
+        let result = self.alloc_value(ty, Ownership::Owned);
+        self.push_inst(InstKind::Discriminant { result, operand });
+        self.track_owned(result);
+        result
     }
 
     pub fn emit_discriminant(&mut self, operand: ValueId) -> ValueId {
@@ -3314,7 +3565,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 // refs at its params (mirror of the ret_borrow source rule).
                 // No candidate args ⇒ the callee used statics/pointers —
                 // inherit the unverified pointer contract.
-                if self.ctx.module.ty_arena.contains_ref(ty) {
+                if self.ctx.module.escape_carry(ty).any() {
                     let convs = self.current_param_convs();
                     let mut joined: Option<RootProvenance> = None;
                     for a in &args {
@@ -3324,7 +3575,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         };
                         let candidate = a_guaranteed
                             || (a.convention == ParamConvention::Consuming
-                                && self.ctx.module.ty_arena.contains_ref(a_ty));
+                                && self.ctx.module.escape_carry(a_ty).any());
                         if candidate {
                             joined = Some(match joined {
                                 None => a_root,
@@ -3718,6 +3969,91 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
     }
 
+    /// End every named ref binding declared in the current block whose last
+    /// mention in the source is behind us (`stmt_end` is the end of the
+    /// statement just lowered): a reference that is never used again no
+    /// longer holds its referent, so a later move or `deinit` of the
+    /// referent is fine (`let r = &x; take(x)` with `r` unused or already
+    /// read). Source order is execution order within one block — a loop
+    /// that uses `r` is a single statement of this block — and `r` cannot
+    /// be mentioned outside the block that declares it.
+    ///
+    /// Kept alive while another live borrow derives from it (`let q =
+    /// &r.f`), or when a closure captures it (the closure may run later).
+    pub fn end_dead_ref_bindings(&mut self, stmt_end: &Span) {
+        if self.is_terminated() {
+            return;
+        }
+        let Some(frame) = self.scope_stack.last() else {
+            return;
+        };
+        let here: Vec<ValueId> = frame
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        let live_borrows: Vec<ValueId> = self
+            .scope_stack
+            .iter()
+            .flat_map(|f| f.entries.iter())
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        for v in here {
+            let Some(&local) = self.ref_binding_vals.get(&v) else {
+                continue;
+            };
+            if !self.mentions_end_by(local, stmt_end)
+                || self.captured_by_closure(local)
+                || live_borrows
+                    .iter()
+                    .any(|&b| b != v && self.borrow_derives_from(b, v))
+            {
+                continue;
+            }
+            self.ref_binding_vals.remove(&v);
+            self.ref_results.remove(&v);
+            self.ref_binding_remaining.remove(&local);
+            self.emit_end_borrow(v);
+        }
+    }
+
+    /// Every mention of `local` ends by `end` (same file).
+    fn mentions_end_by(&self, local: HirLocalId, end: &Span) -> bool {
+        self.hir.exprs.iter().all(|(_, e)| match e {
+            HirExpr::Local(l, span) if *l == local => {
+                span.file_id == end.file_id && span.end <= end.end
+            },
+            _ => true,
+        })
+    }
+
+    /// Some closure in this body captures `local`.
+    fn captured_by_closure(&self, local: HirLocalId) -> bool {
+        self.hir.exprs.iter().any(|(id, e)| {
+            matches!(e, HirExpr::Closure { .. })
+                && self.captures.get(id).iter().any(|cp| cp.key.root == local)
+        })
+    }
+
+    /// Whether `b`'s borrow-source chain passes through `root`.
+    fn borrow_derives_from(&self, b: ValueId, root: ValueId) -> bool {
+        let mut cur = b;
+        for _ in 0..64 {
+            match self.body.value(cur).borrow_source {
+                Some(src) if src == root => return true,
+                Some(src) if src != cur => cur = src,
+                _ => return false,
+            }
+        }
+        false
+    }
+
     /// Count a read of a ref-binding local (once per HIR expr — desugar
     /// re-lowering must not double-decrement). Drives the terminator
     /// policy: remaining > 0 at an inside-fn terminator = E497.
@@ -3854,6 +4190,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // var-addr → accessor → value chain.
             if let Some(arg) = self.try_lower_accessor_place_mut(expr_id) {
                 return arg;
+            }
+            // A stored field / tuple element of an accessor element
+            // (`arr(0).i.x += v`): mutate it inside the accessor's writeback
+            // slot so the setter stores it back.
+            if matches!(
+                self.hir.exprs[expr_id],
+                HirExpr::Field { .. } | HirExpr::TupleIndex { .. }
+            ) && let Some(addr) = self.accessor_writeback_place(expr_id)
+            {
+                let pointee = self.resolve_expr_type(expr_id);
+                let borrow = self.emit_begin_mut_borrow_addr(addr, pointee);
+                return CallArg {
+                    value: borrow,
+                    convention,
+                };
             }
             let val = self.lower_expr(expr_id);
             return self.prepare_call_arg(val, convention);
@@ -4103,6 +4454,38 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // The pending writeback drains at the owning statement boundary,
         // calling `member`'s setter with the mutated slot.
         true
+    }
+
+    /// The address to write through for a place whose root is an accessor
+    /// (`arr(0)`, `o.proxy`) reached through stored fields and tuple elements
+    /// (`arr(0).i.x`, `arr(0).0`): the accessor's value is gotten into a
+    /// writeback slot (its setter runs when pending writebacks drain) and the
+    /// stored projections are field addresses into that slot. `None` when the
+    /// chain does not bottom out on a settable accessor. Without this a
+    /// nested store mutated a temporary copy and was lost.
+    pub(crate) fn accessor_writeback_place(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        if let Some((receiver, index_args, member, _)) = self.accessor_member_prelude(expr_id)
+            && self.ctx.find_setter_child(member).is_some()
+        {
+            return self.fabricate_setter_writeback_slot(expr_id, &receiver, &index_args, member);
+        }
+        let (base, idx) = match &self.hir.exprs[expr_id] {
+            HirExpr::Field { base, name, .. } => {
+                let base = *base;
+                let name = name.as_str_or_empty().to_string();
+                let base_ty = self.resolve_expr_type(base);
+                let entity = match self.ctx.module.ty_arena.get(base_ty) {
+                    MirTy::Named { entity, .. } => *entity,
+                    _ => return None,
+                };
+                (base, self.ctx.resolve_field_idx(entity, &name)?)
+            },
+            HirExpr::TupleIndex { base, index, .. } => (*base, FieldIdx::new(*index as usize)),
+            _ => return None,
+        };
+        let base_ty = self.resolve_expr_type(base);
+        let base_addr = self.accessor_writeback_place(base)?;
+        Some(self.emit_field_addr(base_addr, base_ty, idx))
     }
 
     /// Resolve an accessor-backed member expression (`x(i)`, `x.first`,

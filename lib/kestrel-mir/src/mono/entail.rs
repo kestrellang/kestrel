@@ -54,7 +54,9 @@ impl<'a> MonoLayer<'a> {
                 entity: *entity,
                 args: type_args.iter().map(|&a| self.ety(a, bindings)).collect(),
             },
-            MirTy::Tuple(elems) => ETy::Tuple(elems.iter().map(|&a| self.ety(a, bindings)).collect()),
+            MirTy::Tuple(elems) => {
+                ETy::Tuple(elems.iter().map(|&a| self.ety(a, bindings)).collect())
+            },
             MirTy::Ref { pointee, mutating } => ETy::Ref {
                 inner: Box::new(self.ety(*pointee, bindings)),
                 mutating: *mutating,

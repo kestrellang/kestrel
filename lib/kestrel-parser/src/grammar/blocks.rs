@@ -24,8 +24,8 @@ use crate::core::Parser;
 /// expressions count as statements without a `;`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum BlockFlavor {
-    /// A declaration body (function, accessor, init, deinit). Allows
-    /// `deinit x;`. `if`/`while`/`loop`/`for`/`match` stand alone.
+    /// A declaration body (function, accessor, init, deinit).
+    /// `if`/`while`/`loop`/`for`/`match` stand alone.
     Top,
     /// The body of `if`/`while`/`loop`/`for`. Additionally `return`,
     /// `throw` and `try` stand alone.
@@ -131,7 +131,7 @@ pub(super) fn block_items(p: &mut Parser<'_>, flavor: BlockFlavor) {
     while !p.at(K::RBrace) && !p.at_eof() {
         match p.current() {
             Some(K::Guard) if flavor.allows_guard() => guard_stmt(p, flavor.guard_else()),
-            Some(K::Deinit) if flavor == BlockFlavor::Top => deinit_stmt(p),
+            Some(K::Deinit) => deinit_stmt(p),
             Some(K::Let | K::Var) => var_decl(p),
             _ if at_expr_start(p) => expr_item(p, flavor),
             _ => {

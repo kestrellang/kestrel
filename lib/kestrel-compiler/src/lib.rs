@@ -15,6 +15,12 @@
 //! let diagnostics = compiler.diagnostics();
 //! ```
 
+/// Stack size for a thread that runs the compiler. The front end and MIR
+/// lowering recurse once per nesting level, so the default 2–8 MB overflowed
+/// on a few thousand levels (long generated `+` chains, deep `else if`
+/// ladders). 256 MB is reserved virtual memory, committed only as used.
+pub const COMPILER_STACK_SIZE: usize = 256 * 1024 * 1024;
+
 pub mod components;
 pub mod diagnostic;
 pub mod queries;
@@ -247,18 +253,22 @@ impl Compiler {
             // an invalid ret_borrow body are noise — report only the coded
             // ones. Uncoded errors alone are real ICEs and surface as such.
             let has_coded = errors.iter().any(|e| e.diag.is_some());
-            for error in errors.iter().filter(|e| !has_coded || e.diag.is_some()) {
+            let reported: Vec<_> = errors
+                .iter()
+                .filter(|e| !has_coded || e.diag.is_some())
+                .collect();
+            for error in &reported {
                 ctx.accumulate(diagnostic::mir_verify_error_to_diagnostic(
                     error,
                     self.world(),
                 ));
             }
             // Coded errors are ordinary user diagnostics (escape check); only
-            // uncoded ones are internal verify failures.
-            let msg = if errors.iter().all(|e| e.diag.is_some()) {
-                format!("compilation failed with {} error(s)", errors.len())
+            // uncoded ones are internal verify failures. Count what was shown.
+            let msg = if has_coded {
+                format!("compilation failed with {} error(s)", reported.len())
             } else {
-                format!("OSSA verification failed with {} error(s)", errors.len())
+                format!("OSSA verification failed with {} error(s)", reported.len())
             };
             return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(msg));
         }
@@ -469,7 +479,7 @@ impl Compiler {
 
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
 
-        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        // Diagnostic only; no-op unless KESTREL_DEBUG=audit-dup.
         kestrel_mir::mono::audit::run_audit(&mono);
 
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);
@@ -545,7 +555,7 @@ impl Compiler {
         let _mono_flow = kestrel_mir::verify::verify_mono_flow(&mono);
 
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
-        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        // Diagnostic only; no-op unless KESTREL_DEBUG=audit-dup.
         kestrel_mir::mono::audit::run_audit(&mono);
 
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);

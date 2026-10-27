@@ -26,9 +26,17 @@ use kestrel_hecs::Entity;
 /// Externs that only allocate, release or move memory; reaching them is not
 /// observable.
 const MEMORY_EXTERNS: &[&str] = &[
-    "malloc", "calloc", "realloc", "free", "memcpy", "memmove", "memset", "memcmp",
+    "malloc",
+    "calloc",
+    "realloc",
+    "free",
+    "memcpy",
+    "memmove",
+    "memset",
+    "memcmp",
     // The system allocator's aligned path (`SystemAllocator.allocate`).
-    "posix_memalign", "aligned_alloc",
+    "posix_memalign",
+    "aligned_alloc",
 ];
 
 /// One unmarked `Cloneable` type whose deinit reaches an observable extern.

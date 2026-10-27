@@ -516,13 +516,27 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 describe_tyvar(ctx, *got)
             )
         },
-        InferError::DoesNotConform { ty, protocol, .. } => {
+        InferError::DoesNotConform {
+            ty,
+            protocol,
+            protocol_args,
+            ..
+        } => {
             let ty_name = describe_tyvar(ctx, *ty);
-            let proto_name = ctx
+            let mut proto_name = ctx
                 .query_ctx
                 .get::<kestrel_ast_builder::Name>(*protocol)
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| format!("{:?}", protocol));
+            // `Int8 !: Convertible[Int8]`, not the misleading `Int8 !:
+            // Convertible` (Int8 does conform — just not with this arg).
+            if !protocol_args.is_empty() {
+                let args: Vec<String> = protocol_args
+                    .iter()
+                    .map(|&a| describe_tyvar(ctx, a))
+                    .collect();
+                proto_name = format!("{proto_name}[{}]", args.join(", "));
+            }
             // Static failures get a "because" detail — deep in generic
             // instantiation chains the bare `T !: Static` is miserable.
             if let Some(why) = describe_static_failure(ctx, *ty, *protocol) {

@@ -29,7 +29,7 @@ pub fn build_subscript(
     world.set(entity, NodeKind::Subscript);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
+    world.set(entity, CstNode(SyntaxNodePtr::new(syntax)));
     world.set(entity, Subscript);
     world.set(entity, Gettable);
     world.set_parent(entity, parent);

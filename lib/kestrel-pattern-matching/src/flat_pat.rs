@@ -143,12 +143,28 @@ fn decompose_array(
     // (`k == 1` is the last). A rest row knows only its prefix and suffix; its
     // children are `prefix, rest slot, suffix`.
     let from_front = |i: usize| -> FlatPat {
-        let known = if src_rest { i < src_prefix } else { i < children.len() };
-        if known { children[i].clone() } else { FlatPat::Wildcard }
+        let known = if src_rest {
+            i < src_prefix
+        } else {
+            i < children.len()
+        };
+        if known {
+            children[i].clone()
+        } else {
+            FlatPat::Wildcard
+        }
     };
     let from_back = |k: usize| -> FlatPat {
-        let known = if src_rest { k <= src_suffix } else { k <= children.len() };
-        if known { children[children.len() - k].clone() } else { FlatPat::Wildcard }
+        let known = if src_rest {
+            k <= src_suffix
+        } else {
+            k <= children.len()
+        };
+        if known {
+            children[children.len() - k].clone()
+        } else {
+            FlatPat::Wildcard
+        }
     };
 
     if !tgt_rest {
@@ -397,10 +413,12 @@ fn flatten_literal(value: &HirLiteral) -> FlatPat {
     let ctor = match value {
         HirLiteral::Bool(true) => Constructor::True,
         HirLiteral::Bool(false) => Constructor::False,
-        // Pattern matching ranges are computed in `i64`; an out-of-range
-        // pattern literal is itself diagnosed by the range analyzer (E121).
-        HirLiteral::Integer(n) => Constructor::IntLiteral(*n as i64),
-        HirLiteral::Char { value: c, .. } => Constructor::CharLiteral(char::from_u32(*c).unwrap_or('\0')),
+        // Kept at full `i128` width so `UInt64` values above `Int64.max`
+        // survive; an out-of-range literal is diagnosed by E121.
+        HirLiteral::Integer(n) => Constructor::IntLiteral(*n),
+        HirLiteral::Char { value: c, .. } => {
+            Constructor::CharLiteral(char::from_u32(*c).unwrap_or('\0'))
+        },
         HirLiteral::String { value, .. } => Constructor::StringLiteral(value.clone()),
         HirLiteral::Float(_) => Constructor::NonExhaustive,
         HirLiteral::Null => Constructor::NonExhaustive,
@@ -420,13 +438,11 @@ fn flatten_range(start: &Option<HirLiteral>, end: &Option<HirLiteral>, inclusive
 
     let ctor = if is_int {
         let s = match start {
-            Some(HirLiteral::Integer(v)) => Some(*v as i64),
+            Some(HirLiteral::Integer(v)) => Some(*v),
             _ => None,
         };
         let e = match end {
-            Some(HirLiteral::Integer(v)) => {
-                Some(if inclusive { *v as i64 } else { (v - 1) as i64 })
-            },
+            Some(HirLiteral::Integer(v)) => Some(if inclusive { *v } else { v - 1 }),
             _ => None,
         };
         Constructor::IntRange { start: s, end: e }
@@ -476,6 +492,53 @@ fn resolve_variant_field_types(
         arity,
     };
     ctor.field_types(query, root, scrutinee_ty)
+}
+
+/// Payload types of a (possibly implicit) variant pattern matched against
+/// `scrutinee_ty`, in declaration order. Empty for any other pattern.
+pub(crate) fn variant_pattern_field_types(
+    query: &QueryContext<'_>,
+    root: Entity,
+    pat: &HirPat,
+    scrutinee_ty: &ResolvedTy,
+) -> Vec<ResolvedTy> {
+    match pat {
+        HirPat::Variant { entity, .. } => {
+            resolve_variant_field_types(query, root, *entity, scrutinee_ty)
+        },
+        HirPat::ImplicitVariant { name, args, .. } => {
+            resolve_implicit_variant(
+                query,
+                root,
+                name.as_str_or_empty(),
+                args.len(),
+                scrutinee_ty,
+            )
+            .1
+        },
+        _ => Vec::new(),
+    }
+}
+
+/// The type of struct `entity`'s field `name` within `scrutinee_ty`.
+pub(crate) fn struct_field_type(
+    query: &QueryContext<'_>,
+    root: Entity,
+    entity: Entity,
+    name: &str,
+    scrutinee_ty: &ResolvedTy,
+) -> ResolvedTy {
+    let all_fields = collect_fields(query, entity);
+    let ctor = Constructor::Struct {
+        entity,
+        arity: all_fields.len(),
+    };
+    let field_types = ctor.field_types(query, root, scrutinee_ty);
+    all_fields
+        .iter()
+        .position(|&f| query.get::<Name>(f).is_some_and(|n| n.0 == name))
+        .and_then(|i| field_types.get(i).cloned())
+        .unwrap_or(ResolvedTy::Error)
 }
 
 /// Resolve an implicit variant name to its entity, searching the scrutinee type's cases.

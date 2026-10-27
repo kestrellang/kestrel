@@ -25,7 +25,7 @@ use kestrel_hecs::Entity;
 use crate::body::OssaBody;
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
-use crate::inst::InstKind;
+use crate::inst::{InstKind, Instruction};
 use crate::item::enum_def::EnumDef;
 use crate::item::function::{FunctionDef, FunctionKind, WhereConstraint};
 use crate::item::protocol::ProtocolDef;
@@ -34,9 +34,9 @@ use crate::item::witness::WitnessDef;
 use crate::item::{Layout, TargetConfig};
 use crate::layout::StructLayout;
 use crate::substitute::{SubstMap, substitute};
-use crate::ty::{MirTy, TyArena};
-use crate::value::Ownership;
-use crate::{CopyBehavior, MirModule, MonoFuncId, TyId};
+use crate::ty::{MirTy, ParamConvention, TyArena};
+use crate::value::{Ownership, ValueDef};
+use crate::{CopyBehavior, MirModule, MonoFuncId, TyId, ValueId};
 
 /// Check if a function needs self_type in its InstantiationKey.
 ///
@@ -92,6 +92,7 @@ pub fn monomorphize(
             &witnesses,
             &entity_names,
             key,
+            cloneable_protocol,
         );
         mono_bodies.push(result);
     }
@@ -397,6 +398,7 @@ fn monomorphize_body(
     witnesses: &[WitnessDef],
     entity_names: &IndexMap<Entity, String>,
     key: &InstantiationKey,
+    cloneable_protocol: Option<Entity>,
 ) -> MonoBodyResult {
     let func = functions
         .get(&key.func_entity)
@@ -454,8 +456,28 @@ fn monomorphize_body(
     }
 
     // Walk instructions and substitute types
-    for block in &mut mono_body.blocks {
-        for inst in &mut block.insts {
+    for bi in 0..mono_body.blocks.len() {
+        let insts = std::mem::take(&mut mono_body.blocks[bi].insts);
+        let mut adapted = Vec::with_capacity(insts.len());
+        for mut inst in insts {
+            let was_witness = matches!(
+                &inst.kind,
+                InstKind::Call {
+                    callee: Callee::Witness { .. },
+                    ..
+                }
+            );
+            // `Cloneable.clone()` on an escaping closure: the closure is a
+            // shared handle with no witness function; cloning it is a retain.
+            if let Some(copy) =
+                closure_clone_as_copy(arena, &inst.kind, &subst, witnesses, cloneable_protocol)
+            {
+                adapted.push(Instruction {
+                    kind: copy,
+                    span: inst.span.clone(),
+                });
+                continue;
+            }
             substitute_inst(
                 arena,
                 witnesses,
@@ -466,7 +488,31 @@ fn monomorphize_body(
                 &subst,
                 key.self_type,
             );
+            if !was_witness {
+                adapted.push(inst);
+                continue;
+            }
+            // Borrow each owned arg the witness only borrows, then release it.
+            let owned = borrowed_by_witness(&inst.kind, functions);
+            let mut borrows = Vec::with_capacity(owned.len());
+            for &(idx, operand) in &owned {
+                let ty = mono_body.values[operand.index()].ty;
+                let result = mono_body.alloc_value(ValueDef::guaranteed(ty, operand));
+                adapted.push(Instruction::new(InstKind::BeginBorrow { result, operand }));
+                if let InstKind::Call { args, .. } = &mut inst.kind {
+                    args[idx].value = result;
+                    args[idx].convention = ParamConvention::Borrow;
+                }
+                borrows.push(result);
+            }
+            adapted.push(inst);
+            for (&b, &(_, operand)) in borrows.iter().zip(&owned) {
+                adapted.push(Instruction::new(InstKind::EndBorrow { operand: b }));
+                adapted.push(Instruction::new(InstKind::DestroyValue { operand }));
+            }
         }
+        let block = &mut mono_body.blocks[bi];
+        block.insts = adapted;
         // No terminator substitution needed — MIR terminators carry ValueId only
     }
 
@@ -515,6 +561,76 @@ fn monomorphize_body(
         extern_info,
         is_main,
     }
+}
+
+/// `x.clone()` dispatched through `Cloneable` at an `escaping` closure type
+/// becomes `copy_value x` (a refcount retain of the shared environment):
+/// closure types conform to `Cloneable` structurally, without a witness.
+fn closure_clone_as_copy(
+    arena: &mut TyArena,
+    kind: &InstKind,
+    subst: &SubstMap,
+    witnesses: &[WitnessDef],
+    cloneable_protocol: Option<Entity>,
+) -> Option<InstKind> {
+    let InstKind::Call {
+        result: Some(result),
+        callee:
+            Callee::Witness {
+                protocol,
+                method,
+                self_type,
+                ..
+            },
+        args,
+    } = kind
+    else {
+        return None;
+    };
+    if Some(*protocol) != cloneable_protocol || method.name != "clone" {
+        return None;
+    }
+    let concrete = collect::substitute_and_resolve(arena, witnesses, *self_type, subst);
+    let is_shared_closure = matches!(
+        arena.get(concrete),
+        MirTy::FuncThick { kind, .. } if kind.is_shared()
+    );
+    let receiver = args.first()?;
+    is_shared_closure.then_some(InstKind::CopyValue {
+        result: *result,
+        operand: receiver.value,
+    })
+}
+
+/// A requirement may take an argument `consuming` while the witness that
+/// satisfies it only borrows (a weaker demand, so the conformance is sound).
+/// The call site, lowered against the requirement, hands over an owned value
+/// the witness never releases. Returns `(arg index, value)` for each such
+/// argument so the caller can borrow it for the call and release it after.
+fn borrowed_by_witness(
+    kind: &InstKind,
+    functions: &IndexMap<Entity, FunctionDef>,
+) -> Vec<(usize, ValueId)> {
+    let InstKind::Call {
+        callee: Callee::Direct { func, .. },
+        args,
+        ..
+    } = kind
+    else {
+        return Vec::new();
+    };
+    let Some(target) = functions.get(func) else {
+        return Vec::new();
+    };
+    args.iter()
+        .zip(&target.params)
+        .enumerate()
+        .filter(|(_, (arg, param))| {
+            arg.convention == ParamConvention::Consuming
+                && param.convention == ParamConvention::Borrow
+        })
+        .map(|(i, (arg, _))| (i, arg.value))
+        .collect()
 }
 
 /// Substitute types in a single instruction (the OSSA analogue of the
@@ -735,21 +851,17 @@ fn rewrite_callees(
             for (_, callee) in inst.kind.callees_mut() {
                 rewrite_callee(callee, func_id_map, functions);
             }
-            match &mut inst.kind {
-                InstKind::Literal { value, .. } => {
-                    if let ImmediateKind::FunctionRef {
-                        func,
-                        type_args,
-                        self_type,
-                    } = &value.kind
-                    {
-                        let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
-                        if let Some(&mono_id) = func_id_map.get(&key) {
-                            value.kind = ImmediateKind::MonoFunctionRef(mono_id);
-                        }
-                    }
-                },
-                _ => {},
+            if let InstKind::Literal { value, .. } = &mut inst.kind
+                && let ImmediateKind::FunctionRef {
+                    func,
+                    type_args,
+                    self_type,
+                } = &value.kind
+            {
+                let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                if let Some(&mono_id) = func_id_map.get(&key) {
+                    value.kind = ImmediateKind::MonoFunctionRef(mono_id);
+                }
             }
         }
     }
@@ -760,24 +872,22 @@ fn rewrite_callee(
     func_id_map: &HashMap<InstantiationKey, MonoFuncId>,
     functions: &IndexMap<Entity, FunctionDef>,
 ) {
-    match callee {
-        Callee::Direct {
-            func,
-            type_args,
-            self_type,
-        } => {
-            // Mirror collection's arity normalization (collect::scan_callee) so
-            // the lookup key matches the key the instance was enqueued under.
-            let mut targs = type_args.clone();
-            if let Some(f) = functions.get(&*func) {
-                collect::normalize_direct_arity(&mut targs, f.type_params.len());
-            }
-            let key = InstantiationKey::new(*func, targs, *self_type);
-            if let Some(&mono_id) = func_id_map.get(&key) {
-                *callee = Callee::Resolved(mono_id);
-            }
-        },
-        _ => {},
+    if let Callee::Direct {
+        func,
+        type_args,
+        self_type,
+    } = callee
+    {
+        // Mirror collection's arity normalization (collect::scan_callee) so
+        // the lookup key matches the key the instance was enqueued under.
+        let mut targs = type_args.clone();
+        if let Some(f) = functions.get(&*func) {
+            collect::normalize_direct_arity(&mut targs, f.type_params.len());
+        }
+        let key = InstantiationKey::new(*func, targs, *self_type);
+        if let Some(&mono_id) = func_id_map.get(&key) {
+            *callee = Callee::Resolved(mono_id);
+        }
     }
 }
 
@@ -1319,10 +1429,10 @@ mod tests {
     use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
     use crate::item::protocol::ProtocolDef;
     use crate::item::witness::{WitnessDef, WitnessMethodBinding};
+    use crate::op::Op;
     use crate::terminator::{Terminator, TerminatorKind};
     use crate::ty::ParamConvention;
     use crate::value::ValueDef;
-    use crate::op::Op;
     use crate::{BlockId, ValueId, WitnessMethodKey};
 
     fn entity(id: u32) -> Entity {

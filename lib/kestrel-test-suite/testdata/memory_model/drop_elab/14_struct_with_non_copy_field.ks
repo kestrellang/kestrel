@@ -9,7 +9,6 @@
 // that behavior; field-level extension is a follow-up.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

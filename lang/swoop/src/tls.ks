@@ -91,6 +91,10 @@ struct SslHandles {
     var fd: Int32
 }
 
+/// `@observabledrop`: the last drop shuts the TLS session down
+/// (`SSL_shutdown`), so copies must live to the end of their scope rather than
+/// being dropped early at their last use.
+@observabledrop
 public struct TlsStream: Readable, Writable, Cloneable {
     // Shared, reference-counted handle to the live connection. Cloning a
     // `TlsStream` (e.g. passing it by value through the request pipeline)

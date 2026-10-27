@@ -3,7 +3,7 @@
 
 module Test
 
-import std.memory.Slice
+import std.collections.Slice
 
 func nestedMatch(arr: [lang.i64]) -> lang.i64 {
     match arr {

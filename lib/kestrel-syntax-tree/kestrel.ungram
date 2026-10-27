@@ -572,12 +572,12 @@ TuplePatternElement =
   Pat
 
 LiteralPattern =
-  'int' | 'float' | 'string' | 'bool' | 'char'
+  '-'? ('int' | 'float') | 'string' | 'bool' | 'char'
 
 RangePattern =
-  ('int' | 'char') '..'
-| ('int' | 'char') ('..=' | '..<') ('int' | 'char')
-| ('..=' | '..<') ('int' | 'char')
+  ('-'? 'int' | 'char') '..'
+| ('-'? 'int' | 'char') ('..=' | '..<') ('-'? 'int' | 'char')
+| ('..=' | '..<') ('-'? 'int' | 'char')
 
 EnumPattern =
   '.' 'ident' ('(' (EnumPatternArg (',' EnumPatternArg)* ','?)? ')')?

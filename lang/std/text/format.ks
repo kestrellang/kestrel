@@ -240,7 +240,7 @@ public struct FormatOptions: Equatable {
     /// Minimum field width in characters; shorter values are padded with `fill` according to `alignment`.
     public var width: Int64?
 
-    /// For floats: number of decimal places (or significant digits in `Auto` mode). For strings: maximum character count.
+    /// For floats: number of decimal places (an explicit precision prints `Auto` in fixed notation). For strings: maximum character count.
     public var precision: Int64?
 
     /// How to position the value inside `width` when padding is required.
@@ -250,6 +250,7 @@ public struct FormatOptions: Equatable {
     public var fill: Char
 
     /// Numeric base for integer formatting: 2 (binary), 8 (octal), 10 (decimal), 16 (hex).
+    /// Floats honor only 16, printing hexadecimal floating point (`0x1.8p+1` for 3.0).
     public var radix: Int64
 
     /// When `true`, integer hex digits are emitted as `A`–`F` rather than `a`–`f`.
@@ -351,8 +352,9 @@ public struct FormatOptions: Equatable {
 /// Print routines and string interpolation `"\{expr}"` and `"\{expr:spec}"`
 /// both ultimately bottom out in `format`. Implementors should honour
 /// every `FormatOptions` field that is meaningful for their domain
-/// (alignment and width are universal; `radix` only applies to integers,
-/// `floatStyle` only to floats) and silently ignore fields that aren't.
+/// (alignment and width are universal; `radix` applies to integers, and to
+/// floats only as `16`, hexadecimal floating point; `floatStyle` only to
+/// floats) and silently ignore fields that aren't.
 ///
 /// # Examples
 ///

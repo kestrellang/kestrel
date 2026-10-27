@@ -9,8 +9,8 @@
 // is `Exitable`).
 module Main
 import std.text.(Formattable, Formatter)
-import std.text.format.StringBuilder
-import std.text.format.FormatOptions
+import std.text.StringBuilder
+import std.text.FormatOptions
 
 struct NotExitable { var x: Int64 }
 

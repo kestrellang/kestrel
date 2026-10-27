@@ -119,7 +119,7 @@ the CLI — the build fails with no output and no binary, which reads as
 success to anything grepping stderr. Every emitted constraint that can
 ERROR must carry a real span: for solver-side type formations use the
 formed `HirTy`'s own span (the declared-signature site renders fine even
-when it points into stdlib — `emit_static_wellformedness` in solver.rs
+when it points into stdlib — the `FormationScope::Inferred` call in solver/lower.rs
 is the precedent). When probing compiler behavior from the CLI, verify
 the OUTPUT EXECUTABLE exists; never conclude "compiles" from empty
 stderr.

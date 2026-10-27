@@ -241,6 +241,7 @@ pub fn compile_inst(
                 == kestrel_mir::value::Ownership::Guaranteed;
             let disc_width = discriminant_width(
                 operand_ty,
+                fc.body.values[result.index()].ty,
                 &fc.ctx.module.ty_arena,
                 fc.ctx.module,
                 &fc.ctx.tc,
@@ -584,8 +585,33 @@ fn compile_op1(
         Op::IntWiden(_, to) => builder.ins().sextend(int_bits_to_cl(to), arg),
         Op::IntUnsignedWiden(_, to) => builder.ins().uextend(int_bits_to_cl(to), arg),
         Op::IntTruncate(_, to) => builder.ins().ireduce(int_bits_to_cl(to), arg),
-        Op::IntToFloat(_, fb) => builder.ins().fcvt_from_sint(float_bits_to_cl(fb), arg),
-        Op::FloatToInt(_, ib) => builder.ins().fcvt_to_sint_sat(int_bits_to_cl(ib), arg),
+        // Cranelift converts only 32/64-bit integers: widen an 8/16-bit
+        // source first (sign-extend; the cast is signed).
+        Op::IntToFloat(ib, fb) => {
+            let arg = match ib {
+                IntBits::I8 | IntBits::I16 => builder.ins().sextend(ir::types::I32, arg),
+                IntBits::I32 | IntBits::I64 => arg,
+            };
+            builder.ins().fcvt_from_sint(float_bits_to_cl(fb), arg)
+        },
+        // Saturating, like LLVM's `llvm.fptosi.sat` at the TARGET width: an
+        // 8/16-bit target converts at 32 bits, clamps to its own range, then
+        // narrows.
+        Op::FloatToInt(_, ib) => match ib {
+            IntBits::I8 | IntBits::I16 => {
+                let (lo, hi) = match ib {
+                    IntBits::I8 => (i8::MIN as i64, i8::MAX as i64),
+                    _ => (i16::MIN as i64, i16::MAX as i64),
+                };
+                let wide = builder.ins().fcvt_to_sint_sat(ir::types::I32, arg);
+                let lo = builder.ins().iconst(ir::types::I32, lo);
+                let hi = builder.ins().iconst(ir::types::I32, hi);
+                let clamped = builder.ins().smax(wide, lo);
+                let clamped = builder.ins().smin(clamped, hi);
+                builder.ins().ireduce(int_bits_to_cl(ib), clamped)
+            },
+            IntBits::I32 | IntBits::I64 => builder.ins().fcvt_to_sint_sat(int_bits_to_cl(ib), arg),
+        },
         // Pure bitcast (no value conversion): float ↔ same-width integer.
         Op::FloatToBits(fb) => {
             let int_ty = match fb {
@@ -664,7 +690,26 @@ fn compile_op1(
         },
         Op::FloatMath(_, FloatMathKind::Floor) => builder.ins().floor(arg),
         Op::FloatMath(_, FloatMathKind::Ceil) => builder.ins().ceil(arg),
-        Op::FloatMath(_, FloatMathKind::Round) => builder.ins().nearest(arg),
+        // Ties away from zero (the documented `round()`; Cranelift's `nearest`
+        // rounds ties to even): truncate, then step one away from zero when
+        // the dropped fraction is at least one half.
+        Op::FloatMath(fb, FloatMathKind::Round) => {
+            let (half, one) = match fb {
+                FloatBits::F16 | FloatBits::F32 => {
+                    (builder.ins().f32const(0.5), builder.ins().f32const(1.0))
+                },
+                FloatBits::F64 => (builder.ins().f64const(0.5), builder.ins().f64const(1.0)),
+            };
+            let truncated = builder.ins().trunc(arg);
+            let fraction = builder.ins().fsub(arg, truncated);
+            let magnitude = builder.ins().fabs(fraction);
+            let step = builder.ins().fcopysign(one, arg);
+            let away = builder.ins().fadd(truncated, step);
+            let round_up = builder
+                .ins()
+                .fcmp(FloatCC::GreaterThanOrEqual, magnitude, half);
+            builder.ins().select(round_up, away, truncated)
+        },
         Op::FloatMath(_, FloatMathKind::Trunc) => builder.ins().trunc(arg),
         Op::FloatMath(_, FloatMathKind::Sqrt) => builder.ins().sqrt(arg),
         _ => {
@@ -2087,7 +2132,16 @@ fn compile_thick_call(
 // Layout helpers
 // ======================================================================
 
-fn discriminant_width(ty: TyId, arena: &TyArena, module: &MonoModule, tc: &TypeCache) -> ir::Type {
+/// Width of a `Discriminant` read: an enum's tag width, else the result
+/// type's (an integer switch reads its value at its own width; see
+/// `emit_int_discriminant`), else the 32-bit tag default.
+fn discriminant_width(
+    ty: TyId,
+    result_ty: TyId,
+    arena: &TyArena,
+    module: &MonoModule,
+    tc: &TypeCache,
+) -> ir::Type {
     if let MirTy::Named { entity, type_args } = arena.get(ty) {
         let entity = *entity;
         let type_args = type_args.clone();
@@ -2095,7 +2149,12 @@ fn discriminant_width(ty: TyId, arena: &TyArena, module: &MonoModule, tc: &TypeC
             return int_bits_to_cl(e.discriminant_width);
         }
     }
-    ir::types::I32
+    match arena.get(result_ty) {
+        MirTy::I8 => ir::types::I8,
+        MirTy::I16 => ir::types::I16,
+        MirTy::I64 => ir::types::I64,
+        _ => ir::types::I32,
+    }
 }
 
 fn struct_field_offset(

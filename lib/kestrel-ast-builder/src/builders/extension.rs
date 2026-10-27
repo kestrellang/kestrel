@@ -37,7 +37,7 @@ pub fn build_extension(
     world.set(entity, NodeKind::Extension);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
+    world.set(entity, CstNode(SyntaxNodePtr::new(syntax)));
     world.set_parent(entity, parent);
 
     if let Some(target_ty) = lower_opt_type(node.ty(), file_id) {
@@ -95,7 +95,7 @@ fn introduce_rhs_free_type_params(
     let mut new_params: Vec<(String, Span, SyntaxNodePtr)> = Vec::new();
 
     let cst = match world.get::<CstNode>(entity) {
-        Some(node) => node.0.clone(),
+        Some(node) => node.0,
         None => return,
     };
 
@@ -132,7 +132,7 @@ fn introduce_rhs_free_type_params(
                 continue;
             }
             seen.insert(seg.name.clone());
-            new_params.push((seg.name.clone(), span.clone(), cst.clone()));
+            new_params.push((seg.name.clone(), span.clone(), cst));
         }
     }
 
@@ -207,13 +207,18 @@ fn collect_lhs_target_names(world: &World, entity: Entity) -> Vec<String> {
         }
         return names;
     }
-    let AstType::Named { segments, .. } = &target.0 else {
-        return names;
+    // The target's type arguments: `Array[T]`, or the sugar spellings
+    // `[T]`, `T?` and `[K: V]`.
+    let args: Vec<&AstType> = match &target.0 {
+        AstType::Named { segments, .. } => match segments.last() {
+            Some(last) => last.type_args.iter().collect(),
+            None => return names,
+        },
+        AstType::Array(elem, _) | AstType::Optional(elem, _) => vec![elem.as_ref()],
+        AstType::Dictionary(key, val, _) => vec![key.as_ref(), val.as_ref()],
+        _ => return names,
     };
-    let Some(last) = segments.last() else {
-        return names;
-    };
-    for arg in &last.type_args {
+    for arg in args {
         if let AstType::Named { segments: segs, .. } = arg
             && segs.len() == 1
             && segs[0].type_args.is_empty()

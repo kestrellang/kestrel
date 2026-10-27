@@ -199,7 +199,7 @@ All public stdlib types are auto-imported — no `import` statements needed. See
 Kestrel is in early preview — expect breaking changes between releases.
 
 - **macOS** is the primary platform; **Linux** is supported but less tested
-- **Two codegen backends** — Cranelift (default, fast compiles) and LLVM 18 (`kestrel build --backend llvm`)
+- **Two codegen backends** — Cranelift for unoptimized builds (`-O0`, fast compiles) and LLVM 18 for optimized builds (`-O1`, `-O2`)
 - **Optimized builds** — `kestrel build -O 2` for release binaries; `flock install` builds optimized by default
 - **Windows** is not currently supported
 

@@ -53,7 +53,31 @@ pub fn mangle_function(
         mangle_type(arena, entity_names, st, &mut out);
     }
 
-    out
+    shorten_long_symbol(out)
+}
+
+/// Symbols longer than this keep a readable prefix and a hash of the rest.
+const MAX_SYMBOL_LEN: usize = 256;
+/// Readable prefix kept on a shortened symbol.
+const SHORT_PREFIX_LEN: usize = 200;
+
+/// Deeply nested types spell out in full at every instantiation, so symbol
+/// bytes grow quadratically with nesting (800 levels took 3 GB). A symbol
+/// past `MAX_SYMBOL_LEN` becomes its first `SHORT_PREFIX_LEN` bytes plus
+/// `_H` and a 64-bit FNV-1a hash of the whole name: still unique and stable
+/// across builds, and short names are unchanged.
+fn shorten_long_symbol(name: String) -> String {
+    if name.len() <= MAX_SYMBOL_LEN {
+        return name;
+    }
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in name.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    // The prefix is ASCII (mangled names only use identifier characters),
+    // so the cut is on a char boundary.
+    format!("{}_H{hash:016x}", &name[..SHORT_PREFIX_LEN])
 }
 
 // -- Signature: "Z" param* "E" --
@@ -252,6 +276,20 @@ fn mangle_type(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn long_symbols_are_shortened_with_a_stable_hash() {
+        let short = "_K0N4_Test1_fRN3_lang3_i64E".to_string();
+        assert_eq!(shorten_long_symbol(short.clone()), short);
+        let long_a = format!("_K0{}", "a".repeat(400));
+        let long_b = format!("_K0{}b", "a".repeat(399));
+        let a = shorten_long_symbol(long_a.clone());
+        assert_eq!(a.len(), SHORT_PREFIX_LEN + 2 + 16);
+        assert!(a.starts_with(&long_a[..SHORT_PREFIX_LEN]));
+        // Stable, and distinct names that share the prefix stay distinct.
+        assert_eq!(a, shorten_long_symbol(long_a));
+        assert_ne!(a, shorten_long_symbol(long_b));
+    }
     use super::*;
 
     fn make_arena() -> TyArena {

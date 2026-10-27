@@ -15,6 +15,7 @@ impl OssaBodyCtx<'_, '_> {
         let stmt = self.hir.stmts[stmt_id].clone();
         let span = stmt_span(&self.hir.stmts[stmt_id]);
         let prev_span = self.current_span.replace(span);
+        let mut temporaries: Option<(usize, kestrel_mir::ValueId)> = None;
 
         match &stmt {
             HirStmt::Let { local, value, .. } => {
@@ -80,7 +81,12 @@ impl OssaBodyCtx<'_, '_> {
                 }
             },
             HirStmt::Expr { expr, .. } => {
-                self.lower_expr(*expr);
+                // A discarded owned result and argument temporaries drop at
+                // the end of their statement, not at scope exit
+                // (drop-semantics.md §6) — after the writebacks below.
+                let mark = self.scope_stack.last().map_or(0, |f| f.entries.len());
+                let result = self.lower_expr(*expr);
+                temporaries = Some((mark, result));
             },
             HirStmt::Deinit {
                 local: Some(hir_local),
@@ -96,10 +102,7 @@ impl OssaBodyCtx<'_, '_> {
                     });
                     // The slot no longer owns a value: record it (state +
                     // in-memory flag) so scope exit doesn't destroy again.
-                    self.set_var_init(*hir_local, super::VarInit::DefUninit);
-                    if let Some(flag) = self.var_flag(*hir_local) {
-                        self.store_drop_flag(flag, false);
-                    }
+                    self.record_var_whole(*hir_local, super::VarInit::DefUninit);
                 } else {
                     let val = self.map_local(*hir_local);
                     self.emit_destroy_value(val);
@@ -122,6 +125,14 @@ impl OssaBodyCtx<'_, '_> {
             self.drain_writebacks(0);
             self.end_stale_refs_since(0);
         }
+        // Temporaries drop last: a get→set writeback above still reads its
+        // slot (`arr(0).i.x = 10`).
+        if let Some((mark, result)) = temporaries {
+            self.drop_statement_temporaries(mark, result);
+        }
+        // A named reference never mentioned again stops holding its referent.
+        let stmt_end = stmt_span(&self.hir.stmts[stmt_id]);
+        self.end_dead_ref_bindings(&stmt_end);
 
         self.current_span = prev_span;
     }

@@ -12,7 +12,6 @@
 // stage will flip this to emit a `DropIf %h if _init_h`.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

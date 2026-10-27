@@ -159,7 +159,7 @@ impl OssaBodyCtx<'_, '_> {
         // edges contribute nothing, so `if c { .Some(&local) } else { .None }`
         // joins to the local taint (conservative on the .None path — the
         // sound direction).
-        if self.ctx.module.ty_arena.contains_ref(result_ty) {
+        if self.ctx.module.escape_carry(result_ty).any() {
             let convs = self.current_param_convs();
             let mut joined: Option<kestrel_mir::value::RootProvenance> = None;
             for exit in &reaching {
@@ -199,17 +199,13 @@ impl OssaBodyCtx<'_, '_> {
     /// A var taken on some-but-not-all edges becomes `MaybeUninit`.
     pub(crate) fn fold_var_inits(&mut self, reaching: &[&ArmExit]) {
         for (local, _) in self.scope_var_inits() {
-            let mut joined: Option<super::VarInit> = None;
-            for exit in reaching {
-                if let Some((_, ai)) = exit.var_inits.iter().find(|(l, _)| *l == local) {
-                    joined = Some(match joined {
-                        None => *ai,
-                        Some(j) => j.join(*ai),
-                    });
-                }
-            }
+            let joined = reaching
+                .iter()
+                .filter_map(|exit| exit.var_inits.iter().find(|(l, _)| *l == local))
+                .map(|(_, st)| st.clone())
+                .reduce(|a, b| a.join(&b));
             if let Some(j) = joined {
-                self.set_var_init(local, j);
+                self.set_var_state(local, &j);
             }
         }
         self.fold_field_inits(reaching);
@@ -289,6 +285,7 @@ impl OssaBodyCtx<'_, '_> {
             label: label.map(|s| s.to_string()),
             scope_depth,
             tracker_len: self.tracker.len(),
+            break_var_inits: Vec::new(),
         });
 
         // Init-body `self`-field state across the loop: a field can only become
@@ -323,11 +320,27 @@ impl OssaBodyCtx<'_, '_> {
             self.pop_scope();
         }
 
-        self.loop_stack.pop();
+        let break_var_inits = self
+            .loop_stack
+            .pop()
+            .map(|info| info.break_var_inits)
+            .unwrap_or_default();
         self.switch_to(exit_block);
         // Restore scope/local_map to the pre-loop state so that
         // rebind_scope_values can find the initial_args values.
         self.restore_scope(&saved_snapshot);
+        // Every exit is a `break`; join the vars' init-states over them (the
+        // restored pre-loop state would call a var moved in the loop Init).
+        for (local, _) in self.scope_var_inits() {
+            let joined = break_var_inits
+                .iter()
+                .filter_map(|inits| inits.iter().find(|(l, _)| *l == local))
+                .map(|(_, st)| st.clone())
+                .reduce(|a, b| a.join(&b));
+            if let Some(j) = joined {
+                self.set_var_state(local, &j);
+            }
+        }
         self.rebind_scope_values(&initial_args, &exit_params);
         self.tracker = saved_tracker;
         self.tracker.rebind(&initial_args, &exit_params);
@@ -352,6 +365,15 @@ impl OssaBodyCtx<'_, '_> {
             let exit = info.exit_block;
             let depth = info.scope_depth;
             let tracker_len = info.tracker_len;
+            let var_inits = self.scope_var_inits();
+            if let Some(info) = self
+                .loop_stack
+                .iter_mut()
+                .rev()
+                .find(|l| kestrel_hir::label_selects_loop(label, l.label.as_deref()))
+            {
+                info.break_var_inits.push(var_inits);
+            }
             // The active tracker (possibly the loop's or a nested if's)
             // starts with the loop's tracked values in its first N slots.
             // These are the values that need to be threaded to the exit block.

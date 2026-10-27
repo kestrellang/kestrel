@@ -10,7 +10,7 @@ use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
 use crate::terminator::{SwitchArm, Terminator, TerminatorKind};
 use crate::ty::{MirTy, ParamConvention};
 use crate::value::{Ownership, RootProvenance, ValueDef};
-use crate::{DropBehavior, FieldIdx, Immediate, MirModule, TyId};
+use crate::{DropBehavior, FieldIdx, Immediate, MirModule, TyId, ValueId};
 
 /// Synthesize `__drop$T` functions for all types that need cleanup.
 /// Adds the generated functions to `module.functions`.
@@ -186,7 +186,7 @@ fn generate_struct_shim(
     let mut field_type_entities = Vec::new();
 
     // %self = entry block param, @owned
-    let self_val = body.alloc_value(ValueDef::owned(self_ty));
+    let mut self_val = body.alloc_value(ValueDef::owned(self_ty));
     body.param_count = 1;
 
     let entry = body.alloc_block();
@@ -214,22 +214,14 @@ fn generate_struct_shim(
                 // have &MirModule. We'll need to intern it before calling.
                 panic!("Pointer({self_ty:?}) not interned; pre-intern pointer types before shim synthesis");
             });
-        let borrow_val = body.alloc_value(ValueDef::guaranteed(ptr_ty, self_val));
-        insts.push(Instruction::new(InstKind::BeginMutBorrow {
-            result: borrow_val,
-            operand: self_val,
-        }));
-        insts.push(Instruction::new(InstKind::Call {
-            result: None,
-            callee: Callee::direct_with_args(*deinit_entity, tp_ty_ids.clone(), None),
-            args: vec![CallArg {
-                value: borrow_val,
-                convention: ParamConvention::MutBorrow,
-            }],
-        }));
-        insts.push(Instruction::new(InstKind::EndMutBorrow {
-            operand: borrow_val,
-        }));
+        self_val = emit_deinit_call(
+            &mut body,
+            &mut insts,
+            self_val,
+            self_ty,
+            ptr_ty,
+            Callee::direct_with_args(*deinit_entity, tp_ty_ids.clone(), None),
+        );
     }
 
     // 2. Destructure struct — consumes self, produces per-field values.
@@ -337,7 +329,7 @@ fn generate_enum_shim(
     let mut field_type_entities = Vec::new();
 
     // %self = entry block param, @owned
-    let self_val = body.alloc_value(ValueDef::owned(self_ty));
+    let mut self_val = body.alloc_value(ValueDef::owned(self_ty));
     body.param_count = 1;
 
     let entry = body.alloc_block();
@@ -356,22 +348,14 @@ fn generate_enum_shim(
             .ty_arena
             .find(|t| matches!(t, MirTy::Pointer(p) if *p == self_ty))
             .expect("Pointer type should be interned");
-        let borrow_val = body.alloc_value(ValueDef::guaranteed(ptr_ty, self_val));
-        entry_insts.push(Instruction::new(InstKind::BeginMutBorrow {
-            result: borrow_val,
-            operand: self_val,
-        }));
-        entry_insts.push(Instruction::new(InstKind::Call {
-            result: None,
-            callee: Callee::direct_with_args(*deinit_entity, tp_ty_ids.clone(), None),
-            args: vec![CallArg {
-                value: borrow_val,
-                convention: ParamConvention::MutBorrow,
-            }],
-        }));
-        entry_insts.push(Instruction::new(InstKind::EndMutBorrow {
-            operand: borrow_val,
-        }));
+        self_val = emit_deinit_call(
+            &mut body,
+            &mut entry_insts,
+            self_val,
+            self_ty,
+            ptr_ty,
+            Callee::direct_with_args(*deinit_entity, tp_ty_ids.clone(), None),
+        );
     }
 
     // Discriminant — non-consuming read of the tag
@@ -573,6 +557,55 @@ pub fn find_drop_shim(module: &MirModule, type_entity: Entity) -> Option<Entity>
         .map(|f| f.entity)
 }
 
+/// Call `deinit` on `self_val` and return the value to drop afterwards.
+/// `deinit` takes `mutating self`, so self is stored to a frame slot and
+/// borrowed by address: writes the deinit makes (e.g. reassigning a field)
+/// land in that slot and are taken back out. Borrowing the SSA value directly
+/// let a backend spill a scalar-sized self to a temporary it never reloaded,
+/// so the field drops saw the stale value (a double drop plus a leak).
+fn emit_deinit_call(
+    body: &mut OssaBody,
+    insts: &mut Vec<Instruction>,
+    self_val: ValueId,
+    self_ty: TyId,
+    ptr_ty: TyId,
+    deinit: Callee,
+) -> ValueId {
+    let slot = body.alloc_value(ValueDef::owned(ptr_ty));
+    insts.push(Instruction::new(InstKind::Uninit {
+        result: slot,
+        ty: self_ty,
+    }));
+    insts.push(Instruction::new(InstKind::StoreInit {
+        address: slot,
+        value: self_val,
+    }));
+    let borrow = body.alloc_value(ValueDef::guaranteed(self_ty, slot));
+    insts.push(Instruction::new(InstKind::BeginMutBorrowAddr {
+        result: borrow,
+        address: slot,
+        ty: self_ty,
+    }));
+    insts.push(Instruction::new(InstKind::Call {
+        result: None,
+        callee: deinit,
+        args: vec![CallArg {
+            value: borrow,
+            convention: ParamConvention::MutBorrow,
+        }],
+    }));
+    insts.push(Instruction::new(InstKind::EndBorrow { operand: borrow }));
+    let after = body.alloc_value(ValueDef::owned(self_ty));
+    insts.push(Instruction::new(InstKind::Take {
+        result: after,
+        address: slot,
+        ty: self_ty,
+        independent: true,
+    }));
+    insts.push(Instruction::new(InstKind::DestroyValue { operand: slot }));
+    after
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -734,20 +767,22 @@ mod tests {
         let shim = find_shim_by_name(&module, "__drop$MyType");
         let body = shim.body.as_ref().unwrap();
 
-        // Should have: BeginMutBorrow, Call(deinit), EndMutBorrow, DestructureStruct, DestroyValue, Literal
+        // Should have: Uninit/StoreInit slot, BeginMutBorrowAddr, Call(deinit),
+        // EndBorrow, Take, then the field drops. `deinit` mutates the slot so
+        // its field writes reach the drops.
         let has_borrow = body.blocks[0]
             .insts
             .iter()
-            .any(|i| matches!(&i.kind, InstKind::BeginMutBorrow { .. }));
+            .any(|i| matches!(&i.kind, InstKind::BeginMutBorrowAddr { .. }));
         let has_call = body.blocks[0].insts.iter()
             .any(|i| matches!(&i.kind, InstKind::Call { callee: Callee::Direct { func, .. }, .. } if *func == deinit_entity));
         let has_end_borrow = body.blocks[0]
             .insts
             .iter()
-            .any(|i| matches!(&i.kind, InstKind::EndMutBorrow { .. }));
-        assert!(has_borrow, "should have BeginMutBorrow");
+            .any(|i| matches!(&i.kind, InstKind::EndBorrow { .. }));
+        assert!(has_borrow, "should have BeginMutBorrowAddr");
         assert!(has_call, "should have deinit Call");
-        assert!(has_end_borrow, "should have EndMutBorrow");
+        assert!(has_end_borrow, "should have EndBorrow");
 
         verify_shim(&module, shim);
     }

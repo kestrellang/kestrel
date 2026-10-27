@@ -76,14 +76,22 @@ fn messages_never_print_the_error_placeholder() {
     // "expected (i64, i64) -> i64 got (Error) -> Error". The poisoned parts
     // print as `_`; the error itself must still be reported — it is the
     // only one (the `Error` came from `poison`, not from another report).
-    let src = "module Main\n\nfunc test() -> (lang.i64, lang.i64) -> lang.i64 {\n    { (x) in x }\n}\n";
+    let src =
+        "module Main\n\nfunc test() -> (lang.i64, lang.i64) -> lang.i64 {\n    { (x) in x }\n}\n";
     let text = rendered_text(src);
-    assert_eq!(text.len(), 1, "expected exactly the arity mismatch: {text:?}");
+    assert_eq!(
+        text.len(),
+        1,
+        "expected exactly the arity mismatch: {text:?}"
+    );
     assert!(
         !text[0].contains("Error") && !text[0].contains('?'),
         "placeholder leaked into the message: {text:?}"
     );
-    assert!(text[0].contains("(_) -> _"), "unexpected rendering: {text:?}");
+    assert!(
+        text[0].contains("(_) -> _"),
+        "unexpected rendering: {text:?}"
+    );
 }
 
 /// Secondary-label texts of every diagnostic, in order.

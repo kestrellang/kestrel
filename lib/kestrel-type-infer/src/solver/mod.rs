@@ -36,20 +36,20 @@ use kestrel_semantics::{
 };
 use kestrel_span::Span;
 
-mod equality;
-mod conformance;
-mod assoc;
+pub(crate) mod assoc;
 mod call;
-mod member;
+mod conformance;
 mod defaults;
+mod equality;
 mod lower;
-pub(crate) use equality::*;
-pub(crate) use conformance::*;
+mod member;
 use assoc::*;
 use call::*;
-use member::*;
+pub(crate) use conformance::*;
 pub(crate) use defaults::*;
+pub(crate) use equality::*;
 use lower::*;
+use member::*;
 
 /// Diagnose type parameters at generic call sites that inference couldn't
 /// pin down. Lib1 silently defaulted these to `Never` (RFC 1216-style
@@ -433,8 +433,12 @@ pub(crate) fn validate_ref_placement(ctx: &mut InferCtx<'_>, hir: &HirBody) {
 }
 
 pub(crate) fn fixpoint(ctx: &mut InferCtx<'_>) {
-    const MAX_ROUNDS: usize = 256;
-    for _ in 0..MAX_ROUNDS {
+    // The cap only guards against a non-converging solver. A long dependency
+    // chain (512 nested operators) can need one round per link, so it scales
+    // with the body: a fixed 256 rejected valid deep expressions.
+    const MIN_ROUNDS: usize = 256;
+    let max_rounds = MIN_ROUNDS.max(ctx.constraints.len() * 2);
+    for _ in 0..max_rounds {
         let progress = solve_round(ctx);
         if !progress {
             return;
@@ -616,8 +620,28 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 span,
                 poison_ty_on_failure,
                 origin: _,
+                protocol_args,
             } => {
                 if ctx.is_error(ctx.resolve(ty)) {
+                    continue;
+                }
+                // A protocol arg that never resolved gets its own "could not
+                // infer"; judging the conformance without it would guess.
+                if protocol_args
+                    .iter()
+                    .any(|&a| crate::solver_entail::has_open_var(ctx, a))
+                {
+                    continue;
+                }
+                // A literal default's well-formedness check (`Array[?E]: E:
+                // Static`) on an element var that never resolved (`[]` with
+                // no context): the var gets its own "could not infer".
+                if matches!(ctx.slot(ctx.resolve(ty)), TySlot::Unresolved { .. })
+                    && ctx
+                        .literal_default_args
+                        .iter()
+                        .any(|&a| ctx.resolve(a) == ctx.resolve(ty))
+                {
                     continue;
                 }
                 // Re-queued as Unknown because a type arg never resolved: the
@@ -632,7 +656,15 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 if poison_ty_on_failure {
                     ctx.poison(ty);
                 }
-                (InferError::DoesNotConform { ty, protocol, span }, Some(ty))
+                (
+                    InferError::DoesNotConform {
+                        ty,
+                        protocol,
+                        protocol_args,
+                        span,
+                    },
+                    Some(ty),
+                )
             },
             Constraint::Associated {
                 container,
@@ -851,7 +883,15 @@ pub(super) fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
     ctx.solving_depth += 1;
     kestrel_debug::ktrace!("p5-solve", "d={} {:?}", ctx.solving_depth, c);
     let r = try_solve_inner(ctx, c);
-    kestrel_debug::ktrace!("p5-solve", "  -> {}", match &r { SolveResult::Solved => "solved", SolveResult::Deferred(_) => "deferred", SolveResult::Error(_) => "ERROR" });
+    kestrel_debug::ktrace!(
+        "p5-solve",
+        "  -> {}",
+        match &r {
+            SolveResult::Solved => "solved",
+            SolveResult::Deferred(_) => "deferred",
+            SolveResult::Error(_) => "ERROR",
+        }
+    );
     ctx.solving_depth -= 1;
     r
 }
@@ -911,7 +951,16 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
             span,
             poison_ty_on_failure,
             origin,
-        } => solve_conforms(ctx, ty, protocol, span, poison_ty_on_failure, origin),
+            protocol_args,
+        } => solve_conforms(
+            ctx,
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure,
+            origin,
+            protocol_args,
+        ),
         Constraint::Associated {
             container,
             key,
@@ -991,8 +1040,9 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
             scrutinee,
             name,
             arg_tys,
+            labels,
             span,
-        } => solve_implicit_pat(ctx, scrutinee, &name, arg_tys, span),
+        } => solve_implicit_pat(ctx, scrutinee, &name, arg_tys, labels, span),
         Constraint::TupleRestPat {
             scrutinee,
             prefix_tys,

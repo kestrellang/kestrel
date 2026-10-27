@@ -614,12 +614,15 @@ public struct Int8:
     public func gcd(other: Int8) -> Int8 {
         var a = self.abs();
         var b = other.abs();
+        // `minValue.abs()` wraps to `minValue`, so a remainder can come out
+        // negative: keep each remainder's magnitude so the result is
+        // non-negative (only `gcd(minValue, 0)` = 2^(n-1) is unrepresentable).
         while b != Int8.zero {
             let t = b;
-            b = a.modulo(b);
+            b = a.modulo(b).abs();
             a = t
         };
-        a
+        a.abs()
     }
 
     /// Least common multiple, computed as `|self| / gcd(self, other) * |other|`

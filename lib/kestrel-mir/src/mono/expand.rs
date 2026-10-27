@@ -126,25 +126,33 @@ pub fn expand_destroy_copy(
     findings
 }
 
-/// Summarise instantiation findings on stderr when `KESTREL_VERIFY_INSTANTIATION`
-/// is set. Default (unset) is silent, so this is inert until deliberately
+/// Summarise instantiation findings on stderr when the `instantiation`
+/// `KESTREL_DEBUG` category is on. Default (unset) is silent, so this is inert until deliberately
 /// switched on — the same staging the F34 flow verifier uses.
 ///
 /// These are collected unconditionally (the check is a hash lookup on a set the
 /// pass already builds) and returned to the caller, so promoting them to real
 /// user-facing diagnostics later is a caller-side change, not a rework here.
 fn report_instantiation_findings(findings: &[InstantiationFinding]) {
-    if findings.is_empty() || std::env::var("KESTREL_VERIFY_INSTANTIATION").is_err() {
+    if findings.is_empty() || !kestrel_debug::is_enabled("instantiation") {
         return;
     }
-    eprintln!(
-        "[KESTREL_VERIFY_INSTANTIATION] {} invariant-1 violation(s) — a Copyable-default type \
+    kestrel_debug::ktrace!(
+        "instantiation",
+        "{} invariant-1 violation(s) — a Copyable-default type \
          parameter was instantiated with a `not Copyable` argument, and the generic body \
          duplicates it:",
         findings.len(),
     );
     for f in findings {
-        eprintln!("  {}: block {} inst {}: {}", f.func_name, f.block, f.inst, f.message);
+        kestrel_debug::ktrace!(
+            "instantiation",
+            "  {}: block {} inst {}: {}",
+            f.func_name,
+            f.block,
+            f.inst,
+            f.message
+        );
     }
 }
 
@@ -297,10 +305,7 @@ fn build_drop_impl_to_nominal_map(
 /// later release over-decremented the count → double-free of the storage.
 fn build_clone_impl_to_nominal_map(module: &MonoModule) -> HashMap<Entity, Entity> {
     let mut map = HashMap::new();
-    let structs = module
-        .structs
-        .values()
-        .map(|s| (s.source, &s.type_info));
+    let structs = module.structs.values().map(|s| (s.source, &s.type_info));
     let enums = module.enums.values().map(|e| (e.source, &e.type_info));
     for (source, type_info) in structs.chain(enums) {
         if let Some(func) = type_info.clone_impl {
@@ -322,8 +327,9 @@ fn build_clone_lookup(
     // CopyBehavior (a Bitwise instance is filtered out below, per instance).
     let clone_func_to_parent = build_clone_impl_to_nominal_map(module);
 
-    if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-        eprintln!(
+    if kestrel_debug::is_enabled("clone-shim") {
+        kestrel_debug::ktrace!(
+            "clone-shim",
             "[clone_lookup] clone_func_to_parent: {} entries",
             clone_func_to_parent.len()
         );
@@ -337,7 +343,7 @@ fn build_clone_lookup(
                 .get(parent)
                 .map(|s| s.as_str())
                 .unwrap_or("?");
-            eprintln!("  clone func: {name} → parent={parent_name}");
+            kestrel_debug::ktrace!("clone-shim", "  clone func: {name} → parent={parent_name}");
         }
     }
 
@@ -366,26 +372,38 @@ fn build_clone_lookup(
     for (mi, mf) in module.functions.iter().enumerate() {
         if let Some(&nominal) = clone_func_to_parent.get(&mf.source) {
             if skip_clone_instances.contains(&(nominal, mf.type_args.clone())) {
-                if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                    eprintln!(
+                if kestrel_debug::is_enabled("clone-shim") {
+                    kestrel_debug::ktrace!(
+                        "clone-shim",
                         "[clone_lookup] SKIPPED (bitwise/not-copyable): {} source={:?} nominal={:?} type_args={:?}",
-                        mf.name, mf.source, nominal, mf.type_args
+                        mf.name,
+                        mf.source,
+                        nominal,
+                        mf.type_args
                     );
                 }
                 continue;
             }
-            if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                eprintln!(
+            if kestrel_debug::is_enabled("clone-shim") {
+                kestrel_debug::ktrace!(
+                    "clone-shim",
                     "[clone_lookup] ADDED: {} source={:?} nominal={:?} type_args={:?}",
-                    mf.name, mf.source, nominal, mf.type_args
+                    mf.name,
+                    mf.source,
+                    nominal,
+                    mf.type_args
                 );
             }
             lookup.insert((nominal, mf.type_args.clone()), MonoFuncId::new(mi));
         }
     }
 
-    if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-        eprintln!("[clone_lookup] final lookup: {} entries", lookup.len());
+    if kestrel_debug::is_enabled("clone-shim") {
+        kestrel_debug::ktrace!(
+            "clone-shim",
+            "[clone_lookup] final lookup: {} entries",
+            lookup.len()
+        );
     }
 
     lookup
@@ -668,7 +686,6 @@ fn expand_function(
 ) {
     let Some(body) = &mut func.body else { return };
 
-
     // value_remap tracks CopyValue removals: result -> operand
     let mut value_remap: HashMap<ValueId, ValueId> = HashMap::new();
     // Values that were moved via CopyValue on not-Copyable types.
@@ -744,8 +761,9 @@ fn expand_function(
 
                     // Skip destroy on values that were moved (not-Copyable copy_value).
                     if moved_values.contains(&remapped) {
-                        if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                            eprintln!(
+                        if kestrel_debug::is_enabled("clone-shim") {
+                            kestrel_debug::ktrace!(
+                                "clone-shim",
                                 "[expand] SKIP destroy on moved value {remapped:?} (orig {operand:?}) in {}",
                                 func.name
                             );
@@ -1154,18 +1172,20 @@ fn expand_function(
                         // so refcounted fields stay balanced (see double-free note).
                         if skip_clone_nominal != Some(*entity) {
                             let key = (*entity, type_args.clone());
-                            if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
+                            if kestrel_debug::is_enabled("clone-shim") {
                                 let found = clone_lookup.get(&key).is_some();
                                 if !found {
-                                    eprintln!(
+                                    kestrel_debug::ktrace!(
+                                        "clone-shim",
                                         "[expand] CopyValue on Named {entity:?} — NOT in clone_lookup (type_args={:?})",
                                         type_args
                                     );
                                 }
                             }
                             if let Some(&clone_id) = clone_lookup.get(&key) {
-                                if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                                    eprintln!(
+                                if kestrel_debug::is_enabled("clone-shim") {
+                                    kestrel_debug::ktrace!(
+                                        "clone-shim",
                                         "[expand] CopyValue EXPANDED to clone call for {entity:?} in func {}",
                                         func.name
                                     );
@@ -1229,8 +1249,9 @@ fn expand_function(
                             });
                         }
                         let target = remap_value(operand, &value_remap);
-                        if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                            eprintln!(
+                        if kestrel_debug::is_enabled("clone-shim") {
+                            kestrel_debug::ktrace!(
+                                "clone-shim",
                                 "[expand] MOVE (not-Copyable): {result:?} = copy_value {operand:?} → alias to {target:?} in {}",
                                 func.name
                             );

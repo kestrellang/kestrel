@@ -357,6 +357,14 @@ pub(super) fn solve_member(
         });
     };
 
+    // A `Never` receiver is unreachable code: it conforms to every protocol,
+    // so any member exists. Its result is never produced either, so it
+    // coerces to whatever the context wants (`(return 1) + 2`).
+    if matches!(recv_kind, TyKind::Never) {
+        ctx.coerce(resolved, result, expr, span);
+        return SolveResult::Solved;
+    }
+
     // THE transparent-place peel: a ref-typed receiver requeues with the
     // POINTEE as the receiver, so nominal lookup, Self-substitution,
     // conformance and witness constraints all see `T`. One arm covers every
@@ -561,8 +569,11 @@ pub(super) fn solve_member(
             // candidate may turn out not to apply (bidi §5.1 step 6).
             let winner_unknown = top.iter().any(|(_, ext)| {
                 ext.is_some_and(|e| {
-                    applicability(ctx, crate::constraint::ApplicableSource::Extension(e), &recv_kind)
-                        == kestrel_entail::Tri::Unknown
+                    applicability(
+                        ctx,
+                        crate::constraint::ApplicableSource::Extension(e),
+                        &recv_kind,
+                    ) == kestrel_entail::Tri::Unknown
                 })
             });
             if winner_unknown && crate::solver_entail::has_open_var(ctx, receiver) {
@@ -628,6 +639,18 @@ pub(super) fn solve_member(
         },
     };
 
+    // An enum case names a value of the enum TYPE (`E.b`); reaching one
+    // through a value (`E.a.b`, `x.b`) is not member access (it used to
+    // type-check as the case's constructor result).
+    if ctx.query_ctx.get::<NodeKind>(resolution.entity) == Some(&NodeKind::EnumCase) {
+        ctx.poison(result);
+        return SolveResult::Error(InferError::MemberIsStatic {
+            receiver,
+            name: name.to_string(),
+            span,
+        });
+    }
+
     // Applicability (bidi §5.1 steps 4 and 6): the declaring extension's
     // target pattern and where clauses — equality clauses included (N2) —
     // must hold for this receiver. A member resolved THROUGH a protocol (the
@@ -658,13 +681,15 @@ pub(super) fn solve_member(
                     span,
                 });
             },
-            kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => ctx.constraints.push(Constraint::Applicable {
-                receiver,
-                source,
-                name: name.to_string(),
-                is_call,
-                span: span.clone(),
-            }),
+            kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => {
+                ctx.constraints.push(Constraint::Applicable {
+                    receiver,
+                    source,
+                    name: name.to_string(),
+                    is_call,
+                    span: span.clone(),
+                })
+            },
         }
     }
 
@@ -917,7 +942,7 @@ pub(super) fn solve_member(
     // `expected_proto_args`), then the method's own fresh params. Without
     // the proto args here, dispatch through `extend Type: Proto[FreeParams]`
     // can't recover the extension's free TypeParams from the witness.
-    let mut recorded_type_args = proto_type_args_tvs;
+    let mut recorded_type_args = proto_type_args_tvs.clone();
     recorded_type_args.extend(fresh_params.iter().copied());
     if !recorded_type_args.is_empty() {
         ctx.record_type_args(expr, recorded_type_args, span.clone());
@@ -986,14 +1011,11 @@ pub(super) fn solve_member(
                     },
                 };
                 if let Some(tv) = bound_tv {
-                    ctx.conforms_typearg(tv, *protocol, span.clone());
                     let arg_tvs: Vec<TyVar> = protocol_type_args
                         .iter()
                         .map(|hir_ty| lower_hir_ty_sub(ctx, hir_ty, self_entity, receiver, &subs))
                         .collect();
-                    if !arg_tvs.is_empty() {
-                        ctx.record_witness_args(tv, *protocol, arg_tvs);
-                    }
+                    ctx.bound_typearg(tv, *protocol, arg_tvs, span.clone());
                 }
             },
             crate::resolve::WhereClause::Equality { subject, rhs } => {
@@ -1047,8 +1069,11 @@ pub(super) fn solve_member(
 
     // When resolved through a protocol conformance, emit a Conforms constraint
     // to verify the receiver conforms to this protocol with the inferred type args.
+    // The protocol's args ride along: `Int8(from: x)` resolves through
+    // `Convertible[From]`, and `Int8: Convertible` alone holds for ANY
+    // declared `From` — the obligation is `Int8: Convertible[typeof x]`.
     if let Some(protocol) = resolution.via_protocol {
-        ctx.conforms(receiver, protocol, span.clone());
+        ctx.conforms_with_args(receiver, protocol, proto_type_args_tvs, span.clone());
     }
 
     // Bind arguments to parameters in declaration order, allowing defaulted
@@ -1231,6 +1256,23 @@ pub(super) fn solve_implicit(
         },
     };
 
+    // `.name` has no receiver, so it can only name a static member, an enum
+    // case or an initializer. An instance method/field has nothing to bind
+    // `self` to (it used to be called with no `self` argument).
+    let is_instance_member = matches!(
+        ctx.query_ctx.get::<NodeKind>(resolution.entity),
+        Some(NodeKind::Function | NodeKind::Field)
+    ) && ctx
+        .query_ctx
+        .get::<kestrel_ast_builder::Static>(resolution.entity)
+        .is_none();
+    if is_instance_member {
+        return SolveResult::Error(InferError::InstanceMethodAsStatic {
+            name: name.to_string(),
+            span,
+        });
+    }
+
     // Check labels match for enum case calls (e.g., .Circle(radius: 5.0))
     if ctx.query_ctx.get::<NodeKind>(resolution.entity) == Some(&NodeKind::EnumCase)
         && let Some(callable) = ctx.query_ctx.get::<Callable>(resolution.entity)
@@ -1295,6 +1337,7 @@ pub(super) fn solve_implicit_pat(
     scrutinee: TyVar,
     name: &str,
     arg_tys: Vec<TyVar>,
+    labels: Vec<Option<String>>,
     span: Span,
 ) -> SolveResult {
     let resolved = ctx.resolve(scrutinee);
@@ -1303,6 +1346,7 @@ pub(super) fn solve_implicit_pat(
             scrutinee,
             name: name.to_string(),
             arg_tys,
+            labels,
             span,
         });
     }
@@ -1356,6 +1400,8 @@ pub(super) fn solve_implicit_pat(
         }
         return SolveResult::Solved;
     };
+
+    crate::generate::check_variant_pattern_labels(ctx, case_entity, &labels, &span);
 
     // Build substitution map: enum type params → scrutinee type args
     let type_params: Vec<Entity> = ctx

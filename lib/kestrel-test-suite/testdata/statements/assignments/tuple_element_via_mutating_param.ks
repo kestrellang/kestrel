@@ -10,7 +10,7 @@
 
 module Test
 
-import std.num.Int64
+import std.numeric.Int64
 
 func bump(mutating t: (Int64, Int64)) {
     t.0 = t.0 + 10;

@@ -1000,10 +1000,18 @@ fn fmt_switch_case(case: &SwitchCase) -> String {
         SwitchCase::Variant(idx) => format!("variant {}", idx.index()),
         SwitchCase::Bool(b) => format!("{}", b),
         SwitchCase::IntLiteral(v) => format!("{}", v),
-        SwitchCase::IntRange { start, end } => {
-            let s = start.map_or(String::new(), |v| v.to_string());
-            let e = end.map_or(String::new(), |v| v.to_string());
-            format!("{}..={}", s, e)
+        SwitchCase::IntRange { start, end, signed } => {
+            let show = |v: i64| {
+                if *signed {
+                    v.to_string()
+                } else {
+                    (v as u64).to_string()
+                }
+            };
+            let s = start.map_or(String::new(), show);
+            let e = end.map_or(String::new(), show);
+            let unsigned = if *signed { "" } else { " unsigned" };
+            format!("{}..={}{}", s, e, unsigned)
         },
         SwitchCase::CharLiteral(c) => {
             if let Some(ch) = char::from_u32(*c) {

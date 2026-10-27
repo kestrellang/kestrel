@@ -149,6 +149,12 @@ pub enum Constraint {
         /// What the conformance judges when `ty` is a ref — see
         /// `ConformsOrigin`.
         origin: ConformsOrigin,
+        /// The protocol's type arguments this obligation requires
+        /// (`Int8: Convertible[?From]` from a call through `init(from:)`).
+        /// Empty = only the protocol entity is checked, with args (if any)
+        /// taken from `witness_protocol_args`. Carried on the constraint so
+        /// two calls on one receiver with different args stay distinct.
+        protocol_args: Vec<TyVar>,
     },
 
     /// `Container.Name → result` — associated type projection.
@@ -224,6 +230,8 @@ pub enum Constraint {
         name: String,
         /// TyVars for each sub-pattern binding (one per payload field).
         arg_tys: Vec<TyVar>,
+        /// Each sub-pattern's label (`.A(x: a)`), checked against the case.
+        labels: Vec<Option<String>>,
         span: Span,
     },
 

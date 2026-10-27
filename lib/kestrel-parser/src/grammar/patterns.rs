@@ -53,7 +53,20 @@ pub(super) fn at_pattern_start(p: &Parser<'_>) -> bool {
         K::Ampersand,
         K::Var,
         K::LParen,
+        K::Minus,
     ])
+}
+
+/// Consume an optional `-` and the number after it (a negative literal in
+/// pattern position). Returns false when no number follows.
+fn signed_number(p: &mut Parser<'_>) -> bool {
+    let at = usize::from(p.at(K::Minus));
+    if !p.at_any_nth(at, &[K::Integer, K::Float]) {
+        return false;
+    }
+    p.eat(K::Minus);
+    p.bump_any();
+    true
 }
 
 /// Or-level pattern without a wrapper.
@@ -85,25 +98,45 @@ fn base(p: &mut Parser<'_>) -> Option<crate::core::CompletedMarker> {
         Some(K::Integer | K::Char)
             if p.nth_at(1, K::DotDot)
                 || (p.at_any_nth(1, &[K::DotDotEquals, K::DotDotLess])
-                    && p.at_any_nth(2, &[K::Integer, K::Char])) =>
+                    && (p.at_any_nth(2, &[K::Integer, K::Char])
+                        || (p.nth_at(2, K::Minus) && p.nth_at(3, K::Integer)))) =>
         {
             p.bump_any();
             if p.at(K::DotDot) {
                 p.bump(K::DotDot);
             } else {
                 p.bump_any();
-                p.bump_any();
+                if p.at(K::Char) {
+                    p.bump_any();
+                } else {
+                    signed_number(p);
+                }
             }
             K::RangePattern
         },
         Some(K::DotDotEquals | K::DotDotLess) => {
             p.bump_any();
-            if p.at_any(&[K::Integer, K::Char]) {
+            if p.at(K::Char) {
                 p.bump_any();
-            } else {
+            } else if !signed_number(p) {
                 p.error_expected_what("range bound");
             }
             K::RangePattern
+        },
+        // `-5`, `-5..`, `-5..=5`, `-10..<-1`: a negative literal or range start.
+        Some(K::Minus) if p.at_any_nth(1, &[K::Integer, K::Float]) => {
+            signed_number(p);
+            if p.eat(K::DotDot) {
+                K::RangePattern
+            } else if p.at_any(&[K::DotDotEquals, K::DotDotLess]) {
+                p.bump_any();
+                if !signed_number(p) {
+                    p.error_expected_what("range bound");
+                }
+                K::RangePattern
+            } else {
+                K::LiteralPattern
+            }
         },
         Some(K::Float | K::Integer | K::String | K::Boolean | K::Char) => {
             p.bump_any();
@@ -170,7 +203,8 @@ fn enum_pattern(p: &mut Parser<'_>) {
     }
     super::delimited(p, K::LParen, K::RParen, true, |p| {
         let arg = p.start();
-        if p.at(K::Identifier) {
+        // `Name {` opens a struct pattern (`.Some(P { x, y })`), not a label.
+        if p.at(K::Identifier) && !p.nth_at(1, K::LBrace) {
             // A bare identifier is always a label (shorthand binding); a
             // pattern may follow its colon.
             p.bump(K::Identifier);

@@ -10,9 +10,11 @@ use kestrel_reporting::{Diagnostic, Label};
 use kestrel_span::Span;
 use kestrel_type_infer::InferBody;
 
-use crate::body::{HirRef, OssaBodyCtx, TypedRef};
+use crate::body::{HirRef, LocalBinding, OssaBodyCtx, TypedRef};
 use crate::items::function_sig::receiver_convention;
 use crate::ty::{lower_type, resolve_type_annotation};
+use kestrel_hir::res::LocalId as HirLocalId;
+use kestrel_type_infer::captures::CaptureKind;
 
 fn conventions_from_callable(callable: &Callable, is_extern: bool) -> Vec<ParamConvention> {
     if is_extern {
@@ -36,6 +38,13 @@ fn conventions_from_callable(callable: &Callable, is_extern: bool) -> Vec<ParamC
     convs
 }
 
+thread_local! {
+    /// Default-argument entities whose bodies are being inlined right now; a
+    /// re-entry is a self-referential default.
+    static INLINING_DEFAULTS: std::cell::RefCell<Vec<Entity>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 impl OssaBodyCtx<'_, '_> {
     /// Lower call args with the callee's resolved conventions.
     /// `offset` skips receiver slots in `conventions` (e.g. 1 if
@@ -46,6 +55,15 @@ impl OssaBodyCtx<'_, '_> {
         conventions: &[ParamConvention],
         offset: usize,
     ) -> Vec<CallArg> {
+        let convs: Vec<ParamConvention> = (0..args.len())
+            .map(|i| {
+                conventions
+                    .get(offset + i)
+                    .copied()
+                    .unwrap_or(ParamConvention::Borrow)
+            })
+            .collect();
+        self.prepare_closure_arg_snapshots(None, args, &convs);
         args.iter()
             .enumerate()
             .map(|(i, arg)| {
@@ -125,13 +143,13 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
 
+        let arg_convs =
+            self.explicit_arg_conventions(args, Some(callee_entity), conventions, conv_offset);
+        self.prepare_closure_arg_snapshots(None, args, &arg_convs);
+
         // Lower explicit args in source order, each with its bound param's convention.
         let mut prepared = Vec::with_capacity(args.len());
-        for (ai, arg) in args.iter().enumerate() {
-            let conv = conventions
-                .get(conv_offset + arg_slot[ai])
-                .copied()
-                .unwrap_or(ParamConvention::Borrow);
+        for (arg, &conv) in args.iter().zip(&arg_convs) {
             prepared.push(self.prepare_call_arg_for_expr(arg.value, conv));
         }
 
@@ -162,6 +180,132 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
         result
+    }
+
+    /// The convention each EXPLICIT argument binds to, in source order —
+    /// the same label binding `lower_call_args_bound` uses (defaults may be
+    /// skipped anywhere); positional when the callee has no parameter shape.
+    pub(crate) fn explicit_arg_conventions(
+        &self,
+        args: &[HirCallArg],
+        callee_entity: Option<Entity>,
+        conventions: &[ParamConvention],
+        conv_offset: usize,
+    ) -> Vec<ParamConvention> {
+        let conv_at = |slot: usize| {
+            conventions
+                .get(conv_offset + slot)
+                .copied()
+                .unwrap_or(ParamConvention::Borrow)
+        };
+        let plan = callee_entity
+            .and_then(|e| self.ctx.world.get::<Callable>(e))
+            .and_then(|c| {
+                let params: Vec<BindParam> = c
+                    .params
+                    .iter()
+                    .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
+                    .collect();
+                let labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+                bind_arguments(&params, &labels).ok()
+            });
+        let Some(plan) = plan else {
+            return (0..args.len()).map(conv_at).collect();
+        };
+        let mut convs = vec![ParamConvention::Borrow; args.len()];
+        for (pi, binding) in plan.iter().enumerate() {
+            if let Binding::Arg(ai) = binding {
+                convs[*ai] = conv_at(pi);
+            }
+        }
+        convs
+    }
+
+    /// Call-time value semantics for a closure literal argument that reads a
+    /// local which a `mutating` argument (or receiver) of the SAME call
+    /// borrows: `two(x, { x })`. The plain-argument rule
+    /// (`snapshot_overlapping_borrows`) gives a borrowed argument the value
+    /// at the call; a view closure reads later, inside the callee, so it gets
+    /// a copy of the local taken now — BEFORE any argument opens its mutable
+    /// borrow (reading the slot after that is the exclusivity violation that
+    /// used to ICE, fuzz H12). The copy lives in a scope-tracked slot like a
+    /// `let`; `lower_closure_expr` captures it in place of the local.
+    ///
+    /// Same exemptions as plain arguments: a `not Copyable` or mono-dependent
+    /// type keeps the alias. Idempotent per closure, so a site that already
+    /// ran it with the receiver can call the arg lowerers afterwards.
+    pub(crate) fn prepare_closure_arg_snapshots(
+        &mut self,
+        receiver: Option<(HirExprId, ParamConvention)>,
+        args: &[HirCallArg],
+        arg_convs: &[ParamConvention],
+    ) {
+        let items: Vec<(HirExprId, ParamConvention)> = receiver
+            .into_iter()
+            .chain(args.iter().map(|a| a.value).zip(arg_convs.iter().copied()))
+            .collect();
+        let mut_roots: Vec<HirLocalId> = items
+            .iter()
+            .filter(|(_, c)| *c == ParamConvention::MutBorrow)
+            .filter_map(|&(e, _)| self.hir_place_root(e))
+            .collect();
+        if mut_roots.is_empty() {
+            return;
+        }
+        for &(expr, conv) in &items {
+            if conv == ParamConvention::MutBorrow
+                || self.closure_arg_snapshots.contains_key(&expr)
+                || !matches!(self.hir.exprs[expr], HirExpr::Closure { .. })
+            {
+                continue;
+            }
+            let mut locals: Vec<HirLocalId> = self
+                .captures
+                .get(expr)
+                .iter()
+                .filter(|cp| cp.kind == CaptureKind::Read && mut_roots.contains(&cp.key.root))
+                .map(|cp| cp.key.root)
+                .collect();
+            locals.dedup();
+            let snaps: Vec<(HirLocalId, ValueId)> = locals
+                .into_iter()
+                .filter_map(|local| self.snapshot_local(local).map(|copy| (local, copy)))
+                .collect();
+            if !snaps.is_empty() {
+                self.closure_arg_snapshots.insert(expr, snaps);
+            }
+        }
+    }
+
+    /// The local a place expression (`x`, `x.a.b`, `x.0`, `&x`) is rooted at.
+    fn hir_place_root(&self, mut expr: HirExprId) -> Option<HirLocalId> {
+        loop {
+            match &self.hir.exprs[expr] {
+                HirExpr::Local(local, _) => return Some(*local),
+                HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => expr = *base,
+                HirExpr::Borrow { inner, .. } => expr = *inner,
+                _ => return None,
+            }
+        }
+    }
+
+    /// Copy an address-bound local into a fresh scope-tracked slot; `None`
+    /// when the local has no slot or its type must not be duplicated here.
+    fn snapshot_local(&mut self, local: HirLocalId) -> Option<ValueId> {
+        let Some(LocalBinding::Var(addr)) = self.local_map.get(&local).copied() else {
+            return None;
+        };
+        let ty = self.resolve_local_type(local);
+        if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
+            return None;
+        }
+        let src = self.whole_slot_addr(addr);
+        let value = self.emit_load(src, ty);
+        let copy = self.emit_uninit(ty);
+        self.emit_store_init(copy, value);
+        let flag = self.maybe_alloc_var_flag(ty);
+        self.track_var(copy, ty, None, flag);
+        Some(copy)
     }
 
     /// Lower call args with Borrow convention for all params.
@@ -276,6 +420,35 @@ impl OssaBodyCtx<'_, '_> {
             );
             return self.emit_literal(Immediate::error());
         };
+        // A default whose expression calls its own function relying on that
+        // same default (`func f(x: Int64 = f()) -> Int64`) would inline
+        // forever. Report the cycle once and substitute an error value.
+        if INLINING_DEFAULTS.with(|s| s.borrow().contains(&default_entity)) {
+            let span = default_hir
+                .tail_expr
+                .map(|e| crate::body::expr_span(&default_hir, e))
+                .unwrap_or_else(|| Span::synthetic(0));
+            self.ctx.query.accumulate(
+                Diagnostic::error()
+                    .with_code("E631")
+                    .with_message("default argument value depends on itself")
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range()).with_message(
+                            "evaluating this default calls the function with the same default",
+                        ),
+                    ])
+                    .with_notes(vec![
+                        "pass the argument explicitly in the recursive call".into(),
+                    ]),
+            );
+            return self.emit_literal(Immediate::error());
+        }
+        INLINING_DEFAULTS.with(|s| s.borrow_mut().push(default_entity));
+        let _inlining = kestrel_hecs::guard::OnDrop::new(|| {
+            INLINING_DEFAULTS.with(|s| {
+                s.borrow_mut().pop();
+            });
+        });
         let default_typed = self.ctx.query.query(InferBody {
             entity: default_entity,
             root: self.ctx.root,

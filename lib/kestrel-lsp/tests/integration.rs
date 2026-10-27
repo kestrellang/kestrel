@@ -135,6 +135,30 @@ impl LspClient {
         }
     }
 
+    /// Block until the server publishes non-empty diagnostics for `uri` that
+    /// satisfy `accept`, and return them. Waits on the actual notification
+    /// instead of a fixed sleep, so a slow compile (e.g. a workspace that
+    /// pulls in the stdlib) can't race the assertion.
+    fn wait_for_diagnostics(&self, uri: &str, accept: impl Fn(&[Value]) -> bool) -> Vec<Value> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        let mut seen = Vec::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            let msg = match self.rx.recv_timeout(remaining) {
+                Ok(msg) => msg,
+                Err(_) => panic!("timeout waiting for diagnostics on {uri}; saw {seen:#?}"),
+            };
+            let diags = last_non_empty_diagnostics(std::slice::from_ref(&msg), uri);
+            if diags.is_empty() {
+                continue;
+            }
+            if accept(&diags) {
+                return diags;
+            }
+            seen.push(diags);
+        }
+    }
+
     fn initialize(&mut self) -> Value {
         let resp = self.request(
             "initialize",
@@ -605,12 +629,7 @@ fn diagnostics_stay_put_after_closing_an_edited_buffer() {
     c.initialize_with_workspace(&root_uri);
 
     // 1. Disk load only — nothing open in the editor.
-    let notes = c.flush_notifications();
-    let from_disk = last_non_empty_diagnostics(&notes, &uri);
-    assert!(
-        !from_disk.is_empty(),
-        "expected a diagnostic in {uri} from the workspace walk; got {notes:#?}"
-    );
+    let from_disk = c.wait_for_diagnostics(&uri, |_| true);
     assert_eq!(
         start_lines(&from_disk),
         vec![2],
@@ -619,29 +638,27 @@ fn diagnostics_stay_put_after_closing_an_edited_buffer() {
 
     // 2. Open it unchanged — same answer.
     c.open(&uri, original);
-    let notes = c.flush_notifications();
+    let opened = c.wait_for_diagnostics(&uri, |_| true);
     assert_eq!(
-        start_lines(&last_non_empty_diagnostics(&notes, &uri)),
+        start_lines(&opened),
         vec![2],
         "opening the file unchanged must not move the diagnostic"
     );
 
-    // 3. Prepend five blank lines; the error moves to line 7.
+    // 3. Prepend five blank lines; the error moves to line 7. Earlier
+    //    publishes may still be in flight, so wait for the one that reflects
+    //    the edit rather than taking the first that arrives.
     let edited = format!("\n\n\n\n\n{original}");
     c.change(&uri, 2, &edited);
-    let notes = c.flush_notifications();
-    assert_eq!(
-        start_lines(&last_non_empty_diagnostics(&notes, &uri)),
-        vec![7],
-        "after prepending 5 lines the diagnostic should be on line 7"
-    );
+    c.wait_for_diagnostics(&uri, |d| start_lines(d) == vec![7]);
 
     // 4. Close without saving. The buffer stays in `sources`, so the compiler
-    //    still sees the edited text — and so must the position mapping.
+    //    still sees the edited text — and so must the position mapping. The
+    //    next publish is the post-close refresh; the bug re-anchored it to 2.
     c.close(&uri);
-    let notes = c.flush_notifications();
+    let closed = c.wait_for_diagnostics(&uri, |_| true);
     assert_eq!(
-        start_lines(&last_non_empty_diagnostics(&notes, &uri)),
+        start_lines(&closed),
         vec![7],
         "closing an unsaved buffer must not re-anchor its diagnostics to the \
          stale on-disk text"

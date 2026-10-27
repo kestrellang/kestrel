@@ -165,7 +165,9 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
             ctx.register_name(*entity);
             ctx.intern(MirTy::TypeParam(*entity))
         },
-        HirTy::AliasUse { .. } => ctx.module.ty_arena.error(),
+        // Aliases arrive expanded; bounds were checked by inference.
+        HirTy::Alias { expanded, .. } => lower_type(ctx, expanded),
+        HirTy::AbstractAssoc { .. } => ctx.module.ty_arena.error(),
         HirTy::AssocProjection { base, assoc, .. } => lower_assoc_projection(ctx, base, *assoc),
         HirTy::Opaque { .. } => ctx.module.ty_arena.error(),
         HirTy::Never(_) => ctx.module.ty_arena.never(),
@@ -510,10 +512,10 @@ fn lower_type_replacing_opaque(ctx: &mut LowerCtx, ty: &HirTy, concrete: &Resolv
 fn contains_opaque(ty: &HirTy) -> bool {
     match ty {
         HirTy::Opaque { .. } => true,
-        HirTy::Struct { args, .. }
-        | HirTy::Enum { args, .. }
-        | HirTy::Protocol { args, .. }
-        | HirTy::AliasUse { args, .. } => args.iter().any(contains_opaque),
+        HirTy::Struct { args, .. } | HirTy::Enum { args, .. } | HirTy::Protocol { args, .. } => {
+            args.iter().any(contains_opaque)
+        },
+        HirTy::Alias { expanded, .. } => contains_opaque(expanded),
         HirTy::Tuple(elems, _) => elems.iter().any(contains_opaque),
         HirTy::Function { params, ret, .. } => {
             params.iter().any(contains_opaque) || contains_opaque(ret)

@@ -1,7 +1,11 @@
-// test: execution
+// test: diagnostics
 // stdlib: true
-// expect-exit: -1
 
+// Arrays require Copyable elements (decision for C16): an array literal of a
+// `not Copyable` type is rejected like the annotation `Array[Res]`. It used to
+// be accepted, and reading an element back out trapped at run time.
+//
+// History:
 // #127 backstop: reading a `not Copyable` element out of an array BY VALUE
 // (`rs(0).tag` routes through `Slice.subscript` -> `Pointer.read()`, whose
 // `where T: Copyable` bound the frontend fails to enforce for
@@ -35,7 +39,7 @@ struct Res: not Copyable {
 func main() -> lang.i64 {
     let drops = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
     drops.write(0);
-    var rs = [Res(tag: 1, drops: drops)];
+    var rs = [Res(tag: 1, drops: drops)]; // ERROR: Res !: Copyable
     // Bit-copies the non-Copyable element out of the array — must trap.
     let t = rs(0).tag;
     t.raw

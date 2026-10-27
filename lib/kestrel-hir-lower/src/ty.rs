@@ -23,6 +23,13 @@ use crate::ctx::LowerCtx;
 
 // ===== Standalone type lowering =====
 
+thread_local! {
+    /// Trivial aliases currently being expanded by `lower_ast_type` (a
+    /// re-entry is a cycle). Pushes nest strictly; popped on unwind too.
+    static EXPANDING_ALIASES: std::cell::RefCell<Vec<Entity>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Lower an AstType to HirTy using name resolution.
 ///
 /// This is the shared core used by both body lowering (LowerCtx::lower_type)
@@ -249,6 +256,10 @@ fn build_hir_ty_for_entity(
 
     // Type parameter: no args, no projection.
     if kind == Some(NodeKind::TypeParameter) {
+        if let Some(nested) = nested_type_capturing_param(ctx, owner, root, entity) {
+            report_outer_param_in_nested_type(ctx, nested, entity, segments, span);
+            return HirTy::Error(span.clone());
+        }
         return HirTy::Param(entity, span.clone());
     }
 
@@ -285,22 +296,7 @@ fn build_hir_ty_for_entity(
                     span: span.clone(),
                 };
             }
-            // Trivial (non-generic, bound-free) aliases with a concrete
-            // TypeAnnotation are eagerly expanded — avoids constraint bloat
-            // for `type Fd = Int32` style declarations.
-            if is_trivial_alias(ctx, entity)
-                && args.is_empty()
-                && let Some(ann) = ctx.get::<TypeAnnotation>(entity)
-            {
-                return lower_ast_type(ctx, owner, root, &ann.0);
-            }
-            // Non-associated aliases (parameterized or constrained) flow as
-            // AliasUse. The solver reduces concrete ones via Reduce.
-            HirTy::AliasUse {
-                entity,
-                args,
-                span: span.clone(),
-            }
+            expand_alias(ctx, root, entity, args, span)
         },
         Some(NodeKind::Enum) => HirTy::Enum {
             entity,
@@ -359,11 +355,73 @@ fn is_bare_self_ast(ty: &AstType) -> bool {
 
 /// True if an alias entity is trivial — has no type params, no protocol bounds,
 /// no where clause. These aliases can be safely expanded at HIR lowering.
+/// Expand a use of type alias `alias` with `args`: its definition, lowered in
+/// its own scope, with its type parameters replaced by `args`. This is the
+/// only place an alias name becomes a type, and `HirTy::Alias` cannot be
+/// built without the expansion, so no later stage ever sees an unexpanded
+/// alias. A bounded alias keeps its name and arguments in that wrapper for
+/// the bound check; an alias with no definition is an abstract associated
+/// type.
+fn expand_alias(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    alias: Entity,
+    args: Vec<HirTy>,
+    span: &Span,
+) -> HirTy {
+    let Some(ann) = ctx.get::<TypeAnnotation>(alias) else {
+        return HirTy::AbstractAssoc {
+            entity: alias,
+            span: span.clone(),
+        };
+    };
+    // A cyclic alias (`type A = B; type B = A`) would expand forever; the
+    // E447 analyzer reports it, so stop here.
+    if EXPANDING_ALIASES.with(|s| s.borrow().contains(&alias)) {
+        return HirTy::Error(span.clone());
+    }
+    EXPANDING_ALIASES.with(|s| s.borrow_mut().push(alias));
+    let _guard = kestrel_hecs::guard::OnDrop::new(|| {
+        EXPANDING_ALIASES.with(|s| {
+            s.borrow_mut().pop();
+        });
+    });
+    let definition = lower_ast_type(ctx, alias, root, &ann.0);
+    let params: Vec<Entity> = ctx
+        .get::<TypeParams>(alias)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let subs: Vec<(Entity, HirTy)> = params.iter().copied().zip(args.iter().cloned()).collect();
+    let expanded = definition.substitute_params(&subs);
+    // Only a bounded alias keeps a wrapper (inference checks the bounds);
+    // any other is exactly its expansion, so code that reads a type's shape
+    // (`-> Item` with `type Item = &T` is a reference return) sees it as is.
+    if !alias_has_bounds(ctx, alias) {
+        return expanded;
+    }
+    HirTy::Alias {
+        alias,
+        args,
+        expanded: Box::new(expanded),
+        span: span.clone(),
+    }
+}
+
+/// Whether an alias states bounds (`type Keyed[K] where K: Equatable = ...`
+/// or a conformance list), which inference must check at every use.
+fn alias_has_bounds(ctx: &QueryContext<'_>, alias: Entity) -> bool {
+    ctx.get::<kestrel_ast_builder::WhereClause>(alias).is_some()
+        || ctx
+            .get::<kestrel_ast_builder::Conformances>(alias)
+            .is_some()
+}
+
+/// Whether an alias is non-generic and carries no bounds of its own (no
+/// conformances, no `where` clause).
 fn is_trivial_alias(ctx: &QueryContext<'_>, entity: Entity) -> bool {
     let has_type_params = ctx
         .get::<TypeParams>(entity)
-        .map(|tp| !tp.0.is_empty())
-        .unwrap_or(false);
+        .is_some_and(|tp| !tp.0.is_empty());
     if has_type_params {
         return false;
     }
@@ -514,7 +572,8 @@ fn override_span(ty: &mut HirTy, span: &Span) {
         HirTy::Struct { span: s, .. }
         | HirTy::Enum { span: s, .. }
         | HirTy::Protocol { span: s, .. }
-        | HirTy::AliasUse { span: s, .. }
+        | HirTy::Alias { span: s, .. }
+        | HirTy::AbstractAssoc { span: s, .. }
         | HirTy::Tuple(_, s)
         | HirTy::Function { span: s, .. }
         | HirTy::Param(_, s)
@@ -669,12 +728,18 @@ pub fn reject_ref_types(
             args: reject_ref_args(ctx, args, RefPolicy::Strict),
             span,
         },
-        // Alias args stay Strict too: trivial aliases expand at the use
-        // site BEFORE this walk, so a ref smuggled through an alias arg
-        // would bypass the positional rules (the R5 smuggling class).
-        HirTy::AliasUse { entity, args, span } => HirTy::AliasUse {
-            entity,
+        // Aliases are expanded before this walk, so the positional rules see
+        // the real type. A bounded alias's args stay Strict as well: they are
+        // also checked against the alias's bounds, which never admit a ref.
+        HirTy::Alias {
+            alias,
+            args,
+            expanded,
+            span,
+        } => HirTy::Alias {
+            alias,
             args: reject_ref_args(ctx, args, RefPolicy::Strict),
+            expanded: Box::new(reject_ref_types(ctx, *expanded, pos, policy)),
             span,
         },
         HirTy::Tuple(elems, span) => HirTy::Tuple(
@@ -723,6 +788,7 @@ pub fn reject_ref_types(
             span,
         },
         leaf @ (HirTy::Param(..)
+        | HirTy::AbstractAssoc { .. }
         | HirTy::SelfType(..)
         | HirTy::Never(_)
         | HirTy::Infer(_)
@@ -808,7 +874,7 @@ fn lower_sugar_type(
         .map(|t| lower_ast_type(ctx, owner, root, t))
         .collect();
 
-    if let Some(entity) = resolve_sugar_type(ctx, owner, root, builtin, name) {
+    if let Some(entity) = kestrel_name_res::resolve_sugar_type(ctx, owner, root, builtin, name) {
         let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
         // Dispatch by NodeKind — Optional is an enum, Array/Dictionary are structs.
         match ctx.get::<NodeKind>(entity).cloned() {
@@ -867,72 +933,6 @@ fn fill_type_arg_defaults(
         }
     }
     args
-}
-
-/// Resolve the type that a piece of type sugar (`[T]`, `T?`, `[K: V]`,
-/// `T throws E`) denotes.
-///
-/// Goes through the `@builtin(.XTypeOperator)` lang item, which is what the
-/// stdlib annotation is *for*. Before this, the four annotations in `lang/std`
-/// had zero readers and the sugar resolved the hardcoded name `"Array"` in the
-/// **user's** scope — so `struct Array[T] {}` in a user file silently captured
-/// `[Int]`, and every array literal in that file failed to conform to
-/// `_ExpressibleByArrayLiteral`.
-///
-/// Falls back to the name for worlds built without the stdlib (unit tests,
-/// `--no-std`), where there is no lang item to find.
-fn resolve_sugar_type(
-    ctx: &QueryContext<'_>,
-    owner: Entity,
-    root: Entity,
-    builtin: Builtin,
-    name: &str,
-) -> Option<Entity> {
-    if let Some(alias) = ctx.query(ResolveBuiltin { builtin, root })
-        && let Some(target) = sugar_alias_target(ctx, root, alias)
-    {
-        return Some(target);
-    }
-    resolve_std_type(ctx, owner, root, name)
-}
-
-/// Follow `@builtin(.ArrayTypeOperator) type ArrayTypeOperator[T] = Array[T]`
-/// to `Array`.
-///
-/// The target is resolved with the **alias** as context, so it lands in the
-/// stdlib's own scope no matter what the user file declares or imports.
-fn sugar_alias_target(ctx: &QueryContext<'_>, root: Entity, alias: Entity) -> Option<Entity> {
-    let annotation = ctx.get::<TypeAnnotation>(alias)?;
-    let AstType::Named { segments, .. } = &annotation.0 else {
-        return None;
-    };
-    let segments: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-    match ctx.query(ResolveTypePath {
-        segments,
-        context: alias,
-        root,
-    }) {
-        TypeResolution::Found(entity) => Some(entity),
-        _ => None,
-    }
-}
-
-/// Resolve a well-known standard library type name (e.g. "Array", "Optional").
-fn resolve_std_type(
-    ctx: &QueryContext<'_>,
-    owner: Entity,
-    root: Entity,
-    name: &str,
-) -> Option<Entity> {
-    let result = ctx.query(ResolveTypePath {
-        segments: vec![name.to_string()],
-        context: owner,
-        root,
-    });
-    match result {
-        TypeResolution::Found(entity) => Some(entity),
-        _ => None,
-    }
 }
 
 // ===== LowerCtx delegation =====
@@ -1054,8 +1054,8 @@ impl QueryFn for LowerTypeAnnotation {
         // is restricted to TRIVIAL member aliases: those are eagerly
         // expanded at every named use (`let x: Foo.Item` re-applies the
         // use-site position rules, E482/E480 — nothing smuggles), while
-        // non-trivial aliases flow as AliasUse through solver Reduce with
-        // no position re-check, so they stay Strict. Protocol-parented
+        // generic or bounded aliases stay Strict (their RHS is reused across
+        // instantiations). Protocol-parented
         // aliases (assoc DECLS and their defaults) also stay Strict.
         let parent_kind = ctx
             .parent_of(self.entity)
@@ -1288,6 +1288,20 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
                 reject_ref_types(ctx, lowered, RefPosition::GenericArg, RefPolicy::Strict);
             return Some(vec![lowered]);
         }
+        // Sugar targets (`extend [T]`, `extend T?`, `extend [K: V]`) carry
+        // their type arguments inline.
+        let sugar_args: Option<Vec<&AstType>> = match &target.0 {
+            AstType::Array(elem, _) | AstType::Optional(elem, _) => Some(vec![elem.as_ref()]),
+            AstType::Dictionary(key, val, _) => Some(vec![key.as_ref(), val.as_ref()]),
+            _ => None,
+        };
+        if let Some(args) = sugar_args {
+            return Some(
+                args.into_iter()
+                    .map(|a| lower_ast_type(ctx, self.extension, self.root, a))
+                    .collect(),
+            );
+        }
         let AstType::Named { segments, .. } = &target.0 else {
             return Some(vec![]);
         };
@@ -1380,6 +1394,78 @@ fn ast_type_span(ty: &AstType) -> Span {
     }
 }
 
+/// If `param` is used from inside a struct/enum nested in the declaration
+/// that binds it, return that nested type. Nested types don't inherit their
+/// container's type parameters (fuzz M13): `Outer[Int64].Inner` has no slot
+/// for `T`, so a use would leave `T` unbound after specialization. Uses
+/// directly in the binder — or its methods — are fine.
+fn nested_type_capturing_param(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    param: Entity,
+) -> Option<Entity> {
+    let binder = ctx.parent_of(param)?;
+    let mut nested = None;
+    let mut cur = Some(owner);
+    while let Some(e) = cur {
+        if e == binder {
+            return nested;
+        }
+        match ctx.get::<NodeKind>(e) {
+            // The innermost nominal type we pass through is the offender.
+            Some(NodeKind::Struct | NodeKind::Enum) if nested.is_none() => nested = Some(e),
+            // `extend Outer[T] { struct Inner { ... T ... } }` binds Outer's
+            // own parameter, so the extension stands in for the binder.
+            Some(NodeKind::Extension) => {
+                let lhs = ctx.query(kestrel_name_res::ExtensionLhsParams { extension: e, root });
+                if lhs.contains(&param) {
+                    return nested;
+                }
+            },
+            _ => {},
+        }
+        cur = ctx.parent_of(e);
+    }
+    None
+}
+
+fn report_outer_param_in_nested_type(
+    ctx: &QueryContext<'_>,
+    nested: Entity,
+    param: Entity,
+    segments: &[kestrel_ast::PathSegment],
+    span: &Span,
+) {
+    let name = segments.last().map(|s| s.name.clone()).unwrap_or_default();
+    let nested_name = ctx
+        .get::<kestrel_ast_builder::Name>(nested)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    let mut labels = vec![
+        Label::primary(span.file_id, span.range())
+            .with_message(format!("'{name}' belongs to an enclosing type")),
+    ];
+    if let Some(decl) = ctx.get::<DeclSpan>(param) {
+        labels.push(
+            Label::secondary(decl.0.file_id, decl.0.range())
+                .with_message(format!("'{name}' is declared here")),
+        );
+    }
+    ctx.accumulate(
+        Diagnostic::error()
+            .with_code("E634")
+            .with_message(format!(
+                "nested type '{nested_name}' cannot use type parameter '{name}' of an enclosing type"
+            ))
+            .with_labels(labels)
+            .with_notes(vec![format!(
+                "nested types do not inherit their container's type parameters; give \
+                 '{nested_name}' its own parameter, e.g. `{nested_name}[{name}2]`"
+            )]),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1444,11 +1530,12 @@ mod tests {
         }
     }
 
-    /// Non-associated TypeAliases (parent is Module, not Protocol) still
-    /// lower to `HirTy::AliasUse`. Guards against over-broadening the
-    /// `parent_is_protocol` branch.
+    /// Non-associated TypeAliases (parent is Module, not Protocol) never
+    /// become an `AssocProjection`. Guards against over-broadening the
+    /// `parent_is_protocol` branch. Without a definition there is nothing to
+    /// expand, so the alias stays abstract.
     #[test]
-    fn module_level_alias_stays_alias_use() {
+    fn module_level_alias_is_not_a_projection() {
         let mut world = World::new();
         world.begin_revision();
 
@@ -1460,9 +1547,7 @@ mod tests {
         world.set(alias, NodeKind::TypeAlias);
         world.set(alias, Name("Fd".into()));
         world.set(alias, Typed);
-        // no TypeAnnotation → non-trivial; stays as AliasUse
-        let tp = world.spawn();
-        world.set(alias, kestrel_ast_builder::TypeParams(vec![tp]));
+        // no TypeAnnotation → nothing to expand
         world.set_parent(alias, root);
 
         let ctx = world.query_context();
@@ -1471,6 +1556,78 @@ mod tests {
             span: span(),
         };
         let lowered = lower_ast_type(&ctx, root, root, &ast_ty);
-        matches!(lowered, HirTy::AliasUse { .. });
+        assert!(
+            matches!(lowered, HirTy::AbstractAssoc { entity, .. } if entity == alias),
+            "got {lowered:?}"
+        );
+    }
+
+    /// A generic alias expands at lowering: `Pair[Int64]` with
+    /// `type Pair[T] = (T, T)` is the tuple itself, so no later stage can
+    /// see an unexpanded alias.
+    #[test]
+    fn generic_alias_expands_with_its_arguments() {
+        let mut world = World::new();
+        world.begin_revision();
+
+        let root = world.spawn();
+        world.set(root, NodeKind::Module);
+        world.set(root, Name(Name::ROOT.into()));
+
+        let int = world.spawn();
+        world.set(int, NodeKind::Struct);
+        world.set(int, Name("Int64".into()));
+        world.set(int, Typed);
+        world.set_parent(int, root);
+
+        let alias = world.spawn();
+        world.set(alias, NodeKind::TypeAlias);
+        world.set(alias, Name("Pair".into()));
+        world.set(alias, Typed);
+        world.set_parent(alias, root);
+        let t = world.spawn();
+        world.set(t, NodeKind::TypeParameter);
+        world.set(t, Name("T".into()));
+        world.set_parent(t, alias);
+        world.set(alias, kestrel_ast_builder::TypeParams(vec![t]));
+        world.set(
+            alias,
+            TypeAnnotation(AstType::Tuple(
+                vec![
+                    AstType::Named {
+                        segments: vec![seg("T")],
+                        span: span(),
+                    },
+                    AstType::Named {
+                        segments: vec![seg("T")],
+                        span: span(),
+                    },
+                ],
+                span(),
+            )),
+        );
+
+        let ctx = world.query_context();
+        let mut pair = seg("Pair");
+        pair.type_args = vec![AstType::Named {
+            segments: vec![seg("Int64")],
+            span: span(),
+        }];
+        let ast_ty = AstType::Named {
+            segments: vec![pair],
+            span: span(),
+        };
+        match lower_ast_type(&ctx, root, root, &ast_ty) {
+            HirTy::Tuple(elems, _) => {
+                assert_eq!(elems.len(), 2);
+                for e in elems {
+                    assert!(
+                        matches!(e, HirTy::Struct { entity, .. } if entity == int),
+                        "{e:?}"
+                    );
+                }
+            },
+            other => panic!("expected the expanded tuple, got {other:?}"),
+        }
     }
 }

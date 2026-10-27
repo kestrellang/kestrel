@@ -567,6 +567,16 @@ fn seed_cast_ops(world: &mut World, lang: Entity) {
             if from == to || intrinsic_ty(from) == intrinsic_ty(to) {
                 continue;
             }
+            // No MIR `Op` yet for unsigned <-> float or for casts to/from `i1`
+            // (what `cast_i64_i1` should mean is undecided). Declaring them
+            // anyway made every call an ICE at post-mono verify;
+            // `every_seeded_intrinsic_has_a_lowering` (mir-lower) keeps the
+            // two sides in step.
+            let unsigned_float = (from.starts_with('u') && to.starts_with('f'))
+                || (from.starts_with('f') && to.starts_with('u'));
+            if *from == "i1" || *to == "i1" || unsigned_float {
+                continue;
+            }
             seed_fn(
                 world,
                 lang,

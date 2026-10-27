@@ -437,7 +437,6 @@ pub(super) fn emit_resolved_call(
                     SubjectRoot::Subs(&subs),
                     crate::generate::ProjectionPolicy::Reduce(&span),
                 ) {
-                    ctx.conforms_typearg(tv, protocol, span.clone());
                     // Cache the protocol args so solve_associated can substitute
                     // an extension's free TypeParams when projecting through
                     // `extend ConcreteType: Proto[FreeParams]`.
@@ -445,9 +444,7 @@ pub(super) fn emit_resolved_call(
                         .iter()
                         .map(|hir_ty| lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs))
                         .collect();
-                    if !arg_tvs.is_empty() {
-                        ctx.record_witness_args(tv, protocol, arg_tvs);
-                    }
+                    ctx.bound_typearg(tv, protocol, arg_tvs, span.clone());
                 }
             },
             crate::resolve::WhereClause::Equality { subject, rhs } => {
@@ -577,6 +574,11 @@ pub(super) fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallA
         let Some(hir_ty) = param_ty else {
             continue; // unannotated param — compatible with anything
         };
+        // A bounded alias is checked as the type it expands to.
+        let hir_ty = match hir_ty {
+            kestrel_hir::ty::HirTy::Alias { expanded, .. } => expanded.as_ref(),
+            other => other,
+        };
 
         // Get the concrete arg type
         let mut arg_resolved = ctx.resolve(arg.ty);
@@ -607,7 +609,7 @@ pub(super) fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallA
                 entity: param_entity,
                 ..
             }
-            | kestrel_hir::ty::HirTy::AliasUse {
+            | kestrel_hir::ty::HirTy::AbstractAssoc {
                 entity: param_entity,
                 ..
             } => {

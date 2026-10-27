@@ -191,7 +191,7 @@ fn check_user_match(
 
     // E304: empty match on inhabited type.
     if arms.is_empty() {
-        if !matches!(scrutinee_ty, ResolvedTy::Never) {
+        if !kestrel_pattern_matching::usefulness::is_uninhabited(cx.query, cx.root, scrutinee_ty) {
             let d = descriptor("E304");
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: d.id,

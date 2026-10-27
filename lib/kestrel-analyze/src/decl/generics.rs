@@ -488,7 +488,7 @@ fn check_type_param_shadowing(
 ) {
     // Collect outer type param names by walking parent chain
     let mut outer_params: HashMap<String, Span> = HashMap::new();
-    let mut record = |p: kestrel_hecs::Entity, outer: &mut HashMap<String, Span>| {
+    let record = |p: kestrel_hecs::Entity, outer: &mut HashMap<String, Span>| {
         let name = util::entity_name(cx.query, p);
         let span = util::entity_span(cx.query, p);
         outer.entry(name).or_insert(span);

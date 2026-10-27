@@ -17,7 +17,7 @@
 
 module Test
 
-import std.core.print
+import std.io.stdio.print
 
 @main
 func main() -> lang.i64 {

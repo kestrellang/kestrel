@@ -113,10 +113,34 @@ impl OssaBodyCtx<'_, '_> {
         params: &[HirClosureParam],
         body: &HirBlock,
     ) -> ValueId {
+        // A read capture of a local that a `mutating` argument of the
+        // enclosing call is about to borrow sees the call-time copy instead
+        // (see `prepare_closure_arg_snapshots`): point the local at the copy
+        // while this literal materializes its captures.
+        if let Some(snaps) = self.closure_arg_snapshots.remove(&expr_id) {
+            let saved: Vec<(HirLocalId, Option<LocalBinding>)> = snaps
+                .iter()
+                .map(|&(local, copy)| {
+                    (local, self.local_map.insert(local, LocalBinding::Var(copy)))
+                })
+                .collect();
+            let result = self.lower_closure_expr(expr_id, params, body);
+            for (local, prev) in saved {
+                match prev {
+                    Some(b) => self.local_map.insert(local, b),
+                    None => self.local_map.remove(&local),
+                };
+            }
+            return result;
+        }
         let closure_ty = self.resolve_expr_type(expr_id);
 
         // Captures decided post-inference; we only apply copyability here.
-        let slots = self.plan_slots(expr_id);
+        let owning = matches!(
+            self.ctx.module.ty_arena.get(closure_ty),
+            MirTy::FuncThick { kind, .. } if kind.is_boxed()
+        );
+        let slots = self.plan_slots(expr_id, owning);
 
         let closure_idx = self.ctx.closure_counter;
         self.ctx.closure_counter += 1;
@@ -313,16 +337,24 @@ impl OssaBodyCtx<'_, '_> {
                         .push(ParamDef::new(name, val, ty, ParamConvention::MutBorrow));
                     closure_local_map.insert(cp.local, LocalBinding::Var(val));
                 },
-                _ => {
-                    // Consuming (default) / Borrow: keep the @owned SSA binding
-                    // (unchanged from pre-#106 behavior).
-                    let val = closure_body.alloc_value(
-                        ValueDef::owned(ty).with_root(RootProvenance::Param((i + 1) as u32)),
-                    );
+                ParamConvention::Borrow | ParamConvention::Consuming => {
+                    // Indirect calls pass every non-`mutating` arg `@borrow`
+                    // (`lower_indirect_call`; an un-annotated fn-type param is
+                    // spelled `Consuming` but means "not mutating"). Bind it
+                    // @guaranteed like a function's `Borrow` param, so a
+                    // consuming use in the body copies instead of taking the
+                    // caller's value (which the caller still releases).
+                    let val = closure_body.alloc_value(ValueDef {
+                        ty,
+                        ownership: Ownership::Guaranteed,
+                        borrow_source: None,
+                        root: RootProvenance::Param((i + 1) as u32),
+                        span: None,
+                    });
                     closure_body.value_names.insert(val, name.clone());
                     func_def
                         .params
-                        .push(ParamDef::new(name, val, ty, ParamConvention::Consuming));
+                        .push(ParamDef::new(name, val, ty, ParamConvention::Borrow));
                     closure_local_map.insert(cp.local, LocalBinding::Ssa(val));
                 },
             }
@@ -381,13 +413,22 @@ impl OssaBodyCtx<'_, '_> {
             let env = self.emit_unique_take(binding, env_val, env_named);
             let fields = self.emit_destructure_struct(env, &slot_tys);
             for (i, slot) in slots.iter().enumerate() {
+                // Each capture lives in a frame slot (like a `var`), so writes
+                // inside the body persist and the slot's drop tracking
+                // releases whatever was not moved out.
+                let ty = slot_tys[i];
+                let addr = self.emit_uninit(ty);
+                self.emit_store_init(addr, fields[i]);
+                let flag = self.maybe_alloc_var_flag(ty);
                 match slot {
                     CaptureSlot::Whole(root) => {
-                        self.local_map.insert(*root, LocalBinding::Ssa(fields[i]));
+                        self.local_map.insert(*root, LocalBinding::Var(addr));
+                        self.track_var(addr, ty, Some(*root), flag);
                     },
                     CaptureSlot::Place(cp) => {
                         self.place_capture_map
-                            .insert(cp.key.clone(), PlaceCapture::Value(fields[i]));
+                            .insert(cp.key.clone(), PlaceCapture::Addr(addr));
+                        self.track_var(addr, ty, None, flag);
                     },
                 }
             }
@@ -613,8 +654,16 @@ impl OssaBodyCtx<'_, '_> {
     /// copyability (only the MIR layer knows it). A projected place is kept as
     /// a by-value place capture only when it is Copyable and read-only;
     /// otherwise the whole root is captured (preserving historical behavior).
-    fn plan_slots(&mut self, closure_id: HirExprId) -> Vec<CaptureSlot> {
+    fn plan_slots(&mut self, closure_id: HirExprId, owning: bool) -> Vec<CaptureSlot> {
         let plan: Vec<CapturedPlace> = self.captures.get(closure_id).to_vec();
+        // An owning closure takes a non-Copyable projected read capture by
+        // itself (a partial move) when the root is only ever read through
+        // projections; the move checker applies the same rule.
+        let field_roots = if owning {
+            kestrel_type_infer::captures::field_capturable_roots(&plan)
+        } else {
+            Default::default()
+        };
 
         // First pass: which roots must be captured whole.
         let mut whole_roots: std::collections::HashSet<HirLocalId> =
@@ -631,7 +680,18 @@ impl OssaBodyCtx<'_, '_> {
             // Gating on `is_copy_type` (Bitwise only) here would force a Clone
             // field to fall back to whole-receiver capture, which can wrongly
             // consume a move-only receiver. See [[closure_cloneable_capture_clone]].
-            if !(self.captures_by_value(pty) && cp.kind == CaptureKind::Read) {
+            // A VIEW closure captures a projected place by its address
+            // (`view_addr_of_place`), read or written, Copyable or not — so
+            // `{ p.b = 3 }` aliases only `p.b`, not all of `p`
+            // (partial-moves.md rule 8). An owning closure copies duplicable
+            // fields and moves the rest only when `field_roots` allows it.
+            let by_place = if owning {
+                cp.kind == CaptureKind::Read
+                    && (self.captures_by_value(pty) || field_roots.contains(&cp.key.root))
+            } else {
+                !self.is_protocol_self(pty)
+            };
+            if !by_place {
                 whole_roots.insert(cp.key.root);
             }
         }
@@ -761,7 +821,14 @@ impl OssaBodyCtx<'_, '_> {
     /// reaches here it degrades to a bit-copy rather than crashing.
     fn materialize_owning_capture(&mut self, slot: &CaptureSlot, cap_ty: TyId) -> ValueId {
         let CaptureSlot::Whole(root) = slot else {
-            // Projected place: copy/clone just the field, never the receiver.
+            // A move-only projected place is MOVED out of its root (a partial
+            // move); a duplicable one is copied/cloned, never the receiver.
+            if let CaptureSlot::Place(cp) = slot
+                && !self.captures_by_value(cap_ty)
+                && let Some(moved) = self.lower_partial_move(cp.repr)
+            {
+                return moved;
+            }
             return self.materialize_capture(slot, cap_ty);
         };
         let root = *root;
@@ -776,10 +843,7 @@ impl OssaBodyCtx<'_, '_> {
         // Move-only: the environment becomes the sole owner.
         if self.is_var_local(&root) && self.body.value(mir_val).ownership == Ownership::Owned {
             let value = self.emit_take(mir_val, cap_ty);
-            self.set_var_init(root, super::VarInit::DefUninit);
-            if let Some(flag) = self.var_flag(root) {
-                self.store_drop_flag(flag, false);
-            }
+            self.record_var_whole(root, super::VarInit::DefUninit);
             return value;
         }
         if self.body.value(mir_val).ownership == Ownership::Owned {
@@ -883,10 +947,7 @@ impl OssaBodyCtx<'_, '_> {
                 let slot_owned = self.body.value(mir_val).ownership == Ownership::Owned;
                 if slot_owned && self.is_non_copyable(cap_ty) {
                     let value = self.emit_take(mir_val, cap_ty);
-                    self.set_var_init(root, super::VarInit::DefUninit);
-                    if let Some(flag) = self.var_flag(root) {
-                        self.store_drop_flag(flag, false);
-                    }
+                    self.record_var_whole(root, super::VarInit::DefUninit);
                     self.emit_store_init(addr, value);
                 } else {
                     let value = self.emit_copy_addr(mir_val, cap_ty);

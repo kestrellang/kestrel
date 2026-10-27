@@ -60,9 +60,7 @@ impl FlowMode {
     fn current() -> FlowMode {
         use std::sync::OnceLock;
         static MODE: OnceLock<FlowMode> = OnceLock::new();
-        *MODE.get_or_init(|| {
-            FlowMode::parse(std::env::var("KESTREL_VERIFY_FLOW").ok().as_deref())
-        })
+        *MODE.get_or_init(|| FlowMode::parse(std::env::var("KESTREL_VERIFY_FLOW").ok().as_deref()))
     }
 
     /// Split out from `current` so the parse is testable: `current` memoises
@@ -217,7 +215,14 @@ pub fn verify_ossa(
             crate::item::function::RetConvention::RefBorrow { .. }
         )
     });
-    verify_ossa_with_mode(body, module, func_name, entity, ret_borrow, FlowMode::current())
+    verify_ossa_with_mode(
+        body,
+        module,
+        func_name,
+        entity,
+        ret_borrow,
+        FlowMode::current(),
+    )
 }
 
 /// The same ownership walk over a MONOMORPHIZED body.
@@ -237,7 +242,14 @@ pub fn verify_ossa_mono(
     entity: Entity,
     ret_borrow: bool,
 ) -> Vec<VerifyError> {
-    verify_ossa_with_mode(body, module, func_name, entity, ret_borrow, FlowMode::current())
+    verify_ossa_with_mode(
+        body,
+        module,
+        func_name,
+        entity,
+        ret_borrow,
+        FlowMode::current(),
+    )
 }
 
 /// `verify_ossa` with the flow mode supplied rather than read from the
@@ -264,7 +276,7 @@ fn verify_ossa_with_mode(
     check_operands_defined(body, func_name, entity, &mut errors);
 
     let order = reverse_postorder(body);
-    let aliases = AddrAliases::build(body);
+    let aliases = AddrAliases::build_with(body, |ty| container_arity(module, ty));
 
     // Check 1c: definitions must dominate their uses. Gated with the rest of
     // the flow work so `Off` remains exactly the historical behaviour, and
@@ -288,7 +300,7 @@ fn verify_ossa_with_mode(
                 if !dominance_findings.is_empty() {
                     report_flow_findings(func_name, &dominance_findings);
                 }
-            }
+            },
         }
     }
 
@@ -636,10 +648,10 @@ fn check_dominance(
         }
 
         let check = |operand: ValueId,
-                         inst: Option<u32>,
-                         span: Option<Span>,
-                         available: &FxHashSet<ValueId>,
-                         errors: &mut Vec<VerifyError>| {
+                     inst: Option<u32>,
+                     span: Option<Span>,
+                     available: &FxHashSet<ValueId>,
+                     errors: &mut Vec<VerifyError>| {
             if available.contains(&operand) {
                 return;
             }
@@ -706,6 +718,20 @@ fn check_dominance(
     }
 }
 
+/// Field count of the struct or tuple an address points to (`ty` is the
+/// address's own type; a non-pointer `ty` is taken as the container itself).
+fn container_arity(module: &dyn VerifyModule, ty: TyId) -> Option<usize> {
+    let arena = module.ty_arena();
+    let container = match arena.get(ty) {
+        crate::ty::MirTy::Pointer(p) => *p,
+        _ => ty,
+    };
+    match arena.get(container) {
+        crate::ty::MirTy::Tuple(elems) => Some(elems.len()),
+        _ => module.struct_field_count(container),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Address aliasing
 // ---------------------------------------------------------------------------
@@ -730,13 +756,24 @@ struct AddrAliases {
     /// their storage, so they are untracked — which is exactly how the walk
     /// behaved for every cross-block address before aliasing existed.
     poisoned: FxHashSet<ValueId>,
-    /// `FieldAddr` result -> (root address, field). Whole-function, so a
-    /// projection taken in one block is still understood in another.
-    field_of: FxHashMap<ValueId, (ValueId, FieldIdx)>,
+    /// `FieldAddr` result -> (root address, projection path). Nested chains
+    /// (`p.a.b`) extend their base's path. Whole-function, so a projection
+    /// taken in one block is still understood in another.
+    field_of: FxHashMap<ValueId, (ValueId, Vec<FieldIdx>)>,
+    /// (root, container path) -> number of fields of that container, from
+    /// the `FieldAddr` base's pointee type. Lets a split slot enumerate every
+    /// sibling instead of guessing whether unmentioned fields exist.
+    arity: FxHashMap<(ValueId, Vec<FieldIdx>), usize>,
 }
 
 impl AddrAliases {
+    #[cfg(test)]
     fn build(body: &OssaBody) -> AddrAliases {
+        Self::build_with(body, |_| None)
+    }
+
+    /// `container_arity(ty)` is the field count of a struct or tuple type.
+    fn build_with(body: &OssaBody, container_arity: impl Fn(TyId) -> Option<usize>) -> AddrAliases {
         let mut aliases = AddrAliases::default();
 
         // Roots.
@@ -782,15 +819,41 @@ impl AddrAliases {
             }
         }
 
-        // Field projections, now that roots are settled.
-        for block in &body.blocks {
-            for inst in &block.insts {
-                if let InstKind::FieldAddr {
-                    result, base, field, ..
-                } = &inst.kind
-                    && let Some(&base_root) = aliases.root.get(base)
-                {
-                    aliases.field_of.insert(*result, (base_root, *field));
+        // Field projections, now that roots are settled. A nested chain's
+        // base may be defined in a later block (layout order is not
+        // dominance order), so iterate to a fixpoint.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for block in &body.blocks {
+                for inst in &block.insts {
+                    let InstKind::FieldAddr {
+                        result,
+                        base,
+                        field,
+                        ..
+                    } = &inst.kind
+                    else {
+                        continue;
+                    };
+                    if aliases.field_of.contains_key(result) {
+                        continue;
+                    }
+                    let base_loc = match aliases.field_of.get(base) {
+                        Some((root, path)) => Some((*root, path.clone())),
+                        None => aliases.root.get(base).map(|&r| (r, Vec::new())),
+                    };
+                    let Some((root, base_path)) = base_loc else {
+                        continue;
+                    };
+                    let base_ty = body.value(*base).ty;
+                    if let Some(n) = container_arity(base_ty) {
+                        aliases.arity.insert((root, base_path.clone()), n);
+                    }
+                    let mut path = base_path;
+                    path.push(*field);
+                    aliases.field_of.insert(*result, (root, path));
+                    changed = true;
                 }
             }
         }
@@ -924,14 +987,195 @@ impl InitState {
     }
 }
 
-#[derive(Debug, Clone)]
-enum AddrKind {
-    Whole(InitState),
-    SubField {
-        #[allow(dead_code)]
-        ty: TyId,
-        fields: FxHashMap<FieldIdx, InitState>,
+/// Init state of one slot, kept per projection path wherever paths differ.
+///
+/// A slot starts as a `Leaf` and splits only when a field path is moved out or
+/// initialized on its own (`p.a` taken, init-body `self.x = …`). A whole
+/// operation on a split slot must agree with every part: reading, taking or
+/// destroying a slot with a moved-out field is a partial-move bug (a double
+/// drop or a read of garbage), not a no-op. Before this tree, a whole
+/// `StoreInit` collapsed the slot to whole-tracking and every later field
+/// operation on it was silently ignored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SlotState {
+    /// The whole (sub-)place is uniformly in this state.
+    Leaf(InitState),
+    /// Split by field. With `complete`, `fields` lists every field of the
+    /// container (its arity was known) and `rest` is unused; otherwise the
+    /// unlisted fields are in `rest`.
+    Split {
+        rest: InitState,
+        complete: bool,
+        fields: FxHashMap<FieldIdx, SlotState>,
     },
+}
+
+/// What a whole read/take/store of a (sub-)place sees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SlotSummary {
+    Uniform(InitState),
+    /// Some parts init, some uninit: a partially moved place.
+    Partial,
+}
+
+impl SlotState {
+    fn summary(&self) -> SlotSummary {
+        let (rest, complete, fields) = match self {
+            SlotState::Leaf(s) => return SlotSummary::Uniform(*s),
+            SlotState::Split {
+                rest,
+                complete,
+                fields,
+            } => (*rest, *complete, fields),
+        };
+        let (mut init, mut uninit, mut maybe) = (false, false, false);
+        let mut note = |st: InitState| match st {
+            InitState::Init => init = true,
+            InitState::Uninit => uninit = true,
+            InitState::MaybeInit => maybe = true,
+        };
+        if !complete {
+            note(rest);
+        }
+        for child in fields.values() {
+            match child.summary() {
+                SlotSummary::Partial => return SlotSummary::Partial,
+                SlotSummary::Uniform(st) => note(st),
+            }
+        }
+        match (init, uninit, maybe) {
+            (true, true, _) => SlotSummary::Partial,
+            (_, _, true) => SlotSummary::Uniform(InitState::MaybeInit),
+            (true, false, false) => SlotSummary::Uniform(InitState::Init),
+            _ => SlotSummary::Uniform(InitState::Uninit),
+        }
+    }
+
+    /// The state of the sub-place at `path`.
+    fn at(&self, path: &[FieldIdx]) -> SlotState {
+        let Some((first, rest_path)) = path.split_first() else {
+            return self.clone();
+        };
+        match self {
+            SlotState::Leaf(s) => SlotState::Leaf(*s),
+            SlotState::Split { rest, fields, .. } => match fields.get(first) {
+                Some(child) => child.at(rest_path),
+                None => SlotState::Leaf(*rest),
+            },
+        }
+    }
+
+    /// Set the whole sub-place at `path` to `st`. `arity(prefix)` is the field
+    /// count of the container at `prefix` (relative to this node's place),
+    /// used to enumerate siblings when a leaf splits.
+    fn set(
+        &mut self,
+        path: &[FieldIdx],
+        st: InitState,
+        arity: &dyn Fn(&[FieldIdx]) -> Option<usize>,
+    ) {
+        self.set_at(&[], path, st, arity);
+    }
+
+    fn set_at(
+        &mut self,
+        here: &[FieldIdx],
+        path: &[FieldIdx],
+        st: InitState,
+        arity: &dyn Fn(&[FieldIdx]) -> Option<usize>,
+    ) {
+        let Some((first, rest_path)) = path.split_first() else {
+            *self = SlotState::Leaf(st);
+            return;
+        };
+        if let SlotState::Leaf(s) = *self {
+            let n = arity(here);
+            let fields = (0..n.unwrap_or(0))
+                .map(|i| (FieldIdx::new(i), SlotState::Leaf(s)))
+                .collect();
+            *self = SlotState::Split {
+                rest: s,
+                complete: n.is_some(),
+                fields,
+            };
+        }
+        let SlotState::Split { rest, fields, .. } = self else {
+            unreachable!("just split")
+        };
+        let default = SlotState::Leaf(*rest);
+        let mut child_here = here.to_vec();
+        child_here.push(*first);
+        fields
+            .entry(*first)
+            .or_insert(default)
+            .set_at(&child_here, rest_path, st, arity);
+        self.normalize();
+    }
+
+    /// Fold a split whose parts all agree back into a leaf.
+    fn normalize(&mut self) {
+        let SlotState::Split {
+            rest,
+            complete,
+            fields,
+        } = self
+        else {
+            return;
+        };
+        if *complete {
+            let mut leaves = fields.values().map(|c| match c {
+                SlotState::Leaf(st) => Some(*st),
+                SlotState::Split { .. } => None,
+            });
+            if let Some(Some(first)) = leaves.next()
+                && leaves.all(|l| l == Some(first))
+            {
+                *self = SlotState::Leaf(first);
+            }
+            return;
+        }
+        let r = *rest;
+        fields.retain(|_, child| *child != SlotState::Leaf(r));
+        if fields.is_empty() {
+            *self = SlotState::Leaf(r);
+        }
+    }
+
+    fn join(&self, other: &SlotState) -> SlotState {
+        if let (SlotState::Leaf(a), SlotState::Leaf(b)) = (self, other) {
+            return SlotState::Leaf(a.join(*b));
+        }
+        let parts = |s: &SlotState| match s {
+            SlotState::Leaf(st) => (*st, false, FxHashMap::default()),
+            SlotState::Split {
+                rest,
+                complete,
+                fields,
+            } => (*rest, *complete, fields.clone()),
+        };
+        let (ra, ca, fa) = parts(self);
+        let (rb, cb, fb) = parts(other);
+        // A complete side's `rest` is meaningless; take the other side's.
+        let rest = match (ca, cb) {
+            (true, true) => ra,
+            (true, false) => rb,
+            (false, true) => ra,
+            (false, false) => ra.join(rb),
+        };
+        let mut fields = FxHashMap::default();
+        for k in fa.keys().chain(fb.keys()) {
+            let a = fa.get(k).cloned().unwrap_or(SlotState::Leaf(ra));
+            let b = fb.get(k).cloned().unwrap_or(SlotState::Leaf(rb));
+            fields.insert(*k, a.join(&b));
+        }
+        let mut merged = SlotState::Split {
+            rest,
+            complete: ca || cb,
+            fields,
+        };
+        merged.normalize();
+        merged
+    }
 }
 
 /// The part of the verifier's state that is a property of a *program point*
@@ -946,8 +1190,8 @@ enum AddrKind {
 struct FlowState {
     /// Tracks @owned values: Live or Consumed.
     owned: FxHashMap<ValueId, ValueState>,
-    /// Address init states.
-    addrs: FxHashMap<ValueId, AddrKind>,
+    /// Address init states, keyed by slot root.
+    addrs: FxHashMap<ValueId, SlotState>,
 }
 
 impl FlowState {
@@ -981,7 +1225,8 @@ impl FlowState {
         for (&a, incoming) in &other.addrs {
             match self.addrs.get(&a) {
                 Some(existing) => {
-                    if let Some(merged) = existing.join(incoming) {
+                    let merged = existing.join(incoming);
+                    if merged != *existing {
                         self.addrs.insert(a, merged);
                         changed = true;
                     }
@@ -994,52 +1239,6 @@ impl FlowState {
         }
 
         changed
-    }
-}
-
-impl AddrKind {
-    /// Merge two address states, returning `Some(merged)` only when the result
-    /// differs from `self` (so the caller can track fixpoint progress).
-    ///
-    /// A `Whole` meeting a `SubField` collapses to `Whole`: the paths disagree
-    /// about whether the slot is field-tracked at all, and whole-tracking is
-    /// the conservative reading (any `Maybe` field makes the whole `Maybe`).
-    fn join(&self, other: &AddrKind) -> Option<AddrKind> {
-        let merged = match (self, other) {
-            (AddrKind::Whole(a), AddrKind::Whole(b)) => AddrKind::Whole(a.join(*b)),
-            (
-                AddrKind::SubField { ty, fields: fa },
-                AddrKind::SubField { fields: fb, .. },
-            ) => {
-                let mut fields = fa.clone();
-                for (&idx, &b) in fb {
-                    let merged = match fa.get(&idx) {
-                        Some(&a) => a.join(b),
-                        None => b,
-                    };
-                    fields.insert(idx, merged);
-                }
-                AddrKind::SubField { ty: *ty, fields }
-            },
-            // Mixed tracking granularity — collapse to whole.
-            (AddrKind::Whole(a), AddrKind::SubField { fields, .. })
-            | (AddrKind::SubField { fields, .. }, AddrKind::Whole(a)) => {
-                let collapsed = fields
-                    .values()
-                    .copied()
-                    .fold(*a, |acc, f| acc.join(f));
-                AddrKind::Whole(collapsed)
-            },
-        };
-        if merged.same_as(self) { None } else { Some(merged) }
-    }
-
-    fn same_as(&self, other: &AddrKind) -> bool {
-        match (self, other) {
-            (AddrKind::Whole(a), AddrKind::Whole(b)) => a == b,
-            (AddrKind::SubField { fields: a, .. }, AddrKind::SubField { fields: b, .. }) => a == b,
-            _ => false,
-        }
     }
 }
 
@@ -1288,7 +1487,16 @@ impl<'a> FlowVerifier<'a> {
         if blocking.is_empty() {
             return;
         }
-        if let Some(ref_val) = self.live_ref_rooted_at(addr) {
+        // A named reference binding (`let r = &a`) is a plain borrow, not a
+        // call result; it is user-attributable too.
+        let named = || {
+            self.borrows
+                .keys()
+                .copied()
+                .filter(|b| self.body.value_names.contains_key(b))
+                .find(|&b| self.borrow_chain_reaches(b, addr))
+        };
+        if let Some(ref_val) = self.live_ref_rooted_at(addr).or_else(named) {
             self.err_consume_while_ref_live(addr, inst, ref_val);
         } else {
             self.err_val(
@@ -1329,8 +1537,8 @@ impl<'a> FlowVerifier<'a> {
     /// The storage (`Uninit` root) an address names, seeing through field
     /// projections, so `&c.name` and `c` share one storage.
     fn storage_of(&self, v: ValueId) -> Option<ValueId> {
-        if let Some(&(root, _)) = self.aliases.field_of.get(&v) {
-            return Some(root);
+        if let Some((root, _)) = self.aliases.field_of.get(&v) {
+            return Some(*root);
         }
         self.aliases.resolve(v)
     }
@@ -1353,6 +1561,20 @@ impl<'a> FlowVerifier<'a> {
             }
             None
         })
+    }
+
+    /// Whether borrow `b`'s source chain reaches `v` (bounded like
+    /// `live_ref_rooted_at`).
+    fn borrow_chain_reaches(&self, b: ValueId, v: ValueId) -> bool {
+        let mut cur = b;
+        for _ in 0..=self.borrows.len() {
+            match self.borrows.get(&cur) {
+                Some(info) if info.source == v => return true,
+                Some(info) => cur = info.source,
+                None => return false,
+            }
+        }
+        false
     }
 
     /// E498: user-attributable consume-while-borrowed — the value is consumed
@@ -1430,160 +1652,120 @@ impl<'a> FlowVerifier<'a> {
 
     // -- Address helpers --
 
-    fn addr_require_init(&mut self, addr: ValueId, inst: Option<u32>) {
-        // If this is a field addr, check the specific field.
-        if let Some(&(base, field)) = self.aliases.field_of.get(&addr) {
-            if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get(&base)
-                && let Some(InitState::Uninit) = fields.get(&field)
-            {
-                self.err(
-                    inst,
-                    format!("field {:?} of address {:?} is uninit", field, base),
-                );
-            }
-            return;
+    /// The slot root and projection path `addr` names, or `None` when it is
+    /// untracked (a param, a poisoned join, a projection of either).
+    fn locate_addr(&self, addr: ValueId) -> Option<(ValueId, Vec<FieldIdx>)> {
+        if let Some((root, path)) = self.aliases.field_of.get(&addr) {
+            return Some((*root, path.clone()));
         }
+        self.aliases.resolve(addr).map(|root| (root, Vec::new()))
+    }
 
-        // Collect error messages first to avoid borrow conflict.
-        let Some(addr) = self.aliases.resolve(addr) else {
-            return;
-        };
-        let mut errs = Vec::new();
-        if let Some(ak) = self.state.addrs.get(&addr) {
-            match ak {
-                AddrKind::Whole(InitState::Uninit) => {
-                    errs.push(format!("address {:?} is uninit", addr));
-                },
-                // MaybeInit: init on some paths only (guarded destroy) — the
-                // drop flag decides at runtime. Permitted.
-                AddrKind::Whole(InitState::MaybeInit) => {},
-                AddrKind::SubField { fields, .. } => {
-                    for (f, st) in fields {
-                        if *st == InitState::Uninit {
-                            errs.push(format!(
-                                "field {:?} of sub-field-tracked address {:?} is uninit",
-                                f, addr,
-                            ));
-                        }
-                    }
-                },
-                AddrKind::Whole(InitState::Init) => {},
-            }
-        }
-        for msg in errs {
-            self.flow_err(addr, inst, msg);
+    /// Report against the slot: a whole-slot error goes through the flow
+    /// mode switch; a field-path error is always hard (as before).
+    fn slot_err(&mut self, root: ValueId, path: &[FieldIdx], inst: Option<u32>, what: &str) {
+        if path.is_empty() {
+            self.flow_err(root, inst, format!("address {root:?} {what}"));
+        } else {
+            let path: Vec<usize> = path.iter().map(|f| f.index()).collect();
+            self.err(
+                inst,
+                format!("field path {path:?} of address {root:?} {what}"),
+            );
         }
     }
 
-    fn addr_set_uninit(&mut self, addr: ValueId, inst: Option<u32>) {
-        // If this is a field addr, set that specific field.
-        if let Some(&(base, field)) = self.aliases.field_of.get(&addr) {
-            let mut err_msg = None;
-            if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get_mut(&base)
-                && let Some(st) = fields.get_mut(&field)
-            {
-                if *st == InitState::Uninit {
-                    err_msg = Some(format!(
-                        "field {:?} of address {:?} already uninit",
-                        field, base,
-                    ));
-                }
-                *st = InitState::Uninit;
-            }
-            if let Some(msg) = err_msg {
-                self.err(inst, msg);
-            }
-            return;
-        }
-
-        let Some(addr) = self.aliases.resolve(addr) else {
+    /// Apply a slot operation: check the current summary at the path with
+    /// `bad` (returning the error text), then optionally set a new state.
+    fn slot_op(
+        &mut self,
+        addr: ValueId,
+        inst: Option<u32>,
+        bad: impl Fn(SlotSummary) -> Option<&'static str>,
+        then: Option<InitState>,
+    ) {
+        let Some((root, path)) = self.locate_addr(addr) else {
             return;
         };
-        let mut err_msg = None;
-        if let Some(ak) = self.state.addrs.get_mut(&addr) {
-            match ak {
-                AddrKind::Whole(st) => {
-                    // MaybeInit is the guarded-destroy arm — permitted.
-                    if *st == InitState::Uninit {
-                        err_msg = Some(format!("address {:?} already uninit", addr));
-                    }
-                    *st = InitState::Uninit;
-                },
-                AddrKind::SubField { .. } => {
-                    // Whole uninit of a sub-field tracked addr.
-                    *ak = AddrKind::Whole(InitState::Uninit);
-                },
-            }
-        }
-        if let Some(msg) = err_msg {
-            self.flow_err(addr, inst, msg);
-        }
-    }
-
-    fn addr_store_init(&mut self, addr: ValueId, inst: Option<u32>) {
-        // If this is a field addr, set that specific field.
-        if let Some(&(base, field)) = self.aliases.field_of.get(&addr) {
-            let mut err_msg = None;
-            if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get_mut(&base)
-                && let Some(st) = fields.get_mut(&field)
-            {
-                if *st == InitState::Init {
-                    err_msg = Some(format!(
-                        "store_init on field {:?} of address {:?} but field already init",
-                        field, base,
-                    ));
-                }
-                *st = InitState::Init;
-            }
-            if let Some(msg) = err_msg {
-                self.err(inst, msg);
-            }
-            return;
-        }
-
-        let Some(addr) = self.aliases.resolve(addr) else {
+        let Some(slot) = self.state.addrs.get(&root) else {
             return;
         };
-        let mut err_msg = None;
-        if let Some(ak) = self.state.addrs.get_mut(&addr) {
-            match ak {
-                AddrKind::Whole(st) => {
-                    // MaybeInit: re-initialising a conditionally-moved slot,
-                    // which is the in-loop reinit shape. Permitted.
-                    if *st == InitState::Init {
-                        err_msg =
-                            Some(format!("store_init on address {:?} but already init", addr,));
-                    }
-                    *st = InitState::Init;
-                },
-                AddrKind::SubField { .. } => {
-                    // Whole store on sub-field tracked address (e.g. var local
-                    // initialized with a complete struct value) — all fields init.
-                    *ak = AddrKind::Whole(InitState::Init);
-                },
-            }
+        let summary = slot.at(&path).summary();
+        if let Some(what) = bad(summary) {
+            self.slot_err(root, &path, inst, what);
         }
-        if let Some(msg) = err_msg {
-            self.flow_err(addr, inst, msg);
-        }
-    }
-
-    fn addr_store_assign(&mut self, addr: ValueId, inst: Option<u32>) {
-        let Some(addr) = self.aliases.resolve(addr) else {
-            return;
-        };
-        let mut err_msg = None;
-        if let Some(ak) = self.state.addrs.get(&addr)
-            && let AddrKind::Whole(InitState::Uninit) = ak
+        if let Some(st) = then
+            && let Some(slot) = self.state.addrs.get_mut(&root)
         {
-            err_msg = Some(format!(
-                "store_assign on address {:?} but it is uninit",
-                addr,
-            ));
+            let arity =
+                |prefix: &[FieldIdx]| self.aliases.arity.get(&(root, prefix.to_vec())).copied();
+            slot.set(&path, st, &arity);
         }
-        if let Some(msg) = err_msg {
-            self.flow_err(addr, inst, msg);
-        }
+    }
+
+    /// Read, borrow, or take-without-uninit: every part must be init.
+    /// MaybeInit (a drop-flag-guarded arm) is permitted.
+    fn addr_require_init(&mut self, addr: ValueId, inst: Option<u32>) {
+        self.slot_op(
+            addr,
+            inst,
+            |s| match s {
+                SlotSummary::Uniform(InitState::Uninit) => Some("is uninit"),
+                SlotSummary::Partial => Some("is partially moved (a field is uninit)"),
+                _ => None,
+            },
+            None,
+        );
+    }
+
+    /// Take or destroy: the place must be wholly init; it becomes uninit.
+    fn addr_set_uninit(&mut self, addr: ValueId, inst: Option<u32>) {
+        self.slot_op(
+            addr,
+            inst,
+            |s| match s {
+                SlotSummary::Uniform(InitState::Uninit) => Some("already uninit"),
+                SlotSummary::Partial => {
+                    Some("is partially moved; take/destroy would double-drop the moved field")
+                },
+                _ => None,
+            },
+            Some(InitState::Uninit),
+        );
+    }
+
+    /// StoreInit: the place must be wholly uninit; it becomes init.
+    fn addr_store_init(&mut self, addr: ValueId, inst: Option<u32>) {
+        self.slot_op(
+            addr,
+            inst,
+            |s| match s {
+                SlotSummary::Uniform(InitState::Init) => Some("store_init but already init"),
+                SlotSummary::Partial => {
+                    Some("store_init over a partially moved place would leak its other fields")
+                },
+                _ => None,
+            },
+            Some(InitState::Init),
+        );
+    }
+
+    /// StoreAssign drops the old value, so the place must be wholly init.
+    fn addr_store_assign(&mut self, addr: ValueId, inst: Option<u32>) {
+        self.slot_op(
+            addr,
+            inst,
+            |s| match s {
+                SlotSummary::Uniform(InitState::Uninit) => {
+                    Some("store_assign but it is uninit (would drop garbage)")
+                },
+                SlotSummary::Partial => {
+                    Some("store_assign over a partially moved place would drop a moved field")
+                },
+                _ => None,
+            },
+            None,
+        );
     }
 
     // -- Main verification --
@@ -1647,7 +1829,10 @@ impl<'a> FlowVerifier<'a> {
                 from,
                 to,
             } => {
-                if matches!((from, to), (crate::FnKind::Escaping, crate::FnKind::Consuming)) {
+                if matches!(
+                    (from, to),
+                    (crate::FnKind::Escaping, crate::FnKind::Consuming)
+                ) {
                     self.try_consume(*operand, idx);
                 } else {
                     self.assert_readable(*operand, idx);
@@ -1951,7 +2136,8 @@ impl<'a> FlowVerifier<'a> {
                 }
                 if let Some(r) = result {
                     let ty = self.body.value(*r).ty;
-                    let is_never = matches!(self._module.ty_arena().get(ty), crate::ty::MirTy::Never);
+                    let is_never =
+                        matches!(self._module.ty_arena().get(ty), crate::ty::MirTy::Never);
                     if self.body.value(*r).ownership == Ownership::Owned && !is_never {
                         self.define_owned(*r);
                     }
@@ -1990,23 +2176,14 @@ impl<'a> FlowVerifier<'a> {
                 let _ = (base, field); // projections come from `AddrAliases`
             },
 
-            // -- Uninit: creates sub-field tracking --
+            // -- Uninit: a fresh slot, wholly uninit --
             InstKind::Uninit { result, ty } => {
                 self.define_owned(*result);
-                // Look up how many fields this type has.
-                let field_count = self.struct_field_count(*ty);
-                if let Some(count) = field_count {
-                    let mut fields = FxHashMap::default();
-                    for i in 0..count {
-                        fields.insert(FieldIdx::new(i), InitState::Uninit);
-                    }
-                    self.state.addrs
-                        .insert(*result, AddrKind::SubField { ty: *ty, fields });
-                } else {
-                    // Non-struct type: whole tracking, starts uninit.
-                    self.state.addrs
-                        .insert(*result, AddrKind::Whole(InitState::Uninit));
-                }
+                let _ = ty;
+                // Starts wholly uninit; field operations split it on demand.
+                self.state
+                    .addrs
+                    .insert(*result, SlotState::Leaf(InitState::Uninit));
             },
         }
     }
@@ -2052,7 +2229,11 @@ impl<'a> FlowVerifier<'a> {
         for (i, n) in seen.iter().enumerate() {
             if *n != 1 {
                 let span = self.inst_span(idx);
-                let what = if *n == 0 { "never written" } else { "written twice or more" };
+                let what = if *n == 0 {
+                    "never written"
+                } else {
+                    "written twice or more"
+                };
                 self.push_err(
                     idx,
                     span,
@@ -2193,9 +2374,7 @@ impl<'a> FlowVerifier<'a> {
             .state
             .owned
             .iter()
-            .filter(|(v, state)| {
-                **state == ValueState::Live && self.defined_here.contains(v)
-            })
+            .filter(|(v, state)| **state == ValueState::Live && self.defined_here.contains(v))
             .map(|(&v, _)| v)
             .collect();
         for v in unconsumed {
@@ -2325,8 +2504,11 @@ pub fn verify_mono_flow(module: &crate::mono::types::MonoModule) -> Vec<VerifyEr
         .collect();
     // Deterministic order — `seen` is a hash map, and this feeds diagnostics.
     out.sort_by(|a, b| {
-        (a.func_name.as_str(), a.block.index(), a.inst)
-            .cmp(&(b.func_name.as_str(), b.block.index(), b.inst))
+        (a.func_name.as_str(), a.block.index(), a.inst).cmp(&(
+            b.func_name.as_str(),
+            b.block.index(),
+            b.inst,
+        ))
     });
 
     if !out.is_empty() {
@@ -2336,7 +2518,10 @@ pub fn verify_mono_flow(module: &crate::mono::types::MonoModule) -> Vec<VerifyEr
             out.len(),
         );
         for e in &out {
-            eprintln!("  {}: {:?}[{:?}]: {}", e.func_name, e.block, e.inst, e.message);
+            eprintln!(
+                "  {}: {:?}[{:?}]: {}",
+                e.func_name, e.block, e.inst, e.message
+            );
         }
     }
     out
@@ -2388,8 +2573,57 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
             let r = roots.get(&v).copied().unwrap_or(body.value(v).root);
             (r != RootProvenance::Local(v) && !r.is_derived_placeholder()).then_some(r)
         };
+        // Join `src`'s effective root into `dst`; true if `dst` changed.
+        let flow = |roots: &mut FxHashMap<ValueId, RootProvenance>, src: ValueId, dst: ValueId| {
+            let r = roots.get(&src).copied().unwrap_or(body.value(src).root);
+            if r == RootProvenance::Local(src) || r.is_derived_placeholder() {
+                return false;
+            }
+            // Start from `dst`'s own stamped root when it has one, so the
+            // flowed taint joins it rather than replacing it.
+            let own = body.value(dst).root;
+            let base = roots
+                .get(&dst)
+                .copied()
+                .or(
+                    (own != RootProvenance::Local(dst) && !own.is_derived_placeholder())
+                        .then_some(own),
+                );
+            let next = match base {
+                Some(c) => c.join(r, convs),
+                None => r,
+            };
+            if roots.get(&dst) == Some(&next) {
+                return false;
+            }
+            roots.insert(dst, next);
+            true
+        };
         loop {
             let mut changed = false;
+            // Taint also rides through a slot: a store taints the slot, and
+            // a read of the slot inherits it. Lowering stamps these once, in
+            // order, so a store reaching a read only over a branch join or a
+            // loop back edge (`if c { f = { k } }; return f`) was missed.
+            for block in &body.blocks {
+                for inst in &block.insts {
+                    changed |= match &inst.kind {
+                        InstKind::StoreInit { address, value }
+                        | InstKind::StoreAssign { address, value } => {
+                            flow(&mut roots, *value, *address)
+                        },
+                        InstKind::Take {
+                            result, address, ..
+                        }
+                        | InstKind::Load { result, address } => flow(&mut roots, *address, *result),
+                        InstKind::CopyValue { result, operand }
+                        | InstKind::MoveValue { result, operand } => {
+                            flow(&mut roots, *operand, *result)
+                        },
+                        _ => false,
+                    };
+                }
+            }
             for block in &body.blocks {
                 for (target, args) in block.terminator.kind.successor_args() {
                     for (i, &arg) in args.iter().enumerate() {
@@ -2524,16 +2758,26 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
             };
             match root {
                 RootProvenance::Local(local) => {
-                    let name = body
-                        .value_names
-                        .get(&local)
-                        .map(|n| format!(" `{n}`"))
-                        .unwrap_or_default();
+                    // An unnamed root is a temporary the frame created — most
+                    // often an `if`/`match` result, since arms always yield an
+                    // owned value (arm-value decay). Say so rather than print
+                    // a bare "local" the user can't find in their source.
+                    let (subject, label) = match body.value_names.get(&local) {
+                        Some(n) => (
+                            format!("local `{n}`"),
+                            format!("the borrowed local `{n}` is defined here"),
+                        ),
+                        None => (
+                            "a temporary".to_string(),
+                            "this temporary is created here".to_string(),
+                        ),
+                    };
+                    let is_temp = !body.value_names.contains_key(&local);
                     let secondary = body
                         .values
                         .get(local.index())
                         .and_then(|d| d.span.clone())
-                        .map(|s| (s, format!("the borrowed local{name} is defined here")));
+                        .map(|s| (s, label));
                     // FIX-IT (docs/design/closures.md, Diagnostics table:
                     // E494's "message gains a fix-it suggesting an `escaping`
                     // or `consuming` owning type"). Fix-its are `notes`
@@ -2546,6 +2790,13 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                             .into(),
                         "Pointer-derived references are not verified by the compiler".into(),
                     ];
+                    if is_temp && !is_closure {
+                        notes.push(
+                            "an `if`/`match` arm yields a new value, not a reference to the \
+                             variable it names"
+                                .into(),
+                        );
+                    }
                     if is_closure {
                         notes = vec![
                             "a normal or `mutating` closure holds VIEWS into this frame, so it \
@@ -2560,9 +2811,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                     }
                     push(
                         "E494",
-                        format!(
-                            "cannot return {what} local{name}, which does not outlive the call"
-                        ),
+                        format!("cannot return {what} {subject}, which does not outlive the call"),
                         secondary,
                         notes,
                     );
@@ -2774,7 +3023,9 @@ mod tests {
             &mut errors,
         );
         assert!(
-            errors.iter().any(|e| e.message.contains("does not dominate")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("does not dominate")),
             "a def on one arm of a diamond must not be usable on the other: {:?}",
             errors,
         );
@@ -2892,9 +3143,7 @@ mod tests {
 
         let aliases = AddrAliases::build(&body);
         let mut incoming = FlowState::default();
-        incoming
-            .owned
-            .insert(ValueId::new(0), ValueState::Consumed);
+        incoming.owned.insert(ValueId::new(0), ValueState::Consumed);
 
         let mut v = FlowVerifier::new(
             &body,
@@ -3917,7 +4166,10 @@ mod tests {
         let v0 = b.emit_literal(Immediate::i64(1));
         let v1 = b.emit_literal(Immediate::i64(2));
 
-        let s = b.emit_struct(struct_ty, vec![(FieldIdx::new(0), v0), (FieldIdx::new(1), v1)]);
+        let s = b.emit_struct(
+            struct_ty,
+            vec![(FieldIdx::new(0), v0), (FieldIdx::new(1), v1)],
+        );
         b.emit_destroy_value(s);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -3940,7 +4192,10 @@ mod tests {
         let v1 = b.emit_literal(Immediate::i64(2));
 
         // Both arguments land in slot 0 — field 1 is left uninitialized.
-        let s = b.emit_struct(struct_ty, vec![(FieldIdx::new(0), v0), (FieldIdx::new(0), v1)]);
+        let s = b.emit_struct(
+            struct_ty,
+            vec![(FieldIdx::new(0), v0), (FieldIdx::new(0), v1)],
+        );
         b.emit_destroy_value(s);
         let unit = b.emit_literal(Immediate::unit());
         b.emit_return(unit);
@@ -3975,9 +4230,7 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors
-                .iter()
-                .any(|e| e.message.contains("only 2 field(s)")),
+            errors.iter().any(|e| e.message.contains("only 2 field(s)")),
             "expected an out-of-range error, got: {:?}",
             errors
         );
@@ -4141,6 +4394,133 @@ mod tests {
             errors.iter().any(|e| e.message.contains("already init")),
             "expected double store_init error, got: {:?}",
             errors,
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Partial moves: a slot initialized whole, then a field taken
+    // -----------------------------------------------------------------------
+
+    /// `var p = S(..)` (whole store) then a field take: the slot is now
+    /// partially moved. Destroying it whole would drop the moved field again.
+    #[test]
+    fn error_whole_destroy_after_field_take() {
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 2);
+        let i64_ty = b.i64();
+        let addr = b.emit_uninit(struct_ty);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+        let whole = b.emit_struct(
+            struct_ty,
+            vec![(FieldIdx::new(0), v0), (FieldIdx::new(1), v1)],
+        );
+        b.emit_store_init(addr, whole);
+        let f0 = b.emit_field_addr(addr, struct_ty, FieldIdx::new(0));
+        let moved = b.emit_take(f0, i64_ty);
+        b.emit_destroy_value(moved);
+        b.emit_destroy_addr(addr, struct_ty);
+        b.emit_destroy_value(f0);
+        b.emit_destroy_value(addr);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(
+            errors.iter().any(|e| e.message.contains("partially moved")),
+            "expected a partial-move error, got: {:?}",
+            errors
+        );
+    }
+
+    /// The correct shape: after taking field 0, drop only field 1.
+    #[test]
+    fn valid_field_take_then_drop_remaining_field() {
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 2);
+        let i64_ty = b.i64();
+        let addr = b.emit_uninit(struct_ty);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+        let whole = b.emit_struct(
+            struct_ty,
+            vec![(FieldIdx::new(0), v0), (FieldIdx::new(1), v1)],
+        );
+        b.emit_store_init(addr, whole);
+        let f0 = b.emit_field_addr(addr, struct_ty, FieldIdx::new(0));
+        let moved = b.emit_take(f0, i64_ty);
+        b.emit_destroy_value(moved);
+        let f1 = b.emit_field_addr(addr, struct_ty, FieldIdx::new(1));
+        b.emit_destroy_addr(f1, i64_ty);
+        b.emit_destroy_value(f0);
+        b.emit_destroy_value(f1);
+        b.emit_destroy_value(addr);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    /// A moved field reinitialized with `StoreInit` makes the slot whole again.
+    #[test]
+    fn valid_field_take_reinit_then_whole_destroy() {
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 2);
+        let i64_ty = b.i64();
+        let addr = b.emit_uninit(struct_ty);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+        let whole = b.emit_struct(
+            struct_ty,
+            vec![(FieldIdx::new(0), v0), (FieldIdx::new(1), v1)],
+        );
+        b.emit_store_init(addr, whole);
+        let f0 = b.emit_field_addr(addr, struct_ty, FieldIdx::new(0));
+        let moved = b.emit_take(f0, i64_ty);
+        b.emit_destroy_value(moved);
+        let v2 = b.emit_literal(Immediate::i64(3));
+        b.emit_store_init(f0, v2);
+        b.emit_destroy_addr(addr, struct_ty);
+        b.emit_destroy_value(f0);
+        b.emit_destroy_value(addr);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    /// Assigning (drop old + store) into a moved-out field drops garbage.
+    #[test]
+    fn error_store_assign_into_moved_field() {
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 2);
+        let i64_ty = b.i64();
+        let addr = b.emit_uninit(struct_ty);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+        let whole = b.emit_struct(
+            struct_ty,
+            vec![(FieldIdx::new(0), v0), (FieldIdx::new(1), v1)],
+        );
+        b.emit_store_init(addr, whole);
+        let f0 = b.emit_field_addr(addr, struct_ty, FieldIdx::new(0));
+        let moved = b.emit_take(f0, i64_ty);
+        b.emit_destroy_value(moved);
+        let v2 = b.emit_literal(Immediate::i64(3));
+        b.emit_store_assign(f0, v2);
+        b.emit_destroy_addr(addr, struct_ty);
+        b.emit_destroy_value(f0);
+        b.emit_destroy_value(addr);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(
+            errors.iter().any(|e| e.message.contains("store_assign")),
+            "expected a store_assign-into-uninit error, got: {:?}",
+            errors
         );
     }
 

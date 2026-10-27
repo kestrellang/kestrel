@@ -86,7 +86,7 @@ Beyond the original scope, this cycle also landed:
 
 - **References (`&T`)** — borrowed views of a value with compile-time *escape checking* (provenance-based; no lifetime annotations, and none planned). Includes reference conformances (`extend &T: P`), `Optional[&T]` comparison, and reference-yielding iteration. Shipped 2026-06-18.
 - **Explicit entry points** — `@main` replaces name-based `main`; entry functions may return `ExitCode`, integer types, `()`, `!`, or a throwing `Result` via the `Exitable` protocol.
-- **A second backend** — LLVM 18 codegen, selectable with `kestrel build --backend llvm` (Cranelift remains the default).
+- **A second backend** — LLVM 18 codegen, used for optimized builds (`-O1`, `-O2`); Cranelift builds `-O0`.
 - **Optimized builds & tool installs** — `kestrel build -O 0|1|2`, and `flock install`, which builds optimized binaries into `~/.flock/bin` by default.
 
 ## 0.17 — Boxing & existentials
@@ -141,7 +141,7 @@ The rest of the preview is shaped by real-world usage: language features informe
 
 # Release Candidate
 
-WebAssembly target, `const` compile-time evaluation, `unsafe` blocks and escape hatches, and standard-library stabilization. The LLVM backend itself already exists (shipped alongside 0.16, selectable via `--backend llvm`); what remains here is hardening it to full parity with Cranelift and deciding whether it becomes the default for optimized builds.
+WebAssembly target, `const` compile-time evaluation, `unsafe` blocks and escape hatches, and standard-library stabilization. The LLVM backend itself already exists (shipped alongside 0.16) and builds every optimized (`-O1`/`-O2`) program; what remains here is hardening it to full parity with Cranelift.
 
 ---
 

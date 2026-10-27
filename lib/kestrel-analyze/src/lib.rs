@@ -51,6 +51,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::initializer::InitializerAnalyzer);
     r.add_body_check(body::closure::ClosureAnalyzer);
     r.add_body_check(body::access_mode::AccessModeAnalyzer);
+    r.add_body_check(body::exclusive_args::ExclusiveArgsAnalyzer);
     // TODO(move-checker): retire in favor of a MIR/OSSA-level move check.
     r.add_body_check(body::move_tracking::MoveTrackingAnalyzer);
     r.add_body_check(body::dangle_ref::DangleRefAnalyzer);
@@ -90,6 +91,8 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::field_method_collision::FieldMethodCollisionAnalyzer);
     r.add_decl_check(decl::extension_conflict::ExtensionConflictAnalyzer);
     r.add_decl_check(decl::extension_validation::ExtensionValidationAnalyzer);
+    r.add_decl_check(decl::conformance_target::ConformanceTargetAnalyzer);
+    r.add_decl_check(decl::import_target::ImportTargetAnalyzer);
     r.add_decl_check(decl::recursive_enum::RecursiveEnumAnalyzer);
     r.add_decl_check(decl::indirect_enum::IndirectEnumAnalyzer);
     r.add_decl_check(decl::parent_protocol_conformance::ParentProtocolConformanceAnalyzer);
@@ -101,6 +104,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
 
     // Compilation checks
     r.add_compilation_check(compilation::type_alias_cycles::TypeAliasCycleAnalyzer);
+    r.add_compilation_check(compilation::global_init_cycles::GlobalInitCycleAnalyzer);
     r.add_compilation_check(compilation::struct_cycles::StructCycleAnalyzer);
     r.add_compilation_check(compilation::protocol_cycles::ProtocolCycleAnalyzer);
     r.add_compilation_check(compilation::constraint_cycles::ConstraintCycleAnalyzer);

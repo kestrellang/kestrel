@@ -1001,6 +1001,175 @@ static TABLE: &[IntrinsicEntry] = &[
         op: Op::FloatWiden(FloatBits::F32, FloatBits::F64),
         arity: 1,
     },
+    // Casts between every integer width/signedness pair and between signed
+    // integers and floats (the seeder's `cast_<from>_<to>` cross product;
+    // `seed_cast_ops` skips the pairs no `Op` can express). The SOURCE's
+    // signedness picks sign- vs zero-extension, as in the rows above.
+    IntrinsicEntry {
+        name: "cast_f32_i16",
+        op: Op::FloatToInt(FloatBits::F32, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f32_i8",
+        op: Op::FloatToInt(FloatBits::F32, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f64_i16",
+        op: Op::FloatToInt(FloatBits::F64, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f64_i32",
+        op: Op::FloatToInt(FloatBits::F64, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f64_i8",
+        op: Op::FloatToInt(FloatBits::F64, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_f32",
+        op: Op::IntToFloat(IntBits::I16, FloatBits::F32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_f64",
+        op: Op::IntToFloat(IntBits::I16, FloatBits::F64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_u32",
+        op: Op::IntWiden(IntBits::I16, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_u64",
+        op: Op::IntWiden(IntBits::I16, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_u8",
+        op: Op::IntTruncate(IntBits::I16, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i32_u16",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i32_u64",
+        op: Op::IntWiden(IntBits::I32, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i32_u8",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i64_u16",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i64_u32",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i64_u8",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_f32",
+        op: Op::IntToFloat(IntBits::I8, FloatBits::F32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_f64",
+        op: Op::IntToFloat(IntBits::I8, FloatBits::F64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_u16",
+        op: Op::IntWiden(IntBits::I8, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_u32",
+        op: Op::IntWiden(IntBits::I8, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_u64",
+        op: Op::IntWiden(IntBits::I8, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u16_u32",
+        op: Op::IntUnsignedWiden(IntBits::I16, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u16_u64",
+        op: Op::IntUnsignedWiden(IntBits::I16, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u16_u8",
+        op: Op::IntTruncate(IntBits::I16, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u32_u16",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u32_u64",
+        op: Op::IntUnsignedWiden(IntBits::I32, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u32_u8",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u64_u16",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u64_u32",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u64_u8",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u8_u16",
+        op: Op::IntUnsignedWiden(IntBits::I8, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u8_u32",
+        op: Op::IntUnsignedWiden(IntBits::I8, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u8_u64",
+        op: Op::IntUnsignedWiden(IntBits::I8, IntBits::I64),
+        arity: 1,
+    },
     IntrinsicEntry {
         name: "cast_f64_f32",
         op: Op::FloatTruncate(FloatBits::F64, FloatBits::F32),

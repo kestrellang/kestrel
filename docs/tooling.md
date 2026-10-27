@@ -68,27 +68,25 @@ written and the exit code is nonzero.
 | Flag | Meaning |
 |---|---|
 | `-o`, `--output <OUTPUT>` | Output executable path. Defaults to the basename of the first input file (`.exe` appended on Windows). |
-| `-O`, `--opt-level <LEVEL>` | Optimization level: `0` = none (default), `1` = speed, `2` = speed + size. |
-| `--backend <BACKEND>` | Code generation backend: `cranelift` (default) or `llvm`. The LLVM backend requires LLVM 18 installed. |
+| `-O`, `--opt-level <LEVEL>` | Optimization level: `0` = none (default), `1` = speed, `2` = speed + size. The level also picks the backend: `-O0` builds with Cranelift (fast compiles), `-O1`/`-O2` with LLVM 18 (optimized code). |
 | `-l`, `--link <LIBRARY>` | Link with a library (repeatable; use `:libname.a` for static). |
 | `-L`, `--library-path <PATH>` | Add a library search path (repeatable). |
 | `--framework <NAME>` | Link a macOS framework (repeatable). |
 
 #### Environment variable overrides
 
-Two environment variables override build flags. They exist so tools that
+Two environment variables override build settings. They exist so tools that
 shell out to `kestrel build` (e.g. `flock`) can select behavior without
 passing flags:
 
 | Variable | Overrides | Values |
 |---|---|---|
-| `KESTREL_BACKEND` | `--backend` | `cranelift` or `llvm` |
 | `KESTREL_OPT` | `-O` / `--opt-level` | `0`, `1`, or `2` |
 | `KESTREL_STD` | default stdlib lookup (but not `--std`) | path to a stdlib directory |
 
 ```sh
-# Build with LLVM at -O2 regardless of flags:
-KESTREL_BACKEND=llvm KESTREL_OPT=2 kestrel build main.ks -o app
+# Optimized (LLVM) build regardless of flags:
+KESTREL_OPT=2 kestrel build main.ks -o app
 ```
 
 ### `kestrel dump` — inspecting compiler stages
@@ -134,6 +132,7 @@ kestrel dump mir main.ks                 # MIR after verify (default)
 kestrel dump mir -s mono main.ks         # after monomorphization
 kestrel dump mir -s all -f myFunc main.ks  # every stage, one function
 kestrel dump cranelift main.ks           # backend IR
+kestrel dump llvm main.ks               # optimized LLVM IR (-O0/-O1/-O2, default -O2)
 kestrel dump diagnostics main.ks         # errors/warnings only
 ```
 

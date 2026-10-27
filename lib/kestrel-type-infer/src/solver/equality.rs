@@ -166,6 +166,7 @@ pub(super) fn try_literal_mismatch(
         Some(protocol) => InferError::DoesNotConform {
             ty: ty_side,
             protocol,
+            protocol_args: Vec::new(),
             span,
         },
         None => InferError::LiteralNotAccepted {

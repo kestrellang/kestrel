@@ -157,6 +157,141 @@ impl QueryFn for ProtocolRefines {
     }
 }
 
+/// Copy semantics of an abstract protocol `Self` (the receiver inside
+/// `extend P { ... }` or a protocol requirement). Unlike a generic param,
+/// `Self` is not Copyable by default: move-only types may conform to `P`, so
+/// `Self` is only as copyable as `P`'s refinements guarantee. Single source
+/// of truth for the semantics, solver and type-infer classifiers.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ProtocolSelfCopySemantics {
+    pub protocol: Entity,
+    /// Use site (function / extension); its where clauses may bound `Self`.
+    pub context: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for ProtocolSelfCopySemantics {
+    type Output = CopySemantics;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> CopySemantics {
+        let refines = |builtin| {
+            ctx.query(ResolveBuiltin {
+                builtin,
+                root: self.root,
+            })
+            .is_some_and(|base| {
+                ctx.query(ProtocolRefines {
+                    protocol: self.protocol,
+                    base,
+                    root: self.root,
+                })
+            })
+        };
+        // Cloneable refines Copyable, so test it first.
+        if refines(Builtin::Cloneable) {
+            return CopySemantics::Cloneable;
+        }
+        if refines(Builtin::Copyable) {
+            return CopySemantics::Copyable;
+        }
+        self_where_bound_semantics(ctx, self.context, self.root)
+    }
+
+    fn describe(&self) -> String {
+        format!("ProtocolSelfCopySemantics({:?})", self.protocol)
+    }
+}
+
+/// The strongest copy class a `where Self: P` clause on `context` or any
+/// ancestor grants (`P` refining Cloneable / Copyable); NotCopyable if none.
+fn self_where_bound_semantics(
+    ctx: &QueryContext<'_>,
+    context: Entity,
+    root: Entity,
+) -> CopySemantics {
+    let builtin = |b| ctx.query(ResolveBuiltin { builtin: b, root });
+    let (copyable, cloneable) = (builtin(Builtin::Copyable), builtin(Builtin::Cloneable));
+    let grants = |proto: Entity, base: Option<Entity>| {
+        base.is_some_and(|base| {
+            ctx.query(ProtocolRefines {
+                protocol: proto,
+                base,
+                root,
+            })
+        })
+    };
+    let mut best = CopySemantics::NotCopyable;
+    let mut current = Some(context);
+    while let Some(scope) = current {
+        current = ctx.parent_of(scope);
+        let Some(wc) = ctx.get::<AstWhereClause>(scope) else {
+            continue;
+        };
+        for constraint in &wc.0 {
+            let WhereConstraint::Bound {
+                subject, protocols, ..
+            } = constraint
+            else {
+                continue;
+            };
+            if !is_self_subject(ctx, subject, scope, root) {
+                continue;
+            }
+            for proto in protocols {
+                let Some(proto) = resolve_type_entity(ctx, proto, scope, root) else {
+                    continue;
+                };
+                if grants(proto, cloneable) {
+                    return CopySemantics::Cloneable;
+                }
+                if grants(proto, copyable) {
+                    best = CopySemantics::Copyable;
+                }
+            }
+        }
+    }
+    best
+}
+
+/// Whether a where-clause subject names `Self`.
+fn is_self_subject(
+    ctx: &QueryContext<'_>,
+    ast_ty: &AstType,
+    context: Entity,
+    root: Entity,
+) -> bool {
+    let AstType::Named { segments, .. } = ast_ty else {
+        return false;
+    };
+    matches!(
+        ctx.query(ResolveTypePath {
+            segments: segments.iter().map(|s| s.name.clone()).collect(),
+            context,
+            root,
+        }),
+        TypeResolution::SelfType
+    )
+}
+
+/// Copy semantics of `SelfType(entity)`: a protocol's abstract `Self`
+/// defers to `ProtocolSelfCopySemantics`; a concrete type's `Self` is that
+/// type's nominal semantics.
+pub fn self_type_copy_semantics(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    context: Entity,
+    root: Entity,
+) -> CopySemantics {
+    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Protocol) {
+        return ctx.query(ProtocolSelfCopySemantics {
+            protocol: entity,
+            context,
+            root,
+        });
+    }
+    query_nominal_semantics(ctx, entity, root)
+}
+
 /// Whether `: not P` is permitted on `protocol` — true only for builtin
 /// language-feature protocols with implicit conformance (e.g. Copyable).
 /// A plain function, not a query: the body is one `EntityBuiltin` lookup,
@@ -607,8 +742,11 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
                 })
                 .into(),
             // No per-instantiation refinement for Self/alias uses (current behavior).
-            HirTy::SelfType(entity, _) => self.base_semantics(*entity),
-            HirTy::AliasUse { entity, .. } => self.base_semantics(*entity),
+            HirTy::SelfType(entity, _) => {
+                self_type_copy_semantics(self.ctx, *entity, self.context, self.root)
+            },
+            HirTy::AbstractAssoc { entity, .. } => self.base_semantics(*entity),
+            HirTy::Alias { expanded, .. } => self.member_semantics(expanded),
             HirTy::Protocol { .. } => CopySemantics::Copyable,
             // `some P and not Copyable` may hide a move-only underlier; the
             // plain form guarantees a duplicable one (post-solve check).

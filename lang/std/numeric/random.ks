@@ -444,7 +444,7 @@ extend UInt64 {
         }
         let lo = UInt64(from: bounds.start);
         let span = UInt64(from: bounds.end) - lo;
-        UInt64(from: lo + rng.nextUInt64(below: span + 1))
+        lo + rng.nextUInt64(below: span + 1)
     }
 
     /// Returns a uniform value in `range`, using OS entropy.

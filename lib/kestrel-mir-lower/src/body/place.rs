@@ -372,6 +372,11 @@ impl OssaBodyCtx<'_, '_> {
     /// (the lost-write/corruption class); callers' fallbacks route through
     /// `emit_struct_extract`'s ref arm instead.
     pub fn try_field_addr_chain(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        // Inside a closure body, a view-captured place IS an address into the
+        // defining frame (`p.b` captured on its own, not all of `p`).
+        if let Some(super::PlaceCapture::Addr(addr)) = self.captured_place_value(expr_id) {
+            return Some(addr);
+        }
         let expr = self.hir.exprs[expr_id].clone();
         match expr {
             HirExpr::Local(hir_local, _) => match self.local_map.get(&hir_local).copied() {

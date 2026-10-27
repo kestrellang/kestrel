@@ -29,13 +29,15 @@ pub(super) fn solve_applicable(
                 span,
             })
         },
-        kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => SolveResult::Deferred(Constraint::Applicable {
-            receiver,
-            source,
-            name,
-            is_call,
-            span,
-        }),
+        kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => {
+            SolveResult::Deferred(Constraint::Applicable {
+                receiver,
+                source,
+                name,
+                is_call,
+                span,
+            })
+        },
     }
 }
 
@@ -51,7 +53,9 @@ pub(super) fn applicability(
         ApplicableSource::Extension(ext) => {
             crate::solver_entail::extension_applicability(ctx, ext, recv)
         },
-        ApplicableSource::Protocol(proto) => crate::solver_entail::kind_conformance(ctx, recv, proto),
+        ApplicableSource::Protocol(proto) => {
+            crate::solver_entail::kind_conformance(ctx, recv, proto)
+        },
     }
 }
 
@@ -120,6 +124,7 @@ pub(super) fn solve_conforms(
     span: Span,
     poison_ty_on_failure: bool,
     origin: ConformsOrigin,
+    protocol_args: Vec<TyVar>,
 ) -> SolveResult {
     let resolved = ctx.resolve(ty);
     match ctx.slot(resolved) {
@@ -129,8 +134,11 @@ pub(super) fn solve_conforms(
             span,
             poison_ty_on_failure,
             origin,
+            protocol_args: protocol_args.clone(),
         }),
-        TySlot::Resolved(TyKind::Error) => SolveResult::Solved,
+        // `Never` has no values, so it vacuously conforms to every protocol
+        // (`(return 1) + 2` needs `Never: Addable`).
+        TySlot::Resolved(TyKind::Error | TyKind::Never) => SolveResult::Solved,
         // The ref matrix (stage 2b, conformances via `extend &T`):
         // - Static: a ref is the one thing that is never Static — reject
         //   regardless of origin (judging the pointee would let `&T` slip
@@ -151,7 +159,12 @@ pub(super) fn solve_conforms(
                 if poison_ty_on_failure {
                     ctx.poison(ty);
                 }
-                return SolveResult::Error(InferError::DoesNotConform { ty, protocol, span });
+                return SolveResult::Error(InferError::DoesNotConform {
+                    ty,
+                    protocol,
+                    protocol_args: protocol_args.clone(),
+                    span,
+                });
             }
             if origin == ConformsOrigin::TypeArg {
                 let conforms = match copyable_builtin_kind(ctx, protocol) {
@@ -174,6 +187,7 @@ pub(super) fn solve_conforms(
                                         span,
                                         poison_ty_on_failure,
                                         origin,
+                                        protocol_args: protocol_args.clone(),
                                     });
                                 },
                             }
@@ -189,7 +203,12 @@ pub(super) fn solve_conforms(
                 if poison_ty_on_failure {
                     ctx.poison(ty);
                 }
-                return SolveResult::Error(InferError::DoesNotConform { ty, protocol, span });
+                return SolveResult::Error(InferError::DoesNotConform {
+                    ty,
+                    protocol,
+                    protocol_args: protocol_args.clone(),
+                    span,
+                });
             }
             let pointee = *pointee;
             SolveResult::Deferred(Constraint::Conforms {
@@ -198,6 +217,7 @@ pub(super) fn solve_conforms(
                 span,
                 poison_ty_on_failure,
                 origin,
+                protocol_args: protocol_args.clone(),
             })
         },
         TySlot::Resolved(_) => {
@@ -240,13 +260,16 @@ pub(super) fn solve_conforms(
                         // of `100..=200` against `RandomBounds[Int16]`),
                         // before literal defaulting can pick Int64.
                         kestrel_entail::Tri::Unknown => {
-                            if unify_bound_protocol_args(ctx, ty, resolved, protocol).is_err() {
+                            if unify_bound_protocol_args(ctx, resolved, protocol, &protocol_args)
+                                .is_err()
+                            {
                                 if poison_ty_on_failure {
                                     ctx.poison(ty);
                                 }
                                 return SolveResult::Error(InferError::DoesNotConform {
                                     ty,
                                     protocol,
+                                    protocol_args: protocol_args.clone(),
                                     span,
                                 });
                             }
@@ -256,6 +279,7 @@ pub(super) fn solve_conforms(
                                 span,
                                 poison_ty_on_failure,
                                 origin,
+                                protocol_args: protocol_args.clone(),
                             });
                         },
                     }
@@ -270,20 +294,40 @@ pub(super) fn solve_conforms(
                 // Unification also drives inference: an unresolved literal
                 // arg (the element of `100..=200`) gets pinned by the bound
                 // before literal defaulting runs.
-                if unify_bound_protocol_args(ctx, ty, resolved, protocol).is_err() {
-                    if poison_ty_on_failure {
-                        ctx.poison(ty);
-                    }
-                    return SolveResult::Error(InferError::DoesNotConform { ty, protocol, span });
+                match unify_bound_protocol_args(ctx, resolved, protocol, &protocol_args) {
+                    Ok(BoundArgs::Decided) => SolveResult::Solved,
+                    Ok(BoundArgs::Undecided) => SolveResult::Deferred(Constraint::Conforms {
+                        ty,
+                        protocol,
+                        span,
+                        poison_ty_on_failure,
+                        origin,
+                        protocol_args,
+                    }),
+                    Err(()) => {
+                        if poison_ty_on_failure {
+                            ctx.poison(ty);
+                        }
+                        SolveResult::Error(InferError::DoesNotConform {
+                            ty,
+                            protocol,
+                            protocol_args: protocol_args.clone(),
+                            span,
+                        })
+                    },
                 }
-                SolveResult::Solved
             } else if typearg_failure_is_duplicate(ctx, resolved, protocol, origin) {
                 SolveResult::Solved
             } else {
                 if poison_ty_on_failure {
                     ctx.poison(ty);
                 }
-                SolveResult::Error(InferError::DoesNotConform { ty, protocol, span })
+                SolveResult::Error(InferError::DoesNotConform {
+                    ty,
+                    protocol,
+                    protocol_args: protocol_args.clone(),
+                    span,
+                })
             }
         },
         TySlot::Redirect(_) => unreachable!("resolve() follows redirects"),
@@ -347,8 +391,8 @@ pub(super) fn base_spine(ctx: &InferCtx<'_>, base: TyVar, depth: u32) -> Option<
     }
 }
 
-/// Unify a parameterized bound's protocol args (recorded via
-/// `record_witness_args` at where-clause emission) with the declared
+/// Unify an obligation's protocol args (`Constraint::Conforms::protocol_args`)
+/// with the declared
 /// conformance's protocol args instantiated at the concrete receiver.
 ///
 /// `extend Foo[T]: P[T]` at receiver `Foo[X]` declares `P[X]`; a bound
@@ -363,51 +407,31 @@ pub(super) fn base_spine(ctx: &InferCtx<'_>, base: TyVar, depth: u32) -> Option<
 /// `Int8.random(in: 3..=9)` infers `ClosedRange[Int8]` instead of letting
 /// the literal default to `Int64`.
 ///
-/// Conservative by design: no recorded args, non-nominal receivers,
+/// Conservative by design: no args, non-nominal receivers,
 /// arg-less conformance declarations, or genuinely ambiguous multi-source
 /// matches all permit (returning `Ok`) — only a definite arg conflict
 /// (including "no declared instantiation is compatible with the bound")
 /// rejects.
 pub(super) fn unify_bound_protocol_args(
     ctx: &mut InferCtx<'_>,
-    ty: TyVar,
     resolved: TyVar,
     protocol: Entity,
-) -> Result<(), ()> {
-    // Bound args recorded for this (container, protocol) pair. The record is
-    // keyed by the canonical TyVar at emission time; redirects may have moved
-    // since, so fall back to an unambiguous canonical scan (mirrors the
-    // consumer in `solve_associated`).
-    let canonical = ctx.resolve(ty);
-    let want_args = ctx
-        .witness_protocol_args
-        .get(&(canonical, protocol))
-        .cloned()
-        .or_else(|| {
-            let mut iter = ctx
-                .witness_protocol_args
-                .iter()
-                .filter(|((k_tv, k_proto), _)| {
-                    *k_proto == protocol && ctx.resolve(*k_tv) == canonical
-                });
-            let first = iter.next()?;
-            if iter.next().is_some() {
-                return None; // Ambiguous — permit rather than guess.
-            }
-            Some(first.1.clone())
-        });
-    let Some(want_args) = want_args else {
-        return Ok(());
-    };
+    explicit_args: &[TyVar],
+) -> Result<BoundArgs, ()> {
+    // The obligation carries the protocol args it requires (a call through
+    // a generic protocol member, or a `where T: P[Args]` bound — see
+    // `InferCtx::bound_typearg`); an obligation without args judges the
+    // protocol alone.
+    let want_args = explicit_args.to_vec();
     if want_args.is_empty() {
-        return Ok(());
+        return Ok(BoundArgs::Decided);
     }
 
     // Only nominal receivers carry declared conformance instantiations.
     let (entity, recv_args) = match ctx.slot(resolved) {
         TySlot::Resolved(TyKind::Struct { entity, args })
         | TySlot::Resolved(TyKind::Enum { entity, args }) => (*entity, args.clone()),
-        _ => return Ok(()),
+        _ => return Ok(BoundArgs::Decided),
     };
 
     // Find the conformance declaration(s) for this protocol whose target
@@ -496,7 +520,7 @@ pub(super) fn unify_bound_protocol_args(
     }
     if applicable.is_empty() {
         // No parameterized declaration — permit.
-        return Ok(());
+        return Ok(BoundArgs::Decided);
     }
     // Several applicable sources (overlapping specializations — e.g. one
     // concrete conformance per element type): narrow by the bound's args.
@@ -516,7 +540,18 @@ pub(super) fn unify_bound_protocol_args(
             return Err(());
         }
         if applicable.len() > 1 {
-            return Ok(());
+            // A call's own protocol args (`Int8(from: x)` → `Convertible[?]`)
+            // that are still open must be waited for: permitting now lets an
+            // instantiation with no conformance reach mono (fuzz H20). Bound
+            // args recorded from where clauses keep the permit.
+            if !explicit_args.is_empty()
+                && want_args
+                    .iter()
+                    .any(|&w| crate::solver_entail::has_open_var(ctx, w))
+            {
+                return Ok(BoundArgs::Undecided);
+            }
+            return Ok(BoundArgs::Decided);
         }
     }
     let ApplicableConformance {
@@ -545,7 +580,16 @@ pub(super) fn unify_bound_protocol_args(
             return Err(());
         }
     }
-    Ok(())
+    Ok(BoundArgs::Decided)
+}
+
+/// Outcome of [`unify_bound_protocol_args`] when no contradiction was found.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum BoundArgs {
+    /// The args were checked (or there was nothing to check).
+    Decided,
+    /// Several declared instantiations still fit open args: retry later.
+    Undecided,
 }
 
 /// One conformance declaration of (receiver-entity, protocol) that structurally
@@ -564,7 +608,11 @@ pub(super) struct ApplicableConformance {
 /// nominal-vs-nominal entity mismatch (recursively through args) counts;
 /// unresolved vars, `Param` patterns, and every non-nominal shape are
 /// "can't rule out" — this must never reject on incompleteness.
-pub(super) fn tv_definitely_incompatible(ctx: &InferCtx<'_>, tv: TyVar, hir: &kestrel_hir::ty::HirTy) -> bool {
+pub(super) fn tv_definitely_incompatible(
+    ctx: &InferCtx<'_>,
+    tv: TyVar,
+    hir: &kestrel_hir::ty::HirTy,
+) -> bool {
     use kestrel_hir::ty::HirTy;
     let (h_entity, h_args) = match hir {
         HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => (*entity, args),
@@ -723,7 +771,20 @@ pub(crate) fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> Co
         TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
             instance_semantics(&SolverCopyLayer { ctx, depth }, entity, &args)
         },
-        // Empty args: a gated base folds to NotCopyable, as today.
+        // A protocol's abstract `Self` is only as copyable as its refinements;
+        // a concrete `Self` is its nominal (empty args: a gated base folds to
+        // NotCopyable).
+        TyKind::SelfType { entity }
+            if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(entity)
+                == Some(&kestrel_ast_builder::NodeKind::Protocol) =>
+        {
+            ctx.query_ctx
+                .query(kestrel_semantics::ProtocolSelfCopySemantics {
+                    protocol: entity,
+                    context: ctx.owner,
+                    root: ctx.root,
+                })
+        },
         TyKind::SelfType { entity } => {
             instance_semantics(&SolverCopyLayer { ctx, depth }, entity, &[])
         },

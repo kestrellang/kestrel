@@ -768,6 +768,18 @@ mod tests {
         let mono_result = kestrel_mir::mono::monomorphize(mir, &target);
         let mut mono_module = mono_result.expect("monomorphization should succeed");
 
+        // The post-mono passes `Compiler::monomorphize_mir` runs before
+        // expansion, in the same order. Expansion's verify rejects a copy of a
+        // `not Copyable` instantiation, and generic bodies rely on copy
+        // propagation to turn copy-then-destroy into a move
+        // (`Result[File, _].tryExtract`), so skipping them tests a pipeline
+        // that never runs.
+        use kestrel_mir::passes::{copy_lifetime, copy_propagation};
+        copy_propagation::eliminate_redundant_copies(&mut mono_module);
+        copy_propagation::eliminate_cross_block_copies(&mut mono_module);
+        copy_lifetime::run(&mut mono_module);
+        copy_propagation::mark_independent_takes(&mut mono_module);
+
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono_module, &generic_functions);
 
         let verify_result = kestrel_mir::mono::verify::verify_mono(&mono_module);

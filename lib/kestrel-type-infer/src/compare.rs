@@ -7,10 +7,9 @@
 
 use crate::collections::HashMap;
 
-use kestrel_ast_builder::{Name, TypeAnnotation, TypeParams};
+use kestrel_ast_builder::Name;
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::ty::HirTy;
-use kestrel_hir_lower::LowerTypeAnnotation;
 
 use crate::result::ResolvedTy;
 
@@ -53,13 +52,11 @@ impl TypeCompareResult {
 #[derive(Clone, Default)]
 struct NormalizeState {
     param_subs: HashMap<Entity, ResolvedTy>,
-    alias_stack: Vec<Entity>,
     assoc_stack: Vec<Entity>,
 }
 
 pub fn compare_hir_types(
     qctx: &QueryContext<'_>,
-    root: Entity,
     expected: &HirTy,
     actual: &HirTy,
     env: &TypeCompareEnv,
@@ -73,8 +70,8 @@ pub fn compare_hir_types(
     };
     let mut expected_state = seed_state();
     let mut actual_state = seed_state();
-    let expected = normalize_hir_type(qctx, root, expected, env, &mut expected_state);
-    let actual = normalize_hir_type(qctx, root, actual, env, &mut actual_state);
+    let expected = normalize_hir_type(qctx, expected, env, &mut expected_state);
+    let actual = normalize_hir_type(qctx, actual, env, &mut actual_state);
 
     if contains_error(&expected) || contains_error(&actual) {
         TypeCompareResult::Unknown
@@ -87,7 +84,6 @@ pub fn compare_hir_types(
 
 fn normalize_hir_type(
     qctx: &QueryContext<'_>,
-    root: Entity,
     ty: &HirTy,
     env: &TypeCompareEnv,
     state: &mut NormalizeState,
@@ -103,13 +99,15 @@ fn normalize_hir_type(
                 entity: *entity,
                 args: args
                     .iter()
-                    .map(|arg| normalize_hir_type(qctx, root, arg, env, state))
+                    .map(|arg| normalize_hir_type(qctx, arg, env, state))
                     .collect(),
             }
         },
         // Opaque types don't have a single entity; treat as Error for now
         HirTy::Opaque { .. } => ResolvedTy::Error,
-        HirTy::AliasUse { entity, args, .. } => {
+        // Aliases arrive expanded; a bounded one compares as its expansion.
+        HirTy::Alias { expanded, .. } => normalize_hir_type(qctx, expanded, env, state),
+        HirTy::AbstractAssoc { entity, .. } => {
             if let Some(sub) = state.param_subs.get(entity) {
                 return sub.clone();
             }
@@ -118,57 +116,13 @@ fn normalize_hir_type(
                     return ResolvedTy::Error;
                 }
                 state.assoc_stack.push(*entity);
-                let normalized = normalize_hir_type(qctx, root, &binding.ty, env, state);
+                let normalized = normalize_hir_type(qctx, &binding.ty, env, state);
                 state.assoc_stack.pop();
                 return normalized;
             }
-
-            let norm_args: Vec<ResolvedTy> = args
-                .iter()
-                .map(|arg| normalize_hir_type(qctx, root, arg, env, state))
-                .collect();
-
-            if state.alias_stack.contains(entity) {
-                return ResolvedTy::Named {
-                    entity: *entity,
-                    args: norm_args,
-                };
-            }
-
-            if qctx.get::<TypeAnnotation>(*entity).is_some()
-                && let Some(alias_ty) = qctx.query(LowerTypeAnnotation {
-                    entity: *entity,
-                    root,
-                })
-            {
-                let type_params = qctx
-                    .get::<TypeParams>(*entity)
-                    .map(|tp| tp.0.clone())
-                    .unwrap_or_default();
-                let old_subs: Vec<(Entity, Option<ResolvedTy>)> = type_params
-                    .iter()
-                    .zip(norm_args.iter())
-                    .map(|(&param, arg)| (param, state.param_subs.insert(param, arg.clone())))
-                    .collect();
-
-                state.alias_stack.push(*entity);
-                let normalized = normalize_hir_type(qctx, root, &alias_ty, env, state);
-                state.alias_stack.pop();
-
-                for (param, old) in old_subs {
-                    if let Some(old) = old {
-                        state.param_subs.insert(param, old);
-                    } else {
-                        state.param_subs.remove(&param);
-                    }
-                }
-
-                return normalized;
-            }
-
             ResolvedTy::Named {
                 entity: *entity,
-                args: norm_args,
+                args: Vec::new(),
             }
         },
         HirTy::Param(entity, _) => state
@@ -186,7 +140,7 @@ fn normalize_hir_type(
             }
             if let Some(binding) = binding_for_assoc(env, qctx, *assoc) {
                 state.assoc_stack.push(*assoc);
-                let normalized = normalize_hir_type(qctx, root, &binding.ty, env, state);
+                let normalized = normalize_hir_type(qctx, &binding.ty, env, state);
                 state.assoc_stack.pop();
                 normalized
             } else {
@@ -196,7 +150,7 @@ fn normalize_hir_type(
         HirTy::Tuple(elems, _) => ResolvedTy::Tuple(
             elems
                 .iter()
-                .map(|elem| normalize_hir_type(qctx, root, elem, env, state))
+                .map(|elem| normalize_hir_type(qctx, elem, env, state))
                 .collect(),
         ),
         // The closure KIND rides through normalization, so requirement/witness
@@ -214,10 +168,10 @@ fn normalize_hir_type(
             kind: *kind,
             params: params
                 .iter()
-                .map(|param| normalize_hir_type(qctx, root, param, env, state))
+                .map(|param| normalize_hir_type(qctx, param, env, state))
                 .collect(),
             conventions: param_conventions.clone(),
-            ret: Box::new(normalize_hir_type(qctx, root, ret, env, state)),
+            ret: Box::new(normalize_hir_type(qctx, ret, env, state)),
         },
         HirTy::Never(_) => ResolvedTy::Never,
         HirTy::Infer(_) | HirTy::Error(_) => ResolvedTy::Error,
@@ -230,7 +184,7 @@ fn normalize_hir_type(
         HirTy::Ref {
             inner, mutating, ..
         } => ResolvedTy::Ref {
-            pointee: Box::new(normalize_hir_type(qctx, root, inner, env, state)),
+            pointee: Box::new(normalize_hir_type(qctx, inner, env, state)),
             mutating: *mutating,
         },
     }

@@ -31,7 +31,6 @@ use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::FnTypeKind;
 use kestrel_ast_builder::{FieldClass, NodeKind};
-use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 
@@ -87,8 +86,7 @@ impl DeclCheck for ClosureFieldAnalyzer {
             },
             _ => return vec![],
         };
-        let Some(kind) = types.iter().find_map(|t| view_closure_kind(cx.query, cx.root, t, 0))
-        else {
+        let Some(kind) = types.iter().find_map(view_closure_kind) else {
             return vec![];
         };
         let name = util::entity_name(cx.query, cx.entity);
@@ -112,30 +110,14 @@ impl DeclCheck for ClosureFieldAnalyzer {
 }
 
 /// The kind of the first view closure stored directly in `ty`: the type
-/// itself, a tuple element, or the target of a plain type alias. Type
-/// arguments are not walked (the `Static` bound covers them).
-fn view_closure_kind(
-    ctx: &QueryContext<'_>,
-    root: Entity,
-    ty: &HirTy,
-    depth: u32,
-) -> Option<FnTypeKind> {
-    // Alias chains are finite, but guard a malformed cycle.
-    if depth > 16 {
-        return None;
-    }
+/// itself, a tuple element, or the expansion of a bounded type alias (plain
+/// aliases arrive expanded). Type arguments are not walked (the `Static`
+/// bound covers them).
+fn view_closure_kind(ty: &HirTy) -> Option<FnTypeKind> {
     match ty {
         HirTy::Function { kind, .. } => kind.is_view().then_some(*kind),
-        HirTy::Tuple(elems, _) => elems
-            .iter()
-            .find_map(|e| view_closure_kind(ctx, root, e, depth + 1)),
-        HirTy::AliasUse { entity, .. } => {
-            let target = ctx.query(LowerTypeAnnotation {
-                entity: *entity,
-                root,
-            })?;
-            view_closure_kind(ctx, root, &target, depth + 1)
-        },
+        HirTy::Tuple(elems, _) => elems.iter().find_map(view_closure_kind),
+        HirTy::Alias { expanded, .. } => view_closure_kind(expanded),
         _ => None,
     }
 }

@@ -14,7 +14,12 @@ use super::*;
 /// right operand a concrete nominal that can be written as that literal and
 /// conforms to the operator protocol. Shared by the walker (at the operator)
 /// and the end-of-body pass (for operands that became known later).
-pub(crate) fn rule_l_applies(ctx: &InferCtx<'_>, recv: TyVar, arg: TyVar, protocol: Entity) -> bool {
+pub(crate) fn rule_l_applies(
+    ctx: &InferCtx<'_>,
+    recv: TyVar,
+    arg: TyVar,
+    protocol: Entity,
+) -> bool {
     let TySlot::Unresolved { literal: Some(lit) } = ctx.slot(ctx.resolve(recv)) else {
         return false;
     };
@@ -51,8 +56,10 @@ pub(crate) fn apply_operator_literal_adoption(ctx: &mut InferCtx<'_>) -> bool {
     let mut progress = false;
     for (recv, arg) in pairs {
         // An earlier pair may already have pinned this receiver.
-        if matches!(ctx.slot(ctx.resolve(recv)), TySlot::Unresolved { literal: Some(_) })
-            && crate::unify::unify(ctx, recv, arg).is_ok()
+        if matches!(
+            ctx.slot(ctx.resolve(recv)),
+            TySlot::Unresolved { literal: Some(_) }
+        ) && crate::unify::unify(ctx, recv, arg).is_ok()
         {
             kestrel_debug::ktrace!("rule-l", "literal receiver adopts the right operand's type");
             progress = true;
@@ -284,7 +291,10 @@ pub(super) fn collect_context_literal(
 /// Is `ty` a nominal wrapper `Head[..default..]` safe to generalize — head a
 /// Struct/Enum other than `default_entity`, all args recursively nominal, and
 /// at least one arg mentioning `default_entity` (the Self-varying position)?
-pub(super) fn projectable_wrapper_return(ty: &kestrel_hir::ty::HirTy, default_entity: Entity) -> bool {
+pub(super) fn projectable_wrapper_return(
+    ty: &kestrel_hir::ty::HirTy,
+    default_entity: Entity,
+) -> bool {
     use kestrel_hir::ty::HirTy;
     let (entity, args) = match ty {
         HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => (*entity, args),
@@ -392,7 +402,10 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
     }
     let mut progress = false;
     for (recv, entity) in picks {
-        if matches!(ctx.slot(ctx.resolve(recv)), TySlot::Unresolved { literal: Some(_) }) {
+        if matches!(
+            ctx.slot(ctx.resolve(recv)),
+            TySlot::Unresolved { literal: Some(_) }
+        ) {
             let ty = ctx.named(entity, Vec::new());
             progress |= unify::unify(ctx, recv, ty).is_ok();
         }
@@ -417,7 +430,11 @@ pub(crate) fn apply_literal_defaults_rest(ctx: &mut InferCtx<'_>, relax_level: u
 /// Give the open literal var `resolved` its `Default<Kind>LiteralType`.
 /// The single place a literal takes its default. Returns false when the
 /// builtin is absent (`// stdlib: false`), leaving the literal open.
-pub(crate) fn default_literal_var(ctx: &mut InferCtx<'_>, resolved: TyVar, literal: LiteralKind) -> bool {
+pub(crate) fn default_literal_var(
+    ctx: &mut InferCtx<'_>,
+    resolved: TyVar,
+    literal: LiteralKind,
+) -> bool {
     let feature = match literal {
         LiteralKind::Integer => Builtin::DefaultIntegerLiteralType,
         LiteralKind::Float => Builtin::DefaultFloatLiteralType,
@@ -441,12 +458,36 @@ pub(crate) fn default_literal_var(ctx: &mut InferCtx<'_>, resolved: TyVar, liter
         .map(|tp| tp.0.len())
         .unwrap_or(0);
     let args: Vec<TyVar> = (0..type_param_count).map(|_| ctx.fresh()).collect();
+    // The default forms a type like an annotation does, so it gets the same
+    // well-formedness: `[{ k }]` is `Array[() -> Int64]` and must be Static
+    // (a view closure used to escape and dangle), and `[R(...)]` must be
+    // Copyable, as `Array[R]` is (reading it out used to trap at run time).
+    // `resolved` is the literal var's representative, so match by resolution.
+    let span = ctx
+        .literal_spans
+        .iter()
+        .find(|(lit, _)| ctx.resolve(**lit) == resolved)
+        .map(|(_, span)| span.clone());
+    if let Some(span) = span {
+        crate::generate::emit_formation_wellformedness(
+            ctx,
+            entity,
+            &args,
+            &span,
+            crate::generate::FormationScope::Written,
+        );
+        ctx.literal_default_args.extend(&args);
+    }
     let default_tv = ctx.named(entity, args);
     ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
     true
 }
 
-pub(crate) fn apply_literal_defaults_from(ctx: &mut InferCtx<'_>, relax_level: u8, start: usize) -> bool {
+pub(crate) fn apply_literal_defaults_from(
+    ctx: &mut InferCtx<'_>,
+    relax_level: u8,
+    start: usize,
+) -> bool {
     let mut progress = false;
 
     // Compute the set of literal TyVars that are "blocked" at this relax

@@ -220,6 +220,13 @@ pub fn copy_behavior(
                     return CopyBehavior::None;
                 }
             }
+            // A protocol's abstract `Self` (lowered as `TypeParam(protocol)`):
+            // move-only types may conform, so it is only as copyable as the
+            // protocol's refinements guarantee (mirrors
+            // `kestrel_semantics::ProtocolSelfCopySemantics`).
+            if module.protocols.contains_key(&entity) {
+                return protocol_self_copy_behavior(module, entity);
+            }
             CopyBehavior::Bitwise
         },
 
@@ -283,7 +290,12 @@ pub fn copy_is_mono_dependent(
             .structs
             .get(&entity)
             .map(|s| s.conditionally_copyable.clone())
-            .or_else(|| module.enums.get(&entity).map(|e| e.conditionally_copyable.clone()))
+            .or_else(|| {
+                module
+                    .enums
+                    .get(&entity)
+                    .map(|e| e.conditionally_copyable.clone())
+            })
     };
     copy_is_mono_dependent_by(arena, module, ty, where_clause, &gating)
 }
@@ -324,9 +336,9 @@ pub fn copy_is_mono_dependent_by(
         MirTy::AssociatedProjection { .. } => true,
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
-            elems.iter().any(|&e| {
-                copy_is_mono_dependent_by(arena, module, e, where_clause, gating_of)
-            })
+            elems
+                .iter()
+                .any(|&e| copy_is_mono_dependent_by(arena, module, e, where_clause, gating_of))
         },
         MirTy::Named { entity, type_args } => {
             let entity = *entity;
@@ -395,6 +407,30 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
 // the `@builtin` lang item recorded on the module (see `MirModule`), not from
 // the protocol's name. A name-suffix test also matched user protocols like
 // `MyCopyable` and would silently match nothing if the stdlib renamed either.
+
+/// Copy behavior of protocol `Self` from its (transitive) parents alone.
+fn protocol_self_copy_behavior(module: &MirModule, protocol: Entity) -> CopyBehavior {
+    let mut stack = vec![protocol];
+    let mut seen = std::collections::HashSet::new();
+    let mut copyable = false;
+    while let Some(p) = stack.pop() {
+        if !seen.insert(p) {
+            continue;
+        }
+        if is_cloneable_protocol(module, p) {
+            return CopyBehavior::Clone(p);
+        }
+        copyable |= is_copyable_protocol(module, p);
+        if let Some(def) = module.protocols.get(&p) {
+            stack.extend(def.parent_protocols.iter().copied());
+        }
+    }
+    if copyable {
+        CopyBehavior::Bitwise
+    } else {
+        CopyBehavior::None
+    }
+}
 
 pub fn is_cloneable_protocol(module: &MirModule, entity: Entity) -> bool {
     module.cloneable_protocol == Some(entity)

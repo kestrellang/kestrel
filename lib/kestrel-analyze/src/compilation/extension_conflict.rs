@@ -331,19 +331,13 @@ fn hir_ty_eq(a: &kestrel_hir::ty::HirTy, b: &kestrel_hir::ty::HirTy) -> bool {
                 args: ab,
                 ..
             },
-        )
-        | (
-            HirTy::AliasUse {
-                entity: ea,
-                args: aa,
-                ..
-            },
-            HirTy::AliasUse {
-                entity: eb,
-                args: ab,
-                ..
-            },
         ) => ea == eb && list_eq(aa, ab),
+        (HirTy::Alias { expanded, .. }, other) | (other, HirTy::Alias { expanded, .. }) => {
+            hir_ty_eq(expanded, other)
+        },
+        (HirTy::AbstractAssoc { entity: ea, .. }, HirTy::AbstractAssoc { entity: eb, .. }) => {
+            ea == eb
+        },
         (HirTy::Tuple(xa, _), HirTy::Tuple(xb, _)) => list_eq(xa, xb),
         (
             HirTy::Function {
