@@ -256,6 +256,7 @@ fn check_protocol_requirements(
 ) {
     let type_name = util::entity_name(cx.query, type_entity);
     let decl_span = util::entity_span(cx.query, decl_entity);
+    let decl = Some(decl_entity);
 
     // Collect all method/type names provided by the type and its extensions,
     // plus methods from extensions on protocols the type conforms to whose
@@ -348,6 +349,7 @@ fn check_protocol_requirements(
                             type_entity,
                             member.declaring_protocol,
                             proto_param_subs,
+                            decl,
                         )
                         .is_none()
                             && (is_init
@@ -358,6 +360,7 @@ fn check_protocol_requirements(
                                     type_entity,
                                     member.declaring_protocol,
                                     proto_param_subs,
+                                    decl,
                                 ))
                     };
                     sig_candidates
@@ -434,6 +437,7 @@ fn check_protocol_requirements(
                         type_entity,
                         member.declaring_protocol,
                         proto_param_subs,
+                        decl,
                         &name,
                         &proto_name,
                         diags,
@@ -446,6 +450,7 @@ fn check_protocol_requirements(
                             type_entity,
                             member.declaring_protocol,
                             proto_param_subs,
+                            decl,
                             &name,
                             &proto_name,
                             diags,
@@ -492,6 +497,7 @@ fn check_protocol_requirements(
                         type_entity,
                         protocol,
                         proto_param_subs,
+                        decl,
                     )
                     .is_equal_or_unknown()
                     {
@@ -945,6 +951,7 @@ fn method_return_type_matches(
     type_entity: Entity,
     protocol: Entity,
     proto_param_subs: &[(Entity, ResolvedTy)],
+    decl: Option<Entity>,
 ) -> bool {
     method_return_type_compare(
         cx,
@@ -953,6 +960,7 @@ fn method_return_type_matches(
         type_entity,
         protocol,
         proto_param_subs,
+        decl,
     )
     .is_equal_or_unknown()
 }
@@ -972,6 +980,7 @@ fn property_type_compare(
     type_entity: Entity,
     protocol: Entity,
     proto_param_subs: &[(Entity, ResolvedTy)],
+    decl: Option<Entity>,
 ) -> TypeCompareResult {
     let expected = cx.query.query(LowerTypeAnnotation {
         entity: proto_field,
@@ -984,7 +993,7 @@ fn property_type_compare(
     let (Some(expected), Some(actual)) = (expected, actual) else {
         return TypeCompareResult::Unknown;
     };
-    let mut env = type_compare_env_for_conformance(cx, type_entity, protocol);
+    let mut env = type_compare_env_for_conformance(cx, type_entity, protocol, decl);
     for (entity, ty) in proto_param_subs {
         env.param_subs.push((*entity, ty.clone()));
     }
@@ -998,6 +1007,7 @@ fn method_return_type_compare(
     type_entity: Entity,
     protocol: Entity,
     proto_param_subs: &[(Entity, ResolvedTy)],
+    decl: Option<Entity>,
 ) -> TypeCompareResult {
     let expected = cx.query.query(LowerCallableReturnType {
         entity: proto_method,
@@ -1014,6 +1024,7 @@ fn method_return_type_compare(
         type_entity,
         protocol,
         proto_param_subs,
+        decl,
     );
     compare_hir_types(cx.query, &expected, &actual, &env)
 }
@@ -1029,8 +1040,9 @@ fn method_compare_env(
     type_entity: Entity,
     protocol: Entity,
     proto_param_subs: &[(Entity, ResolvedTy)],
+    decl: Option<Entity>,
 ) -> TypeCompareEnv {
-    let mut env = type_compare_env_for_conformance(cx, type_entity, protocol);
+    let mut env = type_compare_env_for_conformance(cx, type_entity, protocol, decl);
     // A witness declared in an extension speaks that extension's vocabulary:
     // `extend RcBox[Account]` fixes `RcBox`'s `T` to `Account`, and
     // `extend Range[T]` names its own `T`. Map the conforming type's params
@@ -1138,6 +1150,7 @@ fn method_param_types_mismatch(
     type_entity: Entity,
     protocol: Entity,
     proto_param_subs: &[(Entity, ResolvedTy)],
+    decl: Option<Entity>,
 ) -> Option<usize> {
     let lower = |entity| {
         cx.query.query(LowerCallableTypes {
@@ -1155,6 +1168,7 @@ fn method_param_types_mismatch(
         type_entity,
         protocol,
         proto_param_subs,
+        decl,
     );
     expected.iter().zip(actual.iter()).position(|(e, a)| {
         let (Some(e), Some(a)) = (e, a) else {
@@ -1175,6 +1189,7 @@ fn check_method_param_types(
     type_entity: Entity,
     protocol: Entity,
     proto_param_subs: &[(Entity, ResolvedTy)],
+    decl: Option<Entity>,
     method_name: &str,
     proto_name: &str,
     diags: &mut Vec<AnalyzeDiagnostic>,
@@ -1186,6 +1201,7 @@ fn check_method_param_types(
         type_entity,
         protocol,
         proto_param_subs,
+        decl,
     ) else {
         return;
     };
@@ -1218,6 +1234,7 @@ fn check_method_return_type(
     type_entity: Entity,
     protocol: Entity,
     proto_param_subs: &[(Entity, ResolvedTy)],
+    decl: Option<Entity>,
     method_name: &str,
     proto_name: &str,
     diags: &mut Vec<AnalyzeDiagnostic>,
@@ -1229,6 +1246,7 @@ fn check_method_return_type(
         type_entity,
         protocol,
         proto_param_subs,
+        decl,
     );
     if result.is_equal_or_unknown() {
         return;
@@ -1264,10 +1282,16 @@ fn check_method_return_type(
     });
 }
 
+/// `decl` is the block declaring this conformance, when known: its own
+/// `type Output = …` binds the associated type for THIS conformance, which
+/// matters when a type conforms to one protocol twice (`Instant:
+/// Subtractable[Duration]` and `Subtractable[Instant]` bind different
+/// `Output`s in sibling extensions).
 fn type_compare_env_for_conformance(
     cx: &CompilationContext<'_>,
     type_entity: Entity,
     protocol: Entity,
+    decl: Option<Entity>,
 ) -> TypeCompareEnv {
     let assoc_bindings = cx
         .query
@@ -1281,6 +1305,7 @@ fn type_compare_env_for_conformance(
             let ty = if let Some(binding) = find_associated_type_binding_entity(
                 cx,
                 type_entity,
+                decl,
                 &name,
                 member.declaring_protocol,
             ) {
@@ -1550,13 +1575,21 @@ fn resolve_conformance_type_arg(
 /// Example: `Optional` conforms to `Equatable`, and
 /// `extend Equatable: Equal[Self] { type Equal.Output = Bool }` supplies
 /// the `Equal.Output = Bool` binding for every Equatable type.
+/// `decl`, the block declaring the conformance being checked, is searched
+/// first so its own bindings win ties: a type conforming to one protocol
+/// twice (`Instant: Subtractable[Duration]`, `Subtractable[Instant]`) binds a
+/// different unqualified `Output` in each sibling extension, and only the
+/// declaring block knows which applies. A qualified binding elsewhere
+/// (`type Less.Output = Bool`) still beats an unqualified one in `decl`.
 fn find_associated_type_binding_entity(
     cx: &CompilationContext<'_>,
     type_entity: Entity,
+    decl: Option<Entity>,
     assoc_name: &str,
     protocol: Entity,
 ) -> Option<Entity> {
-    let mut search = vec![type_entity];
+    let mut search: Vec<Entity> = decl.into_iter().collect();
+    search.push(type_entity);
     let extensions = cx.query.query(ExtensionsFor {
         target: type_entity,
         root: cx.root,
@@ -2220,7 +2253,7 @@ fn param_types_match(
     if proto_params.len() != impl_params.len() {
         return false;
     }
-    let mut env = type_compare_env_for_conformance(cx, type_entity, protocol);
+    let mut env = type_compare_env_for_conformance(cx, type_entity, protocol, None);
     let proto_ty_params: Vec<Entity> = cx
         .query
         .get::<TypeParams>(proto_method)
