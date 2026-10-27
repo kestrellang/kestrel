@@ -23,8 +23,7 @@
 use std::cell::RefCell;
 
 use kestrel_ast_builder::{TypeParams, WhereClause as AstWhereClause, WhereConstraint};
-use kestrel_hecs::guard::OnDrop;
-use kestrel_hecs::{Entity, QueryContext, QueryFn};
+use kestrel_hecs::{CycleMode, Entity, QueryContext, QueryFn};
 use kestrel_hir::{Builtin, HirTy};
 use kestrel_name_res::ResolveBuiltin;
 
@@ -178,48 +177,28 @@ pub struct NominalStaticness {
     pub root: Entity,
 }
 
-// WARNING: side-channel state invisible to the query framework's dependency
-// tracker — memoized results that consulted it are not invalidated when it
-// changes. It exists only because the framework panics on re-entrant queries
-// (recursive types). Same caveat as COMPUTING_COPY_SEMANTICS in lib.rs.
-thread_local! {
-    static COMPUTING_STATICNESS: RefCell<Vec<(Entity, Entity)>> = const { RefCell::new(Vec::new()) };
-}
-
 impl QueryFn for NominalStaticness {
     type Output = StaticnessInfo;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> StaticnessInfo {
-        let key = (self.entity, self.root);
-        COMPUTING_STATICNESS.with(|stack| stack.borrow_mut().push(key));
-        // Unwind-safe pop — same reasoning as COMPUTING_COPY_SEMANTICS in
-        // lib.rs: a leaked entry would make this nominal answer `Static`
-        // for the rest of the thread's life (F22).
-        let _guard = OnDrop::new(|| {
-            COMPUTING_STATICNESS.with(|stack| {
-                stack.borrow_mut().pop();
-            });
-        });
         nominal_staticness_impl(ctx, self.entity, self.root)
+    }
+
+    /// Recursive types ask for their own staticness. Start at Static — a
+    /// cycle cannot introduce a reference on its own; any actual ref is
+    /// found on its own branch — and descend Static → ConditionalOn
+    /// (positions only grow) → NotStatic to the fixpoint.
+    fn cycle_mode(&self) -> CycleMode<StaticnessInfo> {
+        CycleMode::Fixpoint {
+            initial: StaticnessInfo {
+                staticness: Staticness::Static,
+                reason: StaticnessReason::Default,
+            },
+        }
     }
 
     fn describe(&self) -> String {
         format!("NominalStaticness({:?})", self.entity)
-    }
-}
-
-fn computing_contains(entity: Entity, root: Entity) -> bool {
-    COMPUTING_STATICNESS.with(|stack| stack.borrow().contains(&(entity, root)))
-}
-
-/// Cycle-guarded nominal lookup: a self-reference (direct or transitive,
-/// e.g. an indirect enum) falls back to Static — a cycle cannot introduce a
-/// reference on its own; any actual ref is found on its own branch.
-fn query_nominal_staticness(ctx: &QueryContext<'_>, entity: Entity, root: Entity) -> Staticness {
-    if computing_contains(entity, root) {
-        Staticness::Static
-    } else {
-        ctx.query(NominalStaticness { entity, root }).staticness
     }
 }
 
@@ -303,7 +282,12 @@ impl StaticLayer for HirStaticWalk<'_, '_> {
     type Ty = HirTy;
 
     fn nominal_staticness(&self, entity: Entity) -> Staticness {
-        query_nominal_staticness(self.ctx, entity, self.root)
+        self.ctx
+            .query(NominalStaticness {
+                entity,
+                root: self.root,
+            })
+            .staticness
     }
 
     fn member_is_static(&self, ty: &HirTy) -> bool {
