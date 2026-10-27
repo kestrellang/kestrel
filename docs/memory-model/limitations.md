@@ -80,6 +80,7 @@ func bad() -> &Int64 {
 
 - **Zero-copy iterators yielding references** — iteration is by value; `for x in xs` copies/clones elements (ref-based iteration composes with accessors, e.g. `&arr(at: i)`, but there is no `Iterator` over `&T` elements in the stdlib's main loop path yet).
 - **Long-lived views** — a struct holding `&T` cannot itself be stored long-term (non-`Static`); views are for passing down and across, not for keeping.
+- **Unchecked: changing the owner of a live heap reference** — `let e = &xs(at: 0)` points into `xs`'s heap buffer. Calling a `mutating` method (`xs.append(..)`), reassigning `xs`, or `deinit xs` while `e` is still used can reallocate or free that buffer, leaving `e` dangling. The compiler does not reject this: Kestrel has no exclusivity rule, and a fix waits on a future exclusive-access feature. Copy the element (`let e = xs(at: 0)`) or use the reference within one expression instead. References to locals and their fields (`&x`, `&s.name`) are not affected — that storage stays put for the whole scope.
 
 ---
 
