@@ -197,6 +197,9 @@ impl OssaBodyCtx<'_, '_> {
                 .first()
                 .copied()
                 .unwrap_or(ParamConvention::Borrow);
+            // Before the receiver opens its borrow (H12: `x.mutate({ x })`).
+            let arg_convs = self.explicit_arg_conventions(args, Some(resolved), &conventions, 1);
+            self.prepare_closure_arg_snapshots(Some((receiver_expr, recv_conv)), args, &arg_convs);
             // Indirection method peel: `wrapper.method()` where the wrapper has
             // no `method` → dispatch to the pointee, reached via
             // `pointeeRef()` / `pointeeMutRef()`. A mutating method (recv_conv
@@ -525,11 +528,15 @@ impl OssaBodyCtx<'_, '_> {
             .first()
             .copied()
             .unwrap_or(ParamConvention::Borrow);
+        // Before the receiver opens its borrow (H12: `x.mutate({ x })`).
+        let method_entity = self.find_protocol_method_entity(protocol, &method_key);
+        let arg_convs = self.explicit_arg_conventions(args, method_entity, &conventions, 1);
+        self.prepare_closure_arg_snapshots(Some((receiver_expr, recv_conv)), args, &arg_convs);
         let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
         let mut call_args = vec![receiver_arg];
         // Bind+fill against the concrete method entity when known (so defaults can
         // be skipped anywhere); otherwise fall back to positional source order.
-        if let Some(method_entity) = self.find_protocol_method_entity(protocol, &method_key) {
+        if let Some(method_entity) = method_entity {
             call_args.extend(self.lower_call_args_bound(
                 args,
                 method_entity,

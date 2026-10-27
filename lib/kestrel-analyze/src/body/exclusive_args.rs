@@ -1,0 +1,197 @@
+//! # Exclusive Arguments Analyzer
+//!
+//! One call may hold only one exclusive (writing) access to a place. A
+//! `mutating` argument or receiver is exclusive, and so is a `mutating`
+//! closure literal argument for every place it writes. Two such accesses to
+//! overlapping places in the same call alias two writers (fuzz H12).
+//!
+//! A READ-only access overlapping a `mutating` one is NOT reported: plain
+//! borrowed arguments and read captures of closure literals see the value at
+//! the call (MIR lowering snapshots them — `snapshot_overlapping_borrows`,
+//! `prepare_closure_arg_snapshots`).
+//!
+//! Place identity is `kestrel_type_infer::captures::place_key_of`, the same
+//! function the capture analysis uses, so `t(p.a, p.b)` (disjoint stored
+//! fields) passes while `t(p, p.a)` and `t(x, x)` do not. A writing closure
+//! counts as accessing its captured locals WHOLE, matching how lowering
+//! captures them (field-granular capture is tracked as fuzz M8).
+//!
+//! ## Diagnostics
+//!
+//! ### E635 — `overlapping_exclusive_access` (Error, Correctness)
+//!
+//! **Message:** "overlapping exclusive access in one call"
+//!
+//! **Labels:**
+//! - Primary: the later exclusive access
+//!   - Span source: `util::expr_span` on the argument / receiver / closure
+//!     literal `HirExprId`
+//!   - Message: "this writes a place already exclusively accessed in this call"
+//! - Secondary: the earlier exclusive access
+//!   - Span source: `util::expr_span` on that access's `HirExprId`
+//!   - Message: "first exclusive access here"
+//!
+//! **Notes:**
+//! - "a `mutating` argument and a writing closure (or a second `mutating`
+//!   argument) would both change the same storage; pass a copy or split the
+//!   call"
+
+use crate::context::BodyContext;
+use crate::diagnostic::*;
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
+use crate::util;
+use kestrel_ast_builder::{Callable, NodeKind, ReceiverKind};
+use kestrel_hir::body::*;
+use kestrel_type_infer::captures::{CaptureKind, PlaceKey, place_key_of};
+
+static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
+    id: "E635",
+    name: "overlapping_exclusive_access",
+    default_severity: Severity::Error,
+    category: Category::Correctness,
+}];
+
+pub struct ExclusiveArgsAnalyzer;
+
+impl Describe for ExclusiveArgsAnalyzer {
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ExclusiveArgs
+    }
+    fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
+        DESCRIPTORS
+    }
+}
+
+impl BodyCheck for ExclusiveArgsAnalyzer {
+    fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
+        let captures = cx.query.query(kestrel_type_infer::ClosureCaptures {
+            entity: cx.entity,
+            root: cx.root,
+        });
+        let mut diags = Vec::new();
+        for (expr_id, expr) in cx.hir.exprs.iter() {
+            let (callee, receiver, args) = match expr {
+                HirExpr::Call { callee, args, .. } => {
+                    let entity = match &cx.hir.exprs[*callee] {
+                        HirExpr::Def(entity, _, _) => Some(*entity),
+                        _ => cx.typed.resolutions.get(callee).copied(),
+                    };
+                    (entity, None, args)
+                },
+                HirExpr::MethodCall { receiver, args, .. } => (
+                    cx.typed.resolutions.get(&expr_id).copied(),
+                    Some(*receiver),
+                    args,
+                ),
+                HirExpr::ProtocolCall {
+                    receiver,
+                    protocol,
+                    method,
+                    args,
+                    ..
+                } => (
+                    util::children_named_of_kind(
+                        cx.query,
+                        *protocol,
+                        method.as_str_or_empty(),
+                        NodeKind::Function,
+                    )
+                    .first()
+                    .copied(),
+                    Some(*receiver),
+                    args,
+                ),
+                _ => continue,
+            };
+            let Some(callable) = callee.and_then(|c| cx.query.get::<Callable>(c)) else {
+                continue;
+            };
+            let accesses = exclusive_accesses(cx, &captures, callable, receiver, args);
+            report_first_overlap(cx, &accesses, &mut diags);
+        }
+        diags
+    }
+}
+
+/// Every exclusive access the call makes, as (place, the expression making it).
+fn exclusive_accesses(
+    cx: &BodyContext<'_>,
+    captures: &kestrel_type_infer::captures::ClosureCaptureMap,
+    callable: &Callable,
+    receiver: Option<HirExprId>,
+    args: &[HirCallArg],
+) -> Vec<(PlaceKey, HirExprId)> {
+    let place = |e: HirExprId| place_key_of(cx.query, cx.typed, cx.hir, e);
+    let mut out = Vec::new();
+    if let Some(recv) = receiver
+        && matches!(callable.receiver, Some(ReceiverKind::Mutating))
+        && let Some(key) = place(recv)
+    {
+        out.push((key, recv));
+    }
+    for (i, arg) in args.iter().enumerate() {
+        if matches!(cx.hir.exprs[arg.value], HirExpr::Closure { .. }) {
+            // A closure literal's WRITE captures are exclusive accesses —
+            // of the WHOLE root: lowering captures a written place by its
+            // whole local (`plan_slots`), so `w(p.a, { p.b = 3 })` really
+            // does borrow all of `p`. Field-granular capture is fuzz M8.
+            for cp in captures.get(arg.value) {
+                if cp.kind == CaptureKind::Write {
+                    out.push((PlaceKey::whole(cp.key.root), arg.value));
+                }
+            }
+            continue;
+        }
+        let Some(param) = callable.params.get(i) else {
+            continue;
+        };
+        if param.is_mut
+            && !param.is_consuming
+            && let Some(key) = place(arg.value)
+        {
+            out.push((key, arg.value));
+        }
+    }
+    out
+}
+
+/// One diagnostic per call: the first exclusive access overlapping an
+/// earlier one from a DIFFERENT expression.
+fn report_first_overlap(
+    cx: &BodyContext<'_>,
+    accesses: &[(PlaceKey, HirExprId)],
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    for (i, (key, expr)) in accesses.iter().enumerate() {
+        let Some((_, first)) = accesses[..i]
+            .iter()
+            .find(|(k, e)| e != expr && (k.is_prefix_of(key) || key.is_prefix_of(k)))
+        else {
+            continue;
+        };
+        let d = &DESCRIPTORS[0];
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: d.id,
+            severity: d.default_severity,
+            message: "overlapping exclusive access in one call".to_string(),
+            labels: vec![
+                DiagLabel {
+                    span: util::expr_span(cx.hir, *expr),
+                    message: "this writes a place already exclusively accessed in this call".into(),
+                    is_primary: true,
+                },
+                DiagLabel {
+                    span: util::expr_span(cx.hir, *first),
+                    message: "first exclusive access here".into(),
+                    is_primary: false,
+                },
+            ],
+            notes: vec![
+                "a `mutating` argument and a writing closure (or a second `mutating` argument) \
+                 would both change the same storage; pass a copy or split the call"
+                    .to_string(),
+            ],
+        });
+        return;
+    }
+}

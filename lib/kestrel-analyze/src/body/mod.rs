@@ -16,6 +16,7 @@ pub mod param_pattern;
 pub mod access_mode;
 pub mod closure;
 pub mod definite_assignment;
+pub mod exclusive_args;
 pub mod initializer;
 // HIR-level move/use-after-move checker (E500/E501). Restored from the
 // pre-MIR-rewrite (0.15) tree: it models `while-let` loops, pattern re-binding

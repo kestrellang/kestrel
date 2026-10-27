@@ -113,6 +113,26 @@ impl OssaBodyCtx<'_, '_> {
         params: &[HirClosureParam],
         body: &HirBlock,
     ) -> ValueId {
+        // A read capture of a local that a `mutating` argument of the
+        // enclosing call is about to borrow sees the call-time copy instead
+        // (see `prepare_closure_arg_snapshots`): point the local at the copy
+        // while this literal materializes its captures.
+        if let Some(snaps) = self.closure_arg_snapshots.remove(&expr_id) {
+            let saved: Vec<(HirLocalId, Option<LocalBinding>)> = snaps
+                .iter()
+                .map(|&(local, copy)| {
+                    (local, self.local_map.insert(local, LocalBinding::Var(copy)))
+                })
+                .collect();
+            let result = self.lower_closure_expr(expr_id, params, body);
+            for (local, prev) in saved {
+                match prev {
+                    Some(b) => self.local_map.insert(local, b),
+                    None => self.local_map.remove(&local),
+                };
+            }
+            return result;
+        }
         let closure_ty = self.resolve_expr_type(expr_id);
 
         // Captures decided post-inference; we only apply copyability here.

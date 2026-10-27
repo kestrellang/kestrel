@@ -343,6 +343,11 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// receiver. Whole-local captures use `local_map` instead. Saved/restored
     /// across nested closure bodies like `local_map`.
     pub(crate) place_capture_map: HashMap<PlaceKey, PlaceCapture>,
+    /// Closure-literal call arguments whose read captures overlap a
+    /// `mutating` argument of the same call: closure expr → (captured local,
+    /// address of its call-time copy). Filled by
+    /// `prepare_closure_arg_snapshots`, consumed by `lower_closure_expr`.
+    pub(crate) closure_arg_snapshots: HashMap<HirExprId, Vec<(HirLocalId, ValueId)>>,
     /// Per-droppable-`self`-field drop-flag tracking in an init body: one entry
     /// per droppable stored field, as `(field index, substituted field type,
     /// drop-flag pointer)`. Populated for EVERY init with droppable fields (see
@@ -464,6 +469,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             typed: typed.map(TypedRef::Borrowed),
             captures,
             place_capture_map: HashMap::new(),
+            closure_arg_snapshots: HashMap::new(),
             func_entity,
             body_context: if in_protocol_extension {
                 BodyContext::ProtocolExtension
