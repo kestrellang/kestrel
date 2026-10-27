@@ -469,7 +469,13 @@ pub(crate) fn default_literal_var(
         .find(|(lit, _)| ctx.resolve(**lit) == resolved)
         .map(|(_, span)| span.clone());
     if let Some(span) = span {
-        crate::generate::emit_copyable_wellformedness(ctx, entity, &args, &span);
+        crate::generate::emit_formation_wellformedness(
+            ctx,
+            entity,
+            &args,
+            &span,
+            crate::generate::FormationScope::Written,
+        );
         ctx.literal_default_args.extend(&args);
     }
     let default_tv = ctx.named(entity, args);

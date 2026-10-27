@@ -1011,14 +1011,11 @@ pub(super) fn solve_member(
                     },
                 };
                 if let Some(tv) = bound_tv {
-                    ctx.conforms_typearg(tv, *protocol, span.clone());
                     let arg_tvs: Vec<TyVar> = protocol_type_args
                         .iter()
                         .map(|hir_ty| lower_hir_ty_sub(ctx, hir_ty, self_entity, receiver, &subs))
                         .collect();
-                    if !arg_tvs.is_empty() {
-                        ctx.record_witness_args(tv, *protocol, arg_tvs);
-                    }
+                    ctx.bound_typearg(tv, *protocol, arg_tvs, span.clone());
                 }
             },
             crate::resolve::WhereClause::Equality { subject, rhs } => {

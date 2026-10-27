@@ -3969,6 +3969,91 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
     }
 
+    /// End every named ref binding declared in the current block whose last
+    /// mention in the source is behind us (`stmt_end` is the end of the
+    /// statement just lowered): a reference that is never used again no
+    /// longer holds its referent, so a later move or `deinit` of the
+    /// referent is fine (`let r = &x; take(x)` with `r` unused or already
+    /// read). Source order is execution order within one block — a loop
+    /// that uses `r` is a single statement of this block — and `r` cannot
+    /// be mentioned outside the block that declares it.
+    ///
+    /// Kept alive while another live borrow derives from it (`let q =
+    /// &r.f`), or when a closure captures it (the closure may run later).
+    pub fn end_dead_ref_bindings(&mut self, stmt_end: &Span) {
+        if self.is_terminated() {
+            return;
+        }
+        let Some(frame) = self.scope_stack.last() else {
+            return;
+        };
+        let here: Vec<ValueId> = frame
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        let live_borrows: Vec<ValueId> = self
+            .scope_stack
+            .iter()
+            .flat_map(|f| f.entries.iter())
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        for v in here {
+            let Some(&local) = self.ref_binding_vals.get(&v) else {
+                continue;
+            };
+            if !self.mentions_end_by(local, stmt_end)
+                || self.captured_by_closure(local)
+                || live_borrows
+                    .iter()
+                    .any(|&b| b != v && self.borrow_derives_from(b, v))
+            {
+                continue;
+            }
+            self.ref_binding_vals.remove(&v);
+            self.ref_results.remove(&v);
+            self.ref_binding_remaining.remove(&local);
+            self.emit_end_borrow(v);
+        }
+    }
+
+    /// Every mention of `local` ends by `end` (same file).
+    fn mentions_end_by(&self, local: HirLocalId, end: &Span) -> bool {
+        self.hir.exprs.iter().all(|(_, e)| match e {
+            HirExpr::Local(l, span) if *l == local => {
+                span.file_id == end.file_id && span.end <= end.end
+            },
+            _ => true,
+        })
+    }
+
+    /// Some closure in this body captures `local`.
+    fn captured_by_closure(&self, local: HirLocalId) -> bool {
+        self.hir.exprs.iter().any(|(id, e)| {
+            matches!(e, HirExpr::Closure { .. })
+                && self.captures.get(id).iter().any(|cp| cp.key.root == local)
+        })
+    }
+
+    /// Whether `b`'s borrow-source chain passes through `root`.
+    fn borrow_derives_from(&self, b: ValueId, root: ValueId) -> bool {
+        let mut cur = b;
+        for _ in 0..64 {
+            match self.body.value(cur).borrow_source {
+                Some(src) if src == root => return true,
+                Some(src) if src != cur => cur = src,
+                _ => return false,
+            }
+        }
+        false
+    }
+
     /// Count a read of a ref-binding local (once per HIR expr — desugar
     /// re-lowering must not double-decrement). Drives the terminator
     /// policy: remaining > 0 at an inside-fn terminator = E497.

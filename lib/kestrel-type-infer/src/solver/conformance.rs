@@ -260,14 +260,8 @@ pub(super) fn solve_conforms(
                         // of `100..=200` against `RandomBounds[Int16]`),
                         // before literal defaulting can pick Int64.
                         kestrel_entail::Tri::Unknown => {
-                            if unify_bound_protocol_args(
-                                ctx,
-                                ty,
-                                resolved,
-                                protocol,
-                                &protocol_args,
-                            )
-                            .is_err()
+                            if unify_bound_protocol_args(ctx, resolved, protocol, &protocol_args)
+                                .is_err()
                             {
                                 if poison_ty_on_failure {
                                     ctx.poison(ty);
@@ -300,7 +294,7 @@ pub(super) fn solve_conforms(
                 // Unification also drives inference: an unresolved literal
                 // arg (the element of `100..=200`) gets pinned by the bound
                 // before literal defaulting runs.
-                match unify_bound_protocol_args(ctx, ty, resolved, protocol, &protocol_args) {
+                match unify_bound_protocol_args(ctx, resolved, protocol, &protocol_args) {
                     Ok(BoundArgs::Decided) => SolveResult::Solved,
                     Ok(BoundArgs::Undecided) => SolveResult::Deferred(Constraint::Conforms {
                         ty,
@@ -397,8 +391,8 @@ pub(super) fn base_spine(ctx: &InferCtx<'_>, base: TyVar, depth: u32) -> Option<
     }
 }
 
-/// Unify a parameterized bound's protocol args (recorded via
-/// `record_witness_args` at where-clause emission) with the declared
+/// Unify an obligation's protocol args (`Constraint::Conforms::protocol_args`)
+/// with the declared
 /// conformance's protocol args instantiated at the concrete receiver.
 ///
 /// `extend Foo[T]: P[T]` at receiver `Foo[X]` declares `P[X]`; a bound
@@ -413,47 +407,22 @@ pub(super) fn base_spine(ctx: &InferCtx<'_>, base: TyVar, depth: u32) -> Option<
 /// `Int8.random(in: 3..=9)` infers `ClosedRange[Int8]` instead of letting
 /// the literal default to `Int64`.
 ///
-/// Conservative by design: no recorded args, non-nominal receivers,
+/// Conservative by design: no args, non-nominal receivers,
 /// arg-less conformance declarations, or genuinely ambiguous multi-source
 /// matches all permit (returning `Ok`) — only a definite arg conflict
 /// (including "no declared instantiation is compatible with the bound")
 /// rejects.
 pub(super) fn unify_bound_protocol_args(
     ctx: &mut InferCtx<'_>,
-    ty: TyVar,
     resolved: TyVar,
     protocol: Entity,
     explicit_args: &[TyVar],
 ) -> Result<BoundArgs, ()> {
-    // The obligation's own args win; otherwise the bound args recorded for
-    // this (container, protocol) pair. The record is
-    // keyed by the canonical TyVar at emission time; redirects may have moved
-    // since, so fall back to an unambiguous canonical scan (mirrors the
-    // consumer in `solve_associated`).
-    let canonical = ctx.resolve(ty);
-    let want_args = (!explicit_args.is_empty())
-        .then(|| explicit_args.to_vec())
-        .or_else(|| {
-            ctx.witness_protocol_args
-                .get(&(canonical, protocol))
-                .cloned()
-        })
-        .or_else(|| {
-            let mut iter = ctx
-                .witness_protocol_args
-                .iter()
-                .filter(|((k_tv, k_proto), _)| {
-                    *k_proto == protocol && ctx.resolve(*k_tv) == canonical
-                });
-            let first = iter.next()?;
-            if iter.next().is_some() {
-                return None; // Ambiguous — permit rather than guess.
-            }
-            Some(first.1.clone())
-        });
-    let Some(want_args) = want_args else {
-        return Ok(BoundArgs::Decided);
-    };
+    // The obligation carries the protocol args it requires (a call through
+    // a generic protocol member, or a `where T: P[Args]` bound — see
+    // `InferCtx::bound_typearg`); an obligation without args judges the
+    // protocol alone.
+    let want_args = explicit_args.to_vec();
     if want_args.is_empty() {
         return Ok(BoundArgs::Decided);
     }

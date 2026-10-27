@@ -1081,6 +1081,30 @@ impl<'a> InferCtx<'a> {
         });
     }
 
+    /// A `where T: P[Args]` bound: the TYPE-ARGUMENT conformance obligation
+    /// carrying its protocol args (checked against the declared
+    /// instantiations), plus the args recorded for `solve_associated`'s
+    /// projection through `extend Concrete: P[FreeParams]`.
+    pub fn bound_typearg(
+        &mut self,
+        ty: TyVar,
+        protocol: Entity,
+        protocol_args: Vec<TyVar>,
+        span: Span,
+    ) {
+        self.emit(Constraint::Conforms {
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure: false,
+            origin: crate::constraint::ConformsOrigin::TypeArg,
+            protocol_args: protocol_args.clone(),
+        });
+        if !protocol_args.is_empty() {
+            self.record_witness_args(ty, protocol, protocol_args);
+        }
+    }
+
     /// Conforms variant for TYPE-ARGUMENT obligations (where-clause bounds,
     /// formation wellformedness, alias bounds): a ref judged here is the
     /// ref ITSELF, never its pointee — see `ConformsOrigin`.

@@ -1504,7 +1504,13 @@ fn gen_struct_init(
     // the post-mono containment ICE (Inv-3b). De-dup in `solve_conforms`
     // keeps this from double-reporting with the call-site/annotation checks.
     // See BUG-04 (Copyable mono-substitution gap).
-    emit_copyable_wellformedness(ctx, struct_entity, &fresh_args, span);
+    emit_formation_wellformedness(
+        ctx,
+        struct_entity,
+        &fresh_args,
+        span,
+        FormationScope::Written,
+    );
 
     // Substitution map: struct type params → fresh TyVars.
     // Used to instantiate init param/field types with the right type vars.
@@ -2681,14 +2687,11 @@ fn emit_where_clause_constraints_with_subs(
                 ) {
                     // Call-site where-clause obligation: a TYPE-ARGUMENT
                     // bound (success instantiates witnesses at tv).
-                    ctx.conforms_typearg(tv, protocol, site_span.clone());
                     let arg_tvs: Vec<TyVar> = protocol_type_args
                         .iter()
                         .map(|hir_ty| lower_hir_ty_with_subs(ctx, hir_ty, subs))
                         .collect();
-                    if !arg_tvs.is_empty() {
-                        ctx.record_witness_args(tv, protocol, arg_tvs);
-                    }
+                    ctx.bound_typearg(tv, protocol, arg_tvs, site_span.clone());
                 }
             },
             crate::resolve::WhereClause::Equality { subject, rhs } => {
@@ -2730,28 +2733,47 @@ fn emit_where_clause_constraints_with_subs(
 /// larger change. The helper only pushes `conforms` constraints (it never
 /// re-enters `lower_hir_ty`), so it can't recurse — nested args get their own
 /// well-formedness from the recursive lowering of `arg_tvs` above.
-pub(crate) fn emit_copyable_wellformedness(
+/// Which builtin bounds a type-formation site checks (the single place the
+/// formation rule lives; see `emit_formation_wellformedness`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FormationScope {
+    /// A type the program forms explicitly — an annotation, parameter,
+    /// return, field, literal default or constructor: Copyable, Cloneable
+    /// and Static bounds.
+    Written,
+    /// A type inference forms by instantiating a member's signature
+    /// (`collect() -> Array[Item]`): the Static bound only — the
+    /// ref-containment soundness line. Copyable/Cloneable there would newly
+    /// flag code the move checker already governs.
+    Inferred,
+}
+
+/// Formation well-formedness: when `entity[arg_tvs]` is formed, each arg
+/// must satisfy the (implicit or explicit) builtin bounds `scope` covers on
+/// its type parameter, as a TYPE-ARGUMENT conformance obligation.
+pub(crate) fn emit_formation_wellformedness(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
     arg_tvs: &[TyVar],
     span: &Span,
+    scope: FormationScope,
 ) {
-    let copyable = ctx.query_ctx.query(ResolveBuiltin {
-        builtin: Builtin::Copyable,
-        root: ctx.root,
-    });
-    let cloneable = ctx.query_ctx.query(ResolveBuiltin {
-        builtin: Builtin::Cloneable,
-        root: ctx.root,
-    });
-    // Static rides the same formation-site wellformedness: an annotation
-    // like `-> Wrap[NS]` must check the (implicit or explicit) Static
-    // bounds against the formed args, like the Copyable wf check.
-    let static_proto = ctx.query_ctx.query(ResolveBuiltin {
-        builtin: Builtin::Static,
-        root: ctx.root,
-    });
-    if copyable.is_none() && cloneable.is_none() && static_proto.is_none() {
+    if arg_tvs.is_empty() {
+        return;
+    }
+    let builtin = |b| {
+        ctx.query_ctx.query(ResolveBuiltin {
+            builtin: b,
+            root: ctx.root,
+        })
+    };
+    let mut checked: Vec<Entity> = Vec::new();
+    checked.extend(builtin(Builtin::Static));
+    if scope == FormationScope::Written {
+        checked.extend(builtin(Builtin::Copyable));
+        checked.extend(builtin(Builtin::Cloneable));
+    }
+    if checked.is_empty() {
         return;
     }
     // Positional map from the type's declared params to the formed args.
@@ -2778,17 +2800,13 @@ pub(crate) fn emit_copyable_wellformedness(
         let Some(param) = subject.as_param() else {
             continue;
         };
-        if Some(protocol) != copyable
-            && Some(protocol) != cloneable
-            && Some(protocol) != static_proto
-        {
+        if !checked.contains(&protocol) {
             continue;
         }
         let Some(pos) = params.iter().position(|p| *p == param) else {
             continue;
         };
         if let Some(&tv) = arg_tvs.get(pos) {
-            // Formation wellformedness: a TYPE-ARGUMENT bound.
             ctx.conforms_typearg(tv, protocol, span.clone());
         }
     }
@@ -3091,7 +3109,7 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .iter()
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
-            emit_copyable_wellformedness(ctx, *entity, &arg_tvs, span);
+            emit_formation_wellformedness(ctx, *entity, &arg_tvs, span, FormationScope::Written);
             ctx.struct_ty(*entity, arg_tvs)
         },
         HirTy::Enum { entity, args, span } => {
@@ -3099,7 +3117,7 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .iter()
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
-            emit_copyable_wellformedness(ctx, *entity, &arg_tvs, span);
+            emit_formation_wellformedness(ctx, *entity, &arg_tvs, span, FormationScope::Written);
             ctx.enum_ty(*entity, arg_tvs)
         },
         HirTy::Protocol { entity, args, .. } => {

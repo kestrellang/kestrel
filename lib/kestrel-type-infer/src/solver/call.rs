@@ -437,7 +437,6 @@ pub(super) fn emit_resolved_call(
                     SubjectRoot::Subs(&subs),
                     crate::generate::ProjectionPolicy::Reduce(&span),
                 ) {
-                    ctx.conforms_typearg(tv, protocol, span.clone());
                     // Cache the protocol args so solve_associated can substitute
                     // an extension's free TypeParams when projecting through
                     // `extend ConcreteType: Proto[FreeParams]`.
@@ -445,9 +444,7 @@ pub(super) fn emit_resolved_call(
                         .iter()
                         .map(|hir_ty| lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs))
                         .collect();
-                    if !arg_tvs.is_empty() {
-                        ctx.record_witness_args(tv, protocol, arg_tvs);
-                    }
+                    ctx.bound_typearg(tv, protocol, arg_tvs, span.clone());
                 }
             },
             crate::resolve::WhereClause::Equality { subject, rhs } => {

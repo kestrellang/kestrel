@@ -130,6 +130,9 @@ impl OssaBodyCtx<'_, '_> {
         if let Some((mark, result)) = temporaries {
             self.drop_statement_temporaries(mark, result);
         }
+        // A named reference never mentioned again stops holding its referent.
+        let stmt_end = stmt_span(&self.hir.stmts[stmt_id]);
+        self.end_dead_ref_bindings(&stmt_end);
 
         self.current_span = prev_span;
     }
