@@ -3,6 +3,7 @@ pub mod collect;
 mod entail;
 pub mod expand;
 pub mod mangle;
+mod ty_sites;
 pub mod types;
 pub mod verify;
 pub mod witness;
@@ -905,13 +906,18 @@ fn resolve_types_and_layouts(
     IndexMap<MonoTypeKey, MonoStruct>,
     IndexMap<MonoTypeKey, MonoEnum>,
 ) {
-    // Collect all concrete Named types from monomorphized bodies
+    // Collect every concrete Named type each function mentions — signature
+    // included, so a bodyless `@extern` still seeds `Pointer[Tm]`. Same site
+    // list `verify_mono` checks (`ty_sites`), so anything it can flag is seeded.
     let mut concrete_types: IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind> = IndexMap::new();
 
     for body_result in mono_bodies {
-        if let Some(body) = &body_result.body {
-            collect_named_types(arena, body, &mut concrete_types, structs, enums);
-        }
+        ty_sites::for_each_fn_ty(
+            &body_result.params,
+            body_result.ret,
+            body_result.body.as_ref(),
+            |ty, _| collect_named_type_from_ty(arena, ty, &mut concrete_types, structs, enums),
+        );
     }
 
     // Compute layouts for concrete types (fixed-point loop)
@@ -1274,63 +1280,9 @@ enum ConcreteTypeKind {
     Enum(Entity),
 }
 
-/// Walk an OssaBody and collect all concrete Named types.
-fn collect_named_types(
-    arena: &TyArena,
-    body: &OssaBody,
-    out: &mut IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind>,
-    structs: &IndexMap<Entity, StructDef>,
-    enums: &IndexMap<Entity, EnumDef>,
-) {
-    // Walk value types
-    for value in &body.values {
-        collect_named_type_from_ty(arena, value.ty, out, structs, enums);
-    }
-    // Walk block param types
-    for block in &body.blocks {
-        for param in &block.params {
-            collect_named_type_from_ty(arena, param.ty, out, structs, enums);
-        }
-    }
-    // Walk instruction types (Struct.ty, Enum.enum_ty, Array.element_ty, Literal immediates)
-    for block in &body.blocks {
-        for inst in &block.insts {
-            match &inst.kind {
-                InstKind::Struct { ty, .. } => {
-                    collect_named_type_from_ty(arena, *ty, out, structs, enums);
-                },
-                InstKind::Enum { enum_ty, .. } => {
-                    collect_named_type_from_ty(arena, *enum_ty, out, structs, enums);
-                },
-                InstKind::Array { element_ty, .. } => {
-                    collect_named_type_from_ty(arena, *element_ty, out, structs, enums);
-                },
-                InstKind::Literal { value, .. } => match &value.kind {
-                    ImmediateKind::SizeOf(ty)
-                    | ImmediateKind::AlignOf(ty)
-                    | ImmediateKind::NullPtr(ty) => {
-                        collect_named_type_from_ty(arena, *ty, out, structs, enums);
-                    },
-                    _ => {},
-                },
-                // Op type operands. Mirrors `substitute_op_type` via the one
-                // canonical variant list in `op::op_ty_variants!`. `SizeOf`/
-                // `AlignOf` are the ops whose type genuinely escapes — nothing
-                // else in the body mentions it — but seeding all ten costs
-                // nothing and keeps the two walks in lockstep by construction.
-                InstKind::Op1 { op, .. } | InstKind::Op2 { op, .. } | InstKind::Op3 { op, .. } => {
-                    if let Some(ty) = crate::op::op_type(op) {
-                        collect_named_type_from_ty(arena, ty, out, structs, enums);
-                    }
-                },
-                // CopyAddr/Take/BeginBorrowAddr/BeginMutBorrowAddr/DestroyAddr/FieldAddr/Uninit
-                // carry ty but those are address types (Pointer), not Named
-                _ => {},
-            }
-        }
-    }
-}
-
+/// Seeds every struct/enum instantiation nested anywhere in `ty` (type args,
+/// pointees, tuple elements, function-type params/ret) — the same nodes
+/// `verify_mono` checks, via `ty_sites::for_each_ty_node`.
 fn collect_named_type_from_ty(
     arena: &TyArena,
     ty: TyId,
@@ -1338,36 +1290,20 @@ fn collect_named_type_from_ty(
     structs: &IndexMap<Entity, StructDef>,
     enums: &IndexMap<Entity, EnumDef>,
 ) {
-    match arena.get(ty) {
-        MirTy::Named { entity, type_args } => {
-            let entity = *entity;
-            let type_args = type_args.clone();
-            let key = (entity, type_args.clone());
-            if !out.contains_key(&key) {
-                if structs.contains_key(&entity) {
-                    out.insert(key, ConcreteTypeKind::Struct(entity));
-                } else if enums.contains_key(&entity) {
-                    out.insert(key, ConcreteTypeKind::Enum(entity));
-                }
-            }
-            // Recurse into type args
-            for &arg in &type_args {
-                collect_named_type_from_ty(arena, arg, out, structs, enums);
-            }
-        },
-        MirTy::Pointer(inner) => {
-            collect_named_type_from_ty(arena, *inner, out, structs, enums);
-        },
-        MirTy::Ref { pointee, .. } => {
-            collect_named_type_from_ty(arena, *pointee, out, structs, enums);
-        },
-        MirTy::Tuple(elems) => {
-            for &elem in elems {
-                collect_named_type_from_ty(arena, elem, out, structs, enums);
-            }
-        },
-        _ => {},
-    }
+    ty_sites::for_each_ty_node(arena, ty, &mut |_, node| {
+        let MirTy::Named { entity, type_args } = node else {
+            return;
+        };
+        let key = (*entity, type_args.clone());
+        if out.contains_key(&key) {
+            return;
+        }
+        if structs.contains_key(entity) {
+            out.insert(key, ConcreteTypeKind::Struct(*entity));
+        } else if enums.contains_key(entity) {
+            out.insert(key, ConcreteTypeKind::Enum(*entity));
+        }
+    });
 }
 
 fn build_type_subst(

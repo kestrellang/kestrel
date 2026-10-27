@@ -4,6 +4,7 @@ use kestrel_span::Span;
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
 use crate::inst::{CalleeSite, InstKind};
+use crate::mono::ty_sites::{for_each_fn_ty, for_each_ty_node, TySite};
 use crate::mono::types::{MonoFunction, MonoModule};
 use crate::ty::MirTy;
 use crate::{BlockId, CopyBehavior, TyId};
@@ -255,70 +256,19 @@ fn verify_function(
         return;
     }
 
-    // Check param types
-    for (pi, param) in func.params.iter().enumerate() {
-        check_type_concrete(
-            module,
-            fi,
-            None,
-            None,
-            None,
-            param.ty,
-            errors,
-            &format!("param {pi}"),
-        );
-    }
-    check_type_concrete(
-        module,
-        fi,
-        None,
-        None,
-        None,
-        func.ret,
-        errors,
-        "return type",
-    );
+    // Every type the function mentions must be concrete and laid out. The
+    // site list is shared with layout seeding (`ty_sites`), so the verifier can
+    // only flag a type that seeding also saw — a miss here is a real gap.
+    for_each_fn_ty(&func.params, func.ret, func.body.as_ref(), |ty, site| {
+        check_type_concrete(module, fi, site, ty, errors);
+    });
 
     let Some(body) = &func.body else { return };
-
-    // Check value types — inherit the value's defining span (T1: interned types
-    // can't carry a span, so the best location is where the value was defined).
-    for (vi, value) in body.values.iter().enumerate() {
-        check_type_concrete(
-            module,
-            fi,
-            None,
-            None,
-            value.span.as_ref(),
-            value.ty,
-            errors,
-            &format!("value {vi}"),
-        );
-    }
 
     // Walk blocks
     let func_count = module.functions.len();
     for (bi, block) in body.blocks.iter().enumerate() {
         let block_id = BlockId::new(bi);
-
-        // Check block param types — inherit the param value's defining span.
-        for (pi, param) in block.params.iter().enumerate() {
-            let pspan = body
-                .values
-                .get(param.value.index())
-                .and_then(|vd| vd.span.as_ref());
-            check_type_concrete(
-                module,
-                fi,
-                Some(block_id),
-                None,
-                pspan,
-                param.ty,
-                errors,
-                &format!("block {bi} param {pi}"),
-            );
-        }
-
         for (ii, inst) in block.insts.iter().enumerate() {
             let inst_span = inst.span.as_ref();
             for (site, callee) in inst.kind.callees() {
@@ -326,121 +276,17 @@ fn verify_function(
                     module, fi, block_id, ii, inst_span, site, callee, func_count, errors,
                 );
             }
-            match &inst.kind {
-                // Check FunctionRef is rewritten to MonoFunctionRef
-                InstKind::Literal { value, .. } => {
-                    check_literal(
-                        module,
-                        fi,
-                        block_id,
-                        ii,
-                        inst_span,
-                        &value.kind,
-                        func_count,
-                        errors,
-                    );
-                },
-
-                // Walk InstKind variants with embedded TyId for concreteness
-                InstKind::Struct { ty, .. } => {
-                    check_type_concrete(
-                        module,
-                        fi,
-                        Some(block_id),
-                        Some(ii),
-                        inst_span,
-                        *ty,
-                        errors,
-                        "Struct type",
-                    );
-                },
-                InstKind::Enum { enum_ty, .. } => {
-                    check_type_concrete(
-                        module,
-                        fi,
-                        Some(block_id),
-                        Some(ii),
-                        inst_span,
-                        *enum_ty,
-                        errors,
-                        "Enum type",
-                    );
-                },
-                InstKind::Array { element_ty, .. } => {
-                    check_type_concrete(
-                        module,
-                        fi,
-                        Some(block_id),
-                        Some(ii),
-                        inst_span,
-                        *element_ty,
-                        errors,
-                        "Array element type",
-                    );
-                },
-                InstKind::CopyAddr { ty, .. }
-                | InstKind::Take { ty, .. }
-                | InstKind::BeginBorrowAddr { ty, .. }
-                | InstKind::BeginMutBorrowAddr { ty, .. }
-                | InstKind::DestroyAddr { ty, .. } => {
-                    check_type_concrete(
-                        module,
-                        fi,
-                        Some(block_id),
-                        Some(ii),
-                        inst_span,
-                        *ty,
-                        errors,
-                        "address type",
-                    );
-                },
-                InstKind::FieldAddr { ty, .. } => {
-                    check_type_concrete(
-                        module,
-                        fi,
-                        Some(block_id),
-                        Some(ii),
-                        inst_span,
-                        *ty,
-                        errors,
-                        "FieldAddr type",
-                    );
-                },
-                InstKind::Uninit { ty, .. } => {
-                    check_type_concrete(
-                        module,
-                        fi,
-                        Some(block_id),
-                        Some(ii),
-                        inst_span,
-                        *ty,
-                        errors,
-                        "Uninit type",
-                    );
-                },
-
-                // Op type operands. verify.rs used to have its own copy of the
-                // op-half gap (this fell through the `_` arm below), so a
-                // `SizeOf(GhostG[Int64])` naming a type absent from the module
-                // was never checked. Shares the one canonical variant list with
-                // `mono::substitute_op_type` and `mono::collect_named_types`.
-                InstKind::Op1 { op, .. } | InstKind::Op2 { op, .. } | InstKind::Op3 { op, .. } => {
-                    if let Some(ty) = crate::op::op_type(op) {
-                        check_type_concrete(
-                            module,
-                            fi,
-                            Some(block_id),
-                            Some(ii),
-                            inst_span,
-                            ty,
-                            errors,
-                            "Op type",
-                        );
-                    }
-                },
-
-                // All other instructions: no additional mono verification needed
-                _ => {},
+            // Check FunctionRef is rewritten to MonoFunctionRef
+            if let InstKind::Literal { value, .. } = &inst.kind {
+                check_literal(
+                    fi,
+                    block_id,
+                    ii,
+                    inst_span,
+                    &value.kind,
+                    func_count,
+                    errors,
+                );
             }
         }
     }
@@ -593,9 +439,9 @@ fn describe_mono_ty(module: &MonoModule, ty: TyId) -> String {
     }
 }
 
-/// Check literal immediates for unresolved FunctionRef and type concreteness.
+/// Check literal immediates for unresolved FunctionRef. (Their type operands
+/// are checked with every other type site, via `ty_sites`.)
 fn check_literal(
-    module: &MonoModule,
     fi: usize,
     block: BlockId,
     ii: usize,
@@ -631,18 +477,6 @@ fn check_literal(
                 });
             }
         },
-        ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) | ImmediateKind::NullPtr(ty) => {
-            check_type_concrete(
-                module,
-                fi,
-                Some(block),
-                Some(ii),
-                span,
-                *ty,
-                errors,
-                "immediate type",
-            );
-        },
         _ => {},
     }
 }
@@ -650,90 +484,46 @@ fn check_literal(
 fn check_type_concrete(
     module: &MonoModule,
     fi: usize,
-    block: Option<BlockId>,
-    inst: Option<usize>,
-    span: Option<&Span>,
+    site: TySite<'_>,
     ty: TyId,
     errors: &mut Vec<MonoVerifyError>,
-    context: &str,
 ) {
-    match module.ty_arena.get(ty) {
-        MirTy::TypeParam(e) => {
-            errors.push(MonoVerifyError {
-                user_facing: false,
-                func_idx: fi,
-                block,
-                inst,
-                message: format!("TypeParam({e:?}) in {context}"),
-                span: span.cloned(),
-            });
-        },
+    let context = site.kind;
+    let mut report = |message: String| {
+        errors.push(MonoVerifyError {
+            user_facing: false,
+            func_idx: fi,
+            block: site.block,
+            inst: site.inst,
+            message,
+            span: site.span.cloned(),
+        });
+    };
+    for_each_ty_node(&module.ty_arena, ty, &mut |_, node| match node {
+        MirTy::TypeParam(e) => report(format!("TypeParam({e:?}) in {context}")),
         MirTy::AssociatedProjection { .. } => {
-            errors.push(MonoVerifyError {
-                user_facing: false,
-                func_idx: fi,
-                block,
-                inst,
-                message: format!("AssociatedProjection in {context}"),
-                span: span.cloned(),
-            });
+            report(format!("AssociatedProjection in {context}"))
         },
-        MirTy::Pointer(inner) => {
-            check_type_concrete(module, fi, block, inst, span, *inner, errors, context);
-        },
-        MirTy::Tuple(elems) => {
-            for &elem in elems {
-                check_type_concrete(module, fi, block, inst, span, elem, errors, context);
-            }
-        },
+        // The real G2 failure mode is ABSENCE from the mono maps, not
+        // presence with a null layout: `MonoStruct`/`MonoEnum` are only
+        // inserted inside `if all_resolved`, one line after `layout =
+        // Some(..)`, so a `layout.is_none()` check would be inert by
+        // construction. A `MirTy::Named` is always a genuine user
+        // struct/enum — every primitive has its own `MirTy` variant (see
+        // `passes::layout::primitive_size_and_align`) — so a function naming
+        // one the module never laid out means codegen will fall back to a
+        // pointer-sized scalar and silently mis-size the value.
         MirTy::Named { entity, type_args } => {
-            let entity = *entity;
-            let type_args = type_args.clone();
-            for &arg in &type_args {
-                check_type_concrete(module, fi, block, inst, span, arg, errors, context);
-            }
-            // The real G2 failure mode is ABSENCE from the mono maps, not
-            // presence with a null layout: `MonoStruct`/`MonoEnum` are only
-            // inserted inside `if all_resolved`, one line after `layout =
-            // Some(..)`, so the `layout.is_none()` checks in `verify_mono` are
-            // inert by construction. A `MirTy::Named` is always a genuine user
-            // struct/enum — every primitive has its own `MirTy` variant (see
-            // `passes::layout::primitive_size_and_align`) — so a body naming one
-            // the module never laid out means codegen will fall back to a
-            // pointer-sized scalar and silently mis-size the value.
-            let key = (entity, type_args.clone());
+            let key = (*entity, type_args.clone());
             if !module.structs.contains_key(&key) && !module.enums.contains_key(&key) {
-                errors.push(MonoVerifyError {
-                    user_facing: false,
-                    func_idx: fi,
-                    block,
-                    inst,
-                    message: format!(
-                        "Named({entity:?}, {type_args:?}) in {context} has no MonoStruct/MonoEnum \
-                         — layout would silently fall back to a pointer-sized scalar"
-                    ),
-                    span: span.cloned(),
-                });
+                report(format!(
+                    "Named({entity:?}, {type_args:?}) in {context} has no MonoStruct/MonoEnum \
+                     — layout would silently fall back to a pointer-sized scalar"
+                ));
             }
-        },
-        MirTy::FuncThin { params, ret }
-        | MirTy::FuncThick {
-            params,
-            ret,
-            kind: _,
-        } => {
-            for (p, _) in params {
-                check_type_concrete(module, fi, block, inst, span, *p, errors, context);
-            }
-            check_type_concrete(module, fi, block, inst, span, *ret, errors, context);
-        },
-        // A `Ref{TypeParam}` must not hide post-mono (stage 2b: refs appear
-        // as payload/field/arg types, so the wrapper can carry params).
-        MirTy::Ref { pointee, .. } => {
-            check_type_concrete(module, fi, block, inst, span, *pointee, errors, context);
         },
         _ => {},
-    }
+    });
 }
 
 #[cfg(test)]
