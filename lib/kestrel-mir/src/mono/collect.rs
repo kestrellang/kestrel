@@ -937,6 +937,36 @@ pub(crate) fn normalize_direct_arity(type_args: &mut Vec<TyId>, type_param_count
     }
 }
 
+/// Instantiation type args nested deeper than this are treated as runaway
+/// polymorphic recursion. It must stay above any type a program writes out
+/// (a 300-deep `Array[Array[...]]` instantiates `Array.init` at that depth),
+/// so it is generous; long symbol names are hashed, so reaching it is cheap.
+const MAX_INSTANTIATION_DEPTH: usize = 512;
+
+/// Nesting depth of `ty`, counting only up to `cap + 1` (enough to know it
+/// is over the limit without walking a huge type).
+fn ty_depth(arena: &TyArena, ty: TyId, cap: usize) -> usize {
+    if cap == 0 {
+        return 1;
+    }
+    let children: Vec<TyId> = match arena.get(ty) {
+        MirTy::Named { type_args, .. } => type_args.clone(),
+        MirTy::Tuple(elems) => elems.clone(),
+        MirTy::Pointer(inner) => vec![*inner],
+        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret, .. } => params
+            .iter()
+            .map(|(t, _)| *t)
+            .chain(std::iter::once(*ret))
+            .collect(),
+        _ => return 1,
+    };
+    1 + children
+        .into_iter()
+        .map(|c| ty_depth(arena, c, cap - 1))
+        .max()
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1430,34 +1460,4 @@ mod tests {
                 .contains(&InstantiationKey::concrete(impl_func_entity))
         );
     }
-}
-
-/// Instantiation type args nested deeper than this are treated as runaway
-/// polymorphic recursion. It must stay above any type a program writes out
-/// (a 300-deep `Array[Array[...]]` instantiates `Array.init` at that depth),
-/// so it is generous; long symbol names are hashed, so reaching it is cheap.
-const MAX_INSTANTIATION_DEPTH: usize = 512;
-
-/// Nesting depth of `ty`, counting only up to `cap + 1` (enough to know it
-/// is over the limit without walking a huge type).
-fn ty_depth(arena: &TyArena, ty: TyId, cap: usize) -> usize {
-    if cap == 0 {
-        return 1;
-    }
-    let children: Vec<TyId> = match arena.get(ty) {
-        MirTy::Named { type_args, .. } => type_args.clone(),
-        MirTy::Tuple(elems) => elems.clone(),
-        MirTy::Pointer(inner) => vec![*inner],
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret, .. } => params
-            .iter()
-            .map(|(t, _)| *t)
-            .chain(std::iter::once(*ret))
-            .collect(),
-        _ => return 1,
-    };
-    1 + children
-        .into_iter()
-        .map(|c| ty_depth(arena, c, cap - 1))
-        .max()
-        .unwrap_or(0)
 }

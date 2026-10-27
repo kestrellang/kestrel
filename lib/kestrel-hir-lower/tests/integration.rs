@@ -470,7 +470,7 @@ fn count_int_literal(hir: &HirBody, marker: i128) -> usize {
                 HirExpr::Literal {
                     value: HirLiteral::Integer(v),
                     ..
-                } if i128::from(*v) == marker
+                } if *v == marker
             )
         })
         .count()
