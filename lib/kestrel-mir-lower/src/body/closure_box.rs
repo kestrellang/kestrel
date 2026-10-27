@@ -84,7 +84,7 @@ pub(crate) struct BoxBinding {
 /// pick the wrong one here would already have failed E454/E458 in the stdlib.
 ///
 /// Pure and ECS-free on purpose — this is the part worth unit-testing.
-fn is_box_init_shape(c: &Callable) -> bool {
+pub(crate) fn is_box_init_shape(c: &Callable) -> bool {
     matches!(c.params.as_slice(), [p] if p.label.is_none() && p.is_consuming)
 }
 
@@ -205,7 +205,10 @@ impl OssaBodyCtx<'_, '_> {
     /// `MirTy::Pointer` is reached, returning `(wrappers outermost-first, raw
     /// pointer type)`. `RcBox[E]` → `std.memory.Pointer[RcBoxStorage[E]]` →
     /// `MirTy::Pointer(RcBoxStorage[E])`.
-    fn unwrap_handle_to_pointer(&mut self, handle_ty: TyId) -> Option<(Vec<TyId>, TyId)> {
+    pub(crate) fn unwrap_handle_to_pointer(
+        &mut self,
+        handle_ty: TyId,
+    ) -> Option<(Vec<TyId>, TyId)> {
         let mut wrappers = Vec::new();
         let mut cur = handle_ty;
         // Small bound: a handle is a thin wrapper, not a deep tower.
@@ -242,7 +245,7 @@ impl OssaBodyCtx<'_, '_> {
     /// peeled to a raw pointer), so a missing or duplicated requirement is a
     /// broken stdlib, never the legitimate "no box available" case. See
     /// [`exactly_one_box_member`].
-    fn find_box_member(
+    pub(crate) fn find_box_member(
         &mut self,
         entity: Entity,
         kind: NodeKind,

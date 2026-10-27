@@ -5,6 +5,7 @@
 //! lowering do not each reinterpret raw conformance syntax differently.
 
 pub mod existential;
+pub mod recursive_enum;
 pub mod sizedness;
 pub mod staticness;
 
@@ -12,6 +13,7 @@ pub use existential::{
     Dispatch, ExistentialLayout, Layout, RequirementDispatch, SelfConformance, bound_closure,
     is_requirement, reachable_protocols, self_conformance,
 };
+pub use recursive_enum::{IndirectCases, RecursiveCase, RecursiveCases, case_payload_types};
 pub use sizedness::{
     NominalSizedness, SizeRequirement, SizedLayer, Sizedness, TypeParamSizeRequirement,
     assoc_may_be_unsized, hir_type_is_sized, instance_is_sized, last_stored_field,
@@ -33,11 +35,10 @@ use kestrel_ast_builder::{
     WhereConstraint,
 };
 use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
-use kestrel_hecs::guard::OnDrop;
-use kestrel_hecs::{Entity, QueryContext, QueryFn};
+use kestrel_hecs::{CycleMode, Entity, QueryContext, QueryFn};
 use kestrel_hir::builtin::BuiltinKind;
 use kestrel_hir::{Builtin, HirTy};
-use kestrel_hir_lower::{LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
+use kestrel_hir_lower::{LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
 use kestrel_name_res::{
     ConformingProtocolInstantiations, ConformingProtocols, EntityBuiltin, ResolveBuiltin,
     ResolveTypePath, TypeResolution,
@@ -306,7 +307,7 @@ impl QueryFn for DeclaresConformanceTo {
 // (solver, resolve, where_clauses, mir-lower, analyze) keep their
 // `kestrel_semantics::` paths. Only kestrel-mir imports kestrel-copy-fold
 // directly (it has no dependency path to this crate).
-pub use kestrel_copy_fold::{CopyRequirement, CopySemantics};
+pub use kestrel_copy_fold::{ConditionalCopy, CopyRequirement, CopySemantics};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CopySemanticsReason {
@@ -431,13 +432,13 @@ pub struct ConditionalCopyableParams {
 }
 
 impl QueryFn for ConditionalCopyableParams {
-    type Output = Vec<usize>;
+    type Output = ConditionalCopy;
 
     fn describe(&self) -> String {
         format!("ConditionalCopyableParams({:?})", self.entity)
     }
 
-    fn execute(&self, ctx: &QueryContext<'_>) -> Vec<usize> {
+    fn execute(&self, ctx: &QueryContext<'_>) -> ConditionalCopy {
         // Only a `not Copyable`-base type can be *conditionally* Copyable.
         if ctx
             .query(NominalCopySemantics {
@@ -447,13 +448,13 @@ impl QueryFn for ConditionalCopyableParams {
             .semantics
             != CopySemantics::NotCopyable
         {
-            return Vec::new();
+            return ConditionalCopy::default();
         }
         let Some(copyable) = ctx.query(ResolveBuiltin {
             builtin: Builtin::Copyable,
             root: self.root,
         }) else {
-            return Vec::new();
+            return ConditionalCopy::default();
         };
 
         // Find an extension adding a Copyable(-refining) conformance.
@@ -480,12 +481,41 @@ impl QueryFn for ConditionalCopyableParams {
             refines_cache.borrow_mut().insert(proto, refines);
             refines
         };
-        let Some(ext) = insts
+        // A Cloneable(-refining) grant only ever yields Cloneable instances
+        // (`extend OwnedBox[T]: Cloneable where T: Cloneable` — a bit-copy
+        // of the box would double-own its block). Prefer a Copyable grant
+        // when both exist (`Optional` has `Copyable where T: Copyable` and
+        // `Cloneable where T: Copyable`).
+        let cloneable = ctx.query(ResolveBuiltin {
+            builtin: Builtin::Cloneable,
+            root: self.root,
+        });
+        let is_clone_only = |proto: Entity| {
+            cloneable.is_some_and(|cloneable| {
+                proto == cloneable
+                    || ctx.query(ProtocolRefines {
+                        protocol: proto,
+                        base: cloneable,
+                        root: self.root,
+                    })
+            })
+        };
+        // Only an extension carries a where-clause; an inherited entry's
+        // source is the refining protocol (`Copyable` via `Cloneable`).
+        let grants: Vec<(Entity, bool)> = insts
             .iter()
-            .find(|(proto, source, _)| *source != self.entity && refines_copyable(*proto))
-            .map(|(_, source, _)| *source)
+            .filter(|(proto, source, _)| {
+                ctx.get::<NodeKind>(*source) == Some(&NodeKind::Extension)
+                    && refines_copyable(*proto)
+            })
+            .map(|(proto, source, _)| (*source, is_clone_only(*proto)))
+            .collect();
+        let Some(&(ext, clone_only)) = grants
+            .iter()
+            .find(|(_, clone_only)| !clone_only)
+            .or_else(|| grants.first())
         else {
-            return Vec::new();
+            return ConditionalCopy::default();
         };
 
         // Map the extension's Copyable where-clause bounds to target-arg
@@ -498,7 +528,7 @@ impl QueryFn for ConditionalCopyableParams {
             })
             .unwrap_or_default();
         let Some(wc) = ctx.get::<AstWhereClause>(ext) else {
-            return Vec::new();
+            return ConditionalCopy::default();
         };
         let mut positions = Vec::new();
         for constraint in &wc.0 {
@@ -525,7 +555,10 @@ impl QueryFn for ConditionalCopyableParams {
                 positions.push(idx);
             }
         }
-        positions
+        ConditionalCopy {
+            positions,
+            clone_only,
+        }
     }
 }
 
@@ -535,58 +568,26 @@ pub struct NominalCopySemantics {
     pub root: Entity,
 }
 
-// WARNING: side-channel state invisible to the query framework's dependency
-// tracker — memoized results that consulted it are not invalidated when it
-// changes. It exists only because the framework panics on re-entrant queries
-// (recursive types). Any future recursive query needs the same treatment, or
-// a framework-level cycle-recovery mechanism.
-thread_local! {
-    static COMPUTING_COPY_SEMANTICS: RefCell<Vec<(Entity, Entity)>> = const { RefCell::new(Vec::new()) };
-}
-
 impl QueryFn for NominalCopySemantics {
     type Output = CopySemanticsInfo;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> CopySemanticsInfo {
-        // The query framework panics on re-entry for the same key, so we
-        // can't rely on a thread_local check *inside* execute — by the
-        // time we'd see the cycle, the framework has already panicked.
-        // Callers guard against re-entry by consulting `computing_contains`
-        // before invoking the query (see `hir_type_copy_semantics`).
-        let key = (self.entity, self.root);
-        COMPUTING_COPY_SEMANTICS.with(|stack| stack.borrow_mut().push(key));
-        // The pop must survive an unwind: hosts catch ICEs per body and keep
-        // the thread (the test harness even reuses worker threads across
-        // `.ks` files), and a leaked entry makes `computing_contains` answer
-        // yes forever — i.e. this nominal reports `Copyable` for the rest of
-        // the process. `pop` is exact: the query framework panics on
-        // re-entering the same key, so `key` is on the stack at most once,
-        // and pushes nest strictly (F22).
-        let _guard = OnDrop::new(|| {
-            COMPUTING_COPY_SEMANTICS.with(|stack| {
-                stack.borrow_mut().pop();
-            });
-        });
         nominal_copy_semantics_impl(ctx, self.entity, self.root)
+    }
+
+    /// Recursive types (`indirect enum List { case Cons(Int64, List) }`,
+    /// `struct Tree { children: [Tree] }`) ask for their own semantics.
+    /// Start at the top of the lattice (Copyable — a self-reference cannot
+    /// make a type non-copyable on its own) and let the framework descend
+    /// Copyable → Cloneable → NotCopyable to the fixpoint.
+    fn cycle_mode(&self) -> CycleMode<CopySemanticsInfo> {
+        CycleMode::Fixpoint {
+            initial: CopySemanticsInfo::copyable(),
+        }
     }
 
     fn describe(&self) -> String {
         format!("NominalCopySemantics({:?})", self.entity)
-    }
-}
-
-fn computing_contains(entity: Entity, root: Entity) -> bool {
-    COMPUTING_COPY_SEMANTICS.with(|stack| stack.borrow().contains(&(entity, root)))
-}
-
-fn query_nominal_semantics(ctx: &QueryContext<'_>, entity: Entity, root: Entity) -> CopySemantics {
-    if computing_contains(entity, root) {
-        // Self-reference (direct or transitive). Fall back to Copyable —
-        // the definition can't make itself non-copyable without another
-        // child already doing so, which is handled on its own branch.
-        CopySemantics::Copyable
-    } else {
-        ctx.query(NominalCopySemantics { entity, root }).semantics
     }
 }
 
@@ -629,11 +630,15 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
     type Sem = CopySemantics;
 
     fn base_semantics(&self, entity: Entity) -> CopySemantics {
-        // Keeps the COMPUTING_COPY_SEMANTICS cycle guard — layer-1-only plumbing.
-        query_nominal_semantics(self.ctx, entity, self.root)
+        self.ctx
+            .query(NominalCopySemantics {
+                entity,
+                root: self.root,
+            })
+            .semantics
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, ConditionalCopy> {
         Cow::Owned(self.ctx.query(ConditionalCopyableParams {
             entity,
             root: self.root,
@@ -786,6 +791,28 @@ fn nominal_copy_semantics_impl(
     CopySemanticsInfo::copyable()
 }
 
+/// The physical storage of a boxed `indirect enum` case: `OwnedBox[P]`, where
+/// `P` is the lone payload type or the tuple of all of them. `None` when the
+/// stdlib binds no `OwnedBox` (an error reported by the indirect-enum
+/// analyzer). MIR `enum_lower` builds the same shape as a `TyId`.
+pub fn indirect_box_type(ctx: &QueryContext<'_>, payload: Vec<HirTy>, root: Entity) -> Option<HirTy> {
+    let owned_box = ctx.query(ResolveBuiltin {
+        builtin: Builtin::OwnedBox,
+        root,
+    })?;
+    // Never shown: this type is synthesized for classification only.
+    let span = Span::synthetic(0);
+    let inner = match <[HirTy; 1]>::try_from(payload) {
+        Ok([single]) => single,
+        Err(many) => HirTy::Tuple(many, span.clone()),
+    };
+    Some(HirTy::Struct {
+        entity: owned_box,
+        args: vec![inner],
+        span,
+    })
+}
+
 /// `Copyable`-name fallback for stdlib-less fixtures. Returns true when
 /// `ast_ty` is a single-segment named type whose last segment matches
 /// `name`. Matches the previous HIR-tracker behavior so tests like
@@ -803,6 +830,7 @@ fn collect_child_types(
     entity: Entity,
     root: Entity,
 ) -> Vec<(Entity, HirTy)> {
+    let boxed = ctx.query(IndirectCases { entity, root });
     let mut out = Vec::new();
     for &child in ctx.children_of(entity) {
         match ctx.get::<NodeKind>(child) {
@@ -827,14 +855,18 @@ fn collect_child_types(
             Some(NodeKind::EnumCase) => {
                 // Enum case payloads live in the Callable component's params,
                 // not as child Field entities. Lower them via LowerCallableTypes.
-                if let Some(tys) = ctx.query(LowerCallableTypes {
-                    entity: child,
-                    root,
-                }) {
-                    for ty in tys.into_iter().flatten() {
-                        out.push((child, ty));
-                    }
+                let payload = case_payload_types(ctx, child, root);
+                // A boxed case of an `indirect enum` stores ONE field, the
+                // `OwnedBox` its payload lowers to (MIR `enum_lower`): it
+                // contributes "never bitwise; Cloneable iff the payload is",
+                // which the box's own conditional `Cloneable` encodes.
+                if boxed.contains(&child)
+                    && let Some(boxed_ty) = indirect_box_type(ctx, payload.clone(), root)
+                {
+                    out.push((child, boxed_ty));
+                    continue;
                 }
+                out.extend(payload.into_iter().map(|ty| (child, ty)));
             },
             _ => {},
         }

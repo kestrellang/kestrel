@@ -85,7 +85,10 @@ fn panicking_verification_does_not_leave_a_query_marked_verified() {
 
     arm_panic(true);
     let first = catch_unwind(AssertUnwindSafe(|| ctx.query(Doubled { entity: e })));
-    assert!(first.is_err(), "Leaf should have panicked during verification");
+    assert!(
+        first.is_err(),
+        "Leaf should have panicked during verification"
+    );
     arm_panic(false);
 
     // Same revision, same context — exactly what `infer_all` and the LSP

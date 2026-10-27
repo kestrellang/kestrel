@@ -112,13 +112,11 @@ enum Shape {
     case Point // No associated value
 }
 
-// Recursive enum (must be marked indirect) - (Future)
-// Recursive cases require `indirect` (E429), but indirect enums are
-// not yet supported by the compiler (E465).
-// indirect enum List[T] {
-//     case Cons(head: T, tail: List[T])
-//     case Empty
-// }
+// Recursive enum: `indirect` boxes the recursive cases (E429 without it)
+indirect enum List[T] {
+    case Cons(head: T, tail: List[T])
+    case Empty
+}
 
 // Implicit Member Access
 let d: Direction = .North;

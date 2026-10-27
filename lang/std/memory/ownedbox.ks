@@ -31,8 +31,9 @@ import std.memory.(ExistentialBox, Layout, Pointer, RawPointer, Allocator, Syste
 ///
 /// # Memory Model
 ///
-/// Single owner, no counting. `OwnedBox` is not `Copyable`; it is
-/// `Cloneable` when its payload is, and a clone allocates a new block.
+/// Single owner, no counting. `OwnedBox` is never bit-copied; it is
+/// `Cloneable` when its payload can be copied at all (bitwise or by its own
+/// `clone()`), and a clone allocates a new block holding that copy.
 ///
 /// # Guarantees
 ///
@@ -122,10 +123,10 @@ extend OwnedBox[T] where T: Sized {
     }
 }
 
-// A clone allocates a fresh block holding a clone of the payload. An unsized
-// payload clones through its function table (existentials M4).
-extend OwnedBox[T]: Cloneable where T: Cloneable, T: Sized {
+// A clone allocates a fresh block holding a copy of the payload — a bit-copy
+// or the payload's own `clone()`, whichever copying `T` means.
+extend OwnedBox[T]: Cloneable where T: Copyable, T: Sized {
     public func clone() -> OwnedBox[T] {
-        OwnedBox(self.ptr.value.clone())
+        OwnedBox(self.ptr.value)
     }
 }

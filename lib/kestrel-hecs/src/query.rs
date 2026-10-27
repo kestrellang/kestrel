@@ -61,7 +61,39 @@ pub trait QueryFn: Hash + Eq + Clone + Send + Sync + 'static {
     fn describe(&self) -> String {
         std::any::type_name::<Self>().to_string()
     }
+
+    /// What re-entering this query's key while it is still executing means.
+    /// The default panics ("Query cycle detected"); recursive-type queries
+    /// opt into fixpoint iteration or a fallback answer. See [`CycleMode`].
+    fn cycle_mode(&self) -> CycleMode<Self::Output> {
+        CycleMode::Panic
+    }
+
+    /// Called on a `Fallback` cycle head after its cycle was detected, inside
+    /// the head's own execution scope — so anything it accumulates (e.g. a
+    /// diagnostic) is attributed to the head and replaced on re-execution.
+    fn on_cycle_fallback(&self, _ctx: &QueryContext<'_>) {}
 }
+
+/// Cycle recovery policy for a query (Salsa-style). A cycle is a query that,
+/// directly or through other queries, asks for its own key while it is still
+/// executing. The first query of the cycle on the stack is its **head**.
+pub enum CycleMode<V> {
+    /// A cycle is a compiler bug: panic with the active stack.
+    Panic,
+    /// Iterate to a fixpoint. Re-entry answers the head's provisional value,
+    /// starting at `initial`; the head re-executes with its last output as
+    /// the new provisional value until the output stops changing. Outputs
+    /// must walk a finite lattice monotonically from `initial`, or the
+    /// iteration cap ICEs.
+    Fixpoint { initial: V },
+    /// The cycle is an error: re-entry answers `value`, the head answers
+    /// `value` (after `on_cycle_fallback`), and nothing iterates.
+    Fallback { value: V },
+}
+
+/// Fixpoint iterations a cycle head may take before it is declared divergent.
+const MAX_CYCLE_ITERATIONS: usize = 100;
 
 /// A memoized query result with dependency and revision tracking.
 #[derive(Clone)]
@@ -132,9 +164,9 @@ impl<V> MemoEntry<V> {
     /// Whether this memo read a component (or the children) of one of
     /// `entities` itself — not through a sub-query.
     fn reads_any(&self, entities: &FxHashSet<Entity>) -> bool {
-        self.deps.iter().any(|dep| {
-            matches!(dep, Dependency::Component { entity, .. } if entities.contains(entity))
-        })
+        self.deps.iter().any(
+            |dep| matches!(dep, Dependency::Component { entity, .. } if entities.contains(entity)),
+        )
     }
 }
 
@@ -175,9 +207,7 @@ impl QueryStorage {
 
     fn update_verified<Q: QueryFn>(&mut self, key: &Q, revision: Revision) {
         if let Some(store) = self.stores.get_mut(&TypeId::of::<Q>())
-            && let Some(map) = store
-                .data
-                .downcast_mut::<MemoMap<Q>>()
+            && let Some(map) = store.data.downcast_mut::<MemoMap<Q>>()
             && let Some(memo) = map.get_mut(key)
         {
             memo.verified_at = revision;
@@ -219,11 +249,32 @@ impl Default for QueryStorage {
 }
 
 /// Tracks an active query on the call stack for cycle detection.
-#[derive(Clone, Debug)]
 struct ActiveQuery {
     key: QueryKey,
     /// Debug label for cycle diagnostics (from QueryFn::describe).
     label: String,
+    /// Set once another frame re-entered this key: this frame is a cycle
+    /// head, and this is the value re-entry hands out (`Q::Output`, erased).
+    provisional: Option<Box<dyn Any + Send + Sync>>,
+    /// Whether the head's mode is `Fallback` (no iteration).
+    fallback: bool,
+    /// Lowest stack index of a cycle head whose provisional value this
+    /// frame's result was computed from (directly or via a callee). Such a
+    /// result is provisional too: it is memoized only once that head
+    /// converges.
+    depends_on_head: Option<usize>,
+}
+
+/// A result computed under a still-iterating cycle head. Held outside the
+/// memo table until `head` converges, then committed by `commit`.
+struct Provisional {
+    /// Stack index of the head this result waits on.
+    head: usize,
+    /// The `Q::Output`, erased — answered to readers in the same iteration.
+    value: Box<dyn Any + Send + Sync>,
+    deps: Vec<Dependency>,
+    /// Memoizes the result with the cycle's shared external deps.
+    commit: Box<dyn FnOnce(&QueryContext<'_>, Vec<Dependency>)>,
 }
 
 /// Context for query execution. Provides read access to the world
@@ -246,6 +297,10 @@ pub struct QueryContext<'a> {
     deps: RefCell<Vec<Dependency>>,
     /// Call stack for cycle detection.
     active: RefCell<Vec<ActiveQuery>>,
+    /// Stack index of each active key — O(1) re-entry detection.
+    active_index: RefCell<FxHashMap<QueryKey, usize>>,
+    /// Results waiting on an iterating cycle head (see [`Provisional`]).
+    provisional: RefCell<FxHashMap<QueryKey, Provisional>>,
 }
 
 impl<'a> QueryContext<'a> {
@@ -268,6 +323,8 @@ impl<'a> QueryContext<'a> {
             exec_count,
             deps: RefCell::new(Vec::new()),
             active: RefCell::new(Vec::new()),
+            active_index: RefCell::new(FxHashMap::default()),
+            provisional: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -343,6 +400,12 @@ impl<'a> QueryContext<'a> {
     /// Returns (value, changed_at). Does NOT record a dependency —
     /// the caller (query() or a verifier) handles that.
     fn ensure_fresh<Q: QueryFn>(&self, q: &Q, qk: &QueryKey) -> (Q::Output, Revision) {
+        // Phase 0: a cycle re-entry or a provisional result answers before
+        // any memo — the memo (if any) predates the iteration in progress.
+        if let Some(answer) = self.cycle_answer(q, qk) {
+            return answer;
+        }
+
         // Phase 1: Check memo. The fast path (already verified this revision)
         // is by far the hottest, so return from it before cloning the deps
         // vector — for widely-used queries deps can be long, and cloning it
@@ -403,30 +466,78 @@ impl<'a> QueryContext<'a> {
         self.execute_query(q, qk)
     }
 
+    /// Answer `q` from the cycle machinery, if it is involved:
+    /// - `q` is active (re-entry) and opted into recovery → the head's
+    ///   provisional value (seeded from its `CycleMode`);
+    /// - `q` has a provisional result waiting on an active head → that.
+    ///
+    /// Either way every frame above the head now depends on it, and the
+    /// answer reports "changed now" so no verifier trusts it. A re-entered
+    /// `Panic` key returns `None`: the memo path and `execute_query` keep
+    /// today's behavior.
+    fn cycle_answer<Q: QueryFn>(&self, q: &Q, qk: &QueryKey) -> Option<(Q::Output, Revision)> {
+        let active_idx = self.active_index.borrow().get(qk).copied();
+        if let Some(idx) = active_idx {
+            let (seed, fallback) = match q.cycle_mode() {
+                CycleMode::Panic => return None,
+                CycleMode::Fixpoint { initial } => (initial, false),
+                CycleMode::Fallback { value } => (value, true),
+            };
+            let mut stack = self.active.borrow_mut();
+            let frame = &mut stack[idx];
+            let answer = match &frame.provisional {
+                Some(value) => downcast_output::<Q>(value).clone(),
+                None => {
+                    frame.provisional = Some(Box::new(seed.clone()));
+                    frame.fallback = fallback;
+                    seed
+                },
+            };
+            mark_dependents(&mut stack, idx);
+            return Some((answer, self.revision));
+        }
+
+        let provisional = self.provisional.borrow();
+        if provisional.is_empty() {
+            return None;
+        }
+        let entry = provisional.get(qk)?;
+        let answer = downcast_output::<Q>(&entry.value).clone();
+        let head = entry.head;
+        drop(provisional);
+        mark_dependents(&mut self.active.borrow_mut(), head);
+        Some((answer, self.revision))
+    }
+
     /// Execute a query from scratch (no valid cache).
     fn execute_query<Q: QueryFn>(&self, q: &Q, qk: &QueryKey) -> (Q::Output, Revision) {
-        // Cycle detection
-        {
+        // Cycle detection. Recoverable keys never get here on re-entry
+        // (`cycle_answer` answers them), so this is a `Panic`-mode cycle.
+        if self.active_index.borrow().contains_key(qk) {
             let stack = self.active.borrow();
-            for aq in stack.iter() {
-                if aq.key == *qk {
-                    eprintln!("=== QUERY CYCLE ===");
-                    for (i, s) in stack.iter().enumerate() {
-                        eprintln!("  [{}] {}", i, s.label);
-                    }
-                    let label = q.describe();
-                    eprintln!("  --> {}", label);
-                    panic!(
-                        "Query cycle detected: {} is already on the stack",
-                        std::any::type_name::<Q>()
-                    );
-                }
+            eprintln!("=== QUERY CYCLE ===");
+            for (i, s) in stack.iter().enumerate() {
+                eprintln!("  [{}] {}", i, s.label);
             }
+            let label = q.describe();
+            eprintln!("  --> {}", label);
+            panic!(
+                "Query cycle detected: {} is already on the stack",
+                std::any::type_name::<Q>()
+            );
         }
-        self.active.borrow_mut().push(ActiveQuery {
-            key: qk.clone(),
-            label: q.describe(),
-        });
+        let idx = {
+            let mut stack = self.active.borrow_mut();
+            stack.push(ActiveQuery {
+                key: qk.clone(),
+                label: q.describe(),
+                provisional: None,
+                fallback: false,
+                depends_on_head: None,
+            });
+            stack.len() - 1
+        };
+        self.active_index.borrow_mut().insert(qk.clone(), idx);
         // The pop MUST also happen when `q.execute` panics. Hosts catch
         // per-unit-of-work panics and keep using the same context (see
         // `kestrel_hecs::guard`); a leaked entry makes every later query
@@ -434,9 +545,16 @@ impl<'a> QueryContext<'a> {
         // top-level `accumulate` calls under the dead key. Pushes/pops are
         // strictly LIFO (a nested execute completes inside this one), and
         // guards unwind innermost-first, so `pop` removes our own entry.
+        // Provisional results waiting on this frame are normally committed
+        // or re-homed before it pops; on unwind they are orphans — drop them.
         let active = &self.active;
+        let active_index = &self.active_index;
+        let provisional = &self.provisional;
         let _active_guard = OnDrop::new(|| {
-            active.borrow_mut().pop();
+            if let Some(frame) = active.borrow_mut().pop() {
+                active_index.borrow_mut().remove(&frame.key);
+            }
+            provisional.borrow_mut().retain(|_, p| p.head < idx);
         });
 
         // Take (don't drop) this query's old accumulated values: the
@@ -466,31 +584,172 @@ impl<'a> QueryContext<'a> {
                 deps.replace(saved);
             }
         });
-        self.exec_count.set(self.exec_count.get() + 1);
-        let result = q.execute(self);
+        let result = self.execute_to_fixpoint(q, qk, idx);
         let new_deps = self.deps.take();
 
+        let (is_head, depends_on_head) = {
+            let stack = self.active.borrow();
+            let frame = &stack[idx];
+            (frame.provisional.is_some(), frame.depends_on_head)
+        };
+
+        // Computed from an outer head's provisional value: park it (and any
+        // results parked on this frame) until that head converges.
+        if let Some(head) = depends_on_head {
+            // A stale memo of `q` may carry `ensure_fresh`'s tentative
+            // "verified this revision" mark; left in place, a later
+            // iteration would read the old value through it. Revoke it so
+            // the memo re-verifies until the commit replaces it.
+            self.queries
+                .borrow_mut()
+                .update_verified::<Q>(q, Revision::initial());
+            let mut provisional = self.provisional.borrow_mut();
+            for p in provisional.values_mut().filter(|p| p.head == idx) {
+                p.head = head;
+            }
+            let (q_commit, qk_commit, value) = (q.clone(), qk.clone(), result.clone());
+            provisional.insert(
+                qk.clone(),
+                Provisional {
+                    head,
+                    value: Box::new(result.clone()),
+                    deps: new_deps,
+                    commit: Box::new(move |ctx, deps| {
+                        ctx.commit_memo(&q_commit, &qk_commit, value, deps);
+                    }),
+                },
+            );
+            return (result, self.revision);
+        }
+
+        let deps = if is_head {
+            self.commit_cycle(idx, qk, new_deps)
+        } else {
+            new_deps
+        };
+        let changed_at = self.commit_memo(q, qk, result.clone(), deps);
+        (result, changed_at)
+    }
+
+    /// Run `q.execute`, re-running it while it is a `Fixpoint` cycle head
+    /// whose output differs from the provisional value it was computed
+    /// under. A `Fallback` head answers its fallback value.
+    fn execute_to_fixpoint<Q: QueryFn>(&self, q: &Q, qk: &QueryKey, idx: usize) -> Q::Output {
+        let mut iterations = 0;
+        loop {
+            self.exec_count.set(self.exec_count.get() + 1);
+            let result = q.execute(self);
+
+            let mut stack = self.active.borrow_mut();
+            let frame = &mut stack[idx];
+            let Some(prev) = &frame.provisional else {
+                return result;
+            };
+            if frame.fallback {
+                let value = downcast_output::<Q>(prev).clone();
+                drop(stack);
+                q.on_cycle_fallback(self);
+                return value;
+            }
+            if Fingerprint::of(&result) == Fingerprint::of(downcast_output::<Q>(prev)) {
+                return result;
+            }
+            iterations += 1;
+            assert!(
+                iterations < MAX_CYCLE_ITERATIONS,
+                "query cycle did not converge after {MAX_CYCLE_ITERATIONS} iterations: {} \
+                 (its output must walk a finite lattice monotonically)",
+                frame.label
+            );
+            frame.provisional = Some(Box::new(result));
+            drop(stack);
+            // Everything computed from the stale provisional value is redone,
+            // including this head's own deps and accumulated values.
+            let stale: Vec<QueryKey> = {
+                let mut provisional = self.provisional.borrow_mut();
+                let stale = provisional
+                    .iter()
+                    .filter(|(_, p)| p.head == idx)
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                provisional.retain(|_, p| p.head != idx);
+                stale
+            };
+            self.deps.borrow_mut().clear();
+            let mut accumulators = self.accumulators.borrow_mut();
+            // Discarded on purpose: computed from the stale value. An unwind
+            // in the next iteration restores the head's pre-execution
+            // snapshot (taken by `execute_query`), so nothing valid is lost.
+            for key in stale.iter().chain(std::iter::once(qk)) {
+                let _ = accumulators.take_for_query(key);
+            }
+        }
+    }
+
+    /// Commit every result parked on the converged head at `idx`. All
+    /// members of a cycle share one dependency list — the union of their
+    /// deps minus edges between members — so verifying any member never
+    /// re-enters the cycle, and any external change reruns all of them.
+    /// Returns that list for the head's own memo.
+    fn commit_cycle(
+        &self,
+        idx: usize,
+        head_key: &QueryKey,
+        head_deps: Vec<Dependency>,
+    ) -> Vec<Dependency> {
+        let members: Vec<(QueryKey, Provisional)> = {
+            let mut provisional = self.provisional.borrow_mut();
+            let keys: Vec<QueryKey> = provisional
+                .iter()
+                .filter(|(_, p)| p.head == idx)
+                .map(|(k, _)| k.clone())
+                .collect();
+            keys.into_iter()
+                .filter_map(|k| provisional.remove(&k).map(|p| (k, p)))
+                .collect()
+        };
+        let internal: FxHashSet<&QueryKey> = members
+            .iter()
+            .map(|(k, _)| k)
+            .chain(std::iter::once(head_key))
+            .collect();
+        let mut seen = FxHashSet::default();
+        let external: Vec<Dependency> = head_deps
+            .iter()
+            .chain(members.iter().flat_map(|(_, p)| p.deps.iter()))
+            .filter(|dep| !matches!(dep, Dependency::Query(k) if internal.contains(k)))
+            .filter(|dep| seen.insert(*dep))
+            .cloned()
+            .collect();
+        for (_, member) in members {
+            (member.commit)(self, external.clone());
+        }
+        external
+    }
+
+    /// Memoize a final result (with backdating) and register its verifier.
+    fn commit_memo<Q: QueryFn>(
+        &self,
+        q: &Q,
+        qk: &QueryKey,
+        result: Q::Output,
+        deps: Vec<Dependency>,
+    ) -> Revision {
         // Backdating: if the result fingerprint matches the old memo,
         // keep the old changed_at so dependents skip re-execution.
         let new_fp = Fingerprint::of(&result);
         let changed_at = {
             let storage = self.queries.borrow();
-            if let Some(old_memo) = storage.get_memo::<Q>(q) {
-                if old_memo.fingerprint == new_fp {
-                    old_memo.changed_at
-                } else {
-                    self.revision
-                }
-            } else {
-                self.revision
+            match storage.get_memo::<Q>(q) {
+                Some(old_memo) if old_memo.fingerprint == new_fp => old_memo.changed_at,
+                _ => self.revision,
             }
         };
 
-        // Store memo
         let entry = MemoEntry {
-            value: result.clone(),
+            value: result,
             fingerprint: new_fp,
-            deps: new_deps,
+            deps,
             computed_at: self.revision,
             verified_at: self.revision,
             changed_at,
@@ -505,8 +764,7 @@ impl<'a> QueryContext<'a> {
             qk.clone(),
             Arc::new(move |ctx| ctx.ensure_fresh(&q_for_verifier, &qk_for_verifier).1),
         );
-
-        (result, changed_at)
+        changed_at
     }
 
     /// Check if all dependencies are still unchanged.
@@ -564,6 +822,22 @@ impl<'a> QueryContext<'a> {
 /// value works — we use the `Hierarchy` struct's TypeId.
 fn hierarchy_dep_type() -> TypeId {
     TypeId::of::<crate::world::Hierarchy>()
+}
+
+/// Every frame above `head` now depends on its provisional value.
+fn mark_dependents(stack: &mut [ActiveQuery], head: usize) {
+    for frame in &mut stack[head + 1..] {
+        frame.depends_on_head = Some(frame.depends_on_head.map_or(head, |h| h.min(head)));
+    }
+}
+
+/// Takes the `Box` (not `&dyn Any`) on purpose: `&Box<dyn Any>` would
+/// unsize-coerce to a `&dyn Any` of the box itself and never downcast.
+#[allow(clippy::borrowed_box)]
+fn downcast_output<Q: QueryFn>(value: &Box<dyn Any + Send + Sync>) -> &Q::Output {
+    (**value)
+        .downcast_ref::<Q::Output>()
+        .expect("type mismatch in provisional query value")
 }
 
 /// Compute a QueryKey for a query value.
@@ -912,5 +1186,267 @@ mod tests {
             ctx.query(GetName { entity: e });
         }
         assert_eq!(world.query_exec_count(), 1);
+    }
+
+    // -- Cycle recovery --
+
+    #[derive(Clone, Debug, PartialEq)]
+    struct Edges(Vec<Entity>);
+
+    /// Max of `Value` over everything reachable — a monotone fixpoint over
+    /// a graph that may contain cycles.
+    #[derive(Clone, PartialEq, Eq, Hash)]
+    struct Reach {
+        entity: Entity,
+    }
+
+    impl QueryFn for Reach {
+        type Output = i32;
+
+        fn execute(&self, ctx: &QueryContext<'_>) -> i32 {
+            let own = ctx.get::<Value>(self.entity).map_or(0, |v| v.0);
+            let edges = ctx
+                .get::<Edges>(self.entity)
+                .map(|e| e.0.clone())
+                .unwrap_or_default();
+            edges
+                .into_iter()
+                .map(|entity| ctx.query(Reach { entity }))
+                .fold(own, i32::max)
+        }
+
+        fn cycle_mode(&self) -> CycleMode<i32> {
+            CycleMode::Fixpoint { initial: 0 }
+        }
+    }
+
+    /// Depth of the longest path; a cycle is an error answering -1.
+    #[derive(Clone, PartialEq, Eq, Hash)]
+    struct Depth {
+        entity: Entity,
+    }
+
+    impl QueryFn for Depth {
+        type Output = i32;
+
+        fn execute(&self, ctx: &QueryContext<'_>) -> i32 {
+            let edges = ctx
+                .get::<Edges>(self.entity)
+                .map(|e| e.0.clone())
+                .unwrap_or_default();
+            let mut depth = 0;
+            for entity in edges {
+                let d = ctx.query(Depth { entity });
+                if d < 0 {
+                    return -1;
+                }
+                depth = depth.max(d + 1);
+            }
+            depth
+        }
+
+        fn cycle_mode(&self) -> CycleMode<i32> {
+            CycleMode::Fallback { value: -1 }
+        }
+
+        fn on_cycle_fallback(&self, ctx: &QueryContext<'_>) {
+            ctx.accumulate(format!("cycle through {:?}", self.entity));
+        }
+    }
+
+    fn graph(world: &mut World, values: &[i32]) -> Vec<Entity> {
+        values
+            .iter()
+            .map(|&v| {
+                let e = world.spawn();
+                world.set(e, Value(v));
+                e
+            })
+            .collect()
+    }
+
+    #[test]
+    fn fixpoint_direct_cycle() {
+        let mut world = World::new();
+        world.begin_revision();
+        let n = graph(&mut world, &[3]);
+        world.set(n[0], Edges(vec![n[0]]));
+
+        let ctx = world.query_context();
+        assert_eq!(ctx.query(Reach { entity: n[0] }), 3);
+    }
+
+    #[test]
+    fn fixpoint_mutual_cycle_answers_every_member() {
+        let mut world = World::new();
+        world.begin_revision();
+        let n = graph(&mut world, &[1, 5]);
+        world.set(n[0], Edges(vec![n[1]]));
+        world.set(n[1], Edges(vec![n[0]]));
+
+        let ctx = world.query_context();
+        assert_eq!(ctx.query(Reach { entity: n[0] }), 5);
+        // `n[1]` was computed as a cycle member and committed with the head.
+        let execs = world.query_exec_count();
+        assert_eq!(ctx.query(Reach { entity: n[1] }), 5);
+        assert_eq!(world.query_exec_count(), execs, "member must be memoized");
+    }
+
+    #[test]
+    fn fixpoint_nested_heads() {
+        // 0 -> 1 -> 2 -> 1, 2 -> 0: the inner head (1) depends on the
+        // outer one (0), so its result waits for 0 to converge.
+        let mut world = World::new();
+        world.begin_revision();
+        let n = graph(&mut world, &[1, 2, 9]);
+        world.set(n[0], Edges(vec![n[1]]));
+        world.set(n[1], Edges(vec![n[2]]));
+        world.set(n[2], Edges(vec![n[1], n[0]]));
+
+        let ctx = world.query_context();
+        assert_eq!(ctx.query(Reach { entity: n[0] }), 9);
+        assert_eq!(ctx.query(Reach { entity: n[1] }), 9);
+        assert_eq!(ctx.query(Reach { entity: n[2] }), 9);
+    }
+
+    #[test]
+    fn fixpoint_member_change_reruns_cycle() {
+        let mut world = World::new();
+        world.begin_revision();
+        let n = graph(&mut world, &[1, 5, 0]);
+        world.set(n[0], Edges(vec![n[1]]));
+        world.set(n[1], Edges(vec![n[0]]));
+        // n[2] sits outside the cycle and reads into it.
+        world.set(n[2], Edges(vec![n[0]]));
+        {
+            let ctx = world.query_context();
+            assert_eq!(ctx.query(Reach { entity: n[2] }), 5);
+        }
+
+        // Lowering a member's value must not leave a stale memo behind
+        // (a guard-based "assume" would keep answering 5).
+        world.begin_revision();
+        world.set(n[1], Value(2));
+        {
+            let ctx = world.query_context();
+            assert_eq!(ctx.query(Reach { entity: n[2] }), 2);
+            assert_eq!(ctx.query(Reach { entity: n[1] }), 2);
+            assert_eq!(ctx.query(Reach { entity: n[0] }), 2);
+        }
+
+        // Ask the other member first this time.
+        world.begin_revision();
+        world.set(n[0], Value(8));
+        {
+            let ctx = world.query_context();
+            assert_eq!(ctx.query(Reach { entity: n[1] }), 8);
+            assert_eq!(ctx.query(Reach { entity: n[2] }), 8);
+        }
+    }
+
+    #[test]
+    fn fixpoint_unrelated_change_reuses_cycle() {
+        let mut world = World::new();
+        world.begin_revision();
+        let n = graph(&mut world, &[1, 5, 0]);
+        world.set(n[0], Edges(vec![n[1]]));
+        world.set(n[1], Edges(vec![n[0]]));
+        {
+            let ctx = world.query_context();
+            ctx.query(Reach { entity: n[0] });
+        }
+
+        world.begin_revision();
+        world.set(n[2], Value(100));
+        let before = world.query_exec_count();
+        {
+            let ctx = world.query_context();
+            assert_eq!(ctx.query(Reach { entity: n[0] }), 5);
+            assert_eq!(ctx.query(Reach { entity: n[1] }), 5);
+        }
+        assert_eq!(
+            world.query_exec_count(),
+            before,
+            "cycle must verify from cache"
+        );
+    }
+
+    #[test]
+    fn fallback_answers_head_and_reports_once() {
+        let mut world = World::new();
+        world.begin_revision();
+        let n = graph(&mut world, &[0, 0, 0]);
+        world.set(n[0], Edges(vec![n[1]]));
+        world.set(n[1], Edges(vec![n[0]]));
+        world.set(n[2], Edges(vec![]));
+
+        let ctx = world.query_context();
+        assert_eq!(ctx.query(Depth { entity: n[0] }), -1);
+        assert_eq!(ctx.query(Depth { entity: n[1] }), -1);
+        assert_eq!(ctx.query(Depth { entity: n[2] }), 0);
+        let errors = world.accumulated::<String>();
+        assert_eq!(errors, vec![format!("cycle through {:?}", n[0])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Query cycle detected")]
+    fn panic_mode_still_panics_inside_recoverable_cycle() {
+        // A `Panic` query re-entered directly still panics, even when a
+        // recoverable query is also on the stack.
+        #[derive(Clone, PartialEq, Eq, Hash)]
+        struct Outer {
+            entity: Entity,
+        }
+        impl QueryFn for Outer {
+            type Output = i32;
+            fn execute(&self, ctx: &QueryContext<'_>) -> i32 {
+                ctx.query(CyclicQuery {
+                    entity: self.entity,
+                })
+            }
+            fn cycle_mode(&self) -> CycleMode<i32> {
+                CycleMode::Fixpoint { initial: 0 }
+            }
+        }
+        let mut world = World::new();
+        world.begin_revision();
+        let e = world.spawn();
+        let ctx = world.query_context();
+        ctx.query(Outer { entity: e });
+    }
+
+    #[test]
+    fn cycle_state_survives_a_caught_panic() {
+        #[derive(Clone, PartialEq, Eq, Hash)]
+        struct Boom {
+            entity: Entity,
+        }
+        impl QueryFn for Boom {
+            type Output = i32;
+            fn execute(&self, ctx: &QueryContext<'_>) -> i32 {
+                // Enter a cycle, then panic while its member is parked.
+                let r = ctx.query(Reach {
+                    entity: self.entity,
+                });
+                if ctx.get::<Name>(self.entity).is_some() {
+                    panic!("boom");
+                }
+                r
+            }
+        }
+        let mut world = World::new();
+        world.begin_revision();
+        let n = graph(&mut world, &[4]);
+        world.set(n[0], Edges(vec![n[0]]));
+        world.set(n[0], Name("x".into()));
+        let ctx = world.query_context();
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ctx.query(Boom { entity: n[0] })
+        }));
+        assert!(caught.is_err());
+        assert!(ctx.active.borrow().is_empty());
+        assert!(ctx.active_index.borrow().is_empty());
+        assert!(ctx.provisional.borrow().is_empty());
+        assert_eq!(ctx.query(Reach { entity: n[0] }), 4);
     }
 }

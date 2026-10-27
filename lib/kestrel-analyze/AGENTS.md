@@ -222,9 +222,14 @@ Current allocations:
 - E459: `circular_protocol_inheritance` (compilation/protocol_cycles.rs)
   — was double-allocated with conformance_completeness's receiver-kind
   check; resolved 2026-07 by moving that check to E477.
-- E454–E458, E460, E462–E465: conformance completeness + indirect-enum
-  checks (compilation/conformance_completeness.rs, indirect_enum.rs) —
-  this list is stale for that range.
+- E405–E407: indirect enums (decl/recursive_enum.rs, with E429) —
+  `indirect_without_recursion` (warning), `indirect_enum_requires_stdlib`,
+  `indirect_polymorphic_recursion`.
+- E408: `infinite_opaque_return` (decl/opaque_cycle.rs).
+- E454–E458, E460, E462–E464: conformance completeness checks
+  (compilation/conformance_completeness.rs) — this list is stale for that
+  range. E465 (indirect enums not yet supported) is retired in 0.19; the ID
+  stays reserved.
 - E466: `some_in_field_type` (decl/field.rs) — `some P` rejected in field
   position (#168).
   E458 (`wrong_method_return_type`) carries the stage-2d ref-shape rule:
@@ -251,7 +256,9 @@ Current allocations:
     `any[...]` box) is emitted by `kestrel-hir-lower/src/ty.rs`; E402 (invalid
     box, `decl/existential_box.rs`, rules in `kestrel_semantics::ExistentialBoxDefect`)
     and E403 (unsized type parameter by value, `decl/unsized_param.rs`) are
-    analyzers. **Free E4xx gaps are now E405–E410 and E414.**
+    analyzers.
+  - E405–E407: indirect enums, E408: infinite opaque return (0.19).
+    **Free E4xx gaps are now E409, E410 and E414.**
   - E1xx E144–E155 are existentials too: E144, E150, E153 and E154 are
     emitted by hir-lower; E145–E148 and E151 by type inference (`InferError`
     variants, `kestrel-type-infer/src/existential.rs`); E149, E152 and the

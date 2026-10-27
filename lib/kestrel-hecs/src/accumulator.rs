@@ -124,9 +124,7 @@ impl AccumulatorStore {
             per_type: self
                 .stores
                 .iter_mut()
-                .filter_map(|(&type_id, store)| {
-                    store.take_for_query(query).map(|v| (type_id, v))
-                })
+                .filter_map(|(&type_id, store)| store.take_for_query(query).map(|v| (type_id, v)))
                 .collect(),
         }
     }

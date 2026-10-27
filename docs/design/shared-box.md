@@ -144,7 +144,7 @@ and keeps it regardless of the binding.
 | `escaping` closure (**shipped**) | synthesized environment struct | reference — aliases share state | `init`, `clone`, drop, `sharedMutRef` |
 | class (future) | synthesized storage struct | reference | the above + `isIdentical` for `===` |
 | `any P` (**shipped**, 0.17) | the concrete `T` | reference — copies share the payload | `init`, `clone`, drop, `pointeeRef` |
-| `indirect enum` (future) | the recursive payload | **value** — copy-on-write | via the CoW layer: `clone` on copy, `isUnique` + fork on mutation |
+| `indirect enum` (**shipped**, 0.19) | a recursive case's whole payload | **value** — a unique `OwnedBox` per case, not this binding; a copy clones the payload | `OwnedBox` `init`, `clone`, drop, `takeValue`; reads project the box pointer in place |
 
 ### Escaping closures
 
