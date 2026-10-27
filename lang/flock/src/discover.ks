@@ -91,10 +91,11 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
     var i: Int64 = 0;
     while i < result.count {
         var j = i + 1;
-        for element in result {
-            if result(unchecked: i).name == element.name {
+        while j < result.count {
+            if result(unchecked: i).name == result(unchecked: j).name {
                 throw FlockError.DuplicateBinary(result(unchecked: i).name)
             }
+            j = j + 1
         }
         i = i + 1
     }
