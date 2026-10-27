@@ -1,9 +1,13 @@
 //! # Exclusive Arguments Analyzer
 //!
-//! One call may hold only one exclusive (writing) access to a place. A
-//! `mutating` argument or receiver is exclusive, and so is a `mutating`
-//! closure literal argument for every place it writes. Two such accesses to
-//! overlapping places in the same call alias two writers (fuzz H12).
+//! A `mutating` argument or receiver borrows its place for the whole call,
+//! so a `mutating` closure literal argument of the SAME call that writes an
+//! overlapping place would be a second writer the borrow cannot coexist with
+//! (fuzz H12: it used to ICE in OSSA verification).
+//!
+//! The same place passed to two `mutating` PARAMETERS (`swap(s, s)`) is
+//! deliberately allowed: the callee sees two aliasing pointers and must cope
+//! (as `swap`'s self-swap guard does).
 //!
 //! A READ-only access overlapping a `mutating` one is NOT reported: plain
 //! borrowed arguments and read captures of closure literals see the value at
@@ -12,7 +16,7 @@
 //!
 //! Place identity is `kestrel_type_infer::captures::place_key_of`, the same
 //! function the capture analysis uses, so `t(p.a, p.b)` (disjoint stored
-//! fields) passes while `t(p, p.a)` and `t(x, x)` do not. A writing closure
+//! fields) passes. A writing closure
 //! counts as accessing its captured locals WHOLE, matching how lowering
 //! captures them (field-granular capture is tracked as fuzz M8).
 //!
@@ -32,9 +36,8 @@
 //!   - Message: "first exclusive access here"
 //!
 //! **Notes:**
-//! - "a `mutating` argument and a writing closure (or a second `mutating`
-//!   argument) would both change the same storage; pass a copy or split the
-//!   call"
+//! - "a `mutating` argument and a closure that writes the same variable
+//!   would both change it during the call; split the call"
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -113,21 +116,22 @@ impl BodyCheck for ExclusiveArgsAnalyzer {
     }
 }
 
-/// Every exclusive access the call makes, as (place, the expression making it).
+/// Every exclusive access the call makes, as (place, the expression making
+/// it, whether it is a writing closure).
 fn exclusive_accesses(
     cx: &BodyContext<'_>,
     captures: &kestrel_type_infer::captures::ClosureCaptureMap,
     callable: &Callable,
     receiver: Option<HirExprId>,
     args: &[HirCallArg],
-) -> Vec<(PlaceKey, HirExprId)> {
+) -> Vec<(PlaceKey, HirExprId, bool)> {
     let place = |e: HirExprId| place_key_of(cx.query, cx.typed, cx.hir, e);
     let mut out = Vec::new();
     if let Some(recv) = receiver
         && matches!(callable.receiver, Some(ReceiverKind::Mutating))
         && let Some(key) = place(recv)
     {
-        out.push((key, recv));
+        out.push((key, recv, false));
     }
     for (i, arg) in args.iter().enumerate() {
         if matches!(cx.hir.exprs[arg.value], HirExpr::Closure { .. }) {
@@ -137,7 +141,7 @@ fn exclusive_accesses(
             // does borrow all of `p`. Field-granular capture is fuzz M8.
             for cp in captures.get(arg.value) {
                 if cp.kind == CaptureKind::Write {
-                    out.push((PlaceKey::whole(cp.key.root), arg.value));
+                    out.push((PlaceKey::whole(cp.key.root), arg.value, true));
                 }
             }
             continue;
@@ -149,24 +153,23 @@ fn exclusive_accesses(
             && !param.is_consuming
             && let Some(key) = place(arg.value)
         {
-            out.push((key, arg.value));
+            out.push((key, arg.value, false));
         }
     }
     out
 }
 
-/// One diagnostic per call: the first exclusive access overlapping an
-/// earlier one from a DIFFERENT expression.
+/// One diagnostic per call: the first writing-closure access overlapping a
+/// `mutating` argument/receiver (either order).
 fn report_first_overlap(
     cx: &BodyContext<'_>,
-    accesses: &[(PlaceKey, HirExprId)],
+    accesses: &[(PlaceKey, HirExprId, bool)],
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    for (i, (key, expr)) in accesses.iter().enumerate() {
-        let Some((_, first)) = accesses[..i]
-            .iter()
-            .find(|(k, e)| e != expr && (k.is_prefix_of(key) || key.is_prefix_of(k)))
-        else {
+    for (i, (key, expr, closure)) in accesses.iter().enumerate() {
+        let Some((_, first, _)) = accesses[..i].iter().find(|(k, e, c)| {
+            c != closure && e != expr && (k.is_prefix_of(key) || key.is_prefix_of(k))
+        }) else {
             continue;
         };
         let d = &DESCRIPTORS[0];
@@ -187,8 +190,8 @@ fn report_first_overlap(
                 },
             ],
             notes: vec![
-                "a `mutating` argument and a writing closure (or a second `mutating` argument) \
-                 would both change the same storage; pass a copy or split the call"
+                "a `mutating` argument and a closure that writes the same variable would both \
+                 change it during the call; split the call"
                     .to_string(),
             ],
         });

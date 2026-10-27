@@ -457,7 +457,7 @@ An executable build (`kestrel build`, `flock build`/`run`) requires exactly one
 | E632 | parameter '{param}' of method '{method}' has the wrong type for protocol '{proto}' | A conformance's method has the requirement's arity and labels but a different parameter type. |
 | E633 | global initializer depends on itself: '{a}' -> ... -> '{a}' | A global's initializer reads that global, directly or through other globals' initializers, so no initialization order exists. |
 | E634 | nested type '{nested}' cannot use type parameter '{name}' of an enclosing type | A struct or enum declared inside a generic type refers to the container's type parameter. Nested types do not inherit those parameters; declare one on the nested type instead. |
-| E635 | overlapping exclusive access in one call | Two exclusive accesses in the same call overlap: a place passed to two `mutating` parameters (or a `mutating` receiver and parameter), or passed as `mutating` while a `mutating` closure argument writes it. A read-only argument or read capture overlapping a `mutating` one is fine — it sees the value at the call. |
+| E635 | overlapping exclusive access in one call | A place passed as a `mutating` argument (or receiver) is also written by a `mutating` closure argument of the same call. Passing one place to two `mutating` parameters (`swap(s, s)`) is allowed, and a read-only argument or read capture sees the value at the call. |
 
 ### Example
 
