@@ -15,14 +15,25 @@ use kestrel_codegen_cranelift as cranelift_backend;
 use kestrel_codegen_llvm as llvm_backend;
 use kestrel_compiler::Compiler;
 
-/// Selectable code generation backend.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default)]
+/// Code generation backend, chosen by optimization level (see `Backend::for_opt`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Backend {
-    /// Cranelift backend (default).
-    #[default]
+    /// Cranelift: fast compiles, used for unoptimized builds (`-O0`).
     Cranelift,
-    /// LLVM backend (via inkwell / LLVM 18).
+    /// LLVM 18 (via inkwell): used for optimized builds (`-O1`, `-O2`).
     Llvm,
+}
+
+impl Backend {
+    /// `-O0` builds with Cranelift (compile speed); `-O1`/`-O2` with LLVM
+    /// (code quality). The single place the backend is decided.
+    fn for_opt(opt_level: u8) -> Backend {
+        if opt_level == 0 {
+            Backend::Cranelift
+        } else {
+            Backend::Llvm
+        }
+    }
 }
 use kestrel_compiler_driver::CompilerDriver;
 use std::path::{Path, PathBuf};
@@ -105,7 +116,8 @@ struct BuildArgs {
     #[arg(short, long)]
     output: Option<String>,
 
-    /// Optimization level: 0 = none, 1 = speed, 2 = speed + size.
+    /// Optimization level: 0 = none (Cranelift backend), 1 = speed,
+    /// 2 = speed + size (both LLVM backend).
     #[arg(
         short = 'O',
         long = "opt-level",
@@ -125,10 +137,6 @@ struct BuildArgs {
     /// Link a macOS framework (repeatable).
     #[arg(long = "framework", value_name = "NAME")]
     frameworks: Vec<String>,
-
-    /// Code generation backend.
-    #[arg(long = "backend", value_name = "BACKEND", default_value = "cranelift")]
-    backend: Backend,
 }
 
 #[derive(Args)]
@@ -240,20 +248,13 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
 
     let c_sources = collect_stdlib_c_sources(std_dir.as_deref());
 
-    // `KESTREL_BACKEND` env var overrides `--backend` (lets tools that shell out
-    // to `kestrel build` — e.g. flock — select a backend without the flag).
-    let backend = match std::env::var("KESTREL_BACKEND").as_deref() {
-        Ok("llvm") => Backend::Llvm,
-        Ok("cranelift") => Backend::Cranelift,
-        _ => args.backend,
-    };
-
     // `KESTREL_OPT` overrides `-O` (lets tools that shell out to `kestrel build`
     // — e.g. an older flock without `--release` — pick an optimization level).
     let opt_level = std::env::var("KESTREL_OPT")
         .ok()
         .and_then(|s| s.parse::<u8>().ok())
         .unwrap_or(args.opt_level);
+    let backend = Backend::for_opt(opt_level);
 
     let result = match backend {
         Backend::Cranelift => {
