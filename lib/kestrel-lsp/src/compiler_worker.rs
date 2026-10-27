@@ -122,9 +122,7 @@ impl WorkerState {
 
 fn run_worker(mut rx: mpsc::UnboundedReceiver<Request>) {
     let mut state = WorkerState::fresh();
-    let verify = std::env::var("KESTREL_LSP_VERIFY_PERSISTENT")
-        .map(|v| v == "1")
-        .unwrap_or(false);
+    let verify = kestrel_debug::is_enabled("lsp-verify");
     while let Some(req) = rx.blocking_recv() {
         // Stdlib drift is the rare case (config edit). When it
         // happens, blow up the world entirely — there's no safe way
@@ -156,7 +154,7 @@ fn run_worker(mut rx: mpsc::UnboundedReceiver<Request>) {
 /// Debug-only sanity check: build a fresh `Compiler` from the same
 /// source set, run the standard analysis pipeline on both, and log to
 /// stderr when their diagnostic outputs diverge. Off by default; gated
-/// by `KESTREL_LSP_VERIFY_PERSISTENT=1`.
+/// by `KESTREL_DEBUG=lsp-verify`.
 ///
 /// Catches gross drift (entities not cleaned up, accumulated state
 /// stuck across rebuilds) without needing per-call closure replay. If
@@ -191,8 +189,9 @@ fn verify_against_fresh(
     let live_diags = state.compiler.diagnostics();
 
     if live_diags.len() != fresh_diags.len() {
-        eprintln!(
-            "[KESTREL_LSP_VERIFY] diagnostic count mismatch: persistent={}, fresh={}",
+        kestrel_debug::ktrace!(
+            "lsp-verify",
+            "diagnostic count mismatch: persistent={}, fresh={}",
             live_diags.len(),
             fresh_diags.len()
         );
@@ -210,8 +209,8 @@ fn verify_against_fresh(
             .filter(|m| !live_msgs.contains(m))
             .take(5)
             .collect();
-        eprintln!("[KESTREL_LSP_VERIFY]   only-persistent (≤5): {only_live:?}");
-        eprintln!("[KESTREL_LSP_VERIFY]   only-fresh      (≤5): {only_fresh:?}");
+        kestrel_debug::ktrace!("lsp-verify", "  only-persistent (≤5): {only_live:?}");
+        kestrel_debug::ktrace!("lsp-verify", "  only-fresh      (≤5): {only_fresh:?}");
     }
 }
 

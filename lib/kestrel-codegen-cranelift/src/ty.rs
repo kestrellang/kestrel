@@ -180,8 +180,9 @@ impl TypeCache {
                 .get(&entity)
                 .map(|s| s.as_str())
                 .unwrap_or("?");
-            if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                eprintln!(
+            if kestrel_debug::is_enabled("clone-shim") {
+                kestrel_debug::ktrace!(
+"clone-shim",
                     "[classify_named] MISSING layout for {name} entity={entity:?} type_args={type_args:?} → Scalar fallback"
                 );
             }
@@ -194,8 +195,9 @@ impl TypeCache {
                 .get(&entity)
                 .map(|s| s.as_str())
                 .unwrap_or("?");
-            if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                eprintln!(
+            if kestrel_debug::is_enabled("clone-shim") {
+                kestrel_debug::ktrace!(
+"clone-shim",
                     "[classify_named] NO LAYOUT for {name} entity={entity:?} → Scalar fallback"
                 );
             }

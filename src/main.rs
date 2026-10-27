@@ -160,6 +160,10 @@ struct DumpArgs {
     /// List the MIR pipeline stages (for `--stage`) and exit.
     #[arg(long = "list-stages")]
     list_stages: bool,
+
+    /// For `llvm`: optimization level of the printed IR (0-2).
+    #[arg(short = 'O', default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=2))]
+    opt_level: u8,
 }
 
 /// Stage selector for `kestrel dump mir -s <stage>`. Variants map 1:1 onto
@@ -211,6 +215,8 @@ enum DumpKind {
     Mir,
     /// Cranelift IR via the MIR (OSSA) pipeline.
     Cranelift,
+    /// Optimized LLVM IR for the whole module (honours `-O`, default `-O2`).
+    Llvm,
     /// All accumulated diagnostics (lex, parse, infer, analyze).
     Diagnostics,
 }
@@ -341,6 +347,7 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     let outcome: Result<(), String> = match args.kind {
         DumpKind::Mir => dump_mir(&compiler, args.stage, args.function_filter.as_deref()),
         DumpKind::Cranelift => dump_cranelift(globals, &compiler),
+        DumpKind::Llvm => dump_llvm(globals, &compiler, args.opt_level),
         DumpKind::Diagnostics => {
             // Emitted below; no stdout output for this kind.
             Ok(())
@@ -385,6 +392,23 @@ fn dump_cranelift(globals: &Globals, compiler: &Compiler) -> Result<(), String> 
         print!("{clif}");
         println!();
     }
+    Ok(())
+}
+
+/// Print the optimized LLVM IR for the whole module at `opt_level`.
+fn dump_llvm(globals: &Globals, compiler: &Compiler, opt_level: u8) -> Result<(), String> {
+    let target = globals
+        .codegen_target()
+        .map_err(|_| "invalid target".to_string())?;
+    let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
+    let mono = compiler.monomorphize_mir(mir).map_err(|e| e.to_string())?;
+    let options = llvm_backend::CodegenOptions {
+        opt_level,
+        emit_ir: true,
+        ..Default::default()
+    };
+    let result = llvm_backend::compile(&mono, &target, &options).map_err(|e| e.to_string())?;
+    print!("{}", result.module_ir.unwrap_or_default());
     Ok(())
 }
 

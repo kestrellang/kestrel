@@ -101,7 +101,7 @@ the error lists every failing function by name. A codegen failure is a miscompil
 shipping a trap-stubbed binary that SIGILLs at runtime (the old warn-and-continue
 behavior) hid real bugs (#151/#149). `reset_to_trap_stub` is still called in-loop
 but the stubs are never serialized (`finish()` is skipped on the error path).
-`KESTREL_VERBOSE_CODEGEN=1` additionally dumps the full broken LLVM function body
+`KESTREL_DEBUG=llvm-verify` additionally dumps the full broken LLVM function body
 for context.
 
 ## inkwell 0.9 gotchas

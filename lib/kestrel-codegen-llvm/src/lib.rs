@@ -52,6 +52,9 @@ pub struct CompilationResult {
     pub object_bytes: Vec<u8>,
     /// `(function name, textual LLVM IR)` pairs, populated when `emit_ir` is set.
     pub ir_text: Vec<(String, String)>,
+    /// The whole module's final (post-optimization) IR, populated when
+    /// `emit_ir` is set. This is what `kestrel dump llvm` prints.
+    pub module_ir: Option<String>,
 }
 
 pub fn compile(

@@ -132,6 +132,7 @@ kestrel dump mir main.ks                 # MIR after verify (default)
 kestrel dump mir -s mono main.ks         # after monomorphization
 kestrel dump mir -s all -f myFunc main.ks  # every stage, one function
 kestrel dump cranelift main.ks           # backend IR
+kestrel dump llvm main.ks               # optimized LLVM IR (-O0/-O1/-O2, default -O2)
 kestrel dump diagnostics main.ks         # errors/warnings only
 ```
 

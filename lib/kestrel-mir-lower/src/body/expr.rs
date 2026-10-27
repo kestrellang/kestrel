@@ -270,7 +270,7 @@ impl OssaBodyCtx<'_, '_> {
                     // default `T` does. If such a `T` is instantiated with a
                     // non-Copyable argument that copy degrades to an alias — but
                     // that already violates invariant 1 and is what
-                    // `KESTREL_VERIFY_INSTANTIATION=1` reports. The #141
+                    // `KESTREL_DEBUG=instantiation` reports. The #141
                     // take/replace shapes read `self` exactly once, so they keep
                     // taking.
                     if self.is_non_copyable(ty)

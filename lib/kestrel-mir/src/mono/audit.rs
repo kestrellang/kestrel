@@ -11,9 +11,8 @@
 //! event), so we catch it structurally on the monomorphized IR.
 //!
 //! The pass is purely diagnostic and **entirely env-gated** — [`run_audit`]
-//! emits nothing unless `KESTREL_AUDIT_DUP` is set, so it is inert in normal
-//! builds and the test suite. `KESTREL_AUDIT_FILTER=<substr>` restricts output
-//! to functions whose mangled name contains `<substr>`.
+//! emits nothing unless `KESTREL_DEBUG=audit-dup` is set, so it is inert in normal
+//! builds and the test suite.
 //!
 //! Copyability/drop is read from the post-mono `type_info` (the per-instantiation
 //! authority resolved during monomorphization), NOT recomputed from the generic
@@ -92,56 +91,19 @@ pub struct DupFinding {
 }
 
 /// Env-gated entry: run the audit and print findings to stderr. No-op unless
-/// `KESTREL_AUDIT_DUP` is set. Hooked after `expand_destroy_copy` in the driver.
+/// `KESTREL_DEBUG=audit-dup` is set. Hooked after `expand_destroy_copy` in the driver.
 pub fn run_audit(module: &MonoModule) {
-    if std::env::var("KESTREL_AUDIT_DUP").is_err() {
+    if !kestrel_debug::is_enabled("audit-dup") {
         return;
     }
-    let filter = std::env::var("KESTREL_AUDIT_FILTER").unwrap_or_default();
-    // KESTREL_AUDIT_KINDS=<comma tags>: restrict printed findings to these kinds
-    // (e.g. "DOUBLE-CONSUME,OWNED-FROM-BORROW"). Summary counts still cover all.
-    let kinds: Vec<String> = std::env::var("KESTREL_AUDIT_KINDS")
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    // KESTREL_AUDIT_DUMP=<comma-substrs>: print the full post-expand body of every
-    // function whose mangled name contains one of the substrings. Lets the same
-    // env-gated build hook serve as a targeted `dump mir -s expand` for tracing.
-    if let Ok(dump) = std::env::var("KESTREL_AUDIT_DUMP") {
-        let needles: Vec<&str> = dump
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .collect();
-        for func in &module.functions {
-            let Some(body) = &func.body else { continue };
-            if needles.iter().any(|n| func.name.contains(n)) {
-                eprintln!("[audit-dump] ; function: {}", func.name);
-                eprint!("{}", crate::display::display_body(body, module));
-                eprintln!();
-            }
-        }
-    }
-
     let findings = audit_duplications(module);
     let mut counts: HashMap<&'static str, usize> = HashMap::new();
-    let mut shown = 0usize;
-
-    eprintln!("[audit-dup] === post-mono bitwise-duplication audit ===");
+    kestrel_debug::ktrace!("audit-dup", "=== post-mono bitwise-duplication audit ===");
     for f in &findings {
         *counts.entry(f.kind.tag()).or_default() += 1;
-        if !filter.is_empty() && !f.func_name.contains(&filter) {
-            continue;
-        }
-        if !kinds.is_empty() && !kinds.iter().any(|k| k == f.kind.tag()) {
-            continue;
-        }
-        shown += 1;
-        eprintln!(
-            "[audit-dup] [{}] {} @ bb{}:{}\n             {}",
+        kestrel_debug::ktrace!(
+            "audit-dup",
+            "[{}] {} @ bb{}:{}\n             {}",
             f.kind.tag(),
             f.func_name,
             f.block,
@@ -149,20 +111,11 @@ pub fn run_audit(module: &MonoModule) {
             f.detail,
         );
     }
-    eprintln!(
-        "[audit-dup] --- {} finding(s) total ({} shown){} ---",
-        findings.len(),
-        shown,
-        if filter.is_empty() {
-            String::new()
-        } else {
-            format!(", filter=\"{filter}\"")
-        },
-    );
+    kestrel_debug::ktrace!("audit-dup", "--- {} finding(s) total ---", findings.len());
     let mut tags: Vec<_> = counts.into_iter().collect();
     tags.sort();
     for (tag, n) in tags {
-        eprintln!("[audit-dup]   {tag}: {n}");
+        kestrel_debug::ktrace!("audit-dup", "  {tag}: {n}");
     }
 }
 

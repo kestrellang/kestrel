@@ -479,7 +479,7 @@ impl Compiler {
 
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
 
-        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        // Diagnostic only; no-op unless KESTREL_DEBUG=audit-dup.
         kestrel_mir::mono::audit::run_audit(&mono);
 
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);
@@ -555,7 +555,7 @@ impl Compiler {
         let _mono_flow = kestrel_mir::verify::verify_mono_flow(&mono);
 
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
-        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        // Diagnostic only; no-op unless KESTREL_DEBUG=audit-dup.
         kestrel_mir::mono::audit::run_audit(&mono);
 
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);

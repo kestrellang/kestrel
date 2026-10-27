@@ -11,7 +11,7 @@ Information on the project structure, workflows, quick references, and patterns 
 
 
 ## Debugging
-- Debug tracing is the `ktrace!` macro from `kestrel-debug`, gated on the `KESTREL_DEBUG` env var with comma-separated categories: `KESTREL_DEBUG=infer,solver <cmd>`, or `KESTREL_DEBUG=all`. Categories are free-form strings each site picks for itself; those in use today are `infer`, `solver`, `hir-lower`, `copyable`, `static-wf`, `ref-gate`, `op-shape`, `dangle`, `arm-decay`. Don't use eprintln!, println!, or any other flags for debugging. When debugging something add `ktrace!("<category>", ...)` to the compiler source code.
+- Debug tracing is the `ktrace!` macro from `kestrel-debug`, gated on the `KESTREL_DEBUG` env var with comma-separated categories: `KESTREL_DEBUG=infer,solver <cmd>`, or `KESTREL_DEBUG=all`. Categories are free-form strings each site picks for itself; those in use today are `infer`, `solver`, `hir-lower`, `copyable`, `static-wf`, `ref-gate`, `op-shape`, `dangle`, `arm-decay`, `clone-shim`, `copy-prop`, `take-alias`, `audit-dup` (post-mono duplication audit), `instantiation` (invariant-1 report), `llvm-verify` (dump LLVM functions that fail verification), `lsp-verify` (LSP persistent-vs-fresh diagnostics check). Don't use eprintln!, println!, or any other flags for debugging. When debugging something add `ktrace!("<category>", ...)` to the compiler source code.
 
 ## Testing
 - **Only run `kestrel-test-suite` through the `/triage` skill** — full suite, targeted subsets, or single tests. Do not invoke `cargo test -p kestrel-test-suite` or the `file_tests-*` binary directly; the triage skill records results in `.triage/triage.db`, supports background runs, and is safe alongside other agents.

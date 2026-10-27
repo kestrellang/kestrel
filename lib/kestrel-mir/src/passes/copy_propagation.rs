@@ -23,17 +23,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// handle bits, so the environment's lifetime is unchanged. No exclusion is
 /// needed.
 pub fn eliminate_redundant_copies(mono: &mut MonoModule) {
-    let debug = std::env::var("KESTREL_DEBUG_COPYPROP").is_ok();
-    let limit: usize = std::env::var("KESTREL_COPYPROP_LIMIT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(usize::MAX);
     let mut total = 0usize;
 
     for func in mono.functions.iter_mut() {
-        if total >= limit {
-            break;
-        }
         let Some(body) = &mut func.body else { continue };
         if body.blocks.is_empty() {
             continue;
@@ -41,22 +33,18 @@ pub fn eliminate_redundant_copies(mono: &mut MonoModule) {
 
         let mut func_total = 0usize;
         for block_idx in 0..body.blocks.len() {
-            if total + func_total >= limit {
-                break;
-            }
             func_total += optimize_block(body, block_idx);
         }
-        if debug && func_total > 0 {
-            eprintln!(
-                "[copy_prop] {}: {func_total} copy+destroy pairs eliminated",
+        if func_total > 0 {
+            kestrel_debug::ktrace!(
+                "copy-prop",
+                "{}: {func_total} copy+destroy pairs eliminated",
                 func.name
             );
         }
         total += func_total;
     }
-    if debug {
-        eprintln!("[copy_prop] total: {total} copy+destroy pairs eliminated (limit: {limit})");
-    }
+    kestrel_debug::ktrace!("copy-prop", "total: {total} copy+destroy pairs eliminated");
 }
 
 fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
@@ -210,7 +198,6 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
 /// arg, the now-unused param, and the destroy are removed together, keeping
 /// args and params aligned.
 pub fn eliminate_cross_block_copies(mono: &mut MonoModule) {
-    let debug = std::env::var("KESTREL_DEBUG_COPYPROP").is_ok();
     let mut total = 0usize;
     for func in mono.functions.iter_mut() {
         let Some(body) = &mut func.body else { continue };
@@ -219,9 +206,7 @@ pub fn eliminate_cross_block_copies(mono: &mut MonoModule) {
         }
         total += optimize_cross_block(body);
     }
-    if debug && total > 0 {
-        eprintln!("[copy_prop] cross-block: {total} copies converted to moves");
-    }
+    kestrel_debug::ktrace!("copy-prop", "cross-block: {total} copies converted to moves");
 }
 
 struct CrossRewrite {
@@ -430,7 +415,6 @@ enum Prov {
 /// Runs at the CopyProp stage (post-mono, pre-expand), so the expand-generated
 /// drop-capture `Take`s are not visited and keep their safe default.
 pub fn mark_independent_takes(mono: &mut MonoModule) {
-    let debug = std::env::var("KESTREL_DEBUG_TAKEALIAS").is_ok();
     let mut total = 0usize;
 
     for func in mono.functions.iter_mut() {
@@ -473,17 +457,16 @@ pub fn mark_independent_takes(mono: &mut MonoModule) {
         for block_idx in 0..body.blocks.len() {
             func_total += mark_block_takes(body, block_idx, &prov);
         }
-        if debug && func_total > 0 {
-            eprintln!(
-                "[take_alias] {}: {func_total} Take(s) marked aliasable",
+        if func_total > 0 {
+            kestrel_debug::ktrace!(
+                "take-alias",
+                "{}: {func_total} Take(s) marked aliasable",
                 func.name
             );
         }
         total += func_total;
     }
-    if debug {
-        eprintln!("[take_alias] total: {total} Take(s) marked aliasable");
-    }
+    kestrel_debug::ktrace!("take-alias", "total: {total} Take(s) marked aliasable");
 }
 
 /// Is `kind` an alias-SAFE consumer of an @owned aggregate value — one that

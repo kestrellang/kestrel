@@ -114,10 +114,11 @@ impl<'ctx> CodegenCtx<'ctx> {
         // Best-effort whole-module verify (per-function verify already ran during
         // definition; this catches inter-function/declaration issues).
         if let Err(e) = self.llmod.verify()
-            && std::env::var("KESTREL_VERBOSE_CODEGEN").is_ok()
+            && kestrel_debug::is_enabled("llvm-verify")
         {
-            eprintln!(
-                "warning: LLVM module verification failed:\n{}",
+            kestrel_debug::ktrace!(
+                "llvm-verify",
+                " LLVM module verification failed:\n{}",
                 e.to_string()
             );
         }
@@ -146,10 +147,11 @@ impl<'ctx> CodegenCtx<'ctx> {
             }
         }
 
-        // Debug: dump the final (post-optimization) module IR for inspection.
-        if let Ok(path) = std::env::var("KESTREL_DUMP_LLVM_IR") {
-            let _ = std::fs::write(&path, self.llmod.print_to_string().to_string());
-        }
+        // Final (post-optimization) module IR, for `kestrel dump llvm`.
+        let module_ir = self
+            .options
+            .emit_ir
+            .then(|| self.llmod.print_to_string().to_string());
 
         let buffer = self
             .machine
@@ -159,6 +161,7 @@ impl<'ctx> CodegenCtx<'ctx> {
         Ok(crate::CompilationResult {
             object_bytes: buffer.as_slice().to_vec(),
             ir_text: self.ir_outputs,
+            module_ir,
         })
     }
 
@@ -324,14 +327,15 @@ impl<'ctx> CodegenCtx<'ctx> {
             }));
             match result {
                 Ok(Ok(())) => {
-                    let print_verify = std::env::var("KESTREL_VERBOSE_CODEGEN").is_ok();
+                    let print_verify = kestrel_debug::is_enabled("llvm-verify");
                     if !fn_value.verify(print_verify) {
                         if print_verify {
                             // The LLVM verifier message above is terse; also dump
                             // the whole broken function so the offending instruction
                             // has context (the function is about to be trap-stubbed).
                             use inkwell::values::AnyValue;
-                            eprintln!(
+                            kestrel_debug::ktrace!(
+                                "llvm-verify",
                                 "=== broken fn {func_name} ===\n{}",
                                 fn_value.print_to_string().to_string()
                             );
