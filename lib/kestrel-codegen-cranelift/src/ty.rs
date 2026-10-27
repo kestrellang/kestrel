@@ -182,7 +182,7 @@ impl TypeCache {
                 .unwrap_or("?");
             if kestrel_debug::is_enabled("clone-shim") {
                 kestrel_debug::ktrace!(
-"clone-shim",
+                    "clone-shim",
                     "[classify_named] MISSING layout for {name} entity={entity:?} type_args={type_args:?} → Scalar fallback"
                 );
             }
@@ -197,7 +197,7 @@ impl TypeCache {
                 .unwrap_or("?");
             if kestrel_debug::is_enabled("clone-shim") {
                 kestrel_debug::ktrace!(
-"clone-shim",
+                    "clone-shim",
                     "[classify_named] NO LAYOUT for {name} entity={entity:?} → Scalar fallback"
                 );
             }

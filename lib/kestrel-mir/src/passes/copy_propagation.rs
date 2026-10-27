@@ -206,7 +206,10 @@ pub fn eliminate_cross_block_copies(mono: &mut MonoModule) {
         }
         total += optimize_cross_block(body);
     }
-    kestrel_debug::ktrace!("copy-prop", "cross-block: {total} copies converted to moves");
+    kestrel_debug::ktrace!(
+        "copy-prop",
+        "cross-block: {total} copies converted to moves"
+    );
 }
 
 struct CrossRewrite {

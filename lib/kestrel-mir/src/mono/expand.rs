@@ -148,7 +148,10 @@ fn report_instantiation_findings(findings: &[InstantiationFinding]) {
         kestrel_debug::ktrace!(
             "instantiation",
             "  {}: block {} inst {}: {}",
-            f.func_name, f.block, f.inst, f.message
+            f.func_name,
+            f.block,
+            f.inst,
+            f.message
         );
     }
 }
@@ -326,7 +329,7 @@ fn build_clone_lookup(
 
     if kestrel_debug::is_enabled("clone-shim") {
         kestrel_debug::ktrace!(
-"clone-shim",
+            "clone-shim",
             "[clone_lookup] clone_func_to_parent: {} entries",
             clone_func_to_parent.len()
         );
@@ -340,8 +343,7 @@ fn build_clone_lookup(
                 .get(parent)
                 .map(|s| s.as_str())
                 .unwrap_or("?");
-            kestrel_debug::ktrace!(
-"clone-shim","  clone func: {name} → parent={parent_name}");
+            kestrel_debug::ktrace!("clone-shim", "  clone func: {name} → parent={parent_name}");
         }
     }
 
@@ -372,18 +374,24 @@ fn build_clone_lookup(
             if skip_clone_instances.contains(&(nominal, mf.type_args.clone())) {
                 if kestrel_debug::is_enabled("clone-shim") {
                     kestrel_debug::ktrace!(
-"clone-shim",
+                        "clone-shim",
                         "[clone_lookup] SKIPPED (bitwise/not-copyable): {} source={:?} nominal={:?} type_args={:?}",
-                        mf.name, mf.source, nominal, mf.type_args
+                        mf.name,
+                        mf.source,
+                        nominal,
+                        mf.type_args
                     );
                 }
                 continue;
             }
             if kestrel_debug::is_enabled("clone-shim") {
                 kestrel_debug::ktrace!(
-"clone-shim",
+                    "clone-shim",
                     "[clone_lookup] ADDED: {} source={:?} nominal={:?} type_args={:?}",
-                    mf.name, mf.source, nominal, mf.type_args
+                    mf.name,
+                    mf.source,
+                    nominal,
+                    mf.type_args
                 );
             }
             lookup.insert((nominal, mf.type_args.clone()), MonoFuncId::new(mi));
@@ -392,7 +400,10 @@ fn build_clone_lookup(
 
     if kestrel_debug::is_enabled("clone-shim") {
         kestrel_debug::ktrace!(
-"clone-shim","[clone_lookup] final lookup: {} entries", lookup.len());
+            "clone-shim",
+            "[clone_lookup] final lookup: {} entries",
+            lookup.len()
+        );
     }
 
     lookup
@@ -752,7 +763,7 @@ fn expand_function(
                     if moved_values.contains(&remapped) {
                         if kestrel_debug::is_enabled("clone-shim") {
                             kestrel_debug::ktrace!(
-"clone-shim",
+                                "clone-shim",
                                 "[expand] SKIP destroy on moved value {remapped:?} (orig {operand:?}) in {}",
                                 func.name
                             );
@@ -1165,7 +1176,7 @@ fn expand_function(
                                 let found = clone_lookup.get(&key).is_some();
                                 if !found {
                                     kestrel_debug::ktrace!(
-"clone-shim",
+                                        "clone-shim",
                                         "[expand] CopyValue on Named {entity:?} — NOT in clone_lookup (type_args={:?})",
                                         type_args
                                     );
@@ -1174,7 +1185,7 @@ fn expand_function(
                             if let Some(&clone_id) = clone_lookup.get(&key) {
                                 if kestrel_debug::is_enabled("clone-shim") {
                                     kestrel_debug::ktrace!(
-"clone-shim",
+                                        "clone-shim",
                                         "[expand] CopyValue EXPANDED to clone call for {entity:?} in func {}",
                                         func.name
                                     );
@@ -1240,7 +1251,7 @@ fn expand_function(
                         let target = remap_value(operand, &value_remap);
                         if kestrel_debug::is_enabled("clone-shim") {
                             kestrel_debug::ktrace!(
-"clone-shim",
+                                "clone-shim",
                                 "[expand] MOVE (not-Copyable): {result:?} = copy_value {operand:?} → alias to {target:?} in {}",
                                 func.name
                             );
