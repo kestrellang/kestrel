@@ -136,7 +136,11 @@ impl OssaBodyCtx<'_, '_> {
         let closure_ty = self.resolve_expr_type(expr_id);
 
         // Captures decided post-inference; we only apply copyability here.
-        let slots = self.plan_slots(expr_id);
+        let owning = matches!(
+            self.ctx.module.ty_arena.get(closure_ty),
+            MirTy::FuncThick { kind, .. } if kind.is_boxed()
+        );
+        let slots = self.plan_slots(expr_id, owning);
 
         let closure_idx = self.ctx.closure_counter;
         self.ctx.closure_counter += 1;
@@ -650,8 +654,16 @@ impl OssaBodyCtx<'_, '_> {
     /// copyability (only the MIR layer knows it). A projected place is kept as
     /// a by-value place capture only when it is Copyable and read-only;
     /// otherwise the whole root is captured (preserving historical behavior).
-    fn plan_slots(&mut self, closure_id: HirExprId) -> Vec<CaptureSlot> {
+    fn plan_slots(&mut self, closure_id: HirExprId, owning: bool) -> Vec<CaptureSlot> {
         let plan: Vec<CapturedPlace> = self.captures.get(closure_id).to_vec();
+        // An owning closure takes a non-Copyable projected read capture by
+        // itself (a partial move) when the root is only ever read through
+        // projections; the move checker applies the same rule.
+        let field_roots = if owning {
+            kestrel_type_infer::captures::field_capturable_roots(&plan)
+        } else {
+            Default::default()
+        };
 
         // First pass: which roots must be captured whole.
         let mut whole_roots: std::collections::HashSet<HirLocalId> =
@@ -668,7 +680,9 @@ impl OssaBodyCtx<'_, '_> {
             // Gating on `is_copy_type` (Bitwise only) here would force a Clone
             // field to fall back to whole-receiver capture, which can wrongly
             // consume a move-only receiver. See [[closure_cloneable_capture_clone]].
-            if !(self.captures_by_value(pty) && cp.kind == CaptureKind::Read) {
+            let by_place = cp.kind == CaptureKind::Read
+                && (self.captures_by_value(pty) || field_roots.contains(&cp.key.root));
+            if !by_place {
                 whole_roots.insert(cp.key.root);
             }
         }
@@ -798,7 +812,14 @@ impl OssaBodyCtx<'_, '_> {
     /// reaches here it degrades to a bit-copy rather than crashing.
     fn materialize_owning_capture(&mut self, slot: &CaptureSlot, cap_ty: TyId) -> ValueId {
         let CaptureSlot::Whole(root) = slot else {
-            // Projected place: copy/clone just the field, never the receiver.
+            // A move-only projected place is MOVED out of its root (a partial
+            // move); a duplicable one is copied/cloned, never the receiver.
+            if let CaptureSlot::Place(cp) = slot
+                && !self.captures_by_value(cap_ty)
+                && let Some(moved) = self.lower_partial_move(cp.repr)
+            {
+                return moved;
+            }
             return self.materialize_capture(slot, cap_ty);
         };
         let root = *root;

@@ -190,6 +190,102 @@ pub fn resolved_is_stored_field(world: &QueryContext<'_>, entity: Entity) -> boo
     true
 }
 
+/// Roots an OWNING closure (`escaping`/`consuming`) can capture field by
+/// field: every capture of the root is a read of a projected place. Such a
+/// closure moves (or copies) just those fields and leaves the rest of the
+/// local in place (docs/design/partial-moves.md, rule 9 phase 4); any whole
+/// or written capture takes the whole local. The single rule MIR lowering
+/// (`plan_slots`) and the move checker both apply, so they agree on what moved.
+pub fn field_capturable_roots(plan: &[CapturedPlace]) -> HashSet<LocalId> {
+    let mut roots: HashSet<LocalId> = plan.iter().map(|cp| cp.key.root).collect();
+    for cp in plan {
+        if cp.key.is_whole() || cp.kind != CaptureKind::Read {
+            roots.remove(&cp.key.root);
+        }
+    }
+    roots
+}
+
+/// For a `match` (or `if let`/`while let`) on an owned place whose arm
+/// patterns only destructure structs and tuples on the way to their bindings,
+/// the place each by-value binding names (`match p { P(a: x, ..) => … }`:
+/// `x` ↦ `p.a`). Such a match moves just those places and leaves the rest of
+/// the scrutinee in place (docs/design/partial-moves.md rule 7). `None` when
+/// the scrutinee is not a place, the match is a `let`/parameter destructure,
+/// or a pattern reaches a binding through an enum variant, array or `@`
+/// binding — those consume the whole scrutinee.
+///
+/// The single rule MIR lowering and the move checker both apply. Callers
+/// keep only the bindings whose type actually moves (non-Copyable).
+pub fn match_bound_places(
+    world: &QueryContext<'_>,
+    typed: &TypedBody,
+    hir: &kestrel_hir::body::HirBody,
+    scrutinee: HirExprId,
+    arms: &[kestrel_hir::body::HirMatchArm],
+    source: kestrel_hir::body::MatchSource,
+) -> Option<Vec<(LocalId, PlaceKey)>> {
+    use kestrel_hir::body::MatchSource;
+    if matches!(
+        source,
+        MatchSource::LetDestructure | MatchSource::ParamDestructure
+    ) {
+        return None;
+    }
+    let base = place_key_of(world, typed, hir, scrutinee)?;
+    let mut out = Vec::new();
+    for arm in arms {
+        bound_places(world, hir, arm.pattern, base.clone(), &mut out)?;
+    }
+    Some(out)
+}
+
+fn bound_places(
+    world: &QueryContext<'_>,
+    hir: &kestrel_hir::body::HirBody,
+    pat: kestrel_hir::body::HirPatId,
+    here: PlaceKey,
+    out: &mut Vec<(LocalId, PlaceKey)>,
+) -> Option<()> {
+    use kestrel_hir::body::HirPat;
+    match &hir.pats[pat] {
+        HirPat::Binding { local, by_ref, .. } => {
+            if by_ref.is_none() {
+                out.push((*local, here));
+            }
+        },
+        HirPat::Wildcard { .. } | HirPat::Literal { .. } | HirPat::Range { .. } => {},
+        HirPat::Tuple { prefix, suffix, .. } => {
+            // A suffix element's index depends on the arity; keep it simple.
+            if !suffix.is_empty() {
+                return None;
+            }
+            for (i, &p) in prefix.iter().enumerate() {
+                let mut at = here.clone();
+                at.path.push(ProjElem::TupleIndex(i as u32));
+                bound_places(world, hir, p, at, out)?;
+            }
+        },
+        HirPat::Struct { entity, fields, .. } => {
+            for f in fields {
+                let sub = f.pattern?;
+                let name = f.field_name.as_str()?;
+                let field = world.children_of(*entity).iter().copied().find(|&c| {
+                    resolved_is_stored_field(world, c)
+                        && world
+                            .get::<kestrel_ast_builder::Name>(c)
+                            .is_some_and(|n| n.0 == name)
+                })?;
+                let mut at = here.clone();
+                at.path.push(ProjElem::Field(field));
+                bound_places(world, hir, sub, at, out)?;
+            }
+        },
+        _ => return None,
+    }
+    Some(())
+}
+
 /// Resolve an access expression to its `PlaceKey`, or `None` if it is not a
 /// place chain (a call, literal, getter access, …). Shared with MIR lowering
 /// so both layers agree on place identity.

@@ -200,6 +200,27 @@ impl OssaBodyCtx<'_, '_> {
         // Place mode (any `&` binder in the arms): the scrutinee is pinned
         // as an address; value mode keeps today's lowering byte-identical.
         let place_mode = self.arms_ref_binding_mode(arms);
+        // A match that moves only its bound parts (partial moves) keeps the
+        // scrutinee in place too: bindings take their fields out of it.
+        let part_moves = self
+            .partial
+            .matches
+            .get(&expr_id)
+            .cloned()
+            .filter(|(root, _)| {
+                matches!(
+                    self.var_entry(*root),
+                    Some(super::ScopeEntry::Var {
+                        borrowed: false,
+                        ..
+                    })
+                )
+            });
+        let place_mode = match (place_mode, &part_moves) {
+            (None, Some(_)) => Some(false),
+            (mode, _) => mode,
+        };
+        let saved_match_moves = std::mem::replace(&mut self.active_match_moves, part_moves);
         let scrutinee_val = match place_mode {
             Some(mutating) => self.lower_match_scrutinee_place(scrutinee_expr, mutating),
             None => self.lower_match_scrutinee(scrutinee_expr),
@@ -308,6 +329,7 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
 
+        self.active_match_moves = saved_match_moves;
         // Reconcile conditional moves of `var` slots across the match arms.
         let reaching: Vec<&super::ArmExit> = exits.iter().collect();
         self.fold_var_inits(&reaching);
@@ -1037,6 +1059,32 @@ impl OssaBodyCtx<'_, '_> {
         scrutinee_addr: ValueId,
         scrutinee_ty: TyId,
     ) {
+        // Partial-move bindings first: take each bound field out of the
+        // scrutinee's storage before any view of it is open.
+        let moving = self.active_match_moves.clone();
+        let mut moved_here = std::collections::HashSet::new();
+        if let Some((root, moves)) = &moving {
+            for binding in bindings.iter().filter(|b| b.by_ref.is_none()) {
+                let Some((_, full)) = moves.iter().find(|(l, _)| *l == binding.local_id) else {
+                    continue;
+                };
+                let Some(addr) = self.field_addr_path(scrutinee_addr, scrutinee_ty, &binding.path)
+                else {
+                    continue;
+                };
+                let ty = self.resolve_local_type(binding.local_id);
+                let value = self.emit_take(addr, ty);
+                self.record_var_path(*root, full, super::VarInit::DefUninit);
+                self.bind_pattern_local(binding.local_id, value);
+                moved_here.insert(binding.local_id);
+            }
+        }
+        let bindings: Vec<Binding> = bindings
+            .iter()
+            .filter(|b| !moved_here.contains(&b.local_id))
+            .cloned()
+            .collect();
+        let bindings = bindings.as_slice();
         let needs_mut = bindings.iter().any(|b| b.by_ref == Some(true));
         let view = if needs_mut {
             self.emit_begin_mut_borrow_addr(scrutinee_addr, scrutinee_ty)
@@ -1073,6 +1121,35 @@ impl OssaBodyCtx<'_, '_> {
                 },
             }
         }
+    }
+
+    /// The address of the stored field/tuple element `path` names under the
+    /// place at `base` (`None` through an enum downcast or array element).
+    fn field_addr_path(
+        &mut self,
+        base: ValueId,
+        base_ty: TyId,
+        path: &[PathElement],
+    ) -> Option<ValueId> {
+        let mut addr = base;
+        let mut ty = base_ty;
+        for elem in path {
+            let idx = match elem {
+                PathElement::Index(i) => FieldIdx::new(*i),
+                PathElement::Field(name) => {
+                    let entity = self.ty_entity(ty)?;
+                    self.ctx.resolve_field_idx(entity, name)?
+                },
+                _ => return None,
+            };
+            let field_ty = match self.ctx.module.ty_arena.get(ty) {
+                MirTy::Tuple(elems) => elems.get(idx.index()).copied()?,
+                _ => self.struct_field_tys(ty).get(idx.index()).copied()?,
+            };
+            addr = self.emit_field_addr(addr, ty, idx);
+            ty = field_ty;
+        }
+        Some(addr)
     }
 
     /// Borrow-extract-copy a single binding from `base` and insert it into the

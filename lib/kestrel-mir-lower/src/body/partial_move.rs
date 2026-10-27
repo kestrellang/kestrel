@@ -19,6 +19,7 @@ use kestrel_hir::body::{HirBlock, HirCallArg, HirExpr, HirExprId, HirStmt};
 use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::{FieldIdx, MirTy, TyId};
+use kestrel_type_infer::captures::{PlaceKey, ProjElem};
 
 use super::{OssaBodyCtx, PathState, ScopeEntry, VarInit};
 use kestrel_mir::ValueId;
@@ -30,6 +31,10 @@ pub(crate) struct PartialMovePlan {
     pub exprs: HashSet<HirExprId>,
     /// Per local: every field path that may be moved, in discovery order.
     pub paths: HashMap<HirLocalId, Vec<Vec<FieldIdx>>>,
+    /// Matches that move only their bound parts (`match_bound_places`):
+    /// the scrutinee's root local, and each moving binding with the full
+    /// field path (from the root) it takes.
+    pub matches: HashMap<HirExprId, (HirLocalId, Vec<(HirLocalId, Vec<FieldIdx>)>)>,
 }
 
 impl PartialMovePlan {
@@ -44,6 +49,24 @@ impl OssaBodyCtx<'_, '_> {
     pub(crate) fn plan_partial_moves(&mut self) -> PartialMovePlan {
         let operands = self.consuming_operands();
         let mut plan = PartialMovePlan::default();
+        // Fields an owning closure moves into its environment (no expression
+        // is lowered as a move for them — `materialize_owning_capture` takes
+        // them — but their roots still need the per-path drop flags).
+        for (match_id, root, moves) in self.match_part_moves() {
+            let paths = plan.paths.entry(root).or_default();
+            for (_, path) in &moves {
+                if !paths.contains(path) {
+                    paths.push(path.clone());
+                }
+            }
+            plan.matches.insert(match_id, (root, moves));
+        }
+        for (local, path) in self.owning_capture_moves() {
+            let paths = plan.paths.entry(local).or_default();
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
         for op in operands {
             let Some((local, path)) = self.place_path(op) else {
                 continue;
@@ -58,6 +81,111 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
         plan
+    }
+
+    /// `(root, path)` of every non-Copyable projected read an owning closure
+    /// in this body moves out (see `field_capturable_roots`).
+    fn owning_capture_moves(&mut self) -> Vec<(HirLocalId, Vec<FieldIdx>)> {
+        let closures: Vec<HirExprId> = self
+            .hir
+            .exprs
+            .iter()
+            .filter(|(_, e)| matches!(e, HirExpr::Closure { .. }))
+            .map(|(id, _)| id)
+            .collect();
+        let mut out = Vec::new();
+        for closure in closures {
+            let ty = self.resolve_expr_type(closure);
+            if !matches!(
+                self.ctx.module.ty_arena.get(ty),
+                MirTy::FuncThick { kind, .. } if kind.is_boxed()
+            ) {
+                continue;
+            }
+            let caps = self.captures.get(closure).to_vec();
+            let roots = kestrel_type_infer::captures::field_capturable_roots(&caps);
+            for cp in caps {
+                if !roots.contains(&cp.key.root) || !self.projection_moves(cp.repr) {
+                    continue;
+                }
+                if let Some(place) = self.place_path(cp.repr) {
+                    out.push(place);
+                }
+            }
+        }
+        out
+    }
+
+    /// Every match that moves only its bound parts, with the moving bindings.
+    #[allow(clippy::type_complexity)]
+    fn match_part_moves(
+        &mut self,
+    ) -> Vec<(HirExprId, HirLocalId, Vec<(HirLocalId, Vec<FieldIdx>)>)> {
+        let Some(typed) = self.typed.as_ref() else {
+            return Vec::new();
+        };
+        let found: Vec<(HirExprId, Vec<(HirLocalId, PlaceKey)>)> = self
+            .hir
+            .exprs
+            .iter()
+            .filter_map(|(id, e)| {
+                let HirExpr::Match {
+                    scrutinee,
+                    arms,
+                    source,
+                    ..
+                } = e
+                else {
+                    return None;
+                };
+                kestrel_type_infer::captures::match_bound_places(
+                    &self.ctx.query,
+                    typed,
+                    &self.hir,
+                    *scrutinee,
+                    arms,
+                    *source,
+                )
+                .map(|places| (id, places))
+            })
+            .collect();
+        let mut out = Vec::new();
+        for (id, places) in found {
+            let mut moves = Vec::new();
+            let mut root = None;
+            for (binding, place) in places {
+                let ty = self.resolve_local_type(binding);
+                if !(self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty)) {
+                    continue;
+                }
+                let Some(path) = self.field_path(&place) else {
+                    moves.clear();
+                    break;
+                };
+                root = Some(place.root);
+                moves.push((binding, path));
+            }
+            if let (Some(root), false) = (root, moves.is_empty()) {
+                out.push((id, root, moves));
+            }
+        }
+        out
+    }
+
+    /// A `PlaceKey`'s projection path as field indices.
+    fn field_path(&self, place: &PlaceKey) -> Option<Vec<FieldIdx>> {
+        place
+            .path
+            .iter()
+            .map(|elem| match elem {
+                ProjElem::TupleIndex(i) => Some(FieldIdx::new(*i as usize)),
+                ProjElem::Field(field) => {
+                    let owner = self.ctx.world.parent_of(*field)?;
+                    let name = self.ctx.world.get::<kestrel_ast_builder::Name>(*field)?;
+                    self.ctx.resolve_field_idx(owner, &name.0)
+                },
+            })
+            .collect()
     }
 
     /// A projection of this type moves rather than copies: not Copyable, or

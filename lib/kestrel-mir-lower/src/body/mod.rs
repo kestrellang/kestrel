@@ -390,6 +390,9 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// address of its call-time copy). Filled by
     /// `prepare_closure_arg_snapshots`, consumed by `lower_closure_expr`.
     pub(crate) closure_arg_snapshots: HashMap<HirExprId, Vec<(HirLocalId, ValueId)>>,
+    /// While lowering a match that moves only its bound parts: the
+    /// scrutinee's root local and each moving binding's full field path.
+    pub(crate) active_match_moves: Option<(HirLocalId, Vec<(HirLocalId, Vec<FieldIdx>)>)>,
     /// Per-droppable-`self`-field drop-flag tracking in an init body: one entry
     /// per droppable stored field, as `(field index, substituted field type,
     /// drop-flag pointer)`. Populated for EVERY init with droppable fields (see
@@ -513,6 +516,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             partial: Arc::default(),
             place_capture_map: HashMap::new(),
             closure_arg_snapshots: HashMap::new(),
+            active_match_moves: None,
             func_entity,
             body_context: if in_protocol_extension {
                 BodyContext::ProtocolExtension
