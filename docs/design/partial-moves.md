@@ -120,11 +120,11 @@ sub-places:
   `escaping` or `consuming` closure moves only `h.r` (currently widened). The
   test `owning_projected_noncopyable_capture_moves_root.ks` gets
   re-baselined.
+- **Match moves** (rule 7) record the bound payload places instead of
+  widening to the scrutinee root, in lockstep with MIR's `emit_moveout`.
 - **Unchanged:**
   - The one-diagnostic-per-local dedup (`reported`, keyed by root).
   - The nested-closure `force_whole` collapse.
-- **Match moves** (rule 7) record the bound payload places instead of
-  widening to the scrutinee root, in lockstep with MIR's `emit_moveout`.
 
 ### MIR lowering (`kestrel-mir-lower`)
 
