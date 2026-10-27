@@ -18,7 +18,7 @@ the type checker, and the code is assigned in one place,
 - [E100–E141 — Type checking, names, parameters & literals](#e100e141--type-checking-names-parameters--literals)
 - [E200–E213 — Mutability, access modes & assignment](#e200e213--mutability-access-modes--assignment)
 - [E300–E321 — Patterns & exhaustiveness](#e300e321--patterns--exhaustiveness)
-- [E400, E411–E479 — Declarations, generics & protocol conformance](#e400-e411e479--declarations-generics--protocol-conformance)
+- [E400–E404, E408, E411–E479 — Declarations, generics & protocol conformance](#e400e404-e408-e411e479--declarations-generics--protocol-conformance)
 - [E480–E499 — References & escape checking](#e480e499--references--escape-checking)
 - [E500–E507 — Moves & ownership](#e500e507--moves--ownership)
 - [E600–E614, E623 — Closures, externs & declaration shape](#e600e614-e623--closures-externs--declaration-shape)
@@ -177,7 +177,7 @@ func unwrap(opt: Int64?) -> Int64 {
 }
 ```
 
-## E400, E411–E479 — Declarations, generics & protocol conformance
+## E400–E404, E408, E411–E479 — Declarations, generics & protocol conformance
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -186,6 +186,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E402 | '{B}' cannot box an existential: {reason} | `any[B] P` names a box that cannot hold a raw existential. `B` needs exactly one type parameter declared `not Sized`, a conformance to `ExistentialBox`, and no stored field holding `T` by value. Reasons: `it must have exactly one type parameter`, `its type parameter is not declared 'not Sized'`, `it does not conform to 'ExistentialBox'`, `field '{f}' stores '{T}' by value`. |
 | E403 | '{T}' may be unsized here ('where {T}: not Sized'), so it can only be used behind a pointer or as the last stored field | A `not Sized` type parameter used by value in a signature or a non-tail field. Move by-value members into an extension `where T: Sized`. |
 | E404 | the box in 'any[...]' is written without type arguments: '{suggestion}' / must name a box type | `any[B] P` takes the box unapplied (`any[RcBox] P`, not `any[RcBox[T]] P`), and it must be a type name. Emitted by HIR lowering. |
+| E408 | opaque return type of '{name}' contains itself | Functions whose `some P` bodies wrap each other's opaque returns (`g` returns `W(inner: h())`, `h` returns `W(inner: g())`) describe an infinite type. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |

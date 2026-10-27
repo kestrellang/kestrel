@@ -251,7 +251,9 @@ Current allocations:
     `any[...]` box) is emitted by `kestrel-hir-lower/src/ty.rs`; E402 (invalid
     box, `decl/existential_box.rs`, rules in `kestrel_semantics::ExistentialBoxDefect`)
     and E403 (unsized type parameter by value, `decl/unsized_param.rs`) are
-    analyzers. **Free E4xx gaps are now E405–E410 and E414.**
+    analyzers.
+  - E408: infinite opaque return (`decl/opaque_cycle.rs`).
+    **Free E4xx gaps are now E405–E407, E409, E410 and E414.**
   - E1xx E144–E155 are existentials too: E144, E150, E153 and E154 are
     emitted by hir-lower; E145–E148 and E151 by type inference (`InferError`
     variants, `kestrel-type-infer/src/existential.rs`); E149, E152 and the
