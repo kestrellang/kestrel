@@ -1143,10 +1143,7 @@ impl OssaBodyCtx<'_, '_> {
                 let addr = self.whole_slot_addr(addr);
                 let ty = self.resolve_expr_type(callee_expr);
                 let value = self.emit_take(addr, ty);
-                self.set_var_init(hir_local, crate::body::VarInit::DefUninit);
-                if let Some(flag) = self.var_flag(hir_local) {
-                    self.store_drop_flag(flag, false);
-                }
+                self.record_var_whole(hir_local, crate::body::VarInit::DefUninit);
                 return (value, true);
             }
         }

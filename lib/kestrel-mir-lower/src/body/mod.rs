@@ -4,6 +4,7 @@ pub mod closure_box;
 pub mod control;
 pub mod expr;
 pub mod literal;
+pub mod partial_move;
 pub mod pattern;
 pub mod place;
 pub mod stmt;
@@ -42,7 +43,7 @@ pub(crate) struct LoopInfo {
     pub tracker_len: usize,
     /// `var` init-states at each `break` (the loop's only exits), joined at
     /// the exit block: a var moved before a break is uninit after the loop.
-    pub break_var_inits: Vec<Vec<(HirLocalId, VarInit)>>,
+    pub break_var_inits: Vec<Vec<(HirLocalId, VarState)>>,
 }
 
 pub(crate) enum HirRef<'a> {
@@ -158,6 +159,40 @@ impl VarInit {
     }
 }
 
+/// One field path of a `var` that this body may move out on its own
+/// (`plan_partial_moves`). Its state and flag mirror the whole var's until the
+/// path itself is moved or reinitialized.
+#[derive(Clone, Debug)]
+pub(crate) struct PathState {
+    pub path: Vec<FieldIdx>,
+    pub init: VarInit,
+    /// In-memory presence flag (`true` = the field holds a value), allocated
+    /// where the var is declared so it dominates every exit.
+    pub flag: ValueId,
+}
+
+/// Static init-state of a `var`: the whole slot, plus each tracked field path
+/// (index-aligned with its `ScopeEntry::Var::paths`). Joined at merges.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct VarState {
+    pub whole: VarInit,
+    pub paths: Vec<VarInit>,
+}
+
+impl VarState {
+    pub fn join(&self, other: &VarState) -> VarState {
+        VarState {
+            whole: self.whole.join(other.whole),
+            paths: self
+                .paths
+                .iter()
+                .zip(&other.paths)
+                .map(|(a, b)| a.join(*b))
+                .collect(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum ScopeEntry {
     Owned(ValueId),
@@ -179,6 +214,10 @@ pub(crate) enum ScopeEntry {
         /// stores drop-vs-StoreInit correctly) but must NOT be DestroyAddr'd at
         /// scope exit — the caller owns and drops the value.
         borrowed: bool,
+        /// Field paths this body may move out (partial moves). Empty for
+        /// nearly every var; non-empty paths make scope exit drop per field
+        /// once any path's state differs from the whole slot's.
+        paths: Vec<PathState>,
     },
     /// @guaranteed borrow needing EndBorrow at scope exit.
     Borrow(ValueId),
@@ -305,7 +344,7 @@ pub(crate) struct ArmExit {
     pub slots: Vec<(ValueId, bool)>,
     /// Static init-state of each in-scope `var` (by HIR local) at this arm's exit,
     /// for drop-flag reconciliation at the merge.
-    pub var_inits: Vec<(HirLocalId, VarInit)>,
+    pub var_inits: Vec<(HirLocalId, VarState)>,
     /// Static init-state of each tracked `self` field (init bodies only) at this
     /// arm's exit, joined by `fold_field_inits` at the merge (#154).
     pub field_inits: Vec<(FieldIdx, VarInit)>,
@@ -337,6 +376,9 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// `HirExprId`. Computed once (post-inference) and consumed by
     /// `lower_closure_expr`. Arc-shared with the query memo cache.
     pub(crate) captures: Arc<ClosureCaptureMap>,
+    /// Which field paths of which locals this body moves out on their own
+    /// (`plan_partial_moves`), computed once at `lower_body` entry.
+    pub(crate) partial: Arc<partial_move::PartialMovePlan>,
     /// Inside a closure body: how each captured *place* (e.g. `self.cap`) is
     /// presented. Consulted when lowering reads/borrows so projected captures
     /// go through the env instead of projecting from a (non-captured)
@@ -468,6 +510,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             hir: HirRef::Borrowed(hir),
             typed: typed.map(TypedRef::Borrowed),
             captures,
+            partial: Arc::default(),
             place_capture_map: HashMap::new(),
             closure_arg_snapshots: HashMap::new(),
             func_entity,
@@ -518,6 +561,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn lower_body(&mut self) {
+        self.partial = Arc::new(self.plan_partial_moves());
         // Build use counts for SSA locals — enables move-on-last-use.
         self.local_use_counts = self.count_local_uses();
         self.local_read_counts = self.count_local_reads();
@@ -695,6 +739,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // Consuming params stay as SSA @owned values — no var_local
         // promotion. Mutating calls use BeginMutBorrow on the SSA value
         // directly, and last-use forwarding avoids unnecessary clones.
+        // Exception: a consuming param whose fields this body moves out
+        // (`consuming self` returning `self.inner`) gets a slot, so its other
+        // fields stay in place with per-field drop tracking.
+        self.spill_partially_moved_params(params_len);
 
         // Lower top-level statements
         for &stmt_id in &statements {
@@ -1202,6 +1250,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         flag: Option<ValueId>,
         borrowed: bool,
     ) {
+        // A var whose fields this body moves gets a presence flag per path,
+        // allocated here (the declaration) so it dominates every exit.
+        let planned: Vec<Vec<FieldIdx>> = match (local, borrowed) {
+            (Some(l), false) => self.partial.paths_of(l).to_vec(),
+            _ => Vec::new(),
+        };
+        let paths = planned
+            .into_iter()
+            .map(|path| PathState {
+                path,
+                init: VarInit::DefInit,
+                flag: self.alloc_var_flag(),
+            })
+            .collect();
         if let Some(frame) = self.scope_stack.last_mut() {
             frame.entries.push(ScopeEntry::Var {
                 addr: address,
@@ -1210,6 +1272,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 flag,
                 local,
                 borrowed,
+                paths,
             });
         }
     }
@@ -1234,21 +1297,84 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         None
     }
 
-    /// Set the static init-state of the `var` slot for HIR `local`.
-    pub fn set_var_init(&mut self, local: HirLocalId, new_init: VarInit) {
-        for scope in self.scope_stack.iter_mut().rev() {
-            for entry in scope.entries.iter_mut().rev() {
-                if let ScopeEntry::Var {
-                    local: Some(l),
-                    init,
-                    ..
-                } = entry
-                    && *l == local
-                {
-                    *init = new_init;
-                    return;
-                }
+    /// Set the whole-and-paths static state of `local` (a merge join).
+    pub fn set_var_state(&mut self, local: HirLocalId, state: &VarState) {
+        if let Some(ScopeEntry::Var { init, paths, .. }) = self.var_entry_mut(local) {
+            *init = state.whole;
+            for (p, st) in paths.iter_mut().zip(&state.paths) {
+                p.init = *st;
             }
+        }
+    }
+
+    /// The innermost scope entry tracking `local`.
+    fn var_entry_mut(&mut self, local: HirLocalId) -> Option<&mut ScopeEntry> {
+        self.scope_stack
+            .iter_mut()
+            .rev()
+            .flat_map(|scope| scope.entries.iter_mut().rev())
+            .find(|e| matches!(e, ScopeEntry::Var { local: Some(l), .. } if *l == local))
+    }
+
+    pub(crate) fn var_entry(&self, local: HirLocalId) -> Option<&ScopeEntry> {
+        self.scope_stack
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.entries.iter().rev())
+            .find(|e| matches!(e, ScopeEntry::Var { local: Some(l), .. } if *l == local))
+    }
+
+    /// The whole var was moved out (`DefUninit`) or (re)initialized
+    /// (`DefInit`): update its static state and drop flag, and every tracked
+    /// field path with it — a field is present exactly when the slot is.
+    /// Single funnel for whole-var transitions, so field paths never drift.
+    pub fn record_var_whole(&mut self, local: HirLocalId, st: VarInit) {
+        let full = match st {
+            VarInit::DefInit => true,
+            VarInit::DefUninit => false,
+            VarInit::MaybeUninit => unreachable!("a single program point is never Maybe"),
+        };
+        let mut flags = Vec::new();
+        if let Some(ScopeEntry::Var {
+            init, flag, paths, ..
+        }) = self.var_entry_mut(local)
+        {
+            *init = st;
+            flags.extend(*flag);
+            for p in paths.iter_mut() {
+                p.init = st;
+                flags.push(p.flag);
+            }
+        }
+        for f in flags {
+            self.store_drop_flag(f, full);
+        }
+    }
+
+    /// Set one tracked field path (and every tracked path under it) of
+    /// `local` to `st`, with their presence flags.
+    pub fn record_var_path(&mut self, local: HirLocalId, path: &[FieldIdx], st: VarInit) {
+        let full = st == VarInit::DefInit;
+        let mut flags = Vec::new();
+        if let Some(ScopeEntry::Var { paths, .. }) = self.var_entry_mut(local) {
+            for p in paths.iter_mut().filter(|p| p.path.starts_with(path)) {
+                p.init = st;
+                flags.push(p.flag);
+            }
+        }
+        for f in flags {
+            self.store_drop_flag(f, full);
+        }
+    }
+
+    /// Whether any tracked field path of `local` at or under `prefix` is not
+    /// fully initialized — the place is partially moved.
+    pub fn var_partially_moved(&self, local: HirLocalId, prefix: &[FieldIdx]) -> bool {
+        match self.var_entry(local) {
+            Some(ScopeEntry::Var { paths, .. }) => paths
+                .iter()
+                .any(|p| p.path.starts_with(prefix) && p.init != VarInit::DefInit),
+            _ => false,
         }
     }
 
@@ -1733,10 +1859,34 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if self.is_terminated() {
             return;
         }
+        // Partially moved vars drop field by field (guarded where needed).
+        // Same pass as the flag-guarded destroys: both rename threaded values,
+        // so both must precede the callers' destroy snapshots.
+        let split: Vec<ScopeEntry> = self.scope_stack[target_depth..]
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.entries.iter().rev())
+            .filter(|e| Self::var_entry_is_split(e))
+            .cloned()
+            .collect();
+        for entry in split {
+            if let ScopeEntry::Var {
+                addr,
+                ty,
+                init,
+                flag,
+                paths,
+                ..
+            } = entry
+            {
+                self.drop_var_parts(addr, ty, &[], (init, flag), &paths);
+            }
+        }
         let pending: Vec<(ValueId, ValueId, TyId)> = self.scope_stack[target_depth..]
             .iter()
             .rev()
             .flat_map(|scope| scope.entries.iter().rev())
+            .filter(|e| !Self::var_entry_is_split(e))
             .filter_map(|e| match e {
                 ScopeEntry::Var {
                     init: VarInit::MaybeUninit,
@@ -1793,6 +1943,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 ScopeEntry::Borrow(_) => false,
             });
             for entry in &entries {
+                if Self::var_entry_is_split(entry) {
+                    continue; // dropped per field above
+                }
                 match entry {
                     ScopeEntry::Owned(v) if !keep.contains(v) => {
                         self.push_inst(InstKind::DestroyValue { operand: *v });
@@ -1865,6 +2018,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .flat_map(|scope| scope.entries.iter().rev().cloned())
             .collect();
         for entry in &entries {
+            if Self::var_entry_is_split(entry) {
+                continue; // dropped per field above
+            }
             match entry {
                 ScopeEntry::Owned(v) if !keep.contains(v) => {
                     self.push_inst(InstKind::DestroyValue { operand: *v });
@@ -2109,18 +2265,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     /// Per-`var` static init-state (keyed by HIR local) across all in-scope
     /// frames, innermost wins. Used to reconcile conditional moves at merges.
-    pub fn scope_var_inits(&self) -> Vec<(HirLocalId, VarInit)> {
-        let mut out: Vec<(HirLocalId, VarInit)> = Vec::new();
+    pub fn scope_var_inits(&self) -> Vec<(HirLocalId, VarState)> {
+        let mut out: Vec<(HirLocalId, VarState)> = Vec::new();
         for scope in self.scope_stack.iter().rev() {
             for entry in scope.entries.iter().rev() {
                 if let ScopeEntry::Var {
                     local: Some(l),
                     init,
+                    paths,
                     ..
                 } = entry
                     && !out.iter().any(|(k, _)| k == l)
                 {
-                    out.push((*l, *init));
+                    let state = VarState {
+                        whole: *init,
+                        paths: paths.iter().map(|p| p.init).collect(),
+                    };
+                    out.push((*l, state));
                 }
             }
         }

@@ -199,17 +199,13 @@ impl OssaBodyCtx<'_, '_> {
     /// A var taken on some-but-not-all edges becomes `MaybeUninit`.
     pub(crate) fn fold_var_inits(&mut self, reaching: &[&ArmExit]) {
         for (local, _) in self.scope_var_inits() {
-            let mut joined: Option<super::VarInit> = None;
-            for exit in reaching {
-                if let Some((_, ai)) = exit.var_inits.iter().find(|(l, _)| *l == local) {
-                    joined = Some(match joined {
-                        None => *ai,
-                        Some(j) => j.join(*ai),
-                    });
-                }
-            }
+            let joined = reaching
+                .iter()
+                .filter_map(|exit| exit.var_inits.iter().find(|(l, _)| *l == local))
+                .map(|(_, st)| st.clone())
+                .reduce(|a, b| a.join(&b));
             if let Some(j) = joined {
-                self.set_var_init(local, j);
+                self.set_var_state(local, &j);
             }
         }
         self.fold_field_inits(reaching);
@@ -338,10 +334,11 @@ impl OssaBodyCtx<'_, '_> {
         for (local, _) in self.scope_var_inits() {
             let joined = break_var_inits
                 .iter()
-                .filter_map(|inits| inits.iter().find(|(l, _)| *l == local).map(|(_, i)| *i))
-                .reduce(|a, b| a.join(b));
+                .filter_map(|inits| inits.iter().find(|(l, _)| *l == local))
+                .map(|(_, st)| st.clone())
+                .reduce(|a, b| a.join(&b));
             if let Some(j) = joined {
-                self.set_var_init(local, j);
+                self.set_var_state(local, &j);
             }
         }
         self.rebind_scope_values(&initial_args, &exit_params);

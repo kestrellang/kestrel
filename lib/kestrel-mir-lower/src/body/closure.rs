@@ -813,10 +813,7 @@ impl OssaBodyCtx<'_, '_> {
         // Move-only: the environment becomes the sole owner.
         if self.is_var_local(&root) && self.body.value(mir_val).ownership == Ownership::Owned {
             let value = self.emit_take(mir_val, cap_ty);
-            self.set_var_init(root, super::VarInit::DefUninit);
-            if let Some(flag) = self.var_flag(root) {
-                self.store_drop_flag(flag, false);
-            }
+            self.record_var_whole(root, super::VarInit::DefUninit);
             return value;
         }
         if self.body.value(mir_val).ownership == Ownership::Owned {
@@ -920,10 +917,7 @@ impl OssaBodyCtx<'_, '_> {
                 let slot_owned = self.body.value(mir_val).ownership == Ownership::Owned;
                 if slot_owned && self.is_non_copyable(cap_ty) {
                     let value = self.emit_take(mir_val, cap_ty);
-                    self.set_var_init(root, super::VarInit::DefUninit);
-                    if let Some(flag) = self.var_flag(root) {
-                        self.store_drop_flag(flag, false);
-                    }
+                    self.record_var_whole(root, super::VarInit::DefUninit);
                     self.emit_store_init(addr, value);
                 } else {
                     let value = self.emit_copy_addr(mir_val, cap_ty);

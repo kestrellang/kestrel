@@ -102,10 +102,7 @@ impl OssaBodyCtx<'_, '_> {
                     });
                     // The slot no longer owns a value: record it (state +
                     // in-memory flag) so scope exit doesn't destroy again.
-                    self.set_var_init(*hir_local, super::VarInit::DefUninit);
-                    if let Some(flag) = self.var_flag(*hir_local) {
-                        self.store_drop_flag(flag, false);
-                    }
+                    self.record_var_whole(*hir_local, super::VarInit::DefUninit);
                 } else {
                     let val = self.map_local(*hir_local);
                     self.emit_destroy_value(val);

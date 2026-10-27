@@ -70,10 +70,7 @@ impl OssaBodyCtx<'_, '_> {
                 && self.var_init(hir_local) != Some(super::VarInit::DefUninit)
             {
                 let v = self.emit_take(addr, ty);
-                self.set_var_init(hir_local, super::VarInit::DefUninit);
-                if let Some(flag) = self.var_flag(hir_local) {
-                    self.store_drop_flag(flag, false);
-                }
+                self.record_var_whole(hir_local, super::VarInit::DefUninit);
                 // Apply any recorded value promotion (e.g. `T` → `Result[T,E]`
                 // / `Optional[T]` Ok/Some-wrapping at a throws/Optional return).
                 // The non-var path delegates to `lower_expr`, which promotes;
@@ -83,117 +80,10 @@ impl OssaBodyCtx<'_, '_> {
                 return self.apply_promotion(expr_id, v);
             }
         }
-        // Move a non-Copyable field out of an OWNED struct receiver (the
-        // `consuming self` case): `consuming func f() -> Res { self.inner }`.
-        // Must MOVE `inner` out, not borrow-then-copy it while the whole self
-        // is still dropped (the E503 backstop + double-drop of #145/#152).
-        if let Some(field_val) = self.try_move_field_out_of_owned(expr_id) {
-            return self.apply_promotion(expr_id, field_val);
-        }
+        // A field moved out of an owned local (`self.inner` in a consuming
+        // method, `p.a` of a let) is a planned partial move: `lower_expr`
+        // takes it out of the slot (see `partial_move.rs`).
         self.lower_expr(expr_id)
-    }
-
-    /// Move-out of a non-Copyable field from an OWNED struct local in a
-    /// consuming/return position. Per `copy-semantics.md`, extracting a field
-    /// from a *consuming* receiver is legal (`consuming func f() -> Res
-    /// { self.inner }` is the documented idiom). The generic member-access path
-    /// would `begin_borrow self → struct_extract (@guaranteed) → copy out`,
-    /// hitting the move-out-of-borrow backstop (false E503) AND leaving the
-    /// whole `self` to be dropped — double-freeing the moved field (#145/#152).
-    ///
-    /// Fix mirrors the enum move-out path (`emit_moveout` →
-    /// `emit_destructure_enum`): destructure the owned struct, which CONSUMES it
-    /// (so no whole-self destroy), hand back the wanted field as @owned, and
-    /// leave the sibling fields tracked-owned so scope exit drops exactly those.
-    ///
-    /// Returns `None` — falling through to the borrow/copy path — unless the
-    /// base is a directly-owned struct local AND the field is non-Copyable: a
-    /// Copyable field copies out without consuming self (and self must still
-    /// drop), and a borrowed self (normal method) is not ours to consume.
-    fn try_move_field_out_of_owned(&mut self, expr_id: HirExprId) -> Option<ValueId> {
-        let HirExpr::Field { base, name, .. } = &self.hir.exprs[expr_id] else {
-            return None;
-        };
-        let base = *base;
-        let field_name = name.as_str_or_empty().to_string();
-        // Base must be a directly-owned local: `consuming self` binds as
-        // `Ssa(@owned)`; a let/var binds as `Var` over an @owned slot it
-        // solely owns (a MutBorrow param's slot is @guaranteed — the
-        // caller's storage, not ours to consume). A borrowed self (normal
-        // method, bound @guaranteed `Ssa`) is rejected by the ownership
-        // check below.
-        let HirExpr::Local(base_local, _) = &self.hir.exprs[base] else {
-            return None;
-        };
-        let base_local = *base_local;
-        enum BaseSrc {
-            Ssa(ValueId),
-            Slot(ValueId),
-        }
-        let (base_src, base_ty) = match self.local_map.get(&base_local) {
-            Some(super::LocalBinding::Ssa(v)) => {
-                let v = *v;
-                if self.body.value(v).ownership != kestrel_mir::value::Ownership::Owned {
-                    return None;
-                }
-                (BaseSrc::Ssa(v), self.body.value(v).ty)
-            },
-            Some(super::LocalBinding::Var(addr)) => {
-                let addr = *addr;
-                if self.body.value(addr).ownership != kestrel_mir::value::Ownership::Owned
-                    || self.var_init(base_local) == Some(super::VarInit::DefUninit)
-                {
-                    return None;
-                }
-                (BaseSrc::Slot(addr), self.resolve_local_type(base_local))
-            },
-            None => return None,
-        };
-        let entity = match self.ctx.module.ty_arena.get(base_ty) {
-            MirTy::Named { entity, .. } => *entity,
-            _ => return None,
-        };
-        // Structs only — enum field-moves go through `match self`, tuples are a
-        // separate projection arm.
-        if !self.ctx.module.structs.contains_key(&entity) {
-            return None;
-        }
-        // Only MOVE a non-Copyable field: a Copyable field copies out fine and
-        // must NOT consume self (self stays usable and must still drop). A
-        // mono-dependent field (a bare type param / conditionally-Copyable
-        // container) is ALSO moved: pre-mono its copy behavior is unknown, and
-        // the borrow+`copy_value` fallback bitwise-aliases storage that is
-        // unsound once the param resolves non-Copyable — the same #141 hazard
-        // the var-read path guards (mod.rs `is_non_copyable || mono_dependent`).
-        // Destructuring is equivalent to copy-out when it resolves Copyable.
-        let result_ty = self.resolve_expr_type(expr_id);
-        if !self.is_non_copyable(result_ty) && !self.copy_behavior_is_mono_dependent(result_ty) {
-            return None;
-        }
-        let field_idx = self.ctx.resolve_field_idx(entity, &field_name)?;
-        let field_tys = self.struct_field_tys(base_ty);
-        if field_idx.index() >= field_tys.len() {
-            return None;
-        }
-        // Materialize the whole base as @owned. A slot-bound local is taken
-        // out (Swift `load [take]`) and marked moved so scope exit doesn't
-        // destroy the vacated slot.
-        let base_val = match base_src {
-            BaseSrc::Ssa(v) => v,
-            BaseSrc::Slot(addr) => {
-                let v = self.emit_take(addr, base_ty);
-                self.set_var_init(base_local, super::VarInit::DefUninit);
-                if let Some(flag) = self.var_flag(base_local) {
-                    self.store_drop_flag(flag, false);
-                }
-                v
-            },
-        };
-        // Destructure consumes `base_val` (no whole-self destroy) and tracks
-        // every field as @owned; the return path keeps the wanted field (its
-        // `keep` set) and drops the siblings at scope exit.
-        let results = self.emit_destructure_struct(base_val, &field_tys);
-        Some(results[field_idx.index()])
     }
 
     /// Apply a recorded `FromValue.from(value)` promotion if type-infer
@@ -319,6 +209,13 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     fn lower_expr_inner(&mut self, expr_id: HirExprId, expr: &HirExpr) -> ValueId {
+        // A planned partial move (`let x = p.a`, `take(p.a)`): take the field
+        // out of the slot instead of borrowing it.
+        if self.partial.exprs.contains(&expr_id)
+            && let Some(v) = self.lower_partial_move(expr_id)
+        {
+            return v;
+        }
         match expr {
             HirExpr::Literal { value, .. } => self.lower_literal(expr_id, value),
 
@@ -392,12 +289,7 @@ impl OssaBodyCtx<'_, '_> {
                             hir_local
                         );
                         let v = self.emit_take(addr, ty);
-                        self.set_var_init(*hir_local, super::VarInit::DefUninit);
-                        // Record the move in the in-memory drop flag (if any) so a
-                        // later merge/scope-exit can reconcile divergent paths.
-                        if let Some(flag) = self.var_flag(*hir_local) {
-                            self.store_drop_flag(flag, false);
-                        }
+                        self.record_var_whole(*hir_local, super::VarInit::DefUninit);
                         v
                     } else {
                         self.emit_copy_addr(addr, ty)
@@ -1174,6 +1066,10 @@ impl OssaBodyCtx<'_, '_> {
             return self.emit_literal(Immediate::unit());
         }
 
+        if self.store_into_partially_moved(target, rhs) {
+            return self.emit_literal(Immediate::unit());
+        }
+
         let target_expr = self.hir.exprs[target].clone();
         match target_expr {
             HirExpr::Local(hir_local, _) => {
@@ -1190,7 +1086,7 @@ impl OssaBodyCtx<'_, '_> {
                             let raw = self.local_map[&hir_local].value();
                             let addr = self.whole_slot_addr(raw);
                             self.emit_store_init(addr, rhs);
-                            self.set_var_init(hir_local, super::VarInit::DefInit);
+                            self.record_var_whole(hir_local, super::VarInit::DefInit);
                         },
                         // Moved on some paths only: flag-guarded drop of the old
                         // value, then StoreInit. `emit_store_assign` would
@@ -1210,8 +1106,7 @@ impl OssaBodyCtx<'_, '_> {
                             let rhs = remapped[0];
                             let addr = remapped[1];
                             self.emit_store_init(addr, rhs);
-                            self.store_drop_flag(flag, true);
-                            self.set_var_init(hir_local, super::VarInit::DefInit);
+                            self.record_var_whole(hir_local, super::VarInit::DefInit);
                         },
                         // Definitely initialized: StoreAssign drops the old value.
                         // A MutBorrow param (`mutating self`) is bound as
