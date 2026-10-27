@@ -78,20 +78,18 @@ impl CopyLayer for MirCopyLayer<'_> {
             .unwrap_or(CopyBehavior::Bitwise)
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
-        Cow::Borrowed(
-            self.env
-                .structs
-                .get(&entity)
-                .map(|s| s.conditionally_copyable.as_slice())
-                .or_else(|| {
-                    self.env
-                        .enums
-                        .get(&entity)
-                        .map(|e| e.conditionally_copyable.as_slice())
-                })
-                .unwrap_or(&[]),
-        )
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, kestrel_copy_fold::ConditionalCopy> {
+        self.env
+            .structs
+            .get(&entity)
+            .map(|s| &s.conditionally_copyable)
+            .or_else(|| {
+                self.env
+                    .enums
+                    .get(&entity)
+                    .map(|e| &e.conditionally_copyable)
+            })
+            .map_or_else(|| Cow::Owned(Default::default()), Cow::Borrowed)
     }
 
     fn member_semantics(&self, &ty: &TyId) -> CopyBehavior {
@@ -364,7 +362,7 @@ pub fn copy_is_mono_dependent(
                 return false;
             };
             // Only gating positions affect the container's copyability.
-            gating.iter().any(|&pos| {
+            gating.positions.iter().any(|&pos| {
                 type_args
                     .get(pos)
                     .is_some_and(|&arg| copy_is_mono_dependent(arena, module, arg, where_clause))

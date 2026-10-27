@@ -306,7 +306,7 @@ impl QueryFn for DeclaresConformanceTo {
 // (solver, resolve, where_clauses, mir-lower, analyze) keep their
 // `kestrel_semantics::` paths. Only kestrel-mir imports kestrel-copy-fold
 // directly (it has no dependency path to this crate).
-pub use kestrel_copy_fold::{CopyRequirement, CopySemantics};
+pub use kestrel_copy_fold::{ConditionalCopy, CopyRequirement, CopySemantics};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CopySemanticsReason {
@@ -431,13 +431,13 @@ pub struct ConditionalCopyableParams {
 }
 
 impl QueryFn for ConditionalCopyableParams {
-    type Output = Vec<usize>;
+    type Output = ConditionalCopy;
 
     fn describe(&self) -> String {
         format!("ConditionalCopyableParams({:?})", self.entity)
     }
 
-    fn execute(&self, ctx: &QueryContext<'_>) -> Vec<usize> {
+    fn execute(&self, ctx: &QueryContext<'_>) -> ConditionalCopy {
         // Only a `not Copyable`-base type can be *conditionally* Copyable.
         if ctx
             .query(NominalCopySemantics {
@@ -447,13 +447,13 @@ impl QueryFn for ConditionalCopyableParams {
             .semantics
             != CopySemantics::NotCopyable
         {
-            return Vec::new();
+            return ConditionalCopy::default();
         }
         let Some(copyable) = ctx.query(ResolveBuiltin {
             builtin: Builtin::Copyable,
             root: self.root,
         }) else {
-            return Vec::new();
+            return ConditionalCopy::default();
         };
 
         // Find an extension adding a Copyable(-refining) conformance.
@@ -480,12 +480,41 @@ impl QueryFn for ConditionalCopyableParams {
             refines_cache.borrow_mut().insert(proto, refines);
             refines
         };
-        let Some(ext) = insts
+        // A Cloneable(-refining) grant only ever yields Cloneable instances
+        // (`extend OwnedBox[T]: Cloneable where T: Cloneable` — a bit-copy
+        // of the box would double-own its block). Prefer a Copyable grant
+        // when both exist (`Optional` has `Copyable where T: Copyable` and
+        // `Cloneable where T: Copyable`).
+        let cloneable = ctx.query(ResolveBuiltin {
+            builtin: Builtin::Cloneable,
+            root: self.root,
+        });
+        let is_clone_only = |proto: Entity| {
+            cloneable.is_some_and(|cloneable| {
+                proto == cloneable
+                    || ctx.query(ProtocolRefines {
+                        protocol: proto,
+                        base: cloneable,
+                        root: self.root,
+                    })
+            })
+        };
+        // Only an extension carries a where-clause; an inherited entry's
+        // source is the refining protocol (`Copyable` via `Cloneable`).
+        let grants: Vec<(Entity, bool)> = insts
             .iter()
-            .find(|(proto, source, _)| *source != self.entity && refines_copyable(*proto))
-            .map(|(_, source, _)| *source)
+            .filter(|(proto, source, _)| {
+                ctx.get::<NodeKind>(*source) == Some(&NodeKind::Extension)
+                    && refines_copyable(*proto)
+            })
+            .map(|(proto, source, _)| (*source, is_clone_only(*proto)))
+            .collect();
+        let Some(&(ext, clone_only)) = grants
+            .iter()
+            .find(|(_, clone_only)| !clone_only)
+            .or_else(|| grants.first())
         else {
-            return Vec::new();
+            return ConditionalCopy::default();
         };
 
         // Map the extension's Copyable where-clause bounds to target-arg
@@ -498,7 +527,7 @@ impl QueryFn for ConditionalCopyableParams {
             })
             .unwrap_or_default();
         let Some(wc) = ctx.get::<AstWhereClause>(ext) else {
-            return Vec::new();
+            return ConditionalCopy::default();
         };
         let mut positions = Vec::new();
         for constraint in &wc.0 {
@@ -525,7 +554,10 @@ impl QueryFn for ConditionalCopyableParams {
                 positions.push(idx);
             }
         }
-        positions
+        ConditionalCopy {
+            positions,
+            clone_only,
+        }
     }
 }
 
@@ -633,7 +665,7 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
         query_nominal_semantics(self.ctx, entity, self.root)
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, ConditionalCopy> {
         Cow::Owned(self.ctx.query(ConditionalCopyableParams {
             entity,
             root: self.root,

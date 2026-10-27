@@ -2662,7 +2662,7 @@ impl CopyLayer for SolverCopyLayer<'_, '_> {
         sem
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, kestrel_copy_fold::ConditionalCopy> {
         Cow::Owned(self.ctx.query_ctx.query(ConditionalCopyableParams {
             entity,
             root: self.ctx.root,

@@ -81,6 +81,26 @@ impl From<CopyRequirement> for CopySemantics {
     }
 }
 
+/// How a `not Copyable` nominal regains copyability per instantiation, from
+/// a where-gated extension (`ConditionalCopyableParams`). Empty when it
+/// doesn't.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ConditionalCopy {
+    /// Type-param positions whose args gate the conformance:
+    /// `extend X[A, B]: Copyable where A: Copyable` gates `[0]`.
+    pub positions: Vec<usize>,
+    /// The gating extension grants only `Cloneable` (`extend OwnedBox[T]:
+    /// Cloneable where T: Cloneable`): an instance is at best Cloneable, never
+    /// bitwise — duplicating it must run its `clone()`.
+    pub clone_only: bool,
+}
+
+impl ConditionalCopy {
+    pub fn is_empty(&self) -> bool {
+        self.positions.is_empty()
+    }
+}
+
 /// A layer-native semantics value projecting to the shared tri-state.
 /// `CopySemantics` itself for frontend layers; `CopyBehavior` for MIR, whose
 /// `Clone(Entity)` payloads vary by producer (type entity from lowering,
@@ -118,11 +138,11 @@ pub trait CopyLayer {
     /// guard — vs MIR's precomputed `type_info.copy`.
     fn base_semantics(&self, entity: Entity) -> Self::Sem;
 
-    /// Gating positions for conditional copyability (ConditionalCopyableParams
-    /// query / precomputed `conditionally_copyable`). Cow: Borrowed for MIR,
-    /// Owned for query layers. Invariant (enforced by the query): non-empty
-    /// only when the base is NotCopyable.
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]>;
+    /// Conditional copyability (ConditionalCopyableParams query /
+    /// precomputed `conditionally_copyable`). Cow: Borrowed for MIR, Owned
+    /// for query layers. Invariant (enforced by the query): non-empty only
+    /// when the base is NotCopyable.
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, ConditionalCopy>;
 
     /// Classify one member/arg type — the layer's exhaustive match, including
     /// its own recursion bookkeeping (solver depth, MIR where_clause threading).
@@ -166,16 +186,21 @@ pub fn instance_semantics<L: CopyLayer>(layer: &L, entity: Entity, args: &[L::Ty
         return base;
     }
     // 2. A `not Copyable` base is conditionally Copyable only with gating positions.
-    let positions = layer.gating_positions(entity);
-    if positions.is_empty() {
+    let conditional = layer.conditional_copy(entity);
+    if conditional.is_empty() {
         return layer.sem_from_class(entity, CopySemantics::NotCopyable);
     }
     // 3. Fold gating args; a missing/out-of-range position is unprovable -> NotCopyable.
-    let class = fold_members(positions.iter().map(|&pos| {
+    let class = fold_members(conditional.positions.iter().map(|&pos| {
         args.get(pos).map_or(CopySemantics::NotCopyable, |a| {
             layer.member_semantics(a).class()
         })
     }));
+    // 4. A Cloneable-only grant caps the class: never a bit-copy.
+    let class = match class {
+        CopySemantics::Copyable if conditional.clone_only => CopySemantics::Cloneable,
+        class => class,
+    };
     layer.sem_from_class(entity, class)
 }
 
@@ -221,9 +246,16 @@ mod tests {
         }
     }
 
+    fn gating(positions: &[usize]) -> ConditionalCopy {
+        ConditionalCopy {
+            positions: positions.to_vec(),
+            clone_only: false,
+        }
+    }
+
     struct ToyLayer {
         base: ToySem,
-        gating: Vec<usize>,
+        gating: ConditionalCopy,
     }
     impl CopyLayer for ToyLayer {
         type Ty = CopySemantics;
@@ -231,7 +263,7 @@ mod tests {
         fn base_semantics(&self, _: Entity) -> ToySem {
             self.base.clone()
         }
-        fn gating_positions(&self, _: Entity) -> Cow<'_, [usize]> {
+        fn conditional_copy(&self, _: Entity) -> Cow<'_, ConditionalCopy> {
             Cow::Borrowed(&self.gating)
         }
         fn member_semantics(&self, ty: &CopySemantics) -> ToySem {
@@ -246,7 +278,7 @@ mod tests {
     fn unconditional_base_passes_through_natively() {
         let layer = ToyLayer {
             base: ToySem::Tagged(Cloneable, 42),
-            gating: vec![0],
+            gating: gating(&[0]),
         };
         let e = Entity::from_raw(1);
         // Payload preserved — NOT normalized through the tri-state.
@@ -260,7 +292,7 @@ mod tests {
     fn not_copyable_base_without_gating_is_not_copyable() {
         let layer = ToyLayer {
             base: ToySem::Plain(NotCopyable),
-            gating: vec![],
+            gating: gating(&[]),
         };
         let e = Entity::from_raw(1);
         assert_eq!(
@@ -274,7 +306,7 @@ mod tests {
         let e = Entity::from_raw(1);
         let layer = ToyLayer {
             base: ToySem::Plain(NotCopyable),
-            gating: vec![0, 2],
+            gating: gating(&[0, 2]),
         };
         // Non-gating position 1 is ignored.
         assert_eq!(
@@ -292,11 +324,36 @@ mod tests {
     }
 
     #[test]
+    fn clone_only_grant_is_never_bitwise() {
+        // `extend OwnedBox[T]: Cloneable where T: Cloneable`.
+        let e = Entity::from_raw(1);
+        let layer = ToyLayer {
+            base: ToySem::Plain(NotCopyable),
+            gating: ConditionalCopy {
+                positions: vec![0],
+                clone_only: true,
+            },
+        };
+        assert_eq!(
+            instance_semantics(&layer, e, &[Copyable]),
+            ToySem::Plain(Cloneable)
+        );
+        assert_eq!(
+            instance_semantics(&layer, e, &[Cloneable]),
+            ToySem::Plain(Cloneable)
+        );
+        assert_eq!(
+            instance_semantics(&layer, e, &[NotCopyable]),
+            ToySem::Plain(NotCopyable)
+        );
+    }
+
+    #[test]
     fn missing_gating_arg_is_not_copyable() {
         let e = Entity::from_raw(1);
         let layer = ToyLayer {
             base: ToySem::Plain(NotCopyable),
-            gating: vec![1],
+            gating: gating(&[1]),
         };
         // args too short for gating position 1 → unprovable → NotCopyable.
         assert_eq!(

@@ -1857,7 +1857,7 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
             .semantics
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, kestrel_copy_fold::ConditionalCopy> {
         Cow::Owned(self.cx.query.query(ConditionalCopyableParams {
             entity,
             root: self.cx.root,

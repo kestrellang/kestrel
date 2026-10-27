@@ -1130,24 +1130,18 @@ impl CopyLayer for MonoCopyLayer<'_> {
         // Checked form of the invariant above: a pass that flips a conditional
         // container's base away from None would silently skip the gating fold.
         debug_assert!(
-            self.gating_positions(entity).is_empty() || matches!(copy, CopyBehavior::None),
+            self.conditional_copy(entity).is_empty() || matches!(copy, CopyBehavior::None),
             "conditional container's generic def must keep CopyBehavior::None"
         );
         copy
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
-        Cow::Borrowed(
-            self.structs
-                .get(&entity)
-                .map(|s| s.conditionally_copyable.as_slice())
-                .or_else(|| {
-                    self.enums
-                        .get(&entity)
-                        .map(|e| e.conditionally_copyable.as_slice())
-                })
-                .unwrap_or(&[]),
-        )
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, kestrel_copy_fold::ConditionalCopy> {
+        self.structs
+            .get(&entity)
+            .map(|s| &s.conditionally_copyable)
+            .or_else(|| self.enums.get(&entity).map(|e| &e.conditionally_copyable))
+            .map_or_else(|| Cow::Owned(Default::default()), Cow::Borrowed)
     }
 
     fn member_semantics(&self, &ty: &TyId) -> CopyBehavior {

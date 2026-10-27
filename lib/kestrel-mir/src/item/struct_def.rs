@@ -31,7 +31,7 @@ pub struct StructDef {
     /// T: Copyable`). Empty unless conditionally copyable. Drives
     /// per-instantiation `copy_behavior`: `X[args]` is Copyable iff every gating
     /// `args[i]` is. See `kestrel_semantics::ConditionalCopyableParams`.
-    pub conditionally_copyable: Vec<usize>,
+    pub conditionally_copyable: kestrel_copy_fold::ConditionalCopy,
     /// `@layout` / `@align`, the input to every layout of this type.
     pub layout_attrs: crate::layout::LayoutAttrs,
 }
@@ -44,7 +44,7 @@ impl StructDef {
             type_params: Vec::new(),
             fields: Vec::new(),
             type_info: TypeInfo::default(),
-            conditionally_copyable: Vec::new(),
+            conditionally_copyable: kestrel_copy_fold::ConditionalCopy::default(),
             layout_attrs: crate::layout::LayoutAttrs::default(),
         }
     }
