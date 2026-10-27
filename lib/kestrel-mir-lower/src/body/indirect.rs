@@ -116,7 +116,11 @@ impl OssaBodyCtx<'_, '_> {
 
     /// Consume an @owned box and move its payload out (`takeValue()`, which
     /// frees the block), split back into the @owned logical fields.
-    pub(crate) fn emit_indirect_unbox(&mut self, case: &IndirectCase, boxed: ValueId) -> Vec<ValueId> {
+    pub(crate) fn emit_indirect_unbox(
+        &mut self,
+        case: &IndirectCase,
+        boxed: ValueId,
+    ) -> Vec<ValueId> {
         let owned_box = self.owned_box_entity(case.box_ty);
         let take_value =
             self.find_box_member(owned_box, NodeKind::Function, "takeValue()", |c, name| {

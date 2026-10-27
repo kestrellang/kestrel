@@ -13,7 +13,6 @@
 //! only the tail field can gate: every other stored field must be Sized
 //! (E403 enforces that).
 
-
 use kestrel_ast_builder::WhereConstraint;
 use kestrel_ast_builder::{
     FieldClass, Intrinsic, NodeKind, TypeParams, WhereClause as AstWhereClause,

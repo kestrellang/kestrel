@@ -270,17 +270,29 @@ fn substitute(ty: &HirTy, params: &[Entity], args: &[HirTy]) -> HirTy {
             Some(i) if i < args.len() => args[i].clone(),
             _ => ty.clone(),
         },
-        HirTy::Struct { entity, args: a, span } => HirTy::Struct {
+        HirTy::Struct {
+            entity,
+            args: a,
+            span,
+        } => HirTy::Struct {
             entity: *entity,
             args: subs(a),
             span: span.clone(),
         },
-        HirTy::Enum { entity, args: a, span } => HirTy::Enum {
+        HirTy::Enum {
+            entity,
+            args: a,
+            span,
+        } => HirTy::Enum {
             entity: *entity,
             args: subs(a),
             span: span.clone(),
         },
-        HirTy::AliasUse { entity, args: a, span } => HirTy::AliasUse {
+        HirTy::AliasUse {
+            entity,
+            args: a,
+            span,
+        } => HirTy::AliasUse {
             entity: *entity,
             args: subs(a),
             span: span.clone(),

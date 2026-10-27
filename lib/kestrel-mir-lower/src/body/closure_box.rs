@@ -205,7 +205,10 @@ impl OssaBodyCtx<'_, '_> {
     /// `MirTy::Pointer` is reached, returning `(wrappers outermost-first, raw
     /// pointer type)`. `RcBox[E]` → `std.memory.Pointer[RcBoxStorage[E]]` →
     /// `MirTy::Pointer(RcBoxStorage[E])`.
-    pub(crate) fn unwrap_handle_to_pointer(&mut self, handle_ty: TyId) -> Option<(Vec<TyId>, TyId)> {
+    pub(crate) fn unwrap_handle_to_pointer(
+        &mut self,
+        handle_ty: TyId,
+    ) -> Option<(Vec<TyId>, TyId)> {
         let mut wrappers = Vec::new();
         let mut cur = handle_ty;
         // Small bound: a handle is a thin wrapper, not a deep tower.

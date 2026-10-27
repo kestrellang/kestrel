@@ -106,10 +106,9 @@ fn box_case(ctx: &mut LowerCtx, case: &mut EnumCaseDef) {
     let logical_fields = std::mem::take(&mut case.payload_fields);
     let payload_ty = match logical_fields.as_slice() {
         [single] => single.ty,
-        many => ctx
-            .module
-            .ty_arena
-            .intern(kestrel_mir::MirTy::Tuple(many.iter().map(|f| f.ty).collect())),
+        many => ctx.module.ty_arena.intern(kestrel_mir::MirTy::Tuple(
+            many.iter().map(|f| f.ty).collect(),
+        )),
     };
     let box_ty = ctx.module.ty_arena.named(owned_box, vec![payload_ty]);
     case.payload_fields = vec![FieldDef::new("$box", box_ty)];

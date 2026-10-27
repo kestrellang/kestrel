@@ -2193,7 +2193,9 @@ impl OssaBodyCtx<'_, '_> {
 
         if let Some(entity) = entity
             && let Some(edef) = self.ctx.module.enums.get(&entity)
-            && let Some(field) = edef.logical_fields(variant_idx.index()).get(field_idx.index())
+            && let Some(field) = edef
+                .logical_fields(variant_idx.index())
+                .get(field_idx.index())
         {
             let mut field_ty = field.ty;
             if !type_args.is_empty() {

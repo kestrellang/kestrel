@@ -3,16 +3,15 @@
 //! All type lowering returns `TyId` (interned). No `MirTy` clones flow
 //! through the pipeline — the arena deduplicates automatically.
 
-
 use kestrel_ast_builder::{Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_mir::{FnKind, MirTy, ParamConvention, TyId};
+use kestrel_type_infer::result::ResolvedTy;
 use kestrel_type_infer::{
     InferBody, OpaqueConcrete, OpaqueConcreteTy, origin_type_params, substitute_resolved_ty,
 };
-use kestrel_type_infer::result::ResolvedTy;
 
 use crate::context::LowerCtx;
 
@@ -206,7 +205,6 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
 }
 
 // === ResolvedTy → TyId ===
-
 
 /// Lower a ResolvedTy (from type inference) to an interned TyId — the
 /// EXPRESSION seam: a TOP-LEVEL ref-typed expression value registers as an
