@@ -884,11 +884,11 @@ impl LowerCtx<'_> {
         if let Some(segments) = callee_path.as_ref().and_then(PathSyntax::as_segments)
             && segments.len() >= 2
         {
-            return self.lower_path_call(segments, &callee, lowered_args, span);
+            return self.lower_path_call(segments, callee, lowered_args, span);
         }
 
         // Direct call
-        let lowered_callee = self.lower_callee(&callee);
+        let lowered_callee = self.lower_callee(callee);
         self.alloc_expr(HirExpr::Call {
             callee: lowered_callee,
             args: lowered_args,

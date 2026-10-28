@@ -573,7 +573,7 @@ fn collect_bindings(
             let chosen = alternatives
                 .iter()
                 .copied()
-                .find(|&alt| or_alternative_matches(hir, query, cx.root, alt, cx.matched))
+                .find(|&alt| or_alternative_matches(hir, query, alt, cx.matched))
                 .or_else(|| alternatives.first().copied());
             if let Some(alt) = chosen {
                 collect_bindings(cx, alt, ty, path, bindings);
@@ -620,7 +620,6 @@ fn collect_bindings(
 fn or_alternative_matches(
     hir: &HirBody,
     query: &QueryContext<'_>,
-    root: Entity,
     alt: HirPatId,
     matched: &[Constructor],
 ) -> bool {
@@ -650,9 +649,7 @@ fn or_alternative_matches(
                 (Constructor::True, true) | (Constructor::False, false)
             )
         }),
-        HirPat::At { subpattern, .. } => {
-            or_alternative_matches(hir, query, root, *subpattern, matched)
-        },
+        HirPat::At { subpattern, .. } => or_alternative_matches(hir, query, *subpattern, matched),
         HirPat::TypeTest { target, .. } => {
             let target = kestrel_type_infer::compare::resolve_hir_type(query, target);
             matched.contains(&Constructor::TypeTest(target))

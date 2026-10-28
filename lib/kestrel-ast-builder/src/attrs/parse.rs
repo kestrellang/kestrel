@@ -388,6 +388,7 @@ fn unknown_label(def: &AttrDef, arg: &AstAttributeArg, label: &str) -> AttrError
 }
 
 /// Convert one argument's literal to the parameter's kind.
+#[allow(clippy::result_large_err)]
 fn convert(param: &ParamDef, arg: &AstAttributeArg) -> Result<AttrValue, AttrError> {
     let wrong = |expected: &str| {
         AttrError::new(
@@ -537,8 +538,8 @@ fn edit_distance(a: &str, b: &str) -> usize {
     for (i, row) in d.iter_mut().enumerate() {
         row[0] = i;
     }
-    for j in 0..=b.len() {
-        d[0][j] = j;
+    for (j, cell) in d[0].iter_mut().enumerate() {
+        *cell = j;
     }
     for i in 1..=a.len() {
         for j in 1..=b.len() {
