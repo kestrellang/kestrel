@@ -275,7 +275,7 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     /// place, then writes `value`. Use this — not `write` — to overwrite a
     /// live slot; `write` is for uninitialized (or moved-out) storage and
     /// drops nothing, so overwriting a live heap value with it leaks.
-    public func assign(consuming value: T) {
+    public func assign(consuming value: T) where T: Sized {
         lang.drop_in_place(self._raw);
         lang.ptr_write(self._raw, value)
     }
