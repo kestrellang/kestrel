@@ -316,13 +316,17 @@ pub trait TypeResolver {
 
     /// Resolve a static member on a type (e.g., Result.fromResidual).
     /// Like resolve_member but searches static methods instead of instance ones.
+    ///
+    /// `is_call` separates `T.zero` (a property read) from `T.zero()` when a
+    /// type has both a `static var zero` and a `static func zero()`.
     fn resolve_static_member(
         &self,
         receiver_ty: &TyKind,
         name: &str,
         args: &[crate::constraint::CallArg],
+        is_call: bool,
     ) -> Result<MemberResolution, MemberError> {
-        let _ = (receiver_ty, name, args);
+        let _ = (receiver_ty, name, args, is_call);
         Err(MemberError::NotFound)
     }
 
@@ -840,86 +844,60 @@ impl TypeResolver for WorldResolver<'_> {
         receiver_ty: &TyKind,
         name: &str,
         args: &[crate::constraint::CallArg],
+        is_call: bool,
     ) -> Result<MemberResolution, MemberError> {
-        let Some(entity_val) = receiver_ty.entity() else {
+        let Some(entity) = receiver_ty.entity() else {
             return Err(MemberError::NotFound);
         };
-        let entity = &entity_val;
 
-        // Search direct children and extensions for static members
-        let mut all_candidates: Vec<kestrel_hecs::Entity> = Vec::new();
-
-        let children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-            parent: *entity,
+        // Candidates come from `TypeMembersByName` (direct, own extensions,
+        // conformed-protocol extensions) with the precedence name resolution
+        // applies to `A.tag()` (`resolve_extension_static_method`): own
+        // members compete equally; a protocol-extension default joins only
+        // when its label signature is not already taken.
+        let type_members = self.ctx.query(TypeMembersByName {
+            type_entity: entity,
             name: name.to_string(),
             context: self.body_owner,
-        });
-        all_candidates.extend(children.iter());
-
-        let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-            target: *entity,
             root: self.root,
         });
-        for ext in &extensions {
-            let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-                parent: *ext,
-                name: name.to_string(),
-                context: self.body_owner,
-            });
-            all_candidates.extend(ext_children.iter());
-        }
-
-        // Also search extensions on protocols this type conforms to —
-        // a static method defined in `extend SomeProto { ... }` is callable
-        // via any conforming type. Mirrors the instance-method case where
-        // `TypeMembersByName` already walks `ProtocolExtension` sources.
-        let conforming = self.ctx.query(kestrel_name_res::ConformingProtocols {
-            entity: *entity,
-            root: self.root,
-        });
-        for &proto in &conforming {
-            let proto_extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-                target: proto,
-                root: self.root,
-            });
-            for &ext in &proto_extensions {
-                let ext_children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-                    parent: ext,
-                    name: name.to_string(),
-                    context: self.body_owner,
-                });
-                all_candidates.extend(ext_children.iter());
+        let (own, via_protocol): (Vec<_>, Vec<_>) = type_members
+            .iter()
+            .filter(|tm| self.ctx.has::<Static>(tm.entity))
+            .partition(|tm| !matches!(tm.source, TypeMemberSource::ProtocolExtension { .. }));
+        let mut seen: crate::collections::HashSet<String> =
+            own.iter().map(|tm| self.label_signature(tm.entity)).collect();
+        let mut static_candidates: Vec<kestrel_hecs::Entity> =
+            own.iter().map(|tm| tm.entity).collect();
+        for tm in via_protocol {
+            if seen.insert(self.label_signature(tm.entity)) {
+                static_candidates.push(tm.entity);
             }
         }
 
-        // Filter to static members only
-        let static_candidates: Vec<kestrel_hecs::Entity> = all_candidates
-            .into_iter()
-            .filter(|&c| self.ctx.has::<Static>(c))
-            .collect();
-
-        if std::env::var("DEBUG_STATIC_MEMBER").is_ok() {
-            eprintln!(
-                "resolve_static_member: name={} candidates={}",
-                name,
-                static_candidates.len()
-            );
-            for &c in &static_candidates {
-                let callable = self.ctx.get::<kestrel_ast_builder::Callable>(c);
-                eprintln!(
-                    "  candidate {:?} params={:?}",
-                    c,
-                    callable.map(|cc| cc
-                        .params
-                        .iter()
-                        .map(|p| (p.label.clone(), p.name.clone()))
-                        .collect::<Vec<_>>())
-                );
-            }
+        // A read names the property, a call the function, when a type has
+        // both (`static var zero` + `static func zero()`). A lone candidate of
+        // the other kind still applies — a function-typed `static var` is
+        // callable, an unapplied `static func` is a function value.
+        let is_function =
+            |e: &kestrel_hecs::Entity| self.ctx.get::<NodeKind>(*e) == Some(&NodeKind::Function);
+        if static_candidates.iter().any(is_function) && !static_candidates.iter().all(is_function) {
+            static_candidates.retain(|e| is_function(e) == is_call);
         }
 
         if static_candidates.is_empty() {
             return Err(MemberError::NotFound);
+        }
+
+        // A read (`Box[Int64].make` as a function value) has no argument
+        // labels to match: a lone candidate is the member.
+        if !is_call && args.is_empty() {
+            return match static_candidates.as_slice() {
+                [member] => self.build_member_resolution(*member),
+                _ => Err(MemberError::Ambiguous(
+                    static_candidates.into_iter().map(|e| (e, None, 0)).collect(),
+                )),
+            };
         }
 
         let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();

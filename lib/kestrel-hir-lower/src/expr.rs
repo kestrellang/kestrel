@@ -46,6 +46,16 @@ enum ArmBody {
     Block(SyntaxNode),
 }
 
+/// What a path prefix in front of a static member names (see
+/// `LowerCtx::type_prefix`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TypePrefix {
+    /// `Type` / `Type[Args]` — a struct or enum.
+    Named,
+    /// `Self` inside a struct or enum.
+    SelfType,
+}
+
 /// The type path a member call's base names, when the base is a plain
 /// path: `Type[Args]` in `Type[Args].staticMethod()`.
 fn static_call_base(path: &PathSyntax, file_id: usize) -> Option<Vec<PathSeg>> {
@@ -182,6 +192,7 @@ impl LowerCtx<'_> {
                         self.lower_call_args(&args)
                     });
                 self.alloc_expr(HirExpr::ImplicitMember {
+                    owner: None,
                     name: hir_name(name),
                     args,
                     span,
@@ -530,6 +541,30 @@ impl LowerCtx<'_> {
             .map(|t| self.lower_type(t))
             .collect();
 
+        // `Enum[Args].Case` / `Enum.Case` / `Self.Case` as a value: the enum
+        // type is the case's owner.
+        if segments.len() > 1
+            && let ValueResolution::Def(_) = result
+        {
+            let (prefix, case) = segments.split_at(segments.len() - 1);
+            if let Some(kind) = self.enum_case_prefix(prefix, &case[0].name) {
+                return self.lower_owned_case(prefix, kind, &case[0], None, span);
+            }
+        }
+
+        // A computed static property or an unapplied static method that is
+        // the path's last segment (`Box[Int64].tag`, `Box[Int64].make`,
+        // `Self.tag`) is a member of the TYPE receiver, like the call form.
+        if let ValueResolution::Def(entity) = result
+            && matches!(
+                self.ctx.get::<kestrel_ast_builder::NodeKind>(entity),
+                Some(kestrel_ast_builder::NodeKind::Field | kestrel_ast_builder::NodeKind::Function)
+            )
+            && let Some(kind) = self.static_property_prefix(entity, segments, segments.len() - 1)
+        {
+            return self.lower_static_property(segments, segments.len() - 1, kind);
+        }
+
         match result {
             ValueResolution::Def(entity)
             | ValueResolution::TypeParameter(entity)
@@ -550,11 +585,22 @@ impl LowerCtx<'_> {
                 entity,
                 resolved_index,
             } => {
-                let base = self.alloc_expr(HirExpr::Def(
-                    entity,
-                    explicit_type_args.clone(),
-                    span.clone(),
-                ));
+                let prefix = &segments[..resolved_index];
+                let case = &segments[resolved_index];
+                let base = match self.enum_case_prefix(prefix, &case.name) {
+                    Some(kind) => {
+                        let case_span = Span::new(
+                            segments[0].span.file_id,
+                            segments[0].span.start..case.span.end,
+                        );
+                        self.lower_owned_case(prefix, kind, case, None, &case_span)
+                    },
+                    None => self.alloc_expr(HirExpr::Def(
+                        entity,
+                        explicit_type_args.clone(),
+                        span.clone(),
+                    )),
+                };
                 self.lower_trailing_member_segments(base, &segments[resolved_index + 1..])
             },
             ValueResolution::FieldValue {
@@ -567,7 +613,13 @@ impl LowerCtx<'_> {
                 // of the resolved name. Emitting them as a `Field` chain is what
                 // keeps the `.cents` projection — without it the whole
                 // expression collapsed to `Money.seven` (#214).
-                let base = self.alloc_expr(HirExpr::Def(entity, vec![], span.clone()));
+                // A static property named through its type (`Box[Int64].tag`,
+                // `Self.tag`) is a member of that TYPE receiver, so the owner's
+                // args reach it; a `Def` alone would drop them.
+                let base = match self.static_property_prefix(entity, segments, resolved_index) {
+                    Some(kind) => self.lower_static_property(segments, resolved_index, kind),
+                    None => self.alloc_expr(HirExpr::Def(entity, vec![], span.clone())),
+                };
                 self.lower_trailing_member_segments(base, &segments[resolved_index + 1..])
             },
             // A qualified path ending in an associated type (`U.Item`,
@@ -781,44 +833,31 @@ impl LowerCtx<'_> {
         let last = path.members.len() - 1;
         let member = &path.members[last];
 
-        // Check if this is a static method call on a type: Type[Args].staticMethod()
-        // Resolve directly as Call(Def) instead of MethodCall so type inference
-        // doesn't filter out the static method during member resolution.
-        // Multiple overloads become an OverloadSet the solver disambiguates.
-        let static_call = match (&member.name, static_call_base(path, self.file_id)) {
-            (Some(name), Some(base)) => self.try_resolve_static_call(&base, name),
+        // `Type[Args].staticMethod()` / `Self.staticMethod()`: the receiver is
+        // the TYPE, so its args stay the owner's and the method's own
+        // `[..]` stay the method's (see `static_member_receiver`).
+        let base_segments = static_call_base(path, self.file_id);
+        if let (Some(name), Some(base)) = (&member.name, &base_segments)
+            && let Some(kind) = self.enum_case_prefix(base, name)
+        {
+            let case = PathSeg {
+                name: name.clone(),
+                type_args: None,
+                span: member.name_range.map_or_else(
+                    || span.clone(),
+                    |r| Span::new(span.file_id, r.start().into()..r.end().into()),
+                ),
+            };
+            return self.lower_owned_case(base, kind, &case, Some(lowered_args), span);
+        }
+        let static_receiver = match (&member.name, &base_segments) {
+            (Some(name), Some(base)) => self.static_member_receiver(base, name),
             _ => None,
         };
-        if let Some((static_candidates, base_type_args)) = static_call {
-            let mut all_type_args = base_type_args;
-            if let Some(ref method_args) = member.type_args {
-                all_type_args.extend(method_args.iter().map(|t| self.lower_type(t)));
-            }
-            let callee = if static_candidates.len() == 1 {
-                self.alloc_expr(HirExpr::Def(
-                    static_candidates[0],
-                    all_type_args,
-                    span.clone(),
-                ))
-            } else {
-                self.alloc_expr(HirExpr::OverloadSet {
-                    candidates: static_candidates,
-                    type_args: all_type_args,
-                    span: span.clone(),
-                })
-            };
-            if let Some(range) = member.name_range {
-                self.source_map.record_name_ref(range, callee);
-            }
-            return self.alloc_expr(HirExpr::Call {
-                callee,
-                args: lowered_args,
-                span: span.clone(),
-            });
-        }
-
-        // Instance method call
-        let lowered_base = self.lower_path_chain(path, last, span);
+        let lowered_base = match static_receiver {
+            Some(receiver) => receiver,
+            None => self.lower_path_chain(path, last, span),
+        };
         let lowered_type_args = member
             .type_args
             .as_ref()
@@ -870,35 +909,33 @@ impl LowerCtx<'_> {
             });
         }
 
-        // Not a local-based path — check for static method call.
-        // For Type[Args].staticMethod() or mod.Type[Args].staticMethod(),
-        // resolve the static method directly so type inference doesn't need
-        // to handle it as a member constraint. Multiple overloads become
-        // an OverloadSet the solver disambiguates.
+        // Not a local-based path — `Type[Args].staticMethod()`,
+        // `Self.staticMethod()`, or a static from an extension or protocol
+        // extension: a `MethodCall` on the TYPE receiver.
         {
             let last = &segments[segments.len() - 1];
-            if let Some((static_candidates, base_type_args)) =
-                self.try_resolve_static_call_from_segments(segments, &last.name)
+            if let Some(receiver) =
+                self.static_member_receiver(&segments[..segments.len() - 1], &last.name)
             {
-                let callee = if static_candidates.len() == 1 {
-                    self.alloc_expr(HirExpr::Def(
-                        static_candidates[0],
-                        base_type_args,
-                        span.clone(),
-                    ))
-                } else {
-                    self.alloc_expr(HirExpr::OverloadSet {
-                        candidates: static_candidates,
-                        type_args: base_type_args,
-                        span: span.clone(),
-                    })
-                };
-                self.record_segments(std::slice::from_ref(last), callee);
-                return self.alloc_expr(HirExpr::Call {
-                    callee,
+                let lowered_type_args = last
+                    .type_args
+                    .as_ref()
+                    .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+                let call = self.alloc_expr(HirExpr::MethodCall {
+                    receiver,
+                    method: HirName::Name(last.name.clone()),
+                    type_args: lowered_type_args,
                     args: lowered_args,
                     span: span.clone(),
                 });
+                self.record_segments(std::slice::from_ref(last), call);
+                return call;
+            }
+
+            // `Enum[Args].Case(args)` / `Enum.Case(args)` / `Self.Case(args)`.
+            let prefix = &segments[..segments.len() - 1];
+            if let Some(kind) = self.enum_case_prefix(prefix, &last.name) {
+                return self.lower_owned_case(prefix, kind, last, Some(lowered_args), span);
             }
 
             // No static method matched. If the prefix names a type and
@@ -1017,75 +1054,6 @@ impl LowerCtx<'_> {
                     args: lowered_args,
                     span: span.clone(),
                 });
-            }
-        }
-
-        // Type-prefix protocol-extension static method call:
-        // `A.helper()` where `helper` lives in `extend SomeProto` and
-        // `A: SomeProto`. The full-path collapse to `Call(Def(helper))`
-        // loses the receiver `A`, so MIR can't compute the witness
-        // self_type. Emit `MethodCall(Def(A), "helper")` instead, so
-        // `lower_method_call` uses A's type as self_type.
-        {
-            use kestrel_ast_builder::NodeKind;
-            if segments.len() >= 2 {
-                let prefix_names: Vec<String> = segments[..segments.len() - 1]
-                    .iter()
-                    .map(|s| s.name.clone())
-                    .collect();
-                let prefix_result = self.ctx.query(ResolveValuePath {
-                    segments: prefix_names,
-                    context: self.owner,
-                    root: self.root,
-                });
-                let full_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-                let full_result = self.ctx.query(ResolveValuePath {
-                    segments: full_names,
-                    context: self.owner,
-                    root: self.root,
-                });
-                let prefix_is_type = matches!(
-                    &prefix_result,
-                    ValueResolution::Def(e) if matches!(
-                        self.ctx.get::<NodeKind>(*e),
-                        Some(&NodeKind::Struct | &NodeKind::Enum)
-                    )
-                );
-                let method_via_proto_ext = matches!(
-                    &full_result,
-                    ValueResolution::Def(method)
-                        if self.ctx.get::<NodeKind>(*method) == Some(&NodeKind::Function)
-                        && self.ctx.parent_of(*method).is_some_and(|p|
-                            self.ctx.get::<NodeKind>(p) == Some(&NodeKind::Extension)
-                            && self.ctx.query(kestrel_name_res::ExtensionTargetEntity {
-                                extension: p,
-                                root: self.root,
-                            }).is_some_and(|target|
-                                self.ctx.get::<NodeKind>(target) == Some(&NodeKind::Protocol)
-                            )
-                        )
-                );
-                if prefix_is_type && method_via_proto_ext {
-                    let prefix_slice = &segments[..segments.len() - 1];
-                    let prefix_span = Span::new(
-                        segments[0].span.file_id,
-                        segments[0].span.start..prefix_slice.last().unwrap().span.end,
-                    );
-                    let receiver = self.lower_path(prefix_slice, &prefix_span);
-                    self.record_segments(prefix_slice, receiver);
-                    let last = &segments[segments.len() - 1];
-                    let lowered_type_args = last
-                        .type_args
-                        .as_ref()
-                        .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
-                    return self.alloc_expr(HirExpr::MethodCall {
-                        receiver,
-                        method: HirName::Name(last.name.clone()),
-                        type_args: lowered_type_args,
-                        args: lowered_args,
-                        span: span.clone(),
-                    });
-                }
             }
         }
 
@@ -1215,134 +1183,182 @@ impl LowerCtx<'_> {
         })
     }
 
-    /// Check if a multi-segment path ending in `member` is a static method call.
-    /// Resolves all segments except the last as a type, then collects ALL static
-    /// methods named `member` on that type (one entity per overload).
-    fn try_resolve_static_call_from_segments(
-        &mut self,
-        segments: &[PathSeg],
-        member: &str,
-    ) -> Option<(Vec<kestrel_hecs::Entity>, Vec<kestrel_hir::ty::HirTy>)> {
-        use kestrel_ast_builder::{Name, NodeKind, Static};
+    /// The receiver of `prefix.member(..)` when `prefix` names a struct or
+    /// enum (or `Self` inside one) and `member` names a static function of it
+    /// — declared on the type, in an extension, or in a protocol extension.
+    ///
+    /// The receiver is the TYPE, so the solver resolves the member as it does
+    /// `T.method()`: the receiver's args bind the owner's params and the
+    /// method's own `[..]` bind the method's, never a flat list split by
+    /// length. A bare `Type` receiver is `Type[_]` (inferred per use, inside
+    /// the type's own body too); only `Self` means the enclosing
+    /// instantiation, so it lowers to the `Self` type.
+    fn static_member_receiver(&mut self, prefix: &[PathSeg], member: &str) -> Option<HirExprId> {
+        use kestrel_ast_builder::{NodeKind, Static};
 
-        if segments.len() < 2 {
-            return None;
-        }
-
-        // Resolve all segments except the last as a type path
-        let type_segments: Vec<String> = segments[..segments.len() - 1]
-            .iter()
-            .map(|s| s.name.clone())
-            .collect();
-
-        let result = self.ctx.query(ResolveValuePath {
-            segments: type_segments,
+        let prefix_kind = self.type_prefix(prefix)?;
+        let names = |segs: &[PathSeg]| segs.iter().map(|s| s.name.clone()).collect::<Vec<_>>();
+        let mut full = names(prefix);
+        full.push(member.to_string());
+        let full_result = self.ctx.query(ResolveValuePath {
+            segments: full,
             context: self.owner,
             root: self.root,
         });
-
-        let type_entity = match result {
-            ValueResolution::Def(entity) => entity,
-            _ => return None,
+        let is_static_fn = |ctx: &Self, e: kestrel_hecs::Entity| {
+            ctx.ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
+                && (ctx.ctx.has::<Static>(e) || ctx.is_protocol_extension_member(e))
         };
-
-        // Must be a struct or enum
-        let kind = self.ctx.get::<NodeKind>(type_entity)?;
-        if !matches!(kind, NodeKind::Struct | NodeKind::Enum) {
+        let names_static = match &full_result {
+            ValueResolution::Def(e) => is_static_fn(self, *e),
+            ValueResolution::Overloaded(es) => !es.is_empty() && es.iter().all(|&e| is_static_fn(self, e)),
+            _ => false,
+        };
+        if !names_static {
             return None;
         }
 
-        // Collect every static-function child matching `member` — multiple
-        // entities mean overloads, which the solver disambiguates by labels/arity.
-        let mut matches: Vec<kestrel_hecs::Entity> = Vec::new();
-        for &child in self.ctx.children_of(type_entity) {
-            if self.ctx.get::<NodeKind>(child) != Some(&NodeKind::Function) {
-                continue;
-            }
-            if self.ctx.get::<Static>(child).is_none() {
-                continue;
-            }
-            let Some(child_name) = self.ctx.get::<Name>(child) else {
-                continue;
-            };
-            if child_name.0 == member {
-                matches.push(child);
-            }
-        }
-
-        if matches.is_empty() {
-            return None;
-        }
-
-        // Collect struct type_args from base segments + method type_args from last segment
-        let mut type_args: Vec<kestrel_hir::ty::HirTy> = segments[..segments.len() - 1]
-            .iter()
-            .flat_map(|s| s.type_args.iter().flatten())
-            .map(|t| self.lower_type(t))
-            .collect();
-        let last = &segments[segments.len() - 1];
-        if let Some(ref method_args) = last.type_args {
-            type_args.extend(method_args.iter().map(|t| self.lower_type(t)));
-        }
-        Some((matches, type_args))
+        Some(self.lower_type_prefix(prefix, prefix_kind))
     }
 
-    /// Check if `segments.member` (a path naming a type) is a static method call.
-    /// Returns `Some((candidates, type_args))` where `candidates` collects every
-    /// static overload named `member` — the solver disambiguates by labels/arity.
-    fn try_resolve_static_call(
-        &mut self,
-        segments: &[PathSeg],
-        member: &str,
-    ) -> Option<(Vec<kestrel_hecs::Entity>, Vec<kestrel_hir::ty::HirTy>)> {
-        use kestrel_ast_builder::{Name, NodeKind, Static};
+    /// Whether `prefix` names a struct or enum — `Some(TypePrefix::Named)` —
+    /// or is `Self` inside one — `Some(TypePrefix::SelfType)`. Allocates
+    /// nothing, so callers can decide before lowering (HIR ids stay in source
+    /// order).
+    fn type_prefix(&mut self, prefix: &[PathSeg]) -> Option<TypePrefix> {
+        use kestrel_ast_builder::NodeKind;
 
-        // Resolve the base path to an entity
-        let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-        let result = self.ctx.query(ResolveValuePath {
-            segments: seg_names,
+        let first = prefix.first()?;
+        if first.type_args.is_none() && self.lookup_local(&first.name).is_some() {
+            return None;
+        }
+        let resolution = self.ctx.query(ResolveValuePath {
+            segments: prefix.iter().map(|s| s.name.clone()).collect(),
             context: self.owner,
             root: self.root,
         });
-
-        let base_entity = match result {
-            ValueResolution::Def(entity) => entity,
-            _ => return None,
+        let is_nominal = |e: kestrel_hecs::Entity| {
+            matches!(self.ctx.get::<NodeKind>(e), Some(&NodeKind::Struct | &NodeKind::Enum))
         };
+        match resolution {
+            ValueResolution::Def(e) if is_nominal(e) => Some(TypePrefix::Named),
+            ValueResolution::SelfValue(e) if is_nominal(e) && prefix.len() == 1 => {
+                Some(TypePrefix::SelfType)
+            },
+            _ => None,
+        }
+    }
 
-        // Must be a struct or enum
-        let kind = self.ctx.get::<NodeKind>(base_entity)?;
-        if !matches!(kind, NodeKind::Struct | NodeKind::Enum) {
+    /// Lower a type prefix as a type-level receiver. `Type[Args]` / bare
+    /// `Type` is a `Def` of the type, whose args are the TYPE's own (missing
+    /// ones inferred, so bare `Type` is `Type[_]`); `Self` is the `Self` type,
+    /// the enclosing instantiation.
+    fn lower_type_prefix(&mut self, prefix: &[PathSeg], kind: TypePrefix) -> HirExprId {
+        if kind == TypePrefix::SelfType {
+            return self.lower_type_receiver_path(prefix);
+        }
+        let first = &prefix[0];
+        let span = Span::new(first.span.file_id, first.span.start..prefix[prefix.len() - 1].span.end);
+        let receiver = self.lower_path(prefix, &span);
+        self.record_segments(prefix, receiver);
+        receiver
+    }
+
+    /// The prefix kind when `segments[index]` (resolved to `entity`) is a
+    /// computed static property (or static method) named through a type
+    /// prefix `segments[..index]`. Only callables: a getter is generic over
+    /// the owner's params, so the owner's args must reach it. A stored
+    /// `static var` is one global for every instantiation and stays a `Def`
+    /// (the form every global place/assign path in MIR stores through).
+    fn static_property_prefix(
+        &mut self,
+        entity: kestrel_hecs::Entity,
+        segments: &[PathSeg],
+        index: usize,
+    ) -> Option<TypePrefix> {
+        if index == 0
+            || !self.ctx.has::<kestrel_ast_builder::Static>(entity)
+            || self.ctx.get::<kestrel_ast_builder::Callable>(entity).is_none()
+        {
             return None;
         }
+        self.type_prefix(&segments[..index])
+    }
 
-        // Collect every static-function child matching `member`
-        let mut matches: Vec<kestrel_hecs::Entity> = Vec::new();
-        for &child in self.ctx.children_of(base_entity) {
-            if self.ctx.get::<NodeKind>(child) != Some(&NodeKind::Function) {
-                continue;
-            }
-            if self.ctx.get::<Static>(child).is_none() {
-                continue;
-            }
-            let Some(child_name) = self.ctx.get::<Name>(child) else {
-                continue;
-            };
-            if child_name.0 == member {
-                matches.push(child);
-            }
-        }
+    /// The prefix kind when `prefix.member` names an enum case of the enum
+    /// `prefix` (`Opt[Int64].Some`, `Opt.None`, `Self.Some`).
+    fn enum_case_prefix(&mut self, prefix: &[PathSeg], member: &str) -> Option<TypePrefix> {
+        let kind = self.type_prefix(prefix)?;
+        let mut full: Vec<String> = prefix.iter().map(|s| s.name.clone()).collect();
+        full.push(member.to_string());
+        let resolution = self.ctx.query(ResolveValuePath {
+            segments: full,
+            context: self.owner,
+            root: self.root,
+        });
+        // A final-segment case resolves to `Def(case)`; one with members
+        // after it (`Opt.None.isNone`) to `EnumCaseValue` at the case.
+        let is_case = match resolution {
+            ValueResolution::Def(e) => {
+                self.ctx.get::<kestrel_ast_builder::NodeKind>(e)
+                    == Some(&kestrel_ast_builder::NodeKind::EnumCase)
+            },
+            ValueResolution::EnumCaseValue { resolved_index, .. } => resolved_index == prefix.len(),
+            _ => false,
+        };
+        is_case.then_some(kind)
+    }
 
-        if matches.is_empty() {
-            return None;
-        }
+    /// `prefix.Case` / `prefix.Case(args)`: the implicit-member form with the
+    /// enum TYPE written out as its owner, so the type's args (or `_`s, or
+    /// `Self`) stay with the type.
+    fn lower_owned_case(
+        &mut self,
+        prefix: &[PathSeg],
+        kind: TypePrefix,
+        case: &PathSeg,
+        args: Option<Vec<HirCallArg>>,
+        span: &Span,
+    ) -> HirExprId {
+        let owner = self.lower_type_prefix(prefix, kind);
+        let id = self.alloc_expr(HirExpr::ImplicitMember {
+            owner: Some(owner),
+            name: HirName::Name(case.name.clone()),
+            args,
+            span: span.clone(),
+        });
+        self.record_segments(std::slice::from_ref(case), id);
+        id
+    }
 
-        let type_args: Vec<kestrel_hir::ty::HirTy> = segments
-            .iter()
-            .flat_map(|s| s.type_args.iter().flatten())
-            .map(|t| self.lower_type(t))
-            .collect();
-        Some((matches, type_args))
+    /// `segments[index]` as a static property of the type prefix
+    /// `segments[..index]`: a `Field` on the type receiver.
+    fn lower_static_property(&mut self, segments: &[PathSeg], index: usize, kind: TypePrefix) -> HirExprId {
+        let receiver = self.lower_type_prefix(&segments[..index], kind);
+        let seg = &segments[index];
+        let field = HirExpr::Field {
+            base: receiver,
+            name: HirName::Name(seg.name.clone()),
+            span: seg.span.clone(),
+        };
+        self.alloc_seg(field, seg)
+    }
+
+    /// A function declared in `extend SomeProtocol { .. }` — reachable through
+    /// a conforming type's name (`A.helper()`).
+    fn is_protocol_extension_member(&self, entity: kestrel_hecs::Entity) -> bool {
+        use kestrel_ast_builder::NodeKind;
+
+        self.ctx.parent_of(entity).is_some_and(|p| {
+            self.ctx.get::<NodeKind>(p) == Some(&NodeKind::Extension)
+                && self
+                    .ctx
+                    .query(kestrel_name_res::ExtensionTargetEntity {
+                        extension: p,
+                        root: self.root,
+                    })
+                    .is_some_and(|t| self.ctx.get::<NodeKind>(t) == Some(&NodeKind::Protocol))
+        })
     }
 
     /// Receiver of a type-level static call whose prefix names a single

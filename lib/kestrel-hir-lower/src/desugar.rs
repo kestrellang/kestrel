@@ -787,6 +787,7 @@ impl LowerCtx<'_> {
 
         // .fromResidual($early) — resolved against the function's return type
         let return_value = self.alloc_expr(HirExpr::ImplicitMember {
+            owner: None,
             name: HirName::name("fromResidual"),
             args: Some(vec![HirCallArg {
                 label: Some("residual".to_string()),
@@ -843,6 +844,7 @@ impl LowerCtx<'_> {
         }
 
         let err_wrap = self.alloc_expr(HirExpr::ImplicitMember {
+            owner: None,
             name: HirName::name("Err"),
             args: Some(vec![HirCallArg {
                 label: None,
@@ -1109,6 +1111,7 @@ impl LowerCtx<'_> {
                 span: span.clone(),
             });
             let some_val = self.alloc_expr(HirExpr::ImplicitMember {
+                owner: None,
                 name: HirName::name("Some"),
                 args: Some(vec![HirCallArg {
                     label: None,
@@ -1126,6 +1129,7 @@ impl LowerCtx<'_> {
                 span: span.clone(),
             });
             let some_val = self.alloc_expr(HirExpr::ImplicitMember {
+                owner: None,
                 name: HirName::name("Some"),
                 args: Some(vec![HirCallArg {
                     label: None,
@@ -1144,6 +1148,7 @@ impl LowerCtx<'_> {
                 Alignment::Left => unreachable!(),
             };
             let val = self.alloc_expr(HirExpr::ImplicitMember {
+                owner: None,
                 name: HirName::name(variant),
                 args: None,
                 span: span.clone(),
@@ -1197,6 +1202,7 @@ impl LowerCtx<'_> {
                 SignMode::Negative => unreachable!(),
             };
             let val = self.alloc_expr(HirExpr::ImplicitMember {
+                owner: None,
                 name: HirName::name(variant),
                 args: None,
                 span: span.clone(),
@@ -1223,6 +1229,7 @@ impl LowerCtx<'_> {
         };
         if let Some(variant) = float_variant {
             let val = self.alloc_expr(HirExpr::ImplicitMember {
+                owner: None,
                 name: HirName::name(variant),
                 args: None,
                 span: span.clone(),

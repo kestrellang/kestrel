@@ -495,7 +495,7 @@ pub(super) fn solve_member(
         Ok(res) => res,
         Err(crate::resolve::MemberError::NotFound) => {
             // Fall back to static member search
-            match ctx.resolver.resolve_static_member(&recv_kind, name, &args) {
+            match ctx.resolver.resolve_static_member(&recv_kind, name, &args, is_call) {
                 Ok(res) => res,
                 Err(_) => {
                     // Lazy `Indirection` peel: the member is on neither the
@@ -625,7 +625,7 @@ pub(super) fn solve_member(
             // The member exists but is static — fall back to static resolution.
             // Only error if static resolution also fails (the instance-on-static
             // diagnostic is for cases where no static call is possible).
-            match ctx.resolver.resolve_static_member(&recv_kind, name, &args) {
+            match ctx.resolver.resolve_static_member(&recv_kind, name, &args, is_call) {
                 Ok(res) => res,
                 Err(_) => {
                     ctx.poison(result);
@@ -1084,7 +1084,19 @@ pub(super) fn solve_member(
         .map(|p| BindParam::new(p.label.as_deref(), p.has_default))
         .collect();
     let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
-    let plan = match bind_arguments(&bind_params, &arg_labels) {
+    // An UNAPPLIED static method (`let f = Box[Int64].make`) binds nothing:
+    // it becomes a function value below.
+    let is_unapplied_static = !is_call
+        && resolution.kind == crate::resolve::MemberKind::Method
+        && ctx
+            .query_ctx
+            .has::<kestrel_ast_builder::Static>(resolution.entity);
+    let bound = if is_unapplied_static {
+        Ok(Vec::new())
+    } else {
+        bind_arguments(&bind_params, &arg_labels)
+    };
+    let plan = match bound {
         Ok(plan) => plan,
         Err(BindError::LabelMismatch {
             arg_index,
@@ -1142,12 +1154,7 @@ pub(super) fn solve_member(
     // the same type through name resolution; a static requirement named
     // through a type parameter or projection (`T.zero`, `B.Item.zero`)
     // arrives here as a field access (G26).
-    if !is_call
-        && resolution.kind == crate::resolve::MemberKind::Method
-        && ctx
-            .query_ctx
-            .has::<kestrel_ast_builder::Static>(resolution.entity)
-    {
+    if is_unapplied_static {
         let params: Vec<TyVar> = resolution
             .param_types
             .iter()
@@ -1204,6 +1211,17 @@ pub(super) fn solve_member(
     SolveResult::Solved
 }
 
+/// Whether `kind` is an enum with a case named `name`.
+fn has_enum_case(ctx: &InferCtx<'_>, kind: &TyKind, name: &str) -> bool {
+    let Some(entity) = kind.entity() else {
+        return false;
+    };
+    ctx.query_ctx.children_of(entity).iter().any(|&child| {
+        ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::EnumCase)
+            && ctx.query_ctx.get::<Name>(child).is_some_and(|n| n.0 == name)
+    })
+}
+
 pub(super) fn solve_implicit(
     ctx: &mut InferCtx<'_>,
     expected: TyVar,
@@ -1243,8 +1261,21 @@ pub(super) fn solve_implicit(
         Err(_) => {
             // Fall back to static member search (e.g., Result.fromResidual
             // is a static method defined in a FromResidual extension)
-            match ctx.resolver.resolve_static_member(&kind, name, &args) {
+            // `Implicit` does not record whether `()` was written; with args
+            // it is a call, without them a read (only a var/func name clash
+            // can tell the two apart).
+            let is_call = !args.is_empty();
+            match ctx.resolver.resolve_static_member(&kind, name, &args, is_call) {
                 Ok(res) => res,
+                // The case exists but its labels/arity don't fit the args
+                // (`Shape.Rectangle(width: 5.0)`): an overload mismatch, not
+                // a missing member.
+                Err(_) if has_enum_case(ctx, &kind, name) => {
+                    return SolveResult::Error(InferError::NoMatchingOverload {
+                        name: name.to_string(),
+                        span,
+                    });
+                },
                 Err(_) => {
                     return SolveResult::Error(InferError::ImplicitMemberNotFound {
                         expected,

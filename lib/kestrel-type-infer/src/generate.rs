@@ -635,7 +635,20 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         },
 
         // === Implicit member (.CaseName) ===
-        HirExpr::ImplicitMember { name, args, span } => {
+        HirExpr::ImplicitMember {
+            owner,
+            name,
+            args,
+            span,
+        } => {
+            // A written owner (`Opt[Int64].Some(1)`, `Opt.None`, `Self.Some`)
+            // is a type-level receiver: typed like any other (bare `Opt` gets
+            // fresh args, `Self` the enclosing instantiation) and consumed here.
+            let owner_tv = owner.map(|o| {
+                let tv = gen_expr(ctx, hir, o);
+                ctx.type_param_defs.remove(&o);
+                tv
+            });
             let arg_tvs = args
                 .as_ref()
                 .map(|a| gen_call_args(ctx, hir, a))
@@ -649,9 +662,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Check mode (bidi §2.1): look `.Case` up on the expected type,
             // or on its promotion target (`.Red` against `Color?` is a
             // `Color`, then promoted by the caller's coercion).
-            let home = expect
-                .as_ref()
-                .and_then(|(e, _)| implicit_case_home(ctx, *e, name_str));
+            // With a written owner, that type is the home — the context only
+            // checks the result afterwards.
+            let home = owner_tv.or_else(|| {
+                expect
+                    .as_ref()
+                    .and_then(|(e, _)| implicit_case_home(ctx, *e, name_str))
+            });
             if let Some(home) = home {
                 ctx.equal(result_tv, home, span.clone());
             }
@@ -1638,6 +1655,11 @@ fn gen_struct_init(
             return result_tv;
         }
     } else {
+        // The memberwise init's type args are the struct's own — recorded so
+        // MIR reads the solved args, not the raw `[..]` written (or omitted).
+        if !fresh_args.is_empty() {
+            ctx.record_type_args(expr_id, fresh_args.clone(), span.clone());
+        }
         // Memberwise init: match args against stored field types (in order).
         // This list must be index-aligned with the MIR layout in
         // struct_lower.rs, because struct construction maps argument position

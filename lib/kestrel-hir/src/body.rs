@@ -260,8 +260,13 @@ pub enum HirExpr {
         index: u32,
         span: Span,
     },
-    /// `.Case` or `.Case(args)` — resolved by type inference based on expected type
+    /// `.Case` or `.Case(args)` — resolved by type inference based on expected
+    /// type. With an `owner`, the member is named through a type instead —
+    /// `Opt[Int64].Some(1)`, `Opt.Some(x)`, `Self.None` — and `owner` (a
+    /// type-level `Def`/`TypeRef` receiver) is the type it is looked up on,
+    /// so the type's args are the owner's, never mixed into a flat list.
     ImplicitMember {
+        owner: Option<HirExprId>,
         name: HirName,
         args: Option<Vec<HirCallArg>>,
         span: Span,

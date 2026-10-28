@@ -194,3 +194,19 @@ Iterable`, and `Hashable` reaches `Equal.Output` and `NotEqual.Output` through
 `Equatable`. G29 (`a87b1f9f`) found this and fixed it in one place:
 `where_clauses.rs::single_assoc` decides every `T.Seg` path in a where clause.
 Reuse it; don't write a second candidate gatherer.
+
+## Static member lookup uses name resolution's precedence
+
+`resolve_static_member` (`src/resolve.rs`) takes its candidates from
+`TypeMembersByName` and applies the same rule as name resolution
+(`resolve_extension_static_method` in kestrel-name-res): direct and
+own-extension members compete equally, and a protocol-extension default joins
+them only when its label signature is still free. Static members named through
+a type reach the solver as `MethodCall` / `Field` / owned `ImplicitMember`
+(see `kestrel-hir-lower/AGENTS.md`), so a looser rule here shows up as E116 or
+an ambiguity that name resolution never reports.
+
+`is_call` separates a read from a call when a type has both a
+`static var zero` and a `static func zero()`. A read has no labels, so it is
+not label-filtered. An unapplied static method (`let f = Box[Int64].make`)
+skips argument binding in `solve_member` and becomes a function value.

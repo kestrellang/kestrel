@@ -12,7 +12,7 @@ use kestrel_type_infer::InferBody;
 
 use crate::body::{HirRef, LocalBinding, OssaBodyCtx, TypedRef};
 use crate::items::function_sig::receiver_convention;
-use crate::ty::{lower_type, resolve_type_annotation};
+use crate::ty::resolve_type_annotation;
 use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_type_infer::captures::CaptureKind;
 
@@ -583,42 +583,15 @@ impl OssaBodyCtx<'_, '_> {
             type_args = self.resolve_type_args(callee_expr);
         }
 
-        let has_error = type_args
-            .iter()
-            .any(|&a| matches!(self.ctx.module.ty_arena.get(a), MirTy::Error));
-        if has_error || (type_args.is_empty() && !is_init) {
-            if let Some(fallback) = self.extract_explicit_type_args(callee_expr) {
-                type_args = fallback;
-            } else if has_error {
-                type_args.retain(|&a| !matches!(self.ctx.module.ty_arena.get(a), MirTy::Error));
-            }
-        }
+        // Inference records every call's type args (owner's then own); an
+        // `Error` arg is a failed inference already diagnosed — drop it.
+        type_args.retain(|&a| !matches!(self.ctx.module.ty_arena.get(a), MirTy::Error));
 
         if type_args.is_empty() {
             type_args = self.infer_parent_type_args(callee_entity, expr_id, callee_expr);
         }
 
         type_args
-    }
-
-    fn extract_explicit_type_args(&mut self, expr_id: HirExprId) -> Option<Vec<TyId>> {
-        let expr = &self.hir.exprs[expr_id];
-        match expr {
-            HirExpr::Def(_, args, _) if !args.is_empty() => {
-                Some(args.iter().map(|ty| lower_type(self.ctx, ty)).collect())
-            },
-            HirExpr::OverloadSet { type_args, .. } if !type_args.is_empty() => Some(
-                type_args
-                    .iter()
-                    .map(|ty| lower_type(self.ctx, ty))
-                    .collect(),
-            ),
-            HirExpr::MethodCall {
-                type_args: Some(args),
-                ..
-            } if !args.is_empty() => Some(args.iter().map(|ty| lower_type(self.ctx, ty)).collect()),
-            _ => None,
-        }
     }
 
     fn infer_parent_type_args(

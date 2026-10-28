@@ -74,3 +74,27 @@ with `alloc_seg` / `record_segments`. A local with no single declaring
 identifier — a desugaring temporary, `self`, an implicit `it`, a struct-pattern
 shorthand — stays UNRECORDED on purpose, so rename/references fail closed
 instead of guessing (audit F2).
+
+## A member named through a type is a member OF that type
+
+`Type[Args].member`, `Type.member` and `Self.member` lower with the **type as
+the receiver** (`lower_type_prefix` in `src/expr.rs`), never as a `Def` of the
+member carrying one flat `[owner…, own…]` type-arg list:
+
+- a static call becomes a `MethodCall` on the type;
+- a computed static property or an unapplied static method becomes a `Field`
+  on the type;
+- an enum case becomes `ImplicitMember { owner: Some(type) }`.
+
+The type's `[args]` bind the type's params, and the member's own `[args]` bind
+the member's. A bare `Type` is `Type[_]`, inferred per use, even inside
+`Type`'s own body. `Self` is the enclosing instantiation. A flat list has no
+answer for `HMAC.setup(..)` inside `HMAC[H]`, and the backend used to guess
+from the raw brackets.
+
+**Exception: a stored `static var` stays `Def(field)`.** It is one global for
+every instantiation, so it has no type args. Every MIR global place and assign
+path stores through `Def`.
+
+Also, `ResolveValuePath` returns `Def(case)` for a case in the **last**
+segment, and `EnumCaseValue` only when more segments follow. Check both.

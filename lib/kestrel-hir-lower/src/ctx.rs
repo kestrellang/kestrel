@@ -264,6 +264,7 @@ impl<'a> LowerCtx<'a> {
             InitEffect::Throwing => "Ok",
         };
         Some(self.alloc_expr(HirExpr::ImplicitMember {
+            owner: None,
             name: HirName::name(wrapper_name),
             args: Some(vec![HirCallArg {
                 label: None,
