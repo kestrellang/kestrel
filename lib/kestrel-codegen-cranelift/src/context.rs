@@ -140,9 +140,11 @@ impl<'m> CodegenCtx<'m> {
                     kestrel_mir::mono::MonoVTableEntry::Size(ty) => {
                         Some(self.tc.repr(*ty, &self.module.ty_arena, self.module).size())
                     },
-                    kestrel_mir::mono::MonoVTableEntry::Align(ty) => {
-                        Some(self.tc.repr(*ty, &self.module.ty_arena, self.module).align())
-                    },
+                    kestrel_mir::mono::MonoVTableEntry::Align(ty) => Some(
+                        self.tc
+                            .repr(*ty, &self.module.ty_arena, self.module)
+                            .align(),
+                    ),
                     other => {
                         relocs.push((at, other.clone()));
                         None

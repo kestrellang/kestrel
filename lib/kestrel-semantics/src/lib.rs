@@ -13,9 +13,9 @@ pub use existential::{
     is_requirement, reachable_protocols, self_conformance,
 };
 pub use sizedness::{
-    NominalSizedness, SizeRequirement, SizedLayer, Sizedness, TypeParamSizeRequirement,
-    assoc_may_be_unsized, hir_type_is_sized, instance_is_sized, last_stored_field,
-    last_stored_field_type, relaxed_param_by_value, BoxDefect, ExistentialBoxDefect,
+    BoxDefect, ExistentialBoxDefect, NominalSizedness, SizeRequirement, SizedLayer, Sizedness,
+    TypeParamSizeRequirement, assoc_may_be_unsized, hir_type_is_sized, instance_is_sized,
+    last_stored_field, last_stored_field_type, relaxed_param_by_value,
 };
 
 pub use staticness::{

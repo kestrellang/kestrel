@@ -225,7 +225,13 @@ fn fmt_ty(ty: TyId, arena: &TyArena, module: &dyn NameResolver) -> String {
                 .collect();
             let pins: Vec<String> = bindings
                 .iter()
-                .map(|(a, t)| format!("{} = {}", module.resolve_name(*a), fmt_ty(*t, arena, module)))
+                .map(|(a, t)| {
+                    format!(
+                        "{} = {}",
+                        module.resolve_name(*a),
+                        fmt_ty(*t, arena, module)
+                    )
+                })
                 .collect();
             if pins.is_empty() {
                 format!("rawany {}", bounds.join(" and "))

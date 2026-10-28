@@ -3349,7 +3349,13 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
             if !is_invalid_existential_box(ctx, *entity, args) {
-                emit_formation_wellformedness(ctx, *entity, &arg_tvs, span, FormationScope::Written);
+                emit_formation_wellformedness(
+                    ctx,
+                    *entity,
+                    &arg_tvs,
+                    span,
+                    FormationScope::Written,
+                );
             }
             ctx.struct_ty(*entity, arg_tvs)
         },
@@ -3359,7 +3365,13 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
             if !is_invalid_existential_box(ctx, *entity, args) {
-                emit_formation_wellformedness(ctx, *entity, &arg_tvs, span, FormationScope::Written);
+                emit_formation_wellformedness(
+                    ctx,
+                    *entity,
+                    &arg_tvs,
+                    span,
+                    FormationScope::Written,
+                );
             }
             ctx.enum_ty(*entity, arg_tvs)
         },

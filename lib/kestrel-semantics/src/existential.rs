@@ -263,7 +263,10 @@ pub fn bound_closure(ctx: &QueryContext<'_>, bounds: &[Entity], root: Entity) ->
     let mut out: Vec<Entity> = bounds.to_vec();
     let edges: Vec<(Entity, Entity)> = bounds
         .iter()
-        .flat_map(|&b| ctx.query(ConformingProtocolInstantiations { entity: b, root }).to_vec())
+        .flat_map(|&b| {
+            ctx.query(ConformingProtocolInstantiations { entity: b, root })
+                .to_vec()
+        })
         .filter(|(_, source, _)| ctx.get::<NodeKind>(*source) == Some(&NodeKind::Protocol))
         .map(|(proto, source, _)| (proto, source))
         .collect();

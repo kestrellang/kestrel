@@ -88,7 +88,12 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
         MirTy::RawExistential { bounds, bindings } => {
             let sub_bounds: Vec<(kestrel_hecs::Entity, Vec<TyId>)> = bounds
                 .iter()
-                .map(|(p, args)| (*p, args.iter().map(|&a| substitute(arena, a, subst)).collect()))
+                .map(|(p, args)| {
+                    (
+                        *p,
+                        args.iter().map(|&a| substitute(arena, a, subst)).collect(),
+                    )
+                })
                 .collect();
             let sub_bindings: Vec<(kestrel_hecs::Entity, TyId)> = bindings
                 .iter()

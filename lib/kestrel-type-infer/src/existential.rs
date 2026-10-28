@@ -90,9 +90,9 @@ pub(crate) fn try_convert(
         None => {
             // `B[T]` is unsized in place; anything else is boxed whole.
             let (kind, payload) = match ctx.slot(ctx.resolve(from)) {
-                TySlot::Resolved(TyKind::Struct { entity, args } | TyKind::Enum { entity, args })
-                    if *entity == target.box_entity && args.len() == 1 =>
-                {
+                TySlot::Resolved(
+                    TyKind::Struct { entity, args } | TyKind::Enum { entity, args },
+                ) if *entity == target.box_entity && args.len() == 1 => {
                     (ConversionKind::Unsize, args[0])
                 },
                 _ => (ConversionKind::Box, from),
@@ -254,9 +254,7 @@ fn call_error(
             },
             kestrel_semantics::Dispatch::Dispatchable { assocs } => {
                 let missing = assocs.iter().find(|a| !bound.contains(a)).copied();
-                let assoc = missing.map_or_else(String::new, |a| {
-                    crate::resolve::assoc_name(q, a)
-                });
+                let assoc = missing.map_or_else(String::new, |a| crate::resolve::assoc_name(q, a));
                 format!("it mentions associated type '{assoc}', which '{shown}' leaves unbound")
             },
         };
@@ -293,16 +291,13 @@ fn access_error(
     }
     let box_name = entity_name(ctx, existential.box_entity);
     // A Cloneable box hands out copies that share the payload.
-    let shares = ctx
-        .resolver
-        .builtin(Builtin::Cloneable)
-        .is_some_and(|c| {
-            q.query(kestrel_name_res::ConformingProtocols {
-                entity: existential.box_entity,
-                root: ctx.root,
-            })
-            .contains(&c)
-        });
+    let shares = ctx.resolver.builtin(Builtin::Cloneable).is_some_and(|c| {
+        q.query(kestrel_name_res::ConformingProtocols {
+            entity: existential.box_entity,
+            root: ctx.root,
+        })
+        .contains(&c)
+    });
     let reason = match (mode, shares) {
         ("consuming", true) => format!("'{box_name}' shares its payload, so it cannot give it up"),
         ("consuming", false) => format!("'{box_name}' cannot give up its payload"),
@@ -439,7 +434,9 @@ pub(crate) fn self_conformance_member(
 pub(crate) fn pinned_assoc_of(ctx: &InferCtx<'_>, kind: &TyKind, key: &AssocKey) -> Option<TyVar> {
     match kind {
         TyKind::RawExistential { bindings, .. } => pinned_assoc(ctx, bindings, key),
-        TyKind::Struct { args, .. } | TyKind::Enum { args, .. } if matches!(key, AssocKey::Entity(_)) => {
+        TyKind::Struct { args, .. } | TyKind::Enum { args, .. }
+            if matches!(key, AssocKey::Entity(_)) =>
+        {
             let [payload] = args.as_slice() else {
                 return None;
             };
@@ -455,11 +452,7 @@ pub(crate) fn pinned_assoc_of(ctx: &InferCtx<'_>, kind: &TyKind, key: &AssocKey)
 }
 
 /// The type a raw existential pins for an associated type, if it pins it.
-fn pinned_assoc(
-    ctx: &InferCtx<'_>,
-    bindings: &[(Entity, TyVar)],
-    key: &AssocKey,
-) -> Option<TyVar> {
+fn pinned_assoc(ctx: &InferCtx<'_>, bindings: &[(Entity, TyVar)], key: &AssocKey) -> Option<TyVar> {
     bindings
         .iter()
         .find(|(assoc, _)| match key {

@@ -109,8 +109,9 @@ impl QueryFn for TypeParamSizeRequirement {
                             continue;
                         }
                         let implies_sized = protocols.iter().any(|p| {
-                            resolve_type_entity(ctx, p, context, self.root)
-                                .is_some_and(|p| p == sized || implies_bitwise_copy(ctx, p, self.root))
+                            resolve_type_entity(ctx, p, context, self.root).is_some_and(|p| {
+                                p == sized || implies_bitwise_copy(ctx, p, self.root)
+                            })
                         });
                         if implies_sized {
                             return SizeRequirement::RequiresSized;
@@ -138,13 +139,14 @@ impl QueryFn for TypeParamSizeRequirement {
 /// through its function table (`any[CowBox] P` with `P: Cloneable`).
 fn implies_bitwise_copy(ctx: &QueryContext<'_>, protocol: Entity, root: Entity) -> bool {
     let refines = |builtin| {
-        ctx.query(ResolveBuiltin { builtin, root }).is_some_and(|base| {
-            ctx.query(crate::ProtocolRefines {
-                protocol,
-                base,
-                root,
+        ctx.query(ResolveBuiltin { builtin, root })
+            .is_some_and(|base| {
+                ctx.query(crate::ProtocolRefines {
+                    protocol,
+                    base,
+                    root,
+                })
             })
-        })
     };
     refines(Builtin::Copyable) && !refines(Builtin::Cloneable)
 }

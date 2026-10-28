@@ -211,9 +211,10 @@ impl<'ctx> CodegenCtx<'ctx> {
                     kestrel_mir::mono::MonoVTableEntry::Size(ty) => {
                         int(self.tc.repr(*ty, &self.module.ty_arena, self.module).size())
                     },
-                    kestrel_mir::mono::MonoVTableEntry::Align(ty) => {
-                        int(self.tc.repr(*ty, &self.module.ty_arena, self.module).align())
-                    },
+                    kestrel_mir::mono::MonoVTableEntry::Align(ty) => int(self
+                        .tc
+                        .repr(*ty, &self.module.ty_arena, self.module)
+                        .align()),
                     kestrel_mir::mono::MonoVTableEntry::Table(t) => {
                         self.vtable_data[t.index()].as_pointer_value()
                     },

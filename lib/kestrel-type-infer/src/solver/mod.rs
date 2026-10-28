@@ -43,15 +43,15 @@ mod defaults;
 mod equality;
 mod lower;
 mod member;
-use assoc::*;
 pub(crate) use assoc::solve_associated;
+use assoc::*;
 use call::*;
 pub(crate) use conformance::*;
 pub(crate) use defaults::*;
 pub(crate) use equality::*;
 use lower::*;
-use member::*;
 pub(crate) use member::try_indirection_peel;
+use member::*;
 
 /// Diagnose type parameters at generic call sites that inference couldn't
 /// pin down. Lib1 silently defaulted these to `Never` (RFC 1216-style

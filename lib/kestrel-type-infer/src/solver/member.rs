@@ -467,10 +467,9 @@ pub(super) fn solve_member(
     // the box's own (existentials design §7). Operators and for-in go
     // through self-conformance instead, so they skip the peel.
     if !ctx.protocol_dispatch_members.contains(&expr)
-        && let Some(peeled) =
-            crate::existential::peel_for_member(
-                ctx, receiver, &recv_kind, name, &args, is_call, expr, &span,
-            )
+        && let Some(peeled) = crate::existential::peel_for_member(
+            ctx, receiver, &recv_kind, name, &args, is_call, expr, &span,
+        )
     {
         return match peeled {
             Ok(payload) => solve_member(

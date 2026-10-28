@@ -306,7 +306,8 @@ fn is_wildcard_useful(
             // useful under some piece — the OTHER columns may still be open.
             if covers_whole_domain(&heads, int_domain(ctx, site.root, col_type)) {
                 for ctor in &heads {
-                    let result = is_constructor_useful(matrix, query, col, ctor, col_type, site, ctx);
+                    let result =
+                        is_constructor_useful(matrix, query, col, ctor, col_type, site, ctx);
                     if result.is_useful {
                         return result;
                     }

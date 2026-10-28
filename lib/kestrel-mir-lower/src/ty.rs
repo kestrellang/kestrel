@@ -361,7 +361,12 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
                 .iter()
                 .map(|(p, args)| {
                     ctx.register_name(*p);
-                    (*p, args.iter().map(|a| lower_resolved_ty_preserving(ctx, a)).collect())
+                    (
+                        *p,
+                        args.iter()
+                            .map(|a| lower_resolved_ty_preserving(ctx, a))
+                            .collect(),
+                    )
                 })
                 .collect();
             let bindings: Vec<(Entity, TyId)> = bindings

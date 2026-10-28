@@ -76,11 +76,11 @@ impl<'a, 'i> SolverLayer<'a, 'i> {
             TyKind::RawExistential { .. } => self
                 .fe
                 .abstract_of(crate::solver::reify_kind(self.ctx, kind)),
-            TyKind::Function { .. }
-            | TyKind::Opaque { .. }
-            | TyKind::TypeAlias { .. } => self.fe.abstract_of(kestrel_hir::ty::HirTy::Error(
-                kestrel_span::Span::synthetic(0),
-            )),
+            TyKind::Function { .. } | TyKind::Opaque { .. } | TyKind::TypeAlias { .. } => {
+                self.fe.abstract_of(kestrel_hir::ty::HirTy::Error(
+                    kestrel_span::Span::synthetic(0),
+                ))
+            },
         }
     }
 }

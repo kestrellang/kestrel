@@ -256,8 +256,7 @@ pub(super) fn solve_conforms(
                 // (`any P: P`); the kernel decides whether it holds.
                 let declared = ctx.resolver.conforms_to(&kind, protocol)
                     || crate::existential::names_protocol(ctx, resolved, protocol);
-                if !(declared && projection_base_admits(ctx, &kind, protocol))
-                {
+                if !(declared && projection_base_admits(ctx, &kind, protocol)) {
                     false
                 } else {
                     match crate::solver_entail::conformance(ctx, resolved, protocol) {
@@ -927,10 +926,12 @@ impl kestrel_semantics::SizedLayer for SolverSizedLayer<'_, '_> {
     type Ty = TyVar;
 
     fn nominal_sizedness(&self, entity: Entity) -> kestrel_semantics::Sizedness {
-        self.ctx.query_ctx.query(kestrel_semantics::NominalSizedness {
-            entity,
-            root: self.ctx.root,
-        })
+        self.ctx
+            .query_ctx
+            .query(kestrel_semantics::NominalSizedness {
+                entity,
+                root: self.ctx.root,
+            })
     }
 
     fn member_is_sized(&self, &tv: &TyVar) -> bool {
@@ -953,17 +954,17 @@ pub(crate) fn solver_ty_is_sized(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> b
     };
     match kind.clone() {
         TyKind::RawExistential { .. } => false,
-        TyKind::Struct { entity, args } => kestrel_semantics::instance_is_sized(
-            &SolverSizedLayer { ctx, depth },
-            entity,
-            &args,
-        ),
+        TyKind::Struct { entity, args } => {
+            kestrel_semantics::instance_is_sized(&SolverSizedLayer { ctx, depth }, entity, &args)
+        },
         TyKind::Param { entity } => {
-            ctx.query_ctx.query(kestrel_semantics::TypeParamSizeRequirement {
-                param: entity,
-                context: ctx.owner,
-                root: ctx.root,
-            }) == kestrel_semantics::SizeRequirement::RequiresSized
+            ctx.query_ctx
+                .query(kestrel_semantics::TypeParamSizeRequirement {
+                    param: entity,
+                    context: ctx.owner,
+                    root: ctx.root,
+                })
+                == kestrel_semantics::SizeRequirement::RequiresSized
         },
         TyKind::AssocProjection { assoc, .. } => {
             !kestrel_semantics::assoc_may_be_unsized(ctx.query_ctx, assoc, ctx.root)

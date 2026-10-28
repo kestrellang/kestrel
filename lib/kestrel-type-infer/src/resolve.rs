@@ -2668,11 +2668,13 @@ impl WorldResolver<'_> {
                 }
             },
             TyKind::AssocProjection { .. } => CopySemantics::NotCopyable,
-            TyKind::RawExistential { bounds, .. } => kestrel_semantics::raw_existential_copy_semantics(
-                self.ctx,
-                bounds.iter().map(|(protocol, _)| *protocol),
-                self.root,
-            ),
+            TyKind::RawExistential { bounds, .. } => {
+                kestrel_semantics::raw_existential_copy_semantics(
+                    self.ctx,
+                    bounds.iter().map(|(protocol, _)| *protocol),
+                    self.root,
+                )
+            },
             // A closure value's copy class is its KIND's (plan D6) — the twin
             // of the `solver_copy_class` arm.
             TyKind::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),

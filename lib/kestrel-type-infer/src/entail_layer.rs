@@ -471,7 +471,12 @@ impl FrontEndLayer<'_, '_> {
         }
         let pinned: Vec<Entity> = bindings.iter().map(|b| b.assoc).collect();
         let needs = kestrel_semantics::self_conformance(self.ctx, protocol, &pinned, self.root);
-        kestrel_debug::ktrace!("existential", "  pinned {:?}; self-conformance: {:?}", pinned, needs);
+        kestrel_debug::ktrace!(
+            "existential",
+            "  pinned {:?}; self-conformance: {:?}",
+            pinned,
+            needs
+        );
 
         if needs.blocker.is_some() {
             return Some(Supply::Decided(Tri::Fails));

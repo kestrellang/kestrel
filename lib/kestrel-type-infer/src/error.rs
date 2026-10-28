@@ -162,7 +162,11 @@ pub enum InferError {
     /// E147: an existential converted into an existential with a different
     /// box. Boxes are never interconverted (existentials design §4). The
     /// types are described when the error is raised.
-    ExistentialBoxMismatch { from: String, to: String, span: Span },
+    ExistentialBoxMismatch {
+        from: String,
+        to: String,
+        span: Span,
+    },
 
     /// E145: a requirement that can't be called through an existential
     /// (static, generic, `Self`-using, or naming an unbound associated

@@ -959,8 +959,7 @@ impl<'a> InferCtx<'a> {
         match err {
             InferError::DoesNotConform {
                 ty, protocol, span, ..
-            } if self.resolver.builtin(Builtin::OptionalChainProtocol) == Some(protocol) =>
-            {
+            } if self.resolver.builtin(Builtin::OptionalChainProtocol) == Some(protocol) => {
                 InferError::OptionalChainNotConforming { ty, span }
             },
             other => other,
