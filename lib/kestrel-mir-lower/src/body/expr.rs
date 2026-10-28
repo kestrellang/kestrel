@@ -1384,7 +1384,7 @@ impl OssaBodyCtx<'_, '_> {
 
             if is_static {
                 let self_type = self.type_from_type_ref(base);
-                let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+                let rhs_arg = self.prepare_call_arg(rhs, super::setter_value());
                 let callee = Callee::Witness {
                     protocol,
                     method,
@@ -1395,7 +1395,7 @@ impl OssaBodyCtx<'_, '_> {
             } else {
                 let receiver_ty = self.resolve_expr_type(base);
                 let receiver_arg = self.prepare_call_arg_for_expr(base, ParamConvention::MutBorrow);
-                let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+                let rhs_arg = self.prepare_call_arg(rhs, super::setter_value());
                 let callee = Callee::Witness {
                     protocol,
                     method,
@@ -1447,7 +1447,7 @@ impl OssaBodyCtx<'_, '_> {
         if is_static {
             let self_type = self.type_from_type_ref(base);
             let type_args = self.prepend_receiver_type_args(self_type, vec![]);
-            let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+            let rhs_arg = self.prepare_call_arg(rhs, super::setter_value());
             let callee = Callee::direct_with_args(setter, type_args, None);
             self.emit_call_void(callee, vec![rhs_arg]);
         } else {
@@ -1459,7 +1459,7 @@ impl OssaBodyCtx<'_, '_> {
                 self.ctx.register_name(protocol);
                 let key = self.ctx.witness_setter_key(setter);
                 let receiver_arg = self.prepare_call_arg_for_expr(base, ParamConvention::MutBorrow);
-                let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+                let rhs_arg = self.prepare_call_arg(rhs, super::setter_value());
                 let callee = Callee::Witness {
                     protocol,
                     method: key,
@@ -1469,7 +1469,7 @@ impl OssaBodyCtx<'_, '_> {
                 self.emit_call_void(callee, vec![receiver_arg, rhs_arg]);
             } else {
                 let receiver_arg = self.prepare_call_arg_for_expr(base, ParamConvention::MutBorrow);
-                let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+                let rhs_arg = self.prepare_call_arg(rhs, super::setter_value());
                 let callee = Callee::direct_with_args(setter, type_args, None);
                 self.emit_call_void(callee, vec![receiver_arg, rhs_arg]);
             }
@@ -1507,7 +1507,7 @@ impl OssaBodyCtx<'_, '_> {
             let rhs = self.lower_expr(value_id);
             let method_type_args = self.resolve_type_args(target_id);
             let method = WitnessMethodKey::simple(format!("{field_name}.set"));
-            let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+            let rhs_arg = self.prepare_call_arg(rhs, super::setter_value());
             let callee = Callee::Witness {
                 protocol,
                 method,
@@ -1528,7 +1528,7 @@ impl OssaBodyCtx<'_, '_> {
         let setter = self.ctx.find_setter_child(entity)?;
         self.ctx.register_name(setter);
         let rhs = self.lower_expr(value_id);
-        let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+        let rhs_arg = self.prepare_call_arg(rhs, super::setter_value());
         let callee = Callee::direct_with_args(setter, vec![], None);
         self.emit_call_void(callee, vec![rhs_arg]);
         Some(self.emit_literal(Immediate::unit()))
@@ -1612,7 +1612,7 @@ impl OssaBodyCtx<'_, '_> {
             // default so it is skipped here and pushed last. Without this the
             // call is built with too few args and fails codegen verification.
             self.expand_default_args(&mut call_args, setter, args.len(), &[], 0, &[]);
-            call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
+            call_args.push(self.prepare_call_arg(rhs, super::setter_value()));
             let callee = Callee::direct_with_args(setter, type_args, None);
             self.emit_call_void(callee, call_args);
         } else {
@@ -1632,7 +1632,7 @@ impl OssaBodyCtx<'_, '_> {
             // appends to the end, so call it after the explicit index args and before
             // `rhs` to preserve the `[self, idx.., default(idx), newValue]` ABI order.
             self.expand_default_args(&mut call_args, setter, args.len(), &[], 0, &[]);
-            call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
+            call_args.push(self.prepare_call_arg(rhs, super::setter_value()));
 
             if let Some(protocol) = self.ctx.is_protocol_method(setter) {
                 self.ctx.register_name(protocol);
@@ -1769,7 +1769,7 @@ impl OssaBodyCtx<'_, '_> {
 
         let setter = setter.expect("setter present when no mutating ref accessor");
         self.ctx.register_name(setter);
-        call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
+        call_args.push(self.prepare_call_arg(rhs, super::setter_value()));
 
         if let Some(protocol) = self.ctx.is_protocol_method(setter) {
             self.ctx.register_name(protocol);

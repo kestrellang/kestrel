@@ -35,7 +35,7 @@ use crate::item::witness::WitnessDef;
 use crate::item::{Layout, TargetConfig};
 use crate::layout::StructLayout;
 use crate::substitute::{SubstMap, substitute};
-use crate::ty::{MirTy, ParamConvention, TyArena};
+use crate::ty::{MirTy, TyArena};
 use crate::value::Ownership;
 use crate::{CopyBehavior, MirModule, MonoFuncId, TyId};
 
@@ -490,16 +490,15 @@ fn monomorphize_body(
                 key.self_type,
             );
             // Conformance requires exact receiver (E477) and parameter (E469)
-            // conventions, so a witness never borrows what the call site
-            // hands over `consuming` — the case mono used to adapt with a
-            // borrow + destroy. Fail loudly rather than leak the argument.
-            // (Synthesized stored-property accessor witnesses still differ in
-            // other directions — e.g. a setter value passed @borrow — which
-            // is pre-existing and not judged here.)
-            if was_witness && let Some(idx) = witness_borrows_consumed_arg(&inst.kind, functions) {
+            // conventions, and setter values follow one rule
+            // (`SETTER_NEW_VALUE_MODE`), so a resolved witness takes every
+            // argument exactly the way the call site passes it. A mismatch
+            // would leak or double-drop the argument (a borrowed value stored
+            // by a consuming setter was freed twice) — fail loudly instead.
+            if was_witness && let Some(idx) = witness_convention_mismatch(&inst.kind, functions) {
                 panic!(
-                    "ICE: witness call in {:?} hands arg {idx} over `consuming` to a witness that \
-                     borrows it — conformance checking (E469/E477) should have rejected it",
+                    "ICE: witness call in {:?} passes arg {idx} with a convention its witness \
+                     doesn't take — the requirement and witness disagree",
                     func.name
                 );
             }
@@ -596,9 +595,9 @@ fn closure_clone_as_copy(
     })
 }
 
-/// The first argument a resolved witness call passes `consuming` to a
-/// parameter the witness only borrows (`None` when there is none).
-fn witness_borrows_consumed_arg(
+/// The first argument of a resolved witness call whose passing convention
+/// differs from the witness's parameter (`None` when they all agree).
+fn witness_convention_mismatch(
     kind: &InstKind,
     functions: &IndexMap<Entity, FunctionDef>,
 ) -> Option<usize> {
@@ -613,10 +612,7 @@ fn witness_borrows_consumed_arg(
     let target = functions.get(func)?;
     args.iter()
         .zip(&target.params)
-        .position(|(arg, param)| {
-            arg.convention == ParamConvention::Consuming
-                && param.convention == ParamConvention::Borrow
-        })
+        .position(|(arg, param)| arg.convention != param.convention)
 }
 
 /// Substitute types in a single instruction (the OSSA analogue of the

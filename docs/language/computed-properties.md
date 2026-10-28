@@ -29,7 +29,10 @@ var celsius: Float64 {
 }
 ```
 
-The setter receives an implicit `newValue` parameter of the property's type.
+The setter receives an implicit `newValue` parameter of the property's type. It is
+`consuming`: the setter owns the new value and can move it into storage (so
+a `not Copyable` property is settable). The caller copies a value it still
+needs; a temporary moves in for free. Subscript setters work the same way.
 
 ### Static Computed Properties
 

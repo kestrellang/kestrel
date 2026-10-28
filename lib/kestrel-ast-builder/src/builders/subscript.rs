@@ -116,15 +116,9 @@ fn build_accessors(
         && let Some(body) = clause.code_block()
     {
         let mut params = index_params(world);
-        params.push(AstParam {
-            label: None,
-            name: "newValue".into(),
-            ty: world.get::<TypeAnnotation>(entity).map(|t| t.0.clone()),
-            default_entity: None,
-            pattern: None,
-            is_mut: false,
-            is_consuming: false,
-        });
+        params.push(AstParam::new_value(
+            world.get::<TypeAnnotation>(entity).map(|t| t.0.clone()),
+        ));
         spawn_setter(
             world,
             entity,

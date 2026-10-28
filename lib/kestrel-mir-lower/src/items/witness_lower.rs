@@ -377,7 +377,7 @@ fn bind_witness_methods(
                     "value",
                     ValueId::new(0),
                     field_ty,
-                    ParamConvention::Consuming,
+                    crate::body::setter_value(),
                 )];
                 ctx.module.add_function(def);
                 crate::body::synthesize_static_var_setter(ctx, accessor, field, field_ty);
@@ -438,7 +438,7 @@ fn bind_witness_methods(
                         "value",
                         ValueId::new(1),
                         field_ty,
-                        ParamConvention::Consuming,
+                        crate::body::setter_value(),
                     ),
                 ];
                 ctx.module.add_function(def);

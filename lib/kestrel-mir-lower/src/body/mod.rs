@@ -4636,7 +4636,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             for &v in &wb.index_vals {
                 args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }
-            args.push(self.prepare_call_arg(new_val, ParamConvention::Borrow));
+            args.push(self.prepare_call_arg(new_val, setter_value()));
             if let Some(protocol) = self.ctx.is_protocol_method(wb.setter) {
                 self.ctx.register_name(protocol);
                 let key = self.ctx.witness_setter_key(wb.setter);
@@ -4812,11 +4812,21 @@ pub(crate) fn synthesize_static_var_getter(
     }
 }
 
+/// How every setter receives its new value at the MIR level — derived from
+/// the one source of truth, [`kestrel_ast_builder::SETTER_NEW_VALUE_MODE`]
+/// (which also shapes a hand-written setter's implicit `newValue` param), so
+/// setter call sites, hand-written setters and synthesized witness setters
+/// can't disagree (they did: a `Consuming` synthesized setter fed a `Borrow`
+/// argument double-freed a String property set through a protocol).
+pub(crate) fn setter_value() -> ParamConvention {
+    crate::items::function_sig::receiver_convention(&kestrel_ast_builder::SETTER_NEW_VALUE_MODE)
+}
+
 /// Synthesize the MIR body of a setter for a stored `static var` witnessing a
 /// protocol `static var { set }` requirement (twin of
 /// [`synthesize_static_var_getter`]). The body is `global = value` — a
 /// `StoreAssign` (drops the old value, stores the consumed param). The
-/// FunctionDef must already exist with one consuming `value` param at
+/// FunctionDef must already exist with one [`setter_value`] `value` param at
 /// `ValueId(0)` and a unit return type.
 pub(crate) fn synthesize_static_var_setter(
     ctx: &mut LowerCtx,
@@ -4885,9 +4895,10 @@ pub(crate) fn synthesize_instance_var_getter(
 
 /// Synthesize the MIR body of a setter for a stored INSTANCE var witnessing a
 /// protocol `var { set }` requirement. The body is `self.field = value` — a
-/// `StoreAssign` through the field address of the (mutably-borrowed) `self`. The
-/// FunctionDef must already exist with a mutating `self` param at `ValueId(0)`,
-/// a consuming `value` param at `ValueId(1)`, and a unit return type.
+/// `StoreAssign` through the field address of the (mutably-borrowed) `self`.
+/// The FunctionDef must already exist with a mutating `self` param at
+/// `ValueId(0)`, a [`setter_value`] `value` param at `ValueId(1)`, and a unit
+/// return type.
 pub(crate) fn synthesize_instance_var_setter(
     ctx: &mut LowerCtx,
     setter_entity: Entity,
@@ -4911,7 +4922,7 @@ pub(crate) fn synthesize_instance_var_setter(
         root: RootProvenance::Param(0),
         span: None,
     });
-    // value: consuming param (ValueId 1).
+    // value: consumed param (ValueId 1) — moved into the field.
     let value = bctx.body.alloc_value(ValueDef::owned(field_ty));
     let field_addr = bctx.emit_field_addr(self_val, self_ty, field_idx);
     bctx.emit_store_assign(field_addr, value);

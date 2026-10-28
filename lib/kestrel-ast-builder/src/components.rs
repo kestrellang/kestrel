@@ -232,6 +232,31 @@ pub enum ReceiverKind {
     Consuming,
 }
 
+/// How every setter — property or subscript, hand-written or synthesized —
+/// receives its new value: CONSUMING (user decision 2026-10-28). A setter
+/// exists to store the value, so it takes ownership: a temporary moves
+/// straight into storage, and a non-Copyable property can be set at all.
+/// The single source of truth — the implicit `newValue` param
+/// ([`AstParam::new_value`]) and MIR's setter call sites both derive from it.
+pub const SETTER_NEW_VALUE_MODE: ReceiverKind = ReceiverKind::Consuming;
+
+impl AstParam {
+    /// A setter's implicit `newValue` parameter, typed `ty`, passed per
+    /// [`SETTER_NEW_VALUE_MODE`].
+    pub fn new_value(ty: Option<AstType>) -> AstParam {
+        let is_consuming = SETTER_NEW_VALUE_MODE == ReceiverKind::Consuming;
+        AstParam {
+            label: None,
+            name: "newValue".into(),
+            ty,
+            default_entity: None,
+            pattern: None,
+            is_mut: is_consuming || SETTER_NEW_VALUE_MODE == ReceiverKind::Mutating,
+            is_consuming,
+        }
+    }
+}
+
 /// Marker: can be read as a value.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Gettable;
