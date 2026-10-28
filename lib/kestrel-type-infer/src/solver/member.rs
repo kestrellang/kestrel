@@ -87,8 +87,13 @@ pub(super) fn solve_for_loop_iterator(
         TySlot::Resolved(TyKind::Error | TyKind::Never | TyKind::Ref { .. }) => false,
         TySlot::Resolved(kind) => {
             let kind = kind.clone();
+            // An `any Iterator` names the protocol it conforms to (`any P:
+            // P`); the kernel below decides whether that holds.
             match ctx.resolver.builtin(Builtin::IteratorProtocol) {
-                Some(iterator) if ctx.resolver.conforms_to(&kind, iterator) => {
+                Some(iterator)
+                    if ctx.resolver.conforms_to(&kind, iterator)
+                        || crate::existential::names_protocol(ctx, resolved, iterator) =>
+                {
                     match crate::solver_entail::conformance(ctx, resolved, iterator) {
                         kestrel_entail::Tri::Holds => true,
                         kestrel_entail::Tri::Fails => false,
