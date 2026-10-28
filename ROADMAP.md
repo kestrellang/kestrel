@@ -74,7 +74,7 @@ Parser rewrite, symbol-mangling refactor, the deferred-resolution inference engi
 
 ---
 
-# Preview 2: Types & Expressiveness (0.16 → 0.23)
+# Preview 2: Types & Expressiveness (0.16 → 0.22)
 
 This preview rounds out the type system surface — opaque and existential types, attribute-driven derives, expression sugar that's been deferred, the property model (lazy / observed / `mutating get`), conditional conformance, and the class runtime. Each version is a 3-week train cycle. 0.16 has shipped; development is on 0.17.
 
@@ -95,33 +95,33 @@ Existential types (`any Protocol`) — boxed via `GlobalAllocator`, with vtables
 
 > **TODO — `Pointer(to: <non-place>)` silently addresses a temporary.** `Pointer(to:)` should only be expressible against a *place* (a local `var`, a stored field, etc.), where it addresses real storage and write-through works. Today it also accepts an rvalue — most insidiously a subscript getter result like `Pointer(to: arr(i))` — and silently takes the address of a throwaway stack temporary. The value-semantics are technically correct (you got a pointer to *a* copy of the value), but it's a sharp FFI footgun: a C out-param write (e.g. `kestrel_system_timezone_name(Pointer(to: buf(0)), 256)`) overflows the 1-byte temporary → stack corruption, not a buffer fill. `arr.asPointer()` is the correct idiom for element storage. Fix in 0.17: reject `Pointer(to: <non-place>)` at the type-check layer with a diagnostic that points at `.asPointer()` / suggests binding to a `var` first. (Surfaced 2026-06-02 in datetime's `TimeZone.system`/`name`/`abbreviationAt`.)
 
-## 0.18 — Attribute system
+## 0.18 — Attributes, existentials & expression sugar
 
-The full attribute pipeline parsed and propagated through AST → HIR → MIR. Auto-derived protocols arrive (`@derive(Equatable, Hashable, Cloneable, Comparable)`), along with built-in attributes (`@inline`, `@deprecated`).
+The full attribute pipeline parsed and propagated through AST → HIR → MIR. Auto-derived protocols arrive (`@derive(Equatable, Hashable, Cloneable, Comparable)`, with `@default` on enum cases), along with built-in attributes (`@inline`, `@deprecated`, `@unavailable`, `@doc`, `@nonExhaustive`, `@align`, `@layout`).
 
-## 0.19 — Expression sugar
+Existentials (`any P`, `any[B] P`), planned for 0.17, land here: function tables with dynamic dispatch, `as?` / `is` and `is` patterns, and self-conformance (`any P: P`).
 
-Optional chaining, the pipe operator (`|>`), and placeholder arguments (`_` for partial application).
+The expression sugar first planned as its own release ships here too: optional chaining, the pipe operator (`|>`), and placeholder arguments (`_` for partial application).
 
-Designs: [optional chaining](docs/plans/optional-chaining/optional-chaining-design.md) · [pipe operator](docs/plans/pipe-operator/pipe-operator-design.md) · [placeholder arguments](docs/plans/placeholder-arguments/placeholder-arguments-design.md).
+Designs: [attributes](docs/plans/attributes/attributes-design.md) · [existentials](docs/plans/existentials/existentials-design.md) · [optional chaining](docs/plans/optional-chaining/optional-chaining-design.md) · [pipe operator](docs/plans/pipe-operator/pipe-operator-design.md) · [placeholder arguments](docs/plans/placeholder-arguments/placeholder-arguments-design.md).
 
-## 0.20 — Properties & conditional conformance
+## 0.19 — Properties & conditional conformance
 
 Lazy properties (`lazy let expensive = compute()`), property observers (`willSet` / `didSet`), `mutating get` on computed properties and subscripts, and conditional conformance (`Box[T]: Copyable where T: Copyable`).
 
 > **`mutating get` matters more than it looks.** It lets a getter modify `self` (value types only); the call site requires a `var` receiver. This unblocks insert-on-read APIs like `Dictionary.subscript(key:inserting:)`, which was removed in 0.13's stdlib because without `mutating get` the documented "insert default on miss" contract couldn't be honored. Keep an eye on what other APIs become expressible once this lands.
 
-## 0.21 — Standard library & polish
+## 0.20 — Standard library & polish
 
-Standard-library expansion and depth, compiler-speed work, stdlib speedups, and language refinements informed by 0.16 → 0.20 usage.
+Standard-library expansion and depth, compiler-speed work, stdlib speedups, and language refinements informed by 0.16 → 0.19 usage.
 
-## 0.22 — Class runtime
+## 0.21 — Class runtime
 
 Class declarations with reference semantics, reference counting with control blocks, `===` identity, RTTI via extended vtables, `@weak` / `@unowned` reference attributes, and `@final` classes.
 
-## 0.23 — Refinements (Preview 2 milestone)
+## 0.22 — Refinements (Preview 2 milestone)
 
-Bug fixes and rough edges from 0.16 → 0.22 usage. Class runtime hardening informed by real-world adoption. Documentation and stdlib polish. Stabilization of the Preview 2 surface area.
+Bug fixes and rough edges from 0.16 → 0.21 usage. Class runtime hardening informed by real-world adoption. Documentation and stdlib polish. Stabilization of the Preview 2 surface area.
 
 ---
 
@@ -137,7 +137,7 @@ The shape of the work: generators (`generator` / `yield`, CPS / state-machine lo
 
 Implicits land here: `using` / `given` implicit parameters, with `GlobalAllocator` migrating to `given Allocator`, and async context (executors, cancellation tokens) migrating to `using`. The effect-lite generalization carries implicit propagation, handler blocks, and effect inference — a stepping-stone to 3.0's algebraic effects.
 
-The rest of the preview is shaped by real-world usage: language features informed by what 0.16 → 0.23 made awkward, the standard library's final shape and depth, and ecosystem tooling.
+The rest of the preview is shaped by real-world usage: language features informed by what 0.16 → 0.22 made awkward, the standard library's final shape and depth, and ecosystem tooling.
 
 ---
 

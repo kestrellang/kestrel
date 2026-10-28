@@ -1,6 +1,6 @@
 # Optional Chaining (`a?.b`) Design
 
-> **Status: implemented on `future/0.19`.** Milestone 0.19 ("Expression sugar"). See `docs/language/optional-chaining.md`.
+> **Status: shipped in 0.18.** Planned as milestone 0.19 ("Expression sugar"), folded into 0.18. See `docs/language/optional-chaining.md`.
 > Base commit `def25459` (`future/0.18`). File and line anchors refer to that
 > tree. Companion designs: [placeholder arguments](../placeholder-arguments/placeholder-arguments-design.md),
 > [pipe operator](../pipe-operator/pipe-operator-design.md).
@@ -26,7 +26,7 @@ wrapped in `Optional`. If the result is already an `Optional`, it's
 
 Like every other Kestrel operator, `?.` is **backed by a protocol**,
 `OptionalChain`. `Optional` conforms to it in the stdlib. Other types can
-conform too: a future `@weak` reference (0.22), a lazily loaded handle, or a
+conform too: a future `@weak` reference (0.21), a lazily loaded handle, or a
 user's own `Maybe`-like type.
 
 The chain's result is **always `Optional`**, whatever the base type is. That's
@@ -242,7 +242,7 @@ should exempt `Optional[()]`.
 - **`??`:** `a?.b ?? d` works as expected.
 - **`try`:** `try a?.b()` where `b` throws gives `try` an
   `Optional[Result[…]]`, and `try` unwraps the Optional. That's legal but
-  surprising, so it's documented. There's no lint in 0.19.
+  surprising, so it's documented. There's no lint in 0.18.
 - **`!`:** `a?.b!` force-unwraps `b` inside the chain. `(a?.b)!` unwraps the
   result.
 - **Placeholders:** `xs.map(_?.name)` is a placeholder closure whose body is
@@ -390,5 +390,5 @@ These have a chosen answer. A prototype must confirm it holds.
 
 - **`Result` conforms to `OptionalChain`** (2026-10-25). `r?.x` chains on the
   `Ok` value and gives `Optional`, dropping the error.
-- **No lint for `try a?.b()` in 0.19** (2026-10-25). The interaction in §6 is
+- **No lint for `try a?.b()` in 0.18** (2026-10-25). The interaction in §6 is
   documented only.

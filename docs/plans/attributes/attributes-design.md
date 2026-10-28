@@ -524,14 +524,14 @@ allocas for `@align`.
 ### B6. `@unavailable`
 
 ```kestrel
-@unavailable("needs 'mutating get' (0.20); use 'modify(key:)' instead", replacement: "modify")
+@unavailable("needs 'mutating get' (0.19); use 'modify(key:)' instead", replacement: "modify")
 public subscript(key: K, inserting default: V) -> V { ... }
 ```
 
 - **Meaning.** Using the declaration is an **error** (E913). This is for APIs
   that were removed, or that are declared but can't work yet. The
   `Dictionary.subscript(key:inserting:)` that 0.13 removed (`ROADMAP.md`,
-  0.20) is the motivating case: with `@unavailable` it can stay declared and
+  0.19) is the motivating case: with `@unavailable` it can stay declared and
   tell callers what to do instead.
 - **Arguments.** An optional positional message and `replacement:`, the same
   as `@deprecated` (§B2). There is no `since:`.
@@ -722,14 +722,14 @@ no bound.
   marks it derived. Its own `where` clause is used as written, and nothing is
   inferred.
 
-**Relation to 0.20 "conditional conformance".** Derives need nothing from
-0.20. The `where`-gated extension conformance they desugar to already
+**Relation to 0.19 "conditional conformance".** Derives need nothing from
+0.19. The `where`-gated extension conformance they desugar to already
 type-checks, monomorphizes and dispatches. The stdlib's `Optional`, `Result`
 and `Array` conformances depend on it (see [Current state](#current-state)).
 `docs/memory-model/generics.md` already documents conditional `Copyable`.
-**John decides** (D-Q3): confirm that 0.20's conditional-conformance item is
+**John decides** (D-Q3): confirm that 0.19's conditional-conformance item is
 about something else (overlap rules, or `Copyable` on user generics?). If
-0.20 changes how a `where`-gated conformance is represented, derives follow
+0.19 changes how a `where`-gated conformance is represented, derives follow
 it, because they use that representation and do not copy it.
 
 ### C4. Built-in derivers
@@ -1013,7 +1013,7 @@ E950–E999 cover derives.
 | E910 | Attribute not valid for this type | `'@layout(.C)' on an enum needs every case to be payload-less; 'Shape.Circle' has a payload` (variants: `'@layout(.Packed)' cannot be applied to an enum`, `... to a type with an unsized tail`, `'@nonExhaustive' has no effect: 'Mode' is not visible outside its module`) |
 | E911 | Non-`Copyable` field in a packed struct | `field 'name' of packed struct 'Header' has type 'String', which is not Copyable; packed fields are copied on every read` |
 | E912 | Address of a packed field needed | `cannot borrow 'h.length' in place: 'WireHeader' is packed, so the field may be misaligned; copy it first: 'var n = h.length'` |
-| E913 | Use of an unavailable item | `'subscript(key:inserting:)' is unavailable: needs 'mutating get' (0.20); use 'modify' instead` |
+| E913 | Use of an unavailable item | `'subscript(key:inserting:)' is unavailable: needs 'mutating get' (0.19); use 'modify' instead` |
 | E305 (existing) | Match on a `@nonExhaustive` enum outside its module without a catch-all | the existing `non_exhaustive_match` message, plus the note `'HttpMethod' is '@nonExhaustive'; add a '_' arm, since cases may be added` |
 | E950 | `@derive` argument is not a protocol | `'Point' in '@derive' is not a protocol` (variant: `cannot find protocol 'Equtable'`) |
 | E951 | Protocol is not derivable | `'Iterator' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable and Defaultable` (variant for `Copyable`/`Cloneable`, §C1) |
@@ -1065,7 +1065,7 @@ attributes. Recommendation: make it an error and keep the code.
 |---|---|---|
 | D-Q1 | Implicit or explicit derives? | Explicit `@derive` for `Equatable`/`Hashable`/`Comparable`/`Formattable`/`Defaultable`; `Copyable`/`Cloneable` stay inferred (§C1) |
 | D-Q2 | `@derive(Cloneable)` / `@derive(Copyable)` | Reject with an explanation (E951); the roadmap's listing predates the copy fold |
-| D-Q3 | Does 0.20's conditional conformance change anything derives rely on? | No: derives desugar to the `where`-gated extensions the stdlib already uses (§C3). Please confirm what 0.20 adds |
+| D-Q3 | Does 0.19's conditional conformance change anything derives rely on? | No: derives desugar to the `where`-gated extensions the stdlib already uses (§C3). Please confirm what 0.20 adds |
 | D-Q5 | Derive `Formattable`? Format? | Yes: `Name(label: value, ...)`, fields with `debug: true` |
 | D-Q6 | Derive `Defaultable`? | Yes: structs (declared initializers win) and enums with one `@default` case |
 | D-Q7 | Diagnostic band | New E900–E999 band for attributes and derives |
