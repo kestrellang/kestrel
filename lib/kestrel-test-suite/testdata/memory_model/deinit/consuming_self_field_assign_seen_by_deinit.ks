@@ -11,7 +11,7 @@
 module Test
 
 import std.numeric.(Int64)
-import std.io.(print)
+import std.io.stdio.(print)
 
 struct Tok: not Copyable {
     var live: Int64

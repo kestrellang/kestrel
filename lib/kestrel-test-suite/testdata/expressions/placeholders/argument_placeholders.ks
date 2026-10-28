@@ -54,7 +54,7 @@ func main() -> lang.i64 {
     let ages = [Optional.Some(1), .None].map(_ ?? 0);
     if ages(1) != 0 { return 10 }
     // calling each element
-    let fs: Array[(Int64) -> Int64] = [double, { it + 1 }];
+    let fs: Array[escaping (Int64) -> Int64] = [double, { it + 1 }];
     let applied = fs.map(_(5));
     if applied(0) != 10 or applied(1) != 6 { return 11 }
     // sort key
