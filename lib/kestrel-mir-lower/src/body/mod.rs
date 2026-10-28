@@ -9,7 +9,7 @@ pub mod pattern;
 pub mod place;
 pub mod stmt;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use kestrel_hecs::Entity;
@@ -385,6 +385,12 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// receiver. Whole-local captures use `local_map` instead. Saved/restored
     /// across nested closure bodies like `local_map`.
     pub(crate) place_capture_map: HashMap<PlaceKey, PlaceCapture>,
+    /// Inside a closure body: whole locals captured by VIEW. They are bound
+    /// to the defining frame's slot address (`LocalBinding::Var`), but this
+    /// frame does not own that slot — it may alias a caller's borrow, and the
+    /// closure may run again — so a consuming read copies, never moves out.
+    /// Saved/restored across nested closure bodies like `local_map`.
+    pub(crate) view_captured_locals: HashSet<HirLocalId>,
     /// Closure-literal call arguments whose read captures overlap a
     /// `mutating` argument of the same call: closure expr → (captured local,
     /// address of its call-time copy). Filled by
@@ -515,6 +521,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             captures,
             partial: Arc::default(),
             place_capture_map: HashMap::new(),
+            view_captured_locals: HashSet::new(),
             closure_arg_snapshots: HashMap::new(),
             active_match_moves: None,
             func_entity,
@@ -3277,6 +3284,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.push_inst(InstKind::Load { result, address });
         self.track_owned(result);
         result
+    }
+
+    /// Whether this frame OWNS `local`'s var slot at `addr`, so a consuming
+    /// read may move out of it. Not owned: a `mutating` param (its address is
+    /// @guaranteed — the caller's storage) or a closure's view capture (the
+    /// defining frame's slot, possibly aliasing a borrow; the closure may run
+    /// again). Those reads copy instead.
+    pub(crate) fn owns_var_slot(&self, local: HirLocalId, addr: ValueId) -> bool {
+        self.body.value(addr).ownership == Ownership::Owned
+            && !self.view_captured_locals.contains(&local)
     }
 
     pub fn emit_take(&mut self, address: ValueId, ty: TyId) -> ValueId {

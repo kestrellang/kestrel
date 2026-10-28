@@ -142,11 +142,28 @@ pub(super) fn solve_associated(
         _ => unreachable!(),
     };
 
-    let found = match key {
+    let found = match &key {
         crate::constraint::AssocKey::Entity(assoc) => ctx
             .resolver
-            .resolve_associated_type_by_entity(&kind, assoc, name),
+            .resolve_associated_type_by_entity(&kind, *assoc, name),
         crate::constraint::AssocKey::Name(_) => ctx.resolver.resolve_associated_type(&kind, name),
+        crate::constraint::AssocKey::Conformance {
+            assoc,
+            protocol_args,
+        } => match conformance_binding(ctx, &kind, *assoc, protocol_args, name) {
+            ConformancePick::Wait => {
+                return SolveResult::Deferred(Constraint::Associated {
+                    container,
+                    key,
+                    result,
+                    span,
+                });
+            },
+            ConformancePick::Found(res) => Some(res),
+            ConformancePick::Unselected => ctx
+                .resolver
+                .resolve_associated_type_by_entity(&kind, *assoc, name),
+        },
     };
     match found {
         Some(assoc) => {
@@ -363,4 +380,106 @@ pub(super) fn is_self_rooted_assoc_alias(ctx: &InferCtx<'_>, kind: &TyKind) -> b
             .query_ctx
             .parent_of(*entity)
             .is_some_and(|p| ctx.query_ctx.get::<NodeKind>(p) == Some(&NodeKind::Protocol))
+}
+
+/// What [`conformance_binding`] decided.
+enum ConformancePick {
+    /// The protocol args are still open; the pick waits for them.
+    Wait,
+    /// The binding declared by the one conformance the args select.
+    Found(crate::resolve::AssociatedTypeResolution),
+    /// Not a multi-conformance case (or no unique match): the plain
+    /// by-entity lookup answers.
+    Unselected,
+}
+
+/// `container.assoc` through the conformance `protocol_args` select, for a
+/// container that conforms to `assoc`'s protocol more than once
+/// (`extend Stamp: Subtractable[Meters] { type Output = Stamp }` +
+/// `extend Stamp: Subtractable[Stamp] { type Output = Meters }`): each sibling
+/// declares its own binding, and the by-name lookup would return the first.
+/// Reads the binding from the selected conformance's own declaration — the
+/// same rule the E632 checker uses (`find_associated_type_binding_entity`).
+fn conformance_binding(
+    ctx: &mut InferCtx<'_>,
+    container: &TyKind,
+    assoc: Entity,
+    protocol_args: &[TyVar],
+    name: &str,
+) -> ConformancePick {
+    let (Some(recv), Some(protocol)) = (container.entity(), ctx.query_ctx.parent_of(assoc)) else {
+        return ConformancePick::Unselected;
+    };
+    let conformances = super::member::positive_conformances_to(ctx, recv, protocol);
+    if conformances.len() < 2 {
+        return ConformancePick::Unselected;
+    }
+    if protocol_args.iter().any(|&tv| !ctx.is_concrete(ctx.resolve(tv))) {
+        return ConformancePick::Wait;
+    }
+
+    let mut selected = conformances.into_iter().filter(|(source, ast_ty)| {
+        let written = kestrel_name_res::extract_ast_type_args(ast_ty);
+        written.len() == protocol_args.len()
+            && written.iter().zip(protocol_args).all(|(arg, &tv)| {
+                let hir = kestrel_hir_lower::lower_ast_type(ctx.query_ctx, *source, ctx.root, arg);
+                written_arg_matches(ctx, &hir, tv)
+            })
+    });
+    let (Some((source, _)), None) = (selected.next(), selected.next()) else {
+        return ConformancePick::Unselected;
+    };
+
+    let binding = ctx.query_ctx.children_of(source).iter().copied().find(|&child| {
+        ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
+            && ctx.query_ctx.get::<Name>(child).is_some_and(|n| n.0 == name)
+    });
+    let Some(resolved) = binding.and_then(|alias| {
+        ctx.query_ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+            entity: alias,
+            root: ctx.root,
+        })
+    }) else {
+        return ConformancePick::Unselected;
+    };
+    ConformancePick::Found(crate::resolve::AssociatedTypeResolution {
+        resolved,
+        source_extension: (source != recv).then_some(source),
+    })
+}
+
+/// Whether a conformance's written protocol arg (`Meters` in
+/// `Subtractable[Meters]`) is the solved `tv`. An extension's own type param
+/// matches anything; an unresolved or unmodelled position does not match, so
+/// the caller falls back rather than guessing.
+fn written_arg_matches(ctx: &InferCtx<'_>, written: &kestrel_hir::ty::HirTy, tv: TyVar) -> bool {
+    use kestrel_hir::ty::HirTy;
+    let TySlot::Resolved(kind) = ctx.slot(ctx.resolve(tv)) else {
+        return false;
+    };
+    match (written, kind) {
+        (HirTy::Param(..), _) => true,
+        (
+            HirTy::Struct { entity, args, .. },
+            TyKind::Struct {
+                entity: e,
+                args: a,
+            },
+        )
+        | (
+            HirTy::Enum { entity, args, .. },
+            TyKind::Enum {
+                entity: e,
+                args: a,
+            },
+        ) => {
+            entity == e
+                && args.len() == a.len()
+                && args.iter().zip(a).all(|(w, &t)| written_arg_matches(ctx, w, t))
+        },
+        (HirTy::Tuple(ws, _), TyKind::Tuple(ts)) => {
+            ws.len() == ts.len() && ws.iter().zip(ts).all(|(w, &t)| written_arg_matches(ctx, w, t))
+        },
+        _ => false,
+    }
 }

@@ -101,11 +101,11 @@ extend Int64: SeqIndex[T] {
         if self < 0 or self >= slice.count {
             fatalError("Index out of bounds")
         }
-        slice.pointer.offset(by: self).write(value)
+        slice.pointer.offset(by: self).assign(value)
     }
 
     public func writeSeqUnchecked(to slice: ArraySlice[T], with value: T) {
-        slice.pointer.offset(by: self).write(value)
+        slice.pointer.offset(by: self).assign(value)
     }
 }
 
@@ -147,7 +147,7 @@ extend Range[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -160,7 +160,7 @@ extend Range[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -206,7 +206,7 @@ extend ClosedRange[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -219,7 +219,7 @@ extend ClosedRange[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -265,7 +265,7 @@ extend RangeFrom[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -278,7 +278,7 @@ extend RangeFrom[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -319,7 +319,7 @@ extend RangeUpTo[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < end {
-            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -331,7 +331,7 @@ extend RangeUpTo[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < end {
-            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -372,7 +372,7 @@ extend RangeThrough[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < endExclusive {
-            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -384,7 +384,7 @@ extend RangeThrough[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < endExclusive {
-            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -417,7 +417,7 @@ extend Int64: SeqClampable[T] {
             var idx = self;
             if idx < 0 { idx = 0 }
             if idx >= len { idx = len - 1 }
-            slice.pointer.offset(by: idx).write(v)
+            slice.pointer.offset(by: idx).assign(v)
         }
     }
 }
@@ -448,7 +448,7 @@ extend Range[Int64]: SeqClampable[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -479,7 +479,7 @@ extend Int64: SeqWrappable[T] {
             }
             var idx = self % len;
             if idx < 0 { idx = idx + len }
-            slice.pointer.offset(by: idx).write(v)
+            slice.pointer.offset(by: idx).assign(v)
         }
     }
 }

@@ -14,35 +14,35 @@
 // storage share, released twice. It is now `consuming` (moves, like Rust's
 // `impl<I: Iterator> IntoIterator for I`).
 //
-// The deinit counter checks no element is released early or twice.
+// An early or double release of the shared storage frees the elements'
+// heap buffers; the second pass over the same array then reads freed memory,
+// so it runs every loop twice and checks the contents after each.
+//
+// (A deinit counter cannot measure this: the element type would have to be
+// Copyable to live in an Array, and a Copyable type's deinit runs once per
+// copy — drop-semantics.md.)
 
 module Test
 
-var drops: Int64 = 0
-
-struct Tracked {
-    var id: Int64
-    deinit { drops += 1; }
-}
-
-func sumEnumerated(items: Array[Tracked]) -> Int64 {
+func sumEnumerated(items: Array[String]) -> Int64 {
     var total = 0;
     for (index, item) in items.iter().enumerate() {
-        total += index * 100 + item.id;
+        total += index * 100 + item.bytes.count;
     }
     total
 }
 
-// The array lives in its own scope so its elements drop when it returns.
-func checkTracked() -> Int64 {
-    var items = Array[Tracked]();
-    items.append(Tracked(id: 1));
-    items.append(Tracked(id: 2));
-    items.append(Tracked(id: 3));
-    if sumEnumerated(items) != 306 { return 3 }
-    if drops != 0 { return 4 }
+// The array lives in its own scope, so it is released when this returns.
+func checkTwice() -> Int64 {
+    var items = Array[String]();
+    items.append("one");
+    items.append("three");
+    items.append("seventeen");
+    // 0*100+3 + 1*100+5 + 2*100+9
+    if sumEnumerated(items) != 317 { return 3 }
+    if sumEnumerated(items) != 317 { return 4 }
     if items.count != 3 { return 5 }
-    if items(unchecked: 2).id != 3 { return 6 }
+    if items(unchecked: 2) != "seventeen" { return 6 }
     0
 }
 
@@ -67,10 +67,9 @@ func main() -> Int64 {
     // 'h' 104 + 'i' 105 + '!' 33 + offsets 0+1+2
     if byteTotal != 245 { return 2 }
 
-    // Elements with a deinit: the array must stay intact after the loop.
-    let tracked = checkTracked();
-    if tracked != 0 { return tracked }
-    if drops != 3 { return 7 }
+    // The array must stay intact across repeated loops.
+    let intact = checkTwice();
+    if intact != 0 { return intact }
 
     0
 }

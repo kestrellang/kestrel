@@ -890,7 +890,7 @@ extend String {
     /// result of an iterator chain back into a `String`:
     ///
     /// ```
-    /// let upper = String(from: "hello".chars.iter().map { it.toUpper() });
+    /// let upper = String(from: "hello".chars.iter().map { it.toUpper() }.collect());
     /// // "HELLO"
     /// ```
     public init[I](from chars: I) where I: Iterable, I.Item = Char {

@@ -221,6 +221,7 @@ Current allocations:
 - E459: `circular_protocol_inheritance` (compilation/protocol_cycles.rs)
   — was double-allocated with conformance_completeness's receiver-kind
   check; resolved 2026-07 by moving that check to E477.
+- E469: `wrong_parameter_convention` (compilation/conformance_completeness.rs) — a witness parameter's `consuming`/`mutating`/plain convention must match the requirement's exactly (2026-10-28; receivers are E477).
 - E454–E458, E460, E462–E465: conformance completeness + indirect-enum
   checks (compilation/conformance_completeness.rs, indirect_enum.rs) —
   this list is stale for that range.

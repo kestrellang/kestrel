@@ -35,10 +35,20 @@ pub enum ConformsOrigin {
 /// `Out` cannot be confused. `Name` is only for producers that genuinely start
 /// from a spelling with no declaration in hand (array/dictionary literals,
 /// `Indirection.Target`, `ArrayMatchable.Element`).
+///
+/// `Conformance` is `Entity` with the protocol's args known: `Self.Output`
+/// lowered from a requirement of `Subtractable[Other]` while `Other` is
+/// bound. A type that conforms to the protocol more than once
+/// (`Subtractable[Meters]` + `Subtractable[Stamp]`) reads the binding from the
+/// conformance those args select, not whichever extension comes first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AssocKey {
     Entity(Entity),
     Name(String),
+    Conformance {
+        assoc: Entity,
+        protocol_args: Vec<TyVar>,
+    },
 }
 
 /// Why a type was expected at a check — shown on a type mismatch as
@@ -266,6 +276,18 @@ pub enum Constraint {
         tuple: TyVar,
         index: usize,
         result: TyVar,
+        span: Span,
+    },
+
+    /// A `for` loop's iterator source. Deferred until `iterable` resolves:
+    /// an `Iterator` is the loop's iterator itself (`result = iterable`,
+    /// recorded in `direct_iterators`); anything else must be `Iterable` and
+    /// the loop calls its `iter()` (`protocol`, the Iterable builtin).
+    ForLoopIterator {
+        iterable: TyVar,
+        result: TyVar,
+        protocol: Entity,
+        expr: HirExprId,
         span: Span,
     },
 

@@ -271,6 +271,18 @@ pub(super) fn lower_hir_ty_sub(
             ) {
                 return tv;
             }
+            // A requirement of a parameterized protocol (`Subtractable[Other]`)
+            // lowered with the protocol's params bound names ONE conformance:
+            // key the projection by it, so a type conforming twice reads the
+            // sibling those args select.
+            if let Some(protocol_args) = bound_protocol_args(ctx, *assoc, subs) {
+                return ctx.project_conformance_associated(
+                    base_tv,
+                    *assoc,
+                    protocol_args,
+                    span.clone(),
+                );
+            }
             ctx.project_associated(base_tv, *assoc, span.clone())
         },
         HirTy::Param(entity, _) => {
@@ -324,4 +336,27 @@ pub(super) fn lower_hir_ty_sub(
             TyVar(idx)
         },
     }
+}
+
+/// The args of `assoc`'s protocol when `subs` binds every one of its type
+/// params (`Other` in `Subtractable[Other]`); `None` for an unparameterized
+/// protocol or one whose params are not substituted here.
+fn bound_protocol_args(
+    ctx: &InferCtx<'_>,
+    assoc: kestrel_hecs::Entity,
+    subs: &[(kestrel_hecs::Entity, TyVar)],
+) -> Option<Vec<TyVar>> {
+    let protocol = ctx.query_ctx.parent_of(assoc)?;
+    if ctx.query_ctx.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
+        return None;
+    }
+    let params = ctx.query_ctx.get::<TypeParams>(protocol)?;
+    if params.0.is_empty() {
+        return None;
+    }
+    params
+        .0
+        .iter()
+        .map(|p| subs.iter().find(|(e, _)| e == p).map(|&(_, tv)| tv))
+        .collect()
 }

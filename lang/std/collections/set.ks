@@ -350,7 +350,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     ///
     /// ```
     /// for item in set.iter() { print(item); }
-    /// let arr = Array(from: set.iter());
+    /// let arr = Array(from: set);
     /// ```
     public func iter() -> SetIterator[T, H] {
         SetIterator(dictIter: self.dict.iter())

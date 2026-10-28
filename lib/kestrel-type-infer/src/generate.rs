@@ -526,50 +526,67 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let arg_tvs = gen_call_args(ctx, hir, args);
             let result_tv = ctx.fresh();
 
-            // Receiver must conform to the protocol. When this ProtocolCall
-            // sits inside a Sugar wrapper (the desugaring's primary call),
-            // emit a poisoning Conforms so a non-conforming receiver poisons
-            // recv_tv. The downstream Member constraint then sees an Error
-            // receiver and absorbs without emitting "no member" cascades.
-            if ctx.poison_protocol_call_recv_on_failure.contains(&id) {
-                ctx.conforms_poisoning(recv_tv, *protocol, span.clone());
+            // A `for` loop's `iter()`: whether it is called at all depends on
+            // the iterable's type (an Iterator is used as-is).
+            // (No early `return`: the arm's value must reach the
+            // `expr_types` record at the end of `gen_expr`.)
+            if ctx.for_loop_iter_calls.contains(&id) {
+                ctx.protocol_dispatch_members.insert(id);
+                ctx.for_loop_iterator(recv_tv, result_tv, *protocol, id, span.clone());
+                result_tv
             } else {
-                ctx.conforms(recv_tv, *protocol, span.clone());
-            }
-            let Some(method_str) = method.as_str() else {
-                ctx.poison(result_tv);
-                return result_tv;
-            };
-            // Operators / for-in / try desugar to ProtocolCall. Their method
-            // lookup must NOT trigger the lazy Indirection peel — a wrapper's
-            // `==` forwards via `extend W: Equatable`, never by peeling the
-            // member to the pointee (which would coerce the argument; R7).
-            ctx.protocol_dispatch_members.insert(id);
-            if *from_operator {
-                ctx.operator_members.insert(id, *protocol);
-                unify_literal_operands(ctx, *protocol, recv_tv, &arg_tvs);
-                type_literal_operator(ctx, *protocol, method, recv_tv, &arg_tvs, expect.as_ref());
-            }
-            // An operator over a still-open literal gets its result's shape
-            // now (`100..=200` → `ClosedRange[ℓ]`), so a later bound or
-            // annotation on the result can pin the literal (bidi P5: the
-            // walker, not the end of the body).
-            if *from_operator && open_literal(ctx, recv_tv).is_some() {
-                crate::solver::project_operator_shape(
-                    ctx, recv_tv, result_tv, method_str, &arg_tvs,
+                // Receiver must conform to the protocol. When this ProtocolCall
+                // sits inside a Sugar wrapper (the desugaring's primary call),
+                // emit a poisoning Conforms so a non-conforming receiver poisons
+                // recv_tv. The downstream Member constraint then sees an Error
+                // receiver and absorbs without emitting "no member" cascades.
+                if ctx.poison_protocol_call_recv_on_failure.contains(&id) {
+                    ctx.conforms_poisoning(recv_tv, *protocol, span.clone());
+                } else {
+                    ctx.conforms(recv_tv, *protocol, span.clone());
+                }
+                let Some(method_str) = method.as_str() else {
+                    ctx.poison(result_tv);
+                    return result_tv;
+                };
+                // Operators / for-in / try desugar to ProtocolCall. Their method
+                // lookup must NOT trigger the lazy Indirection peel — a wrapper's
+                // `==` forwards via `extend W: Equatable`, never by peeling the
+                // member to the pointee (which would coerce the argument; R7).
+                ctx.protocol_dispatch_members.insert(id);
+                if *from_operator {
+                    ctx.operator_members.insert(id, *protocol);
+                    unify_literal_operands(ctx, *protocol, recv_tv, &arg_tvs);
+                    type_literal_operator(
+                        ctx,
+                        *protocol,
+                        method,
+                        recv_tv,
+                        &arg_tvs,
+                        expect.as_ref(),
+                    );
+                }
+                // An operator over a still-open literal gets its result's shape
+                // now (`100..=200` → `ClosedRange[ℓ]`), so a later bound or
+                // annotation on the result can pin the literal (bidi P5: the
+                // walker, not the end of the body).
+                if *from_operator && open_literal(ctx, recv_tv).is_some() {
+                    crate::solver::project_operator_shape(
+                        ctx, recv_tv, result_tv, method_str, &arg_tvs,
+                    );
+                }
+                // Resolve method on the protocol
+                ctx.member(
+                    recv_tv,
+                    method_str,
+                    arg_tvs,
+                    result_tv,
+                    id,
+                    true,
+                    span.clone(),
                 );
+                result_tv
             }
-            // Resolve method on the protocol
-            ctx.member(
-                recv_tv,
-                method_str,
-                arg_tvs,
-                result_tv,
-                id,
-                true,
-                span.clone(),
-            );
-            result_tv
         },
 
         // === Member access ===
@@ -1159,22 +1176,29 @@ fn mark_sugar_primary(
     use kestrel_hir::body::SugarKind;
     match kind {
         SugarKind::ForLoop => {
-            // inner is `Block { stmts: [Let { value: Some(iter_pcall) }], tail_expr: Some(loop) }`.
-            // The iter_pcall is the IterableProtocol "iter" call we want to poison.
+            // inner is `Block { stmts: [.., Let { $iter = iter_pcall }], tail_expr: Some(loop) }`
+            // — the `$iter` let is the LAST statement (a hidden `$seq` let
+            // keeping a temporary iterable alive may precede it). The
+            // iter_pcall is poisoned on failure, and resolved by
+            // `ForLoopIterator` (iterator used directly vs `iter()`).
             let HirExpr::Block { body, .. } = &hir.exprs[inner] else {
                 return;
             };
-            let Some(first_stmt) = body.stmts.first() else {
+            let Some(last_stmt) = body.stmts.last() else {
                 return;
             };
             let HirStmt::Let {
                 value: Some(pcall_id),
                 ..
-            } = &hir.stmts[*first_stmt]
+            } = &hir.stmts[*last_stmt]
             else {
                 return;
             };
+            if !matches!(hir.exprs[*pcall_id], HirExpr::ProtocolCall { .. }) {
+                return;
+            }
             ctx.poison_protocol_call_recv_on_failure.insert(*pcall_id);
+            ctx.for_loop_iter_calls.insert(*pcall_id);
         },
         SugarKind::Try => {
             // inner is `Match { scrutinee: tryExtract_pcall, ..., source: TryOp }`.

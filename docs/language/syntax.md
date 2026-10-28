@@ -169,10 +169,12 @@ outer: loop {
     }
 }
 
-// For loop
+// For loop — over an Iterable it calls `iter()` (borrowing the collection);
+// over an Iterator it consumes that iterator directly
 for item in collection {
     process(item);
 }
+for (i, item) in collection.iter().enumerate() { }
 
 // Match expression (Pattern Matching)
 let desc = match direction {

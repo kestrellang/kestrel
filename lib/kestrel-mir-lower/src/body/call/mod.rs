@@ -510,6 +510,16 @@ impl OssaBodyCtx<'_, '_> {
         _hir_type_args: Option<&[HirTy]>,
         args: &[HirCallArg],
     ) -> ValueId {
+        // A `for` loop over an Iterator: no `iter()` call — the iterable is
+        // consumed as the loop's iterator (inference decided; the move checker
+        // records the same consume).
+        if self
+            .typed
+            .as_ref()
+            .is_some_and(|t| t.direct_iterators.contains(&expr_id))
+        {
+            return self.lower_expr(receiver_expr);
+        }
         let receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
 

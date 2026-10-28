@@ -492,7 +492,7 @@ impl LowerCtx<'_> {
         //
         // This must be caught here because name resolution's direct-children
         // walk (`resolve_value.rs::walk_path_from`) returns the method entity
-        // with no receiver bound — the `is_static_method` filter guards only
+        // with no receiver bound — the `is_static_member` filter guards only
         // the *extension* fallback, never direct members. Left through,
         // inference types it as the method's signature minus `self` and MIR
         // emits an `apply_partial` over a two-parameter thunk behind a

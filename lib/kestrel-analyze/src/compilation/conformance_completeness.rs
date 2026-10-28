@@ -29,6 +29,9 @@
 //!
 //! ### E464 -- `init_effect_mismatch` (Error, Correctness)
 //! **Message:** "init has wrong effect for protocol '{proto}'"
+//!
+//! ### E469 -- `wrong_parameter_convention` (Error, Correctness)
+//! **Message:** "parameter '{param}' of method '{name}' has the wrong convention for protocol '{proto}'"
 
 use std::collections::{HashMap, HashSet};
 
@@ -122,6 +125,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E632",
         name: "wrong_method_parameter_type",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E469",
+        name: "wrong_parameter_convention",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -396,6 +405,27 @@ fn check_protocol_requirements(
                                 message: format!(
                                     "expected {} method to match protocol receiver",
                                     expected,
+                                ),
+                                is_primary: true,
+                            }],
+                            notes: vec![],
+                        });
+                    } else if let Some((param, want)) =
+                        first_param_convention_mismatch(proto_call, impl_call)
+                    {
+                        diags.push(AnalyzeDiagnostic {
+                            descriptor_id: DESCRIPTORS[11].id, // E469
+                            severity: DESCRIPTORS[11].default_severity,
+                            message: format!(
+                                "parameter '{}' of method '{}' has the wrong convention for protocol '{}'",
+                                param, name, proto_name,
+                            ),
+                            labels: vec![DiagLabel {
+                                span: util::entity_span(cx.query, impl_method),
+                                message: format!(
+                                    "expected {} parameter '{}' to match the requirement",
+                                    param_mode_word(&want),
+                                    param,
                                 ),
                                 is_primary: true,
                             }],
@@ -815,6 +845,8 @@ fn protocol_default_method_matches(
         member_lookup_name(cx, default).is_some_and(|name| name == req_name)
             && signatures_match(req_call, cx.query.get::<Callable>(default))
             && receivers_match(req_call, cx.query.get::<Callable>(default))
+            && first_param_convention_mismatch(req_call, cx.query.get::<Callable>(default))
+                .is_none()
     })
 }
 
@@ -1749,20 +1781,54 @@ fn signatures_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
         .all(|(a, b)| a.label == b.label)
 }
 
-/// Both sides are instance methods, or both are static.
 /// Whether `imp`'s receiver can witness `proto`'s: both static, or both
-/// instance with a compatible mode. A borrowing impl may witness any mode
-/// (it does less), but a `mutating` or `consuming` impl only its own: a
-/// `mutating` impl behind a borrowing requirement writes through the
-/// caller's read-only borrow (it mutated a `let`).
+/// instance with the SAME mode. Exact match (user decision 2026-10-28): the
+/// declaration must say what callers get. A borrowing impl of a `consuming`
+/// requirement used to be accepted (it "does less"), but readers took the
+/// plain `func` for consuming and moved payloads out of `self`, and mono had
+/// to adapt every such call with a borrow + destroy.
 fn receivers_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
     let (Some(p), Some(i)) = (proto, imp) else {
         return true;
     };
-    match (&p.receiver, &i.receiver) {
-        (None, None) => true,
-        (Some(p), Some(i)) => p == i || *i == ReceiverKind::Borrowing,
-        _ => false,
+    p.receiver == i.receiver
+}
+
+/// The first parameter whose passing convention differs between requirement
+/// and witness: `(witness param name, the requirement's mode)`. Exact match
+/// (user decision 2026-10-28), like receivers: a `consuming` witness behind a
+/// borrowing requirement destroys the caller's still-live value, and a
+/// borrowing witness of a `consuming` one leaves mono to adapt every call.
+/// Parameter count/labels are `signatures_match`'s job; this zips by position.
+fn first_param_convention_mismatch(
+    proto: Option<&Callable>,
+    imp: Option<&Callable>,
+) -> Option<(String, ReceiverKind)> {
+    let (Some(p), Some(i)) = (proto, imp) else {
+        return None;
+    };
+    p.params
+        .iter()
+        .zip(&i.params)
+        .find(|(pp, ip)| param_mode(pp) != param_mode(ip))
+        .map(|(pp, ip)| (ip.name.clone(), param_mode(pp)))
+}
+
+/// A parameter's passing mode, in receiver terms (`is_mut` covers both
+/// `mutating` and `consuming`).
+fn param_mode(param: &kestrel_ast_builder::AstParam) -> ReceiverKind {
+    match (param.is_consuming, param.is_mut) {
+        (true, _) => ReceiverKind::Consuming,
+        (false, true) => ReceiverKind::Mutating,
+        (false, false) => ReceiverKind::Borrowing,
+    }
+}
+
+fn param_mode_word(kind: &ReceiverKind) -> &'static str {
+    match kind {
+        ReceiverKind::Borrowing => "a plain (borrowing)",
+        ReceiverKind::Mutating => "a `mutating`",
+        ReceiverKind::Consuming => "a `consuming`",
     }
 }
 
@@ -2350,6 +2416,7 @@ fn check_ambiguous_method_satisfaction(
                     let proto_call = cx.query.get::<Callable>(child);
                     if signatures_match(proto_call, impl_call)
                         && receivers_match(proto_call, impl_call)
+                        && first_param_convention_mismatch(proto_call, impl_call).is_none()
                         && param_types_match(cx, type_entity, proto, child, impl_method)
                     {
                         matching_protocols.push(proto);

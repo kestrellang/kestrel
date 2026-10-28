@@ -526,7 +526,10 @@ impl LowerCtx<'_> {
 
     /// Desugar `for pattern in iterable { body }` to:
     /// ```text
-    /// let $iter = iterable.iter()   // via Iterable protocol
+    /// let $seq = iterable           // only for a temporary (see below)
+    /// let $iter = iterable.iter()   // via Iterable protocol — or the
+    ///                               // iterable itself if it is an Iterator
+    ///                               // (decided by inference)
     /// loop {
     ///     match $iter.next() {       // via Iterator protocol
     ///         .Some(pattern) => { body }
@@ -542,7 +545,7 @@ impl LowerCtx<'_> {
         for_body: &BlockSyntax,
         span: &Span,
     ) -> HirExprId {
-        let lowered_iterable = self.lower_expr_src(iterable);
+        let mut lowered_iterable = self.lower_expr_src(iterable);
 
         // $iter = iterable.iter() via Iterable protocol.
         // If the IterableProtocol builtin isn't available (e.g. tests with
@@ -564,6 +567,27 @@ impl LowerCtx<'_> {
                 span: span.clone(),
             });
         };
+        // `iter()` borrows its receiver and the iterator may point into it, so
+        // a TEMPORARY iterable (`for k in makeDict()`) must outlive the loop:
+        // bind it to a hidden local scoped to the loop block. A place
+        // (local, global, field chain) is borrowed where it lives — binding
+        // it would move or copy the user's value.
+        let mut stmts = Vec::new();
+        // (Syntactic: a computed property reads like a field, so it counts as
+        // a place and is not kept alive — fine unless its value's iterator
+        // points into the temporary.)
+        let is_place = self.is_place_expr(lowered_iterable)
+            || matches!(self.exprs[lowered_iterable], HirExpr::Def(..));
+        if !is_place {
+            let seq_local = self.define_local("$seq", false, span.clone());
+            stmts.push(self.alloc_stmt(HirStmt::Let {
+                local: seq_local,
+                ty: None,
+                value: Some(lowered_iterable),
+                span: span.clone(),
+            }));
+            lowered_iterable = self.alloc_expr(HirExpr::Local(seq_local, span.clone()));
+        }
         let iterate_call = self.alloc_expr(HirExpr::ProtocolCall {
             from_operator: false,
             receiver: lowered_iterable,
@@ -673,10 +697,12 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        // Wrap in a block: { let $iter = iterable.iter(); loop { ... } }
+        // Wrap in a block: { [let $seq = ..;] let $iter = iterable.iter(); loop { ... } }
+        // `$iter` stays the LAST let — `mark_sugar_primary` finds it there.
+        stmts.push(iter_let);
         let block_expr = self.alloc_expr(HirExpr::Block {
             body: HirBlock {
-                stmts: vec![iter_let],
+                stmts,
                 tail_expr: Some(loop_expr),
             },
             span: span.clone(),

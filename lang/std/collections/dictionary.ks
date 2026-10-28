@@ -1003,7 +1003,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
             let myBuckets = self.buckets();
-            let oldBucket = myBuckets.offset(by: index).read();
+            // Move the old entry out: `write` overwrites without dropping,
+            // so a `read()` copy here leaked the replaced key and value.
+            let oldBucket = myBuckets.offset(by: index).take();
             let oldValue: V? = match oldBucket {
                 .Occupied(_, v, _) => .Some(v),
                 _ => .None
@@ -1049,7 +1051,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
             let removedValue = self.storage.modify { (mutating s) in
-                let bucket = s.buckets.offset(by: index).read();
+                // Moved out (not `read()`): the tombstone write drops nothing.
+                let bucket = s.buckets.offset(by: index).take();
                 let rv: V? = match bucket {
                     .Occupied(_, v, _) => .Some(v),
                     _ => .None
@@ -1088,7 +1091,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
             let removedEntry = self.storage.modify { (mutating s) in
-                let bucket = s.buckets.offset(by: index).read();
+                // Moved out (not `read()`): the tombstone write drops nothing.
+                let bucket = s.buckets.offset(by: index).take();
                 let rv: (K, V)? = match bucket {
                     .Occupied(k, v, _) => .Some((k, v)),
                     _ => .None
@@ -1181,7 +1185,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
             let myBuckets = self.buckets();
-            let bucket = myBuckets.offset(by: index).read();
+            // Moved out and written back below: `write` drops nothing.
+            let bucket = myBuckets.offset(by: index).take();
             match bucket {
                 .Occupied(k, v, h) => {
                     var value = v;
@@ -1406,7 +1411,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// for (k, v) in dict.iter() { ... }
-    /// let entries = Array(from: dict.iter());
+    /// let entries = Array(from: dict);
     /// ```
     public func iter() -> DictionaryIterator[K, V] {
         DictionaryIterator(buckets: self.buckets(), capacity: self.cap())

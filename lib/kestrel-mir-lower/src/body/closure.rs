@@ -49,7 +49,7 @@
 //!   field — the receiver itself is never duplicated. A projected VIEW capture
 //!   projects the field's ADDRESS instead (`FieldAddr`), never a value.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem;
 
 use kestrel_hir::body::{HirBlock, HirClosureParam, HirExpr, HirExprId};
@@ -78,6 +78,7 @@ struct SavedState {
     body: OssaBody,
     current_block: Option<kestrel_mir::BlockId>,
     local_map: HashMap<HirLocalId, LocalBinding>,
+    view_captured_locals: HashSet<HirLocalId>,
     place_capture_map: HashMap<kestrel_type_infer::captures::PlaceKey, PlaceCapture>,
     loop_stack: Vec<LoopInfo>,
     scope_stack: Vec<ScopeFrame>,
@@ -370,6 +371,7 @@ impl OssaBodyCtx<'_, '_> {
             body: mem::replace(&mut self.body, closure_body),
             current_block: self.current_block.take(),
             local_map: mem::replace(&mut self.local_map, closure_local_map),
+            view_captured_locals: mem::take(&mut self.view_captured_locals),
             place_capture_map: mem::take(&mut self.place_capture_map),
             loop_stack: mem::take(&mut self.loop_stack),
             scope_stack: mem::take(&mut self.scope_stack),
@@ -486,6 +488,7 @@ impl OssaBodyCtx<'_, '_> {
                     match slot {
                         CaptureSlot::Whole(root) => {
                             self.local_map.insert(*root, LocalBinding::Var(owned_field));
+                            self.view_captured_locals.insert(*root);
                         },
                         CaptureSlot::Place(cp) => {
                             self.place_capture_map
@@ -546,6 +549,7 @@ impl OssaBodyCtx<'_, '_> {
         self.current_block = saved.current_block;
         self.local_map = saved.local_map;
         self.place_capture_map = saved.place_capture_map;
+        self.view_captured_locals = saved.view_captured_locals;
         self.loop_stack = saved.loop_stack;
         self.scope_stack = saved.scope_stack;
         self.tracker = saved.tracker;

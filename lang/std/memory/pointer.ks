@@ -284,6 +284,15 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
         lang.ptr_write(self._raw, value)
     }
 
+    /// Replaces an INITIALIZED pointee: runs the old value's destructor in
+    /// place, then writes `value`. Use this — not `write` — to overwrite a
+    /// live slot; `write` is for uninitialized (or moved-out) storage and
+    /// drops nothing, so overwriting a live heap value with it leaks.
+    public func assign(consuming value: T) {
+        lang.drop_in_place(self._raw);
+        lang.ptr_write(self._raw, value)
+    }
+
     /// Runs T's destructor at this address without copying the value to stack.
     /// The pointer remains valid but the pointee is left in a destroyed state.
     public func dropInPlace() {

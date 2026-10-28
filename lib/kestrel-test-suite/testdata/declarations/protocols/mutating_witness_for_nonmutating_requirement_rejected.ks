@@ -1,8 +1,9 @@
 // test: diagnostics
 
-// A `mutating` method cannot satisfy a non-mutating requirement: generic
-// callers pass `self` as a read-only borrow, so it would write through a
-// `let`. A non-mutating method may satisfy a `mutating` requirement.
+// A witness's receiver must match the requirement's exactly. A `mutating`
+// method cannot satisfy a non-mutating requirement (generic callers pass
+// `self` as a read-only borrow, so it would write through a `let`), and a
+// non-mutating method no longer satisfies a `mutating` one either.
 
 module Test
 
@@ -16,5 +17,5 @@ struct S: P {
 
 struct T: Q {
     var n: Int64
-    func bump() { }
+    func bump() { } // ERROR(E477)
 }

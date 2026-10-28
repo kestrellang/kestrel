@@ -165,7 +165,7 @@ to add elements to an existing array.
 ```
 let fromRange = Array(from: 1..<5);         // [1, 2, 3, 4]
 let fromSet   = Array(from: mySet);         // arbitrary order
-let collected = Array(from: lines.iter());  // exhausts the iterator
+let collected = lines.iter().collect();     // an iterator: use collect()
 ```
 
 _Defined in `lang/std/collections/array.ks`._
@@ -3601,7 +3601,7 @@ use `keys.iter()` / `values.iter()`.
 
 ```
 for (k, v) in dict.iter() { ... }
-let entries = Array(from: dict.iter());
+let entries = Array(from: dict);
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -5640,7 +5640,7 @@ set while iterating.
 
 ```
 for item in set.iter() { print(item); }
-let arr = Array(from: set.iter());
+let arr = Array(from: set);
 ```
 
 _Defined in `lang/std/collections/set.ks`._

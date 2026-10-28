@@ -180,6 +180,16 @@ pub struct InferCtx<'a> {
     /// gen helpers before they recurse into `inner`.
     pub(crate) poison_protocol_call_recv_on_failure: HashSet<HirExprId>,
 
+    /// The `Iterable.iter()` ProtocolCall of each `for` loop. Its `gen_expr`
+    /// arm emits `Constraint::ForLoopIterator` instead of a plain protocol
+    /// call, which picks "the iterable is the iterator" vs `iter()` once the
+    /// iterable's type is known. Populated by `mark_sugar_primary`.
+    pub(crate) for_loop_iter_calls: HashSet<HirExprId>,
+
+    /// The `for_loop_iter_calls` whose iterable is itself an `Iterator`.
+    /// Surfaced on `TypedBody.direct_iterators`.
+    pub(crate) direct_iterators: HashSet<HirExprId>,
+
     /// Member-access exprs that came from a desugared `ProtocolCall`
     /// (operators, for-in, try). The lazy `Indirection` peel in `solve_member`
     /// is SKIPPED for these — operators/conformances forward via explicit
@@ -432,6 +442,8 @@ impl<'a> InferCtx<'a> {
             solving_depth: 0,
             eager: false,
             poison_protocol_call_recv_on_failure: HashSet::default(),
+            for_loop_iter_calls: HashSet::default(),
+            direct_iterators: HashSet::default(),
             protocol_dispatch_members: HashSet::default(),
             operator_members: HashMap::default(),
             resolutions: HashMap::default(),
@@ -615,6 +627,28 @@ impl<'a> InferCtx<'a> {
     pub fn project_associated(&mut self, base: TyVar, assoc: Entity, span: Span) -> TyVar {
         let result = self.fresh();
         self.associated_entity(base, assoc, result, span);
+        result
+    }
+
+    /// [`Self::project_associated`] through the conformance `protocol_args`
+    /// select (see [`AssocKey::Conformance`](crate::constraint::AssocKey)).
+    pub fn project_conformance_associated(
+        &mut self,
+        base: TyVar,
+        assoc: Entity,
+        protocol_args: Vec<TyVar>,
+        span: Span,
+    ) -> TyVar {
+        let result = self.fresh();
+        self.emit(Constraint::Associated {
+            container: base,
+            key: crate::constraint::AssocKey::Conformance {
+                assoc,
+                protocol_args,
+            },
+            result,
+            span,
+        });
         result
     }
 
@@ -1123,6 +1157,24 @@ impl<'a> InferCtx<'a> {
     /// primary-constraint emission so cascading Member/ImplicitMember errors
     /// inside the desugared subtree absorb silently when the receiver type
     /// doesn't conform to the expected protocol.
+    /// A `for` loop's iterator source — see `Constraint::ForLoopIterator`.
+    pub fn for_loop_iterator(
+        &mut self,
+        iterable: TyVar,
+        result: TyVar,
+        protocol: Entity,
+        expr: HirExprId,
+        span: Span,
+    ) {
+        self.emit(Constraint::ForLoopIterator {
+            iterable,
+            result,
+            protocol,
+            expr,
+            span,
+        });
+    }
+
     pub fn conforms_poisoning(&mut self, ty: TyVar, protocol: Entity, span: Span) {
         self.emit(Constraint::Conforms {
             ty,
@@ -1150,7 +1202,8 @@ impl<'a> InferCtx<'a> {
     /// for diagnostics, and for a concrete conformer's by-name binding.
     pub(crate) fn assoc_key_name(&self, key: &crate::constraint::AssocKey) -> String {
         match key {
-            crate::constraint::AssocKey::Entity(e) => {
+            crate::constraint::AssocKey::Entity(e)
+            | crate::constraint::AssocKey::Conformance { assoc: e, .. } => {
                 crate::resolve::assoc_name(self.query_ctx, *e)
             },
             crate::constraint::AssocKey::Name(n) => n.clone(),

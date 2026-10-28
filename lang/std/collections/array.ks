@@ -499,7 +499,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     /// let fromRange = Array(from: 1..<5);         // [1, 2, 3, 4]
     /// let fromSet   = Array(from: mySet);         // arbitrary order
-    /// let collected = Array(from: lines.iter());  // exhausts the iterator
+    /// let collected = lines.iter().collect();     // an iterator: use collect()
     /// ```
     public init[I](from iterable: I) where I: Iterable, I.Item = T {
         self.init();
@@ -869,11 +869,13 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         }
         self.makeUnique();
         self.storage.modify { (mutating s) in
-            let removed = s.ptr.offset(by: index).read();
+            // Move (`take`), not `read()`: each slot is overwritten by
+            // `write`, which drops nothing, so a copy here leaked.
+            let removed = s.ptr.offset(by: index).take();
             // Shift elements left
             var i: Int64 = index;
             while i < s.len - 1 {
-                s.ptr.offset(by: i).write(s.ptr.offset(by: i + 1).read());
+                s.ptr.offset(by: i).write(s.ptr.offset(by: i + 1).take());
                 i = i + 1
             }
             s.len = s.len - 1;

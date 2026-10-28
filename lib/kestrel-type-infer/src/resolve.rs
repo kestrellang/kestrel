@@ -850,29 +850,40 @@ impl TypeResolver for WorldResolver<'_> {
             return Err(MemberError::NotFound);
         };
 
-        // Candidates come from `TypeMembersByName` (direct, own extensions,
-        // conformed-protocol extensions) with the precedence name resolution
-        // applies to `A.tag()` (`resolve_extension_static_method`): own
-        // members compete equally; a protocol-extension default joins only
-        // when its label signature is not already taken.
+        // Candidates come from `TypeMembersByName`, layered the way name
+        // resolution's path walk sees them: the type's own (direct) members,
+        // then own-extension members, then conformed-protocol-extension
+        // defaults. A later layer joins only with a label signature no
+        // earlier layer took — so `extend Duration: Addable { static var
+        // zero { Duration.zero } }` forwards to the direct `zero` instead of
+        // colliding with it, and a protocol default never competes with the
+        // type's own `tag()` — while overloads with other labels stay
+        // reachable (`resolve_extension_static_member`, F10).
         let type_members = self.ctx.query(TypeMembersByName {
             type_entity: entity,
             name: name.to_string(),
             context: self.body_owner,
             root: self.root,
         });
-        let (own, via_protocol): (Vec<_>, Vec<_>) = type_members
-            .iter()
-            .filter(|tm| self.ctx.has::<Static>(tm.entity))
-            .partition(|tm| !matches!(tm.source, TypeMemberSource::ProtocolExtension { .. }));
-        let mut seen: crate::collections::HashSet<String> =
-            own.iter().map(|tm| self.label_signature(tm.entity)).collect();
-        let mut static_candidates: Vec<kestrel_hecs::Entity> =
-            own.iter().map(|tm| tm.entity).collect();
-        for tm in via_protocol {
-            if seen.insert(self.label_signature(tm.entity)) {
-                static_candidates.push(tm.entity);
-            }
+        let layer = |source: &TypeMemberSource| match source {
+            TypeMemberSource::Direct => 0,
+            TypeMemberSource::Extension(_) => 1,
+            TypeMemberSource::ProtocolExtension { .. } => 2,
+        };
+        let mut seen: crate::collections::HashSet<String> = Default::default();
+        let mut static_candidates: Vec<kestrel_hecs::Entity> = Vec::new();
+        for current in 0..3 {
+            let members: Vec<kestrel_hecs::Entity> = type_members
+                .iter()
+                .filter(|tm| layer(&tm.source) == current && self.ctx.has::<Static>(tm.entity))
+                .map(|tm| tm.entity)
+                .collect();
+            let fresh: Vec<kestrel_hecs::Entity> = members
+                .into_iter()
+                .filter(|&e| !seen.contains(&self.label_signature(e)))
+                .collect();
+            seen.extend(fresh.iter().map(|&e| self.label_signature(e)));
+            static_candidates.extend(fresh);
         }
 
         // A read names the property, a call the function, when a type has
@@ -1235,7 +1246,6 @@ impl WorldResolver<'_> {
             context: self.body_owner,
             root: self.root,
         });
-
         // Direct + own-extension candidates compete equally; protocol-extension
         // defaults are held back as fallback (see below).
         let mut all_candidates: Vec<Entity> = Vec::new();

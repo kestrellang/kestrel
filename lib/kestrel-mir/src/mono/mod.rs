@@ -36,8 +36,8 @@ use crate::item::{Layout, TargetConfig};
 use crate::layout::StructLayout;
 use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, ParamConvention, TyArena};
-use crate::value::{Ownership, ValueDef};
-use crate::{CopyBehavior, MirModule, MonoFuncId, TyId, ValueId};
+use crate::value::Ownership;
+use crate::{CopyBehavior, MirModule, MonoFuncId, TyId};
 
 /// Check if a function needs self_type in its InstantiationKey.
 ///
@@ -489,28 +489,21 @@ fn monomorphize_body(
                 &subst,
                 key.self_type,
             );
-            if !was_witness {
-                adapted.push(inst);
-                continue;
-            }
-            // Borrow each owned arg the witness only borrows, then release it.
-            let owned = borrowed_by_witness(&inst.kind, functions);
-            let mut borrows = Vec::with_capacity(owned.len());
-            for &(idx, operand) in &owned {
-                let ty = mono_body.values[operand.index()].ty;
-                let result = mono_body.alloc_value(ValueDef::guaranteed(ty, operand));
-                adapted.push(Instruction::new(InstKind::BeginBorrow { result, operand }));
-                if let InstKind::Call { args, .. } = &mut inst.kind {
-                    args[idx].value = result;
-                    args[idx].convention = ParamConvention::Borrow;
-                }
-                borrows.push(result);
+            // Conformance requires exact receiver (E477) and parameter (E469)
+            // conventions, so a witness never borrows what the call site
+            // hands over `consuming` — the case mono used to adapt with a
+            // borrow + destroy. Fail loudly rather than leak the argument.
+            // (Synthesized stored-property accessor witnesses still differ in
+            // other directions — e.g. a setter value passed @borrow — which
+            // is pre-existing and not judged here.)
+            if was_witness && let Some(idx) = witness_borrows_consumed_arg(&inst.kind, functions) {
+                panic!(
+                    "ICE: witness call in {:?} hands arg {idx} over `consuming` to a witness that \
+                     borrows it — conformance checking (E469/E477) should have rejected it",
+                    func.name
+                );
             }
             adapted.push(inst);
-            for (&b, &(_, operand)) in borrows.iter().zip(&owned) {
-                adapted.push(Instruction::new(InstKind::EndBorrow { operand: b }));
-                adapted.push(Instruction::new(InstKind::DestroyValue { operand }));
-            }
         }
         let block = &mut mono_body.blocks[bi];
         block.insts = adapted;
@@ -603,35 +596,27 @@ fn closure_clone_as_copy(
     })
 }
 
-/// A requirement may take an argument `consuming` while the witness that
-/// satisfies it only borrows (a weaker demand, so the conformance is sound).
-/// The call site, lowered against the requirement, hands over an owned value
-/// the witness never releases. Returns `(arg index, value)` for each such
-/// argument so the caller can borrow it for the call and release it after.
-fn borrowed_by_witness(
+/// The first argument a resolved witness call passes `consuming` to a
+/// parameter the witness only borrows (`None` when there is none).
+fn witness_borrows_consumed_arg(
     kind: &InstKind,
     functions: &IndexMap<Entity, FunctionDef>,
-) -> Vec<(usize, ValueId)> {
+) -> Option<usize> {
     let InstKind::Call {
         callee: Callee::Direct { func, .. },
         args,
         ..
     } = kind
     else {
-        return Vec::new();
+        return None;
     };
-    let Some(target) = functions.get(func) else {
-        return Vec::new();
-    };
+    let target = functions.get(func)?;
     args.iter()
         .zip(&target.params)
-        .enumerate()
-        .filter(|(_, (arg, param))| {
+        .position(|(arg, param)| {
             arg.convention == ParamConvention::Consuming
                 && param.convention == ParamConvention::Borrow
         })
-        .map(|(i, (arg, _))| (i, arg.value))
-        .collect()
 }
 
 /// Substitute types in a single instruction (the OSSA analogue of the

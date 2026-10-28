@@ -63,9 +63,7 @@ impl OssaBodyCtx<'_, '_> {
             // value is @guaranteed — it aliases the caller's storage, so moving
             // out of it (`return self` in a mutating method) would strand the
             // caller. Leave those to the cloning path.
-            let owns_storage =
-                self.body.value(addr).ownership == kestrel_mir::value::Ownership::Owned;
-            if owns_storage
+            if self.owns_var_slot(hir_local, addr)
                 && self.ownership_for(ty) == kestrel_mir::value::Ownership::Owned
                 && self.var_init(hir_local) != Some(super::VarInit::DefUninit)
             {
@@ -275,7 +273,8 @@ impl OssaBodyCtx<'_, '_> {
                     // taking.
                     if self.is_non_copyable(ty)
                         || (self.copy_behavior_is_mono_dependent(ty)
-                            && self.is_single_use(*hir_local))
+                            && self.is_single_use(*hir_local)
+                            && self.owns_var_slot(*hir_local, raw_addr))
                     {
                         debug_assert!(
                             self.var_init(*hir_local) != Some(super::VarInit::DefUninit),

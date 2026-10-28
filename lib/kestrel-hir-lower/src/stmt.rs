@@ -293,7 +293,7 @@ impl LowerCtx<'_> {
     }
 
     /// A local, or a stored-field / tuple-element chain rooted at one.
-    fn is_place_expr(&self, expr: HirExprId) -> bool {
+    pub(crate) fn is_place_expr(&self, expr: HirExprId) -> bool {
         match &self.exprs[expr] {
             HirExpr::Local(..) => true,
             HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {

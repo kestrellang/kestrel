@@ -812,6 +812,13 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
             // Unresolved InterpolationLink: the accumulator was resolved by
             // literal defaults. Absorb silently.
             Constraint::InterpolationLink { .. } => continue,
+            // The iterable never resolved — its own "could not infer"
+            // diagnostic covers it; poison the iterator so the loop body
+            // doesn't cascade.
+            Constraint::ForLoopIterator { result, .. } => {
+                ctx.poison(result);
+                continue;
+            },
             // Still Unknown at body end: the receiver's open var is reported
             // by its own "could not infer" diagnostic, so this obligation
             // adds nothing a user could act on.
@@ -1072,6 +1079,14 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
             acc_tv,
             span,
         } => solve_interpolation_link(ctx, result_tv, acc_tv, span),
+
+        Constraint::ForLoopIterator {
+            iterable,
+            result,
+            protocol,
+            expr,
+            span,
+        } => solve_for_loop_iterator(ctx, iterable, result, protocol, expr, span),
 
         Constraint::Applicable {
             receiver,

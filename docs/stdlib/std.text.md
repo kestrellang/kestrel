@@ -4968,7 +4968,7 @@ Mirrors `Array.init(from:)` and `Set.init(from:)` — accepts any
 result of an iterator chain back into a `String`:
 
 ```
-let upper = String(from: "hello".chars.iter().map { it.toUpper() });
+let upper = String(from: "hello".chars.iter().map { it.toUpper() }.collect());
 // "HELLO"
 ```
 

@@ -3,7 +3,7 @@
 //! `TypedBody` is the final output of type inference for a single body.
 //! All TyVars have been resolved to `ResolvedTy`.
 
-use crate::collections::HashMap;
+use crate::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 use kestrel_ast::arena::Idx;
@@ -69,6 +69,12 @@ pub struct TypedBody {
     /// value/slot types (see `InferCtx::kind_coercions`); this map is the
     /// audit trail of the solver's passing-table decisions.
     pub kind_coercions: HashMap<HirExprId, (kestrel_ast::FnTypeKind, kestrel_ast::FnTypeKind)>,
+
+    /// `for` loops whose iterable is already an `Iterator`: the loop's
+    /// `Iterable.iter()` protocol call (keyed by its expr id) is not made —
+    /// the iterable itself is CONSUMED as the loop's iterator. Decided once
+    /// by inference; the move checker and MIR lowering both read it.
+    pub direct_iterators: HashSet<HirExprId>,
 }
 
 /// One level of an `Indirection` member peel: the concrete pointee accessors
@@ -109,6 +115,7 @@ impl Hash for TypedBody {
             opaque_concrete_type,
             indirection_peels,
             kind_coercions,
+            direct_iterators,
         } = self;
         hash_sorted(expr_types, state);
         hash_sorted(local_types, state);
@@ -121,6 +128,9 @@ impl Hash for TypedBody {
         opaque_concrete_type.hash(state);
         hash_sorted(indirection_peels, state);
         hash_sorted(kind_coercions, state);
+        let mut direct: Vec<_> = direct_iterators.iter().map(|e| e.raw()).collect();
+        direct.sort_unstable();
+        direct.hash(state);
     }
 }
 
@@ -372,6 +382,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
             })
             .collect(),
         kind_coercions: ctx.kind_coercions.clone(),
+        direct_iterators: ctx.direct_iterators.clone(),
     }
 }
 
@@ -825,6 +836,7 @@ mod tests {
             opaque_concrete_type: None,
             indirection_peels: HashMap::default(),
             kind_coercions: HashMap::default(),
+            direct_iterators: HashSet::default(),
         }
     }
 

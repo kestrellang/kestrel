@@ -173,7 +173,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |
 | E415 | enums cannot have stored fields | Enums carry data in case payloads, not stored fields. |
-| E416 | static stored properties not supported in generic types | A generic type would need one global per instantiation; use a computed static instead. |
+| E416 | static stored properties not supported in generic types | A stored static has one storage cell, so it cannot belong to a generic type (`Box[Int64].count` and `Box[String].count` would have to be one cell or many). This also applies in any `extend` of a generic type, `extend Box[Int64]` included, and in protocol extensions, whose `Self` is generic. Use a computed static instead (Swift's rule). |
 | E417 | protocol method '{method}' in '{protocol}' cannot have a body | Protocol requirements are signatures only; put default bodies in a protocol extension. |
 | E418 | '{name}' cannot be static in this context | `static` is not allowed at module level. |
 | E419 | @builtin(.{feature}) must be a marker protocol (no required methods or types) | Builtin language-feature protocols cannot declare requirements. |
@@ -225,11 +225,12 @@ func unwrap(opt: Int64?) -> Int64 {
 | E465 | indirect enums are not yet supported | `indirect` is recognized but not implemented in this version. |
 | E466 | 'some' (opaque type) is not allowed in a field type | Opaque `some P` types can only appear in return position. |
 | E467 | method '{name}' shadows the stored field '{name}' of '{type}' | A zero-arg extension method with a stored field's name would recurse instead of reading the field. |
+| E469 | parameter '{param}' of method '{name}' has the wrong convention for protocol '{proto}' | A witness parameter's convention (`consuming`/`mutating`/plain) must match the requirement's exactly, like the receiver (E477). |
 | E473 | struct \`{name}\` already has a deinit | A type may declare at most one `deinit`. |
 | E474 | duplicate definition of {kind} '{name}' | Two declarations of the same kind share a name in the same scope. |
 | E475 | '{name}' is already defined as a {original_kind} | A name is reused by a declaration of a different kind (e.g. struct vs func). |
 | E476 | cannot find type '{name}' in this scope | A type annotation names a type that doesn't resolve. (Also emitted by HIR lowering for the same condition.) |
-| E477 | method '{name}' has wrong receiver kind for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) doesn't match the requirement. |
+| E477 | method '{name}' has wrong receiver kind for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) must match the requirement's exactly — a plain method no longer satisfies a `mutating` or `consuming` requirement. |
 | E478 | 'static' is redundant here | Global (module-level) properties are already static. |
 | E479 | associated type '{name}' in where clause is ambiguous: '{type}' is bound by {protocols}, which each declare '{name}' | An equality clause `T.X = Y` where two or more protocols bound on `T` in the same clause each declare `X`. A where-clause path has no protocol-qualified form, so the clause is ignored. |
 

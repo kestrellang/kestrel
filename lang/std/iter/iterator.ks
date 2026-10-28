@@ -92,8 +92,8 @@ public protocol Iterator {
 /// `Iterable` is one level above `Iterator`: a collection conforms to
 /// `Iterable` and produces a fresh `Iter` each call to `iter()`, leaving
 /// the source intact. (Compare with `Iterator`, which is consumed in
-/// place.) Every `Iterator` is also `Iterable` via the blanket
-/// conformance below — `iter()` on an iterator returns itself.
+/// place.) An `Iterator` is not itself `Iterable`; a `for` loop over an
+/// iterator uses it directly.
 ///
 /// # Examples
 ///
@@ -113,27 +113,16 @@ public protocol Iterable {
     /// `TargetIterator.Item` matches `Self.Item`.
     type TargetIterator: Iterator where TargetIterator.Item = Item
 
-    /// Builds a fresh iterator over the contents.
+    /// Builds a fresh iterator over the contents. Borrows `self`: the
+    /// collection outlives the iterator it hands out.
     @builtin(.IterableIterMethod)
-    consuming func iter() -> TargetIterator
+    func iter() -> TargetIterator
 }
 
-// ============================================================================
-// ITERATOR IS ITERABLE
-// ============================================================================
-
-/// Blanket conformance: every `Iterator` is `Iterable` (returning itself).
-/// This is what lets the result of an adapter chain — a `MapIterator`,
-/// `FilterIterator`, etc. — drop into a `for-in` loop without an extra
-/// `iter()` call.
-extend Iterator: Iterable {
-    type Iterable.Item = Self.Item
-    type Iterable.TargetIterator = Self
-
-    /// Returns `self`. The blanket conformance pivot — iterators *are*
-    /// iterables.
-    consuming func iter() -> Self { self }
-}
+// An `Iterator` is NOT `Iterable` (no blanket conformance): `for x in it`
+// consumes an iterator as the loop's iterator directly (the compiler decides
+// per loop — `TypedBody.direct_iterators`), so an adapter chain still drops
+// into a `for` loop without an `iter()` call.
 
 /// An iterator that can also yield from the back. Powers `rev()` and
 /// efficient "last N elements" patterns without first materialising the

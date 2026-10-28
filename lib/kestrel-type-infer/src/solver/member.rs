@@ -53,6 +53,71 @@ pub(super) fn solve_interpolation_link(
     )
 }
 
+/// Decide a `for` loop's iterator source (`Constraint::ForLoopIterator`).
+/// Once the iterable resolves: an `Iterator` is consumed as the loop's
+/// iterator (`result = iterable`, recorded in `direct_iterators`); any other
+/// type takes the `Iterable.iter()` path — the poisoning conformance plus the
+/// protocol member call the `ProtocolCall` arm would have emitted.
+pub(super) fn solve_for_loop_iterator(
+    ctx: &mut InferCtx<'_>,
+    iterable: TyVar,
+    result: TyVar,
+    protocol: kestrel_hecs::Entity,
+    expr: kestrel_hir::body::HirExprId,
+    span: Span,
+) -> SolveResult {
+    let resolved = ctx.resolve(iterable);
+    let is_iterator = match ctx.slot(resolved) {
+        // A still-open literal (`for x in [1, 2]`, `for i in 0..<n`'s bound)
+        // defaults to an Iterable collection, never an iterator: take the
+        // `iter()` path now so the element type flows into the body.
+        TySlot::Unresolved { literal: Some(_) } => false,
+        TySlot::Unresolved { .. } | TySlot::Redirect(_) => {
+            return SolveResult::Deferred(Constraint::ForLoopIterator {
+                iterable,
+                result,
+                protocol,
+                expr,
+                span,
+            });
+        },
+        // A reference iterates its pointee through `Iterable` (the Expr-origin
+        // conformance rule judges a `&T` as its pointee); an iterator can't
+        // be advanced through a shared borrow anyway.
+        TySlot::Resolved(TyKind::Error | TyKind::Never | TyKind::Ref { .. }) => false,
+        TySlot::Resolved(kind) => {
+            let kind = kind.clone();
+            match ctx.resolver.builtin(Builtin::IteratorProtocol) {
+                Some(iterator) if ctx.resolver.conforms_to(&kind, iterator) => {
+                    match crate::solver_entail::conformance(ctx, resolved, iterator) {
+                        kestrel_entail::Tri::Holds => true,
+                        kestrel_entail::Tri::Fails => false,
+                        kestrel_entail::Tri::Unknown => {
+                            return SolveResult::Deferred(Constraint::ForLoopIterator {
+                                iterable,
+                                result,
+                                protocol,
+                                expr,
+                                span,
+                            });
+                        },
+                    }
+                },
+                _ => false,
+            }
+        },
+    };
+    kestrel_debug::ktrace!("infer", "for-loop iterable {expr:?}: direct iterator = {is_iterator}");
+    if is_iterator {
+        ctx.direct_iterators.insert(expr);
+        ctx.equal(result, iterable, span);
+        return SolveResult::Solved;
+    }
+    ctx.conforms_poisoning(iterable, protocol, span.clone());
+    ctx.member(iterable, "iter", Vec::new(), result, expr, true, span);
+    SolveResult::Solved
+}
+
 /// Resolve a tuple index access (`t.N`). Defers until `tuple` is concrete,
 /// then either extracts the N-th element type or emits a specific error.
 pub(super) fn solve_tuple_index(
@@ -1587,98 +1652,49 @@ pub(super) fn resolve_proto_param_via_conformance(
     proto_param_count: usize,
     subs: &[(kestrel_hecs::Entity, TyVar)],
 ) -> Option<TyVar> {
-    use kestrel_ast_builder::{ConformanceItem, Conformances};
     let recv = recv_entity?;
-    if ctx.query_ctx.get::<NodeKind>(recv) != Some(&NodeKind::Struct)
-        && ctx.query_ctx.get::<NodeKind>(recv) != Some(&NodeKind::Enum)
-    {
-        return None;
-    }
+    // The first positive conformance to `protocol` wins.
+    let (source, ast_ty) = positive_conformances_to(ctx, recv, protocol).into_iter().next()?;
+    let type_args = kestrel_name_res::extract_ast_type_args(&ast_ty);
 
-    // Search direct conformances + extension conformances. The first positive
-    // conformance whose resolved entity is `protocol` wins.
-    let mut sources: Vec<kestrel_hecs::Entity> = vec![recv];
-    sources.extend(
-        ctx.query_ctx
-            .query(kestrel_name_res::ExtensionsFor {
-                target: recv,
-                root: ctx.root,
-            })
-            .iter()
-            .copied(),
-    );
-
-    for source in sources {
-        let Some(confs) = ctx.query_ctx.get::<Conformances>(source) else {
-            continue;
-        };
-        for item in &confs.0 {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
-                continue;
-            };
-            let kestrel_ast_builder::AstType::Named { segments, .. } = ast_ty else {
-                continue;
-            };
-            let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-            let kestrel_name_res::TypeResolution::Found(resolved) =
-                ctx.query_ctx.query(kestrel_name_res::ResolveTypePath {
-                    segments: seg_names,
-                    context: source,
-                    root: ctx.root,
-                })
-            else {
-                continue;
-            };
-            if resolved != protocol {
-                continue;
-            }
-            let type_args = kestrel_name_res::extract_ast_type_args(ast_ty);
-
-            // Implicit-positional: empty args means "match struct params positionally".
-            if type_args.is_empty() {
-                let struct_params = ctx
-                    .query_ctx
-                    .get::<TypeParams>(recv)
-                    .map(|tp| tp.0.clone())
-                    .unwrap_or_default();
-                if struct_params.len() != proto_param_count {
-                    return None;
-                }
-                let struct_param = struct_params.get(proto_param_idx).copied()?;
-                return subs
-                    .iter()
-                    .find(|(e, _)| *e == struct_param)
-                    .map(|&(_, tv)| tv);
-            }
-
-            // Explicit: lower the i-th conformance type arg through subs so
-            // Param references (`V`) resolve to the receiver's TyVar.
-            let arg_ast = type_args.get(proto_param_idx)?;
-            let hir_ty =
-                kestrel_hir_lower::lower_ast_type(ctx.query_ctx, source, ctx.root, arg_ast);
-            let subs_vec = subs.to_vec();
-            return Some(lower_hir_ty_sub(ctx, &hir_ty, None, TyVar(0), &subs_vec));
+    // Implicit-positional: empty args means "match struct params positionally".
+    if type_args.is_empty() {
+        let struct_params = ctx
+            .query_ctx
+            .get::<TypeParams>(recv)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        if struct_params.len() != proto_param_count {
+            return None;
         }
+        let struct_param = struct_params.get(proto_param_idx).copied()?;
+        return subs
+            .iter()
+            .find(|(e, _)| *e == struct_param)
+            .map(|&(_, tv)| tv);
     }
-    None
+
+    // Explicit: lower the i-th conformance type arg through subs so
+    // Param references (`V`) resolve to the receiver's TyVar.
+    let arg_ast = type_args.get(proto_param_idx)?;
+    let hir_ty = kestrel_hir_lower::lower_ast_type(ctx.query_ctx, source, ctx.root, arg_ast);
+    let subs_vec = subs.to_vec();
+    Some(lower_hir_ty_sub(ctx, &hir_ty, None, TyVar(0), &subs_vec))
 }
 
-/// Count `recv`'s positive conformances to `protocol` (direct + extensions).
-///
-/// Used to detect the ambiguous same-protocol multi-conformance case
-/// (`S: Producer[Int64]` + `S: Producer[Int32]`): when ≥2, the protocol's type
-/// param must be left to unification rather than pinned to the first
-/// conformance by `resolve_proto_param_via_conformance`.
-pub(super) fn receiver_conformance_count(
+/// Every positive conformance of `recv` (its own declaration, then its
+/// extensions) to `protocol`, as `(declaring entity, written conformance type)`.
+/// The one walk behind the multi-conformance questions below.
+pub(super) fn positive_conformances_to(
     ctx: &InferCtx<'_>,
     recv: kestrel_hecs::Entity,
     protocol: kestrel_hecs::Entity,
-) -> usize {
+) -> Vec<(kestrel_hecs::Entity, kestrel_ast_builder::AstType)> {
     use kestrel_ast_builder::{ConformanceItem, Conformances};
     if ctx.query_ctx.get::<NodeKind>(recv) != Some(&NodeKind::Struct)
         && ctx.query_ctx.get::<NodeKind>(recv) != Some(&NodeKind::Enum)
     {
-        return 0;
+        return Vec::new();
     }
     let mut sources: Vec<kestrel_hecs::Entity> = vec![recv];
     sources.extend(
@@ -1690,7 +1706,7 @@ pub(super) fn receiver_conformance_count(
             .iter()
             .copied(),
     );
-    let mut count = 0;
+    let mut out = Vec::new();
     for source in sources {
         let Some(confs) = ctx.query_ctx.get::<Conformances>(source) else {
             continue;
@@ -1711,9 +1727,23 @@ pub(super) fn receiver_conformance_count(
                 })
                 && resolved == protocol
             {
-                count += 1;
+                out.push((source, ast_ty.clone()));
             }
         }
     }
-    count
+    out
+}
+
+/// Count `recv`'s positive conformances to `protocol` (direct + extensions).
+///
+/// Used to detect the ambiguous same-protocol multi-conformance case
+/// (`S: Producer[Int64]` + `S: Producer[Int32]`): when ≥2, the protocol's type
+/// param must be left to unification rather than pinned to the first
+/// conformance by `resolve_proto_param_via_conformance`.
+pub(super) fn receiver_conformance_count(
+    ctx: &InferCtx<'_>,
+    recv: kestrel_hecs::Entity,
+    protocol: kestrel_hecs::Entity,
+) -> usize {
+    positive_conformances_to(ctx, recv, protocol).len()
 }
