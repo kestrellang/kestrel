@@ -25,7 +25,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
 
@@ -39,8 +39,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct RefutablePatternAnalyzer;
 
 impl Describe for RefutablePatternAnalyzer {
-    fn id(&self) -> &'static str {
-        "refutable_pattern"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::RefutablePattern
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -154,7 +154,7 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
             HirLiteral::Integer(i) => i.to_string(),
             HirLiteral::Float(f) => f.to_string(),
             HirLiteral::String { value, .. } => format!("\"{}\"", value),
-            HirLiteral::Char(c) => {
+            HirLiteral::Char { value: c, .. } => {
                 if let Some(ch) = char::from_u32(*c) {
                     format!("'{}'", ch)
                 } else {

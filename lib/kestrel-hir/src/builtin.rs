@@ -5,8 +5,9 @@
 //! source files with `@builtin(.FeatureName)`.
 //!
 //! **Resolution**: Forward lookup (entity → Builtin) uses `EntityBuiltin` query
-//! in kestrel-name-res. Reverse lookup (Builtin → entity) uses `ResolveBuiltin`
-//! with name-based resolution + `BuiltinIndex` attribute-scanning fallback.
+//! in kestrel-name-res. Reverse lookup (Builtin → entity) uses `ResolveBuiltin`,
+//! which consults the `BuiltinIndex` attribute scan only: a lang item is
+//! identified by its annotation, never by its source name.
 
 /// What kind of symbol a builtin expects, with kind-specific configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -79,6 +80,13 @@ pub enum Builtin {
     Cloneable,
     CloneMethod,
 
+    // ===== Reference containment (references stage 2a) =====
+    /// A type is Static iff it transitively contains no reference (`&T`).
+    /// Conformance is structural (never declared); `implicit_conformance`
+    /// turns on `: not Static` declarations and `where T: not Static`
+    /// relaxations, exactly like Copyable.
+    Static,
+
     // ===== Pattern matching =====
     Matchable,
     RangeMatchable,
@@ -97,6 +105,10 @@ pub enum Builtin {
     ExpressibleByBoolLiteral,
     ExpressibleByCharLiteral,
     ExpressibleByNullLiteral,
+    /// Marker on the unsigned integer types (`UInt8`…`UInt64`): their raw
+    /// bits are unsigned, which integer patterns need for range tests and
+    /// exhaustiveness.
+    UnsignedInteger,
     InternalExpressibleByArrayLiteral,
     InternalExpressibleByDictionaryLiteral,
 
@@ -250,15 +262,43 @@ pub enum Builtin {
     FormatOptions,
     FormattableProtocol,
     FormattableFormatIntoMethod,
+
+    // ===== Exitable / @main return =====
+    Exitable,
+    ExitableReport,
+    ExitCode,
+
+    // ===== Indirection / smart-pointer member peel =====
+    /// `Indirection` — opt-in transparent member access: `wrapper.foo` peels
+    /// to `Target.foo` via `pointeeRef()`. Explicit conformance, non-marker.
+    Indirection,
+
+    // ===== Shared-ownership box (implicit boxing) =====
+    /// The generic struct the compiler instantiates for implicit boxing —
+    /// escaping closure environments today; class storage, `any` payloads and
+    /// `indirect enum` payloads later. Bound to `RcBox` in the stdlib via
+    /// `@builtin(.SharedBox)`; the binding is swappable, so every boxing site
+    /// resolves the *entity* through this builtin and then calls only
+    /// `SharedBox` protocol requirements on it (docs/design/shared-box.md).
+    SharedBox,
+
+    // ===== Unique-ownership box (one-shot `consuming` closure envs) =====
+    /// The generic struct the compiler instantiates for a UNIQUELY owned heap
+    /// environment — a `consuming` closure's captures today. Bound to
+    /// `UniqueBox` in the stdlib via `@builtin(.UniqueBox)`.
+    ///
+    /// Deliberately not the shared box: a shared release drops the whole
+    /// payload, which double-frees the capture slots a one-shot body already
+    /// moved out (docs/plans/closure-kinds/closure-kinds-plan.md D5).
+    UniqueBox,
 }
 
 impl Builtin {
-    /// The type/protocol name as it appears in Kestrel source code.
-    ///
-    /// Used by `ResolveBuiltin` for name-based resolution (looking up types
-    /// that are auto-imported from std). For features that are NOT resolvable
-    /// by source name (protocol methods, enum cases, etc.), this returns the
-    /// `@builtin` attribute name instead.
+    /// A display name for the builtin: the type/protocol name as it usually
+    /// appears in Kestrel source code, or the `@builtin` attribute name for
+    /// features that have no source-level type (protocol methods, enum
+    /// cases, etc.). Used in diagnostics only — `ResolveBuiltin` does not
+    /// look builtins up by name.
     pub fn name(self) -> &'static str {
         match self {
             // Well-known types — resolved by source name
@@ -268,6 +308,9 @@ impl Builtin {
             Self::Copyable => "Copyable",
             Self::Cloneable => "Cloneable",
             Self::CloneMethod => "Clone",
+
+            // Reference containment
+            Self::Static => "Static",
 
             // Pattern matching
             Self::Matchable => "Matchable",
@@ -287,6 +330,7 @@ impl Builtin {
             Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
             Self::ExpressibleByCharLiteral => "ExpressibleByCharLiteral",
             Self::ExpressibleByNullLiteral => "ExpressibleByNullLiteral",
+            Self::UnsignedInteger => "UnsignedInteger",
             Self::InternalExpressibleByArrayLiteral => "_ExpressibleByArrayLiteral",
             Self::InternalExpressibleByDictionaryLiteral => "_ExpressibleByDictionaryLiteral",
 
@@ -444,6 +488,28 @@ impl Builtin {
             Self::FormatOptions => "FormatOptions",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
+
+            // Exitable — `Exitable`/`ExitCode` resolve by source name; the method
+            // by its `@builtin` attribute name.
+            Self::Exitable => "Exitable",
+            Self::ExitableReport => "ExitableReport",
+            Self::ExitCode => "ExitCode",
+
+            // Indirection — resolves by source name (auto-imported from std.core).
+            Self::Indirection => "Indirection",
+
+            // Shared box — a display name only, deliberately neither the
+            // conformer's name (`RcBox`) nor the protocol's (`SharedBox`):
+            // the binding is whatever type carries `@builtin(.SharedBox)`
+            // (`RcBox` today), found through the attribute index like every
+            // builtin. (This sentinel predates index-only resolution, when a
+            // name-based lookup would have found the wrong entity.)
+            Self::SharedBox => "SharedBoxBinding",
+
+            // Unique box — same rationale as the shared box above: resolution
+            // must go through the attribute index so the binding stays
+            // swappable, and the sentinel must not name any source type.
+            Self::UniqueBox => "UniqueBoxBinding",
         }
     }
 
@@ -459,6 +525,9 @@ impl Builtin {
             "Copyable" => Some(Self::Copyable),
             "Cloneable" => Some(Self::Cloneable),
             "Clone" => Some(Self::CloneMethod),
+
+            // Reference containment
+            "Static" => Some(Self::Static),
 
             // Pattern matching
             "Matchable" => Some(Self::Matchable),
@@ -478,6 +547,7 @@ impl Builtin {
             "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
             "ExpressibleByCharLiteral" => Some(Self::ExpressibleByCharLiteral),
             "ExpressibleByNullLiteral" => Some(Self::ExpressibleByNullLiteral),
+            "UnsignedInteger" => Some(Self::UnsignedInteger),
             "_ExpressibleByArrayLiteral" => Some(Self::InternalExpressibleByArrayLiteral),
             "_ExpressibleByDictionaryLiteral" => Some(Self::InternalExpressibleByDictionaryLiteral),
 
@@ -491,6 +561,7 @@ impl Builtin {
             "DefaultBooleanLiteralType" => Some(Self::DefaultBooleanLiteralType),
             "DefaultCharLiteralType" => Some(Self::DefaultCharLiteralType),
             "DefaultNullLiteralType" => Some(Self::DefaultNullLiteralType),
+            "DefaultArrayLiteralType" => Some(Self::DefaultArrayLiteralType),
             "DefaultDictionaryLiteralType" => Some(Self::DefaultDictionaryLiteralType),
 
             // Arithmetic operators
@@ -553,6 +624,14 @@ impl Builtin {
 
             // Boolean conditional
             "BooleanConditional" => Some(Self::BooleanConditional),
+
+            // Well-known types. Without this arm the `@builtin(.Bool)`
+            // annotation would be silently inert: `EntityBuiltin` returns
+            // `None`, the struct never enters `BuiltinIndex`, and
+            // `ResolveBuiltin` (index only) would not find `Bool` at all. This
+            // arm also makes `every_stdlib_builtin_annotation_is_recognized` a
+            // live guard over the annotation.
+            "Bool" => Some(Self::Bool),
 
             // Range operators
             "ExclusiveRangeOperatorProtocol" => Some(Self::ExclusiveRangeOperatorProtocol),
@@ -635,8 +714,42 @@ impl Builtin {
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
 
+            // Exitable / @main return
+            "Exitable" => Some(Self::Exitable),
+            "ExitableReport" => Some(Self::ExitableReport),
+            "ExitCode" => Some(Self::ExitCode),
+
+            // Indirection / smart-pointer member peel
+            "Indirection" => Some(Self::Indirection),
+
+            // Shared-ownership box (implicit boxing)
+            "SharedBox" => Some(Self::SharedBox),
+
+            // Unique-ownership box (one-shot closure environments)
+            "UniqueBox" => Some(Self::UniqueBox),
+
             _ => None,
         }
+    }
+
+    /// Whether this builtin denotes the *target* of the type alias that
+    /// carries its annotation rather than the alias itself.
+    /// `@builtin(.DefaultIntegerLiteralType) type IntegerLiteralType = Int64`
+    /// makes `Int64` the default integer literal type; the type operators
+    /// (`@builtin(.OptionalTypeOperator) type OptionalTypeOperator[T] = …`)
+    /// denote the alias.
+    pub fn denotes_alias_target(self) -> bool {
+        matches!(
+            self,
+            Self::DefaultIntegerLiteralType
+                | Self::DefaultFloatLiteralType
+                | Self::DefaultStringLiteralType
+                | Self::DefaultBooleanLiteralType
+                | Self::DefaultCharLiteralType
+                | Self::DefaultNullLiteralType
+                | Self::DefaultArrayLiteralType
+                | Self::DefaultDictionaryLiteralType
+        )
     }
 
     /// Metadata about what symbol kind this builtin expects.
@@ -652,6 +765,16 @@ impl Builtin {
             },
             Self::Cloneable => BuiltinKind::protocol(),
             Self::CloneMethod => BuiltinKind::ProtocolMethod,
+
+            // Reference containment — same marker shape as Copyable:
+            // implicit (structural) conformance + negative declarations.
+            Self::Static => BuiltinKind::Protocol {
+                implicit_conformance: true,
+                must_be_marker: true,
+                tuple_conformance_propagation: false,
+                requires_fields_conform: false,
+                disallow_enum_conformance: false,
+            },
 
             // Pattern matching
             Self::Matchable | Self::RangeMatchable | Self::ArrayMatchable => {
@@ -671,6 +794,7 @@ impl Builtin {
             | Self::ExpressibleByBoolLiteral
             | Self::ExpressibleByCharLiteral
             | Self::ExpressibleByNullLiteral
+            | Self::UnsignedInteger
             | Self::InternalExpressibleByArrayLiteral
             | Self::InternalExpressibleByDictionaryLiteral => BuiltinKind::protocol(),
 
@@ -811,8 +935,113 @@ impl Builtin {
             Self::FormattableProtocol => BuiltinKind::protocol(),
             Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
 
-            // Well-known types — Bool is resolved by name, doesn't need @builtin
+            // Exitable: non-marker protocol with a required `report()` method.
+            Self::Exitable => BuiltinKind::protocol(),
+            Self::ExitableReport => BuiltinKind::ProtocolMethod,
+            Self::ExitCode => BuiltinKind::Struct,
+
+            // Indirection: non-marker protocol with a required `pointeeRef()`
+            // method; explicit conformance (NOT implicit, unlike Copyable).
+            Self::Indirection => BuiltinKind::protocol(),
+
+            // Shared box: the annotated symbol is the generic *struct* the
+            // compiler instantiates (`RcBox`), not the `SharedBox` protocol
+            // that states its contract.
+            Self::SharedBox => BuiltinKind::Struct,
+
+            // Unique box: the annotated symbol is the generic *struct* the
+            // compiler instantiates (`UniqueBox`).
+            Self::UniqueBox => BuiltinKind::Struct,
+
+            // Well-known types — `Bool` resolves by name first, but carries
+            // `@builtin(.Bool)` as the attribute anchor so strategy 2 works too.
             Self::Bool => BuiltinKind::Struct,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn stdlib_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lang/std")
+    }
+
+    fn ks_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir)
+            .expect("stdlib dir is readable")
+            .flatten()
+        {
+            let path = entry.path();
+            if path.is_dir() {
+                ks_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "ks") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Every `@builtin(.Name)` occurrence in `text`, ignoring `//` comments —
+    /// the stdlib mentions builtin names in prose doc comments too.
+    fn annotations(text: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for line in text.lines() {
+            let code = line.split_once("//").map_or(line, |(before, _)| before);
+            let mut rest = code;
+            while let Some(at) = rest.find("@builtin(.") {
+                rest = &rest[at + "@builtin(.".len()..];
+                let end = rest
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(rest.len());
+                if end > 0 {
+                    found.push(rest[..end].to_string());
+                }
+            }
+        }
+        found
+    }
+
+    /// Every `@builtin(.Name)` written in the stdlib must parse into a `Builtin`.
+    ///
+    /// An unrecognised name is silently inert, not an error: `EntityBuiltin`
+    /// returns `None`, so the entity never enters `BuiltinIndex`, and
+    /// `ResolveBuiltin` (index only) does not find the feature at all.
+    /// `DefaultArrayLiteralType` once sat inert this way, masked by a
+    /// since-removed name-based lookup finding `Array`.
+    #[test]
+    fn every_stdlib_builtin_annotation_is_recognized() {
+        let root = stdlib_root();
+        assert!(root.is_dir(), "stdlib not found at {}", root.display());
+
+        let mut files = Vec::new();
+        ks_files(&root, &mut files);
+        files.sort();
+
+        let mut seen = 0usize;
+        let mut inert: Vec<String> = Vec::new();
+        for path in &files {
+            let text = std::fs::read_to_string(path).expect("stdlib file is readable");
+            for name in annotations(&text) {
+                seen += 1;
+                if Builtin::from_attribute_name(&name).is_none() {
+                    let rel = path.strip_prefix(&root).unwrap_or(path);
+                    inert.push(format!("{}: @builtin(.{name})", rel.display()));
+                }
+            }
+        }
+
+        // Guard the guard: a scan that matches nothing would pass vacuously.
+        assert!(
+            seen > 100,
+            "only found {seen} @builtin annotations — scan is broken"
+        );
+        assert!(
+            inert.is_empty(),
+            "stdlib annotations with no `Builtin::from_attribute_name` arm \
+             (silently inert — add the arm):\n  {}",
+            inert.join("\n  ")
+        );
     }
 }

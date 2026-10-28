@@ -4,6 +4,6 @@ module Main
 import std.io.stdio.println
 
 func main() -> lang.i64 {
-    let _ = println(not true and true);
+     println(not true and true);
     0
 }

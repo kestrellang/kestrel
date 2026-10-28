@@ -197,6 +197,11 @@ fn fmt_ty(ty: TyId, arena: &TyArena, module: &dyn NameResolver) -> String {
             format!("Pointer[{}]", fmt_ty(*inner, arena, module))
         },
 
+        MirTy::Ref { pointee, mutating } => {
+            let prefix = if *mutating { "&mutating " } else { "&" };
+            format!("{prefix}{}", fmt_ty(*pointee, arena, module))
+        },
+
         MirTy::Tuple(elems) => {
             if elems.is_empty() {
                 "()".into()
@@ -246,13 +251,14 @@ fn fmt_ty(ty: TyId, arena: &TyArena, module: &dyn NameResolver) -> String {
             )
         },
 
-        MirTy::FuncThick { params, ret } => {
+        MirTy::FuncThick { kind, params, ret } => {
             let ps: Vec<_> = params
                 .iter()
                 .map(|(t, _)| fmt_ty(*t, arena, module))
                 .collect();
             format!(
-                "@thick ({}) -> {}",
+                "@thick{} ({}) -> {}",
+                kind.display_suffix(),
                 ps.join(", "),
                 fmt_ty(*ret, arena, module)
             )
@@ -326,6 +332,23 @@ fn fmt_inst(
         InstKind::DestroyValue { operand } => {
             write!(out, "destroy_value {}", fmt_value(*operand)).unwrap();
         },
+        InstKind::CoerceFnKind {
+            result,
+            operand,
+            from,
+            to,
+        } => {
+            write!(
+                out,
+                "{} = coerce_fn_kind {:?}->{:?} {}",
+                fmt_value(*result),
+                from,
+                to,
+                fmt_value(*operand)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
 
         // -- Borrowing --
         InstKind::BeginBorrow { result, operand } => {
@@ -379,11 +402,13 @@ fn fmt_inst(
             result,
             address,
             ty,
+            independent,
         } => {
             write!(
                 out,
-                "{} = take {}, {}",
+                "{} = take{} {}, {}",
                 fmt_value(*result),
+                if *independent { "" } else { " [alias]" },
                 fmt_value(*address),
                 fmt_ty(*ty, arena, module),
             )
@@ -438,7 +463,7 @@ fn fmt_inst(
             )
             .unwrap();
         },
-        InstKind::DestroyAddr { address, ty } => {
+        InstKind::DestroyAddr { address, ty, .. } => {
             write!(
                 out,
                 "destroy_addr {}, {}",
@@ -722,6 +747,8 @@ fn fmt_inst(
             result,
             callee,
             captures,
+            retain,
+            release,
         } => {
             let vals: Vec<_> = captures.iter().map(|v| fmt_value(*v)).collect();
             let callee_str = fmt_callee(callee, arena, module);
@@ -733,6 +760,12 @@ fn fmt_inst(
                 vals.join(", "),
             )
             .unwrap();
+            if let Some(r) = retain {
+                write!(out, " retain {}", fmt_callee(r, arena, module)).unwrap();
+            }
+            if let Some(r) = release {
+                write!(out, " release {}", fmt_callee(r, arena, module)).unwrap();
+            }
             out.push_str(&fmt_type_comment(*result, body, arena, module));
         },
 
@@ -967,7 +1000,19 @@ fn fmt_switch_case(case: &SwitchCase) -> String {
         SwitchCase::Variant(idx) => format!("variant {}", idx.index()),
         SwitchCase::Bool(b) => format!("{}", b),
         SwitchCase::IntLiteral(v) => format!("{}", v),
-        SwitchCase::IntRange { start, end } => format!("{}..={}", start, end),
+        SwitchCase::IntRange { start, end, signed } => {
+            let show = |v: i64| {
+                if *signed {
+                    v.to_string()
+                } else {
+                    (v as u64).to_string()
+                }
+            };
+            let s = start.map_or(String::new(), show);
+            let e = end.map_or(String::new(), show);
+            let unsigned = if *signed { "" } else { " unsigned" };
+            format!("{}..={}{}", s, e, unsigned)
+        },
         SwitchCase::CharLiteral(c) => {
             if let Some(ch) = char::from_u32(*c) {
                 format!("'{}'", ch.escape_default())
@@ -976,14 +1021,14 @@ fn fmt_switch_case(case: &SwitchCase) -> String {
             }
         },
         SwitchCase::CharRange { start, end } => {
-            let s = char::from_u32(*start).map_or_else(
-                || format!("\\u{{{:X}}}", start),
-                |ch| format!("'{}'", ch.escape_default()),
-            );
-            let e = char::from_u32(*end).map_or_else(
-                || format!("\\u{{{:X}}}", end),
-                |ch| format!("'{}'", ch.escape_default()),
-            );
+            let render = |c: u32| {
+                char::from_u32(c).map_or_else(
+                    || format!("\\u{{{:X}}}", c),
+                    |ch| format!("'{}'", ch.escape_default()),
+                )
+            };
+            let s = start.map_or(String::new(), render);
+            let e = end.map_or(String::new(), render);
             format!("{}..={}", s, e)
         },
     }

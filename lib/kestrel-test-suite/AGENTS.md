@@ -25,7 +25,11 @@ When the exact wording is long or churns often, use a long distinctive prefix, n
 
 ## Test file format
 
-- Header line 1: `// test: <kind>` (e.g., `diagnostics`, `compiles`, `runs`).
+- Header line 1: `// test: <kind>` — one of `diagnostics`, `mir`, or `execution` (`src/annotation.rs`).
+  - `diagnostics` — checks `// ERROR:` annotations against emitted diagnostics.
+  - `mir` — requires a clean compile, then compares lowered MIR against a snapshot (see the `mir-filter` / `mir-snapshot` headers and `src/mir_snapshot.rs`).
+  - `execution` — requires a clean compile, then builds and runs the binary; exit code must match `// expect-exit:` (default 0), and `// expect-stdout:` / `// stdout-contains:` check output.
+  - **WARNING: unknown kinds silently fall back to `diagnostics`.** `// test: runs` or `// test: compiles` won't error — the file just runs as a diagnostics test (and with no `// ERROR:` annotations, it typically passes vacuously). Double-check the kind spelling.
 - Header line 2: `// stdlib: <true|false>` — opt out of stdlib for unit-like diagnostic tests that don't need it.
 - Module declaration: `module <Name>` (any name; single-module tests are conventional).
 - Place `// ERROR:` annotations on the same line as the offending token.

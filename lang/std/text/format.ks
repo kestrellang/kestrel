@@ -4,7 +4,7 @@ module std.text
 
 import std.core.(Bool, Equatable, Matchable, ExpressibleByStringLiteral)
 import std.numeric.(Int64)
-import std.text.(String, Char, StringBuilder)
+import std.text.(String, Char, Str, StringBuilder)
 import std.result.(Optional)
 import std.collections.(Array)
 
@@ -26,9 +26,9 @@ import std.collections.(Array)
 /// var opts = FormatOptions();
 /// opts.width = .Some(8);
 /// opts.alignment = .Right;
-/// "ab".format(options: opts);  // "      ab"
+/// "ab".formatted(opts);  // "      ab"
 /// opts.alignment = .Center;
-/// "ab".format(options: opts);  // "   ab   "
+/// "ab".formatted(opts);  // "   ab   "
 /// ```
 public enum Alignment: Equatable, Matchable {
     /// Pad on the right; the value sits flush against the left edge of the field.
@@ -86,10 +86,10 @@ public enum Alignment: Equatable, Matchable {
 /// ```
 /// var opts = FormatOptions();
 /// opts.sign = .Always;
-/// (3).format(options: opts);   // "+3"
-/// (-3).format(options: opts);  // "-3"
+/// (3).formatted(opts);   // "+3"
+/// (-3).formatted(opts);  // "-3"
 /// opts.sign = .Space;
-/// (3).format(options: opts);   // " 3"
+/// (3).formatted(opts);   // " 3"
 /// ```
 public enum Sign: Equatable, Matchable {
     /// Show `-` for negative values, no prefix for zero or positive (default).
@@ -145,11 +145,11 @@ public enum Sign: Equatable, Matchable {
 /// var opts = FormatOptions();
 /// opts.precision = .Some(2);
 /// opts.floatStyle = .Fixed;
-/// (3.14159).format(options: opts);       // "3.14"
+/// (3.14159).formatted(opts);       // "3.14"
 /// opts.floatStyle = .Scientific;
-/// (3.14159).format(options: opts);       // "3.14e0"
+/// (3.14159).formatted(opts);       // "3.14e0"
 /// opts.floatStyle = .Percent;
-/// (0.5).format(options: opts);           // "50.00%"
+/// (0.5).formatted(opts);           // "50.00%"
 /// ```
 public enum FloatStyle: Equatable, Matchable {
     /// Shortest round-trippable representation; switches to scientific for very large or very small magnitudes.
@@ -240,7 +240,7 @@ public struct FormatOptions: Equatable {
     /// Minimum field width in characters; shorter values are padded with `fill` according to `alignment`.
     public var width: Int64?
 
-    /// For floats: number of decimal places (or significant digits in `Auto` mode). For strings: maximum character count.
+    /// For floats: number of decimal places (an explicit precision prints `Auto` in fixed notation). For strings: maximum character count.
     public var precision: Int64?
 
     /// How to position the value inside `width` when padding is required.
@@ -250,6 +250,7 @@ public struct FormatOptions: Equatable {
     public var fill: Char
 
     /// Numeric base for integer formatting: 2 (binary), 8 (octal), 10 (decimal), 16 (hex).
+    /// Floats honor only 16, printing hexadecimal floating point (`0x1.8p+1` for 3.0).
     public var radix: Int64
 
     /// When `true`, integer hex digits are emitted as `A`–`F` rather than `a`–`f`.
@@ -277,7 +278,7 @@ public struct FormatOptions: Equatable {
     ///
     /// ```
     /// let opts = FormatOptions.default();
-    /// (42).format(options: opts);  // "42"
+    /// (42).formatted(opts);  // "42"
     /// ```
     public static func default() -> FormatOptions {
         FormatOptions()
@@ -296,7 +297,7 @@ public struct FormatOptions: Equatable {
     /// var opts = FormatOptions();
     /// opts.width = .Some(6);
     /// opts.alignment = .Right;
-    /// "hi".format(options: opts);  // "    hi"
+    /// "hi".formatted(opts);  // "    hi"
     /// ```
     public init() {
         self.width = .None;
@@ -351,8 +352,9 @@ public struct FormatOptions: Equatable {
 /// Print routines and string interpolation `"\{expr}"` and `"\{expr:spec}"`
 /// both ultimately bottom out in `format`. Implementors should honour
 /// every `FormatOptions` field that is meaningful for their domain
-/// (alignment and width are universal; `radix` only applies to integers,
-/// `floatStyle` only to floats) and silently ignore fields that aren't.
+/// (alignment and width are universal; `radix` applies to integers, and to
+/// floats only as `16`, hexadecimal floating point; `floatStyle` only to
+/// floats) and silently ignore fields that aren't.
 ///
 /// # Examples
 ///
@@ -363,15 +365,25 @@ public struct FormatOptions: Equatable {
 /// "\{pi:.2}";        // "3.14"           (precision 2)
 /// "\{value:?}";      // debug representation
 /// ```
+/// Mutable destination for formatted text.
+///
+/// Formatters only need to accept string-like values and individual code
+/// points. `StringBuilder` is the default implementation; streaming sinks can
+/// implement this protocol without forcing an intermediate `String`.
+public protocol Formatter {
+    mutating func append(other: some Str)
+    mutating func append(char c: Char)
+}
+
 @builtin(.FormattableProtocol)
 public protocol Formattable {
     /// Writes this value's formatted representation directly into `writer`.
     ///
     /// This is the kernel method — all formatting ultimately bottoms out
-    /// here. The convenience `format(options:) -> String` in the protocol
+    /// here. The convenience `formatted(options:) -> String` in the protocol
     /// extension calls this under the hood.
     @builtin(.FormattableFormatInto)
-    func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default())
+    func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default())
 }
 
 extend Formattable {
@@ -393,7 +405,13 @@ extend Formattable {
 
 /// Writes `content` into `writer` with width/alignment/fill padding applied.
 /// Used by String, integer, and float `format(into:)` implementations.
-public func _writePadded(mutating into writer: StringBuilder, content: String, options: FormatOptions) {
+///
+/// When `fill == '0'` and padding goes on the left (right-align / center),
+/// any sign character (`-`, `+`, ` `) or radix prefix (`0b`, `0o`, `0x`,
+/// `0X`) that appears at the start of `content` is emitted *before* the
+/// zero-padding so the result matches the C `printf` "%08d" convention,
+/// e.g. `-5` with width 8 → `-0000005` rather than `000000-5`.
+public func _writePadded(mutating into writer: some Formatter, content: String, options: FormatOptions) {
     if let .Some(width) = options.width {
         let currentLen = content.chars.count;
         if width > currentLen {
@@ -408,6 +426,41 @@ public func _writePadded(mutating into writer: StringBuilder, content: String, o
             } else {
                 padLeft = padding / 2;
                 padRight = padding - padLeft
+            }
+
+            // When zero-filling and padding on the left, emit any sign/prefix
+            // before the zeros so we get "-0000005" rather than "000000-5".
+            let contentLen = content.bytes.count;
+            if padLeft > 0 and options.fill == '0' and contentLen > 0 {
+                // Detect sign character: '-' (45), '+' (43), ' ' (32)
+                let firstByte = Int64(from: content.bytes(unchecked: 0));
+                var prefixLen: Int64 = 0;
+                if firstByte == 45 or firstByte == 43 or firstByte == 32 {
+                    prefixLen = 1
+                }
+                // Detect radix prefix: "0b", "0o", "0x", "0X" after optional sign
+                if contentLen > prefixLen + 1 {
+                    let p0 = Int64(from: content.bytes(unchecked: prefixLen));
+                    let p1 = Int64(from: content.bytes(unchecked: prefixLen + 1));
+                    // p0 == '0' (48), p1 == 'b'(98)/'o'(111)/'x'(120)/'X'(88)
+                    if p0 == 48 and (p1 == 98 or p1 == 111 or p1 == 120 or p1 == 88) {
+                        prefixLen = prefixLen + 2
+                    }
+                }
+                if prefixLen > 0 {
+                    // Emit sign+prefix first, then zeros, then the numeric digits
+                    writer.append(content.substringBytes(from: 0, to: prefixLen));
+                    while padLeft > 0 {
+                        writer.append(char: options.fill);
+                        padLeft = padLeft - 1
+                    }
+                    writer.append(content.substringBytes(from: prefixLen, to: contentLen));
+                    while padRight > 0 {
+                        writer.append(char: options.fill);
+                        padRight = padRight - 1
+                    }
+                    return
+                }
             }
 
             while padLeft > 0 {

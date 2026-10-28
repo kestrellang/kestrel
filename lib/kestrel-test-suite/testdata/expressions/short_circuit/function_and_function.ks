@@ -12,7 +12,7 @@ func isEven(n: Int) -> Bool {
 }
 
 func main() -> lang.i64 {
-    let _ = println(isPositive(4) and isEven(4));  // true and true
-    let _ = println(isPositive(-1) and isEven(4)); // false and true (short-circuits)
+     println(isPositive(4) and isEven(4));  // true and true
+     println(isPositive(-1) and isEven(4)); // false and true (short-circuits)
     0
 }

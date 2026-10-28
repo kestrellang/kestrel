@@ -78,7 +78,7 @@ func main() {
 
 func handleLoginPage(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    if token.byteCount > 0 { return Response.redirect(to: "/") };
+    if token.bytes.count > 0 { return Response.redirect(to: "/") };
     Response.ok(render(doc: loginPage("")))
 }
 
@@ -97,7 +97,7 @@ func handleLoginSubmit(req: Request, ctx: Ctx) -> Response {
         return Response.ok(render(doc: loginPage("Unexpected response")))
     }
 
-    let token = match json.value(forKey: "token") {
+    let token = match json.value(for: "token") {
         .Some(t) => match t {
             .Str(s) => s,
             _ => return Response.ok(render(doc: loginPage("Unexpected response")))
@@ -128,7 +128,7 @@ func handleRegisterSubmit(req: Request, ctx: Ctx) -> Response {
     }
     guard apiRes.status.isSuccess() else {
         let msg = match apiRes.json() {
-            .Ok(j) => match j.value(forKey: "error") {
+            .Ok(j) => match j.value(for: "error") {
                 .Some(e) => match e { .Str(s) => s, _ => "Registration failed" },
                 .None => "Registration failed"
             },
@@ -153,13 +153,13 @@ func handleLogout(req: Request, ctx: Ctx) -> Response {
 
 func handleHome(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.redirect(to: "/login") }
+    guard token.bytes.count > 0 else { return Response.redirect(to: "/login") }
     renderAppPage(token, 0, "All Notes")
 }
 
 func handleFolder(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.redirect(to: "/login") }
+    guard token.bytes.count > 0 else { return Response.redirect(to: "/login") }
     let folderId = match req.param("id") {
         .Some(idStr) => match Int64(parsing: idStr) {
             .Some(n) => n,
@@ -172,7 +172,7 @@ func handleFolder(req: Request, ctx: Ctx) -> Response {
 
 func handleNewNote(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.redirect(to: "/login") }
+    guard token.bytes.count > 0 else { return Response.redirect(to: "/login") }
     let folderId = match req.query("folderId") {
         .Some(idStr) => match Int64(parsing: idStr) {
             .Some(n) => n,
@@ -186,7 +186,7 @@ func handleNewNote(req: Request, ctx: Ctx) -> Response {
 
 func handleViewNote(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.redirect(to: "/login") }
+    guard token.bytes.count > 0 else { return Response.redirect(to: "/login") }
     let noteId = match req.param("id") {
         .Some(idStr) => match Int64(parsing: idStr) {
             .Some(n) => n,
@@ -206,7 +206,7 @@ func handleViewNote(req: Request, ctx: Ctx) -> Response {
 
 func handleEditNote(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.redirect(to: "/login") }
+    guard token.bytes.count > 0 else { return Response.redirect(to: "/login") }
     let noteId = match req.param("id") {
         .Some(idStr) => match Int64(parsing: idStr) {
             .Some(n) => n,
@@ -220,7 +220,7 @@ func handleEditNote(req: Request, ctx: Ctx) -> Response {
     guard let .Ok(note) = apiRes.json() else {
         return Response.redirect(to: "/")
     }
-    let noteFolderId = match note.value(forKey: "folderId") {
+    let noteFolderId = match note.value(for: "folderId") {
         .Some(v) => match v { .Int(n) => n, _ => 0 },
         .None => 0
     };
@@ -234,7 +234,7 @@ func handleEditNote(req: Request, ctx: Ctx) -> Response {
 
 func handleNotesFragment(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.unauthorized() }
+    guard token.bytes.count > 0 else { return Response.unauthorized() }
     let allNotes = loadNotes(token);
     let folderId = match req.query("folderId") {
         .Some(idStr) => match Int64(parsing: idStr) {
@@ -253,7 +253,7 @@ func handleNotesFragment(req: Request, ctx: Ctx) -> Response {
 
 func handleNoteFragment(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.unauthorized() }
+    guard token.bytes.count > 0 else { return Response.unauthorized() }
     let noteId = match req.param("id") {
         .Some(idStr) => match Int64(parsing: idStr) {
             .Some(n) => n,
@@ -273,7 +273,7 @@ func handleNoteFragment(req: Request, ctx: Ctx) -> Response {
 
 func handleEditNoteFragment(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.unauthorized() }
+    guard token.bytes.count > 0 else { return Response.unauthorized() }
     let noteId = match req.param("id") {
         .Some(idStr) => match Int64(parsing: idStr) {
             .Some(n) => n,
@@ -287,7 +287,7 @@ func handleEditNoteFragment(req: Request, ctx: Ctx) -> Response {
     guard let .Ok(note) = apiRes.json() else {
         return Response.internalServerError()
     }
-    let noteFolderId = match note.value(forKey: "folderId") {
+    let noteFolderId = match note.value(for: "folderId") {
         .Some(v) => match v { .Int(n) => n, _ => 0 },
         .None => 0
     };
@@ -296,7 +296,7 @@ func handleEditNoteFragment(req: Request, ctx: Ctx) -> Response {
 
 func handleCreateNoteFragment(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.unauthorized() }
+    guard token.bytes.count > 0 else { return Response.unauthorized() }
     let fields = parseForm(req.body);
     let title = formField(fields, "title");
     let body = formField(fields, "body");
@@ -316,7 +316,7 @@ func handleCreateNoteFragment(req: Request, ctx: Ctx) -> Response {
 
 func handleUpdateNoteFragment(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.unauthorized() }
+    guard token.bytes.count > 0 else { return Response.unauthorized() }
     let noteId = match req.param("id") {
         .Some(idStr) => match Int64(parsing: idStr) {
             .Some(n) => n,
@@ -339,7 +339,7 @@ func handleUpdateNoteFragment(req: Request, ctx: Ctx) -> Response {
 
 func handleMoveNoteFragment(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.unauthorized() }
+    guard token.bytes.count > 0 else { return Response.unauthorized() }
     let noteId = match req.param("id") {
         .Some(idStr) => match Int64(parsing: idStr) {
             .Some(n) => n,
@@ -364,7 +364,7 @@ func handleMoveNoteFragment(req: Request, ctx: Ctx) -> Response {
 
 func handleDeleteNoteFragment(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.unauthorized() }
+    guard token.bytes.count > 0 else { return Response.unauthorized() }
     let noteId = match req.param("id") {
         .Some(idStr) => match Int64(parsing: idStr) {
             .Some(n) => n,
@@ -381,10 +381,10 @@ func handleDeleteNoteFragment(req: Request, ctx: Ctx) -> Response {
 
 func handleCreateFolderFragment(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.unauthorized() }
+    guard token.bytes.count > 0 else { return Response.unauthorized() }
     let fields = parseForm(req.body);
     let name = formField(fields, "name");
-    guard name.byteCount > 0 else {
+    guard name.bytes.count > 0 else {
         return Response.ok(render(doc: folderSidebar(loadFolders(token), 0)))
     }
     guard let .Ok(_) = apiCreateFolder(token, name) else {
@@ -395,7 +395,7 @@ func handleCreateFolderFragment(req: Request, ctx: Ctx) -> Response {
 
 func handleSidebarFragment(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
-    guard token.byteCount > 0 else { return Response.unauthorized() }
+    guard token.bytes.count > 0 else { return Response.unauthorized() }
     Response.ok(render(doc: folderSidebar(loadFolders(token), 0)))
 }
 
@@ -412,7 +412,7 @@ func renderAppPage(token: String, folderId: Int64, title: String) -> Response {
 func loadNotes(token: String) -> Array[Value] {
     guard let .Ok(apiRes) = apiListNotes(token, 1) else { return Array[Value]() }
     guard let .Ok(json) = apiRes.json() else { return Array[Value]() }
-    match json.value(forKey: "data") {
+    match json.value(for: "data") {
         .Some(arr) => match arr.asArray() {
             .Some(items) => items,
             .None => Array[Value]()
@@ -426,7 +426,7 @@ func filterByFolder(notes: Array[Value], folderId: Int64) -> Array[Value] {
     var i: Int64 = 0;
     while i < notes.count {
         let note = notes(unchecked: i);
-        let noteFolderId = match note.value(forKey: "folderId") {
+        let noteFolderId = match note.value(for: "folderId") {
             .Some(v) => match v {
                 .Int(n) => n,
                 _ => 0
@@ -444,7 +444,7 @@ func filterByFolder(notes: Array[Value], folderId: Int64) -> Array[Value] {
 func loadFolders(token: String) -> Array[Value] {
     guard let .Ok(apiRes) = apiListFolders(token) else { return Array[Value]() }
     guard let .Ok(json) = apiRes.json() else { return Array[Value]() }
-    match json.value(forKey: "data") {
+    match json.value(for: "data") {
         .Some(arr) => match arr.asArray() {
             .Some(items) => items,
             .None => Array[Value]()

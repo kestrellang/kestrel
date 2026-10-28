@@ -10,7 +10,7 @@ func main() -> lang.i64 {
         sum = sum + i;
         i = i + 1;
     }
-    let _ = println(i);
-    let _ = println(sum);
+     println(i);
+     println(sum);
     0
 }

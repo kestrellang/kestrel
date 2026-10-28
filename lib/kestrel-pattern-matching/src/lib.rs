@@ -43,6 +43,7 @@
 //! | `constructor` | Constructor enum, TypeShape (type → constructor space) |
 //! | `flat_pat` | Normalized pattern, HirPat→FlatPat conversion, decompose() |
 //! | `matrix` | Pattern matrix, specialize (S(c,P)), default (D(P)) |
+//! | `split` | Cuts overlapping constructors (ranges, array lengths) into disjoint pieces |
 //! | `usefulness` | Core Maranget algorithm, ExhaustivenessResult |
 //! | `witness` | Example values for "missing pattern: `.None`" messages |
 //! | `decision_tree` | Decision tree compilation, binding extraction |
@@ -54,6 +55,8 @@
 //! - **Pattern decomposition** — `FlatPat::decompose()` (used by matrix + decision tree)
 //! - **Constructor field types** — `Constructor::field_types()` (used by matrix + decision tree)
 //! - **Constructor matching** — `Constructor::matches()` (used by decompose + matrix)
+//! - **Constructor splitting** — `split::split()` (used by `PatternMatrix::head_constructors`
+//!   and `PatternMatrix::split_head`); nothing switches on an unsplit range
 //! - **Type classification** — `TypeShape::classify()` (used by usefulness + irrefutability)
 //!
 //! # References
@@ -65,6 +68,7 @@ pub mod constructor;
 pub mod decision_tree;
 pub mod flat_pat;
 pub mod matrix;
+pub mod split;
 pub mod usefulness;
 pub mod witness;
 
@@ -102,7 +106,7 @@ pub fn is_irrefutable(
     pat_id: HirPatId,
     ty: &ResolvedTy,
 ) -> bool {
-    let flat = flat_pat::flatten(hir, query, pat_id, ty);
+    let flat = flat_pat::flatten(hir, query, root, pat_id, ty);
     check_irrefutable(&flat, query, root, ty)
 }
 
@@ -143,7 +147,7 @@ fn check_irrefutable(
             }
 
             // Constructor is sole — check all children recursively
-            let field_types = ctor.field_types(query, ty);
+            let field_types = ctor.field_types(query, root, ty);
             children.iter().enumerate().all(|(i, child)| {
                 let child_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
                 check_irrefutable(child, query, root, child_ty)
@@ -167,7 +171,7 @@ pub fn compile_decision_tree(
 ) -> DecisionTree {
     let flat_pats: Vec<_> = arms
         .iter()
-        .map(|arm| flat_pat::flatten(hir, query, arm.pattern, scrutinee_ty))
+        .map(|arm| flat_pat::flatten(hir, query, root, arm.pattern, scrutinee_ty))
         .collect();
     let arm_pat_ids: Vec<_> = arms.iter().map(|arm| arm.pattern).collect();
     let has_guards: Vec<_> = arms.iter().map(|arm| arm.guard.is_some()).collect();

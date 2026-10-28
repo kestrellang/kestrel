@@ -30,12 +30,17 @@
 
 use std::collections::HashSet;
 
-use kestrel_ast_builder::{Callable, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams};
+use kestrel_ast_builder::{
+    Callable, FieldClass, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams,
+};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
-use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
+use kestrel_name_res::{
+    ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution, extensions::ExtensionsFor,
+};
 use kestrel_type_infer::result::ResolvedTy;
 
+use super::split;
 use super::witness::Witness;
 
 // ===== Constructor =====
@@ -57,11 +62,11 @@ pub enum Constructor {
     /// Struct (single constructor for the type)
     Struct { entity: Entity, arity: usize },
     /// Integer literal
-    IntLiteral(i64),
+    IntLiteral(i128),
     /// Integer range (both ends inclusive after normalization, None = unbounded)
     IntRange {
-        start: Option<i64>,
-        end: Option<i64>,
+        start: Option<i128>,
+        end: Option<i128>,
     },
     /// Character literal
     CharLiteral(char),
@@ -113,9 +118,12 @@ impl Constructor {
         matches!(self, Constructor::Wildcard)
     }
 
-    /// Check if this constructor is compatible with `other` for specialization.
+    /// Does this row constructor cover every value of `other`?
     ///
-    /// Returns true if a value matching `self` could also match `other`.
+    /// `other` is the constructor being specialized on. It is containment, not
+    /// overlap: specialization keeps a row only if the row matches the whole
+    /// case. Overlapping families (int/char ranges, array lengths) are cut into
+    /// disjoint pieces by `split::split` first, so containment is exact (F1).
     /// This is the SINGLE compatibility check — no duplicates elsewhere.
     pub fn matches(&self, other: &Constructor) -> bool {
         match (self, other) {
@@ -133,25 +141,15 @@ impl Constructor {
             },
             (Constructor::Tuple { arity: a1 }, Constructor::Tuple { arity: a2 }) => a1 == a2,
 
-            // Integer comparisons
-            (Constructor::IntLiteral(v1), Constructor::IntLiteral(v2)) => v1 == v2,
-            (Constructor::IntLiteral(v), Constructor::IntRange { start, end }) => {
-                start.is_none_or(|s| *v >= s) && end.is_none_or(|e| *v <= e)
-            },
+            // Integers and chars: the case's interval lies inside the row's.
             (
-                Constructor::IntRange { start: s1, end: e1 },
-                Constructor::IntRange { start: s2, end: e2 },
-            ) => ranges_overlap_i64(*s1, *e1, *s2, *e2),
-
-            // Character comparisons
-            (Constructor::CharLiteral(v1), Constructor::CharLiteral(v2)) => v1 == v2,
-            (Constructor::CharLiteral(v), Constructor::CharRange { start, end }) => {
-                start.is_none_or(|s| *v >= s) && end.is_none_or(|e| *v <= e)
-            },
+                Constructor::IntLiteral(_) | Constructor::IntRange { .. },
+                Constructor::IntLiteral(_) | Constructor::IntRange { .. },
+            ) => interval_contains(split::int_interval(self), split::int_interval(other)),
             (
-                Constructor::CharRange { start: s1, end: e1 },
-                Constructor::CharRange { start: s2, end: e2 },
-            ) => ranges_overlap_char(*s1, *e1, *s2, *e2),
+                Constructor::CharLiteral(_) | Constructor::CharRange { .. },
+                Constructor::CharLiteral(_) | Constructor::CharRange { .. },
+            ) => interval_contains(split::char_interval(self), split::char_interval(other)),
 
             // String
             (Constructor::StringLiteral(s1), Constructor::StringLiteral(s2)) => s1 == s2,
@@ -171,10 +169,11 @@ impl Constructor {
             ) => {
                 let min1 = p1 + s1;
                 let min2 = p2 + s2;
+                // A rest row covers every length from its minimum up; a fixed
+                // row covers one length, so never an open-ended case.
                 match (*r1, *r2) {
-                    (true, true) => true,
-                    (true, false) => min1 <= min2,
-                    (false, true) => min2 <= min1,
+                    (true, _) => min1 <= min2,
+                    (false, true) => false,
                     (false, false) => min1 == min2,
                 }
             },
@@ -187,7 +186,12 @@ impl Constructor {
     ///
     /// For example, `Variant("Some", 1)` on `Optional[Int]` returns `[Int]`.
     /// This is the SINGLE implementation — no duplicates elsewhere.
-    pub fn field_types(&self, query: &QueryContext<'_>, parent_ty: &ResolvedTy) -> Vec<ResolvedTy> {
+    pub fn field_types(
+        &self,
+        query: &QueryContext<'_>,
+        root: Entity,
+        parent_ty: &ResolvedTy,
+    ) -> Vec<ResolvedTy> {
         match (self, parent_ty) {
             (Constructor::Tuple { .. }, ResolvedTy::Tuple(elems)) => elems.clone(),
 
@@ -205,7 +209,7 @@ impl Constructor {
                         .iter()
                         .map(|p| {
                             // Resolve the parameter type with the enum's type args
-                            resolve_case_param_type(query, *enum_entity, args, p)
+                            resolve_case_param_type(query, root, *enum_entity, args, p)
                         })
                         .collect();
                 }
@@ -218,26 +222,30 @@ impl Constructor {
                 if fields.len() == *arity {
                     fields
                         .iter()
-                        .map(|field_entity| resolve_field_type(query, *field_entity, *entity, args))
+                        .map(|field_entity| {
+                            resolve_field_type(query, root, *field_entity, *entity, args)
+                        })
                         .collect()
                 } else {
                     vec![parent_ty.clone(); *arity]
                 }
             },
 
-            // Array[T] — element type from type args
+            // ArrayMatchable conformer — element type from the `Element`
+            // associated type of the conformance (handles non-generic
+            // conformers, not just `Array[T]` where Element == first type arg).
             (
                 Constructor::Array {
                     prefix_len,
                     suffix_len,
                     has_rest,
                 },
-                ResolvedTy::Named { args, .. },
+                ResolvedTy::Named { .. },
             ) => {
-                let elem_ty = args.first().cloned().unwrap_or(ResolvedTy::Error);
+                let elem_ty = array_element_ty(query, root, parent_ty);
                 let mut types = vec![elem_ty.clone(); *prefix_len];
                 if *has_rest {
-                    types.push(parent_ty.clone()); // rest is the array type
+                    types.push(parent_ty.clone()); // rest slot (Wildcard; inert)
                 }
                 types.extend(vec![elem_ty; *suffix_len]);
                 types
@@ -565,17 +573,90 @@ fn classify_by_conformances(
 
     // Literal types have infinite value spaces. ExpressibleByArrayLiteral is
     // a stdlib wrapper that inherits from InternalExpressibleByArrayLiteral,
-    // so checking the internal protocol suffices.
+    // so checking the internal protocol suffices. `ArrayMatchable` covers the
+    // deconstruction side: a type matchable with array patterns (e.g.
+    // `ArraySlice`, the `..rest` binding type) likewise has infinite length, so
+    // a recursive `[a, ..rest] | []` over a slice is exhaustive (without it the
+    // slice fell through to a single-constructor Struct and falsely tripped
+    // E305).
     if conforms_to(Builtin::ExpressibleByIntegerLiteral)
         || conforms_to(Builtin::ExpressibleByFloatLiteral)
         || conforms_to(Builtin::ExpressibleByCharLiteral)
         || conforms_to(Builtin::ExpressibleByStringLiteral)
         || conforms_to(Builtin::InternalExpressibleByArrayLiteral)
+        || conforms_to(Builtin::ArrayMatchable)
     {
         return Some(TypeShape::Infinite);
     }
 
     None
+}
+
+/// The value range of an integer type: its bit width and signedness.
+/// Integer patterns test and tile against it (a `UInt8` switch covers
+/// `[0, 255]`, compared unsigned), so width and signedness have ONE source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IntDomain {
+    pub bits: u32,
+    pub signed: bool,
+}
+
+impl IntDomain {
+    pub fn min(self) -> i128 {
+        if self.signed {
+            -(1i128 << (self.bits - 1))
+        } else {
+            0
+        }
+    }
+
+    pub fn max(self) -> i128 {
+        if self.signed {
+            (1i128 << (self.bits - 1)) - 1
+        } else {
+            (1i128 << self.bits) - 1
+        }
+    }
+}
+
+/// The integer domain of `ty`: a `lang.iN` intrinsic (signed), or a stdlib
+/// integer struct (`ExpressibleByIntegerLiteral` wrapping a single `lang.iN`
+/// field), unsigned when it conforms to the `UnsignedInteger` builtin.
+pub fn int_domain(query: &QueryContext<'_>, root: Entity, ty: &ResolvedTy) -> Option<IntDomain> {
+    let ResolvedTy::Named { entity, args } = ty else {
+        return None;
+    };
+    if let Some(bits) = intrinsic_int_bits(query, *entity) {
+        return Some(IntDomain { bits, signed: true });
+    }
+    if !conforms_to_builtin(query, root, *entity, Builtin::ExpressibleByIntegerLiteral) {
+        return None;
+    }
+    let [field] = collect_fields(query, *entity)[..] else {
+        return None;
+    };
+    let ResolvedTy::Named { entity: raw, .. } =
+        resolve_field_type(query, root, field, *entity, args)
+    else {
+        return None;
+    };
+    let bits = intrinsic_int_bits(query, raw)?;
+    let signed = !conforms_to_builtin(query, root, *entity, Builtin::UnsignedInteger);
+    Some(IntDomain { bits, signed })
+}
+
+/// Bit width of a `lang.i8`…`lang.i64` intrinsic.
+fn intrinsic_int_bits(query: &QueryContext<'_>, entity: Entity) -> Option<u32> {
+    if !query.has::<Intrinsic>(entity) {
+        return None;
+    }
+    match query.get::<Name>(entity)?.0.as_str() {
+        "i8" => Some(8),
+        "i16" => Some(16),
+        "i32" => Some(32),
+        "i64" => Some(64),
+        _ => None,
+    }
 }
 
 /// Test whether an entity transitively conforms to a builtin protocol.
@@ -604,22 +685,37 @@ fn is_array_type(query: &QueryContext<'_>, root: Entity, ty: &ResolvedTy) -> boo
     if query.has::<Intrinsic>(*entity) {
         return false;
     }
-    // ExpressibleByArrayLiteral inherits from _ExpressibleByArrayLiteral, so
-    // ConformingProtocols surfaces the internal protocol for any conforming type.
-    conforms_to_builtin(
-        query,
-        root,
-        *entity,
-        Builtin::InternalExpressibleByArrayLiteral,
-    )
+    // Array PATTERNS apply to any `ArrayMatchable` conformer — that protocol
+    // (matchLength/matchGet/matchSlice) is what the matcher lowers to. This is
+    // the deconstruction capability and the correct criterion for exhaustiveness
+    // (e.g. `ArraySlice`, which is matchable but not array-literal-expressible,
+    // so a recursive `[a, ..rest] | []` over a slice is exhaustive). The
+    // ExpressibleByArrayLiteral check stays for back-compat: it covers the
+    // construction side (`[1, 2, 3]`) and every literal type conforms to both.
+    conforms_to_builtin(query, root, *entity, Builtin::ArrayMatchable)
+        || conforms_to_builtin(
+            query,
+            root,
+            *entity,
+            Builtin::InternalExpressibleByArrayLiteral,
+        )
 }
 
-/// Collect Field children of an entity, in declaration order.
-pub(super) fn collect_fields(query: &QueryContext<'_>, entity: Entity) -> Vec<Entity> {
+/// Collect the stored instance fields of an entity, in declaration order.
+///
+/// Must stay index-aligned with the MIR layout (`items/struct_lower.rs`), since
+/// sub-pattern positions index into the scrutinee's fields. Including computed
+/// properties here made a pattern read past the end of the struct — an OSSA
+/// block-arg type mismatch rather than a diagnostic.
+pub(crate) fn collect_fields(query: &QueryContext<'_>, entity: Entity) -> Vec<Entity> {
     query
         .children_of(entity)
         .iter()
-        .filter(|&&child| matches!(query.get::<NodeKind>(child), Some(NodeKind::Field)))
+        .filter(|&&child| {
+            query
+                .get::<FieldClass>(child)
+                .is_some_and(FieldClass::is_stored_instance)
+        })
         .copied()
         .collect()
 }
@@ -632,24 +728,88 @@ pub(super) fn collect_fields(query: &QueryContext<'_>, entity: Entity) -> Vec<En
 /// to the raw AstType resolution.
 fn resolve_case_param_type(
     query: &QueryContext<'_>,
+    root: Entity,
     enum_entity: Entity,
     type_args: &[ResolvedTy],
     param: &kestrel_ast_builder::AstParam,
 ) -> ResolvedTy {
     let subs = build_type_param_subs(query, enum_entity, type_args);
-    resolve_ast_type_with_subs(query, param.ty.as_ref(), &subs, enum_entity)
+    resolve_ast_type_with_subs(query, root, param.ty.as_ref(), &subs, enum_entity)
 }
 
 /// Resolve a field's type with the parent struct's type arguments.
 fn resolve_field_type(
     query: &QueryContext<'_>,
+    root: Entity,
     field_entity: Entity,
     parent_entity: Entity,
     type_args: &[ResolvedTy],
 ) -> ResolvedTy {
     let subs = build_type_param_subs(query, parent_entity, type_args);
     let ast_ty = query.get::<TypeAnnotation>(field_entity).map(|ta| &ta.0);
-    resolve_ast_type_with_subs(query, ast_ty, &subs, parent_entity)
+    resolve_ast_type_with_subs(query, root, ast_ty, &subs, parent_entity)
+}
+
+/// Element type of an `ArrayMatchable` conformer — its `Element` associated
+/// type, resolved from the conformance and substituted with the conformer's
+/// type args. Drives array-pattern element typing for ANY conformer, so a
+/// non-generic conformer (`Trio` with `type Element = Int64`) and a generic
+/// one (`Array[Int64]` / `Bag[Int64]` with `type Element = T`) are handled
+/// uniformly — the previous "first type arg" shortcut only worked when
+/// `Element == the first type param`. Falls back to the first type arg if the
+/// binding can't be found.
+pub(crate) fn array_element_ty(
+    query: &QueryContext<'_>,
+    root: Entity,
+    array_ty: &ResolvedTy,
+) -> ResolvedTy {
+    let ResolvedTy::Named { entity, args } = array_ty else {
+        return ResolvedTy::Error;
+    };
+    let fallback = || args.first().cloned().unwrap_or(ResolvedTy::Error);
+    let Some((alias, owner)) = find_element_alias(query, root, *entity) else {
+        return fallback();
+    };
+    let Some(ast_ty) = query.get::<TypeAnnotation>(alias).map(|ta| ta.0.clone()) else {
+        return fallback();
+    };
+    // The binding's `T` may name either the target type's own param or the
+    // conforming extension's binder; both align positionally with the
+    // scrutinee's args, so include both (resolve_ast_type_with_subs matches by
+    // name, so duplicate names are harmless).
+    let mut subs = build_type_param_subs(query, *entity, args);
+    subs.extend(build_type_param_subs(query, owner, args));
+    resolve_ast_type_with_subs(query, root, Some(&ast_ty), &subs, owner)
+}
+
+/// Find the `type Element = ...` alias of an `ArrayMatchable` conformer,
+/// returning the alias entity and its OWNER (the type body or the conforming
+/// extension — the owner scopes name resolution and provides type params).
+fn find_element_alias(
+    query: &QueryContext<'_>,
+    root: Entity,
+    type_entity: Entity,
+) -> Option<(Entity, Entity)> {
+    if let Some(alias) = find_type_alias_named(query, type_entity, "Element") {
+        return Some((alias, type_entity));
+    }
+    for ext in query.query(ExtensionsFor {
+        target: type_entity,
+        root,
+    }) {
+        if let Some(alias) = find_type_alias_named(query, ext, "Element") {
+            return Some((alias, ext));
+        }
+    }
+    None
+}
+
+/// Find a `NodeKind::TypeAlias` child of `parent` with the given name.
+fn find_type_alias_named(query: &QueryContext<'_>, parent: Entity, name: &str) -> Option<Entity> {
+    query.children_of(parent).iter().copied().find(|&child| {
+        query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
+            && query.get::<Name>(child).map(|n| n.0.as_str()) == Some(name)
+    })
 }
 
 /// Build a mapping from type parameter names to their concrete types.
@@ -681,6 +841,7 @@ fn build_type_param_subs(
 /// `scope_entity` is used to walk up the parent chain for name resolution.
 fn resolve_ast_type_with_subs(
     query: &QueryContext<'_>,
+    root: Entity,
     ast_ty: Option<&kestrel_ast::AstType>,
     subs: &[(String, ResolvedTy)],
     scope_entity: Entity,
@@ -693,29 +854,46 @@ fn resolve_ast_type_with_subs(
 
     match ty {
         AstType::Named { segments, .. } => {
+            // A bare single-segment name may be a type parameter — substitute it.
             if segments.len() == 1 && segments[0].type_args.is_empty() {
                 let name = &segments[0].name;
-                // Try type parameter substitution first
                 if let Some((_, resolved)) = subs.iter().find(|(n, _)| n == name) {
                     return resolved.clone();
                 }
-                // Try resolving as a sibling type in the parent scope
-                if let Some(entity) = resolve_name_in_scope(query, name, scope_entity) {
-                    // Recurse to resolve type args on the segments
-                    return ResolvedTy::Named {
-                        entity,
-                        args: vec![],
-                    };
-                }
             }
-            // Multi-segment or unresolved — conservative fallback
-            ResolvedTy::Error
+            // Resolve the path to its type entity via the canonical resolver
+            // (handles builtins like `Bool`/`Int64`, stdlib types, and generic
+            // instantiations like `Optional[Int64]` — the hand-rolled
+            // sibling-scope lookup could not, leaving such payload/field types
+            // as `Error` and breaking nested pattern matching, #189/#190).
+            let path: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+            let entity = match query.query(ResolveTypePath {
+                segments: path,
+                context: scope_entity,
+                root,
+            }) {
+                TypeResolution::Found(entity) => entity,
+                _ => return ResolvedTy::Error,
+            };
+            // Recursively resolve the trailing segment's type arguments.
+            let args: Vec<ResolvedTy> = segments
+                .last()
+                .map(|seg| {
+                    seg.type_args
+                        .iter()
+                        .map(|a| {
+                            resolve_ast_type_with_subs(query, root, Some(a), subs, scope_entity)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            ResolvedTy::Named { entity, args }
         },
 
         AstType::Tuple(elems, _) => {
             let resolved: Vec<_> = elems
                 .iter()
-                .map(|e| resolve_ast_type_with_subs(query, Some(e), subs, scope_entity))
+                .map(|e| resolve_ast_type_with_subs(query, root, Some(e), subs, scope_entity))
                 .collect();
             ResolvedTy::Tuple(resolved)
         },
@@ -724,65 +902,18 @@ fn resolve_ast_type_with_subs(
 
         AstType::Never(_) => ResolvedTy::Never,
 
-        // For Optional, Array, etc. we'd need the builtin entities to construct
-        // Named types. Fall back to Error — these rarely appear as enum case
-        // params or struct fields in practice.
         _ => ResolvedTy::Error,
     }
 }
 
-/// Resolve a single-segment name by searching up the parent chain.
-/// Looks for structs/enums with the given name among siblings of scope_entity's ancestors.
-fn resolve_name_in_scope(
-    query: &QueryContext<'_>,
-    name: &str,
-    scope_entity: Entity,
-) -> Option<Entity> {
-    // Walk up the parent chain looking for a child with this name
-    let mut current = Some(scope_entity);
-    while let Some(parent) = current {
-        for &child in query.children_of(parent) {
-            if query.get::<Name>(child).is_some_and(|n| n.0 == name) {
-                let kind = query.get::<NodeKind>(child);
-                if matches!(kind, Some(NodeKind::Struct | NodeKind::Enum)) {
-                    return Some(child);
-                }
-            }
-        }
-        current = query.parent_of(parent);
+/// Is `inner` inside `outer`? An empty `inner` covers no value, so nothing
+/// needs to match it and it is inside everything.
+fn interval_contains(outer: Option<(i128, i128)>, inner: Option<(i128, i128)>) -> bool {
+    match (outer, inner) {
+        (_, None) => true,
+        (None, Some(_)) => false,
+        (Some((os, oe)), Some((is, ie))) => os <= is && ie <= oe,
     }
-    None
-}
-
-/// Check if two optional i64 ranges overlap.
-fn ranges_overlap_i64(s1: Option<i64>, e1: Option<i64>, s2: Option<i64>, e2: Option<i64>) -> bool {
-    let start_ok = match (s1, e2) {
-        (Some(s), Some(e)) => s <= e,
-        _ => true,
-    };
-    let end_ok = match (s2, e1) {
-        (Some(s), Some(e)) => s <= e,
-        _ => true,
-    };
-    start_ok && end_ok
-}
-
-/// Check if two optional char ranges overlap.
-fn ranges_overlap_char(
-    s1: Option<char>,
-    e1: Option<char>,
-    s2: Option<char>,
-    e2: Option<char>,
-) -> bool {
-    let start_ok = match (s1, e2) {
-        (Some(s), Some(e)) => s <= e,
-        _ => true,
-    };
-    let end_ok = match (s2, e1) {
-        (Some(s), Some(e)) => s <= e,
-        _ => true,
-    };
-    start_ok && end_ok
 }
 
 /// Find missing array constructors given covered patterns.

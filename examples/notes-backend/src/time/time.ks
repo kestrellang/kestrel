@@ -6,14 +6,14 @@ import std.text.(String)
 
 public func getCurrentTimestamp() -> String {
     var now: Int64 = 0;
-    let _ = time(Pointer(to: now));
+     time(Pointer(to: now));
 
     var tm = Tm(
         sec: 0, min: 0, hour: 0,
         mday: 0, mon: 0, year: 0,
         wday: 0, yday: 0, isdst: 0
     );
-    let _ = gmtime_r(Pointer(to: now), Pointer(to: tm));
+     gmtime_r(Pointer(to: now), Pointer(to: tm));
 
     // Allocate a buffer for the formatted string
     var buffer = Array[UInt8](repeating: 0, count: 32);

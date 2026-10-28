@@ -22,8 +22,8 @@ module Test
 
             // Test shrinkToFit
             var s3 = std.collections.Set[std.numeric.Int64](capacity: 100);
-            let _ = s3.insert(1);
-            let _ = s3.insert(2);
+             s3.insert(1);
+             s3.insert(2);
             let capBeforeShrink = s3.capacity;
             s3.shrinkToFit();
             if s3.capacity > capBeforeShrink { return 5 }

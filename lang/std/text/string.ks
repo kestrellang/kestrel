@@ -2,8 +2,8 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Matchable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, fatalError)
-import std.text.(Formattable, StringBuilder, _writePadded)
+import std.core.(Bool, Equal, NotEqual, Equatable, Matchable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, fatalError)
+import std.text.(Formattable, Formatter, StringBuilder, _writePadded)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, CowBox, ArraySlice)
@@ -24,7 +24,7 @@ func _memcpyBytes(dst dst: Pointer[UInt8], src src: Pointer[UInt8], n n: Int64) 
     if n <= 0 {
         return
     }
-    let _ = memcpy(dst.asRaw(), src.asRaw(), n);
+     memcpy(dst.asRaw(), src.asRaw(), n);
 }
 
 /// Byte-wise equality of two regions via libc `memcmp`. Caller ensures
@@ -148,7 +148,7 @@ struct StringStorage: Cloneable {
 /// ```
 /// var s = "hello";
 /// s.append(", world");
-/// s.byteCount;            // 12
+/// s.bytes.count;          // 12
 /// s.contains(",");  // true
 /// for line in "a\nb".lines { /* ... */ }
 /// ```
@@ -178,15 +178,19 @@ struct StringStorage: Cloneable {
 /// # Guarantees
 ///
 /// - Bytes are valid UTF-8 after every public mutator.
-/// - `byteCount`, `capacity`, and `isEmpty` are O(1); `count` (code
+/// - `bytes.count`, `capacity`, and `isEmpty` are O(1); `chars.count` (code
 ///   points) is O(n).
 /// - Clones do not share mutation; `s.clone()` and `s` will diverge as
 ///   soon as either is mutated.
-public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hashable, Defaultable {
+public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice], NotEqual[String], NotEqual[StringSlice], Matchable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hashable, Defaultable {
     /// The element type yielded by iteration — always `Char`.
     type Item = Char
     /// The iterator type returned by `iter()`.
     type TargetIterator = CharsIterator
+    type Equal[String].Output = Bool
+    type Equal[StringSlice].Output = Bool
+    type NotEqual[String].Output = Bool
+    type NotEqual[StringSlice].Output = Bool
     /// The output type of `+` (concatenation) — always `String`.
     type Output = String
 
@@ -218,7 +222,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// ```
     /// let s = String();
     /// s.isEmpty;     // true
-    /// s.byteCount;   // 0
+    /// s.bytes.count; // 0
     /// ```
     public init() {
         self.storage = CowBox(StringStorage(
@@ -245,7 +249,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     ///
     /// ```
     /// var s = String(capacity: 64);
-    /// s.byteCount;  // 0
+    /// s.bytes.count;  // 0
     /// s.capacity;   // 64
     /// ```
     public init(capacity capacity: Int64) {
@@ -276,14 +280,14 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// Panics with `"String allocation failed"` if the system
     /// allocator returns null.
     public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
-        let byteCount = Int64(intLiteral: length);
-        if byteCount > 0 {
-            let newPtr = _textAlloc(Layout.array[UInt8](byteCount));
-            let _ = memcpy(newPtr.asRaw(), RawPointer(raw: ptr), byteCount);
+        let byteLen = Int64(intLiteral: length);
+        if byteLen > 0 {
+            let newPtr = _textAlloc(Layout.array[UInt8](byteLen));
+             memcpy(newPtr.asRaw(), RawPointer(raw: ptr), byteLen);
             self.storage = CowBox(StringStorage(
                 ptr: newPtr,
-                len: byteCount,
-                cap: byteCount
+                len: byteLen,
+                cap: byteLen
             ))
         } else {
             self.storage = CowBox(StringStorage(
@@ -452,12 +456,6 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     // SIZE & CAPACITY
     // ========================================================================
 
-    /// The number of UTF-8 bytes in the string. O(1).
-    ///
-    /// This is **not** the character count — see `count` for that.
-    /// Pure ASCII strings have `byteCount == count`.
-    public var byteCount: Int64 { self.len() }
-
     /// The number of bytes the storage buffer can hold without reallocating. O(1).
     public var capacity: Int64 { self.cap() }
 
@@ -512,7 +510,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// ```
     public mutating func append(other: some Str) {
         let slice = other.asSlice();
-        let otherLen = slice.byteCount;
+        let otherLen = (slice.end - slice.start);
         if otherLen == 0 {
             return
         }
@@ -727,7 +725,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     // ========================================================================
 
     /// Replaces every occurrence of `pattern` with `replacement`, in place.
-    public mutating func replace(pattern: String, with replacement: String) {
+    public mutating func replace(pattern: some Str, with replacement: some Str) {
         self = self.replaced(pattern, with: replacement)
     }
 
@@ -756,7 +754,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
             result.append(other);
             result
         } else {
-            var result = String(capacity: self.byteCount + other.byteCount);
+            var result = String(capacity: self.len() + other.len());
             result.append(self);
             result.append(other);
             result
@@ -781,6 +779,22 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
             return false
         }
         _bytesEqual(a: self.ptr(), b: other.ptr(), n: myLen)
+    }
+
+    public func equal(to other: String) -> Bool {
+        self.isEqual(to: other)
+    }
+
+    public func notEqual(to other: String) -> Bool {
+        if self.isEqual(to: other) { false } else { true }
+    }
+
+    public func equal(to other: StringSlice) -> Bool {
+        self.asSlice().isEqual(to: other)
+    }
+
+    public func notEqual(to other: StringSlice) -> Bool {
+        if self.asSlice().isEqual(to: other) { false } else { true }
     }
 
     /// Pattern-match form of `isEqual`: each `case "literal" =>` arm
@@ -856,13 +870,13 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// var opts = FormatOptions();
     /// opts.width = .Some(10);
     /// opts.alignment = .Left;
-    /// "test".format(opts);   // "test      "
+    /// "test".formatted(opts);   // "test      "
     /// opts.alignment = .Right;
-    /// "test".format(opts);   // "      test"
+    /// "test".formatted(opts);   // "      test"
     /// opts.alignment = .Center;
-    /// "test".format(opts);   // "   test   "
+    /// "test".formatted(opts);   // "   test   "
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         _writePadded(into: writer, self, options)
     }
 }
@@ -876,7 +890,7 @@ extend String {
     /// result of an iterator chain back into a `String`:
     ///
     /// ```
-    /// let upper = String(from: "hello".chars.iter().map { it.toUpper() });
+    /// let upper = String(from: "hello".chars.iter().map { it.toUpper() }.collect());
     /// // "HELLO"
     /// ```
     public init[I](from chars: I) where I: Iterable, I.Item = Char {

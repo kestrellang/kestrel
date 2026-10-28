@@ -22,7 +22,7 @@ protocol Factory {
 struct IntMaker { }
 extend IntMaker: Factory {
     func make[U](seed: lang.i64) -> U {
-        lang.panic("IntMaker.make never called in this test")
+        lang.panic()
     }
 }
 

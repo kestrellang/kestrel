@@ -17,21 +17,64 @@
 //! - More testable (can inspect events)
 //! - Follows proven rust-analyzer architecture
 
-use crate::input::ChumskySpan;
-use crate::parser::ParseError;
-use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{GreenNodeBuilder, SyntaxKind, SyntaxNode};
 
-/// Emit a typed piece of parser data to an [`EventSink`].
+/// The exact source text a fixed-lexeme `SyntaxKind` must have.
 ///
-/// Implementors are expected to destructure their data without a `..` rest
-/// pattern so that adding a new field forces the emitter to be updated (or
-/// fail to compile). The combination — one trait, one destructure per impl
-/// — gives us a local compile-time check that a new syntax field is handled
-/// by the emitter instead of being silently dropped.
-pub trait EmitSyntax {
-    fn emit(self, sink: &mut EventSink);
+/// Only punctuation and keywords — kinds whose spelling is fixed. Identifiers,
+/// literals and nodes have no expected text and are absent.
+fn expected_lexeme(kind: SyntaxKind) -> Option<&'static str> {
+    Some(match kind {
+        SyntaxKind::Dot => ".",
+        SyntaxKind::Comma => ",",
+        SyntaxKind::Colon => ":",
+        SyntaxKind::Semicolon => ";",
+        SyntaxKind::LParen => "(",
+        SyntaxKind::RParen => ")",
+        SyntaxKind::LBrace => "{",
+        SyntaxKind::RBrace => "}",
+        SyntaxKind::LBracket => "[",
+        SyntaxKind::RBracket => "]",
+        SyntaxKind::As => "as",
+        SyntaxKind::Import => "import",
+        SyntaxKind::Module => "module",
+        _ => return None,
+    })
+}
+
+/// Reject a token whose emitted span does not actually contain that token.
+///
+/// Emitters used to *invent* punctuation spans by byte arithmetic off a
+/// neighbouring identifier — `last_segment_end + 1 .. + 2` for a `(`, assuming
+/// exactly one byte of separator and zero trivia. But the combinators skip
+/// trivia, so `import A.B. (X, Y)` and multi-line imports are grammatical, and
+/// the fabricated range then held whitespace. The tree still round-tripped
+/// (`emit_trivia_until`'s safety net re-emitted the real punctuation as
+/// `SyntaxKind::Error`), so nothing failed — it just silently marked
+/// well-formed shipping stdlib source as a parse-recovery site (F25).
+///
+/// **Zero-width spans are exempt.** A parser recovery branch may synthesize an
+/// absent token (`or(empty().map_with(...))`); `emit_expression_statement`
+/// does exactly that for a missing `;`, which is why an empty-text `Semicolon`
+/// reaches here on shipping stdlib source. That is not a fabricated span — it
+/// is the documented synthesized-token idiom, and the fact that it is accepted
+/// silently is a separate finding (F13). What this rejects is a **non-empty**
+/// range that holds the wrong bytes.
+///
+/// Debug-only: the check is a string compare per fixed-lexeme token, and a
+/// release build must not pay for it. The suite runs debug, so drift is caught.
+fn debug_assert_token_text(kind: SyntaxKind, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    debug_assert!(
+        expected_lexeme(kind).is_none_or(|expected| expected == text),
+        "token {kind:?} was emitted over the text {text:?}, but that kind is \
+         always spelled {:?} — the span was derived by arithmetic instead of \
+         being captured by the parser (see F25)",
+        expected_lexeme(kind).unwrap_or_default()
+    );
 }
 
 /// Distinct trivia kinds that can appear between syntax tokens. Kept local to
@@ -61,8 +104,12 @@ pub enum Event {
     MissingToken { kind: SyntaxKind, at: Span },
     /// Finish the current syntax node
     FinishNode,
-    /// A parse error occurred
-    Error { message: String, span: Option<Span> },
+    /// A parse error occurred. `code` is its `E8xx` syntax-error code.
+    Error {
+        message: String,
+        span: Option<Span>,
+        code: Option<&'static str>,
+    },
 }
 
 /// Collects events during parsing
@@ -96,13 +143,7 @@ impl EventSink {
         self.events.push(Event::AddToken(kind, span));
     }
 
-    /// Emit a synthesized zero-width token wrapped in a `Missing` node at
-    /// the given position. The recovery primitive for "expected token X, got
-    /// nothing" — keeps the CST well-formed so downstream lowering /
-    /// inference / completion can still operate on the parent shape. The
-    /// caller is responsible for also emitting a corresponding parse error
-    /// (typically via Chumsky's `validate` emitter) so the diagnostic isn't
-    /// silently dropped.
+    /// Emit a synthesized zero-width token wrapped in a `Missing` node.
     pub fn missing_token(&mut self, kind: SyntaxKind, at: Span) {
         self.events.push(Event::MissingToken { kind, at });
     }
@@ -114,104 +155,16 @@ impl EventSink {
 
     /// Record a parse error with an optional span
     pub fn error(&mut self, message: String, span: Option<Span>) {
-        self.events.push(Event::Error { message, span });
-    }
-
-    /// Record a parse error at a chumsky span (uses stored file_id)
-    ///
-    /// This is the primary method for recording errors from chumsky parsers,
-    /// which use SimpleSpan without file ID information.
-    pub fn error_at(&mut self, message: String, span: ChumskySpan) {
         self.events.push(Event::Error {
             message,
-            span: Some(Span::new(self.file_id, span.start..span.end)),
-        });
-    }
-
-    /// Record a parse error with a pre-built Span (uses span's file_id)
-    ///
-    /// Use this when you already have a complete Span with the correct file_id.
-    pub fn error_at_span(&mut self, message: String, span: Span) {
-        self.events.push(Event::Error {
-            message,
-            span: Some(span),
-        });
-    }
-
-    /// Record a parse error without a specific span
-    pub fn error_no_span(&mut self, message: String) {
-        self.events.push(Event::Error {
-            message,
-            span: None,
-        });
-    }
-
-    /// Record a parse error from a chumsky Rich<Token> error
-    ///
-    /// This is the preferred method for recording errors from chumsky parsers
-    /// as it properly formats the token and extracts expected tokens.
-    pub fn error_from_rich(&mut self, error: &chumsky::error::Rich<'_, Token>) {
-        let parse_error = ParseError::from_token_error(error);
-        // Fix the file_id in the span (chumsky spans don't carry file_id)
-        let span = parse_error
-            .span
-            .map(|s| Span::new(self.file_id, s.start..s.end));
-        self.events.push(Event::Error {
-            message: parse_error.message,
             span,
+            code: None,
         });
     }
 
-    /// Add a closing token whose span the parser may have synthesised when
-    /// the real token was missing. A zero-width span means the parser ran
-    /// the recovery branch (`or(empty().map_with(...))`); in that case
-    /// emit a `missing_token` CST event plus a "expected `<kind>`"
-    /// diagnostic so the editor still squiggles the gap. Real tokens go
-    /// through the normal `add_token` path. Use this for any closing
-    /// `)` / `]` / `}` / `;` that has the parser-recovery pattern in
-    /// `parser_recovery_pattern.md`.
-    ///
-    /// The diagnostic span widens the synthesised zero-width span by one
-    /// byte to the left when possible — VSCode collapses zero-width
-    /// diagnostics to invisible squiggles, so we anchor the underline on
-    /// the character preceding the cursor (where the missing token should
-    /// have appeared).
-    pub fn add_token_or_missing(&mut self, kind: SyntaxKind, span: Span, expected_label: &str) {
-        if span.start == span.end {
-            // Anchor the diagnostic on the last real (non-trivia) token
-            // already emitted into this sink — that's the end of the
-            // expression / item that should have been followed by the
-            // missing closing token. Without this, the squiggle lands on
-            // whitespace at the start of the next line because chumsky's
-            // `skip_trivia` consumed the newline before the recovery
-            // branch fired.
-            let anchor_end = self.last_real_token_end().unwrap_or(span.end);
-            let diag_start = anchor_end.saturating_sub(1);
-            self.error_at_span(
-                format!("expected `{}`", expected_label),
-                // file_id from the sink, not the input span: chumsky
-                // spans use file_id 0, which the LSP's file_id → URL
-                // map would silently drop for any non-zero file.
-                Span::new(self.file_id, diag_start..anchor_end),
-            );
-            self.missing_token(kind, Span::new(self.file_id, span.start..span.end));
-        } else {
-            self.add_token(kind, span);
-        }
-    }
-
-    /// End offset of the most recently emitted non-trivia `AddToken`.
-    /// Used by `add_token_or_missing` to anchor diagnostics for parser-
-    /// synthesised tokens at the end of the previous real content.
-    fn last_real_token_end(&self) -> Option<usize> {
-        for ev in self.events.iter().rev() {
-            if let Event::AddToken(k, span) = ev
-                && !is_trivia_kind(*k)
-            {
-                return Some(span.end);
-            }
-        }
-        None
+    /// Append already-built events (the parser's output).
+    pub fn extend(&mut self, events: impl IntoIterator<Item = Event>) {
+        self.events.extend(events);
     }
 
     /// Get the collected events
@@ -329,6 +282,7 @@ impl<'src> TreeBuilder<'src> {
                     self.emit_trivia_until(span_start, builder);
 
                     let text = &self.source[span_range];
+                    debug_assert_token_text(kind, text);
                     builder.token(kind.into(), text);
                     self.source_pos = span_end;
                     self.pos += 1;

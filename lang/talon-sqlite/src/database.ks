@@ -63,7 +63,7 @@ public struct Database: SqliteExecutor {
         match body(tx) {
             .Ok(_) => execRawOnDb(self.conn.db, "COMMIT"),
             .Err(e) => {
-                let _ = execRawOnDb(self.conn.db, "ROLLBACK");
+                 execRawOnDb(self.conn.db, "ROLLBACK");
                 throw e;
             }
         }

@@ -6,6 +6,6 @@ import std.io.stdio.println
 func main() -> lang.i64 {
     let a: Int? = .Some(5);
     let b: Int? = null;
-    let _ = println((a ?? 10) + (b ?? 20));
+     println((a ?? 10) + (b ?? 20));
     0
 }

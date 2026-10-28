@@ -30,7 +30,7 @@ as a single `lang.f32`.
 ```
 let pi = Float64.pi;
 let area = pi * radius * radius;
-let s = area.format(.{precision: 2});  // "314.16"
+let s = area.formatted(.{precision: 2});  // "314.16"
 ```
 
 ```
@@ -153,7 +153,7 @@ _Defined in `lang/std/numeric/float32.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)
+public init(parsing: String)?
 ```
 
 Parses a `Float32` from a string. Recognises decimal
@@ -266,6 +266,25 @@ public func atanh() -> Float32
 ```
 
 Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### field `bitPattern`
+
+```kestrel
+public var bitPattern: UInt32 { get }
+```
+
+The raw IEEE-754 bit pattern reinterpreted as an unsigned integer
+(UInt32 for Float32). No value conversion — the bits are
+preserved exactly, so `sign`/`exponent`/`significand` can be extracted by
+masking. Inverse of `init(bitPattern:)`.
+
+##### Examples
+
+```
+(1.0).bitPattern;        // 4607182418800017408 (0x3FF0000000000000)
+```
 
 _Defined in `lang/std/numeric/float32.ks`._
 
@@ -494,6 +513,23 @@ Float64.infinity;       // inf
 Float64.infinity + 1;   // inf
 1.0 / 0.0;              // inf
 Float64.infinity.negate();  // -inf
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(bitPattern: UInt32)
+```
+
+Constructs a float by reinterpreting a raw IEEE-754 bit pattern (the
+inverse of `bitPattern`). No value conversion — the bits are used directly.
+
+##### Examples
+
+```
+Float32(bitPattern: 4607182418800017408);   // 1.0  (Float64)
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -834,6 +870,26 @@ exponents invert.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
+#### function `random`
+
+```kestrel
+public static func random(using: mutating some RandomNumberGenerator) -> Float32
+```
+
+Returns a uniform `Float32` in `[0, 1)`, drawn from `rng`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random() -> Float32
+```
+
+Returns a uniform `Float32` in `[0, 1)`, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
+
 #### field `raw`
 
 ```kestrel
@@ -1037,14 +1093,6 @@ _Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Comparable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `compare`
 
 ```kestrel
@@ -1067,95 +1115,7 @@ answer.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Self) -> Bool
-```
-
-`>` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Self) -> Bool
-```
-
-`>=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Self) -> Bool
-```
-
-`start..` lower-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Self) -> Bool
-```
-
-`..=end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Self) -> Bool
-```
-
-`..<end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Self) -> Bool
-```
-
-`<` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Self) -> Bool
-```
-
-`<=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Equatable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -1175,95 +1135,159 @@ Float64.nan.isEqual(to: Float64.nan);      // false (!)
 
 _Defined in `lang/std/numeric/float32.ks`._
 
-#### function `notEqual`
+### Implements `Less`
+
+#### typealias `Output`
 
 ```kestrel
-public func notEqual(to: Self) -> Bool
+type Output = Float32
 ```
 
-Default `!=`: delegates to `==` so there's a single source of truth.
+_Defined in `lang/std/numeric/float32.ks`._
 
-_Defined in `lang/std/core/protocols.ks`._
+#### typealias `Output`
+
+```kestrel
+type Output = Float32
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float32
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float32
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float32
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Float32) -> Bool
+```
+
+Returns true if `self < other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+### Implements `LessOrEqual`
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Float32) -> Bool
+```
+
+Returns true if `self <= other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+### Implements `Greater`
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Float32) -> Bool
+```
+
+Returns true if `self > other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+### Implements `GreaterOrEqual`
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Float32) -> Bool
+```
+
+Returns true if `self >= other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Formattable`
 
 #### function `format`
 
 ```kestrel
-public func format(into: mutating StringBuilder, FormatOptions)
+public func format(into: mutating some Formatter, FormatOptions)
 ```
 
 Formats the float directly into `writer`, honouring the supplied
 `FormatOptions`. Implements `Formattable`.
 
+Digit generation uses the exact big-integer engine in `float_digits.ks`:
+the value is decomposed into `m * 2^e` and rounded with round-to-nearest-
+even on the stored binary value, so printed decimals are correct.
+
 ##### Examples
 
 ```
-(3.14159).format();                                          // "3.14159"
-(3.14159).format(.{precision: 2});                  // "3.14"
-(1234.5).format(.{floatStyle: .Scientific});        // "1.2345e3"
-(0.756).format(.{floatStyle: .Percent});            // "75.6%"
-(3.14).format(.{width: 8, fill: '0'});              // "00003.14"
-(3.14).format(.{sign: .Always});                    // "+3.14"
+(3.14159).formatted();                                          // "3.14159"
+(3.14159).formatted(.{precision: 2});                  // "3.14"
+(1234.5).formatted(.{floatStyle: .Scientific});        // "1.2345e3"
+(0.756).formatted(.{floatStyle: .Percent});            // "75.6%"
+(3.14).formatted(.{width: 8, fill: '0'});              // "00003.14"
+(3.14).formatted(.{sign: .Always});                    // "+3.14"
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
-
-#### function `formatted`
-
-```kestrel
-public func formatted(FormatOptions) -> String
-```
-
-Returns this value rendered as a `String`.
-
-Convenience wrapper: creates a `StringBuilder`, calls
-`format(into:)`, and returns the built string. Uses a distinct
-name to avoid overload-resolution ambiguity with `format(into:)`.
-
-_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Addable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float32
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float32
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float32
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float32
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float32
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
 
 #### function `add`
 
@@ -1288,14 +1312,6 @@ _Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Subtractable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `subtract`
 
 ```kestrel
@@ -1307,14 +1323,6 @@ IEEE 754 subtraction. `inf - inf` is NaN; otherwise mirrors `add`.
 _Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Multipliable`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `multiply`
 
@@ -1338,14 +1346,6 @@ The multiplicative identity, `1.0`.
 _Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Divisible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `divide`
 
@@ -1373,14 +1373,6 @@ _Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Negatable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `negate`
 
 ```kestrel
@@ -1394,51 +1386,13 @@ _Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `ExpressibleByFloatLiteral`
 
-#### initializer `Float Literal`
-
-```kestrel
-init(floatLiteral: lang.f64)
-```
-
-Builds an instance from a floating-point literal.
-
-_Defined in `lang/std/core/literals.ks`._
-
 ### Implements `ExpressibleByIntLiteral`
-
-#### initializer `Int Literal`
-
-```kestrel
-init(intLiteral: lang.i64)
-```
-
-Builds an instance from an integer literal.
-
-_Defined in `lang/std/core/literals.ks`._
 
 ### Implements `Defaultable`
 
-#### initializer `Default`
-
-```kestrel
-init()
-```
-
-Builds the default-valued instance.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Convertible`
 
-#### initializer `From Source`
-
-```kestrel
-init(from: From)
-```
-
-Creates an instance from `value`.
-
-_Defined in `lang/std/core/convertible.ks`._
+### Implements `FFISafe`
 
 ## struct `Float64`
 
@@ -1458,7 +1412,7 @@ as a single `lang.f64`.
 ```
 let pi = Float64.pi;
 let area = pi * radius * radius;
-let s = area.format(.{precision: 2});  // "314.16"
+let s = area.formatted(.{precision: 2});  // "314.16"
 ```
 
 ```
@@ -1581,7 +1535,7 @@ _Defined in `lang/std/numeric/float64.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)
+public init(parsing: String)?
 ```
 
 Parses a `Float64` from a string. Recognises decimal
@@ -1694,6 +1648,25 @@ public func atanh() -> Float64
 ```
 
 Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### field `bitPattern`
+
+```kestrel
+public var bitPattern: UInt64 { get }
+```
+
+The raw IEEE-754 bit pattern reinterpreted as an unsigned integer
+(UInt64 for Float64). No value conversion — the bits are
+preserved exactly, so `sign`/`exponent`/`significand` can be extracted by
+masking. Inverse of `init(bitPattern:)`.
+
+##### Examples
+
+```
+(1.0).bitPattern;        // 4607182418800017408 (0x3FF0000000000000)
+```
 
 _Defined in `lang/std/numeric/float64.ks`._
 
@@ -1922,6 +1895,23 @@ Float64.infinity;       // inf
 Float64.infinity + 1;   // inf
 1.0 / 0.0;              // inf
 Float64.infinity.negate();  // -inf
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(bitPattern: UInt64)
+```
+
+Constructs a float by reinterpreting a raw IEEE-754 bit pattern (the
+inverse of `bitPattern`). No value conversion — the bits are used directly.
+
+##### Examples
+
+```
+Float64(bitPattern: 4607182418800017408);   // 1.0  (Float64)
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -2262,6 +2252,59 @@ exponents invert.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
+#### function `random`
+
+```kestrel
+public static func random(using: mutating some RandomNumberGenerator) -> Float64
+```
+
+Returns a uniform `Float64` in `[0, 1)`, drawn from `rng`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random() -> Float64
+```
+
+Returns a uniform `Float64` in `[0, 1)`, using OS entropy.
+
+##### Examples
+
+```
+let p = Float64.random();
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random(from: Float64, to: Float64, using: mutating some RandomNumberGenerator) -> Float64
+```
+
+Returns a uniform `Float64` in `[from, to)`, drawn from `rng`.
+Aborts when `from >= to`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random(from: Float64, to: Float64) -> Float64
+```
+
+Returns a uniform `Float64` in `[from, to)`, using OS entropy.
+
+##### Examples
+
+```
+let jitter = Float64.random(from: 0.0, to: 250.0);
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
 #### field `raw`
 
 ```kestrel
@@ -2465,14 +2508,6 @@ _Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Comparable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `compare`
 
 ```kestrel
@@ -2495,95 +2530,7 @@ answer.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Self) -> Bool
-```
-
-`>` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Self) -> Bool
-```
-
-`>=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Self) -> Bool
-```
-
-`start..` lower-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Self) -> Bool
-```
-
-`..=end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Self) -> Bool
-```
-
-`..<end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Self) -> Bool
-```
-
-`<` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Self) -> Bool
-```
-
-`<=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Equatable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -2603,95 +2550,159 @@ Float64.nan.isEqual(to: Float64.nan);      // false (!)
 
 _Defined in `lang/std/numeric/float64.ks`._
 
-#### function `notEqual`
+### Implements `Less`
+
+#### typealias `Output`
 
 ```kestrel
-public func notEqual(to: Self) -> Bool
+type Output = Float64
 ```
 
-Default `!=`: delegates to `==` so there's a single source of truth.
+_Defined in `lang/std/numeric/float64.ks`._
 
-_Defined in `lang/std/core/protocols.ks`._
+#### typealias `Output`
+
+```kestrel
+type Output = Float64
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float64
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float64
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float64
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Float64) -> Bool
+```
+
+Returns true if `self < other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+### Implements `LessOrEqual`
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Float64) -> Bool
+```
+
+Returns true if `self <= other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+### Implements `Greater`
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Float64) -> Bool
+```
+
+Returns true if `self > other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+### Implements `GreaterOrEqual`
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Float64) -> Bool
+```
+
+Returns true if `self >= other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Formattable`
 
 #### function `format`
 
 ```kestrel
-public func format(into: mutating StringBuilder, FormatOptions)
+public func format(into: mutating some Formatter, FormatOptions)
 ```
 
 Formats the float directly into `writer`, honouring the supplied
 `FormatOptions`. Implements `Formattable`.
 
+Digit generation uses the exact big-integer engine in `float_digits.ks`:
+the value is decomposed into `m * 2^e` and rounded with round-to-nearest-
+even on the stored binary value, so printed decimals are correct.
+
 ##### Examples
 
 ```
-(3.14159).format();                                          // "3.14159"
-(3.14159).format(.{precision: 2});                  // "3.14"
-(1234.5).format(.{floatStyle: .Scientific});        // "1.2345e3"
-(0.756).format(.{floatStyle: .Percent});            // "75.6%"
-(3.14).format(.{width: 8, fill: '0'});              // "00003.14"
-(3.14).format(.{sign: .Always});                    // "+3.14"
+(3.14159).formatted();                                          // "3.14159"
+(3.14159).formatted(.{precision: 2});                  // "3.14"
+(1234.5).formatted(.{floatStyle: .Scientific});        // "1.2345e3"
+(0.756).formatted(.{floatStyle: .Percent});            // "75.6%"
+(3.14).formatted(.{width: 8, fill: '0'});              // "00003.14"
+(3.14).formatted(.{sign: .Always});                    // "+3.14"
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
-
-#### function `formatted`
-
-```kestrel
-public func formatted(FormatOptions) -> String
-```
-
-Returns this value rendered as a `String`.
-
-Convenience wrapper: creates a `StringBuilder`, calls
-`format(into:)`, and returns the built string. Uses a distinct
-name to avoid overload-resolution ambiguity with `format(into:)`.
-
-_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Addable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float64
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float64
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float64
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float64
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float64
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
 
 #### function `add`
 
@@ -2716,14 +2727,6 @@ _Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Subtractable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `subtract`
 
 ```kestrel
@@ -2735,14 +2738,6 @@ IEEE 754 subtraction. `inf - inf` is NaN; otherwise mirrors `add`.
 _Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Multipliable`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `multiply`
 
@@ -2766,14 +2761,6 @@ The multiplicative identity, `1.0`.
 _Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Divisible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `divide`
 
@@ -2801,14 +2788,6 @@ _Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Negatable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `negate`
 
 ```kestrel
@@ -2822,51 +2801,13 @@ _Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `ExpressibleByFloatLiteral`
 
-#### initializer `Float Literal`
-
-```kestrel
-init(floatLiteral: lang.f64)
-```
-
-Builds an instance from a floating-point literal.
-
-_Defined in `lang/std/core/literals.ks`._
-
 ### Implements `ExpressibleByIntLiteral`
-
-#### initializer `Int Literal`
-
-```kestrel
-init(intLiteral: lang.i64)
-```
-
-Builds an instance from an integer literal.
-
-_Defined in `lang/std/core/literals.ks`._
 
 ### Implements `Defaultable`
 
-#### initializer `Default`
-
-```kestrel
-init()
-```
-
-Builds the default-valued instance.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Convertible`
 
-#### initializer `From Source`
-
-```kestrel
-init(from: From)
-```
-
-Creates an instance from `value`.
-
-_Defined in `lang/std/core/convertible.ks`._
+### Implements `FFISafe`
 
 ## typealias `Int`
 
@@ -2937,7 +2878,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S) where S: Slice[UInt8]
+public init[S](fromBytes: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int16` from 2 bytes in native byte order.
@@ -2948,7 +2889,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int16` from 2 bytes in big-endian order.
@@ -2959,7 +2900,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int16` from 2 bytes in little-endian order.
@@ -3078,7 +3019,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)
+public init(parsing: String)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -3098,7 +3039,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)
+public init(parsing: String, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -3182,8 +3123,11 @@ _Defined in `lang/std/numeric/int16.ks`._
 public func clamp(Int16, Int16) -> Int16
 ```
 
-Clamps `self` into `[min, max]`. Caller is responsible for ensuring
-`min <= max`; otherwise the result is undefined.
+Clamps `self` into `[min, max]`.
+
+##### Errors
+
+Panics with `"clamp: min must be <= max"` when `min > max`.
 
 ##### Examples
 
@@ -3233,6 +3177,25 @@ public func divideChecked(Int16) -> Int16?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming Int16) -> Int16
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3369,6 +3332,21 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming Int16) -> Int16
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
@@ -3376,8 +3354,6 @@ public func multiplyChecked(Int16) -> Int16?
 ```
 
 Wrapping multiplication that returns `None` instead of overflowing.
-Implemented by multiplying then dividing back; replace with an
-overflow-detecting intrinsic when one is available.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3431,6 +3407,48 @@ the would-be fraction).
 ```
 
 _Defined in `lang/std/numeric/int16.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random(using: mutating some RandomNumberGenerator) -> Int16
+```
+
+Returns a uniform value over the full `Int16` range, drawn from `rng`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random() -> Int16
+```
+
+Returns a uniform value over the full `Int16` range, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R, using: mutating some RandomNumberGenerator) -> Int16 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, drawn from `rng`. Bounds are
+`Int64`-domain (so literal ranges work) and are checked against the
+`Int16` range at runtime; empty, inverted, or out-of-range bounds abort.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R) -> Int16 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
 
 #### field `raw`
 
@@ -3563,6 +3581,18 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Steppable`
 
+#### function `distance`
+
+```kestrel
+public func distance(to: Int16) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### function `predecessor`
 
 ```kestrel
@@ -3586,14 +3616,6 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Comparable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `compare`
 
 ```kestrel
@@ -3613,95 +3635,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Self) -> Bool
-```
-
-`>` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Self) -> Bool
-```
-
-`>=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Self) -> Bool
-```
-
-`start..` lower-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Self) -> Bool
-```
-
-`..=end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Self) -> Bool
-```
-
-`..<end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Self) -> Bool
-```
-
-`<` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Self) -> Bool
-```
-
-`<=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Equatable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -3720,16 +3654,6 @@ Bit-for-bit equality. Backs the `==` operator.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Matchable`
 
 #### function `matches`
@@ -3747,7 +3671,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### function `format`
 
 ```kestrel
-public func format(into: mutating StringBuilder, FormatOptions)
+public func format(into: mutating some Formatter, FormatOptions)
 ```
 
 Formats the integer directly into `writer`, honouring the supplied
@@ -3756,30 +3680,16 @@ Formats the integer directly into `writer`, honouring the supplied
 ##### Examples
 
 ```
-(42).format();                                           // "42"
-(255).format(.{radix: 16});                     // "ff"
-(255).format(.{radix: 16, uppercase: true});    // "FF"
-(255).format(.{radix: 16, alternate: true});    // "0xff"
-(42).format(.{radix: 2, alternate: true});      // "0b101010"
-(42).format(.{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(.{sign: .Always});                 // "-42"
+(42).formatted();                                           // "42"
+(255).formatted(.{radix: 16});                     // "ff"
+(255).formatted(.{radix: 16, uppercase: true});    // "FF"
+(255).formatted(.{radix: 16, alternate: true});    // "0xff"
+(42).formatted(.{radix: 2, alternate: true});      // "0b101010"
+(42).formatted(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).formatted(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/int16.ks`._
-
-#### function `formatted`
-
-```kestrel
-public func formatted(FormatOptions) -> String
-```
-
-Returns this value rendered as a `String`.
-
-Convenience wrapper: creates a `StringBuilder`, calls
-`format(into:)`, and returns the built string. Uses a distinct
-name to avoid overload-resolution ambiguity with `format(into:)`.
-
-_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -3955,14 +3865,6 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Subtractable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `subtract`
 
 ```kestrel
@@ -3974,14 +3876,6 @@ public consuming func subtract(consuming Int16) -> Int16
 _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Multipliable`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `multiply`
 
@@ -4005,14 +3899,6 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Divisible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `divide`
 
 ```kestrel
@@ -4031,14 +3917,6 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Modulo`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `modulo`
 
 ```kestrel
@@ -4056,14 +3934,6 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Negatable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `negate`
 
 ```kestrel
@@ -4078,14 +3948,6 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseAnd`
 
 ```kestrel
@@ -4097,14 +3959,6 @@ Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseOr`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseOr`
 
@@ -4118,14 +3972,6 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseXor`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseXor`
 
 ```kestrel
@@ -4137,14 +3983,6 @@ Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `BitwiseNot`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseNot`
 
@@ -4158,34 +3996,20 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `LeftShift`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `shiftLeft`
 
 ```kestrel
 public consuming func shiftLeft(by: consuming Int64) -> Int16
 ```
 
-Left shift by `count`. Behavior is undefined when `count >= bitWidth`
-— pre-mask the count if you can't guarantee the bound.
+Left shift by `count`. The shift count is masked to
+`count % bitWidth` (matching hardware semantics), so
+`count >= bitWidth` wraps around rather than zeroing the value —
+e.g. shifting a `Int16` left by `bitWidth` is a no-op.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `RightShift`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `shiftRight`
 
@@ -4194,8 +4018,8 @@ public consuming func shiftRight(by: consuming Int64) -> Int16
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. Same `count` precondition as
-`shiftLeft`.
+logical (zero-filling) for unsigned. The count is masked to
+`count % bitWidth`, same as `shiftLeft`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -4321,37 +4145,11 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
-#### initializer `Int Literal`
-
-```kestrel
-init(intLiteral: lang.i64)
-```
-
-Builds an instance from an integer literal.
-
-_Defined in `lang/std/core/literals.ks`._
-
 ### Implements `Defaultable`
 
-#### initializer `Default`
-
-```kestrel
-init()
-```
-
-Builds the default-valued instance.
-
-_Defined in `lang/std/core/protocols.ks`._
+### Implements `FFISafe`
 
 ### Implements `RangeConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `exclusiveRange`
 
@@ -4365,14 +4163,6 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `inclusiveRange`
 
 ```kestrel
@@ -4384,14 +4174,6 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `RangeFromConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeFrom`
 
@@ -4405,14 +4187,6 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `RangeUpToConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `rangeUpTo`
 
 ```kestrel
@@ -4424,14 +4198,6 @@ Builds a partial range `..<self` (up to self, exclusive).
 _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `RangeThroughConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeThrough`
 
@@ -4445,15 +4211,15 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Convertible`
 
-#### initializer `From Source`
+### Implements `Exitable`
+
+#### function `report`
 
 ```kestrel
-init(from: From)
+consuming func report() -> ExitCode
 ```
 
-Creates an instance from `value`.
-
-_Defined in `lang/std/core/convertible.ks`._
+_Defined in `lang/std/os/exitable.ks`._
 
 ## struct `Int32`
 
@@ -4514,7 +4280,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S) where S: Slice[UInt8]
+public init[S](fromBytes: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int32` from 4 bytes in native byte order.
@@ -4525,7 +4291,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int32` from 4 bytes in big-endian order.
@@ -4536,7 +4302,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int32` from 4 bytes in little-endian order.
@@ -4655,7 +4421,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)
+public init(parsing: String)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -4675,7 +4441,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)
+public init(parsing: String, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -4759,8 +4525,11 @@ _Defined in `lang/std/numeric/int32.ks`._
 public func clamp(Int32, Int32) -> Int32
 ```
 
-Clamps `self` into `[min, max]`. Caller is responsible for ensuring
-`min <= max`; otherwise the result is undefined.
+Clamps `self` into `[min, max]`.
+
+##### Errors
+
+Panics with `"clamp: min must be <= max"` when `min > max`.
 
 ##### Examples
 
@@ -4810,6 +4579,25 @@ public func divideChecked(Int32) -> Int32?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming Int32) -> Int32
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4946,6 +4734,21 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming Int32) -> Int32
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
@@ -4953,8 +4756,6 @@ public func multiplyChecked(Int32) -> Int32?
 ```
 
 Wrapping multiplication that returns `None` instead of overflowing.
-Implemented by multiplying then dividing back; replace with an
-overflow-detecting intrinsic when one is available.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5008,6 +4809,48 @@ the would-be fraction).
 ```
 
 _Defined in `lang/std/numeric/int32.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random(using: mutating some RandomNumberGenerator) -> Int32
+```
+
+Returns a uniform value over the full `Int32` range, drawn from `rng`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random() -> Int32
+```
+
+Returns a uniform value over the full `Int32` range, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R, using: mutating some RandomNumberGenerator) -> Int32 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, drawn from `rng`. Bounds are
+`Int64`-domain (so literal ranges work) and are checked against the
+`Int32` range at runtime; empty, inverted, or out-of-range bounds abort.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R) -> Int32 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
 
 #### field `raw`
 
@@ -5140,6 +4983,18 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Steppable`
 
+#### function `distance`
+
+```kestrel
+public func distance(to: Int32) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### function `predecessor`
 
 ```kestrel
@@ -5163,14 +5018,6 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Comparable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `compare`
 
 ```kestrel
@@ -5190,95 +5037,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Self) -> Bool
-```
-
-`>` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Self) -> Bool
-```
-
-`>=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Self) -> Bool
-```
-
-`start..` lower-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Self) -> Bool
-```
-
-`..=end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Self) -> Bool
-```
-
-`..<end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Self) -> Bool
-```
-
-`<` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Self) -> Bool
-```
-
-`<=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Equatable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -5297,16 +5056,6 @@ Bit-for-bit equality. Backs the `==` operator.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Matchable`
 
 #### function `matches`
@@ -5324,7 +5073,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### function `format`
 
 ```kestrel
-public func format(into: mutating StringBuilder, FormatOptions)
+public func format(into: mutating some Formatter, FormatOptions)
 ```
 
 Formats the integer directly into `writer`, honouring the supplied
@@ -5333,30 +5082,16 @@ Formats the integer directly into `writer`, honouring the supplied
 ##### Examples
 
 ```
-(42).format();                                           // "42"
-(255).format(.{radix: 16});                     // "ff"
-(255).format(.{radix: 16, uppercase: true});    // "FF"
-(255).format(.{radix: 16, alternate: true});    // "0xff"
-(42).format(.{radix: 2, alternate: true});      // "0b101010"
-(42).format(.{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(.{sign: .Always});                 // "-42"
+(42).formatted();                                           // "42"
+(255).formatted(.{radix: 16});                     // "ff"
+(255).formatted(.{radix: 16, uppercase: true});    // "FF"
+(255).formatted(.{radix: 16, alternate: true});    // "0xff"
+(42).formatted(.{radix: 2, alternate: true});      // "0b101010"
+(42).formatted(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).formatted(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/int32.ks`._
-
-#### function `formatted`
-
-```kestrel
-public func formatted(FormatOptions) -> String
-```
-
-Returns this value rendered as a `String`.
-
-Convenience wrapper: creates a `StringBuilder`, calls
-`format(into:)`, and returns the built string. Uses a distinct
-name to avoid overload-resolution ambiguity with `format(into:)`.
-
-_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -5532,14 +5267,6 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Subtractable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `subtract`
 
 ```kestrel
@@ -5551,14 +5278,6 @@ public consuming func subtract(consuming Int32) -> Int32
 _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Multipliable`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `multiply`
 
@@ -5582,14 +5301,6 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Divisible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `divide`
 
 ```kestrel
@@ -5608,14 +5319,6 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Modulo`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `modulo`
 
 ```kestrel
@@ -5633,14 +5336,6 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Negatable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `negate`
 
 ```kestrel
@@ -5655,14 +5350,6 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseAnd`
 
 ```kestrel
@@ -5674,14 +5361,6 @@ Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseOr`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseOr`
 
@@ -5695,14 +5374,6 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseXor`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseXor`
 
 ```kestrel
@@ -5714,14 +5385,6 @@ Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `BitwiseNot`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseNot`
 
@@ -5735,34 +5398,20 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `LeftShift`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `shiftLeft`
 
 ```kestrel
 public consuming func shiftLeft(by: consuming Int64) -> Int32
 ```
 
-Left shift by `count`. Behavior is undefined when `count >= bitWidth`
-— pre-mask the count if you can't guarantee the bound.
+Left shift by `count`. The shift count is masked to
+`count % bitWidth` (matching hardware semantics), so
+`count >= bitWidth` wraps around rather than zeroing the value —
+e.g. shifting a `Int32` left by `bitWidth` is a no-op.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `RightShift`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `shiftRight`
 
@@ -5771,8 +5420,8 @@ public consuming func shiftRight(by: consuming Int64) -> Int32
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. Same `count` precondition as
-`shiftLeft`.
+logical (zero-filling) for unsigned. The count is masked to
+`count % bitWidth`, same as `shiftLeft`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5898,37 +5547,11 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
-#### initializer `Int Literal`
-
-```kestrel
-init(intLiteral: lang.i64)
-```
-
-Builds an instance from an integer literal.
-
-_Defined in `lang/std/core/literals.ks`._
-
 ### Implements `Defaultable`
 
-#### initializer `Default`
-
-```kestrel
-init()
-```
-
-Builds the default-valued instance.
-
-_Defined in `lang/std/core/protocols.ks`._
+### Implements `FFISafe`
 
 ### Implements `RangeConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `exclusiveRange`
 
@@ -5942,14 +5565,6 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `inclusiveRange`
 
 ```kestrel
@@ -5961,14 +5576,6 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `RangeFromConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeFrom`
 
@@ -5982,14 +5589,6 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `RangeUpToConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `rangeUpTo`
 
 ```kestrel
@@ -6001,14 +5600,6 @@ Builds a partial range `..<self` (up to self, exclusive).
 _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `RangeThroughConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeThrough`
 
@@ -6022,15 +5613,15 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Convertible`
 
-#### initializer `From Source`
+### Implements `Exitable`
+
+#### function `report`
 
 ```kestrel
-init(from: From)
+consuming func report() -> ExitCode
 ```
 
-Creates an instance from `value`.
-
-_Defined in `lang/std/core/convertible.ks`._
+_Defined in `lang/std/os/exitable.ks`._
 
 ## struct `Int64`
 
@@ -6091,7 +5682,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S) where S: Slice[UInt8]
+public init[S](fromBytes: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int64` from 8 bytes in native byte order.
@@ -6102,7 +5693,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int64` from 8 bytes in big-endian order.
@@ -6113,7 +5704,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int64` from 8 bytes in little-endian order.
@@ -6232,7 +5823,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)
+public init(parsing: String)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -6252,7 +5843,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)
+public init(parsing: String, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -6336,8 +5927,11 @@ _Defined in `lang/std/numeric/int64.ks`._
 public func clamp(Int64, Int64) -> Int64
 ```
 
-Clamps `self` into `[min, max]`. Caller is responsible for ensuring
-`min <= max`; otherwise the result is undefined.
+Clamps `self` into `[min, max]`.
+
+##### Errors
+
+Panics with `"clamp: min must be <= max"` when `min > max`.
 
 ##### Examples
 
@@ -6387,6 +5981,25 @@ public func divideChecked(Int64) -> Int64?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming Int64) -> Int64
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6523,6 +6136,21 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming Int64) -> Int64
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
@@ -6530,8 +6158,6 @@ public func multiplyChecked(Int64) -> Int64?
 ```
 
 Wrapping multiplication that returns `None` instead of overflowing.
-Implemented by multiplying then dividing back; replace with an
-overflow-detecting intrinsic when one is available.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6585,6 +6211,66 @@ the would-be fraction).
 ```
 
 _Defined in `lang/std/numeric/int64.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random(using: mutating some RandomNumberGenerator) -> Int64
+```
+
+Returns a uniform value over the full `Int64` range, drawn from `rng`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random() -> Int64
+```
+
+Returns a uniform value over the full `Int64` range, using OS entropy.
+
+##### Examples
+
+```
+let id = Int64.random();
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R, using: mutating some RandomNumberGenerator) -> Int64 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, drawn from `rng`. Accepts both
+`..<` and `..=` ranges; aborts when the range is empty or inverted.
+
+##### Examples
+
+```
+var rng = Lcg64(seed: 42);
+let roll = Int64.random(in: 1..=6, using: rng);
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R) -> Int64 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, using OS entropy.
+
+##### Examples
+
+```
+let roll = Int64.random(in: 1..=6);
+```
+
+_Defined in `lang/std/numeric/random.ks`._
 
 #### field `raw`
 
@@ -6717,6 +6403,18 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Steppable`
 
+#### function `distance`
+
+```kestrel
+public func distance(to: Int64) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### function `predecessor`
 
 ```kestrel
@@ -6740,14 +6438,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Comparable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `compare`
 
 ```kestrel
@@ -6767,95 +6457,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Self) -> Bool
-```
-
-`>` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Self) -> Bool
-```
-
-`>=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Self) -> Bool
-```
-
-`start..` lower-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Self) -> Bool
-```
-
-`..=end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Self) -> Bool
-```
-
-`..<end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Self) -> Bool
-```
-
-`<` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Self) -> Bool
-```
-
-`<=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Equatable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -6874,16 +6476,6 @@ Bit-for-bit equality. Backs the `==` operator.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Matchable`
 
 #### function `matches`
@@ -6901,7 +6493,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### function `format`
 
 ```kestrel
-public func format(into: mutating StringBuilder, FormatOptions)
+public func format(into: mutating some Formatter, FormatOptions)
 ```
 
 Formats the integer directly into `writer`, honouring the supplied
@@ -6910,30 +6502,16 @@ Formats the integer directly into `writer`, honouring the supplied
 ##### Examples
 
 ```
-(42).format();                                           // "42"
-(255).format(.{radix: 16});                     // "ff"
-(255).format(.{radix: 16, uppercase: true});    // "FF"
-(255).format(.{radix: 16, alternate: true});    // "0xff"
-(42).format(.{radix: 2, alternate: true});      // "0b101010"
-(42).format(.{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(.{sign: .Always});                 // "-42"
+(42).formatted();                                           // "42"
+(255).formatted(.{radix: 16});                     // "ff"
+(255).formatted(.{radix: 16, uppercase: true});    // "FF"
+(255).formatted(.{radix: 16, alternate: true});    // "0xff"
+(42).formatted(.{radix: 2, alternate: true});      // "0b101010"
+(42).formatted(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).formatted(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/int64.ks`._
-
-#### function `formatted`
-
-```kestrel
-public func formatted(FormatOptions) -> String
-```
-
-Returns this value rendered as a `String`.
-
-Convenience wrapper: creates a `StringBuilder`, calls
-`format(into:)`, and returns the built string. Uses a distinct
-name to avoid overload-resolution ambiguity with `format(into:)`.
-
-_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -7109,14 +6687,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Subtractable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `subtract`
 
 ```kestrel
@@ -7128,14 +6698,6 @@ public consuming func subtract(consuming Int64) -> Int64
 _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Multipliable`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `multiply`
 
@@ -7159,14 +6721,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Divisible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `divide`
 
 ```kestrel
@@ -7185,14 +6739,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Modulo`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `modulo`
 
 ```kestrel
@@ -7210,14 +6756,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Negatable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `negate`
 
 ```kestrel
@@ -7232,14 +6770,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseAnd`
 
 ```kestrel
@@ -7251,14 +6781,6 @@ Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseOr`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseOr`
 
@@ -7272,14 +6794,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseXor`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseXor`
 
 ```kestrel
@@ -7291,14 +6805,6 @@ Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `BitwiseNot`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseNot`
 
@@ -7312,34 +6818,20 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `LeftShift`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `shiftLeft`
 
 ```kestrel
 public consuming func shiftLeft(by: consuming Int64) -> Int64
 ```
 
-Left shift by `count`. Behavior is undefined when `count >= bitWidth`
-— pre-mask the count if you can't guarantee the bound.
+Left shift by `count`. The shift count is masked to
+`count % bitWidth` (matching hardware semantics), so
+`count >= bitWidth` wraps around rather than zeroing the value —
+e.g. shifting a `Int64` left by `bitWidth` is a no-op.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `RightShift`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `shiftRight`
 
@@ -7348,8 +6840,8 @@ public consuming func shiftRight(by: consuming Int64) -> Int64
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. Same `count` precondition as
-`shiftLeft`.
+logical (zero-filling) for unsigned. The count is masked to
+`count % bitWidth`, same as `shiftLeft`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -7475,37 +6967,11 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
-#### initializer `Int Literal`
-
-```kestrel
-init(intLiteral: lang.i64)
-```
-
-Builds an instance from an integer literal.
-
-_Defined in `lang/std/core/literals.ks`._
-
 ### Implements `Defaultable`
 
-#### initializer `Default`
-
-```kestrel
-init()
-```
-
-Builds the default-valued instance.
-
-_Defined in `lang/std/core/protocols.ks`._
+### Implements `FFISafe`
 
 ### Implements `RangeConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `exclusiveRange`
 
@@ -7519,14 +6985,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `inclusiveRange`
 
 ```kestrel
@@ -7538,14 +6996,6 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `RangeFromConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeFrom`
 
@@ -7559,14 +7009,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `RangeUpToConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `rangeUpTo`
 
 ```kestrel
@@ -7579,14 +7021,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `RangeThroughConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `rangeThrough`
 
 ```kestrel
@@ -7598,16 +7032,6 @@ Builds a partial range `..=self` (through self, inclusive).
 _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Convertible`
-
-#### initializer `From Source`
-
-```kestrel
-init(from: From)
-```
-
-Creates an instance from `value`.
-
-_Defined in `lang/std/core/convertible.ks`._
 
 ### Implements `SeqIndex`
 
@@ -7710,6 +7134,16 @@ public func writeSeqWrapped(to: ArraySlice[T], with: T?)
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
+
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
 
 ### Implements `BytesIndex`
 
@@ -8026,7 +7460,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S) where S: Slice[UInt8]
+public init[S](fromBytes: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int8` from 1 bytes in native byte order.
@@ -8037,7 +7471,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int8` from 1 bytes in big-endian order.
@@ -8048,7 +7482,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `Int8` from 1 bytes in little-endian order.
@@ -8167,7 +7601,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `Parsing`
 
 ```kestrel
-public init(parsing: String)
+public init(parsing: String)?
 ```
 
 Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
@@ -8187,7 +7621,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `Parsing with Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)
+public init(parsing: String, radix: Int64)?
 ```
 
 Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -8271,8 +7705,11 @@ _Defined in `lang/std/numeric/int8.ks`._
 public func clamp(Int8, Int8) -> Int8
 ```
 
-Clamps `self` into `[min, max]`. Caller is responsible for ensuring
-`min <= max`; otherwise the result is undefined.
+Clamps `self` into `[min, max]`.
+
+##### Errors
+
+Panics with `"clamp: min must be <= max"` when `min > max`.
 
 ##### Examples
 
@@ -8322,6 +7759,25 @@ public func divideChecked(Int8) -> Int8?
 
 Division that returns `None` for divide-by-zero or for the
 `minValue / -1` overflow case.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming Int8) -> Int8
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8458,6 +7914,21 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming Int8) -> Int8
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
@@ -8465,8 +7936,6 @@ public func multiplyChecked(Int8) -> Int8?
 ```
 
 Wrapping multiplication that returns `None` instead of overflowing.
-Implemented by multiplying then dividing back; replace with an
-overflow-detecting intrinsic when one is available.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8520,6 +7989,48 @@ the would-be fraction).
 ```
 
 _Defined in `lang/std/numeric/int8.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random(using: mutating some RandomNumberGenerator) -> Int8
+```
+
+Returns a uniform value over the full `Int8` range, drawn from `rng`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random() -> Int8
+```
+
+Returns a uniform value over the full `Int8` range, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R, using: mutating some RandomNumberGenerator) -> Int8 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, drawn from `rng`. Bounds are
+`Int64`-domain (so literal ranges work) and are checked against the
+`Int8` range at runtime; empty, inverted, or out-of-range bounds abort.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R) -> Int8 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
 
 #### field `raw`
 
@@ -8652,6 +8163,18 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Steppable`
 
+#### function `distance`
+
+```kestrel
+public func distance(to: Int8) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### function `predecessor`
 
 ```kestrel
@@ -8675,14 +8198,6 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Comparable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `compare`
 
 ```kestrel
@@ -8702,95 +8217,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Self) -> Bool
-```
-
-`>` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Self) -> Bool
-```
-
-`>=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Self) -> Bool
-```
-
-`start..` lower-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Self) -> Bool
-```
-
-`..=end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Self) -> Bool
-```
-
-`..<end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Self) -> Bool
-```
-
-`<` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Self) -> Bool
-```
-
-`<=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Equatable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -8809,16 +8236,6 @@ Bit-for-bit equality. Backs the `==` operator.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Matchable`
 
 #### function `matches`
@@ -8836,7 +8253,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### function `format`
 
 ```kestrel
-public func format(into: mutating StringBuilder, FormatOptions)
+public func format(into: mutating some Formatter, FormatOptions)
 ```
 
 Formats the integer directly into `writer`, honouring the supplied
@@ -8845,30 +8262,16 @@ Formats the integer directly into `writer`, honouring the supplied
 ##### Examples
 
 ```
-(42).format();                                           // "42"
-(255).format(.{radix: 16});                     // "ff"
-(255).format(.{radix: 16, uppercase: true});    // "FF"
-(255).format(.{radix: 16, alternate: true});    // "0xff"
-(42).format(.{radix: 2, alternate: true});      // "0b101010"
-(42).format(.{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(.{sign: .Always});                 // "-42"
+(42).formatted();                                           // "42"
+(255).formatted(.{radix: 16});                     // "ff"
+(255).formatted(.{radix: 16, uppercase: true});    // "FF"
+(255).formatted(.{radix: 16, alternate: true});    // "0xff"
+(42).formatted(.{radix: 2, alternate: true});      // "0b101010"
+(42).formatted(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).formatted(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/int8.ks`._
-
-#### function `formatted`
-
-```kestrel
-public func formatted(FormatOptions) -> String
-```
-
-Returns this value rendered as a `String`.
-
-Convenience wrapper: creates a `StringBuilder`, calls
-`format(into:)`, and returns the built string. Uses a distinct
-name to avoid overload-resolution ambiguity with `format(into:)`.
-
-_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -9044,14 +8447,6 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Subtractable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `subtract`
 
 ```kestrel
@@ -9063,14 +8458,6 @@ public consuming func subtract(consuming Int8) -> Int8
 _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Multipliable`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `multiply`
 
@@ -9094,14 +8481,6 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Divisible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `divide`
 
 ```kestrel
@@ -9120,14 +8499,6 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Modulo`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `modulo`
 
 ```kestrel
@@ -9145,14 +8516,6 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Negatable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `negate`
 
 ```kestrel
@@ -9167,14 +8530,6 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseAnd`
 
 ```kestrel
@@ -9186,14 +8541,6 @@ Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseOr`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseOr`
 
@@ -9207,14 +8554,6 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseXor`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseXor`
 
 ```kestrel
@@ -9226,14 +8565,6 @@ Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `BitwiseNot`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseNot`
 
@@ -9247,34 +8578,20 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `LeftShift`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `shiftLeft`
 
 ```kestrel
 public consuming func shiftLeft(by: consuming Int64) -> Int8
 ```
 
-Left shift by `count`. Behavior is undefined when `count >= bitWidth`
-— pre-mask the count if you can't guarantee the bound.
+Left shift by `count`. The shift count is masked to
+`count % bitWidth` (matching hardware semantics), so
+`count >= bitWidth` wraps around rather than zeroing the value —
+e.g. shifting a `Int8` left by `bitWidth` is a no-op.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `RightShift`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `shiftRight`
 
@@ -9283,8 +8600,8 @@ public consuming func shiftRight(by: consuming Int64) -> Int8
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. Same `count` precondition as
-`shiftLeft`.
+logical (zero-filling) for unsigned. The count is masked to
+`count % bitWidth`, same as `shiftLeft`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -9410,37 +8727,11 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
-#### initializer `Int Literal`
-
-```kestrel
-init(intLiteral: lang.i64)
-```
-
-Builds an instance from an integer literal.
-
-_Defined in `lang/std/core/literals.ks`._
-
 ### Implements `Defaultable`
 
-#### initializer `Default`
-
-```kestrel
-init()
-```
-
-Builds the default-valued instance.
-
-_Defined in `lang/std/core/protocols.ks`._
+### Implements `FFISafe`
 
 ### Implements `RangeConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `exclusiveRange`
 
@@ -9454,14 +8745,6 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `inclusiveRange`
 
 ```kestrel
@@ -9473,14 +8756,6 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `RangeFromConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeFrom`
 
@@ -9494,14 +8769,6 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `RangeUpToConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `rangeUpTo`
 
 ```kestrel
@@ -9513,14 +8780,6 @@ Builds a partial range `..<self` (up to self, exclusive).
 _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `RangeThroughConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeThrough`
 
@@ -9534,15 +8793,15 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Convertible`
 
-#### initializer `From Source`
+### Implements `Exitable`
+
+#### function `report`
 
 ```kestrel
-init(from: From)
+consuming func report() -> ExitCode
 ```
 
-Creates an instance from `value`.
-
-_Defined in `lang/std/core/convertible.ks`._
+_Defined in `lang/std/os/exitable.ks`._
 
 ## struct `Lcg64`
 
@@ -9553,6 +8812,8 @@ public struct Lcg64 { /* private fields */ }
 A 64-bit linear congruential generator. Cheap, allocation-free, and
 adequate for shuffling, fuzz seeds, and simulation noise — *not* for
 cryptographic use, key generation, or anything an adversary observes.
+Reach for `SystemRandom` when you want unpredictable values, and for
+`Lcg64(seed:)` when you want a reproducible stream.
 
 Constants come from Numerical Recipes and give a full period of `2^64`:
 
@@ -9609,28 +8870,6 @@ _Defined in `lang/std/numeric/random.ks`._
 
 ### Implements `RandomNumberGenerator`
 
-#### function `nextInt`
-
-```kestrel
-public mutating func nextInt(below: Int64) -> Int64
-```
-
-Returns a uniformly distributed integer in `[0, upperBound)`.
-Returns `0` when `upperBound <= 0` rather than panicking.
-
-Uses naive modulo for simplicity — for `upperBound` close to
-`UInt64.maxValue` the result has slight bias toward smaller values.
-If you need exact uniformity, sample `nextUInt64()` and reject.
-
-##### Examples
-
-```
-var rng = Lcg64(seed: 42);
-let roll = rng.nextInt(below: 6);   // 0..5
-```
-
-_Defined in `lang/std/numeric/random.ks`._
-
 #### function `nextUInt64`
 
 ```kestrel
@@ -9644,15 +8883,31 @@ _Defined in `lang/std/numeric/random.ks`._
 
 ### Implements `Defaultable`
 
-#### initializer `Default`
+## protocol `RandomBounds`
 
 ```kestrel
-init()
+public protocol RandomBounds[B]
 ```
 
-Builds the default-valued instance.
+Resolves a range-like type to inclusive bounds for uniform sampling —
+the `random(in:)` analogue of `SeqRange`. `Range` and `ClosedRange`
+conform for every standard integer type, so `Int64.random(in: 0..<6)`
+and `Int64.random(in: 1..=6)` go through one generic entry point.
 
-_Defined in `lang/std/core/protocols.ks`._
+_Defined in `lang/std/numeric/random.ks`._
+
+### Members
+
+#### function `inclusiveBounds`
+
+```kestrel
+func inclusiveBounds() -> ClosedRange[B]
+```
+
+The inclusive `[start, end]` sampling bounds. Aborts the process
+when the range is empty (possible only for half-open ranges).
+
+_Defined in `lang/std/numeric/random.ks`._
 
 ## protocol `RandomNumberGenerator`
 
@@ -9666,8 +8921,8 @@ helpers on top.
 
 Conformers are free to choose any algorithm they like — the protocol
 makes no statement about cryptographic strength, period, or bias. Pick
-`Lcg64` for cheap non-cryptographic randomness; bring your own type for
-anything stronger.
+`Lcg64` for cheap reproducible randomness, `SystemRandom` for OS entropy;
+bring your own type for anything stronger.
 
 ### Examples
 
@@ -9685,24 +8940,52 @@ _Defined in `lang/std/numeric/random.ks`._
 
 ### Members
 
-#### function `nextInt`
+#### function `nextBool`
 
 ```kestrel
-public mutating func nextInt(below: Int64) -> Int64
+public mutating func nextBool() -> Bool
 ```
 
-Returns a uniformly distributed integer in `[0, upperBound)`.
-Returns `0` when `upperBound <= 0` rather than panicking.
-
-Uses naive modulo for simplicity — for `upperBound` close to
-`UInt64.maxValue` the result has slight bias toward smaller values.
-If you need exact uniformity, sample `nextUInt64()` and reject.
+Returns `true` or `false` with equal probability.
 
 ##### Examples
 
 ```
 var rng = Lcg64(seed: 42);
-let roll = rng.nextInt(below: 6);   // 0..5
+if rng.nextBool() { }
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `nextFloat32`
+
+```kestrel
+public mutating func nextFloat32() -> Float32
+```
+
+Returns a uniformly distributed `Float32` in `[0, 1)`.
+
+Uses the top 24 bits of one `nextUInt64()` draw scaled by `2^-24`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `nextFloat64`
+
+```kestrel
+public mutating func nextFloat64() -> Float64
+```
+
+Returns a uniformly distributed `Float64` in `[0, 1)`.
+
+Uses the top 53 bits of one `nextUInt64()` draw scaled by `2^-53`,
+so every representable multiple of `2^-53` in the interval is
+equally likely.
+
+##### Examples
+
+```
+var rng = Lcg64(seed: 42);
+let p = rng.nextFloat64();   // e.g. 0.7297...
 ```
 
 _Defined in `lang/std/numeric/random.ks`._
@@ -9717,6 +9000,28 @@ Returns the next `UInt64` from the stream and advances internal
 state. Each call should be independent and uniformly distributed
 over the full `UInt64` range — implementers that can't promise
 uniformity (e.g. very small periods) should document the bias.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `nextUInt64`
+
+```kestrel
+public mutating func nextUInt64(below: UInt64) -> UInt64
+```
+
+Returns a uniformly distributed integer in `[0, upperBound)` with no
+modulo bias, using bitmask rejection sampling. Returns `0` when
+`upperBound` is `0`.
+
+Rejection draws at most 2 samples on average, so this stays `O(1)`
+in expectation for every bound.
+
+##### Examples
+
+```
+var rng = Lcg64(seed: 42);
+let roll = rng.nextUInt64(below: 6);   // 0..5, unbiased
+```
 
 _Defined in `lang/std/numeric/random.ks`._
 
@@ -9764,6 +9069,27 @@ _Defined in `lang/std/numeric/numeric.ks`._
 
 ### Members
 
+#### function `distance`
+
+```kestrel
+func distance(to: Self) -> Int64
+```
+
+The number of `successor()` steps from `self` to `other` (negative
+when `other` precedes `self`). For integers this is `other - self`.
+
+This is the `O(1)` stride distance — it lets range iterators carry a
+remaining-element *counter* instead of a boolean "finished" flag,
+which is what keeps `for x in a..=b` unrollable (a counter is an
+induction variable the optimizer can reason about; a flag is not).
+
+The result must fit in `Int64`. For spans wider than `Int64` (only
+reachable via near-full-width ranges, which never terminate in
+practice) the value wraps, following the same edge rule as
+`successor`/`predecessor`.
+
+_Defined in `lang/std/numeric/numeric.ks`._
+
 #### function `predecessor`
 
 ```kestrel
@@ -9783,6 +9109,65 @@ func successor() -> Self
 The next value in the sequence. For integers this is `self + 1`.
 
 _Defined in `lang/std/numeric/numeric.ks`._
+
+## struct `SystemRandom`
+
+```kestrel
+public struct SystemRandom { /* private fields */ }
+```
+
+A random number generator backed by operating-system entropy.
+
+Every `nextUInt64()` call reads 8 fresh bytes from the OS via
+`getentropy(2)` — there is no seed, no internal state, and no way to
+reproduce a stream. This is the generator behind all the no-argument
+conveniences (`Int64.random(in:)`, `Bool.random()`, `shuffle()`, ...);
+pass a seeded `Lcg64` to the `using:` overloads when you need
+reproducibility instead.
+
+Suitable as an entropy source, but see a dedicated crypto package for
+key generation and other adversarial uses.
+
+### Examples
+
+```
+var rng = SystemRandom();
+let value = rng.nextUInt64();   // unpredictable
+```
+
+### Representation
+
+Zero-sized — all state lives in the operating system.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+### Members
+
+#### initializer `Default`
+
+```kestrel
+public init()
+```
+
+Creates a system generator. Construction is free; entropy is read
+per call.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+### Implements `RandomNumberGenerator`
+
+#### function `nextUInt64`
+
+```kestrel
+public mutating func nextUInt64() -> UInt64
+```
+
+Returns 8 fresh OS entropy bytes as a `UInt64`. Aborts the process
+in the (effectively impossible) case that `getentropy` fails.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+### Implements `Defaultable`
 
 ## typealias `UInt`
 
@@ -9853,7 +9238,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S) where S: Slice[UInt8]
+public init[S](fromBytes: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt16` from 2 bytes in native byte order.
@@ -9864,7 +9249,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt16` from 2 bytes in big-endian order.
@@ -9875,7 +9260,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt16` from 2 bytes in little-endian order.
@@ -9994,7 +9379,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `Parse`
 
 ```kestrel
-public init(parsing: String)
+public init(parsing: String)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -10014,7 +9399,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)
+public init(parsing: String, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -10038,8 +9423,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public func addChecked(UInt16) -> UInt16?
 ```
 
-Wrapping addition that returns `None` on overflow. For unsigned types
-overflow is detected via `result < self`.
+Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10080,8 +9464,11 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public func clamp(UInt16, UInt16) -> UInt16
 ```
 
-Clamps `self` into `[min, max]`. Caller is responsible for ensuring
-`min <= max`; otherwise the result is undefined.
+Clamps `self` into `[min, max]`.
+
+##### Errors
+
+Panics with `"clamp: min must be <= max"` when `min > max`.
 
 ##### Examples
 
@@ -10130,6 +9517,25 @@ public func divideChecked(UInt16) -> UInt16?
 ```
 
 Division that returns `None` for divide-by-zero.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming UInt16) -> UInt16
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10266,14 +9672,28 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming UInt16) -> UInt16
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
 public func multiplyChecked(UInt16) -> UInt16?
 ```
 
-Wrapping multiplication that returns `None` on overflow. Implemented
-by multiplying then dividing back.
+Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10306,6 +9726,48 @@ the would-be fraction).
 ```
 
 _Defined in `lang/std/numeric/uint16.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random(using: mutating some RandomNumberGenerator) -> UInt16
+```
+
+Returns a uniform value over the full `UInt16` range, drawn from `rng`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random() -> UInt16
+```
+
+Returns a uniform value over the full `UInt16` range, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R, using: mutating some RandomNumberGenerator) -> UInt16 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, drawn from `rng`. Bounds are
+`Int64`-domain (so literal ranges work) and are checked against the
+`UInt16` range at runtime; empty, inverted, or out-of-range bounds abort.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R) -> UInt16 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
 
 #### field `raw`
 
@@ -10424,7 +9886,21 @@ power of two dividing the value.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+### Implements `UnsignedInteger`
+
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: UInt16) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `predecessor`
 
@@ -10449,14 +9925,6 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Comparable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `compare`
 
 ```kestrel
@@ -10476,95 +9944,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Self) -> Bool
-```
-
-`>` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Self) -> Bool
-```
-
-`>=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Self) -> Bool
-```
-
-`start..` lower-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Self) -> Bool
-```
-
-`..=end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Self) -> Bool
-```
-
-`..<end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Self) -> Bool
-```
-
-`<` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Self) -> Bool
-```
-
-`<=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Equatable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -10583,16 +9963,6 @@ Bit-for-bit equality. Backs the `==` operator.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Matchable`
 
 #### function `matches`
@@ -10610,7 +9980,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### function `format`
 
 ```kestrel
-public func format(into: mutating StringBuilder, FormatOptions)
+public func format(into: mutating some Formatter, FormatOptions)
 ```
 
 Formats the integer directly into `writer`, honouring the supplied
@@ -10619,30 +9989,16 @@ Formats the integer directly into `writer`, honouring the supplied
 ##### Examples
 
 ```
-(42).format();                                           // "42"
-(255).format(.{radix: 16});                     // "ff"
-(255).format(.{radix: 16, uppercase: true});    // "FF"
-(255).format(.{radix: 16, alternate: true});    // "0xff"
-(42).format(.{radix: 2, alternate: true});      // "0b101010"
-(42).format(.{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(.{sign: .Always});                 // "-42"
+(42).formatted();                                           // "42"
+(255).formatted(.{radix: 16});                     // "ff"
+(255).formatted(.{radix: 16, uppercase: true});    // "FF"
+(255).formatted(.{radix: 16, alternate: true});    // "0xff"
+(42).formatted(.{radix: 2, alternate: true});      // "0b101010"
+(42).formatted(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).formatted(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/uint16.ks`._
-
-#### function `formatted`
-
-```kestrel
-public func formatted(FormatOptions) -> String
-```
-
-Returns this value rendered as a `String`.
-
-Convenience wrapper: creates a `StringBuilder`, calls
-`format(into:)`, and returns the built string. Uses a distinct
-name to avoid overload-resolution ambiguity with `format(into:)`.
-
-_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -10810,14 +10166,6 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Subtractable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `subtract`
 
 ```kestrel
@@ -10829,14 +10177,6 @@ public consuming func subtract(consuming UInt16) -> UInt16
 _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Multipliable`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `multiply`
 
@@ -10860,14 +10200,6 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Divisible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `divide`
 
 ```kestrel
@@ -10886,14 +10218,6 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Modulo`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `modulo`
 
 ```kestrel
@@ -10911,14 +10235,6 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseAnd`
 
 ```kestrel
@@ -10930,14 +10246,6 @@ Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseOr`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseOr`
 
@@ -10951,14 +10259,6 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseXor`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseXor`
 
 ```kestrel
@@ -10970,14 +10270,6 @@ Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `BitwiseNot`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseNot`
 
@@ -10991,34 +10283,20 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `LeftShift`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `shiftLeft`
 
 ```kestrel
 public consuming func shiftLeft(by: consuming Int64) -> UInt16
 ```
 
-Left shift by `count`. Behavior is undefined when `count >= bitWidth`
-— pre-mask the count if you can't guarantee the bound.
+Left shift by `count`. The shift count is masked to
+`count % bitWidth` (matching hardware semantics), so
+`count >= bitWidth` wraps around rather than zeroing the value —
+e.g. shifting a `UInt16` left by `bitWidth` is a no-op.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `RightShift`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `shiftRight`
 
@@ -11027,8 +10305,8 @@ public consuming func shiftRight(by: consuming Int64) -> UInt16
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. Same `count` precondition as
-`shiftLeft`.
+logical (zero-filling) for unsigned. The count is masked to
+`count % bitWidth`, same as `shiftLeft`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -11154,37 +10432,11 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
-#### initializer `Int Literal`
-
-```kestrel
-init(intLiteral: lang.i64)
-```
-
-Builds an instance from an integer literal.
-
-_Defined in `lang/std/core/literals.ks`._
-
 ### Implements `Defaultable`
 
-#### initializer `Default`
-
-```kestrel
-init()
-```
-
-Builds the default-valued instance.
-
-_Defined in `lang/std/core/protocols.ks`._
+### Implements `FFISafe`
 
 ### Implements `RangeConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `exclusiveRange`
 
@@ -11198,14 +10450,6 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `inclusiveRange`
 
 ```kestrel
@@ -11217,14 +10461,6 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `RangeFromConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeFrom`
 
@@ -11238,14 +10474,6 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `RangeUpToConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `rangeUpTo`
 
 ```kestrel
@@ -11257,14 +10485,6 @@ Builds a partial range `..<self` (up to self, exclusive).
 _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `RangeThroughConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeThrough`
 
@@ -11278,15 +10498,15 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Convertible`
 
-#### initializer `From Source`
+### Implements `Exitable`
+
+#### function `report`
 
 ```kestrel
-init(from: From)
+consuming func report() -> ExitCode
 ```
 
-Creates an instance from `value`.
-
-_Defined in `lang/std/core/convertible.ks`._
+_Defined in `lang/std/os/exitable.ks`._
 
 ## struct `UInt32`
 
@@ -11347,7 +10567,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S) where S: Slice[UInt8]
+public init[S](fromBytes: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt32` from 4 bytes in native byte order.
@@ -11358,7 +10578,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt32` from 4 bytes in big-endian order.
@@ -11369,7 +10589,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt32` from 4 bytes in little-endian order.
@@ -11488,7 +10708,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `Parse`
 
 ```kestrel
-public init(parsing: String)
+public init(parsing: String)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -11508,7 +10728,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)
+public init(parsing: String, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -11532,8 +10752,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public func addChecked(UInt32) -> UInt32?
 ```
 
-Wrapping addition that returns `None` on overflow. For unsigned types
-overflow is detected via `result < self`.
+Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11574,8 +10793,11 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public func clamp(UInt32, UInt32) -> UInt32
 ```
 
-Clamps `self` into `[min, max]`. Caller is responsible for ensuring
-`min <= max`; otherwise the result is undefined.
+Clamps `self` into `[min, max]`.
+
+##### Errors
+
+Panics with `"clamp: min must be <= max"` when `min > max`.
 
 ##### Examples
 
@@ -11624,6 +10846,25 @@ public func divideChecked(UInt32) -> UInt32?
 ```
 
 Division that returns `None` for divide-by-zero.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming UInt32) -> UInt32
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11760,14 +11001,28 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming UInt32) -> UInt32
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
 public func multiplyChecked(UInt32) -> UInt32?
 ```
 
-Wrapping multiplication that returns `None` on overflow. Implemented
-by multiplying then dividing back.
+Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11800,6 +11055,48 @@ the would-be fraction).
 ```
 
 _Defined in `lang/std/numeric/uint32.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random(using: mutating some RandomNumberGenerator) -> UInt32
+```
+
+Returns a uniform value over the full `UInt32` range, drawn from `rng`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random() -> UInt32
+```
+
+Returns a uniform value over the full `UInt32` range, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R, using: mutating some RandomNumberGenerator) -> UInt32 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, drawn from `rng`. Bounds are
+`Int64`-domain (so literal ranges work) and are checked against the
+`UInt32` range at runtime; empty, inverted, or out-of-range bounds abort.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R) -> UInt32 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
 
 #### field `raw`
 
@@ -11918,7 +11215,21 @@ power of two dividing the value.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+### Implements `UnsignedInteger`
+
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: UInt32) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `predecessor`
 
@@ -11943,14 +11254,6 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Comparable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `compare`
 
 ```kestrel
@@ -11970,95 +11273,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Self) -> Bool
-```
-
-`>` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Self) -> Bool
-```
-
-`>=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Self) -> Bool
-```
-
-`start..` lower-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Self) -> Bool
-```
-
-`..=end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Self) -> Bool
-```
-
-`..<end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Self) -> Bool
-```
-
-`<` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Self) -> Bool
-```
-
-`<=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Equatable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -12077,16 +11292,6 @@ Bit-for-bit equality. Backs the `==` operator.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Matchable`
 
 #### function `matches`
@@ -12104,7 +11309,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### function `format`
 
 ```kestrel
-public func format(into: mutating StringBuilder, FormatOptions)
+public func format(into: mutating some Formatter, FormatOptions)
 ```
 
 Formats the integer directly into `writer`, honouring the supplied
@@ -12113,30 +11318,16 @@ Formats the integer directly into `writer`, honouring the supplied
 ##### Examples
 
 ```
-(42).format();                                           // "42"
-(255).format(.{radix: 16});                     // "ff"
-(255).format(.{radix: 16, uppercase: true});    // "FF"
-(255).format(.{radix: 16, alternate: true});    // "0xff"
-(42).format(.{radix: 2, alternate: true});      // "0b101010"
-(42).format(.{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(.{sign: .Always});                 // "-42"
+(42).formatted();                                           // "42"
+(255).formatted(.{radix: 16});                     // "ff"
+(255).formatted(.{radix: 16, uppercase: true});    // "FF"
+(255).formatted(.{radix: 16, alternate: true});    // "0xff"
+(42).formatted(.{radix: 2, alternate: true});      // "0b101010"
+(42).formatted(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).formatted(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/uint32.ks`._
-
-#### function `formatted`
-
-```kestrel
-public func formatted(FormatOptions) -> String
-```
-
-Returns this value rendered as a `String`.
-
-Convenience wrapper: creates a `StringBuilder`, calls
-`format(into:)`, and returns the built string. Uses a distinct
-name to avoid overload-resolution ambiguity with `format(into:)`.
-
-_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -12304,14 +11495,6 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Subtractable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `subtract`
 
 ```kestrel
@@ -12323,14 +11506,6 @@ public consuming func subtract(consuming UInt32) -> UInt32
 _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Multipliable`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `multiply`
 
@@ -12354,14 +11529,6 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Divisible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `divide`
 
 ```kestrel
@@ -12380,14 +11547,6 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Modulo`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `modulo`
 
 ```kestrel
@@ -12405,14 +11564,6 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseAnd`
 
 ```kestrel
@@ -12424,14 +11575,6 @@ Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseOr`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseOr`
 
@@ -12445,14 +11588,6 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseXor`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseXor`
 
 ```kestrel
@@ -12464,14 +11599,6 @@ Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `BitwiseNot`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseNot`
 
@@ -12485,34 +11612,20 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `LeftShift`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `shiftLeft`
 
 ```kestrel
 public consuming func shiftLeft(by: consuming Int64) -> UInt32
 ```
 
-Left shift by `count`. Behavior is undefined when `count >= bitWidth`
-— pre-mask the count if you can't guarantee the bound.
+Left shift by `count`. The shift count is masked to
+`count % bitWidth` (matching hardware semantics), so
+`count >= bitWidth` wraps around rather than zeroing the value —
+e.g. shifting a `UInt32` left by `bitWidth` is a no-op.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `RightShift`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `shiftRight`
 
@@ -12521,8 +11634,8 @@ public consuming func shiftRight(by: consuming Int64) -> UInt32
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. Same `count` precondition as
-`shiftLeft`.
+logical (zero-filling) for unsigned. The count is masked to
+`count % bitWidth`, same as `shiftLeft`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -12648,37 +11761,11 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
-#### initializer `Int Literal`
-
-```kestrel
-init(intLiteral: lang.i64)
-```
-
-Builds an instance from an integer literal.
-
-_Defined in `lang/std/core/literals.ks`._
-
 ### Implements `Defaultable`
 
-#### initializer `Default`
-
-```kestrel
-init()
-```
-
-Builds the default-valued instance.
-
-_Defined in `lang/std/core/protocols.ks`._
+### Implements `FFISafe`
 
 ### Implements `RangeConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `exclusiveRange`
 
@@ -12692,14 +11779,6 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `inclusiveRange`
 
 ```kestrel
@@ -12711,14 +11790,6 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `RangeFromConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeFrom`
 
@@ -12732,14 +11803,6 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `RangeUpToConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `rangeUpTo`
 
 ```kestrel
@@ -12751,14 +11814,6 @@ Builds a partial range `..<self` (up to self, exclusive).
 _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `RangeThroughConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeThrough`
 
@@ -12772,15 +11827,15 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Convertible`
 
-#### initializer `From Source`
+### Implements `Exitable`
+
+#### function `report`
 
 ```kestrel
-init(from: From)
+consuming func report() -> ExitCode
 ```
 
-Creates an instance from `value`.
-
-_Defined in `lang/std/core/convertible.ks`._
+_Defined in `lang/std/os/exitable.ks`._
 
 ## struct `UInt64`
 
@@ -12841,7 +11896,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S) where S: Slice[UInt8]
+public init[S](fromBytes: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt64` from 8 bytes in native byte order.
@@ -12852,7 +11907,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt64` from 8 bytes in big-endian order.
@@ -12863,7 +11918,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt64` from 8 bytes in little-endian order.
@@ -12982,7 +12037,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `Parse`
 
 ```kestrel
-public init(parsing: String)
+public init(parsing: String)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -13002,7 +12057,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)
+public init(parsing: String, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -13026,8 +12081,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public func addChecked(UInt64) -> UInt64?
 ```
 
-Wrapping addition that returns `None` on overflow. For unsigned types
-overflow is detected via `result < self`.
+Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -13068,8 +12122,11 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public func clamp(UInt64, UInt64) -> UInt64
 ```
 
-Clamps `self` into `[min, max]`. Caller is responsible for ensuring
-`min <= max`; otherwise the result is undefined.
+Clamps `self` into `[min, max]`.
+
+##### Errors
+
+Panics with `"clamp: min must be <= max"` when `min > max`.
 
 ##### Examples
 
@@ -13118,6 +12175,25 @@ public func divideChecked(UInt64) -> UInt64?
 ```
 
 Division that returns `None` for divide-by-zero.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming UInt64) -> UInt64
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -13254,14 +12330,28 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming UInt64) -> UInt64
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
 public func multiplyChecked(UInt64) -> UInt64?
 ```
 
-Wrapping multiplication that returns `None` on overflow. Implemented
-by multiplying then dividing back.
+Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -13294,6 +12384,57 @@ the would-be fraction).
 ```
 
 _Defined in `lang/std/numeric/uint64.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random(using: mutating some RandomNumberGenerator) -> UInt64
+```
+
+Returns a uniform value over the full `UInt64` range, drawn from
+`rng`. This is the only way to draw values above `Int64.maxValue` —
+`random(in:)` bounds live in the `Int64` domain.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random() -> UInt64
+```
+
+Returns a uniform value over the full `UInt64` range, using OS
+entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R, using: mutating some RandomNumberGenerator) -> UInt64 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, drawn from `rng`. Bounds are
+`Int64`-domain (so literal ranges work); negative bounds abort.
+
+##### Examples
+
+```
+var rng = Lcg64(seed: 42);
+let value = UInt64.random(in: 0..<100, using: rng);
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R) -> UInt64 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
 
 #### field `raw`
 
@@ -13412,7 +12553,21 @@ power of two dividing the value.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+### Implements `UnsignedInteger`
+
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: UInt64) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `predecessor`
 
@@ -13437,14 +12592,6 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Comparable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `compare`
 
 ```kestrel
@@ -13464,95 +12611,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Self) -> Bool
-```
-
-`>` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Self) -> Bool
-```
-
-`>=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Self) -> Bool
-```
-
-`start..` lower-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Self) -> Bool
-```
-
-`..=end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Self) -> Bool
-```
-
-`..<end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Self) -> Bool
-```
-
-`<` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Self) -> Bool
-```
-
-`<=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Equatable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -13571,16 +12630,6 @@ Bit-for-bit equality. Backs the `==` operator.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Matchable`
 
 #### function `matches`
@@ -13598,7 +12647,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### function `format`
 
 ```kestrel
-public func format(into: mutating StringBuilder, FormatOptions)
+public func format(into: mutating some Formatter, FormatOptions)
 ```
 
 Formats the integer directly into `writer`, honouring the supplied
@@ -13607,30 +12656,16 @@ Formats the integer directly into `writer`, honouring the supplied
 ##### Examples
 
 ```
-(42).format();                                           // "42"
-(255).format(.{radix: 16});                     // "ff"
-(255).format(.{radix: 16, uppercase: true});    // "FF"
-(255).format(.{radix: 16, alternate: true});    // "0xff"
-(42).format(.{radix: 2, alternate: true});      // "0b101010"
-(42).format(.{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(.{sign: .Always});                 // "-42"
+(42).formatted();                                           // "42"
+(255).formatted(.{radix: 16});                     // "ff"
+(255).formatted(.{radix: 16, uppercase: true});    // "FF"
+(255).formatted(.{radix: 16, alternate: true});    // "0xff"
+(42).formatted(.{radix: 2, alternate: true});      // "0b101010"
+(42).formatted(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).formatted(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/uint64.ks`._
-
-#### function `formatted`
-
-```kestrel
-public func formatted(FormatOptions) -> String
-```
-
-Returns this value rendered as a `String`.
-
-Convenience wrapper: creates a `StringBuilder`, calls
-`format(into:)`, and returns the built string. Uses a distinct
-name to avoid overload-resolution ambiguity with `format(into:)`.
-
-_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -13798,14 +12833,6 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Subtractable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `subtract`
 
 ```kestrel
@@ -13817,14 +12844,6 @@ public consuming func subtract(consuming UInt64) -> UInt64
 _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Multipliable`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `multiply`
 
@@ -13848,14 +12867,6 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Divisible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `divide`
 
 ```kestrel
@@ -13874,14 +12885,6 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Modulo`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `modulo`
 
 ```kestrel
@@ -13899,14 +12902,6 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseAnd`
 
 ```kestrel
@@ -13918,14 +12913,6 @@ Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseOr`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseOr`
 
@@ -13939,14 +12926,6 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseXor`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseXor`
 
 ```kestrel
@@ -13958,14 +12937,6 @@ Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `BitwiseNot`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseNot`
 
@@ -13979,34 +12950,20 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `LeftShift`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `shiftLeft`
 
 ```kestrel
 public consuming func shiftLeft(by: consuming Int64) -> UInt64
 ```
 
-Left shift by `count`. Behavior is undefined when `count >= bitWidth`
-— pre-mask the count if you can't guarantee the bound.
+Left shift by `count`. The shift count is masked to
+`count % bitWidth` (matching hardware semantics), so
+`count >= bitWidth` wraps around rather than zeroing the value —
+e.g. shifting a `UInt64` left by `bitWidth` is a no-op.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `RightShift`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `shiftRight`
 
@@ -14015,8 +12972,8 @@ public consuming func shiftRight(by: consuming Int64) -> UInt64
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. Same `count` precondition as
-`shiftLeft`.
+logical (zero-filling) for unsigned. The count is masked to
+`count % bitWidth`, same as `shiftLeft`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -14142,37 +13099,11 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
-#### initializer `Int Literal`
-
-```kestrel
-init(intLiteral: lang.i64)
-```
-
-Builds an instance from an integer literal.
-
-_Defined in `lang/std/core/literals.ks`._
-
 ### Implements `Defaultable`
 
-#### initializer `Default`
-
-```kestrel
-init()
-```
-
-Builds the default-valued instance.
-
-_Defined in `lang/std/core/protocols.ks`._
+### Implements `FFISafe`
 
 ### Implements `RangeConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `exclusiveRange`
 
@@ -14186,14 +13117,6 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `inclusiveRange`
 
 ```kestrel
@@ -14205,14 +13128,6 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `RangeFromConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeFrom`
 
@@ -14226,14 +13141,6 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `RangeUpToConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `rangeUpTo`
 
 ```kestrel
@@ -14245,14 +13152,6 @@ Builds a partial range `..<self` (up to self, exclusive).
 _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `RangeThroughConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeThrough`
 
@@ -14266,15 +13165,15 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Convertible`
 
-#### initializer `From Source`
+### Implements `Exitable`
+
+#### function `report`
 
 ```kestrel
-init(from: From)
+consuming func report() -> ExitCode
 ```
 
-Creates an instance from `value`.
-
-_Defined in `lang/std/core/convertible.ks`._
+_Defined in `lang/std/os/exitable.ks`._
 
 ## struct `UInt8`
 
@@ -14335,7 +13234,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S) where S: Slice[UInt8]
+public init[S](fromBytes: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt8` from 1 bytes in native byte order.
@@ -14346,7 +13245,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt8` from 1 bytes in big-endian order.
@@ -14357,7 +13256,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S) where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
 ```
 
 Reassembles a `UInt8` from 1 bytes in little-endian order.
@@ -14476,7 +13375,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `Parse`
 
 ```kestrel
-public init(parsing: String)
+public init(parsing: String)?
 ```
 
 Parses a base-10 unsigned integer literal, optionally prefixed
@@ -14496,7 +13395,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `Parse Radix`
 
 ```kestrel
-public init(parsing: String, radix: Int64)
+public init(parsing: String, radix: Int64)?
 ```
 
 Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -14520,8 +13419,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public func addChecked(UInt8) -> UInt8?
 ```
 
-Wrapping addition that returns `None` on overflow. For unsigned types
-overflow is detected via `result < self`.
+Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14562,8 +13460,11 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public func clamp(UInt8, UInt8) -> UInt8
 ```
 
-Clamps `self` into `[min, max]`. Caller is responsible for ensuring
-`min <= max`; otherwise the result is undefined.
+Clamps `self` into `[min, max]`.
+
+##### Errors
+
+Panics with `"clamp: min must be <= max"` when `min > max`.
 
 ##### Examples
 
@@ -14612,6 +13513,25 @@ public func divideChecked(UInt8) -> UInt8?
 ```
 
 Division that returns `None` for divide-by-zero.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming UInt8) -> UInt8
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14748,14 +13668,28 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming UInt8) -> UInt8
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
 public func multiplyChecked(UInt8) -> UInt8?
 ```
 
-Wrapping multiplication that returns `None` on overflow. Implemented
-by multiplying then dividing back.
+Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14788,6 +13722,48 @@ the would-be fraction).
 ```
 
 _Defined in `lang/std/numeric/uint8.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random(using: mutating some RandomNumberGenerator) -> UInt8
+```
+
+Returns a uniform value over the full `UInt8` range, drawn from `rng`.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random() -> UInt8
+```
+
+Returns a uniform value over the full `UInt8` range, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R, using: mutating some RandomNumberGenerator) -> UInt8 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, drawn from `rng`. Bounds are
+`Int64`-domain (so literal ranges work) and are checked against the
+`UInt8` range at runtime; empty, inverted, or out-of-range bounds abort.
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random[R](in: R) -> UInt8 where R: RandomBounds[Int64]
+```
+
+Returns a uniform value in `range`, using OS entropy.
+
+_Defined in `lang/std/numeric/random.ks`._
 
 #### field `raw`
 
@@ -14906,7 +13882,21 @@ power of two dividing the value.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+### Implements `UnsignedInteger`
+
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: UInt8) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `predecessor`
 
@@ -14931,14 +13921,6 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Comparable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `compare`
 
 ```kestrel
@@ -14958,95 +13940,7 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
-#### function `greaterThan`
-
-```kestrel
-public func greaterThan(Self) -> Bool
-```
-
-`>` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `greaterThanOrEqual`
-
-```kestrel
-public func greaterThanOrEqual(Self) -> Bool
-```
-
-`>=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtLeast`
-
-```kestrel
-public func isAtLeast(Self) -> Bool
-```
-
-`start..` lower-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isAtMost`
-
-```kestrel
-public func isAtMost(Self) -> Bool
-```
-
-`..=end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isBelow`
-
-```kestrel
-public func isBelow(Self) -> Bool
-```
-
-`..<end` upper-bound check, derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThan`
-
-```kestrel
-public func lessThan(Self) -> Bool
-```
-
-`<` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `lessThanOrEqual`
-
-```kestrel
-public func lessThanOrEqual(Self) -> Bool
-```
-
-`<=` derived from `compare`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Equatable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -15065,16 +13959,6 @@ Bit-for-bit equality. Backs the `==` operator.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 ### Implements `Matchable`
 
 #### function `matches`
@@ -15092,7 +13976,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### function `format`
 
 ```kestrel
-public func format(into: mutating StringBuilder, FormatOptions)
+public func format(into: mutating some Formatter, FormatOptions)
 ```
 
 Formats the integer directly into `writer`, honouring the supplied
@@ -15101,30 +13985,16 @@ Formats the integer directly into `writer`, honouring the supplied
 ##### Examples
 
 ```
-(42).format();                                           // "42"
-(255).format(.{radix: 16});                     // "ff"
-(255).format(.{radix: 16, uppercase: true});    // "FF"
-(255).format(.{radix: 16, alternate: true});    // "0xff"
-(42).format(.{radix: 2, alternate: true});      // "0b101010"
-(42).format(.{width: .Some(5), fill: '0'});     // "00042"
-(-42).format(.{sign: .Always});                 // "-42"
+(42).formatted();                                           // "42"
+(255).formatted(.{radix: 16});                     // "ff"
+(255).formatted(.{radix: 16, uppercase: true});    // "FF"
+(255).formatted(.{radix: 16, alternate: true});    // "0xff"
+(42).formatted(.{radix: 2, alternate: true});      // "0b101010"
+(42).formatted(.{width: .Some(5), fill: '0'});     // "00042"
+(-42).formatted(.{sign: .Always});                 // "-42"
 ```
 
 _Defined in `lang/std/numeric/uint8.ks`._
-
-#### function `formatted`
-
-```kestrel
-public func formatted(FormatOptions) -> String
-```
-
-Returns this value rendered as a `String`.
-
-Convenience wrapper: creates a `StringBuilder`, calls
-`format(into:)`, and returns the built string. Uses a distinct
-name to avoid overload-resolution ambiguity with `format(into:)`.
-
-_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -15292,14 +14162,6 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Subtractable`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `subtract`
 
 ```kestrel
@@ -15311,14 +14173,6 @@ public consuming func subtract(consuming UInt8) -> UInt8
 _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Multipliable`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `multiply`
 
@@ -15342,14 +14196,6 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Divisible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `divide`
 
 ```kestrel
@@ -15368,14 +14214,6 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Modulo`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
 #### function `modulo`
 
 ```kestrel
@@ -15393,14 +14231,6 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseAnd`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseAnd`
 
 ```kestrel
@@ -15412,14 +14242,6 @@ Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
 _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseOr`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseOr`
 
@@ -15433,14 +14255,6 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseXor`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `bitwiseXor`
 
 ```kestrel
@@ -15452,14 +14266,6 @@ Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
 _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `BitwiseNot`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `bitwiseNot`
 
@@ -15473,34 +14279,20 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `LeftShift`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
-
 #### function `shiftLeft`
 
 ```kestrel
 public consuming func shiftLeft(by: consuming Int64) -> UInt8
 ```
 
-Left shift by `count`. Behavior is undefined when `count >= bitWidth`
-— pre-mask the count if you can't guarantee the bound.
+Left shift by `count`. The shift count is masked to
+`count % bitWidth` (matching hardware semantics), so
+`count >= bitWidth` wraps around rather than zeroing the value —
+e.g. shifting a `UInt8` left by `bitWidth` is a no-op.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `RightShift`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/bitwise.ks`._
 
 #### function `shiftRight`
 
@@ -15509,8 +14301,8 @@ public consuming func shiftRight(by: consuming Int64) -> UInt8
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
-logical (zero-filling) for unsigned. Same `count` precondition as
-`shiftLeft`.
+logical (zero-filling) for unsigned. The count is masked to
+`count % bitWidth`, same as `shiftLeft`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -15636,37 +14428,11 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `ExpressibleByIntLiteral`
 
-#### initializer `Int Literal`
-
-```kestrel
-init(intLiteral: lang.i64)
-```
-
-Builds an instance from an integer literal.
-
-_Defined in `lang/std/core/literals.ks`._
-
 ### Implements `Defaultable`
 
-#### initializer `Default`
-
-```kestrel
-init()
-```
-
-Builds the default-valued instance.
-
-_Defined in `lang/std/core/protocols.ks`._
+### Implements `FFISafe`
 
 ### Implements `RangeConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `exclusiveRange`
 
@@ -15680,14 +14446,6 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `ClosedRangeConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `inclusiveRange`
 
 ```kestrel
@@ -15699,14 +14457,6 @@ Builds a closed range `self..=end`. Sugar for the `..=` operator.
 _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `RangeFromConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeFrom`
 
@@ -15720,14 +14470,6 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `RangeUpToConstructible`
 
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
-
 #### function `rangeUpTo`
 
 ```kestrel
@@ -15739,14 +14481,6 @@ Builds a partial range `..<self` (up to self, exclusive).
 _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `RangeThroughConstructible`
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/range.ks`._
 
 #### function `rangeThrough`
 
@@ -15760,15 +14494,15 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Convertible`
 
-#### initializer `From Source`
+### Implements `Exitable`
+
+#### function `report`
 
 ```kestrel
-init(from: From)
+consuming func report() -> ExitCode
 ```
 
-Creates an instance from `value`.
-
-_Defined in `lang/std/core/convertible.ks`._
+_Defined in `lang/std/os/exitable.ks`._
 
 ## protocol `UnsignedInteger`
 

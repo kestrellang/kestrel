@@ -12,15 +12,45 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use kestrel_ast_builder::{Os as AstOs, TargetConfig as AstTargetConfig};
 use kestrel_codegen::TargetConfig as CodegenTargetConfig;
 use kestrel_codegen_cranelift as cranelift_backend;
-use kestrel_compiler::{Compiler, Severity};
+use kestrel_codegen_llvm as llvm_backend;
+use kestrel_compiler::Compiler;
+
+/// Code generation backend, chosen by optimization level (see `Backend::for_opt`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum Backend {
+    /// Cranelift: fast compiles, used for unoptimized builds (`-O0`).
+    Cranelift,
+    /// LLVM 18 (via inkwell): used for optimized builds (`-O1`, `-O2`).
+    Llvm,
+}
+
+impl Backend {
+    /// `-O0` builds with Cranelift (compile speed); `-O1`/`-O2` with LLVM
+    /// (code quality). The single place the backend is decided.
+    fn for_opt(opt_level: u8) -> Backend {
+        if opt_level == 0 {
+            Backend::Cranelift
+        } else {
+            Backend::Llvm
+        }
+    }
+}
 use kestrel_compiler_driver::CompilerDriver;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(code) => code,
+    // Compile on a thread with a large stack: deeply nested input recurses
+    // once per level (see `COMPILER_STACK_SIZE`).
+    let worker = std::thread::Builder::new()
+        .name("kestrel".into())
+        .stack_size(kestrel_compiler::COMPILER_STACK_SIZE)
+        .spawn(run)
+        .expect("failed to spawn the compiler thread");
+    match worker.join() {
+        Ok(Ok(())) => ExitCode::SUCCESS,
+        Ok(Err(code)) => code,
+        Err(panic) => std::panic::resume_unwind(panic),
     }
 }
 
@@ -86,7 +116,8 @@ struct BuildArgs {
     #[arg(short, long)]
     output: Option<String>,
 
-    /// Optimization level: 0 = none, 1 = speed, 2 = speed + size.
+    /// Optimization level: 0 = none (Cranelift backend), 1 = speed,
+    /// 2 = speed + size (both LLVM backend).
     #[arg(
         short = 'O',
         long = "opt-level",
@@ -129,6 +160,10 @@ struct DumpArgs {
     /// List the MIR pipeline stages (for `--stage`) and exit.
     #[arg(long = "list-stages")]
     list_stages: bool,
+
+    /// For `llvm`: optimization level of the printed IR (0-2).
+    #[arg(short = 'O', default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=2))]
+    opt_level: u8,
 }
 
 /// Stage selector for `kestrel dump mir -s <stage>`. Variants map 1:1 onto
@@ -180,6 +215,8 @@ enum DumpKind {
     Mir,
     /// Cranelift IR via the MIR (OSSA) pipeline.
     Cranelift,
+    /// Optimized LLVM IR for the whole module (honours `-O`, default `-O2`).
+    Llvm,
     /// All accumulated diagnostics (lex, parse, infer, analyze).
     Diagnostics,
 }
@@ -194,13 +231,15 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
     driver.infer_all();
     // `build` produces an executable, so analysis enforces the `@main`
     // entry-point requirement (E618).
-    let analyze_summary = driver.analyze_all(true);
+    driver.analyze_all(true);
 
     // Flush diagnostics before codegen — better to fail fast on type errors
     // than to surface a confusing MIR-lowering cascade downstream.
-    driver.emit_diagnostics().ok();
-    emit_analyze_errors(&compiler, &analyze_summary);
-    if has_errors(&compiler) || analyze_summary.errors > 0 {
+    // `emit_diagnostics`/`has_errors` cover both diagnostic halves (F17).
+    // Analyzer warnings print here too (E461 unknown attribute, …); without
+    // them a build silently accepted what `kestrel dump diagnostics` flags.
+    driver.emit_diagnostics_with_warnings().ok();
+    if driver.has_errors() {
         return Err(ExitCode::FAILURE);
     }
 
@@ -215,27 +254,62 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
 
     let c_sources = collect_stdlib_c_sources(std_dir.as_deref());
 
-    let options = cranelift_backend::CodegenOptions {
-        opt_level: args.opt_level,
-        libraries: args.libraries,
-        library_paths: args.library_paths,
-        frameworks: args.frameworks,
-        c_sources,
-        ..Default::default()
+    // `KESTREL_OPT` overrides `-O` (lets tools that shell out to `kestrel build`
+    // — e.g. an older flock without `--release` — pick an optimization level).
+    let opt_level = std::env::var("KESTREL_OPT")
+        .ok()
+        .and_then(|s| s.parse::<u8>().ok())
+        .unwrap_or(args.opt_level);
+    let backend = Backend::for_opt(opt_level);
+
+    let result = match backend {
+        Backend::Cranelift => {
+            let options = cranelift_backend::CodegenOptions {
+                opt_level,
+                libraries: args.libraries,
+                library_paths: args.library_paths,
+                frameworks: args.frameworks,
+                c_sources,
+                ..Default::default()
+            };
+            compiler
+                .compile_and_link(&output_path, &options)
+                .map_err(|e| e.to_string())
+        },
+        Backend::Llvm => {
+            let options = llvm_backend::CodegenOptions {
+                opt_level,
+                libraries: args.libraries,
+                library_paths: args.library_paths,
+                frameworks: args.frameworks,
+                c_sources,
+                ..Default::default()
+            };
+            compiler
+                .compile_and_link_llvm(&output_path, &options)
+                .map_err(|e| e.to_string())
+        },
     };
-    let result = compiler.compile_and_link(&output_path, &options);
     driver.emit_diagnostics().ok();
+    emit_mono_warnings(&compiler);
     result.map_err(|e| {
         eprintln!("error: {}", e);
         ExitCode::FAILURE
     })?;
 
-    if has_errors(&compiler) {
+    if driver.has_errors() {
         return Err(ExitCode::FAILURE);
     }
     if globals.verbose {
         eprintln!("  Built successfully: {}", output_path.display());
     }
+
+    // Skip the Compiler's teardown: dropping its memo tables takes ~4% of a
+    // whole-program build, and the process exits immediately after. The
+    // driver only borrows the compiler, so drop it first to release the
+    // borrow. Leak is intentional — the OS reclaims everything on exit.
+    drop(driver);
+    std::mem::forget(compiler);
     Ok(())
 }
 
@@ -266,51 +340,76 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     // `dump` is not producing a binary — don't require a `@main`.
     driver.analyze_all(false);
 
-    match args.kind {
-        DumpKind::Mir => {
-            dump_mir(&compiler, args.stage, args.function_filter.as_deref())?;
-        },
-        DumpKind::Cranelift => {
-            let mir = compiler.lower_to_mir().map_err(|e| {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            })?;
-            let mono = compiler.monomorphize_mir(mir).map_err(|e| {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            })?;
-            let target = globals.codegen_target()?;
-            let options = cranelift_backend::CodegenOptions {
-                emit_clif: true,
-                ..Default::default()
-            };
-            match cranelift_backend::compile(&mono, &target, &options) {
-                Ok(result) => {
-                    for (name, clif) in &result.clif_text {
-                        println!("; function: {name}");
-                        print!("{clif}");
-                        println!();
-                    }
-                },
-                Err(e) => {
-                    driver.emit_diagnostics().ok();
-                    eprintln!("error: {e}");
-                    return Err(ExitCode::FAILURE);
-                },
-            }
-        },
+    // Each arm reports an abort as a message rather than returning: MIR
+    // lowering and codegen *accumulate* rich coded diagnostics (E494-E496) and
+    // then return only a count, so returning early here would construct their
+    // spans, codes and notes and throw them away (F18).
+    let outcome: Result<(), String> = match args.kind {
+        DumpKind::Mir => dump_mir(&compiler, args.stage, args.function_filter.as_deref()),
+        DumpKind::Cranelift => dump_cranelift(globals, &compiler),
+        DumpKind::Llvm => dump_llvm(globals, &compiler, args.opt_level),
         DumpKind::Diagnostics => {
             // Emitted below; no stdout output for this kind.
+            Ok(())
         },
         DumpKind::Tokens | DumpKind::Cst => unreachable!("handled above"),
-    }
+    };
 
-    driver.emit_diagnostics().ok();
-    if has_errors(&compiler) {
+    // Both halves, always — before the summary line, so the coded diagnostic
+    // is what the user reads and the count is just the epilogue. `dump
+    // diagnostics` promises every diagnostic, so it adds analyzer warnings.
+    if matches!(args.kind, DumpKind::Diagnostics) {
+        driver.emit_diagnostics_with_warnings().ok();
+    } else {
+        driver.emit_diagnostics().ok();
+    }
+    if let Err(message) = outcome {
+        eprintln!("error: {message}");
+        return Err(ExitCode::FAILURE);
+    }
+    if driver.has_errors() {
         Err(ExitCode::FAILURE)
     } else {
         Ok(())
     }
+}
+
+/// Print cranelift IR for the whole module. Errors are returned, not printed,
+/// so `dump` can flush accumulated diagnostics first (F18).
+fn dump_cranelift(globals: &Globals, compiler: &Compiler) -> Result<(), String> {
+    let target = globals
+        .codegen_target()
+        .map_err(|_| "invalid target".to_string())?;
+    let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
+    let mono = compiler.monomorphize_mir(mir).map_err(|e| e.to_string())?;
+    let options = cranelift_backend::CodegenOptions {
+        emit_clif: true,
+        ..Default::default()
+    };
+    let result = cranelift_backend::compile(&mono, &target, &options).map_err(|e| e.to_string())?;
+    for (name, clif) in &result.clif_text {
+        println!("; function: {name}");
+        print!("{clif}");
+        println!();
+    }
+    Ok(())
+}
+
+/// Print the optimized LLVM IR for the whole module at `opt_level`.
+fn dump_llvm(globals: &Globals, compiler: &Compiler, opt_level: u8) -> Result<(), String> {
+    let target = globals
+        .codegen_target()
+        .map_err(|_| "invalid target".to_string())?;
+    let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
+    let mono = compiler.monomorphize_mir(mir).map_err(|e| e.to_string())?;
+    let options = llvm_backend::CodegenOptions {
+        opt_level,
+        emit_ir: true,
+        ..Default::default()
+    };
+    let result = llvm_backend::compile(&mono, &target, &options).map_err(|e| e.to_string())?;
+    print!("{}", result.module_ir.unwrap_or_default());
+    Ok(())
 }
 
 /// Print the MIR module at the requested `stage` (default `verify`).
@@ -323,34 +422,32 @@ fn dump_mir(
     compiler: &Compiler,
     stage: Option<DumpStage>,
     filter: Option<&str>,
-) -> Result<(), ExitCode> {
+) -> Result<(), String> {
     use kestrel_mir::passes::Stage;
 
     match stage.unwrap_or(DumpStage::Verify).to_mir() {
         // Default / explicit `verify`: keep aborting on verify error.
         Some(Stage::Verify) => {
-            let mir = compiler.lower_to_mir().map_err(|e| {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            })?;
+            let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
             print_mir(&mir, filter);
         },
         // Pre-mono intermediate stages (raw..layout): best-effort, no verify.
         Some(s) if s.is_pre_mono() => {
-            let (mir, _errors) = compiler.lower_to_mir_stage(s);
+            let (mir, errors) = compiler.lower_to_mir_stage(s);
+            // Best-effort stage: show the module, but don't swallow what verify
+            // found (the post-mono arm below does the same) — F18.
+            for e in &errors {
+                eprintln!("warning: verify: {}", e.message);
+            }
             print_mir(&mir, filter);
         },
         // Post-mono stages (mono / copy-prop / expand): best-effort; only a hard
         // monomorphization failure aborts (there'd be no module to print).
         Some(s) => {
-            let mir = compiler.lower_to_mir().map_err(|e| {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            })?;
-            let (mono, mono_errors) = compiler.monomorphize_mir_until(mir, s).map_err(|e| {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            })?;
+            let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
+            let (mono, mono_errors) = compiler
+                .monomorphize_mir_until(mir, s)
+                .map_err(|e| e.to_string())?;
             for e in &mono_errors {
                 eprintln!("warning: mono-verify: {}", e.message);
             }
@@ -444,14 +541,15 @@ fn dump_syntax(kind: DumpKind, files: &[String], verbose: bool) -> Result<(), Ex
             DumpKind::Cst => {
                 println!("; cst: {}", file);
                 // SyntaxNode's Debug format is the tree-view CST representation.
-                println!("{:#?}", compiler.parse(entity).tree);
+                println!("{:#?}", compiler.parse(entity).tree());
             },
             _ => unreachable!("dump_syntax called with non-syntax kind"),
         }
     }
 
-    CompilerDriver::new(&compiler).emit_diagnostics().ok();
-    if has_errors(&compiler) {
+    let driver = CompilerDriver::new(&compiler);
+    driver.emit_diagnostics().ok();
+    if driver.has_errors() {
         Err(ExitCode::FAILURE)
     } else {
         Ok(())
@@ -472,7 +570,7 @@ impl Globals {
         if !self.no_std {
             let std_dir = match self.std_path.as_deref() {
                 Some(p) => PathBuf::from(p),
-                None => default_std_path().map_err(|e| {
+                None => kestrel_compiler::stdlib_path::default_std_path().map_err(|e| {
                     eprintln!("error: could not locate the Kestrel stdlib");
                     for (source, path) in &e.tried {
                         eprintln!("  tried {} -> {}", source, path.display());
@@ -534,57 +632,9 @@ impl Globals {
 // Small helpers
 // ============================================================================
 
-struct StdLookupError {
-    tried: Vec<(&'static str, PathBuf)>,
-}
-
-/// Locate the stdlib via, in priority order:
-///   1. `KESTREL_STD` env var (matches kestrel-test-suite convention)
-///   2. `<exe>/../lib/std` (jessup-installed toolchain layout)
-///   3. `<CARGO_MANIFEST_DIR>/lang/std` baked at build time (in-repo dev)
-///
-/// Each candidate must `exists()` to win; otherwise we fall through and
-/// surface every path we tried so the user can see what went wrong.
-/// Order must stay fixed: explicit override > installed toolchain > repo dev.
-fn default_std_path() -> Result<PathBuf, StdLookupError> {
-    let mut tried = Vec::new();
-
-    if let Some(p) = std::env::var_os("KESTREL_STD") {
-        let p = PathBuf::from(p);
-        if p.exists() {
-            return Ok(p);
-        }
-        tried.push(("KESTREL_STD", p));
-    }
-
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(p) = exe
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.join("lib/std"))
-    {
-        if p.exists() {
-            return Ok(p);
-        }
-        tried.push(("exe-relative", p));
-    }
-
-    let baked = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lang/std");
-    if baked.exists() {
-        return Ok(baked);
-    }
-    tried.push(("CARGO_MANIFEST_DIR", baked));
-
-    Err(StdLookupError { tried })
-}
-
 /// Collect .c files from the stdlib directory that need to be compiled and linked.
 fn collect_stdlib_c_sources(std_dir: Option<&Path>) -> Vec<PathBuf> {
-    let Some(std_dir) = std_dir else {
-        return vec![];
-    };
-    let shim = std_dir.join("io/libc_shims.c");
-    if shim.exists() { vec![shim] } else { vec![] }
+    kestrel_compiler::stdlib_path::stdlib_c_sources(std_dir)
 }
 
 fn default_output_path(files: &[String]) -> PathBuf {
@@ -598,51 +648,14 @@ fn default_output_path(files: &[String]) -> PathBuf {
         PathBuf::from(stem.as_ref())
     }
 }
-
-fn has_errors(compiler: &Compiler) -> bool {
-    compiler
-        .diagnostics()
-        .iter()
-        .any(|d| d.severity >= Severity::Error)
-}
-
-/// Emit analyzer diagnostics (E-codes) as codespan-style errors to stderr.
-fn emit_analyze_errors(compiler: &Compiler, summary: &kestrel_compiler_driver::AnalyzeSummary) {
-    use codespan_reporting::diagnostic::{Diagnostic, Label};
-    use kestrel_compiler::diagnostic::WorldFiles;
-
-    let error_diags: Vec<_> = summary
-        .diagnostics
-        .iter()
-        .filter(|d| d.severity == kestrel_analyze::Severity::Error)
-        .collect();
-
-    if error_diags.is_empty() {
+/// Emit warnings found after monomorphization (E507) to stderr. They are not
+/// in the query-accumulated stream `emit_diagnostics` prints.
+fn emit_mono_warnings(compiler: &Compiler) {
+    let warnings = compiler.mono_warnings();
+    if warnings.is_empty() {
         return;
     }
-
-    let files = WorldFiles::from_world(compiler.world(), compiler.files());
-    let codespan_diags: Vec<Diagnostic<usize>> = error_diags
-        .iter()
-        .map(|d| {
-            let labels = d
-                .labels
-                .iter()
-                .map(|l| {
-                    let label = if l.is_primary {
-                        Label::primary(l.span.file_id, l.span.range())
-                    } else {
-                        Label::secondary(l.span.file_id, l.span.range())
-                    };
-                    label.with_message(&l.message)
-                })
-                .collect();
-            Diagnostic::error()
-                .with_message(format!("{} [{}]", d.message, d.descriptor_id))
-                .with_labels(labels)
-                .with_notes(d.notes.clone())
-        })
-        .collect();
-
-    kestrel_reporting::emit_all(&files, &codespan_diags).ok();
+    let files =
+        kestrel_compiler::diagnostic::WorldFiles::from_world(compiler.world(), compiler.files());
+    kestrel_reporting::emit_all(&files, &warnings).ok();
 }

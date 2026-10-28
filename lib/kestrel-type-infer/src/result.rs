@@ -3,8 +3,10 @@
 //! `TypedBody` is the final output of type inference for a single body.
 //! All TyVars have been resolved to `ResolvedTy`.
 
-use std::collections::HashMap;
+use crate::collections::{HashMap, HashSet};
+use std::hash::Hash;
 
+use kestrel_ast::arena::Idx;
 use kestrel_hecs::Entity;
 use kestrel_hir::body::HirExprId;
 use kestrel_hir::res::LocalId;
@@ -48,40 +50,99 @@ pub struct TypedBody {
     /// concrete type that the body's return expressions unified to.
     /// Used by MIR lowering to substitute the opaque type with concrete.
     pub opaque_concrete_type: Option<ResolvedTy>,
+
+    /// `Indirection`-peel plan for member-access exprs that resolved through a
+    /// smart-pointer's pointee (`wrapper.m` → `wrapper.pointeeRef().m`). The
+    /// `Vec` is the peel CHAIN, outer→inner, for nested wrappers
+    /// (`RcBox[Pointer[T]]`). MIR lowering replays it: project the receiver
+    /// through each `pointeeRef()`/`pointeeMutRef()` before the member access.
+    /// Single source of truth — MIR never re-derives the peel (mirrors
+    /// `resolutions` / `ClosureCaptures`).
+    pub indirection_peels: HashMap<HirExprId, Vec<IndirectionPeel>>,
+
+    /// Accepted CROSS-kind closure coercions: `expr → (source kind, target
+    /// kind)`. Only cells where the two kinds DIFFER are recorded, and the
+    /// source value's own type is never re-labelled (`expr_types[expr]` still
+    /// reports the source kind — `escaping → normal` must not turn a shared
+    /// handle into a bitwise-copyable view). NOTE: currently recorded but
+    /// unconsumed — mir-lower derives the representation conversions from the
+    /// value/slot types (see `InferCtx::kind_coercions`); this map is the
+    /// audit trail of the solver's passing-table decisions.
+    pub kind_coercions: HashMap<HirExprId, (kestrel_ast::FnTypeKind, kestrel_ast::FnTypeKind)>,
+
+    /// `for` loops whose iterable is already an `Iterator`: the loop's
+    /// `Iterable.iter()` protocol call (keyed by its expr id) is not made —
+    /// the iterable itself is CONSUMED as the loop's iterator. Decided once
+    /// by inference; the move checker and MIR lowering both read it.
+    pub direct_iterators: HashSet<HirExprId>,
+}
+
+/// One level of an `Indirection` member peel: the concrete pointee accessors
+/// on the wrapper type at this level. `mut_method` is `None` when the wrapper
+/// is `Indirection` but not `MutableIndirection` (read-only) — a write through
+/// it is the `indirection_no_mutating_accessor` error.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct IndirectionPeel {
+    /// `pointeeRef()` on the wrapper — yields `&Target` for reads.
+    pub read_method: Entity,
+    /// `pointeeMutRef()` on the wrapper — yields `&mutating Target` for
+    /// writes / RMW / mutating-method receivers; `None` if read-only.
+    pub mut_method: Option<Entity>,
+    /// The concrete pointee type (`Indirection.Target`) at this level. MIR
+    /// builds the `&Target` / `&mutating Target` result type of the accessor
+    /// call from this, and projects the member off it.
+    pub target: ResolvedTy,
 }
 
 /// Manual Hash: hash each map as sorted (key, value) pairs for determinism.
-/// Uses raw index values for sorting since Idx<T> doesn't implement Ord.
-impl std::hash::Hash for TypedBody {
+///
+/// This hash is `InferBody`'s whole change signal: hECS backdates the memo when
+/// the fingerprint is unchanged, and dependents (including the query that
+/// accumulates the diagnostics) then keep their cached results. So it must
+/// cover **every** field — the destructuring below has no `..`, so adding a
+/// field to `TypedBody` without hashing it is a compile error (audit F19).
+impl Hash for TypedBody {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.errors.len().hash(state);
+        let TypedBody {
+            expr_types,
+            local_types,
+            resolutions,
+            field_subscripts,
+            promotions,
+            type_args,
+            errors,
+            error_details,
+            opaque_concrete_type,
+            indirection_peels,
+            kind_coercions,
+            direct_iterators,
+        } = self;
+        hash_sorted(expr_types, state);
+        hash_sorted(local_types, state);
+        hash_sorted(resolutions, state);
+        hash_sorted(field_subscripts, state);
+        hash_sorted(promotions, state);
+        hash_sorted(type_args, state);
+        errors.hash(state);
+        error_details.hash(state);
+        opaque_concrete_type.hash(state);
+        hash_sorted(indirection_peels, state);
+        hash_sorted(kind_coercions, state);
+        let mut direct: Vec<_> = direct_iterators.iter().map(|e| e.raw()).collect();
+        direct.sort_unstable();
+        direct.hash(state);
+    }
+}
 
-        // Hash expr_types
-        let mut expr_pairs: Vec<_> = self.expr_types.iter().collect();
-        expr_pairs.sort_by_key(|(k, _)| k.raw());
-        for (k, v) in &expr_pairs {
-            k.hash(state);
-            v.hash(state);
-        }
-
-        // Hash local_types
-        let mut local_pairs: Vec<_> = self.local_types.iter().collect();
-        local_pairs.sort_by_key(|(k, _)| k.raw());
-        for (k, v) in &local_pairs {
-            k.hash(state);
-            v.hash(state);
-        }
-
-        // Hash resolutions
-        let mut res_pairs: Vec<_> = self.resolutions.iter().collect();
-        res_pairs.sort_by_key(|(k, _)| k.raw());
-        for (k, v) in &res_pairs {
-            k.hash(state);
-            v.hash(state);
-        }
-
-        // Hash opaque_concrete_type
-        self.opaque_concrete_type.hash(state);
+/// Hash an `Idx`-keyed map in key order (`Idx` has no `Ord`, so sort by raw
+/// index). The length prefix keeps adjacent maps from aliasing.
+fn hash_sorted<T, V: Hash, H: std::hash::Hasher>(map: &HashMap<Idx<T>, V>, state: &mut H) {
+    let mut pairs: Vec<_> = map.iter().collect();
+    pairs.sort_by_key(|(k, _)| k.raw());
+    pairs.len().hash(state);
+    for (k, v) in pairs {
+        k.raw().hash(state);
+        v.hash(state);
     }
 }
 
@@ -110,6 +171,11 @@ pub enum ResolvedTy {
     },
     Tuple(Vec<ResolvedTy>),
     Function {
+        /// The closure tier (`escaping (T) -> R`). Participates in the derived
+        /// `Eq`/`Hash`, so witness/conformance signature matching is
+        /// kind-EXACT: a `func f(cb: escaping () -> ())` requirement is not
+        /// witnessed by a `func f(cb: () -> ())` impl.
+        kind: kestrel_ast::FnTypeKind,
         params: Vec<ResolvedTy>,
         /// Parallel to `params`; carries the `mutating` convention to MIR.
         conventions: Vec<kestrel_ast::ParamConvention>,
@@ -118,18 +184,30 @@ pub enum ResolvedTy {
     /// Opaque return type from a call to a function with `some P` return.
     /// Preserved through inference output so MIR lowering can resolve it
     /// to the concrete type by querying InferBody on the origin.
+    /// `not_copyable` mirrors an `and not Copyable` bound on the origin —
+    /// the analyze move checker treats the value as move-only.
     Opaque {
         origin: Entity,
         bounds: Vec<(Entity, Vec<ResolvedTy>)>,
         origin_args: Vec<ResolvedTy>,
         index: u32,
+        not_copyable: bool,
+    },
+    /// Second-class reference `&T` / `&mutating T` — a ret_borrow call
+    /// result's expression type. MIR lowering PEELS it (a ref-typed value
+    /// registers as a @guaranteed pointee value), so consumers must not key
+    /// place-ness on this alone: the callee's `CallableRefReturn` is ground
+    /// truth (solver ordering can pin a result var to the pointee first).
+    Ref {
+        pointee: Box<ResolvedTy>,
+        mutating: bool,
     },
     Never,
     Error,
 }
 
 /// Resolved promotion info (no TyVars).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct ResolvedPromotion {
     pub method: Entity,
     pub target: ResolvedTy,
@@ -183,10 +261,12 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
                 .collect(),
         ),
         TyKind::Function {
+            kind,
             params,
             conventions,
             ret,
         } => ResolvedTy::Function {
+            kind: *kind,
             params: params
                 .iter()
                 .map(|&tv| resolve_to_concrete(ctx, tv))
@@ -199,8 +279,10 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
             bounds,
             origin_args,
             index,
+            not_copyable,
         } => ResolvedTy::Opaque {
             origin: *origin,
+            not_copyable: *not_copyable,
             bounds: bounds
                 .iter()
                 .map(|(e, args)| {
@@ -217,6 +299,10 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
                 .map(|&tv| resolve_to_concrete(ctx, tv))
                 .collect(),
             index: *index,
+        },
+        TyKind::Ref { pointee, mutating } => ResolvedTy::Ref {
+            pointee: Box::new(resolve_to_concrete(ctx, *pointee)),
+            mutating: *mutating,
         },
         TyKind::Never => ResolvedTy::Never,
         TyKind::Error => ResolvedTy::Error,
@@ -280,17 +366,34 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         errors: ctx.errors.clone(),
         error_details: ctx.error_details.clone(),
         opaque_concrete_type,
+        indirection_peels: ctx
+            .indirection_peels
+            .iter()
+            .map(|(&expr, peels)| {
+                let resolved: Vec<IndirectionPeel> = peels
+                    .iter()
+                    .map(|p| IndirectionPeel {
+                        read_method: p.read_method,
+                        mut_method: p.mut_method,
+                        target: resolve_to_concrete(ctx, p.target_tv),
+                    })
+                    .collect();
+                (expr, resolved)
+            })
+            .collect(),
+        kind_coercions: ctx.kind_coercions.clone(),
+        direct_iterators: ctx.direct_iterators.clone(),
     }
 }
 
 /// Describe a TyVar as a short type name string (for diagnostics).
-fn describe_tyvar(ctx: &InferCtx<'_>, tv: TyVar) -> String {
+pub(crate) fn describe_tyvar(ctx: &InferCtx<'_>, tv: TyVar) -> String {
     let resolved = ctx.resolve(tv);
     match &ctx.types[resolved.0 as usize] {
         TySlot::Resolved(kind) => describe_tykind(ctx, kind),
         TySlot::Unresolved { literal: Some(lit) } => literal_kind_name(*lit).into(),
-        TySlot::Unresolved { literal: None } => "?".into(),
-        TySlot::Redirect(_) => "?redirect".into(),
+        // An open var prints `_` — never `?` (bidi design §10).
+        TySlot::Unresolved { literal: None } | TySlot::Redirect(_) => "_".into(),
     }
 }
 
@@ -351,6 +454,10 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                 .unwrap_or_else(|| format!("{:?}", assoc));
             format!("{}.{}", base_str, assoc_name)
         },
+        TyKind::Ref { pointee, mutating } => {
+            let prefix = if *mutating { "&mutating " } else { "&" };
+            format!("{prefix}{}", describe_tyvar(ctx, *pointee))
+        },
         TyKind::Tuple(elems) => {
             if elems.is_empty() {
                 "()".into()
@@ -359,13 +466,31 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                 format!("({})", strs.join(", "))
             }
         },
-        TyKind::Function { params, ret, .. } => {
+        TyKind::Function {
+            kind, params, ret, ..
+        } => {
             let p: Vec<_> = params.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
-            format!("({}) -> {}", p.join(", "), describe_tyvar(ctx, *ret))
+            // `FnTypeKind::prefix()` is the single source of truth for the
+            // rendered keyword (empty for `Normal`).
+            format!(
+                "{}({}) -> {}",
+                kind.prefix(),
+                p.join(", "),
+                describe_tyvar(ctx, *ret)
+            )
         },
-        TyKind::Opaque { bounds, .. } => {
+        TyKind::Opaque {
+            bounds,
+            not_copyable,
+            ..
+        } => {
+            let suffix = if *not_copyable {
+                " and not Copyable"
+            } else {
+                ""
+            };
             if bounds.is_empty() {
-                "some ?".into()
+                format!("some ?{suffix}")
             } else {
                 let bound_names: Vec<String> = bounds
                     .iter()
@@ -376,11 +501,15 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                             .unwrap_or_else(|| format!("{:?}", e))
                     })
                     .collect();
-                format!("some {}", bound_names.join(" and "))
+                format!("some {}{suffix}", bound_names.join(" and "))
             }
         },
         TyKind::Never => "Never".into(),
-        TyKind::Error => "Error".into(),
+        // The `Error` absorber is an internal placeholder, not a type the
+        // user wrote: print it like an open var. It can't be suppressed
+        // instead — `InferCtx::poison` makes `Error` without a diagnostic, so
+        // an error mentioning it may be the only one (bidi design §10, P0c).
+        TyKind::Error => "_".into(),
     }
 }
 
@@ -398,13 +527,45 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 describe_tyvar(ctx, *got)
             )
         },
-        InferError::DoesNotConform { ty, protocol, .. } => {
+        InferError::DoesNotConform {
+            ty,
+            protocol,
+            protocol_args,
+            ..
+        } => {
             let ty_name = describe_tyvar(ctx, *ty);
-            let proto_name = ctx
+            let mut proto_name = ctx
                 .query_ctx
                 .get::<kestrel_ast_builder::Name>(*protocol)
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| format!("{:?}", protocol));
+            // `Int8 !: Convertible[Int8]`, not the misleading `Int8 !:
+            // Convertible` (Int8 does conform — just not with this arg).
+            if !protocol_args.is_empty() {
+                let args: Vec<String> = protocol_args
+                    .iter()
+                    .map(|&a| describe_tyvar(ctx, a))
+                    .collect();
+                proto_name = format!("{proto_name}[{}]", args.join(", "));
+            }
+            // Static failures get a "because" detail — deep in generic
+            // instantiation chains the bare `T !: Static` is miserable.
+            if let Some(why) = describe_static_failure(ctx, *ty, *protocol) {
+                return format!("{} !: {} ({})", ty_name, proto_name, why);
+            }
+            // A ref TYPE ARGUMENT conforms to exactly what `extend &T: P`
+            // declares — when none does, a bare `&T !: P` reads like the
+            // pointee is at fault, so name the actual rule.
+            if matches!(
+                ctx.slot(ctx.resolve(*ty)),
+                crate::ty::TySlot::Resolved(TyKind::Ref { .. })
+            ) {
+                return format!(
+                    "{} !: {} (a reference satisfies only the protocols declared by an \
+                     `extend &T:` / `extend &mutating T:` extension)",
+                    ty_name, proto_name
+                );
+            }
             format!("{} !: {}", ty_name, proto_name)
         },
         InferError::NoMember {
@@ -436,8 +597,12 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 describe_tyvar(ctx, *receiver)
             )
         },
-        InferError::AmbiguousMember { receiver, name, .. } => {
-            format!("{}.{} ambiguous", describe_tyvar(ctx, *receiver), name)
+        InferError::AmbiguousMember { receiver, name, .. } => match receiver {
+            Some(recv) => format!("{}.{} ambiguous", describe_tyvar(ctx, *recv), name),
+            // Receiver-less (overloaded free-function call): no receiver type to
+            // name — rendering the synthetic placeholder produced "Error.f
+            // ambiguous" (#210).
+            None => format!("multiple candidates for '{}'", name),
         },
         InferError::MemberNotVisible { receiver, name, .. } => {
             format!("{}.{} not visible", describe_tyvar(ctx, *receiver), name)
@@ -471,6 +636,9 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             format!("instance method '{}' cannot be called on a type", name)
         },
         InferError::TypeParamAsValue { .. } => "type parameter cannot be used as a value".into(),
+        InferError::TypeMustBeKnown { member, .. } => {
+            format!("type must be known to look up '{member}'")
+        },
         InferError::TypeArgCountMismatch { expected, got, .. } => {
             if *got < *expected {
                 format!("too few type arguments: expected {}, got {}", expected, got)
@@ -554,8 +722,198 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             describe_tyvar(ctx, *receiver)
         ),
         InferError::CircularOpaqueReturn { .. } => "circular opaque return type".into(),
+        InferError::OpaqueUnderlierNotCopyable { concrete, .. } => format!(
+            "opaque return type hides non-Copyable type '{}'; add 'and not Copyable' to the return type",
+            describe_tyvar(ctx, *concrete)
+        ),
+        InferError::RefFunctionAsValue { .. } => {
+            "a reference-returning function is not a value".into()
+        },
+        InferError::RefInTypeArgument { .. } => {
+            "a reference cannot be a generic type argument".into()
+        },
         InferError::ConventionMismatch { .. } => {
             "cannot pass a mutating closure where a non-mutating parameter is expected".into()
         },
+        InferError::KindMismatch {
+            expected, actual, ..
+        } => format!(
+            "expected {}, found {}",
+            crate::error::describe_fn_kind(*expected),
+            crate::error::describe_fn_kind(*actual)
+        ),
+    }
+}
+
+/// "Because" detail for a failed `Static` bound (references 2a): names the
+/// declaration, the offending stored member, or the offending type argument.
+/// `None` for non-Static protocols or shapes with nothing specific to say.
+fn describe_static_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Option<String> {
+    use kestrel_semantics::{NominalStaticness, Staticness, StaticnessReason};
+
+    if !crate::solver::is_static_builtin(ctx, protocol) {
+        return None;
+    }
+    let resolved = ctx.resolve(ty);
+    let TySlot::Resolved(kind) = ctx.slot(resolved) else {
+        return None;
+    };
+    match kind.clone() {
+        TyKind::Ref { .. } => Some("a reference is never Static".into()),
+        TyKind::Param { .. } => Some(
+            "the type parameter is relaxed with 'not Static', so it may hold references".into(),
+        ),
+        TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
+            let info = ctx.query_ctx.query(NominalStaticness {
+                entity,
+                root: ctx.root,
+            });
+            match info.reason {
+                StaticnessReason::DeclaredNotStatic => Some("declared 'not Static'".into()),
+                StaticnessReason::NonStaticChild(child) => {
+                    let word = match ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(child) {
+                        Some(kestrel_ast_builder::NodeKind::EnumCase) => "case",
+                        _ => "field",
+                    };
+                    let name = ctx
+                        .query_ctx
+                        .get::<kestrel_ast_builder::Name>(child)
+                        .map(|n| n.0.clone())
+                        .unwrap_or_else(|| "<unnamed>".into());
+                    Some(format!("{} '{}' is non-Static", word, name))
+                },
+                StaticnessReason::Default => {
+                    // Conditional base: the failure came from a gating arg —
+                    // re-fold to name the first offender.
+                    let Staticness::ConditionalOn(positions) = info.staticness else {
+                        return None;
+                    };
+                    let bad = positions
+                        .iter()
+                        .filter_map(|&i| args.get(i))
+                        .find(|&&arg| !crate::solver::solver_ty_is_static(ctx, arg, 0))?;
+                    Some(format!(
+                        "type argument '{}' is non-Static",
+                        describe_tyvar(ctx, *bad)
+                    ))
+                },
+            }
+        },
+        // Element-wise tuple fold: name the first non-Static element so
+        // `Array[(&T, Int64)]` failures say WHY.
+        TyKind::Tuple(elems) => {
+            let bad = elems
+                .iter()
+                .find(|&&e| !crate::solver::solver_ty_is_static(ctx, e, 0))?;
+            Some(format!(
+                "tuple element '{}' is non-Static",
+                describe_tyvar(ctx, *bad)
+            ))
+        },
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use kestrel_ast::arena::Arena;
+    use kestrel_hecs::{Fingerprint, World};
+    use kestrel_hir::body::HirExpr;
+    use kestrel_span::Span;
+
+    use super::*;
+
+    fn empty() -> TypedBody {
+        TypedBody {
+            expr_types: HashMap::default(),
+            local_types: HashMap::default(),
+            resolutions: HashMap::default(),
+            field_subscripts: HashMap::default(),
+            promotions: HashMap::default(),
+            type_args: HashMap::default(),
+            errors: Vec::new(),
+            error_details: Vec::new(),
+            opaque_concrete_type: None,
+            indirection_peels: HashMap::default(),
+            kind_coercions: HashMap::default(),
+            direct_iterators: HashSet::default(),
+        }
+    }
+
+    /// Regression for audit F19: `TypedBody`'s fingerprint is `InferBody`'s
+    /// whole change signal, so changing any one field must change it — the
+    /// five fields below used to be skipped (`errors` by length only), which
+    /// backdated a re-inferred body and left stale diagnostics on screen.
+    #[test]
+    fn fingerprint_covers_every_field() {
+        let mut exprs = Arena::new();
+        let e = exprs.alloc(HirExpr::Error {
+            span: Span::synthetic(0),
+        });
+        let mut world = World::new();
+        let (a, b) = (world.spawn(), world.spawn());
+        let ty = |entity| ResolvedTy::Named {
+            entity,
+            args: Vec::new(),
+        };
+        let error = |span| InferError::FromHir { span };
+
+        let mut base = empty();
+        base.errors.push(error(Span::new(0, 0..1)));
+        base.error_details.push("type 'A'".into());
+        let base_fp = Fingerprint::of(&base);
+
+        let variants: Vec<(&str, TypedBody)> = vec![
+            (
+                "field_subscripts",
+                TypedBody {
+                    field_subscripts: [(e, a)].into_iter().collect(),
+                    ..base.clone()
+                },
+            ),
+            (
+                "promotions",
+                TypedBody {
+                    promotions: [(
+                        e,
+                        ResolvedPromotion {
+                            method: a,
+                            target: ty(b),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                    ..base.clone()
+                },
+            ),
+            (
+                "type_args",
+                TypedBody {
+                    type_args: [(e, vec![ty(a)])].into_iter().collect(),
+                    ..base.clone()
+                },
+            ),
+            (
+                "errors (same length)",
+                TypedBody {
+                    errors: vec![error(Span::new(0, 4..9))],
+                    ..base.clone()
+                },
+            ),
+            (
+                "error_details",
+                TypedBody {
+                    error_details: vec!["type 'B'".into()],
+                    ..base.clone()
+                },
+            ),
+        ];
+        for (field, body) in variants {
+            assert_ne!(
+                Fingerprint::of(&body),
+                base_fp,
+                "fingerprint ignores `{field}`"
+            );
+        }
     }
 }

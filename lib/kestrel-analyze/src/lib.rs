@@ -20,13 +20,14 @@ pub mod context;
 pub mod decl;
 pub mod diagnostic;
 pub mod registry;
+pub mod staticness;
 pub mod traits;
 pub mod util;
 
 pub use context::{BodyContext, CompilationContext, DeclContext};
 pub use diagnostic::{AnalyzeDiagnostic, Category, DiagLabel, DiagnosticDescriptor, Severity};
 pub use registry::{AnalyzerRegistry, AnalyzerRegistryRef};
-pub use traits::{BodyCheck, CompilationCheck, DeclCheck, Describe};
+pub use traits::{AnalyzerId, BodyCheck, CompilationCheck, DeclCheck, Describe};
 
 use kestrel_ast_builder::NodeKind;
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
@@ -41,7 +42,6 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::exhaustive_return::ExhaustiveReturnAnalyzer);
     r.add_body_check(body::dead_code::DeadCodeAnalyzer);
     r.add_body_check(body::guard::GuardDivergenceAnalyzer);
-    r.add_body_check(body::type_check::TypeCheckAnalyzer);
     r.add_body_check(body::condition_check::ConditionCheckAnalyzer);
     r.add_body_check(body::param_pattern::ParamPatternAnalyzer);
     r.add_body_check(body::assignment::AssignmentAnalyzer);
@@ -51,8 +51,10 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::initializer::InitializerAnalyzer);
     r.add_body_check(body::closure::ClosureAnalyzer);
     r.add_body_check(body::access_mode::AccessModeAnalyzer);
+    r.add_body_check(body::exclusive_args::ExclusiveArgsAnalyzer);
     // TODO(move-checker): retire in favor of a MIR/OSSA-level move check.
     r.add_body_check(body::move_tracking::MoveTrackingAnalyzer);
+    r.add_body_check(body::dangle_ref::DangleRefAnalyzer);
 
     // Wave 6: Pattern checks
     r.add_body_check(body::refutable_pattern::RefutablePatternAnalyzer);
@@ -62,25 +64,35 @@ pub fn default_analyzers() -> AnalyzerRegistry {
 
     // Literal/lexing checks (E700-E799)
     r.add_body_check(body::string_escape::StringEscapeAnalyzer);
+    r.add_body_check(body::integer_literal_range::IntegerLiteralRangeAnalyzer);
 
     // Declaration checks
     r.add_decl_check(decl::function_body::FunctionBodyAnalyzer);
     r.add_decl_check(decl::protocol_method::ProtocolMethodAnalyzer);
     r.add_decl_check(decl::static_context::StaticContextAnalyzer);
+    r.add_decl_check(decl::static_value_type::StaticValueTypeAnalyzer);
+    r.add_decl_check(decl::closure_field::ClosureFieldAnalyzer);
     r.add_decl_check(decl::builtin_marker_protocol::BuiltinMarkerProtocolAnalyzer);
+    r.add_decl_check(decl::duplicate_builtin::DuplicateBuiltinAnalyzer);
     r.add_decl_check(decl::conformance_rules::ConformanceRulesAnalyzer);
     r.add_decl_check(decl::duplicate_deinit::DuplicateDeinitAnalyzer);
     r.add_decl_check(decl::duplicate_case::DuplicateCaseAnalyzer);
     r.add_decl_check(decl::duplicate_label::DuplicateLabelAnalyzer);
     r.add_decl_check(decl::field::FieldAnalyzer);
     r.add_decl_check(decl::subscript::SubscriptAnalyzer);
+    r.add_decl_check(decl::place_accessor::PlaceAccessorAnalyzer);
+    r.add_decl_check(decl::ref_return::RefReturnAnalyzer);
     r.add_decl_check(decl::extern_ffi_safe::ExternFfiSafeAnalyzer);
     r.add_decl_check(decl::default_param_ordering::DefaultParamOrderingAnalyzer);
     r.add_decl_check(decl::cloneable_field::CloneableFieldAnalyzer);
+    r.add_decl_check(decl::closure_kind_convention::ClosureKindConventionAnalyzer);
     r.add_decl_check(decl::duplicate_symbol::DuplicateSymbolAnalyzer);
     r.add_decl_check(decl::duplicate_callable::DuplicateCallableAnalyzer);
+    r.add_decl_check(decl::field_method_collision::FieldMethodCollisionAnalyzer);
     r.add_decl_check(decl::extension_conflict::ExtensionConflictAnalyzer);
     r.add_decl_check(decl::extension_validation::ExtensionValidationAnalyzer);
+    r.add_decl_check(decl::conformance_target::ConformanceTargetAnalyzer);
+    r.add_decl_check(decl::import_target::ImportTargetAnalyzer);
     r.add_decl_check(decl::recursive_enum::RecursiveEnumAnalyzer);
     r.add_decl_check(decl::indirect_enum::IndirectEnumAnalyzer);
     r.add_decl_check(decl::parent_protocol_conformance::ParentProtocolConformanceAnalyzer);
@@ -92,6 +104,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
 
     // Compilation checks
     r.add_compilation_check(compilation::type_alias_cycles::TypeAliasCycleAnalyzer);
+    r.add_compilation_check(compilation::global_init_cycles::GlobalInitCycleAnalyzer);
     r.add_compilation_check(compilation::struct_cycles::StructCycleAnalyzer);
     r.add_compilation_check(compilation::protocol_cycles::ProtocolCycleAnalyzer);
     r.add_compilation_check(compilation::constraint_cycles::ConstraintCycleAnalyzer);
@@ -110,12 +123,58 @@ pub fn default_analyzers() -> AnalyzerRegistry {
 
 /// Run a single analyzer on a single entity.
 ///
+/// Assert every diagnostic an analyzer produced carries a code that analyzer
+/// declares — owned (`descriptors()`) or explicitly borrowed
+/// (`borrowed_descriptors()`).
+///
+/// The registry's docs promised "each code maps to exactly one diagnostic" but
+/// only *uniqueness across descriptor arrays* was checked, so a code could be
+/// declared by one analyzer and hand-written into an unrelated emit site: E436
+/// was allocated `non_protocol_bound` and also emitted with E476's message and
+/// E476's meaning (F16). This is the check that makes the promise true, and it
+/// runs on every analyzer result — the suite's 3700 files are the corpus.
+fn assert_owned(analyzer: &dyn Describe, diags: &[AnalyzeDiagnostic]) {
+    if diags.is_empty() {
+        return;
+    }
+    for d in diags {
+        let owned = analyzer
+            .descriptors()
+            .iter()
+            .any(|x| x.id == d.descriptor_id);
+        let borrowed = analyzer
+            .borrowed_descriptors()
+            .iter()
+            .any(|x| x.id == d.descriptor_id);
+        assert!(
+            owned || borrowed,
+            "analyzer {:?} emitted {} but declares neither — allocate it in this \
+             analyzer's DESCRIPTORS, or list the owner's descriptor in \
+             `borrowed_descriptors()` (see kestrel-analyze/AGENTS.md)",
+            analyzer.id(),
+            d.descriptor_id,
+        );
+        // The other direction: a code parked in RESERVED_UNEMITTED is one the
+        // docs describe as not-yet-live. If it fires, the reservation is stale
+        // and the docs are lying in the opposite direction.
+        assert!(
+            !crate::registry::RESERVED_UNEMITTED
+                .iter()
+                .any(|(id, _)| *id == d.descriptor_id),
+            "{} is listed in RESERVED_UNEMITTED but {:?} just emitted it — \
+             drop the reservation",
+            d.descriptor_id,
+            analyzer.id(),
+        );
+    }
+}
+
 /// The query key is `(analyzer_id, entity)`, so results are memoized
 /// per analyzer per entity. Changing a body only re-runs that body's
 /// analyzer queries.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Analyze {
-    pub analyzer: String,
+    pub analyzer: AnalyzerId,
     pub entity: Entity,
     pub root: Entity,
 }
@@ -129,7 +188,7 @@ impl QueryFn for Analyze {
         };
 
         // Try body check first
-        if let Some(analyzer) = registry.0.find_body_check(&self.analyzer) {
+        if let Some(analyzer) = registry.0.find_body_check(self.analyzer) {
             // Body checks need HIR + typed body
             let Some(hir) = ctx.query(LowerBody {
                 entity: self.entity,
@@ -151,11 +210,13 @@ impl QueryFn for Analyze {
                 hir: &hir,
                 typed: &typed,
             };
-            return analyzer.check(&cx);
+            let diags = analyzer.check(&cx);
+            assert_owned(analyzer.as_ref(), &diags);
+            return diags;
         }
 
         // Try decl check
-        if let Some(analyzer) = registry.0.find_decl_check(&self.analyzer) {
+        if let Some(analyzer) = registry.0.find_decl_check(self.analyzer) {
             let Some(kind) = ctx.get::<NodeKind>(self.entity) else {
                 return vec![];
             };
@@ -169,14 +230,21 @@ impl QueryFn for Analyze {
                 root: self.root,
                 kind: kind.clone(),
             };
-            return analyzer.check(&cx);
+            let diags = analyzer.check(&cx);
+            assert_owned(analyzer.as_ref(), &diags);
+            return diags;
         }
 
-        vec![]
+        // Compilation checks run via `analyze_compilation`, never this query;
+        // anything else here means the registry is missing an analyzer.
+        panic!(
+            "Analyze dispatched with {:?}, which is not a registered body or decl check",
+            self.analyzer
+        );
     }
 
     fn describe(&self) -> String {
-        format!("Analyze({}, {:?})", self.analyzer, self.entity)
+        format!("Analyze({}, {:?})", self.analyzer.as_str(), self.entity)
     }
 }
 
@@ -193,13 +261,13 @@ pub fn analyze_bodies(
         return vec![];
     };
 
-    let body_ids: Vec<&str> = registry.0.body_checks.iter().map(|a| a.id()).collect();
+    let body_ids: Vec<AnalyzerId> = registry.0.body_checks.iter().map(|a| a.id()).collect();
     let mut all_diags = Vec::new();
 
     for &entity in body_entities {
-        for &analyzer_id in &body_ids {
+        for &analyzer in &body_ids {
             let diags = ctx.query(Analyze {
-                analyzer: analyzer_id.to_string(),
+                analyzer,
                 entity,
                 root,
             });
@@ -225,13 +293,13 @@ pub fn analyze_decls(
         return vec![];
     };
 
-    let decl_ids: Vec<&str> = registry.0.decl_checks.iter().map(|a| a.id()).collect();
+    let decl_ids: Vec<AnalyzerId> = registry.0.decl_checks.iter().map(|a| a.id()).collect();
     let mut all_diags = Vec::new();
 
     for &entity in decl_entities {
-        for &analyzer_id in &decl_ids {
+        for &analyzer in &decl_ids {
             let diags = ctx.query(Analyze {
-                analyzer: analyzer_id.to_string(),
+                analyzer,
                 entity,
                 root,
             });
@@ -265,7 +333,9 @@ pub fn analyze_compilation(
 
     let mut all_diags = Vec::new();
     for analyzer in &registry.0.compilation_checks {
-        all_diags.extend(analyzer.check(&cx));
+        let diags = analyzer.check(&cx);
+        assert_owned(analyzer.as_ref(), &diags);
+        all_diags.extend(diags);
     }
 
     all_diags

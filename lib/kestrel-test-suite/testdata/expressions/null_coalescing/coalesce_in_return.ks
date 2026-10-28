@@ -8,7 +8,7 @@ func getOrDefault(opt: Int?) -> Int {
 }
 
 func main() -> lang.i64 {
-    let _ = println(getOrDefault(.Some(1)));
-    let _ = println(getOrDefault(null));
+     println(getOrDefault(.Some(1)));
+     println(getOrDefault(null));
     0
 }

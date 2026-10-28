@@ -21,7 +21,7 @@ public struct JsonBody: Content, Cloneable {
     public init[T](value: T) throws SerializeError where T: Serialize {
         self.raw = match value.toValue() {
             .Ok(v) => emitJson(v),
-            .Err(e) => return .Err(e)
+            .Err(e) => throw e
         };
     }
 
@@ -31,7 +31,7 @@ public struct JsonBody: Content, Cloneable {
     }
 
     public func toBytes() -> Array[UInt8] = stringToBytes(self.raw)
-    public func byteCount() -> Int64 = self.raw.byteCount
+    public func byteCount() -> Int64 = self.raw.bytes.count
     public func contentType() -> String? = .Some("application/json")
 
     public func clone() -> JsonBody = JsonBody(fromString: self.raw.clone())

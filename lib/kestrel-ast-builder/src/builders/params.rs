@@ -1,78 +1,73 @@
-//! Parameter extraction from CST nodes.
+//! Parameter extraction from `ParameterList` views.
 //!
-//! CST structure for a Parameter:
-//! ```text
-//! Parameter "x: Int64"
-//!   Pattern "x"
-//!     BindingPattern "x"
-//!       Identifier "x"
-//!   Colon ":"
-//!   Ty " Int64"
-//!     TyPath ...
-//! ```
-//! For two-name params like `with x: Int`, there may be an additional
-//! label identifier before the Pattern node.
+//! `Parameter = ('mutating' | 'consuming')? Name? Pattern ':' Ty DefaultValue?`
+//! — the `Name` is the argument label; the pattern binds the parameter (a
+//! plain `BindingPattern` gives its name, anything else gets a synthetic
+//! `_param_N` name and a `ParamPattern`).
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree::utils::find_child;
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::SyntaxNodePtr;
+use kestrel_syntax_tree::ast::{self, AstNode};
 
-use super::helpers::is_type_kind;
-
-use crate::ast_type::ast_type_from_cst;
+use crate::ast_type::lower_opt_type;
 use crate::components::{
-    AstParam, Body, FileId, NodeKind, ParamPattern, StructPatternField, TypeAnnotation,
+    AstParam, FileId, NodeKind, ParamPattern, StructPatternField, TypeAnnotation, Valued,
 };
-use crate::lower;
 
-/// Extract parameters from a node containing a ParameterList child.
-/// Creates child entities for default value expressions.
+/// Extract the parameters of `list`. Creates child entities for default
+/// value expressions.
 pub fn extract_params(
     world: &mut World,
-    node: &SyntaxNode,
+    list: Option<ast::ParameterList>,
     parent: Entity,
     file_entity: Entity,
     file_id: usize,
 ) -> Vec<AstParam> {
-    let param_list = match find_child(node, SyntaxKind::ParameterList) {
-        Some(list) => list,
-        None => return Vec::new(),
+    let Some(list) = list else {
+        return Vec::new();
     };
 
-    let params: Vec<AstParam> = param_list
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::Parameter)
-        .filter_map(|param_node| {
-            extract_single_param(world, &param_node, parent, file_entity, file_id)
+    // Synthetic-name counter for destructured params in **this** parameter list.
+    //
+    // Names are `_param_{idx}` and they are user-visible: E611 and E613 print
+    // them verbatim (e.g. "required parameter '_param_0' cannot follow
+    // parameter 'a' which has a default value").
+    //
+    // This MUST stay a local. It used to be a process-lifetime
+    // `static AtomicU32`, which made the name depend on how many declarations
+    // the process had already built rather than on the source: the LSP holds one
+    // long-lived `Compiler`, so the *same unedited* file reported `_param_0`,
+    // then `_param_7`, then `_param_23` across rebuilds, and the test harness
+    // runs every test in one process on parallel threads, so the number was a
+    // race. Scoping it here makes the name a pure function of the parameter
+    // list. See `lib/kestrel-ast-builder/AGENTS.md` (F43b).
+    let mut synth_idx: u32 = 0;
+
+    let params: Vec<AstParam> = list
+        .parameters()
+        .filter_map(|param| {
+            extract_single_param(world, &param, parent, file_entity, file_id, &mut synth_idx)
         })
         .collect();
 
-    // Detect defaults that reference sibling params. Replace the body with an
-    // empty one (suppresses "undefined name" from inference) and set a marker
-    // component so the analyzer can emit a proper diagnostic.
+    // Detect defaults that reference sibling params. The marker component
+    // lets the analyzer emit a proper diagnostic, and makes body lowering
+    // treat the default as empty (suppressing "undefined name" from
+    // inference).
     let param_names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
     for param in &params {
         let Some(default_entity) = param.default_entity else {
             continue;
         };
-        let Some(body) = world.get::<crate::components::Body>(default_entity) else {
+        let Some(default) =
+            crate::syntax::valued_node(&*world, default_entity).and_then(ast::DefaultValue::cast)
+        else {
             continue;
         };
-        if let Some(referenced) = default_body_references_param(&body.0, &param_names) {
+        if let Some(referenced) = default_references_param(&default, &param_names) {
             world.set(
                 default_entity,
                 crate::components::DefaultReferencesParam(referenced.to_string()),
-            );
-            // Replace with empty body so inference doesn't produce "undefined name"
-            world.set(
-                default_entity,
-                crate::components::Body(kestrel_ast::ast_body::AstBody {
-                    exprs: kestrel_ast::arena::Arena::new(),
-                    pats: kestrel_ast::arena::Arena::new(),
-                    stmts: kestrel_ast::arena::Arena::new(),
-                    statements: Vec::new(),
-                    tail_expr: None,
-                }),
             );
         }
     }
@@ -80,95 +75,42 @@ pub fn extract_params(
     params
 }
 
-/// Extract a single parameter from a Parameter CST node.
+/// Extract a single parameter.
 ///
-/// The bind name comes from Pattern > BindingPattern > Identifier.
-/// A label (if any) is a bare Identifier token at the top level before
-/// the Pattern node.
-/// Counter for generating synthetic parameter names (_0, _1, ...).
-/// Reset per parameter list via `extract_params`.
-static PARAM_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
+/// `synth_idx` is the caller's per-parameter-list counter for synthetic
+/// `_param_N` names; see [`extract_params`].
 fn extract_single_param(
     world: &mut World,
-    node: &SyntaxNode,
+    param: &ast::Parameter,
     parent: Entity,
     file_entity: Entity,
     file_id: usize,
+    synth_idx: &mut u32,
 ) -> Option<AstParam> {
-    // Check for mutating/consuming access mode
-    let is_consuming = node.children_with_tokens().any(|e| {
-        e.as_token()
-            .is_some_and(|t| t.kind() == SyntaxKind::Consuming)
-    });
-    let is_mut = is_consuming
-        || node.children_with_tokens().any(|e| {
-            e.as_token()
-                .is_some_and(|t| t.kind() == SyntaxKind::Mutating)
-        });
+    let is_consuming = param.consuming_token().is_some();
+    let is_mut = is_consuming || param.mutating_token().is_some();
 
-    let pattern_node = find_child(node, SyntaxKind::Pattern)?;
-
-    // Try simple binding pattern first: Pattern > BindingPattern > Identifier
-    let simple_name = find_child(&pattern_node, SyntaxKind::BindingPattern).and_then(|bp| {
-        bp.children_with_tokens()
-            .filter_map(|e| e.into_token())
-            .find(|t| t.kind() == SyntaxKind::Identifier)
-            .map(|t| t.text().to_string())
-    });
-
-    // For destructured patterns (tuple, struct, wildcard), extract the pattern
-    // and generate a synthetic name
-    let (name, pattern) = if let Some(name) = simple_name {
-        (name, None)
-    } else {
-        let param_pat = extract_param_pattern(&pattern_node);
-        param_pat.as_ref()?;
-        let idx = PARAM_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        (format!("_param_{}", idx), param_pat)
+    let pat = param.pattern()?.pat()?;
+    // A plain binding names the parameter; a destructuring pattern gets a
+    // synthetic name.
+    let (name, pattern) = match &pat {
+        ast::Pat::BindingPattern(b) => (b.identifier_token()?.text().to_string(), None),
+        _ => {
+            let param_pat = extract_param_pattern(&pat)?;
+            let idx = *synth_idx;
+            *synth_idx += 1;
+            (format!("_param_{idx}"), Some(param_pat))
+        },
     };
-
-    // Check for a label before the Pattern child. The emitter wraps labels
-    // in Name nodes (Name > Identifier), but they could also appear as bare
-    // Identifier tokens. Handle both forms.
-    let mut label = None;
-    for elem in node.children_with_tokens() {
-        match elem {
-            rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::Pattern => break,
-            rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::Name => {
-                // Label wrapped in Name node: Name > Identifier
-                label = n
-                    .children_with_tokens()
-                    .filter_map(|e| e.into_token())
-                    .find(|t| t.kind() == SyntaxKind::Identifier)
-                    .map(|t| t.text().to_string());
-            },
-            rowan::NodeOrToken::Token(t) if t.kind() == SyntaxKind::Identifier => {
-                label = Some(t.text().to_string());
-            },
-            rowan::NodeOrToken::Token(t) if t.kind() == SyntaxKind::Underscore => {
-                // Explicit no-label marker — leave label as None
-                label = None;
-            },
-            _ => {},
-        }
-    }
-
-    // Extract type annotation
-    let ty = node
-        .children()
-        .find(|c| is_type_kind(c.kind()))
-        .and_then(|c| ast_type_from_cst(&c, file_id));
+    let label = param.name().and_then(|n| n.text());
+    let ty = lower_opt_type(param.ty(), file_id);
 
     // Create child entity for default value expression
-    let default_entity = find_child(node, SyntaxKind::DefaultValue).map(|default_node| {
+    let default_entity = param.default_value().map(|default| {
         let entity = world.spawn();
         world.set(entity, NodeKind::ParamDefault);
         world.set(entity, FileId(file_entity));
-        world.set(
-            entity,
-            Body(lower::lower_default_value(&default_node, file_id)),
-        );
+        world.set(entity, Valued(SyntaxNodePtr::new(default.syntax())));
         // Store the param's type annotation so inference checks the default against it
         if let Some(ref param_ty) = ty {
             world.set(entity, TypeAnnotation(param_ty.clone()));
@@ -188,139 +130,162 @@ fn extract_single_param(
     })
 }
 
-/// Extract a ParamPattern from a Pattern CST node.
-/// Handles tuple patterns, struct patterns, wildcard, and binding.
-fn extract_param_pattern(node: &SyntaxNode) -> Option<ParamPattern> {
-    // Unwrap Pattern wrapper if present
-    let inner = if node.kind() == SyntaxKind::Pattern {
-        node.children().next()?
-    } else {
-        node.clone()
-    };
-
-    match inner.kind() {
-        SyntaxKind::WildcardPattern => Some(ParamPattern::Wildcard),
-
-        SyntaxKind::BindingPattern => {
-            let is_mut = inner
-                .children_with_tokens()
-                .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Var));
-            let name = inner
-                .children_with_tokens()
-                .filter_map(|e| e.into_token())
-                .find(|t| t.kind() == SyntaxKind::Identifier)
+/// The `ParamPattern` of a destructuring parameter: tuple, struct, wildcard,
+/// or (nested) binding. Other patterns are not valid parameter patterns.
+fn extract_param_pattern(pat: &ast::Pat) -> Option<ParamPattern> {
+    Some(match pat {
+        ast::Pat::WildcardPattern(_) => ParamPattern::Wildcard,
+        ast::Pat::BindingPattern(b) => ParamPattern::Binding {
+            name: b
+                .identifier_token()
                 .map(|t| t.text().to_string())
-                .unwrap_or_default();
-            Some(ParamPattern::Binding { name, is_mut })
+                .unwrap_or_default(),
+            is_mut: b.var_token().is_some(),
         },
-
-        SyntaxKind::TuplePattern => {
-            let elements: Vec<ParamPattern> = inner
-                .children()
-                .filter(|c| c.kind() == SyntaxKind::TuplePatternElement)
-                .filter_map(|c| {
-                    // TuplePatternElement contains a pattern node directly
-                    // (BindingPattern, TuplePattern, etc.) or wrapped in Pattern
-                    c.children()
-                        .find(|cc| {
-                            cc.kind() == SyntaxKind::Pattern
-                                || cc.kind() == SyntaxKind::BindingPattern
-                                || cc.kind() == SyntaxKind::TuplePattern
-                                || cc.kind() == SyntaxKind::StructPattern
-                                || cc.kind() == SyntaxKind::WildcardPattern
-                        })
-                        .and_then(|p| extract_param_pattern(&p))
-                })
-                .collect();
-            Some(ParamPattern::Tuple { elements })
+        ast::Pat::TuplePattern(t) => ParamPattern::Tuple {
+            elements: t
+                .tuple_pattern_elements()
+                .filter_map(|e| extract_param_pattern(&e.pat()?))
+                .collect(),
         },
-
-        SyntaxKind::StructPattern => {
-            // Extract struct name
-            let type_name = inner
-                .children()
-                .find(|c| c.kind() == SyntaxKind::ExprPath || c.kind() == SyntaxKind::TyPath)
-                .and_then(|path| {
-                    path.children_with_tokens()
-                        .filter_map(|e| e.into_token())
-                        .find(|t| t.kind() == SyntaxKind::Identifier)
-                        .map(|t| t.text().to_string())
-                })
-                .or_else(|| {
-                    // Try bare identifier
-                    inner
-                        .children_with_tokens()
-                        .filter_map(|e| e.into_token())
-                        .find(|t| t.kind() == SyntaxKind::Identifier)
-                        .map(|t| t.text().to_string())
-                })
-                .unwrap_or_default();
-
-            let has_rest = inner.children().any(|c| {
-                c.kind() == SyntaxKind::RestPattern || c.kind() == SyntaxKind::StructPatternRest
-            });
-
-            let fields: Vec<StructPatternField> = inner
-                .children()
-                .filter(|c| c.kind() == SyntaxKind::StructPatternField)
-                .filter_map(|field| {
-                    // Field has: Identifier (field name), optional Pattern (binding)
-                    let field_name = field
-                        .children_with_tokens()
-                        .filter_map(|e| e.into_token())
-                        .find(|t| t.kind() == SyntaxKind::Identifier)
-                        .map(|t| t.text().to_string())?;
-
-                    // Check for explicit binding pattern (field: pattern)
-                    // The emitter puts the binding directly (no Pattern wrapper)
-                    let pattern = field
-                        .children()
-                        .find(|c| {
-                            c.kind() == SyntaxKind::Pattern
-                                || c.kind() == SyntaxKind::BindingPattern
-                                || c.kind() == SyntaxKind::TuplePattern
-                                || c.kind() == SyntaxKind::WildcardPattern
-                                || c.kind() == SyntaxKind::StructPattern
-                        })
-                        .and_then(|p| extract_param_pattern(&p))
-                        .unwrap_or(ParamPattern::Binding {
-                            name: field_name.clone(),
-                            is_mut: false,
+        ast::Pat::StructPattern(s) => {
+            let mut fields = Vec::new();
+            let mut has_rest = false;
+            for member in s.struct_pattern_members() {
+                match member {
+                    ast::StructPatternMember::StructPatternRest(_) => has_rest = true,
+                    ast::StructPatternMember::StructPatternField(f) => {
+                        let Some(field_name) = f.identifier_token().map(|t| t.text().to_string())
+                        else {
+                            continue;
+                        };
+                        // `field: pattern`, or the shorthand `field` binding
+                        // its own name.
+                        let pattern = f.pat().and_then(|p| extract_param_pattern(&p)).unwrap_or(
+                            ParamPattern::Binding {
+                                name: field_name.clone(),
+                                is_mut: false,
+                            },
+                        );
+                        fields.push(StructPatternField {
+                            field_name,
+                            pattern,
                         });
-
-                    Some(StructPatternField {
-                        field_name,
-                        pattern,
-                    })
-                })
-                .collect();
-
-            Some(ParamPattern::Struct {
-                type_name,
+                    },
+                }
+            }
+            ParamPattern::Struct {
+                type_name: s
+                    .identifier_token()
+                    .map(|t| t.text().to_string())
+                    .unwrap_or_default(),
                 fields,
                 has_rest,
-            })
+            }
         },
-
-        _ => None,
-    }
+        _ => return None,
+    })
 }
 
-/// Check if a default value body's tail expression is a single-segment path
-/// matching a sibling parameter name. Returns the matched name if found.
-fn default_body_references_param<'a>(
-    body: &kestrel_ast::ast_body::AstBody,
+/// Whether a default value is exactly a bare name (`= x` — one identifier,
+/// no type arguments, no member access) matching a sibling parameter.
+/// Returns the matched name if found.
+fn default_references_param<'a>(
+    default: &ast::DefaultValue,
     param_names: &[&'a str],
 ) -> Option<&'a str> {
-    let tail_id = body.tail_expr?;
-    if let kestrel_ast::ast_body::AstExpr::Path { segments, .. } = &body.exprs[tail_id]
-        && segments.len() == 1
-        && segments[0].type_args.is_none()
+    let ast::Expr::ExprPath(path) = default.expression()?.expr()? else {
+        return None;
+    };
+    if path.expression().is_some()
+        || path.dot_token().is_some()
+        || path.type_argument_lists().next().is_some()
     {
-        return param_names
-            .iter()
-            .find(|&&p| p == segments[0].name)
-            .copied();
+        return None;
     }
-    None
+    let name = path.identifier_token()?;
+    param_names.iter().find(|&&p| p == name.text()).copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::build::build_declarations;
+    use crate::components::{Callable, Name, NodeKind};
+    use kestrel_hecs::World;
+
+    /// Parse `source`, build declarations into a **fresh** World, and return
+    /// the synthetic parameter names of every callable, in declaration order.
+    fn synthetic_param_names(source: &str) -> Vec<String> {
+        let mut world = World::new();
+        world.begin_revision();
+
+        let root = world.spawn();
+        world.set(root, NodeKind::Module);
+        world.set(root, Name(Name::ROOT.to_string()));
+
+        let file_entity = world.spawn();
+        let tokens: Vec<_> = kestrel_lexer::lex(source, file_entity.index())
+            .filter_map(|r| r.ok())
+            .collect();
+        let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
+        let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
+        build_declarations(&mut world, file_entity, &result.tree(), root, None);
+
+        world
+            .iter_component::<Callable>()
+            .flat_map(|(_, c)| c.params.iter())
+            .filter(|p| p.name.starts_with("_param_"))
+            .map(|p| p.name.clone())
+            .collect()
+    }
+
+    /// Two destructured params in ONE parameter list number from zero, in
+    /// source order.
+    #[test]
+    fn synthetic_param_names_number_from_zero_within_one_list() {
+        let names =
+            synthetic_param_names("func f((a, b): (Int64, Int64), (c, d): (Int64, Int64)) {}\n");
+        assert_eq!(
+            names,
+            vec!["_param_0".to_string(), "_param_1".to_string()],
+            "synthetic names must be positional within the parameter list"
+        );
+    }
+
+    /// The counter must NOT carry over between calls: building the same source
+    /// twice in one process must produce the same names both times.
+    ///
+    /// This is the regression guard for F43b. `_param_N` reaches user-visible
+    /// diagnostic text (E611/E613); a process-lifetime `static AtomicU32` made
+    /// it depend on how many declarations the process had already built, so the
+    /// LSP printed `_param_0`, then `_param_7`, then `_param_23` for the same
+    /// unedited file, and the parallel test harness raced on it. Reintroducing
+    /// a `static` fails here.
+    #[test]
+    fn synthetic_param_counter_does_not_carry_between_parameter_lists() {
+        let source = "func f((a, b): (Int64, Int64)) {}\n";
+        let first = synthetic_param_names(source);
+        let second = synthetic_param_names(source);
+
+        assert_eq!(first, vec!["_param_0".to_string()]);
+        assert_eq!(
+            first, second,
+            "synthetic parameter names must be a pure function of the \
+             parameter list, not of process history"
+        );
+    }
+
+    /// Separate declarations each restart at zero — the scope is one parameter
+    /// list, not one file and not one process.
+    #[test]
+    fn each_declaration_restarts_synthetic_numbering() {
+        let names = synthetic_param_names(
+            "func f((a, b): (Int64, Int64)) {}\nfunc g((c, d): (Int64, Int64)) {}\n",
+        );
+        assert_eq!(
+            names,
+            vec!["_param_0".to_string(), "_param_0".to_string()],
+            "each parameter list numbers independently"
+        );
+    }
 }

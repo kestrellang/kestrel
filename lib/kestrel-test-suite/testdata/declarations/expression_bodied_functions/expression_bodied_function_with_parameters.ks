@@ -8,6 +8,6 @@ func add(a: std.numeric.Int64, b: std.numeric.Int64) -> std.numeric.Int64 = a + 
 
 @main
 func main() -> lang.i64 {
-    let _ = println(add(3, 4));
+     println(add(3, 4));
     0
 }

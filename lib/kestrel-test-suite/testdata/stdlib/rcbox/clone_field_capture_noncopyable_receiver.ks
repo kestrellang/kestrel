@@ -2,11 +2,12 @@
 // stdlib: true
 
 // A closure that reads a Cloneable (RcBox) field of a *non-Copyable* receiver
-// must place-capture the field — clone just `c.box` into the env and borrow
-// `c` — never capturing the whole receiver. Capturing the whole non-Copyable
-// `c` would move/consume it, so the use of `c` after the closure would fail to
-// compile (use of moved value). This passing at all proves `c` survives the
-// capture; the value checks prove the captured field is the real one.
+// must place-capture the field — the env holds a view of just `c.box`, never
+// the whole receiver (docs/design/closures.md, "What is captured: the narrowest
+// place"). Under the VIEW tier the capture neither clones the field nor
+// consumes `c`: the env holds the field's ADDRESS and owns nothing, so `c`
+// stays usable afterwards. This passing at all proves `c` survives the capture;
+// the value checks prove the viewed field is the real one.
 
 module Test
 

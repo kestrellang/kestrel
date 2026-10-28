@@ -18,17 +18,17 @@ import jessup.github.(Release, fetchRelease, fetchJessupRelease)
 
 /// Installs a toolchain for the given channel.
 /// channel can be "stable", "nightly", or a specific version like "1.0.0".
-public func installToolchain(channel channel: String) -> Result[String, JessupError] {
+public func installToolchain(channel channel: String) -> String throws JessupError {
     // Ensure directories exist
     match ensureDirectories() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(_) => {}
     }
 
     // Detect platform
     var platform = Platform(os: "", arch: "");
     match detectPlatform() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(p) => platform = p
     }
 
@@ -36,12 +36,12 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     fetchMsg.append("Fetching release info for ");
     fetchMsg.append(channel);
     fetchMsg.append("...");
-    let _ = println(fetchMsg);
+     println(fetchMsg);
 
     // Fetch release info from GitHub
     var release = Release(tagName: "", assetUrl: "");
     match fetchRelease(channel: channel, platform: platform) {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(r) => release = r
     }
 
@@ -51,7 +51,7 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     // Check if already installed
     var tcDir = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => {
             var s = String();
             s.append(dir);
@@ -66,7 +66,7 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
         alreadyMsg.append("Toolchain ");
         alreadyMsg.append(toolchainName);
         alreadyMsg.append(" is already installed");
-        let _ = println(alreadyMsg);
+         println(alreadyMsg);
         return .Ok(toolchainName)
     }
 
@@ -74,7 +74,7 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     dlMsg.append("Downloading ");
     dlMsg.append(toolchainName);
     dlMsg.append("...");
-    let _ = println(dlMsg);
+     println(dlMsg);
 
     // Create temp directory for download
     var tmpDir = String();
@@ -83,7 +83,7 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     var mkdirCmd = String();
     mkdirCmd.append("mkdir -p ");
     mkdirCmd.append(tmpDir);
-    let _ = spawn(mkdirCmd);
+     spawn(mkdirCmd).unwrap(or: -1);
     var archivePath = String();
     archivePath.append(tmpDir);
     archivePath.append("/toolchain.tar.gz");
@@ -93,7 +93,7 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     curlCmd.append("curl -sL ");
     match getenv("GITHUB_TOKEN") {
         .Some(token) => {
-            if token.byteCount > 0 {
+            if token.bytes.count > 0 {
                 curlCmd.append("-H 'Authorization: Bearer ");
                 curlCmd.append(token);
                 curlCmd.append("' -H 'Accept: application/octet-stream' ");
@@ -105,20 +105,20 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     curlCmd.append(archivePath);
     curlCmd.append(" ");
     curlCmd.append(release.assetUrl);
-    let exitCode = spawn(curlCmd);
+    let exitCode = spawn(curlCmd).unwrap(or: -1);
     if exitCode != 0 {
         var rmCmd = String();
         rmCmd.append("rm -rf ");
         rmCmd.append(tmpDir);
-        let _ = spawn(rmCmd);
-        return .Err(JessupError.NetworkError("failed to download toolchain"))
+         spawn(rmCmd).unwrap(or: -1);
+        throw JessupError.NetworkError("failed to download toolchain")
     }
 
     // Create toolchain directory
     var mkdirTcCmd = String();
     mkdirTcCmd.append("mkdir -p ");
     mkdirTcCmd.append(tcDir);
-    let _ = spawn(mkdirTcCmd);
+     spawn(mkdirTcCmd).unwrap(or: -1);
 
     // Extract archive (strip the top-level directory from the tarball)
     var tarCmd = String();
@@ -127,36 +127,36 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     tarCmd.append(" -C ");
     tarCmd.append(tcDir);
     tarCmd.append(" --strip-components=1");
-    let tarExit = spawn(tarCmd);
+    let tarExit = spawn(tarCmd).unwrap(or: -1);
     if tarExit != 0 {
         var rmTmpCmd = String();
         rmTmpCmd.append("rm -rf ");
         rmTmpCmd.append(tmpDir);
-        let _ = spawn(rmTmpCmd);
+         spawn(rmTmpCmd).unwrap(or: -1);
         var rmTcCmd = String();
         rmTcCmd.append("rm -rf ");
         rmTcCmd.append(tcDir);
-        let _ = spawn(rmTcCmd);
-        return .Err(JessupError.InstallError("failed to extract toolchain archive"))
+         spawn(rmTcCmd).unwrap(or: -1);
+        throw JessupError.InstallError("failed to extract toolchain archive")
     }
 
     // Clean up temp files
     var rmCleanCmd = String();
     rmCleanCmd.append("rm -rf ");
     rmCleanCmd.append(tmpDir);
-    let _ = spawn(rmCleanCmd);
+     spawn(rmCleanCmd).unwrap(or: -1);
 
     // Make binaries executable
     var chmodKestrel = String();
     chmodKestrel.append("chmod +x ");
     chmodKestrel.append(tcDir);
     chmodKestrel.append("/bin/kestrel");
-    let _ = spawn(chmodKestrel);
+     spawn(chmodKestrel).unwrap(or: -1);
     var chmodFlock = String();
     chmodFlock.append("chmod +x ");
     chmodFlock.append(tcDir);
     chmodFlock.append("/bin/flock");
-    let _ = spawn(chmodFlock);
+     spawn(chmodFlock).unwrap(or: -1);
     var lspBin = String();
     lspBin.append(tcDir);
     lspBin.append("/bin/kestrel-lsp");
@@ -164,7 +164,7 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
         var chmodLsp = String();
         chmodLsp.append("chmod +x ");
         chmodLsp.append(lspBin);
-        let _ = spawn(chmodLsp);
+         spawn(chmodLsp).unwrap(or: -1);
     }
     var docBin = String();
     docBin.append(tcDir);
@@ -173,13 +173,13 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
         var chmodDoc = String();
         chmodDoc.append("chmod +x ");
         chmodDoc.append(docBin);
-        let _ = spawn(chmodDoc);
+         spawn(chmodDoc).unwrap(or: -1);
     }
 
     var installedMsg = String();
     installedMsg.append("Installed ");
     installedMsg.append(toolchainName);
-    let _ = println(installedMsg);
+     println(installedMsg);
 
     // Editor and agent integrations are opt-in. Rather than silently mutating
     // the user's editor or agent config, print the install commands so they
@@ -194,10 +194,10 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
 // ============================================================================
 
 /// Sets the default toolchain by updating symlinks in ~/.jessup/bin/.
-public func setDefault(toolchainName toolchainName: String) -> Result[(), JessupError] {
+public func setDefault(toolchainName toolchainName: String) -> () throws JessupError {
     var tcDir = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => {
             var s = String();
             s.append(dir);
@@ -211,41 +211,41 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
         var errMsg = String();
         errMsg.append("toolchain not installed: ");
         errMsg.append(toolchainName);
-        return .Err(JessupError.NotFound(errMsg))
+        throw JessupError.NotFound(errMsg)
     }
 
     var binPath = "";
     match binDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => binPath = dir
     }
 
     var mkdirBinCmd = String();
     mkdirBinCmd.append("mkdir -p ");
     mkdirBinCmd.append(binPath);
-    let _ = spawn(mkdirBinCmd);
+     spawn(mkdirBinCmd).unwrap(or: -1);
 
     // Remove existing symlinks and create new ones
     var rmKestrel = String();
     rmKestrel.append("rm -f ");
     rmKestrel.append(binPath);
     rmKestrel.append("/kestrel");
-    let _ = spawn(rmKestrel);
+     spawn(rmKestrel).unwrap(or: -1);
     var rmFlock = String();
     rmFlock.append("rm -f ");
     rmFlock.append(binPath);
     rmFlock.append("/flock");
-    let _ = spawn(rmFlock);
+     spawn(rmFlock).unwrap(or: -1);
     var rmLsp = String();
     rmLsp.append("rm -f ");
     rmLsp.append(binPath);
     rmLsp.append("/kestrel-lsp");
-    let _ = spawn(rmLsp);
+     spawn(rmLsp).unwrap(or: -1);
     var rmDoc = String();
     rmDoc.append("rm -f ");
     rmDoc.append(binPath);
     rmDoc.append("/kestrel-doc");
-    let _ = spawn(rmDoc);
+     spawn(rmDoc).unwrap(or: -1);
 
     var lnKestrel = String();
     lnKestrel.append("ln -s ");
@@ -253,14 +253,14 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
     lnKestrel.append("/bin/kestrel ");
     lnKestrel.append(binPath);
     lnKestrel.append("/kestrel");
-    let _ = spawn(lnKestrel);
+     spawn(lnKestrel).unwrap(or: -1);
     var lnFlock = String();
     lnFlock.append("ln -s ");
     lnFlock.append(tcDir);
     lnFlock.append("/bin/flock ");
     lnFlock.append(binPath);
     lnFlock.append("/flock");
-    let _ = spawn(lnFlock);
+     spawn(lnFlock).unwrap(or: -1);
     var lspBin = String();
     lspBin.append(tcDir);
     lspBin.append("/bin/kestrel-lsp");
@@ -271,7 +271,7 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
         lnLsp.append(" ");
         lnLsp.append(binPath);
         lnLsp.append("/kestrel-lsp");
-        let _ = spawn(lnLsp);
+         spawn(lnLsp).unwrap(or: -1);
     }
     var docBin = String();
     docBin.append(tcDir);
@@ -283,21 +283,21 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
         lnDoc.append(" ");
         lnDoc.append(binPath);
         lnDoc.append("/kestrel-doc");
-        let _ = spawn(lnDoc);
+         spawn(lnDoc).unwrap(or: -1);
     }
 
     // Update config with the channel name
     var config = readConfig();
     config.defaultChannel = toolchainName;
     match writeConfig(config: config) {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(_) => {}
     }
 
     var defaultMsg = String();
     defaultMsg.append("Default toolchain set to ");
     defaultMsg.append(toolchainName);
-    let _ = println(defaultMsg);
+     println(defaultMsg);
 
     .Ok(())
 }
@@ -307,21 +307,21 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
 // ============================================================================
 
 /// Lists all installed toolchains. Marks the active one.
-public func listToolchains() -> Result[(), JessupError] {
+public func listToolchains() -> () throws JessupError {
     var tcDirPath = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => tcDirPath = dir
     }
 
     if not isDirectory(tcDirPath) {
-        let _ = println("No toolchains installed");
+         println("No toolchains installed");
         return .Ok(())
     }
 
-    let entries = listDir(tcDirPath);
+    let entries = listDir(tcDirPath).unwrap(or: []);
     if entries.count == 0 {
-        let _ = println("No toolchains installed");
+         println("No toolchains installed");
         return .Ok(())
     }
 
@@ -329,28 +329,25 @@ public func listToolchains() -> Result[(), JessupError] {
     let config = readConfig();
     let activeChannel = config.defaultChannel;
 
-    let _ = println("Installed toolchains:");
-    let _ = println("");
+     println("Installed toolchains:");
+     println("");
 
-    var i: Int64 = 0;
-    while i < entries.count {
-        let name = entries(unchecked: i);
+    for name in entries {
         // Skip hidden files
-        if name.byteCount > 0 and name.bytes(unchecked: 0) != 46 {
+        if name.bytes.count > 0 and name.bytes(unchecked: 0) != 46 {
             if name == activeChannel {
                 var activeMsg = String();
                 activeMsg.append("  ");
                 activeMsg.append(name);
                 activeMsg.append(" (active)");
-                let _ = println(activeMsg);
+                 println(activeMsg);
             } else {
                 var nameMsg = String();
                 nameMsg.append("  ");
                 nameMsg.append(name);
-                let _ = println(nameMsg);
+                 println(nameMsg);
             }
         }
-        i = i + 1
     }
 
     .Ok(())
@@ -361,10 +358,10 @@ public func listToolchains() -> Result[(), JessupError] {
 // ============================================================================
 
 /// Removes an installed toolchain.
-public func removeToolchain(toolchainName toolchainName: String) -> Result[(), JessupError] {
+public func removeToolchain(toolchainName toolchainName: String) -> () throws JessupError {
     var tcDir = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => {
             var s = String();
             s.append(dir);
@@ -378,13 +375,13 @@ public func removeToolchain(toolchainName toolchainName: String) -> Result[(), J
         var errMsg = String();
         errMsg.append("toolchain not installed: ");
         errMsg.append(toolchainName);
-        return .Err(JessupError.NotFound(errMsg))
+        throw JessupError.NotFound(errMsg)
     }
 
     // Check if this is the active toolchain
     let config = readConfig();
     if config.defaultChannel == toolchainName {
-        let _ = println("Warning: removing the active toolchain. Run 'jessup default <version>' to set a new default.");
+         println("Warning: removing the active toolchain. Run 'jessup default <version>' to set a new default.");
         // Remove symlinks
         match binDir() {
             .Ok(bp) => {
@@ -392,22 +389,22 @@ public func removeToolchain(toolchainName toolchainName: String) -> Result[(), J
                 rmK.append("rm -f ");
                 rmK.append(bp);
                 rmK.append("/kestrel");
-                let _ = spawn(rmK);
+                 spawn(rmK).unwrap(or: -1);
                 var rmF = String();
                 rmF.append("rm -f ");
                 rmF.append(bp);
                 rmF.append("/flock");
-                let _ = spawn(rmF);
+                 spawn(rmF).unwrap(or: -1);
                 var rmLsp = String();
                 rmLsp.append("rm -f ");
                 rmLsp.append(bp);
                 rmLsp.append("/kestrel-lsp");
-                let _ = spawn(rmLsp);
+                 spawn(rmLsp).unwrap(or: -1);
                 var rmDoc = String();
                 rmDoc.append("rm -f ");
                 rmDoc.append(bp);
                 rmDoc.append("/kestrel-doc");
-                let _ = spawn(rmDoc);
+                 spawn(rmDoc).unwrap(or: -1);
             },
             .Err(_) => {}
         }
@@ -416,11 +413,11 @@ public func removeToolchain(toolchainName toolchainName: String) -> Result[(), J
     var rmTcCmd = String();
     rmTcCmd.append("rm -rf ");
     rmTcCmd.append(tcDir);
-    let _ = spawn(rmTcCmd);
+     spawn(rmTcCmd).unwrap(or: -1);
     var removedMsg = String();
     removedMsg.append("Removed toolchain ");
     removedMsg.append(toolchainName);
-    let _ = println(removedMsg);
+     println(removedMsg);
 
     .Ok(())
 }
@@ -430,13 +427,13 @@ public func removeToolchain(toolchainName toolchainName: String) -> Result[(), J
 // ============================================================================
 
 /// Shows the active toolchain and its path.
-public func showActive() -> Result[(), JessupError] {
+public func showActive() -> () throws JessupError {
     let config = readConfig();
     let activeChannel = config.defaultChannel;
 
     var tcDir = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => {
             var s = String();
             s.append(dir);
@@ -450,11 +447,11 @@ public func showActive() -> Result[(), JessupError] {
         var activeMsg = String();
         activeMsg.append("Active toolchain: ");
         activeMsg.append(activeChannel);
-        let _ = println(activeMsg);
+         println(activeMsg);
         var locMsg = String();
         locMsg.append("Location: ");
         locMsg.append(tcDir);
-        let _ = println(locMsg);
+         println(locMsg);
 
         // Show kestrel version if available
         var kestrelBin = String();
@@ -464,14 +461,14 @@ public func showActive() -> Result[(), JessupError] {
             var versionCmd = String();
             versionCmd.append(kestrelBin);
             versionCmd.append(" --version");
-            let version = captureOutput(versionCmd);
+            let version = captureOutput(versionCmd).unwrap(or: String());
             var verMsg = String();
             verMsg.append("Version: ");
             verMsg.append(version);
-            let _ = println(verMsg);
+             println(verMsg);
         }
     } else {
-        let _ = println("No active toolchain. Run 'jessup install stable' to get started.");
+         println("No active toolchain. Run 'jessup install stable' to get started.");
     };
 
     .Ok(())
@@ -482,24 +479,22 @@ public func showActive() -> Result[(), JessupError] {
 // ============================================================================
 
 /// Updates all installed channel toolchains (stable, nightly) to their latest versions.
-public func updateToolchains() -> Result[(), JessupError] {
+public func updateToolchains() -> () throws JessupError {
     var tcDirPath = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => tcDirPath = dir
     }
 
     if not isDirectory(tcDirPath) {
-        let _ = println("No toolchains installed");
+         println("No toolchains installed");
         return .Ok(())
     }
 
-    let entries = listDir(tcDirPath);
+    let entries = listDir(tcDirPath).unwrap(or: []);
     var updated = false;
 
-    var i: Int64 = 0;
-    while i < entries.count {
-        let name = entries(unchecked: i);
+    for name in entries {
         // Update channels (stable-*, preview-*, beta-*, nightly-*)
         if name.starts(with: "stable") or name.starts(with: "preview") or name.starts(with: "beta") or name.starts(with: "nightly") {
             let channel = if name.starts(with: "stable") { "stable" }
@@ -510,7 +505,7 @@ public func updateToolchains() -> Result[(), JessupError] {
             updMsg.append("Updating ");
             updMsg.append(channel);
             updMsg.append("...");
-            let _ = println(updMsg);
+             println(updMsg);
 
             // Remove old version
             var rmOldCmd = String();
@@ -518,7 +513,7 @@ public func updateToolchains() -> Result[(), JessupError] {
             rmOldCmd.append(tcDirPath);
             rmOldCmd.append("/");
             rmOldCmd.append(name);
-            let _ = spawn(rmOldCmd);
+             spawn(rmOldCmd).unwrap(or: -1);
 
             // Install latest
             match installToolchain(channel: channel) {
@@ -530,7 +525,7 @@ public func updateToolchains() -> Result[(), JessupError] {
                         match setDefault(toolchainName: newName) {
                             .Ok(_) => {},
                             .Err(e) => {
-                                let _ = eprintln(e.description());
+                                 eprintln(e.description());
                             }
                         }
                     }
@@ -541,15 +536,14 @@ public func updateToolchains() -> Result[(), JessupError] {
                     failMsg.append(channel);
                     failMsg.append(": ");
                     failMsg.append(e.description());
-                    let _ = eprintln(failMsg);
+                     eprintln(failMsg);
                 }
             }
         }
-        i = i + 1
     }
 
     if not updated {
-        let _ = println("No updatable channels found (install stable or nightly first)");
+         println("No updatable channels found (install stable or nightly first)");
     }
 
     .Ok(())
@@ -560,24 +554,24 @@ public func updateToolchains() -> Result[(), JessupError] {
 // ============================================================================
 
 /// Updates jessup itself to the latest version.
-public func selfUpdate() -> Result[(), JessupError] {
+public func selfUpdate() -> () throws JessupError {
     var platform = Platform(os: "", arch: "");
     match detectPlatform() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(p) => platform = p
     }
 
-    let _ = println("Checking for jessup updates...");
+     println("Checking for jessup updates...");
 
     var downloadUrl = "";
     match fetchJessupRelease(platform: platform) {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(url) => downloadUrl = url
     }
 
     var bp = "";
     match binDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => bp = dir
     }
 
@@ -585,7 +579,7 @@ public func selfUpdate() -> Result[(), JessupError] {
     var mkdirSelfCmd = String();
     mkdirSelfCmd.append("mkdir -p ");
     mkdirSelfCmd.append(tmpDir);
-    let _ = spawn(mkdirSelfCmd);
+     spawn(mkdirSelfCmd).unwrap(or: -1);
     var archivePath = String();
     archivePath.append(tmpDir);
     archivePath.append("/jessup.tar.gz");
@@ -594,7 +588,7 @@ public func selfUpdate() -> Result[(), JessupError] {
     curlCmd.append("curl -sL ");
     match getenv("GITHUB_TOKEN") {
         .Some(selfToken) => {
-            if selfToken.byteCount > 0 {
+            if selfToken.bytes.count > 0 {
                 curlCmd.append("-H 'Authorization: Bearer ");
                 curlCmd.append(selfToken);
                 curlCmd.append("' -H 'Accept: application/octet-stream' ");
@@ -606,13 +600,13 @@ public func selfUpdate() -> Result[(), JessupError] {
     curlCmd.append(archivePath);
     curlCmd.append(" ");
     curlCmd.append(downloadUrl);
-    let exitCode = spawn(curlCmd);
+    let exitCode = spawn(curlCmd).unwrap(or: -1);
     if exitCode != 0 {
         var rmSelfCmd = String();
         rmSelfCmd.append("rm -rf ");
         rmSelfCmd.append(tmpDir);
-        let _ = spawn(rmSelfCmd);
-        return .Err(JessupError.NetworkError("failed to download jessup update"))
+         spawn(rmSelfCmd).unwrap(or: -1);
+        throw JessupError.NetworkError("failed to download jessup update")
     }
 
     // Extract and strip top-level directory
@@ -622,25 +616,25 @@ public func selfUpdate() -> Result[(), JessupError] {
     tarSelfCmd.append(" -C ");
     tarSelfCmd.append(tmpDir);
     tarSelfCmd.append(" --strip-components=1");
-    let _ = spawn(tarSelfCmd);
+     spawn(tarSelfCmd).unwrap(or: -1);
     var chmodSelfCmd = String();
     chmodSelfCmd.append("chmod +x ");
     chmodSelfCmd.append(tmpDir);
     chmodSelfCmd.append("/jessup");
-    let _ = spawn(chmodSelfCmd);
+     spawn(chmodSelfCmd).unwrap(or: -1);
     var mvCmd = String();
     mvCmd.append("mv ");
     mvCmd.append(tmpDir);
     mvCmd.append("/jessup ");
     mvCmd.append(bp);
     mvCmd.append("/jessup");
-    let _ = spawn(mvCmd);
+     spawn(mvCmd).unwrap(or: -1);
     var rmFinalCmd = String();
     rmFinalCmd.append("rm -rf ");
     rmFinalCmd.append(tmpDir);
-    let _ = spawn(rmFinalCmd);
+     spawn(rmFinalCmd).unwrap(or: -1);
 
-    let _ = println("jessup has been updated");
+     println("jessup has been updated");
 
     .Ok(())
 }
@@ -654,20 +648,20 @@ public func selfUpdate() -> Result[(), JessupError] {
 /// shouldn't silently mutate the user's editor or agent config. The user runs
 /// whichever lines they want.
 func printIntegrationHints() {
-    let _ = println("");
-    let _ = println("Optional integrations (run the ones you want):");
-    let _ = println("");
-    let _ = println("  Editor extension (VS Code / Cursor): download the .vsix for your");
-    let _ = println("  platform from https://github.com/kestrellang/kestrel-vscode/releases/latest");
-    let _ = println("  then run: code --install-extension <file>.vsix");
-    let _ = println("");
-    let _ = println("  Claude Code plugin (Kestrel guidance + kestrel-lsp):");
-    let _ = println("    claude plugin marketplace add kestrellang/kestrel-plugin");
-    let _ = println("    claude plugin install kestrel-plugin@kestrel");
-    let _ = println("");
-    let _ = println("  Codex plugin:");
-    let _ = println("    codex plugin marketplace add kestrellang/kestrel-plugin");
-    let _ = println("    codex plugin add kestrel-plugin@kestrel");
+     println("");
+     println("Optional integrations (run the ones you want):");
+     println("");
+     println("  Editor extension (VS Code / Cursor): download the .vsix for your");
+     println("  platform from https://github.com/kestrellang/kestrel-vscode/releases/latest");
+     println("  then run: code --install-extension <file>.vsix");
+     println("");
+     println("  Claude Code plugin (Kestrel guidance + kestrel-lsp):");
+     println("    claude plugin marketplace add kestrellang/kestrel-plugin");
+     println("    claude plugin install kestrel-plugin@kestrel");
+     println("");
+     println("  Codex plugin:");
+     println("    codex plugin marketplace add kestrellang/kestrel-plugin");
+     println("    codex plugin add kestrel-plugin@kestrel");
 }
 
 // ============================================================================
@@ -683,7 +677,7 @@ func toolchainDirName(channel channel: String, tag tag: String) -> String {
     if channel == "nightly" or channel == "beta" {
         // Rolling channels — the tag is fixed (`nightly`/`beta`), so
         // disambiguate installs by date instead.
-        let date = captureOutput("date +%Y-%m-%d");
+        let date = captureOutput("date +%Y-%m-%d").unwrap(or: String());
         let trimmed = trimTrailingNewline(date);
         var s = String();
         s.append(channel);
@@ -706,15 +700,15 @@ func toolchainDirName(channel channel: String, tag tag: String) -> String {
 
 /// Strips a single leading 'v' (byte 118) from a tag, if present.
 func stripLeadingV(tag tag: String) -> String {
-    if tag.byteCount > 0 and tag.bytes(unchecked: 0) == 118 {
-        tag.asSlice().subslice(from: 1, to: tag.byteCount).toOwned()
+    if tag.bytes.count > 0 and tag.bytes(unchecked: 0) == 118 {
+        tag.asSlice().subslice(from: 1, to: tag.bytes.count).toOwned()
     } else {
         tag
     }
 }
 
 func trimTrailingNewline(s: String) -> String {
-    let len = s.byteCount;
+    let len = s.bytes.count;
     var end = len;
     while end > 0 {
         let b = s.bytes(unchecked: end - 1);

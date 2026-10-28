@@ -2,8 +2,6 @@
 
 Welcome. This guide orients new contributors to the Kestrel compiler — the active codebase lives in `lib/` and is organized as a hierarchical entity-component system (hECS) with memoized queries.
 
-> The older `lib/` tree is legacy. All new work targets `lib/`.
-
 ## Where to start
 
 | Goal | Read |
@@ -15,6 +13,7 @@ Welcome. This guide orients new contributors to the Kestrel compiler — the act
 | Work on the type system, inference, generics | [Type Inference](type-inference.md) |
 | Understand or change how symbols are mangled | [Mangling](mangling.md) |
 | Branches, the release train, the Project board, PRs, issues | [Workflow](git.md) |
+| Report a measurement, a repro, or an audit finding others will trust | [Verifying Claims](verifying-claims.md) |
 
 ## Codebase overview
 
@@ -32,15 +31,19 @@ kestrel/
 │   ├── kestrel-hir-lower/              # AST body → HIR body
 │   ├── kestrel-type-infer/             # Constraint-based inference
 │   ├── kestrel-semantics/              # Higher-level semantic queries
+│   ├── kestrel-copy-fold/              # Copyable/Cloneable/NotCopyable decision kernel
 │   ├── kestrel-analyze/                # Roslyn-style analyzers
 │   ├── kestrel-pattern-matching/       # Exhaustiveness checking
-│   ├── kestrel-mir/                    # MIR types
+│   ├── kestrel-mir/                    # MIR types, passes, mono, layout, mangling
 │   ├── kestrel-mir-lower/              # Entities → MIR
-│   ├── kestrel-codegen/                # Layout, mangling (backend-agnostic)
+│   ├── kestrel-codegen/                # Backend-agnostic target configuration
 │   ├── kestrel-codegen-cranelift/      # Cranelift backend
+│   ├── kestrel-codegen-llvm/           # LLVM backend (inkwell / LLVM 18)
 │   ├── kestrel-compiler/               # Query engine / World owner
 │   ├── kestrel-compiler-driver/        # High-level orchestration
 │   ├── kestrel-debug/                  # Introspection helpers
+│   ├── kestrel-doc/                    # Stdlib/API doc extraction (JSON)
+│   ├── kestrel-lsp/                    # Language server (LSP over stdio)
 │   ├── kestrel-reporting/              # Diagnostic formatting
 │   ├── kestrel-span/                   # Source locations
 │   ├── kestrel-test-suite/             # .ks-file test runner
@@ -86,13 +89,14 @@ triage --failures
 
 ## Debugging
 
-Verbose debug tracing is available via:
+Debug tracing is the `ktrace!` macro from `kestrel-debug`, gated on `KESTREL_DEBUG` with comma-separated categories:
 
 ```bash
-VERBOSE_DEBUG_OUTPUT=1 triage <pattern>
+KESTREL_DEBUG=infer,solver triage <pattern>
+KESTREL_DEBUG=all triage <pattern>
 ```
 
-This enables `debug_trace!` output from the compiler (member resolution, method calls, where-clause checks, type substitutions). When you need to trace something new, add `debug_trace!` calls — not `eprintln!`/`println!` — so the output stays filterable.
+Categories are free-form strings chosen at each call site. In use today: `infer`, `solver`, `hir-lower`, `copyable`, `static-wf`, `ref-gate`, `op-shape`, `dangle`, `arm-decay`. When you need to trace something new, add `ktrace!` calls — not `eprintln!`/`println!` — so the output stays filterable.
 
 ## Asking for help
 

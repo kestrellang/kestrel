@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use kestrel_debug::ktrace;
 use kestrel_hecs::Entity;
 
 use crate::block::BlockParam;
@@ -12,7 +13,7 @@ use crate::terminator::{SwitchArm, Terminator, TerminatorKind};
 use crate::ty::TyArena;
 use crate::ty::{MirTy, ParamConvention};
 use crate::ty_query::find_cloneable_protocol;
-use crate::value::{Ownership, ValueDef};
+use crate::value::{Ownership, RootProvenance, ValueDef};
 use crate::{FieldIdx, MirModule, TyId, ValueId, VariantIdx};
 
 /// Synthesize `__clone$T` functions for all structs/enums that aren't `not Copyable`.
@@ -69,19 +70,17 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     // Pre-intern i32 for enum discriminants
     module.ty_arena.i32();
 
-    // Collect types that already have a user-written Cloneable witness
-    let has_user_clone: std::collections::HashSet<Entity> = module
-        .witnesses
-        .iter()
-        .filter(|w| w.protocol == cloneable_proto)
-        .filter_map(|w| {
-            if let MirTy::Named { entity, .. } = module.ty_arena.get(w.implementing_type) {
-                Some(*entity)
-            } else {
-                None
-            }
-        })
-        .collect();
+    // Nominal → its user-written `Cloneable.clone`, keyed off a *declared*
+    // conformance and nothing else. This is the ONLY place that decision is
+    // made; the result is stored in `type_info.clone_impl` below and every later
+    // pass reads it rather than re-deriving it (F7).
+    //
+    // Must run before the shim witnesses are registered below, or the shims
+    // would read back as user clones.
+    let clone_key = clone_witness_key(module, cloneable_proto);
+    let user_clone_funcs = collect_user_clone_funcs(module, cloneable_proto, &clone_key);
+    let has_user_clone: std::collections::HashSet<Entity> =
+        user_clone_funcs.keys().copied().collect();
 
     // Build worklist: all structs/enums that don't already have a user clone.
     // Skip closure envs and types with unresolvable fields.
@@ -117,9 +116,24 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         worklist.push(e.entity);
     }
 
-    let mut shim_map: HashMap<Entity, Entity> = HashMap::new();
+    // Nominal → its synthesized shim.
+    //
+    // `IndexMap`, not `HashMap`: this map is iterated below to append witnesses
+    // via `module.add_witness`, which is a plain `Vec::push`. `module.witnesses`
+    // order is load-bearing — `mono::witness::select_most_specific` walks
+    // candidates greedily from index 0 and keeps the first of any tied pair, so
+    // a reordered tail silently changes which witness a genuinely-incomparable
+    // overlap resolves to. That is unobservable today only because every shim
+    // witness's `implementing_type` is a distinct nominal, i.e. no two of them
+    // can ever tie — one invariant deep.
+    //
+    // Insertion order is `worklist` order: `module.structs` then
+    // `module.enums`, both `IndexMap`s in declaration order. Drained front to
+    // back (not `pop()`) so the witness tail and the shim entity numbering both
+    // follow declaration order rather than its reverse.
+    let mut shim_map: indexmap::IndexMap<Entity, Entity> = indexmap::IndexMap::new();
 
-    while let Some(type_entity) = worklist.pop() {
+    for type_entity in worklist {
         if shim_map.contains_key(&type_entity) {
             continue;
         }
@@ -135,6 +149,24 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         module.register_name(shim_entity, &name);
         module.functions.insert(shim_entity, func);
         shim_map.insert(type_entity, shim_entity);
+    }
+
+    // Store the decision: nominal → the function that clones it. Every later
+    // pass reads this instead of re-deriving it (F7). `user_clone_funcs` is
+    // chained second so a user `clone()` overwrites a shim for the same nominal:
+    // a hand-written clone is always a safe superset of the memberwise one,
+    // whereas picking the shim instead can skip a retain and double-free.
+    let clone_impls: HashMap<Entity, Entity> = shim_map
+        .iter()
+        .chain(user_clone_funcs.iter())
+        .map(|(&nominal, &func)| (nominal, func))
+        .collect();
+    for (nominal, func) in clone_impls {
+        if let Some(s) = module.structs.get_mut(&nominal) {
+            s.type_info.clone_impl = Some(func);
+        } else if let Some(e) = module.enums.get_mut(&nominal) {
+            e.type_info.clone_impl = Some(func);
+        }
     }
 
     // Register each shim as a Cloneable witness. A conditionally-Copyable
@@ -167,7 +199,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
 
         let mut witness = WitnessDef::new(cloneable_proto, self_ty);
         witness.add_method(WitnessMethodBinding::new(
-            WitnessMethodKey::simple("clone"),
+            clone_key.clone(),
             shim_entity,
             tp_ty_ids,
         ));
@@ -216,21 +248,10 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     // bit-copied the `Value`, aliasing the inner String). Mark them `Clone` so
     // the CopyValue expands to their user `clone()`.
     //
-    // Include types with a `.clone` method even if no Cloneable *witness* is
-    // recorded in `module.witnesses` — a `clone()` defined in an `extend` block
-    // (vs inline) doesn't always surface a witness here, but it must still be
-    // treated as Clone-behavior. Same trivial-field / conditional-container
-    // guards as the shim loop.
-    let user_clone_types: std::collections::HashSet<Entity> = has_user_clone
-        .iter()
-        .copied()
-        .chain(
-            module
-                .functions
-                .values()
-                .filter_map(|f| f.clone_method_self_nominal(&module.ty_arena)),
-        )
-        .collect();
+    // Covers types whose `clone()` surfaces only by name and not as a witness —
+    // `user_clone_funcs` already unions both sources. Same trivial-field /
+    // conditional-container guards as the shim loop.
+    let user_clone_types: Vec<Entity> = user_clone_funcs.keys().copied().collect();
     for &type_entity in &user_clone_types {
         if is_conditional_container(module, type_entity) {
             continue;
@@ -255,6 +276,82 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
                 CopyBehavior::Clone(cloneable_proto);
         }
     }
+}
+
+/// The witness-method key for `Cloneable`'s sole requirement, taken from the
+/// **protocol declaration** rather than written out here.
+///
+/// Both sides of the Cloneable witness table go through this: the shim
+/// registration that writes a binding and the scan that reads one. Two
+/// independently-typed `"clone"` literals is exactly the pair that can drift,
+/// and a drift would silently stop matching user clones (F7). Sourcing the name
+/// from `lang/std`'s declaration also means renaming the requirement there
+/// propagates here instead of quietly un-matching — the same reason
+/// `MirModule::cloneable_protocol` exists instead of a `name.ends_with` test.
+///
+/// Falls back to the literal only if the protocol didn't lower with exactly one
+/// requirement, which would mean `Cloneable`'s shape changed out from under this
+/// pass; `ktrace` says so rather than failing silently.
+fn clone_witness_key(module: &MirModule, cloneable_proto: Entity) -> WitnessMethodKey {
+    if let Some(proto) = module.protocols.get(&cloneable_proto)
+        && let [only] = proto.methods.as_slice()
+    {
+        return WitnessMethodKey::simple(&only.name);
+    }
+    ktrace!(
+        "clone-shim",
+        "Cloneable did not lower with exactly one requirement (got {:?}) — \
+         falling back to the literal `clone` key",
+        module.protocols.get(&cloneable_proto).map(|p| p
+            .methods
+            .iter()
+            .map(|m| m.name.as_str())
+            .collect::<Vec<_>>())
+    );
+    WitnessMethodKey::simple("clone")
+}
+
+/// Nominal → its user-written `Cloneable.clone` implementation.
+///
+/// **A declared `Cloneable` conformance is the only thing that counts.** A method
+/// merely *named* `clone()` does not make a type Cloneable and must not be
+/// treated as one — that is duck typing in a nominal protocol system, and it
+/// silently forced `CopyBehavior::Clone` (and implicit-copy routing) onto any
+/// type with an unrelated `clone()`.
+///
+/// This used to fall back to scanning function names for a `.clone` suffix,
+/// justified by a hedged comment claiming an `extend`-defined `clone()` doesn't
+/// always surface a witness. That was a misdiagnosis: instrumenting the fallback
+/// showed it fired for exactly one type in the entire stdlib —
+/// `std.result.Optional`, whose `clone()` lived in a bare `extend Optional[T] {}`
+/// with **no conformance clause at all**. Nothing failed to lower; nothing was
+/// declared. Declaring `extend Optional[T]: Cloneable where T: Copyable` made the
+/// witness appear and the fallback dead, and it is now gone.
+///
+/// Call this before registering synthesized shims as witnesses — afterwards the
+/// scan would report the shims as user clones.
+fn collect_user_clone_funcs(
+    module: &MirModule,
+    cloneable_proto: Entity,
+    clone_key: &WitnessMethodKey,
+) -> HashMap<Entity, Entity> {
+    let mut map: HashMap<Entity, Entity> = HashMap::new();
+    for w in module
+        .witnesses
+        .iter()
+        .filter(|w| w.protocol == cloneable_proto)
+    {
+        let MirTy::Named { entity, .. } = module.ty_arena.get(w.implementing_type) else {
+            continue;
+        };
+        // Full-key equality, matching `mono::witness`. Comparing `.name` alone
+        // would be a partial-key match: two bindings differing only in labels
+        // would resolve by `Vec` order.
+        if let Some(binding) = w.methods.iter().find(|m| m.key == *clone_key) {
+            map.insert(*entity, binding.func);
+        }
+    }
+    map
 }
 
 /// True for a `: not Copyable` type that is *conditionally* Copyable (has gating
@@ -318,6 +415,7 @@ fn generate_struct_clone_shim(
         ty: self_ty,
         ownership: Ownership::Guaranteed,
         borrow_source: None,
+        root: RootProvenance::derived(),
         span: None,
     });
     body.param_count = 1;
@@ -416,6 +514,7 @@ fn generate_enum_clone_shim(
         ty: self_ty,
         ownership: Ownership::Guaranteed,
         borrow_source: None,
+        root: RootProvenance::derived(),
         span: None,
     });
     body.param_count = 1;
@@ -459,6 +558,7 @@ fn generate_enum_clone_shim(
             ty: self_ty,
             ownership: Ownership::Guaranteed,
             borrow_source: None,
+            root: RootProvenance::derived(),
             span: None,
         });
         let variant_disc = body.alloc_value(ValueDef::owned(i32_ty));
@@ -525,6 +625,7 @@ fn generate_enum_clone_shim(
         ty: self_ty,
         ownership: Ownership::Guaranteed,
         borrow_source: None,
+        root: RootProvenance::derived(),
         span: None,
     });
     let wildcard_disc = body.alloc_value(ValueDef::owned(i32_ty));
@@ -587,12 +688,9 @@ fn ty_contains_unresolvable(ty: TyId, arena: &TyArena) -> bool {
             .any(|&t| ty_contains_unresolvable(t, arena)),
         MirTy::Pointer(inner) => ty_contains_unresolvable(*inner, arena),
         MirTy::Tuple(elems) => elems.iter().any(|&t| ty_contains_unresolvable(t, arena)),
-        MirTy::FuncThick { params, ret, .. } => {
-            params
-                .iter()
-                .any(|&(t, _)| ty_contains_unresolvable(t, arena))
-                || ty_contains_unresolvable(*ret, arena)
-        },
+        // A closure is cloned by retaining its environment whatever its
+        // signature, so a projection in it (`escaping (I.A) -> Bool`) does
+        // not block the shim.
         _ => false,
     }
 }
@@ -619,6 +717,16 @@ fn has_unresolvable_fields_enum(e: &crate::item::enum_def::EnumDef, arena: &TyAr
 fn ty_needs_clone_shim(arena: &TyArena, ty: TyId) -> bool {
     match arena.get(ty) {
         MirTy::Named { .. } | MirTy::TypeParam(_) => true,
+        // The `String`-field route for closures (plan D6, lockstep 8): a
+        // struct holding an `escaping` closure field must get a clone shim and
+        // the `type_info.copy = Clone(cloneable_proto)` overwrite below, so
+        // copying the struct SHARES the environment handle (a retain) instead
+        // of bit-copying it. No frontend classifier change is involved.
+        // `is_shared`, NOT `is_boxed`: a `consuming` closure is NotCopyable,
+        // not Cloneable — it makes its container non-Copyable (`copy_behavior`
+        // answers `None`, which the aggregate fold propagates) instead of
+        // giving it a clone shim that has nothing to clone.
+        MirTy::FuncThick { kind, .. } => kind.is_shared(),
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
             elems.iter().any(|&e| ty_needs_clone_shim(arena, e))
@@ -640,4 +748,101 @@ fn needs_clone_shim_enum(e: &crate::item::enum_def::EnumDef, arena: &TyArena) ->
             .iter()
             .any(|f| ty_needs_clone_shim(arena, f.ty))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MirModule;
+    use crate::item::TypeInfo;
+    use crate::item::protocol::{ProtocolDef, ProtocolMethodDef};
+    use crate::item::struct_def::{FieldDef, StructDef};
+
+    /// Build a module with a `Cloneable` protocol and `count` shim-eligible
+    /// structs named `S0..S{count-1}`, declared in that order. Each has one
+    /// `Named` field so `needs_clone_shim_struct` is true.
+    fn module_with_cloneable_structs(count: u32) -> MirModule {
+        let mut module = MirModule::new("test");
+        let unit = module.ty_arena.tuple(vec![]);
+
+        let cloneable = Entity::from_raw(1);
+        let mut proto = ProtocolDef::new(cloneable, "Cloneable");
+        proto
+            .methods
+            .push(ProtocolMethodDef::new("clone", vec![], unit));
+        module.add_protocol(proto);
+        module.cloneable_protocol = Some(cloneable);
+
+        // A payload nominal so every struct has a field that needs deep cloning.
+        let payload = Entity::from_raw(2);
+        module.register_name(payload, "Payload");
+        let payload_ty = module.ty_arena.named(payload, vec![]);
+
+        for i in 0..count {
+            let e = Entity::from_raw(100 + i);
+            let name = format!("S{i}");
+            module.register_name(e, &name);
+            module.ty_arena.named(e, vec![]);
+            let mut def = StructDef::new(e, &name);
+            def.add_field(FieldDef::new("payload", payload_ty));
+            def.type_info = TypeInfo::bitwise();
+            module.add_struct(def);
+        }
+
+        module
+    }
+
+    /// The witnesses appended by this pass must follow `module.structs`
+    /// declaration order.
+    ///
+    /// Asserting the *specific* order, not just "the same every run", is the
+    /// point: `module.witnesses` is a plain `Vec` and
+    /// `mono::witness::select_most_specific` resolves an incomparable overlap
+    /// to whichever candidate comes first in it. A `HashMap` here (F43d) was
+    /// deterministic-per-process at best and reordered the tail between runs;
+    /// a merely-deterministic-but-arbitrary order would pass a "same twice"
+    /// check while still being the wrong answer.
+    #[test]
+    fn shim_witnesses_are_appended_in_module_struct_order() {
+        let mut module = module_with_cloneable_structs(8);
+        let struct_order: Vec<Entity> = module.structs.keys().copied().collect();
+
+        let mut next_entity = 1000;
+        synthesize_clone_shims(&mut module, &mut next_entity);
+
+        let witness_order: Vec<Entity> = module
+            .witnesses
+            .iter()
+            .map(|w| match module.ty_arena.get(w.implementing_type) {
+                MirTy::Named { entity, .. } => *entity,
+                other => panic!("shim witness on a non-nominal type: {other:?}"),
+            })
+            .collect();
+
+        assert_eq!(
+            witness_order, struct_order,
+            "clone-shim witnesses must be appended in `module.structs` order — \
+             witness position decides which candidate an incomparable overlap \
+             resolves to (see mono::witness::select_most_specific)"
+        );
+    }
+
+    /// Two independent builds of the same module produce byte-identical
+    /// witness tails. Complements the order assertion above: that one pins
+    /// *which* order, this one pins that the order is a function of the module
+    /// and nothing else.
+    #[test]
+    fn shim_witness_order_is_reproducible() {
+        let run = || {
+            let mut module = module_with_cloneable_structs(8);
+            let mut next_entity = 1000;
+            synthesize_clone_shims(&mut module, &mut next_entity);
+            module
+                .witnesses
+                .iter()
+                .map(|w| format!("{:?}", module.ty_arena.get(w.implementing_type)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(run(), run());
+    }
 }

@@ -40,10 +40,10 @@ use std::collections::HashSet;
 use crate::compilation::cycle_util::{Cycle, CycleDetector};
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, NodeKind, TypeAnnotation};
+use kestrel_ast_builder::{FieldClass, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 
@@ -65,8 +65,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct StructCycleAnalyzer;
 
 impl Describe for StructCycleAnalyzer {
-    fn id(&self) -> &'static str {
-        "struct_cycles"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::StructCycles
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -169,10 +169,14 @@ fn pick_label_field(stack: &OpeningStack, origin: Entity) -> Entity {
         .unwrap_or(origin)
 }
 
-/// True for stored-property fields (non-computed). Skips computed properties,
-/// which are represented as Fields carrying a Callable getter.
+/// True for fields that occupy inline instance storage — the only ones that can
+/// close a containment cycle. A `static` field is a global, so a `static var`
+/// referring to its own type is not a cycle; the old `!Callable` test called it
+/// one and reported a spurious E449.
 fn is_stored_field(cx: &CompilationContext<'_>, e: Entity) -> bool {
-    cx.query.get::<NodeKind>(e) == Some(&NodeKind::Field) && cx.query.get::<Callable>(e).is_none()
+    cx.query
+        .get::<FieldClass>(e)
+        .is_some_and(FieldClass::is_stored_instance)
 }
 
 /// Walk a field's type, following struct references transitively through
@@ -201,12 +205,30 @@ fn check_type(
                 context,
                 root: cx.root,
             });
-            if let TypeResolution::Found(entity) = result
-                && cx.query.get::<NodeKind>(entity) == Some(&NodeKind::Struct)
-            {
-                return enter_struct(cx, entity, detector, stack, direct, entry);
+            let TypeResolution::Found(entity) = result else {
+                return Ok(());
+            };
+            match cx.query.get::<NodeKind>(entity) {
+                Some(NodeKind::Struct) => enter_struct(cx, entity, detector, stack, direct, entry),
+                // An enum stores its payloads inline (an `indirect` enum is
+                // rejected earlier, E465), so a generic enum's type arguments
+                // (`Optional[S]`) are inline too: not indirection.
+                Some(NodeKind::Enum) => {
+                    for seg in segments {
+                        for arg in &seg.type_args {
+                            check_type(cx, arg, context, detector, stack, None, entry)?;
+                        }
+                    }
+                    Ok(())
+                },
+                _ => Ok(()),
             }
-            Ok(())
+        },
+        // `T?` and `Result[T, E]` sugar are inline enums too.
+        AstType::Optional(inner, _) => check_type(cx, inner, context, detector, stack, None, entry),
+        AstType::Result { ok, err, .. } => {
+            check_type(cx, ok, context, detector, stack, None, entry)?;
+            check_type(cx, err, context, detector, stack, None, entry)
         },
         AstType::Tuple(elements, _) => {
             // Tuple is indirection: struct entries inside aren't direct, but
@@ -217,8 +239,7 @@ fn check_type(
             }
             Ok(())
         },
-        // Array, Optional, Dictionary, Result, Function, Pointer — indirection,
-        // stop here.
+        // Array, Dictionary, Function, Pointer — heap indirection, stop here.
         _ => Ok(()),
     }
 }

@@ -8,13 +8,179 @@ use kestrel_ast_builder::NodeKind;
 use crate::context::{BodyContext, CompilationContext, DeclContext};
 use crate::diagnostic::{AnalyzeDiagnostic, DiagnosticDescriptor};
 
+/// Closed set of analyzer identifiers — the `Analyze` query key.
+///
+/// One variant per registered analyzer; adding an analyzer means adding a
+/// variant here, so an unknown ID is a compile error rather than a silent
+/// dispatch miss. Grouped by granularity to mirror `default_analyzers()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AnalyzerId {
+    // Body checks
+    ExhaustiveReturn,
+    DeadCode,
+    GuardDivergence,
+    ConditionCheck,
+    ParamPattern,
+    Assignment,
+    DefiniteAssignment,
+    Initializer,
+    Closure,
+    AccessMode,
+    ExclusiveArgs,
+    MoveTracking,
+    DangleRef,
+    RefutablePattern,
+    ForLoopPattern,
+    MatchPattern,
+    Exhaustiveness,
+    StringEscape,
+    IntegerLiteralRange,
+
+    // Decl checks
+    FunctionBody,
+    ProtocolMethod,
+    StaticContext,
+    StaticValueType,
+    ClosureField,
+    BuiltinMarkerProtocol,
+    DuplicateBuiltin,
+    ConformanceRules,
+    DuplicateDeinit,
+    DuplicateEnumCase,
+    DuplicateEnumLabel,
+    Field,
+    Subscript,
+    PlaceAccessor,
+    RefReturn,
+    ExternFfiSafe,
+    DefaultParamOrdering,
+    CloneableField,
+    ClosureKindConvention,
+    DuplicateSymbol,
+    DuplicateCallable,
+    FieldMethodCollision,
+    ExtensionConflictDeclStub,
+    ExtensionValidation,
+    ConformanceTarget,
+    ImportTarget,
+    RecursiveEnum,
+    IndirectEnum,
+    ParentProtocolConformance,
+    ProtocolFieldConformance,
+    Generics,
+    TypeArgArity,
+    Visibility,
+    TypeAliasValidation,
+
+    // Compilation checks (run via `analyze_compilation`, never the `Analyze` query)
+    TypeAliasCycles,
+    GlobalInitCycles,
+    StructCycles,
+    ProtocolCycles,
+    ConstraintCycles,
+    ExtensionConflict,
+    ConformanceCompleteness,
+    TypeAnnotationResolution,
+    UnknownAttribute,
+    EntryPoint,
+}
+
+impl AnalyzerId {
+    /// Human-readable snake_case name, used in query `describe()` output.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AnalyzerId::ExhaustiveReturn => "exhaustive_return",
+            AnalyzerId::DeadCode => "dead_code",
+            AnalyzerId::GuardDivergence => "guard_divergence",
+            AnalyzerId::ConditionCheck => "condition_check",
+            AnalyzerId::ParamPattern => "param_pattern",
+            AnalyzerId::Assignment => "assignment",
+            AnalyzerId::DefiniteAssignment => "definite_assignment",
+            AnalyzerId::Initializer => "initializer",
+            AnalyzerId::Closure => "closure",
+            AnalyzerId::AccessMode => "access_mode",
+            AnalyzerId::ExclusiveArgs => "exclusive_args",
+            AnalyzerId::MoveTracking => "move_tracking",
+            AnalyzerId::DangleRef => "dangle_ref",
+            AnalyzerId::RefutablePattern => "refutable_pattern",
+            AnalyzerId::ForLoopPattern => "for_loop_pattern",
+            AnalyzerId::MatchPattern => "match_pattern",
+            AnalyzerId::Exhaustiveness => "exhaustiveness",
+            AnalyzerId::StringEscape => "string_escape",
+            AnalyzerId::IntegerLiteralRange => "integer_literal_range",
+            AnalyzerId::FunctionBody => "function_body",
+            AnalyzerId::ProtocolMethod => "protocol_method",
+            AnalyzerId::StaticContext => "static_context",
+            AnalyzerId::StaticValueType => "static_value_type",
+            AnalyzerId::ClosureField => "closure_field",
+            AnalyzerId::BuiltinMarkerProtocol => "builtin_marker_protocol",
+            AnalyzerId::DuplicateBuiltin => "duplicate_builtin",
+            AnalyzerId::ConformanceRules => "conformance_rules",
+            AnalyzerId::DuplicateDeinit => "duplicate_deinit",
+            AnalyzerId::DuplicateEnumCase => "duplicate_enum_case",
+            AnalyzerId::DuplicateEnumLabel => "duplicate_enum_label",
+            AnalyzerId::Field => "field",
+            AnalyzerId::Subscript => "subscript",
+            AnalyzerId::PlaceAccessor => "place_accessor",
+            AnalyzerId::RefReturn => "ref_return",
+            AnalyzerId::ExternFfiSafe => "extern_ffi_safe",
+            AnalyzerId::DefaultParamOrdering => "default_param_ordering",
+            AnalyzerId::CloneableField => "cloneable_field",
+            AnalyzerId::ClosureKindConvention => "closure_kind_convention",
+            AnalyzerId::DuplicateSymbol => "duplicate_symbol",
+            AnalyzerId::DuplicateCallable => "duplicate_callable",
+            AnalyzerId::FieldMethodCollision => "field_method_collision",
+            AnalyzerId::ExtensionConflictDeclStub => "extension_conflict_decl_stub",
+            AnalyzerId::ExtensionValidation => "extension_validation",
+            AnalyzerId::ConformanceTarget => "conformance_target",
+            AnalyzerId::ImportTarget => "import_target",
+            AnalyzerId::RecursiveEnum => "recursive_enum",
+            AnalyzerId::IndirectEnum => "indirect_enum",
+            AnalyzerId::ParentProtocolConformance => "parent_protocol_conformance",
+            AnalyzerId::ProtocolFieldConformance => "protocol_field_conformance",
+            AnalyzerId::Generics => "generics",
+            AnalyzerId::TypeArgArity => "type_arg_arity",
+            AnalyzerId::Visibility => "visibility",
+            AnalyzerId::TypeAliasValidation => "type_alias_validation",
+            AnalyzerId::TypeAliasCycles => "type_alias_cycles",
+            AnalyzerId::GlobalInitCycles => "global_init_cycles",
+            AnalyzerId::StructCycles => "struct_cycles",
+            AnalyzerId::ProtocolCycles => "protocol_cycles",
+            AnalyzerId::ConstraintCycles => "constraint_cycles",
+            AnalyzerId::ExtensionConflict => "extension_conflict",
+            AnalyzerId::ConformanceCompleteness => "conformance_completeness",
+            AnalyzerId::TypeAnnotationResolution => "type_annotation_resolution",
+            AnalyzerId::UnknownAttribute => "unknown_attribute",
+            AnalyzerId::EntryPoint => "entry_point",
+        }
+    }
+}
+
+impl std::fmt::Display for AnalyzerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Base: every analyzer identifies itself and declares its diagnostics.
 pub trait Describe: Send + Sync + 'static {
-    /// Unique analyzer identifier (e.g. "exhaustive_return").
-    fn id(&self) -> &'static str;
+    /// Unique analyzer identifier (e.g. `AnalyzerId::ExhaustiveReturn`).
+    fn id(&self) -> AnalyzerId;
 
-    /// Diagnostic descriptors this analyzer can produce.
+    /// Diagnostic descriptors this analyzer OWNS — the codes allocated to it.
     fn descriptors(&self) -> &'static [DiagnosticDescriptor];
+
+    /// Descriptors this analyzer emits but does **not** own — codes allocated
+    /// to another analyzer that report the same fact from a different position.
+    ///
+    /// Sharing is legitimate (`cannot find type 'X' in this scope` is E476
+    /// whether the annotation is a binding's or a where-clause subject's), but
+    /// it has to be declared. Emitting an unlisted code is how E436 came to
+    /// mean two unrelated things at once (F16); `registry.rs`'s ownership test
+    /// walks owned ∪ borrowed and rejects anything outside it.
+    fn borrowed_descriptors(&self) -> &'static [&'static DiagnosticDescriptor] {
+        &[]
+    }
 }
 
 /// Analyze function/init bodies (Roslyn: RegisterOperationBlockAction).

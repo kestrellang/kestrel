@@ -18,7 +18,7 @@ import perch.response.(Response)
 /// ```
 public struct Logger[T]: Middleware[T], Cloneable {
     public func handle(request: Request, ctx: T) -> MiddlewareResult {
-        let _ = println(request.method.toString() + " " + request.path);
+         println(request.method.toString() + " " + request.path);
         .Continue(request)
     }
 

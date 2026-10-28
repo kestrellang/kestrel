@@ -1,4 +1,10 @@
 //! Compile, link, and execute Kestrel programs for end-to-end testing.
+//!
+//! Backend selection: a test pins its backends with a `// backends:` header
+//! (each listed backend becomes its own trial); unannotated tests follow the
+//! `KESTREL_BACKEND` env var (`llvm` selects the LLVM backend; anything else
+//! uses the default Cranelift backend). This lets the same suite validate
+//! both backends, and lets ABI-sensitive tests demand both unconditionally.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -6,6 +12,43 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use kestrel_compiler::Compiler;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Which codegen backend a trial compiles with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    Cranelift,
+    Llvm,
+}
+
+impl Backend {
+    /// Suite-wide default for tests without a `// backends:` header.
+    pub fn default_from_env() -> Self {
+        if std::env::var("KESTREL_BACKEND").as_deref() == Ok("llvm") {
+            Backend::Llvm
+        } else {
+            Backend::Cranelift
+        }
+    }
+
+    /// Header-value spelling (`// backends: cranelift,llvm`).
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "cranelift" => Some(Backend::Cranelift),
+            "llvm" => Some(Backend::Llvm),
+            _ => None,
+        }
+    }
+
+    /// Trial-name tag for non-primary backends (`foo__llvm.ks`). Must stay
+    /// dot-free and the full trial name must keep its `.ks` suffix, or
+    /// triage's raw↔identity name round-trip drops the trial.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Backend::Cranelift => "cranelift",
+            Backend::Llvm => "llvm",
+        }
+    }
+}
 
 /// Result of running a compiled Kestrel program.
 #[derive(Debug, Clone)]
@@ -19,7 +62,7 @@ pub struct RunResult {
 ///
 /// Returns Err if compilation or linking fails.
 /// The temporary directory is cleaned up after execution.
-pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
+pub fn compile_and_run(compiler: &Compiler, backend: Backend) -> Result<RunResult, String> {
     // Skip execution if env var is set (for CI speed)
     if std::env::var("KESTREL_SKIP_CODEGEN").is_ok() {
         return Ok(RunResult {
@@ -34,13 +77,23 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
 
     let exe_path = temp_dir.join(if cfg!(windows) { "test.exe" } else { "test" });
 
-    let options = kestrel_codegen_cranelift::CodegenOptions {
-        c_sources: stdlib_c_sources(),
-        ..Default::default()
+    let link_result = if backend == Backend::Llvm {
+        let options = kestrel_codegen_llvm::CodegenOptions {
+            c_sources: stdlib_c_sources(),
+            ..Default::default()
+        };
+        compiler
+            .compile_and_link_llvm(&exe_path, &options)
+            .map_err(|e| format!("{e}"))
+    } else {
+        let options = kestrel_codegen_cranelift::CodegenOptions {
+            c_sources: stdlib_c_sources(),
+            ..Default::default()
+        };
+        compiler
+            .compile_and_link(&exe_path, &options)
+            .map_err(|e| format!("{e}"))
     };
-    let link_result = compiler
-        .compile_and_link(&exe_path, &options)
-        .map_err(|e| format!("{e}"));
     if let Err(e) = link_result {
         let mut msg = format!("codegen/link failed: {e}");
         let diagnostics = compiler.diagnostics();
@@ -88,18 +141,11 @@ fn temp_dir() -> PathBuf {
 }
 
 /// Collect C shim sources from the stdlib directory.
+///
+/// Same resolver as the compiler proper — this had its own copy that skipped
+/// the `exists()` check on `KESTREL_STD`, so a stale value silently linked
+/// without the libc shims.
 fn stdlib_c_sources() -> Vec<PathBuf> {
-    let std_dir = if let Ok(path) = std::env::var("KESTREL_STD") {
-        PathBuf::from(path)
-    } else {
-        let manifest = env!("CARGO_MANIFEST_DIR");
-        std::path::Path::new(manifest)
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("lang/std")
-    };
-    let shim = std_dir.join("io/libc_shims.c");
-    if shim.exists() { vec![shim] } else { vec![] }
+    let std_dir = kestrel_compiler::stdlib_path::default_std_path().ok();
+    kestrel_compiler::stdlib_path::stdlib_c_sources(std_dir.as_deref())
 }

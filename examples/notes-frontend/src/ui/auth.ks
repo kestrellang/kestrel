@@ -66,7 +66,7 @@ func authLink(message: String, url: String, linkText: String) -> Document {
 }
 
 func errorAlert(message: String) -> Document {
-    if message.byteCount == 0 {
+    if message.bytes.count == 0 {
         nothing()
     } else {
         div([cls("alert alert-error")]) {

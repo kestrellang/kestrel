@@ -627,6 +627,23 @@ struct Item: Factory {
 }
 ```
 
+Instance receivers must match exactly too: a `mutating` requirement needs a
+`mutating` method and a `consuming` requirement a `consuming` one. A plain
+method does not satisfy either, even though it does less — the declaration
+must say what callers get. Parameter conventions follow the same rule
+(E469): each `consuming`, `mutating`, or plain parameter must match the
+requirement's.
+
+```kestrel
+protocol Disposable {
+    consuming func dispose()
+}
+
+struct Handle: Disposable {
+    func dispose() { }  // Error E477: expected a `consuming` method
+}
+```
+
 ### Inherited Protocol Requirements
 
 When conforming to a child protocol, must also explicitly conform to parent protocols:

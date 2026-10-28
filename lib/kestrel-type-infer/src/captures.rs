@@ -9,7 +9,7 @@
 //! Consumed by:
 //! - MIR lowering (`kestrel-mir-lower`): env-struct fields, parent-side
 //!   projection, and body rewriting (read the env value for `self.cap`).
-//! - `kestrel-analyze` `ClosureAnalyzer` (E603/E605): the captured-root set.
+//! - `kestrel-analyze` `ClosureAnalyzer` (E603): the captured-root set.
 //!
 //! The analysis follows RFC 2229 ("disjoint closure captures"): it records the
 //! *maximal* place each access touches, then reduces per root local to the
@@ -17,7 +17,8 @@
 //! of that root to a single whole-local capture (the safety fallback, which
 //! preserves the historical behavior for non-place receivers).
 
-use std::collections::{HashMap, HashSet};
+use crate::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use kestrel_ast_builder::{Callable, NodeKind, Static};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
@@ -50,7 +51,7 @@ pub struct PlaceKey {
 }
 
 impl PlaceKey {
-    fn whole(root: LocalId) -> Self {
+    pub fn whole(root: LocalId) -> Self {
         PlaceKey {
             root,
             path: Vec::new(),
@@ -62,8 +63,10 @@ impl PlaceKey {
     }
 
     /// True if `self.path` is a (non-strict) prefix of `other.path` and they
-    /// share the same root.
-    fn is_prefix_of(&self, other: &PlaceKey) -> bool {
+    /// share the same root. Public because the move checker's freeze rule
+    /// (E507) tests a destroyed place against the frozen set for OVERLAP in
+    /// either direction (plan D8: the freeze is place-granular).
+    pub fn is_prefix_of(&self, other: &PlaceKey) -> bool {
         self.root == other.root
             && self.path.len() <= other.path.len()
             && self.path.iter().zip(&other.path).all(|(a, b)| a == b)
@@ -129,34 +132,36 @@ pub struct ClosureCaptures {
 }
 
 impl QueryFn for ClosureCaptures {
-    type Output = ClosureCaptureMap;
+    // Arc-wrapped: memo cache hits clone the Output, so share one allocation
+    // instead of deep-copying the per-body capture map.
+    type Output = Arc<ClosureCaptureMap>;
 
     fn describe(&self) -> String {
         format!("ClosureCaptures(entity={:?})", self.entity)
     }
 
-    fn execute(&self, query_ctx: &QueryContext<'_>) -> ClosureCaptureMap {
+    fn execute(&self, query_ctx: &QueryContext<'_>) -> Arc<ClosureCaptureMap> {
         let Some(hir) = query_ctx.query(LowerBody {
             entity: self.entity,
             root: self.root,
         }) else {
-            return ClosureCaptureMap::default();
+            return Arc::new(ClosureCaptureMap::default());
         };
         let Some(typed) = query_ctx.query(InferBody {
             entity: self.entity,
             root: self.root,
         }) else {
-            return ClosureCaptureMap::default();
+            return Arc::new(ClosureCaptureMap::default());
         };
 
-        let mut map = HashMap::new();
+        let mut map = HashMap::default();
         for (expr_id, expr) in hir.exprs.iter() {
             if let HirExpr::Closure { params, body, .. } = expr {
                 let places = analyze_closure(query_ctx, &typed, &hir, params, body);
                 map.insert(expr_id, places);
             }
         }
-        ClosureCaptureMap { map }
+        Arc::new(ClosureCaptureMap { map })
     }
 }
 
@@ -183,6 +188,115 @@ pub fn resolved_is_stored_field(world: &QueryContext<'_>, entity: Entity) -> boo
         return false;
     }
     true
+}
+
+/// Roots an OWNING closure (`escaping`/`consuming`) can capture field by
+/// field: every capture of the root is a read of a projected place. Such a
+/// closure moves (or copies) just those fields and leaves the rest of the
+/// local in place (docs/design/partial-moves.md, phase 4); any whole
+/// or written capture takes the whole local. The single rule MIR lowering
+/// (`plan_slots`) and the move checker both apply, so they agree on what moved.
+pub fn field_capturable_roots(plan: &[CapturedPlace]) -> HashSet<LocalId> {
+    let mut roots: HashSet<LocalId> = plan.iter().map(|cp| cp.key.root).collect();
+    for cp in plan {
+        if cp.key.is_whole() || cp.kind != CaptureKind::Read {
+            roots.remove(&cp.key.root);
+        }
+    }
+    roots
+}
+
+/// For a `match` (or `if let`/`while let`) on an owned place whose arm
+/// patterns only destructure structs and tuples on the way to their bindings,
+/// the place each by-value binding names (`match p { P(a: x, ..) => … }`:
+/// `x` ↦ `p.a`). Such a match — or `let`/parameter destructure — moves just
+/// those places and leaves the rest of the scrutinee in place
+/// (docs/design/partial-moves.md rule 7). `None` when the scrutinee is not a
+/// place, or a pattern reaches a binding through an enum variant, array or
+/// `@` binding — those consume the whole scrutinee.
+///
+/// The single rule MIR lowering and the move checker both apply. Callers
+/// keep only the bindings whose type actually moves (non-Copyable).
+pub fn match_bound_places(
+    world: &QueryContext<'_>,
+    typed: &TypedBody,
+    hir: &kestrel_hir::body::HirBody,
+    scrutinee: HirExprId,
+    arms: &[kestrel_hir::body::HirMatchArm],
+    source: kestrel_hir::body::MatchSource,
+) -> Option<Vec<(LocalId, PlaceKey)>> {
+    let _ = source;
+    let base = place_key_of(world, typed, hir, scrutinee)?;
+    let ty = typed.expr_types.get(&scrutinee).cloned();
+    let mut out = Vec::new();
+    for arm in arms {
+        bound_places(world, hir, arm.pattern, base.clone(), ty.clone(), &mut out)?;
+    }
+    Some(out)
+}
+
+/// `ty` is the type of the place at `here` when it is known (it is carried
+/// through tuple elements; a struct field's type is not needed and dropped),
+/// so a tuple pattern's suffix after `..` can be indexed from the end.
+fn bound_places(
+    world: &QueryContext<'_>,
+    hir: &kestrel_hir::body::HirBody,
+    pat: kestrel_hir::body::HirPatId,
+    here: PlaceKey,
+    ty: Option<crate::result::ResolvedTy>,
+    out: &mut Vec<(LocalId, PlaceKey)>,
+) -> Option<()> {
+    use crate::result::ResolvedTy;
+    use kestrel_hir::body::HirPat;
+    match &hir.pats[pat] {
+        HirPat::Binding { local, by_ref, .. } => {
+            if by_ref.is_none() {
+                out.push((*local, here));
+            }
+        },
+        HirPat::Wildcard { .. } | HirPat::Literal { .. } | HirPat::Range { .. } => {},
+        HirPat::Tuple { prefix, suffix, .. } => {
+            let elems = match &ty {
+                Some(ResolvedTy::Tuple(elems)) => Some(elems.clone()),
+                _ => None,
+            };
+            // A suffix after `..` counts from the end: it needs the arity.
+            let suffix_start = match (&elems, suffix.is_empty()) {
+                (_, true) => 0,
+                (Some(elems), false) => elems.len().checked_sub(suffix.len())?,
+                (None, false) => return None,
+            };
+            let positioned = prefix.iter().enumerate().chain(
+                suffix
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| (suffix_start + i, p)),
+            );
+            for (i, &p) in positioned {
+                let mut at = here.clone();
+                at.path.push(ProjElem::TupleIndex(i as u32));
+                let elem_ty = elems.as_ref().and_then(|e| e.get(i).cloned());
+                bound_places(world, hir, p, at, elem_ty, out)?;
+            }
+        },
+        HirPat::Struct { entity, fields, .. } => {
+            for f in fields {
+                let sub = f.pattern?;
+                let name = f.field_name.as_str()?;
+                let field = world.children_of(*entity).iter().copied().find(|&c| {
+                    resolved_is_stored_field(world, c)
+                        && world
+                            .get::<kestrel_ast_builder::Name>(c)
+                            .is_some_and(|n| n.0 == name)
+                })?;
+                let mut at = here.clone();
+                at.path.push(ProjElem::Field(field));
+                bound_places(world, hir, sub, at, None, out)?;
+            }
+        },
+        _ => return None,
+    }
+    Some(())
 }
 
 /// Resolve an access expression to its `PlaceKey`, or `None` if it is not a
@@ -232,7 +346,7 @@ fn analyze_closure(
     body: &HirBlock,
 ) -> Vec<CapturedPlace> {
     // Locals bound *inside* the closure are never captures of it.
-    let mut internal = HashSet::new();
+    let mut internal = HashSet::default();
     for p in params {
         internal.insert(p.local);
         if let Some(pat) = p.pattern {
@@ -255,7 +369,7 @@ fn analyze_closure(
 /// Reduce raw place uses to a minimal disjoint capture plan, per root local.
 fn reduce(uses: Vec<RawUse>) -> Vec<CapturedPlace> {
     // Group by root.
-    let mut by_root: HashMap<LocalId, Vec<RawUse>> = HashMap::new();
+    let mut by_root: HashMap<LocalId, Vec<RawUse>> = HashMap::default();
     for u in uses {
         by_root.entry(u.key.root).or_default().push(u);
     }
@@ -280,7 +394,7 @@ fn reduce(uses: Vec<RawUse>) -> Vec<CapturedPlace> {
         // Minimal cover: keep a path iff no *other* present path is a strict
         // prefix of it. Every kept path corresponds to an actual access, so a
         // representative expr always exists.
-        let mut kept: HashMap<Vec<ProjElem>, CapturedPlace> = HashMap::new();
+        let mut kept: HashMap<Vec<ProjElem>, CapturedPlace> = HashMap::default();
         for u in &group {
             let subsumed = group.iter().any(|v| {
                 v.key.path.len() < u.key.path.len() && prefix_of(&v.key.path, &u.key.path)

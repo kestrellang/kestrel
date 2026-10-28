@@ -6,9 +6,9 @@ module Test
         @main
         func main() -> lang.i64 {
             var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = dict.insert(1, 10);
-            let _ = dict.insert(2, 20);
-            let _ = dict.insert(3, 30);
+             dict.insert(1, 10);
+             dict.insert(2, 20);
+             dict.insert(3, 30);
 
             // Test mapValues()
             let doubled = dict.mapValues({ (v) in v * 2 });
@@ -36,8 +36,8 @@ module Test
 
             // Test merging() - non-mutating
             var other = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = other.insert(3, 300);
-            let _ = other.insert(4, 400);
+             other.insert(3, 300);
+             other.insert(4, 400);
             let merged = dict.merging(other, uniquingKeysWith: { (old, new) in new });
             if merged.count != 4 { return 13 }
             if merged(1).unwrap() != 10 { return 14 }

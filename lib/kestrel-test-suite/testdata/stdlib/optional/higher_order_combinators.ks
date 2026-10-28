@@ -12,9 +12,9 @@ module Test
             if mapped.unwrap() != 20 { return 1 }
 
             // Test filter
-            let filtered = someOpt.filter({ (x) in x > 5 });
+            let filtered = someOpt.filter(where: { (x) in x > 5 });
             if filtered.isNone() { return 2 }
-            let filteredOut = someOpt.filter({ (x) in x > 100 });
+            let filteredOut = someOpt.filter(where: { (x) in x > 100 });
             if filteredOut.isSome() { return 3 }
 
             // Test flatMap

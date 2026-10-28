@@ -12,6 +12,7 @@ kestrel-compiler-driver = { path = "../kestrel-compiler-driver" }
 kestrel-hecs = { path = "../kestrel-hecs" }
 kestrel-mir = { path = "../kestrel-mir" }
 kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }
+kestrel-codegen-llvm = { path = "../kestrel-codegen-llvm" }
 kestrel-analyze = { path = "../kestrel-analyze" }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-reporting = { path = "../kestrel-reporting" }

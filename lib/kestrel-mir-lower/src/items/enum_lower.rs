@@ -16,12 +16,14 @@ use crate::ty::resolve_callable_types;
 pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) {
     let name = ctx.register_name(entity);
     let mut def = EnumDef::new(entity, &name);
+    ctx.record_observable_drop(entity);
 
     def.type_params = collect_type_params(ctx, entity);
     def.type_info = TypeInfo {
         copy: lower_copy_behavior(ctx, entity),
         drop: lower_enum_drop_behavior(ctx, entity),
         layout: None,
+        ..TypeInfo::none()
     };
     def.conditionally_copyable = ctx
         .query

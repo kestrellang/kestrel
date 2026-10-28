@@ -17,7 +17,7 @@
 //!
 //! ## Key Functions
 //!
-//! - `flatten(hir, query, pat_id, scrutinee_ty)` — convert HirPat → FlatPat
+//! - `flatten(hir, query, root, pat_id, scrutinee_ty)` — convert HirPat → FlatPat
 //! - `FlatPat::decompose(ctor, arity)` — extract sub-patterns for specialization
 //!   (the SINGLE decomposition function used by both matrix and decision tree)
 //! - `FlatPat::is_wildcard_like()` — does this pattern match anything?
@@ -28,7 +28,7 @@ use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 
-use super::constructor::{Constructor, collect_fields};
+use super::constructor::{Constructor, array_element_ty, collect_fields};
 
 /// A normalized pattern for matrix operations.
 ///
@@ -122,13 +122,14 @@ impl FlatPat {
     }
 }
 
-/// Handle array decomposition where source and target shapes may differ.
+/// Lay a row's array pattern over the target constructor's element slots.
 ///
-/// Four cases based on whether source/target have rest patterns:
-/// 1. Both have rest → map prefix, rest, suffix
-/// 2. Source has rest, target doesn't → expand rest to wildcards
-/// 3. Source doesn't, target has rest → compress to target arity
-/// 4. Neither has rest → direct mapping
+/// The target is a piece from `split`: an exact length, or an open
+/// `[prefix, .., suffix]` at least as wide as the row on both sides. Each target
+/// slot takes the row's sub-pattern at the same position counted from the
+/// matching end, or a wildcard where the row's rest covers it. Counting the
+/// suffix from the END is what keeps `[x, .., 3]` testing the last element of
+/// every length.
 fn decompose_array(
     children: &[FlatPat],
     src_prefix: usize,
@@ -138,61 +139,53 @@ fn decompose_array(
     tgt_suffix: usize,
     tgt_rest: bool,
 ) -> Vec<FlatPat> {
-    let tgt_arity = tgt_prefix + tgt_suffix + if tgt_rest { 1 } else { 0 };
-    let mut result = Vec::with_capacity(tgt_arity);
+    // The row's element at `i` from the front, and at `k` from the back
+    // (`k == 1` is the last). A rest row knows only its prefix and suffix; its
+    // children are `prefix, rest slot, suffix`.
+    let from_front = |i: usize| -> FlatPat {
+        let known = if src_rest {
+            i < src_prefix
+        } else {
+            i < children.len()
+        };
+        if known {
+            children[i].clone()
+        } else {
+            FlatPat::Wildcard
+        }
+    };
+    let from_back = |k: usize| -> FlatPat {
+        let known = if src_rest {
+            k <= src_suffix
+        } else {
+            k <= children.len()
+        };
+        if known {
+            children[children.len() - k].clone()
+        } else {
+            FlatPat::Wildcard
+        }
+    };
 
-    match (src_rest, tgt_rest) {
-        // Case 1: both have rest — map prefix, rest wildcard, suffix
-        (true, true) => {
-            for i in 0..tgt_prefix {
-                result.push(children.get(i).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-            result.push(FlatPat::Wildcard); // rest slot
-            // Source suffix children are at the END of the source array.
-            let total_src = src_prefix + 1 + src_suffix;
-            for i in 0..tgt_suffix {
-                let src_idx = total_src.saturating_sub(tgt_suffix) + i;
-                result.push(children.get(src_idx).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-        },
-
-        // Case 2: source has rest, target doesn't — expand rest to wildcards
-        (true, false) => {
-            for i in 0..tgt_prefix {
-                result.push(children.get(i).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-            // Source suffix children are after prefix + rest slot.
-            // Total source children: src_prefix + 1 (rest) + src_suffix.
-            let total_src = src_prefix + 1 + src_suffix;
-            for i in 0..tgt_suffix {
-                let src_idx = total_src.saturating_sub(tgt_suffix) + i;
-                result.push(children.get(src_idx).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-        },
-
-        // Case 3: source doesn't have rest, target does — compress
-        (false, true) => {
-            for i in 0..tgt_prefix {
-                result.push(children.get(i).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-            result.push(FlatPat::Wildcard); // rest slot
-            // Suffix children are at the END of the source children array.
-            // Source has src_prefix + src_suffix children total (no rest slot).
-            let total_src = src_prefix + src_suffix;
-            for i in 0..tgt_suffix {
-                let src_idx = total_src.saturating_sub(tgt_suffix) + i;
-                result.push(children.get(src_idx).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-        },
-
-        // Case 4: neither has rest — direct mapping
-        (false, false) => {
-            for child in children {
-                result.push(child.clone());
-            }
-        },
+    if !tgt_rest {
+        // Exact length: every slot has a front index and a back index. Prefer
+        // the front for the row's prefix, the back for its suffix.
+        let len = tgt_prefix + tgt_suffix;
+        return (0..len)
+            .map(|i| {
+                let back = len - i;
+                if src_rest && i >= src_prefix && back <= src_suffix {
+                    from_back(back)
+                } else {
+                    from_front(i)
+                }
+            })
+            .collect();
     }
 
+    let mut result: Vec<FlatPat> = (0..tgt_prefix).map(from_front).collect();
+    result.push(FlatPat::Wildcard); // rest slot
+    result.extend((1..=tgt_suffix).rev().map(from_back));
     result
 }
 
@@ -205,6 +198,7 @@ fn decompose_array(
 pub fn flatten(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     pat_id: HirPatId,
     scrutinee_ty: &ResolvedTy,
 ) -> FlatPat {
@@ -242,7 +236,7 @@ pub fn flatten(
                 .enumerate()
                 .map(|(i, &elem_id)| {
                     let elem_ty = elem_types.get(i).unwrap_or(&ResolvedTy::Error);
-                    flatten(hir, query, elem_id, elem_ty)
+                    flatten(hir, query, root, elem_id, elem_ty)
                 })
                 .collect();
 
@@ -260,7 +254,7 @@ pub fn flatten(
                 let elem_ty = elem_types
                     .get(suffix_start + j)
                     .unwrap_or(&ResolvedTy::Error);
-                children.push(flatten(hir, query, elem_id, elem_ty));
+                children.push(flatten(hir, query, root, elem_id, elem_ty));
             }
 
             FlatPat::Ctor {
@@ -274,13 +268,13 @@ pub fn flatten(
         // Fully resolved variant (entity known from name resolution)
         HirPat::Variant { entity, args, .. } => {
             let arity = args.len();
-            let field_types = resolve_variant_field_types(query, *entity, scrutinee_ty);
+            let field_types = resolve_variant_field_types(query, root, *entity, scrutinee_ty);
             let children: Vec<_> = args
                 .iter()
                 .enumerate()
                 .map(|(i, arg)| {
                     let arg_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
-                    flatten(hir, query, arg.pattern, arg_ty)
+                    flatten(hir, query, root, arg.pattern, arg_ty)
                 })
                 .collect();
 
@@ -295,14 +289,19 @@ pub fn flatten(
 
         // Implicit variant — resolve entity from scrutinee type's enum cases
         HirPat::ImplicitVariant { name, args, .. } => {
-            let (entity, field_types) =
-                resolve_implicit_variant(query, name.as_str_or_empty(), args.len(), scrutinee_ty);
+            let (entity, field_types) = resolve_implicit_variant(
+                query,
+                root,
+                name.as_str_or_empty(),
+                args.len(),
+                scrutinee_ty,
+            );
             let children: Vec<_> = args
                 .iter()
                 .enumerate()
                 .map(|(i, arg)| {
                     let arg_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
-                    flatten(hir, query, arg.pattern, arg_ty)
+                    flatten(hir, query, root, arg.pattern, arg_ty)
                 })
                 .collect();
 
@@ -328,7 +327,7 @@ pub fn flatten(
                 entity: *entity,
                 arity: all_fields.len(),
             };
-            let field_types = struct_ctor.field_types(query, scrutinee_ty);
+            let field_types = struct_ctor.field_types(query, root, scrutinee_ty);
 
             let children: Vec<_> = all_fields
                 .iter()
@@ -344,7 +343,7 @@ pub fn flatten(
                         .iter()
                         .find(|f| f.field_name.as_str() == Some(field_name));
                     match matched.and_then(|f| f.pattern) {
-                        Some(pat_id) => flatten(hir, query, pat_id, field_ty),
+                        Some(pat_id) => flatten(hir, query, root, pat_id, field_ty),
                         None => FlatPat::Wildcard,
                     }
                 })
@@ -365,23 +364,24 @@ pub fn flatten(
             suffix,
             ..
         } => {
-            // Extract element type from scrutinee (Array[T] or Slice[T] → T)
-            let elem_ty = match scrutinee_ty {
-                ResolvedTy::Named { args, .. } => {
-                    args.first().cloned().unwrap_or(ResolvedTy::Error)
-                },
-                _ => ResolvedTy::Error,
-            };
+            // Element type from the scrutinee's `ArrayMatchable.Element`
+            // conformance binding (works for any conformer, not just
+            // `Array[T]`/`Slice[T]` where Element == the first type arg).
+            let elem_ty = array_element_ty(query, root, scrutinee_ty);
 
             let has_rest = rest.is_some();
             let mut children: Vec<_> = prefix
                 .iter()
-                .map(|&id| flatten(hir, query, id, &elem_ty))
+                .map(|&id| flatten(hir, query, root, id, &elem_ty))
                 .collect();
             if has_rest {
                 children.push(FlatPat::Wildcard); // rest slot
             }
-            children.extend(suffix.iter().map(|&id| flatten(hir, query, id, &elem_ty)));
+            children.extend(
+                suffix
+                    .iter()
+                    .map(|&id| flatten(hir, query, root, id, &elem_ty)),
+            );
 
             FlatPat::Ctor {
                 ctor: Constructor::Array {
@@ -396,14 +396,14 @@ pub fn flatten(
         HirPat::Or { alternatives, .. } => {
             let alts: Vec<_> = alternatives
                 .iter()
-                .map(|&alt_id| flatten(hir, query, alt_id, scrutinee_ty))
+                .map(|&alt_id| flatten(hir, query, root, alt_id, scrutinee_ty))
                 .collect();
             FlatPat::Or(alts)
         },
 
         // At-pattern: the binding is irrelevant to the matrix algorithm,
         // only the subpattern determines constructor structure
-        HirPat::At { subpattern, .. } => flatten(hir, query, *subpattern, scrutinee_ty),
+        HirPat::At { subpattern, .. } => flatten(hir, query, root, *subpattern, scrutinee_ty),
     }
 }
 
@@ -413,8 +413,12 @@ fn flatten_literal(value: &HirLiteral) -> FlatPat {
     let ctor = match value {
         HirLiteral::Bool(true) => Constructor::True,
         HirLiteral::Bool(false) => Constructor::False,
+        // Kept at full `i128` width so `UInt64` values above `Int64.max`
+        // survive; an out-of-range literal is diagnosed by E121.
         HirLiteral::Integer(n) => Constructor::IntLiteral(*n),
-        HirLiteral::Char(c) => Constructor::CharLiteral(char::from_u32(*c).unwrap_or('\0')),
+        HirLiteral::Char { value: c, .. } => {
+            Constructor::CharLiteral(char::from_u32(*c).unwrap_or('\0'))
+        },
         HirLiteral::String { value, .. } => Constructor::StringLiteral(value.clone()),
         HirLiteral::Float(_) => Constructor::NonExhaustive,
         HirLiteral::Null => Constructor::NonExhaustive,
@@ -444,11 +448,11 @@ fn flatten_range(start: &Option<HirLiteral>, end: &Option<HirLiteral>, inclusive
         Constructor::IntRange { start: s, end: e }
     } else {
         let s = match start {
-            Some(HirLiteral::Char(v)) => char::from_u32(*v),
+            Some(HirLiteral::Char { value: v, .. }) => char::from_u32(*v),
             _ => None,
         };
         let e = match end {
-            Some(HirLiteral::Char(v)) => {
+            Some(HirLiteral::Char { value: v, .. }) => {
                 let c = char::from_u32(*v).unwrap_or('\0');
                 Some(if inclusive {
                     c
@@ -475,6 +479,7 @@ fn flatten_range(start: &Option<HirLiteral>, end: &Option<HirLiteral>, inclusive
 /// to reuse the shared type resolution logic.
 fn resolve_variant_field_types(
     query: &QueryContext<'_>,
+    root: Entity,
     case_entity: Entity,
     scrutinee_ty: &ResolvedTy,
 ) -> Vec<ResolvedTy> {
@@ -486,12 +491,60 @@ fn resolve_variant_field_types(
         entity: case_entity,
         arity,
     };
-    ctor.field_types(query, scrutinee_ty)
+    ctor.field_types(query, root, scrutinee_ty)
+}
+
+/// Payload types of a (possibly implicit) variant pattern matched against
+/// `scrutinee_ty`, in declaration order. Empty for any other pattern.
+pub(crate) fn variant_pattern_field_types(
+    query: &QueryContext<'_>,
+    root: Entity,
+    pat: &HirPat,
+    scrutinee_ty: &ResolvedTy,
+) -> Vec<ResolvedTy> {
+    match pat {
+        HirPat::Variant { entity, .. } => {
+            resolve_variant_field_types(query, root, *entity, scrutinee_ty)
+        },
+        HirPat::ImplicitVariant { name, args, .. } => {
+            resolve_implicit_variant(
+                query,
+                root,
+                name.as_str_or_empty(),
+                args.len(),
+                scrutinee_ty,
+            )
+            .1
+        },
+        _ => Vec::new(),
+    }
+}
+
+/// The type of struct `entity`'s field `name` within `scrutinee_ty`.
+pub(crate) fn struct_field_type(
+    query: &QueryContext<'_>,
+    root: Entity,
+    entity: Entity,
+    name: &str,
+    scrutinee_ty: &ResolvedTy,
+) -> ResolvedTy {
+    let all_fields = collect_fields(query, entity);
+    let ctor = Constructor::Struct {
+        entity,
+        arity: all_fields.len(),
+    };
+    let field_types = ctor.field_types(query, root, scrutinee_ty);
+    all_fields
+        .iter()
+        .position(|&f| query.get::<Name>(f).is_some_and(|n| n.0 == name))
+        .and_then(|i| field_types.get(i).cloned())
+        .unwrap_or(ResolvedTy::Error)
 }
 
 /// Resolve an implicit variant name to its entity, searching the scrutinee type's cases.
 fn resolve_implicit_variant(
     query: &QueryContext<'_>,
+    root: Entity,
     name: &str,
     arity: usize,
     scrutinee_ty: &ResolvedTy,
@@ -501,7 +554,7 @@ fn resolve_implicit_variant(
             if matches!(query.get::<NodeKind>(child), Some(NodeKind::EnumCase))
                 && query.get::<Name>(child).is_some_and(|n| n.0 == name)
             {
-                let field_types = resolve_variant_field_types(query, child, scrutinee_ty);
+                let field_types = resolve_variant_field_types(query, root, child, scrutinee_ty);
                 return (child, field_types);
             }
         }

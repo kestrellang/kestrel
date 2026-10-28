@@ -1,7 +1,6 @@
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::instructions::BlockArg;
-use cranelift_codegen::ir::{self, InstBuilder, MemFlags, TrapCode, Value};
+use cranelift_codegen::ir::{self, InstBuilder, TrapCode, Value};
 use cranelift_frontend::FunctionBuilder;
 
 use kestrel_mir::terminator::{SwitchCase, Terminator, TerminatorKind};
@@ -12,10 +11,25 @@ use crate::error::CodegenError;
 use crate::func::FuncCompiler;
 use crate::inst::find_mono_enum;
 use crate::mem;
-use crate::ty::TypeRepr;
 
 fn to_block_args(vals: &[Value]) -> Vec<BlockArg> {
     vals.iter().map(|v| BlockArg::Value(*v)).collect()
+}
+
+/// Resolve a terminator block arg. A @guaranteed arg is a THREADED borrow
+/// continuing into the target's @guaranteed (pointer-typed) param — pass the
+/// ADDRESS as-is; `resolve_scalar` would load through it and hand the param
+/// a value where it expects a pointer.
+fn resolve_block_arg(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    v: ValueId,
+) -> Value {
+    if fc.body.values[v.index()].ownership == kestrel_mir::value::Ownership::Guaranteed {
+        fc.get_value(builder, v)
+    } else {
+        fc.resolve_scalar(builder, v)
+    }
 }
 
 /// Coerce values to match the target block's declared param types.
@@ -62,7 +76,7 @@ pub fn compile_terminator(
             let block = fc.block_map[target.index()];
             let cl_args: Vec<Value> = args
                 .iter()
-                .map(|v| fc.resolve_scalar(builder, *v))
+                .map(|v| resolve_block_arg(fc, builder, *v))
                 .collect();
             let coerced = coerce_block_args(builder, block, &cl_args);
             let ba = to_block_args(&coerced);
@@ -108,33 +122,26 @@ fn compile_return(
     builder: &mut FunctionBuilder,
     value_id: ValueId,
 ) -> Result<(), CodegenError> {
+    // ret_borrow: the function returns the raw POINTER to the pointee. The
+    // returned @guaranteed value's map entry already is that pointer —
+    // `resolve_scalar` below would LOAD a scalar pointee through it and
+    // silently return it by value (the scalar_ret_borrow_not_loaded
+    // miscompile). Bypass for aggregates too (only accidentally correct).
+    if fc.func.ret_borrow {
+        let val = fc.get_value(builder, value_id);
+        builder.ins().return_(&[val]);
+        return Ok(());
+    }
     let ret_repr = fc
         .ctx
         .tc
         .repr(fc.func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
-    let ret_mode = abi::return_mode(ret_repr, fc.is_main);
+    let ret_mode = abi::return_mode(ret_repr);
 
     match ret_mode {
         ReturnMode::Direct(_t) => {
             let val = fc.resolve_scalar(builder, value_id);
-            if fc.is_main {
-                let final_val = match ret_repr {
-                    TypeRepr::Scalar(st) if st == ir::types::I64 => val,
-                    TypeRepr::Scalar(st) if st.bytes() < 8 => {
-                        builder.ins().sextend(ir::types::I64, val)
-                    },
-                    TypeRepr::Aggregate { .. } => {
-                        builder
-                            .ins()
-                            .load(ir::types::I64, MemFlags::new(), val, Offset32::new(0))
-                    },
-                    TypeRepr::Zst => builder.ins().iconst(ir::types::I64, 0),
-                    _ => val,
-                };
-                builder.ins().return_(&[final_val]);
-            } else {
-                builder.ins().return_(&[val]);
-            }
+            builder.ins().return_(&[val]);
         },
         ReturnMode::Sret => {
             let sret_ptr = fc
@@ -169,11 +176,11 @@ fn compile_branch(
 
     let then_vals: Vec<Value> = then_args
         .iter()
-        .map(|v| fc.resolve_scalar(builder, *v))
+        .map(|v| resolve_block_arg(fc, builder, *v))
         .collect();
     let else_vals: Vec<Value> = else_args
         .iter()
-        .map(|v| fc.resolve_scalar(builder, *v))
+        .map(|v| resolve_block_arg(fc, builder, *v))
         .collect();
     let then_coerced = coerce_block_args(builder, then_cl, &then_vals);
     let else_coerced = coerce_block_args(builder, else_cl, &else_vals);
@@ -240,7 +247,7 @@ fn compile_switch(
         let cl_args: Vec<Value> = arm
             .args
             .iter()
-            .map(|v| fc.resolve_scalar(builder, *v))
+            .map(|v| resolve_block_arg(fc, builder, *v))
             .collect();
         let coerced = coerce_block_args(builder, cl_block, &cl_args);
         (cl_block, coerced)
@@ -266,7 +273,7 @@ fn compile_switch(
         let raw_args: Vec<Value> = arm
             .args
             .iter()
-            .map(|v| fc.resolve_scalar(builder, *v))
+            .map(|v| resolve_block_arg(fc, builder, *v))
             .collect();
         let target_args = coerce_block_args(builder, target, &raw_args);
         let is_last = i == concrete_cases.len() - 1;
@@ -283,21 +290,37 @@ fn compile_switch(
                 emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
             },
             SwitchCase::IntLiteral(v) => {
-                let cmp = builder.ins().icmp_imm(IntCC::Equal, disc_val, *v);
+                let width = builder.func.dfg.value_type(disc_val).bits();
+                let cmp = builder
+                    .ins()
+                    .icmp_imm(IntCC::Equal, disc_val, imm_at_width(*v, width));
                 emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
             },
             SwitchCase::CharLiteral(c) => {
                 let cmp = builder.ins().icmp_imm(IntCC::Equal, disc_val, *c as i64);
                 emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
             },
-            SwitchCase::IntRange { start, end } => {
-                let ge = builder
-                    .ins()
-                    .icmp_imm(IntCC::SignedGreaterThanOrEqual, disc_val, *start);
-                let le = builder
-                    .ins()
-                    .icmp_imm(IntCC::SignedLessThanOrEqual, disc_val, *end);
-                let in_range = builder.ins().band(ge, le);
+            SwitchCase::IntRange { start, end, signed } => {
+                let (ge, le) = if *signed {
+                    (
+                        IntCC::SignedGreaterThanOrEqual,
+                        IntCC::SignedLessThanOrEqual,
+                    )
+                } else {
+                    (
+                        IntCC::UnsignedGreaterThanOrEqual,
+                        IntCC::UnsignedLessThanOrEqual,
+                    )
+                };
+                let width = builder.func.dfg.value_type(disc_val).bits();
+                let in_range = range_predicate(
+                    builder,
+                    disc_val,
+                    start.map(|v| imm_at_width(v, width)),
+                    end.map(|v| imm_at_width(v, width)),
+                    ge,
+                    le,
+                );
                 emit_case_branch(
                     builder,
                     in_range,
@@ -308,16 +331,14 @@ fn compile_switch(
                 );
             },
             SwitchCase::CharRange { start, end } => {
-                let ge = builder.ins().icmp_imm(
-                    IntCC::UnsignedGreaterThanOrEqual,
+                let in_range = range_predicate(
+                    builder,
                     disc_val,
-                    *start as i64,
+                    start.map(|c| c as i64),
+                    end.map(|c| c as i64),
+                    IntCC::UnsignedGreaterThanOrEqual,
+                    IntCC::UnsignedLessThanOrEqual,
                 );
-                let le =
-                    builder
-                        .ins()
-                        .icmp_imm(IntCC::UnsignedLessThanOrEqual, disc_val, *end as i64);
-                let in_range = builder.ins().band(ge, le);
                 emit_case_branch(
                     builder,
                     in_range,
@@ -332,6 +353,39 @@ fn compile_switch(
     }
 
     Ok(())
+}
+
+/// Build the in-range boolean for a range pattern, skipping any open bound.
+/// A `None` lower/upper bound is left untested (an open-ended `N..` / `..<N`);
+/// both `None` is a vacuous always-true match.
+/// A case constant's raw bits at the switch value's width, sign-extended to
+/// `i64` (Cranelift's canonical immediate form): `UInt8` 255 is `-1` at 8 bits.
+fn imm_at_width(v: i64, bits: u32) -> i64 {
+    if bits >= 64 {
+        return v;
+    }
+    let shift = 64 - bits;
+    (v << shift) >> shift
+}
+
+fn range_predicate(
+    builder: &mut FunctionBuilder,
+    disc_val: Value,
+    lo: Option<i64>,
+    hi: Option<i64>,
+    ge_cc: IntCC,
+    le_cc: IntCC,
+) -> Value {
+    match (lo, hi) {
+        (Some(lo), Some(hi)) => {
+            let ge = builder.ins().icmp_imm(ge_cc, disc_val, lo);
+            let le = builder.ins().icmp_imm(le_cc, disc_val, hi);
+            builder.ins().band(ge, le)
+        },
+        (Some(lo), None) => builder.ins().icmp_imm(ge_cc, disc_val, lo),
+        (None, Some(hi)) => builder.ins().icmp_imm(le_cc, disc_val, hi),
+        (None, None) => builder.ins().iconst(ir::types::I8, 1),
+    }
 }
 
 fn emit_case_branch(

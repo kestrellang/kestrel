@@ -30,7 +30,13 @@ impl QueryFn for LexFile {
         for result in lex(&source.0, file_id) {
             match result {
                 Ok(token) => tokens.push(token),
-                Err(err) => ctx.throw(LexError { span: err.span }),
+                Err(err) => {
+                    let text = source.0.get(err.span.range()).unwrap_or("").to_string();
+                    ctx.throw(LexError {
+                        span: err.span,
+                        text,
+                    })
+                },
             }
         }
         tokens

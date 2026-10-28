@@ -6,9 +6,8 @@
 
 use kestrel_hecs::Entity;
 use kestrel_span::Span;
-use kestrel_syntax_tree::SyntaxNode;
+use kestrel_syntax_tree::{GreenNode, SyntaxNode, SyntaxNodePtr};
 
-use kestrel_ast::AstBody;
 use kestrel_ast::AstType;
 
 // ===== Identity (on every declaration entity) =====
@@ -30,6 +29,12 @@ pub enum NodeKind {
     /// declaration it sets. Implicit `newValue` param and Mutating (or
     /// None, for static/global) receiver.
     Setter,
+    /// Place-accessor body (`ref { … }` / `mutating ref { … }`) for a
+    /// Field or Subscript (stage 1.5). Child of the declaration, like
+    /// Setter. Returns the synthesized `&T` / `&mutating T`; the
+    /// `MutatingAccessor` marker distinguishes the two kinds (receiver
+    /// kind can't — static accessors have no receiver).
+    RefAccessor,
     Subscript,
     TypeAlias,
     Import,
@@ -38,19 +43,97 @@ pub enum NodeKind {
     ParamDefault,
 }
 
+impl NodeKind {
+    /// Whether a declaration of this kind is a **type scope**: its non-static
+    /// members get a `self` receiver, and it can host methods, fields and
+    /// subscripts.
+    ///
+    /// Written as an exhaustive `match` on purpose. This predicate had seven
+    /// open-coded copies (`matches!(k, Struct | Enum | Protocol | Extension)`)
+    /// across the AST builder, HIR lowering, two analyzers and the LSP; adding
+    /// a kind meant seven lockstep edits, and missing one reports
+    /// "cannot use 'self' in a static method" on correct code. With no
+    /// wildcard arm, a new `NodeKind` fails to compile *here* — one place, and
+    /// the answer has to be given deliberately.
+    pub fn is_type_scope(&self) -> bool {
+        match self {
+            NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension => true,
+            // `EnumCase` is a member of an enum, not a scope of its own.
+            NodeKind::Module
+            | NodeKind::EnumCase
+            | NodeKind::Function
+            | NodeKind::Initializer
+            | NodeKind::Deinit
+            | NodeKind::Field
+            | NodeKind::Setter
+            | NodeKind::RefAccessor
+            | NodeKind::Subscript
+            | NodeKind::TypeAlias
+            | NodeKind::Import
+            | NodeKind::TypeParameter
+            | NodeKind::ParamDefault => false,
+        }
+    }
+}
+
 /// Source span excluding leading trivia.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DeclSpan(pub Span);
 
-/// Cheap Arc-backed CST reference for this declaration.
-#[derive(Clone, Debug)]
-pub struct CstNode(pub SyntaxNode);
+/// Where this declaration is in its file's syntax tree: a `Send`, hashable
+/// kind+range handle, never the node itself (a rowan `SyntaxNode` is `!Send`
+/// and pins the whole tree — audit F42). Resolve it with
+/// [`crate::syntax::cst_node`] (or [`CstNode::to_node`] against the file's
+/// [`FileSyntax`] root).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CstNode(pub SyntaxNodePtr);
+
+impl CstNode {
+    /// The declaration's node in `root` (its file's tree).
+    pub fn to_node(&self, root: &SyntaxNode) -> Option<SyntaxNode> {
+        self.0.try_to_node(root)
+    }
+}
+
+/// A file's parsed syntax tree, on the file entity: the immutable green tree
+/// (`Send + Sync`), from which [`FileSyntax::root`] rebuilds a cursor cheaply.
+/// Every `CstNode` / `Valued` / conformance / where-clause pointer of the
+/// file's declarations resolves against it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FileSyntax(pub GreenNode);
+
+impl FileSyntax {
+    /// The file's `SourceFile` node.
+    pub fn root(&self) -> SyntaxNode {
+        SyntaxNode::new_root(self.0.clone())
+    }
+}
 
 // ===== Naming & location =====
 
 /// Declared identifier name.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Name(pub String);
+
+impl Name {
+    /// The name of the world's root entity — the implicit module every
+    /// top-level declaration hangs under.
+    ///
+    /// Deliberately unspellable: `<` and `>` are not identifier characters, so
+    /// no source module can collide with it.
+    ///
+    /// **Compare with [`Name::is_root`], never with a literal.** The check
+    /// fails *open* — `visibility.rs` decides whether a declaration is
+    /// top-level by asking whether its parent is root, and a miss makes every
+    /// `internal` declaration universally visible with no diagnostic. A
+    /// literal at a call site is a copy that a rename cannot reach.
+    pub const ROOT: &'static str = "<root>";
+
+    /// Whether this is the root entity's name. See [`Name::ROOT`].
+    pub fn is_root(&self) -> bool {
+        self.0 == Self::ROOT
+    }
+}
 
 /// Source file entity this declaration belongs to.
 /// Modules don't get FileId — they span multiple files.
@@ -103,7 +186,7 @@ pub struct AstParam {
     pub label: Option<String>,
     pub name: String,
     pub ty: Option<AstType>,
-    /// Entity for the default value expression (child entity with Body + TypeAnnotation).
+    /// Entity for the default value expression (child entity with `Valued` + TypeAnnotation).
     pub default_entity: Option<Entity>,
     /// Destructuring pattern for this parameter, if any.
     /// None for simple binding parameters (`x: Int`).
@@ -149,6 +232,31 @@ pub enum ReceiverKind {
     Consuming,
 }
 
+/// How every setter — property or subscript, hand-written or synthesized —
+/// receives its new value: CONSUMING (user decision 2026-10-28). A setter
+/// exists to store the value, so it takes ownership: a temporary moves
+/// straight into storage, and a non-Copyable property can be set at all.
+/// The single source of truth — the implicit `newValue` param
+/// ([`AstParam::new_value`]) and MIR's setter call sites both derive from it.
+pub const SETTER_NEW_VALUE_MODE: ReceiverKind = ReceiverKind::Consuming;
+
+impl AstParam {
+    /// A setter's implicit `newValue` parameter, typed `ty`, passed per
+    /// [`SETTER_NEW_VALUE_MODE`].
+    pub fn new_value(ty: Option<AstType>) -> AstParam {
+        let is_consuming = SETTER_NEW_VALUE_MODE == ReceiverKind::Consuming;
+        AstParam {
+            label: None,
+            name: "newValue".into(),
+            ty,
+            default_entity: None,
+            pattern: None,
+            is_mut: is_consuming || SETTER_NEW_VALUE_MODE == ReceiverKind::Mutating,
+            is_consuming,
+        }
+    }
+}
+
 /// Marker: can be read as a value.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Gettable;
@@ -157,13 +265,27 @@ pub struct Gettable;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Settable;
 
-/// Has body/initializer — CstNode of the body subtree.
-#[derive(Clone, Debug)]
-pub struct Valued(pub SyntaxNode);
+/// Marker on a `NodeKind::RefAccessor` entity: this is the `mutating ref`
+/// accessor (returns `&mutating T`, Mutating receiver) rather than the
+/// shared `ref` accessor (returns `&T`, Borrowing receiver).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MutatingAccessor;
 
-/// Lowered body — arena-based AST for a function/getter/default value.
-#[derive(Clone, Debug)]
-pub struct Body(pub AstBody);
+/// Has a body to lower — a handle to the body subtree: a `CodeBlock`, a
+/// function's `= expr` (`FunctionBody`), a parameter default's `= expr`
+/// (`DefaultValue`), or a field initializer `Expression`. Resolve it with
+/// [`crate::syntax::valued_node`]; `kestrel-hir-lower`'s `LowerBody` lowers
+/// it on demand. This is the one "has a body" marker — every body entity
+/// carries it, and nothing else does.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Valued(pub SyntaxNodePtr);
+
+impl Valued {
+    /// The body's node in `root` (its file's tree).
+    pub fn to_node(&self, root: &SyntaxNode) -> Option<SyntaxNode> {
+        self.0.try_to_node(root)
+    }
+}
 
 /// Marker: accessed through type, not instance.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -189,11 +311,86 @@ pub enum FieldMutability {
     Let,
 }
 
-/// Marker: this Field is a computed property (has a `{ get }` / `{ get set }`
-/// accessor block, possibly bodyless in a protocol). Absence means a stored
-/// property. Set by the field builder when the CST has PropertyAccessors.
+/// Marker: this Field declares an accessor block (`{ get }`, `{ get set }`,
+/// `{ get { … } }`, `{ ref { … } }`, …), bodyless or not. Set by the field
+/// builder when the CST has PropertyAccessors.
+///
+/// This is the *accessor-shape* question (drives E413, E622, doc rendering).
+/// It is NOT the storage question — a bodyless block on a concrete type
+/// declares access to storage, not a replacement for it. For storage, read
+/// [`FieldClass`]; never infer it from the absence of this marker.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Computed;
+
+/// How a [`NodeKind::Field`] is backed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FieldBacking {
+    /// Occupies storage — inline in the instance, or a global for `static` and
+    /// module-level fields. A *bodyless* accessor block (`var b: Int { get set }`)
+    /// on a concrete type is Stored: the block declares access, not a body.
+    Stored,
+    /// Backed by accessor bodies — a bodied `get`/`set`, the `{ expr }`
+    /// shorthand, or a `ref`/`mutating ref` clause. Occupies no storage.
+    Computed,
+}
+
+/// Which kind of container a [`NodeKind::Field`] is declared in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FieldOwner {
+    /// A `struct` or `enum` — the only owner whose stored fields get a FieldIdx.
+    Nominal,
+    /// A `protocol`: a requirement to witness, never storage, whatever its backing.
+    Protocol,
+    /// An `extend` block.
+    Extension,
+    /// Module level. A module-level `var g = 0;` is a global *without* carrying
+    /// [`Static`], which is why global-ness is `is_static || owner == Module`
+    /// rather than a `Static` test.
+    Module,
+}
+
+/// The storage classification of a [`NodeKind::Field`], computed once by the
+/// field builder — the only code that inspects the accessor CST — and stored
+/// rather than re-derived.
+///
+/// Downstream code must read this instead of reconstructing storage-ness from
+/// the *absence* of [`Computed`]/[`Callable`]/[`Static`]. Classification by
+/// absent marker is precisely what caused the F3 divergence: [`Computed`] is
+/// set for any accessor block but [`Callable`] only for a bodied one, so
+/// `!Callable` and `!Computed` disagreed and the layout, memberwise-init and
+/// pattern-arity rosters drifted apart — silently, because struct construction
+/// maps argument position to field index with no name check.
+///
+/// Use the helpers; do not match the fields ad hoc.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FieldClass {
+    pub backing: FieldBacking,
+    pub owner: FieldOwner,
+    /// The `static` modifier only. Orthogonal to `owner`.
+    pub is_static: bool,
+}
+
+impl FieldClass {
+    /// Occupies inline storage in an instance, i.e. gets a `FieldIdx` in the
+    /// type's layout. THE storage test — layout, memberwise init, pattern
+    /// arity, and the copy/drop folds must all agree with this and nothing else.
+    pub fn is_stored_instance(&self) -> bool {
+        self.backing == FieldBacking::Stored
+            && !self.is_static
+            && matches!(self.owner, FieldOwner::Nominal)
+    }
+
+    /// Backed by a `GlobalRef` rather than by instance storage.
+    pub fn is_global_storage(&self) -> bool {
+        self.backing == FieldBacking::Stored
+            && (self.is_static || matches!(self.owner, FieldOwner::Module))
+    }
+
+    /// A protocol requirement: witness-dispatched, storage nowhere.
+    pub fn is_protocol_requirement(&self) -> bool {
+        matches!(self.owner, FieldOwner::Protocol)
+    }
+}
 
 // ===== Generics =====
 
@@ -212,19 +409,19 @@ pub enum WhereConstraint {
     Bound {
         subject: AstType,
         protocols: Vec<AstType>,
-        node: SyntaxNode,
+        node: SyntaxNodePtr,
     },
     /// `T.Assoc == Concrete` — associated type equality
     Equality {
         lhs: AstType,
         rhs: AstType,
-        node: SyntaxNode,
+        node: SyntaxNodePtr,
     },
     /// `T: not Protocol` — negative conformance bound
     NegativeBound {
         subject: AstType,
         protocol: AstType,
-        node: SyntaxNode,
+        node: SyntaxNodePtr,
     },
 }
 
@@ -238,14 +435,28 @@ pub struct Conformances(pub Vec<ConformanceItem>);
 #[derive(Clone, Debug)]
 pub enum ConformanceItem {
     /// `T: Protocol`
-    Positive(AstType, SyntaxNode),
+    Positive(AstType, SyntaxNodePtr),
     /// `T: not Protocol`
-    Negative(AstType, SyntaxNode),
+    Negative(AstType, SyntaxNodePtr),
 }
 
 /// The type being extended by an extension declaration.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExtensionTarget(pub AstType);
+
+/// Names the extension's target LHS *introduces* as type parameters —
+/// `extend Pair[T, U]` → `["T", "U"]`, `extend Pair[Int64, U]` → `["U"]`,
+/// `extend Int64` → `[]`. For a ref target `extend &T` the pointee is the
+/// parameter position, so → `["T"]`.
+///
+/// The entities these names bind belong to the *target nominal*, not to the
+/// extension, so an extension carries no `TypeParams` for them. This component
+/// is the single record of which of the target's parameters the LHS actually
+/// bound; without it, consumers either miss them entirely (E439's shadowing
+/// walk) or over-approximate by taking every parameter the target declares
+/// (which leaks `T` into `extend Box[Int64]` bodies).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExtensionLhsParamNames(pub Vec<String>);
 
 /// On a TypeAlias declared as `type Protocol.Assoc = T` — the qualifying
 /// protocol path. Absence means the alias is unqualified (`type Assoc = T`).
@@ -270,6 +481,21 @@ pub struct Intrinsic;
 /// Attributes on a declaration (e.g. `@inline`, `@available`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Attributes(pub Vec<AstAttribute>);
+
+impl Attributes {
+    /// The explicit C symbol of an `@extern(.., mangleName: "sym")` function,
+    /// if any. Callers fall back to the function's own name. Single source of
+    /// truth for MIR lowering and analyzers.
+    pub fn extern_mangle_name(&self) -> Option<String> {
+        self.0
+            .iter()
+            .find(|a| a.name == "extern")?
+            .args
+            .iter()
+            .find(|a| a.label.as_deref() == Some("mangleName"))
+            .map(|a| a.value.trim_matches('"').to_string())
+    }
+}
 
 /// A single attribute (e.g. `@inline(always)`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

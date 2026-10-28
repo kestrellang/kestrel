@@ -5,7 +5,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### E423 -- `duplicate_deinit` (Error, Correctness)
+//! ### E473 -- `duplicate_deinit` (Error, Correctness)
 //!
 //! **Message:** "struct `{name}` already has a deinit"
 //!
@@ -21,12 +21,12 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::NodeKind;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "E423",
+    id: "E473",
     name: "duplicate_deinit",
     default_severity: Severity::Error,
     category: Category::Correctness,
@@ -35,8 +35,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct DuplicateDeinitAnalyzer;
 
 impl Describe for DuplicateDeinitAnalyzer {
-    fn id(&self) -> &'static str {
-        "duplicate_deinit"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::DuplicateDeinit
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -50,13 +50,7 @@ impl DeclCheck for DuplicateDeinitAnalyzer {
 
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
         // Collect all Deinit children
-        let deinits: Vec<_> = cx
-            .query
-            .children_of(cx.entity)
-            .iter()
-            .copied()
-            .filter(|&child| matches!(cx.query.get::<NodeKind>(child), Some(NodeKind::Deinit)))
-            .collect();
+        let deinits = util::children_of_kind(cx.query, cx.entity, NodeKind::Deinit);
 
         if deinits.len() <= 1 {
             return vec![];

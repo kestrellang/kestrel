@@ -3,11 +3,11 @@
 module std.collections
 
 import std.core.(Bool, Equatable, Comparable, Hashable, Hasher, Range, ClosedRange, RangeFrom, RangeUpTo, RangeThrough, fatalError)
-import std.numeric.(Int64)
+import std.numeric.(Int64, UInt64, RandomNumberGenerator, SystemRandom)
 import std.result.(Optional)
 import std.memory.(ArraySlice, ArraySliceIterator, Pointer)
 import std.iter.(Iterable)
-import std.text.(Formattable, FormatOptions, StringBuilder, String)
+import std.text.(Formattable, Formatter, FormatOptions, StringBuilder, String)
 import std.collections.(Array)
 
 // ============================================================================
@@ -101,11 +101,11 @@ extend Int64: SeqIndex[T] {
         if self < 0 or self >= slice.count {
             fatalError("Index out of bounds")
         }
-        slice.pointer.offset(by: self).write(value)
+        slice.pointer.offset(by: self).assign(value)
     }
 
     public func writeSeqUnchecked(to slice: ArraySlice[T], with value: T) {
-        slice.pointer.offset(by: self).write(value)
+        slice.pointer.offset(by: self).assign(value)
     }
 }
 
@@ -147,7 +147,7 @@ extend Range[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -160,7 +160,7 @@ extend Range[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -206,7 +206,7 @@ extend ClosedRange[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -219,7 +219,7 @@ extend ClosedRange[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -265,7 +265,7 @@ extend RangeFrom[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -278,7 +278,7 @@ extend RangeFrom[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -319,7 +319,7 @@ extend RangeUpTo[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < end {
-            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -331,7 +331,7 @@ extend RangeUpTo[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < end {
-            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -372,7 +372,7 @@ extend RangeThrough[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < endExclusive {
-            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -384,7 +384,7 @@ extend RangeThrough[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < endExclusive {
-            slice.pointer.offset(by: i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -417,7 +417,7 @@ extend Int64: SeqClampable[T] {
             var idx = self;
             if idx < 0 { idx = 0 }
             if idx >= len { idx = len - 1 }
-            slice.pointer.offset(by: idx).write(v)
+            slice.pointer.offset(by: idx).assign(v)
         }
     }
 }
@@ -448,7 +448,7 @@ extend Range[Int64]: SeqClampable[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).write(value.pointer.offset(by: i).read());
+            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -479,7 +479,7 @@ extend Int64: SeqWrappable[T] {
             }
             var idx = self % len;
             if idx < 0 { idx = idx + len }
-            slice.pointer.offset(by: idx).write(v)
+            slice.pointer.offset(by: idx).assign(v)
         }
     }
 }
@@ -635,6 +635,41 @@ extend Slice[T] {
         } else {
             .None
         }
+    }
+
+    /// A uniformly random element drawn from `rng`, or `.None` for an
+    /// empty collection. O(1).
+    ///
+    /// Passing the same seeded generator reproduces the same picks —
+    /// use the no-argument overload for OS-entropy randomness.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var rng = Lcg64(seed: 42);
+    /// [1, 2, 3].randomElement(using: rng);  // deterministic for the seed
+    /// [].randomElement(using: rng);          // None
+    /// ```
+    public func randomElement(mutating using rng: some RandomNumberGenerator) -> T? {
+        let s = self.asSlice();
+        if s.count == 0 {
+            return .None
+        }
+        let index = Int64(from: rng.nextUInt64(below: UInt64(from: s.count)));
+        .Some(s.pointer.offset(by: index).read())
+    }
+
+    /// A uniformly random element using OS entropy, or `.None` for an
+    /// empty collection. O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// ["red", "green", "blue"].randomElement();  // e.g. Some("green")
+    /// ```
+    public func randomElement() -> T? {
+        var rng = SystemRandom();
+        self.randomElement(using: rng)
     }
 
     // -- Iteration -----------------------------------------------------------
@@ -990,7 +1025,7 @@ extend Slice[T] {
     /// let v = [1, -1, 2, 3, -1, 4].split(where: { it < 0 });
     /// for seg in v { ... }
     /// ```
-    public func split(consuming where predicate: (T) -> Bool) -> ArraySplitWhereView[T] {
+    public func split(consuming where predicate: escaping (T) -> Bool) -> ArraySplitWhereView[T] {
         ArraySplitWhereView(slice: self.asSlice(), predicate: predicate)
     }
 
@@ -1413,7 +1448,7 @@ extend Slice[T] where T: Formattable {
     /// [1, 2, 3].format();  // "[1, 2, 3]"
     /// [].format();          // "[]"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: '[');
         let s = self.asSlice();
         let myPtr = s.pointer;

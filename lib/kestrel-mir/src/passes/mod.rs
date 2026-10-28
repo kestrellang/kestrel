@@ -1,5 +1,6 @@
 pub mod clone_shim;
 pub mod copy_check;
+pub mod copy_lifetime;
 pub mod copy_propagation;
 pub mod drop_fix;
 pub mod drop_shim;
@@ -122,6 +123,14 @@ pub fn run_pipeline_until(
         "run_pipeline_until got post-mono stage {stop:?}"
     );
 
+    // NOT a duplicate of the call in `kestrel-mir-lower`'s `lower_items`, which
+    // runs the same pass between the types half and the functions half so that
+    // body lowering can read a final `DropBehavior` (audit G1). This one still
+    // has work to do: body lowering SYNTHESIZES types after that point —
+    // closure-environment structs (`body/closure.rs`'s `add_struct`) — which
+    // the earlier call cannot see. Keep both. The pass is monotone/additive and
+    // internally iterates to a fixed point, so the overlap costs one no-change
+    // sweep and nothing else.
     if stop >= Stage::DropFix {
         drop_fix::fix_drop_behaviors(module);
     }
@@ -157,5 +166,9 @@ pub fn run_pipeline_until(
     // so this currently fails ~550 tests until the lowering's move/copy
     // decision is fixed to borrow/move those instead of copying.
     errors.extend(copy_check::check_copies(module));
+    // References stage 1: the root rule for ret_borrow functions — returned
+    // borrows must root at Param/Static/PointerDerived (user diagnostics
+    // E494-E496, not ICEs).
+    errors.extend(crate::verify::check_escapes(module));
     errors
 }

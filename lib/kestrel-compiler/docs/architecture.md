@@ -29,8 +29,11 @@ The compiler owns the ECS world and provides methods that invoke each phase. Lex
 |-------|--------|---------------|
 | `LexFile` | `queries/lex.rs` | File entity → `Vec<SpannedToken>` |
 | `ParseFile` | `queries/parse.rs` | File entity → `ParseResult` (CST + errors) |
+| `InferWithDiagnostics` | `queries/infer.rs` | Body entity + root → `Option<Arc<TypedBody>>` |
 
-Both queries accumulate `Diagnostic` values as side effects. Dependencies are tracked automatically — changing `SourceText` invalidates `LexFile`, which invalidates `ParseFile`.
+All three queries accumulate `Diagnostic` values as side effects. Dependencies are tracked automatically — changing `SourceText` invalidates `LexFile`, which invalidates `ParseFile`.
+
+`InferWithDiagnostics` is the entry point `infer_all` queries per body. It wraps `InferBody`: runs inference, then converts each `InferError` in the result into a codespan diagnostic and accumulates it, so inference errors show up in `diagnostics()` alongside lex/parse diagnostics. `FromHir` errors are skipped — they duplicate diagnostics already emitted during HIR lowering. The output re-shares `InferBody`'s `Arc` rather than re-wrapping.
 
 ## Key Methods
 
@@ -74,6 +77,7 @@ Unchanged files are served from cache at every level.
 | `diagnostic.rs` | `Diagnostic`, `Severity` |
 | `queries/lex.rs` | `LexFile` query implementation |
 | `queries/parse.rs` | `ParseFile` query implementation |
+| `queries/infer.rs` | `InferWithDiagnostics` query implementation |
 
 ## Dependencies
 
@@ -84,5 +88,5 @@ Unchanged files are served from cache at every level.
 | `kestrel-parser` | `Parser`, `ParseResult` |
 | `kestrel-syntax-tree` | `SyntaxKind`, `SyntaxNode` |
 | `kestrel-ast-builder` | `build_declarations` |
-| `kestrel-type-infer` | `InferBody` query |
+| `kestrel-type-infer` | `InferBody` query, `TypedBody`, `InferError` |
 | `kestrel-span` | `Span` for diagnostics |

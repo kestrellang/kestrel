@@ -2,12 +2,12 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Comparable, Ordering, Cloneable, Hashable, Hasher, fatalError)
+import std.core.(Bool, Equal, NotEqual, Equatable, Comparable, Ordering, Cloneable, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, RcBox, ArraySlice)
 import std.iter.(Iterable)
-import std.text.(Formattable, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringBuilder, StringStorage, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, Str, _bytesEqual, _bytesCompare)
+import std.text.(Formattable, Formatter, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringBuilder, StringStorage, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, Str, _bytesEqual, _bytesCompare)
 
 // ============================================================================
 // STRING INDEX PROTOCOL
@@ -111,7 +111,7 @@ extend CharIndex {
 /// ```
 /// let s = "hello, world";
 /// let slice = s.asSlice();
-/// slice.byteCount;              // 12
+/// slice.bytes.count;             // 12
 /// slice.toOwned();               // "hello, world"
 /// ```
 ///
@@ -124,13 +124,17 @@ extend CharIndex {
 /// Shared ownership via `RcBox`. The source string's buffer stays
 /// alive as long as any slice references it. Call `.toOwned()` to
 /// copy just the slice's bytes into an independent `String`.
-public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Formattable, Iterable {
+public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], NotEqual[StringSlice], NotEqual[String], Comparable, Hashable, Cloneable, Formattable, Iterable {
     type Item = Char
     type TargetIterator = CharsIterator
+    type Equal[StringSlice].Output = Bool
+    type Equal[String].Output = Bool
+    type NotEqual[StringSlice].Output = Bool
+    type NotEqual[String].Output = Bool
 
     var source: RcBox[StringStorage]
-    public var start: Int64
-    public var end: Int64
+    public let start: Int64
+    public let end: Int64
 
     /// @name From Source
     /// Creates a slice covering `[start, end)` in the given storage.
@@ -141,9 +145,6 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
     }
 
     // -- Size ----------------------------------------------------------------
-
-    /// Number of UTF-8 bytes in this slice. O(1).
-    public var byteCount: Int64 { self.end - self.start }
 
     /// True when the slice covers zero bytes.
     public var isEmpty: Bool { self.start >= self.end }
@@ -165,7 +166,7 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
             return String()
         }
         let ptr = self._rawPtr();
-        String.fromBytesUnchecked(ptr.offset(by: self.start), self.byteCount)
+        String.fromBytesUnchecked(ptr.offset(by: self.start), (self.end - self.start))
     }
 
     // -- Internal helpers ----------------------------------------------------
@@ -183,7 +184,7 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
     /// Iterates code points in this slice.
     public func iter() -> CharsIterator {
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](self._rawPtr().offset(by: self.start).asRaw().raw);
-        CharsIterator(ptr: rawPtr, length: self.byteCount, byteIndex: 0)
+        CharsIterator(ptr: rawPtr, length: (self.end - self.start), byteIndex: 0)
     }
 
     // -- Str conformance -----------------------------------------------------
@@ -193,13 +194,13 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
 
     // -- Protocol conformances -----------------------------------------------
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         self.toOwned().format(into: writer, options)
     }
 
     public func isEqual(to other: StringSlice) -> Bool {
-        let myLen = self.byteCount;
-        let otherLen = other.byteCount;
+        let myLen = (self.end - self.start);
+        let otherLen = (other.end - other.start);
         if myLen != otherLen { return false }
         if myLen == 0 { return true }
         _bytesEqual(
@@ -209,9 +210,25 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
         )
     }
 
+    public func equal(to other: StringSlice) -> Bool {
+        self.isEqual(to: other)
+    }
+
+    public func notEqual(to other: StringSlice) -> Bool {
+        if self.isEqual(to: other) { false } else { true }
+    }
+
+    public func equal(to other: String) -> Bool {
+        self.isEqual(to: other.asSlice())
+    }
+
+    public func notEqual(to other: String) -> Bool {
+        if self.isEqual(to: other.asSlice()) { false } else { true }
+    }
+
     public func compare(other: StringSlice) -> Ordering {
-        let myLen = self.byteCount;
-        let otherLen = other.byteCount;
+        let myLen = (self.end - self.start);
+        let otherLen = (other.end - other.start);
         let minLen = if myLen < otherLen { myLen } else { otherLen };
         let cmp = _bytesCompare(
             a: self._rawPtr().offset(by: self.start),
@@ -223,11 +240,10 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
     }
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(ArraySlice(pointer: self._rawPtr().offset(by: self.start), count: self.byteCount))
+        hasher.write(ArraySlice(pointer: self._rawPtr().offset(by: self.start), count: (self.end - self.start)))
     }
 
     public func clone() -> StringSlice {
         StringSlice(source: self.source.clone(), start: self.start, end: self.end)
     }
 }
-

@@ -24,15 +24,17 @@
 //!
 //! - `default_matrix(col)` — D(P): keep only wildcard rows, removing column `col`.
 //!
-//! - `head_constructors(col)` — unique constructors appearing in a column.
+//! - `head_constructors(col)` — unique constructors appearing in a column,
+//!   split into disjoint pieces (`split`).
 //!
 //! Multi-column support is built in (works on any column, not just column 0).
 
-use kestrel_hecs::QueryContext;
+use kestrel_hecs::{Entity, QueryContext};
 use kestrel_type_infer::result::ResolvedTy;
 
 use super::constructor::Constructor;
 use super::flat_pat::FlatPat;
+use super::split;
 
 /// A row in the pattern matrix.
 #[derive(Clone, Debug)]
@@ -43,6 +45,11 @@ pub struct PatternRow {
     pub arm_index: usize,
     /// Whether this arm has a guard condition
     pub has_guard: bool,
+    /// Constructors this row was specialized on, in order. Lets leaf binding
+    /// collection pick the matching alternative of an or-pattern: `.A(n,_) or
+    /// .B(_,n)` reaches a separate leaf per alternative, and `n`'s access path
+    /// (`.A` field 0 vs `.B` field 1) depends on which one matched (#187).
+    pub matched: Vec<Constructor>,
 }
 
 impl PatternRow {
@@ -51,7 +58,14 @@ impl PatternRow {
             pats,
             arm_index,
             has_guard,
+            matched: Vec::new(),
         }
+    }
+
+    /// Set the matched-constructor trail (builder style).
+    pub fn with_matched(mut self, matched: Vec<Constructor>) -> Self {
+        self.matched = matched;
+        self
     }
 }
 
@@ -106,17 +120,37 @@ impl PatternMatrix {
         self.col_types.is_empty()
     }
 
-    /// Get unique non-wildcard constructors in the given column.
+    /// The constructors to switch on in the given column: the unique
+    /// non-wildcard heads, with overlapping ranges and array lengths split into
+    /// disjoint pieces (see `split`).
     pub fn head_constructors(&self, col: usize) -> Vec<Constructor> {
+        split::split(&self.raw_head_constructors(col))
+    }
+
+    /// The pieces of `ctor` relative to this column's heads: `ctor` cut so that
+    /// no row constructor straddles a piece. Asking "is `ctor` useful?" is then
+    /// "is any piece useful?". A non-splittable `ctor` is its own only piece.
+    pub fn split_head(&self, col: usize, ctor: &Constructor) -> Vec<Constructor> {
+        if !split::is_splittable(ctor) {
+            return vec![ctor.clone()];
+        }
+        let mut heads = self.raw_head_constructors(col);
+        heads.push(ctor.clone());
+        split::split(&heads)
+            .into_iter()
+            .filter(|piece| ctor.matches(piece))
+            .collect()
+    }
+
+    /// Unique non-wildcard heads in the given column, as written.
+    fn raw_head_constructors(&self, col: usize) -> Vec<Constructor> {
         let mut seen = std::collections::HashSet::new();
         let mut result = Vec::new();
-
         for row in &self.rows {
             if let Some(pat) = row.pats.get(col) {
                 collect_constructors(pat, &mut seen, &mut result);
             }
         }
-
         result
     }
 
@@ -130,10 +164,11 @@ impl PatternMatrix {
     pub fn specialize(
         &self,
         query: &QueryContext<'_>,
+        root: Entity,
         col: usize,
         ctor: &Constructor,
     ) -> PatternMatrix {
-        let field_types = ctor.field_types(query, &self.col_types[col]);
+        let field_types = ctor.field_types(query, root, &self.col_types[col]);
         let arity = ctor.arity();
 
         // New column types: [..col] + field_types + [col+1..]
@@ -163,7 +198,12 @@ impl PatternMatrix {
                     new_pats.extend_from_slice(&row.pats[col + 1..]);
                 }
 
-                result.push(PatternRow::new(new_pats, row.arm_index, row.has_guard));
+                let mut new_matched = row.matched.clone();
+                new_matched.push(ctor.clone());
+                result.push(
+                    PatternRow::new(new_pats, row.arm_index, row.has_guard)
+                        .with_matched(new_matched),
+                );
             }
         }
 
@@ -189,7 +229,10 @@ impl PatternMatrix {
                 if col + 1 < row.pats.len() {
                     new_pats.extend_from_slice(&row.pats[col + 1..]);
                 }
-                result.push(PatternRow::new(new_pats, row.arm_index, row.has_guard));
+                result.push(
+                    PatternRow::new(new_pats, row.arm_index, row.has_guard)
+                        .with_matched(row.matched.clone()),
+                );
             }
         }
 

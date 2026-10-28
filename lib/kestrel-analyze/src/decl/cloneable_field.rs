@@ -24,7 +24,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use kestrel_ast_builder::NodeKind;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
@@ -37,8 +37,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct CloneableFieldAnalyzer;
 
 impl Describe for CloneableFieldAnalyzer {
-    fn id(&self) -> &'static str {
-        "cloneable_field"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::CloneableField
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

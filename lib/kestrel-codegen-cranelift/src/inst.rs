@@ -8,8 +8,8 @@ use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::{CallArg, InstKind};
 use kestrel_mir::mono::{MonoEnum, MonoModule, MonoStruct};
 use kestrel_mir::{
-    FieldIdx, FloatBits, FloatMathKind, FloatPredicateKind, Layout, MirTy, MonoFuncId, Op,
-    ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
+    DivGuard, FieldIdx, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy,
+    MonoFuncId, Op, ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
 };
 
 use crate::abi::{self, PassMode, ReturnMode};
@@ -61,6 +61,19 @@ pub fn compile_inst(
             }
         },
 
+        // Thick-function layouts are prefix-compatible: view kinds are the
+        // first two words of the four-word owning layout.
+        InstKind::CoerceFnKind {
+            result, operand, ..
+        } => {
+            let src = fc.get_value(builder, *operand);
+            let ty = fc.body.values[result.index()].ty;
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), fc.ctx.ptr_ty);
+            mem::copy_aggregate(builder, repr.size(), slot, src);
+            fc.map_value(builder, *result, slot);
+        },
+
         InstKind::DestroyValue { .. } => {},
 
         // operand: RAW (custom spill for @owned scalars) → result: ADDR
@@ -74,6 +87,35 @@ pub fn compile_inst(
                 .ctx
                 .tc
                 .repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            // Fused ref peel (the 2b extraction contract, on locals/params):
+            // a borrow whose OPERAND is ref-typed but whose RESULT is the
+            // pointee reads through the ref once. @guaranteed ref value =
+            // address OF the ref slot → load the stored address; @owned ref
+            // value IS the address → pass through. Ref-typed bodies (e.g.
+            // `extend &T` methods reading `self`) produce this shape.
+            let operand_is_ref = matches!(
+                fc.ctx.module.ty_arena.get(operand_ty),
+                kestrel_mir::MirTy::Ref { .. }
+            );
+            let result_is_ref = matches!(
+                fc.ctx
+                    .module
+                    .ty_arena
+                    .get(fc.body.values[result.index()].ty),
+                kestrel_mir::MirTy::Ref { .. }
+            );
+            if operand_is_ref && !result_is_ref {
+                let ptr_ty = fc.ctx.ptr_ty;
+                let v = if is_guaranteed {
+                    builder
+                        .ins()
+                        .load(ptr_ty, MemFlags::new(), val, Offset32::new(0))
+                } else {
+                    val
+                };
+                fc.map_value(builder, *result, v);
+                return Ok(false);
+            }
             match repr {
                 _ if is_guaranteed => {
                     fc.map_value(builder, *result, val);
@@ -146,11 +188,34 @@ pub fn compile_inst(
             result,
             address,
             ty,
+            independent,
         } => {
             let addr = fc.resolve_scalar(builder, *address);
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            let val = mem::load_from_repr(builder, repr, addr, fc.ctx.ptr_ty);
-            fc.map_value(builder, *result, val);
+            match repr {
+                // A Take is a destructive *move-out*: the result must be an
+                // independent @owned value. An aggregate is carried by address,
+                // so `load_from_repr` would alias the source storage — and if
+                // that storage is reinitialized before the moved value is
+                // consumed (the `let old = self; self = new` take/replace shape,
+                // or `var x = agg; …; x = new`), the moved value is clobbered.
+                // Memcpy the bytes into a fresh temp slot so the move is truly
+                // independent (a byte-copy of an abandoned source, not a clone —
+                // no double-ownership). When `mark_independent_takes` has proven
+                // the source slot is not reinitialized while this value is live,
+                // `independent` is false and we alias (zero-copy). Scalars load
+                // by value and never alias.
+                TypeRepr::Aggregate { size, align } if *independent => {
+                    let ptr_ty = fc.ctx.ptr_ty;
+                    let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
+                    mem::copy_aggregate(builder, size, slot, addr);
+                    fc.map_value(builder, *result, slot);
+                },
+                _ => {
+                    let val = mem::load_from_repr(builder, repr, addr, fc.ctx.ptr_ty);
+                    fc.map_value(builder, *result, val);
+                },
+            }
         },
 
         // address: ADDR, value: VALUE → writes value to address
@@ -176,15 +241,34 @@ pub fn compile_inst(
                 == kestrel_mir::value::Ownership::Guaranteed;
             let disc_width = discriminant_width(
                 operand_ty,
+                fc.body.values[result.index()].ty,
                 &fc.ctx.module.ty_arena,
                 fc.ctx.module,
                 &fc.ctx.tc,
             );
             let val = match repr {
-                TypeRepr::Scalar(_) if is_guaranteed => {
-                    builder
-                        .ins()
-                        .load(disc_width, MemFlags::new(), base, Offset32::new(0))
+                // Twin of the LLVM `Discriminant` handling in
+                // `kestrel-codegen-llvm/src/inst.rs` — keep both in sync.
+                TypeRepr::Scalar(scalar_ty) if is_guaranteed => {
+                    // Load the scalar through the borrow at its OWN width, then
+                    // normalize to `disc_width`. `disc_width` is the enum tag
+                    // width and defaults to I32 for a non-enum Named type (e.g.
+                    // `Bool`, a newtype over `lang.i1`); loading `disc_width`
+                    // bytes from a 1-byte value over-reads adjacent memory, so a
+                    // `match b { true => .., _ => .. }` compared the tag against
+                    // garbage and always took the default. For a pure-discriminant
+                    // enum `scalar_ty == disc_width`, so this is a no-op there.
+                    let loaded =
+                        builder
+                            .ins()
+                            .load(scalar_ty, MemFlags::new(), base, Offset32::new(0));
+                    if scalar_ty == disc_width {
+                        loaded
+                    } else if scalar_ty.bytes() > disc_width.bytes() {
+                        builder.ins().ireduce(disc_width, loaded)
+                    } else {
+                        builder.ins().uextend(disc_width, loaded)
+                    }
                 },
                 TypeRepr::Scalar(_) => {
                     let actual = builder.func.dfg.value_type(base);
@@ -214,8 +298,10 @@ pub fn compile_inst(
                 // struct_extract computes field offsets, CopyValue loads from it.
                 let a = fc.resolve_scalar(builder, *arg);
                 fc.map_value(builder, *result, a);
-            } else if matches!(op, Op::PtrTo(_)) {
-                // PtrTo needs the ADDRESS of the arg, not the loaded value.
+            // `PtrTo`/`RefToPtr` need the ADDRESS of the arg, never its loaded
+            // value: a `&T` IS an address, and `resolve_scalar` would load the
+            // pointee (silently reading a scalar pointee's BITS as a pointer).
+            } else if matches!(op, Op::PtrTo(_) | Op::RefToPtr) {
                 // The arg is @guaranteed (Borrow convention) — its codegen
                 // value is already the address we want.
                 let a = fc.get_value(builder, *arg);
@@ -291,7 +377,7 @@ pub fn compile_inst(
 
         // elements: VALUE each → result: @owned aggregate
         InstKind::Tuple { result, elements } => {
-            let val = compile_tuple(fc, builder, elements)?;
+            let val = compile_tuple(fc, builder, *result, elements)?;
             fc.map_value(builder, *result, val);
         },
 
@@ -321,8 +407,11 @@ pub fn compile_inst(
             result,
             callee,
             captures,
+            retain,
+            release,
         } => {
-            let val = compile_apply_partial(fc, builder, callee, captures)?;
+            let val =
+                compile_apply_partial(fc, builder, *result, callee, captures, retain, release)?;
             fc.map_value(builder, *result, val);
         },
 
@@ -332,7 +421,7 @@ pub fn compile_inst(
             operand,
             field,
         } => {
-            let val = compile_struct_extract(fc, builder, *operand, *field)?;
+            let val = compile_struct_extract(fc, builder, *result, *operand, *field)?;
             fc.map_value(builder, *result, val);
         },
 
@@ -342,7 +431,7 @@ pub fn compile_inst(
             operand,
             index,
         } => {
-            let val = compile_tuple_extract(fc, builder, *operand, *index)?;
+            let val = compile_tuple_extract(fc, builder, *result, *operand, *index)?;
             fc.map_value(builder, *result, val);
         },
 
@@ -353,7 +442,7 @@ pub fn compile_inst(
             variant,
             field,
         } => {
-            let val = compile_enum_payload(fc, builder, *operand, *variant, *field)?;
+            let val = compile_enum_payload(fc, builder, *result, *operand, *variant, *field)?;
             fc.map_value(builder, *result, val);
         },
 
@@ -381,13 +470,27 @@ pub fn compile_inst(
             field,
         } => {
             let base_val = fc.get_value(builder, *base);
-            let offset = struct_field_offset(
-                *ty,
-                *field,
-                &fc.ctx.module.ty_arena,
-                fc.ctx.module,
-                &fc.ctx.tc,
-            );
+            // Tuple container: positional element offset (mirrors
+            // `compile_tuple_extract`); structs use the layout's field_offsets.
+            let offset = if let MirTy::Tuple(elems) = fc.ctx.module.ty_arena.get(*ty) {
+                let elems = elems.clone();
+                tuple_elem_offset(
+                    &mut fc.ctx.tc,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &elems,
+                    field.index() as u32,
+                )
+                .0
+            } else {
+                struct_field_offset(
+                    *ty,
+                    *field,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &fc.ctx.tc,
+                )
+            };
             let addr = if offset != 0 {
                 builder.ins().iadd_imm(base_val, offset as i64)
             } else {
@@ -482,8 +585,44 @@ fn compile_op1(
         Op::IntWiden(_, to) => builder.ins().sextend(int_bits_to_cl(to), arg),
         Op::IntUnsignedWiden(_, to) => builder.ins().uextend(int_bits_to_cl(to), arg),
         Op::IntTruncate(_, to) => builder.ins().ireduce(int_bits_to_cl(to), arg),
-        Op::IntToFloat(_, fb) => builder.ins().fcvt_from_sint(float_bits_to_cl(fb), arg),
-        Op::FloatToInt(_, ib) => builder.ins().fcvt_to_sint_sat(int_bits_to_cl(ib), arg),
+        // Cranelift converts only 32/64-bit integers: widen an 8/16-bit
+        // source first (sign-extend; the cast is signed).
+        Op::IntToFloat(ib, fb) => {
+            let arg = match ib {
+                IntBits::I8 | IntBits::I16 => builder.ins().sextend(ir::types::I32, arg),
+                IntBits::I32 | IntBits::I64 => arg,
+            };
+            builder.ins().fcvt_from_sint(float_bits_to_cl(fb), arg)
+        },
+        // Saturating, like LLVM's `llvm.fptosi.sat` at the TARGET width: an
+        // 8/16-bit target converts at 32 bits, clamps to its own range, then
+        // narrows.
+        Op::FloatToInt(_, ib) => match ib {
+            IntBits::I8 | IntBits::I16 => {
+                let (lo, hi) = match ib {
+                    IntBits::I8 => (i8::MIN as i64, i8::MAX as i64),
+                    _ => (i16::MIN as i64, i16::MAX as i64),
+                };
+                let wide = builder.ins().fcvt_to_sint_sat(ir::types::I32, arg);
+                let lo = builder.ins().iconst(ir::types::I32, lo);
+                let hi = builder.ins().iconst(ir::types::I32, hi);
+                let clamped = builder.ins().smax(wide, lo);
+                let clamped = builder.ins().smin(clamped, hi);
+                builder.ins().ireduce(int_bits_to_cl(ib), clamped)
+            },
+            IntBits::I32 | IntBits::I64 => builder.ins().fcvt_to_sint_sat(int_bits_to_cl(ib), arg),
+        },
+        // Pure bitcast (no value conversion): float ↔ same-width integer.
+        Op::FloatToBits(fb) => {
+            let int_ty = match fb {
+                kestrel_mir::FloatBits::F32 => ir::types::I32,
+                _ => ir::types::I64,
+            };
+            builder.ins().bitcast(int_ty, MemFlags::new(), arg)
+        },
+        Op::BitsToFloat(fb) => builder
+            .ins()
+            .bitcast(float_bits_to_cl(fb), MemFlags::new(), arg),
         Op::FloatWiden(_, to) => builder.ins().fpromote(float_bits_to_cl(to), arg),
         Op::FloatTruncate(_, to) => builder.ins().fdemote(float_bits_to_cl(to), arg),
         Op::RefToImmut => arg,
@@ -499,6 +638,15 @@ fn compile_op1(
         },
         Op::PtrCast(_) | Op::PtrBitcast(_) => arg,
         Op::RefToPtr => arg,
+        // Project word `i` out of a closure value. A `FuncThick` is always
+        // addressed (TypeRepr::Aggregate), so `arg` is the base address and the
+        // word is a plain pointer-sized load at `i * ptr_size`.
+        Op::ClosureWord(i) => {
+            let off = (i as u64 * fc.ctx.ptr_size) as i32;
+            builder
+                .ins()
+                .load(ptr_ty, MemFlags::new(), arg, Offset32::new(off))
+        },
         Op::PtrRead(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             mem::load_from_repr(builder, repr, arg, ptr_ty)
@@ -542,13 +690,105 @@ fn compile_op1(
         },
         Op::FloatMath(_, FloatMathKind::Floor) => builder.ins().floor(arg),
         Op::FloatMath(_, FloatMathKind::Ceil) => builder.ins().ceil(arg),
-        Op::FloatMath(_, FloatMathKind::Round) => builder.ins().nearest(arg),
+        // Ties away from zero (the documented `round()`; Cranelift's `nearest`
+        // rounds ties to even): truncate, then step one away from zero when
+        // the dropped fraction is at least one half.
+        Op::FloatMath(fb, FloatMathKind::Round) => {
+            let (half, one) = match fb {
+                FloatBits::F16 | FloatBits::F32 => {
+                    (builder.ins().f32const(0.5), builder.ins().f32const(1.0))
+                },
+                FloatBits::F64 => (builder.ins().f64const(0.5), builder.ins().f64const(1.0)),
+            };
+            let truncated = builder.ins().trunc(arg);
+            let fraction = builder.ins().fsub(arg, truncated);
+            let magnitude = builder.ins().fabs(fraction);
+            let step = builder.ins().fcopysign(one, arg);
+            let away = builder.ins().fadd(truncated, step);
+            let round_up = builder
+                .ins()
+                .fcmp(FloatCC::GreaterThanOrEqual, magnitude, half);
+            builder.ins().select(round_up, away, truncated)
+        },
         Op::FloatMath(_, FloatMathKind::Trunc) => builder.ins().trunc(arg),
         Op::FloatMath(_, FloatMathKind::Sqrt) => builder.ins().sqrt(arg),
         _ => {
             return Err(CodegenError::Unsupported(format!("op1 variant: {op:?}")));
         },
     })
+}
+
+/// Return a divisor safe to feed to native `sdiv`/`srem`: `1` when the operation
+/// would be the overflowing `minValue / -1` (so the native op yields `min/1=min`
+/// and `min%1=0`, matching the spec's wrap), otherwise the original divisor. A
+/// zero divisor is left untouched so the native op still traps on div-by-zero.
+fn signed_div_overflow_guard(
+    builder: &mut FunctionBuilder,
+    bits: IntBits,
+    lhs: Value,
+    rhs: Value,
+) -> Value {
+    let ty = builder.func.dfg.value_type(rhs);
+    let min = -(1i128 << (bits.bit_width() - 1)) as i64;
+    let neg_one = builder.ins().iconst(ty, -1);
+    let min_v = builder.ins().iconst(ty, min);
+    let one = builder.ins().iconst(ty, 1);
+    let is_neg_one = builder.ins().icmp(IntCC::Equal, rhs, neg_one);
+    let is_min = builder.ins().icmp(IntCC::Equal, lhs, min_v);
+    let is_overflow = builder.ins().band(is_neg_one, is_min);
+    builder.ins().select(is_overflow, one, rhs)
+}
+
+#[derive(Clone, Copy)]
+enum OverflowKind {
+    Add,
+    Sub,
+    Mul,
+}
+
+/// Compute whether `lhs OP rhs` overflows the `bits`-wide integer, as a Bool.
+/// Cranelift has no overflow intrinsic, so do the op in the next-wider type and
+/// check whether truncating back loses information (the wide result differs from
+/// the sign/zero-extension of the narrow result). Backs the `*Checked` helpers.
+fn emit_overflow_check(
+    builder: &mut FunctionBuilder,
+    bits: IntBits,
+    sign: Signedness,
+    kind: OverflowKind,
+    lhs: Value,
+    rhs: Value,
+) -> Value {
+    let narrow = builder.func.dfg.value_type(lhs);
+    let wide = match bits {
+        IntBits::I8 => ir::types::I16,
+        IntBits::I16 => ir::types::I32,
+        IntBits::I32 => ir::types::I64,
+        IntBits::I64 => ir::types::I128,
+    };
+    let signed = matches!(sign, Signedness::Signed);
+    let lw = if signed {
+        builder.ins().sextend(wide, lhs)
+    } else {
+        builder.ins().uextend(wide, lhs)
+    };
+    let rw = if signed {
+        builder.ins().sextend(wide, rhs)
+    } else {
+        builder.ins().uextend(wide, rhs)
+    };
+    let wide_res = match kind {
+        OverflowKind::Add => builder.ins().iadd(lw, rw),
+        OverflowKind::Sub => builder.ins().isub(lw, rw),
+        OverflowKind::Mul => builder.ins().imul(lw, rw),
+    };
+    let narrow_res = builder.ins().ireduce(narrow, wide_res);
+    let re_wide = if signed {
+        builder.ins().sextend(wide, narrow_res)
+    } else {
+        builder.ins().uextend(wide, narrow_res)
+    };
+    let neq = builder.ins().icmp(IntCC::NotEqual, wide_res, re_wide);
+    cmp_to_bool(builder, neq)
 }
 
 fn compile_op2(
@@ -564,10 +804,41 @@ fn compile_op2(
         Op::Add(_, _) => builder.ins().iadd(lhs, rhs),
         Op::Sub(_, _) => builder.ins().isub(lhs, rhs),
         Op::Mul(_, _) => builder.ins().imul(lhs, rhs),
-        Op::Div(_, Signedness::Signed) => builder.ins().sdiv(lhs, rhs),
-        Op::Div(_, Signedness::Unsigned) => builder.ins().udiv(lhs, rhs),
-        Op::Rem(_, Signedness::Signed) => builder.ins().srem(lhs, rhs),
-        Op::Rem(_, Signedness::Unsigned) => builder.ins().urem(lhs, rhs),
+        // Signed div/rem: `minValue / -1` overflows. Cranelift `sdiv`/`srem` TRAP
+        // on it, but the spec (int64.ks docs) says it WRAPS (div→minValue, rem→0).
+        // Swap the divisor -1→1 exactly in that case so the native op produces
+        // min/1=min and min%1=0 — no trap, correct wrap. Division-by-zero still
+        // traps natively (the swap leaves a 0 divisor untouched). Mirrored in the
+        // LLVM backend (which additionally needs an explicit div-by-zero trap).
+        Op::Div(bits, Signedness::Signed, guard) => {
+            // Unchecked drops the min/-1 swap (native sdiv then traps on that edge
+            // and on div-by-zero — UB-equivalent). The user guarantees validity.
+            let safe = if guard == DivGuard::Checked {
+                signed_div_overflow_guard(builder, bits, lhs, rhs)
+            } else {
+                rhs
+            };
+            builder.ins().sdiv(lhs, safe)
+        },
+        Op::Div(_, Signedness::Unsigned, _) => builder.ins().udiv(lhs, rhs),
+        Op::Rem(bits, Signedness::Signed, guard) => {
+            let safe = if guard == DivGuard::Checked {
+                signed_div_overflow_guard(builder, bits, lhs, rhs)
+            } else {
+                rhs
+            };
+            builder.ins().srem(lhs, safe)
+        },
+        Op::Rem(_, Signedness::Unsigned, _) => builder.ins().urem(lhs, rhs),
+        Op::AddOverflows(bits, sign) => {
+            emit_overflow_check(builder, bits, sign, OverflowKind::Add, lhs, rhs)
+        },
+        Op::SubOverflows(bits, sign) => {
+            emit_overflow_check(builder, bits, sign, OverflowKind::Sub, lhs, rhs)
+        },
+        Op::MulOverflows(bits, sign) => {
+            emit_overflow_check(builder, bits, sign, OverflowKind::Mul, lhs, rhs)
+        },
         Op::FAdd(_) => builder.ins().fadd(lhs, rhs),
         Op::FSub(_) => builder.ins().fsub(lhs, rhs),
         Op::FMul(_) => builder.ins().fmul(lhs, rhs),
@@ -658,20 +929,22 @@ fn compile_op2(
             mem::store_to_repr(builder, repr, lhs, rhs);
             builder.ins().iconst(ptr_ty, 0)
         },
-        Op::AtomicAdd => builder.ins().atomic_rmw(
-            ir::types::I64,
-            MemFlags::new(),
-            ir::AtomicRmwOp::Add,
-            lhs,
-            rhs,
-        ),
-        Op::AtomicSub => builder.ins().atomic_rmw(
-            ir::types::I64,
-            MemFlags::new(),
-            ir::AtomicRmwOp::Sub,
-            lhs,
-            rhs,
-        ),
+        // `lang.atomic_add`/`atomic_sub` are seeded generic over `T`
+        // (ast-builder/lang_module.rs), so the access width must come from the
+        // value operand — hardcoding I64 reads/writes 8 bytes at a narrower
+        // location. Matches the LLVM backend, which infers it from the operand.
+        Op::AtomicAdd => {
+            let ty = builder.func.dfg.value_type(rhs);
+            builder
+                .ins()
+                .atomic_rmw(ty, MemFlags::new(), ir::AtomicRmwOp::Add, lhs, rhs)
+        },
+        Op::AtomicSub => {
+            let ty = builder.func.dfg.value_type(rhs);
+            builder
+                .ins()
+                .atomic_rmw(ty, MemFlags::new(), ir::AtomicRmwOp::Sub, lhs, rhs)
+        },
         Op::FloatCopysign(_) => builder.ins().fcopysign(lhs, rhs),
         _ => {
             return Err(CodegenError::Unsupported(format!("op2 variant: {op:?}")));
@@ -698,6 +971,24 @@ fn compile_op3(
 // Aggregate construction
 // ======================================================================
 
+/// Resolve an aggregate-slot operand's store value. A REF slot (stage 2b)
+/// stores the ADDRESS: a @guaranteed pointee-typed operand's codegen value
+/// IS that address, and an @owned `MirTy::Ref` operand already carries the
+/// pointer scalar — neither may go through `resolve_scalar` (it would load
+/// a scalar POINTEE through the address).
+fn resolve_slot_value(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    slot_ty: TyId,
+    value_id: ValueId,
+) -> Value {
+    if matches!(fc.ctx.module.ty_arena.get(slot_ty), MirTy::Ref { .. }) {
+        fc.get_value(builder, value_id)
+    } else {
+        fc.resolve_scalar(builder, value_id)
+    }
+}
+
 fn compile_struct(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
@@ -711,12 +1002,34 @@ fn compile_struct(
         TypeRepr::Zst => Ok(builder.ins().iconst(ptr_ty, 0)),
         TypeRepr::Scalar(t) => {
             if fields.len() == 1 {
-                return Ok(fc.resolve_scalar(builder, fields[0].1));
+                let field_ty = struct_field_type(
+                    ty,
+                    fields[0].0,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &fc.ctx.tc,
+                );
+                // This is where F40's wrong value was minted, so this is where the
+                // layout authorities are cross-checked. `resolve_slot_value` on an
+                // AGGREGATE field yields that field's stack-slot ADDRESS — fine as
+                // a value only if the struct is itself carried by address. A
+                // `Scalar` struct repr over an aggregate field therefore returns a
+                // pointer typed as an integer, and every by-repr copy downstream
+                // moves 8 bytes of address instead of contents. `classify_named`
+                // must answer `Aggregate` for a newtype over an aggregate field.
+                debug_assert!(
+                    !fc.ctx
+                        .tc
+                        .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module)
+                        .is_aggregate(),
+                    "scalar-repr struct over an aggregate field: the constructed \
+                     value would be a stack-slot address (F40)"
+                );
+                return Ok(resolve_slot_value(fc, builder, field_ty, fields[0].1));
             }
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
             mem::zero_memory(builder, slot, repr.size());
             for &(field_idx, value_id) in fields {
-                let val = fc.resolve_scalar(builder, value_id);
                 let offset = struct_field_offset(
                     ty,
                     field_idx,
@@ -731,6 +1044,7 @@ fn compile_struct(
                     fc.ctx.module,
                     &fc.ctx.tc,
                 );
+                let val = resolve_slot_value(fc, builder, field_ty, value_id);
                 let field_repr = fc
                     .ctx
                     .tc
@@ -746,7 +1060,6 @@ fn compile_struct(
             let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
             mem::zero_memory(builder, slot, size);
             for &(field_idx, value_id) in fields {
-                let val = fc.resolve_scalar(builder, value_id);
                 let offset = struct_field_offset(
                     ty,
                     field_idx,
@@ -761,6 +1074,7 @@ fn compile_struct(
                     fc.ctx.module,
                     &fc.ctx.tc,
                 );
+                let val = resolve_slot_value(fc, builder, field_ty, value_id);
                 let field_repr = fc
                     .ctx
                     .tc
@@ -780,6 +1094,7 @@ fn compile_struct(
 fn compile_tuple(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
+    result: ValueId,
     elements: &[ValueId],
 ) -> Result<Value, CodegenError> {
     let ptr_ty = fc.ctx.ptr_ty;
@@ -788,13 +1103,24 @@ fn compile_tuple(
         return Ok(builder.ins().iconst(ptr_ty, 0));
     }
 
+    // Layout comes from the RESULT tuple type's declared element types —
+    // never from the operands' value types: a ref-slot operand (stage 2b)
+    // is a @guaranteed POINTEE-typed value whose pointee size would corrupt
+    // the layout (the slot holds a pointer). Same authority TupleExtract
+    // reads, so offsets agree.
+    let result_ty = fc.body.values[result.index()].ty;
+    let elem_tys: Vec<TyId> = match fc.ctx.module.ty_arena.get(result_ty) {
+        MirTy::Tuple(elems) => elems.clone(),
+        // Fallback (hand-built bodies): operand value types.
+        _ => elements
+            .iter()
+            .map(|&e| fc.body.values[e.index()].ty)
+            .collect(),
+    };
     let mut layout = StructLayout::new();
-    let mut elem_tys = Vec::with_capacity(elements.len());
-    for &elem_id in elements {
-        let ty = fc.body.values[elem_id.index()].ty;
+    for &ty in &elem_tys {
         let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
         layout.append_field(StructLayout::scalar(repr.size(), repr.align()));
-        elem_tys.push(ty);
     }
     layout.pad_to_align();
 
@@ -802,7 +1128,7 @@ fn compile_tuple(
     mem::zero_memory(builder, slot, layout.size);
 
     for (i, &elem_id) in elements.iter().enumerate() {
-        let val = fc.resolve_scalar(builder, elem_id);
+        let val = resolve_slot_value(fc, builder, elem_tys[i], elem_id);
         let offset = layout.field_offsets[i];
         let repr = fc
             .ctx
@@ -896,12 +1222,12 @@ fn store_variant_payload(
             && let Some(vl) = el.variant_layouts.get(variant.index())
         {
             for (i, &value_id) in payload.iter().enumerate() {
-                let val = fc.resolve_scalar(builder, value_id);
                 let field_offset = vl.field_offsets.get(i).copied().unwrap_or_else(|| {
                     panic!("ICE: enum variant field offset missing for field {i}")
                 });
                 let total_offset = payload_offset + field_offset;
                 let field_ty = e.cases[variant.index()].payload_fields[i].ty;
+                let val = resolve_slot_value(fc, builder, field_ty, value_id);
                 let field_repr = fc
                     .ctx
                     .tc
@@ -952,8 +1278,11 @@ fn compile_array(
 fn compile_apply_partial(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
+    result: ValueId,
     callee: &Callee,
     captures: &[ValueId],
+    retain: &Option<Callee>,
+    release: &Option<Callee>,
 ) -> Result<Value, CodegenError> {
     let ptr_ty = fc.ctx.ptr_ty;
     let ptr_size = fc.ctx.ptr_size;
@@ -962,17 +1291,34 @@ fn compile_apply_partial(
     // instance, exactly like a Call. Resolving by `MonoFuncId` (not by scanning
     // for the first function whose `source` matches the generic entity) is what
     // keeps each instantiation bound to *its own* thunk.
-    let func_addr = {
-        let Callee::Resolved(mono_id) = callee else {
-            return Err(CodegenError::Unsupported(format!(
-                "ApplyPartial callee not resolved to a mono instance: {callee:?}"
-            )));
+    let func_addr = resolve_func_addr(fc, builder, callee)?;
+
+    // Owning tier (lockstep 9): the closure value is 4 words and its
+    // environment is ALREADY boxed — `captures[0]` IS the handle, packed
+    // verbatim into word 1; no stack environment is allocated. `retain`/
+    // `release` are the type-erased share/release shims in words 2/3.
+    if let (Some(retain), Some(release)) = (retain.as_ref(), release.as_ref()) {
+        let handle = match captures.first() {
+            Some(&h) => fc.resolve_scalar(builder, h),
+            None => builder.ins().iconst(ptr_ty, 0),
         };
-        let func_id = fc.ctx.func_ids[mono_id.index()]
-            .ok_or_else(|| CodegenError::Unsupported("closure target not declared".into()))?;
-        let func_ref = fc.ctx.cl_module.declare_func_in_func(func_id, builder.func);
-        builder.ins().func_addr(ptr_ty, func_ref)
-    };
+        let retain_addr = resolve_func_addr(fc, builder, retain)?;
+        let release_addr = resolve_func_addr(fc, builder, release)?;
+        let thick = mem::alloc_stack_slot(builder, ptr_size * 4, ptr_size, ptr_ty);
+        for (i, w) in [func_addr, handle, retain_addr, release_addr]
+            .into_iter()
+            .enumerate()
+        {
+            builder.ins().store(
+                MemFlags::new(),
+                w,
+                thick,
+                Offset32::new((i as u64 * ptr_size) as i32),
+            );
+        }
+        return Ok(thick);
+    }
+    let _ = result;
 
     let mut env_size = 0u64;
     let mut env_align = 1u64;
@@ -1022,6 +1368,23 @@ fn compile_apply_partial(
     Ok(thick)
 }
 
+/// Address of a mono-resolved callee, for packing into a closure value.
+fn resolve_func_addr(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    callee: &Callee,
+) -> Result<Value, CodegenError> {
+    let Callee::Resolved(mono_id) = callee else {
+        return Err(CodegenError::Unsupported(format!(
+            "ApplyPartial callee not resolved to a mono instance: {callee:?}"
+        )));
+    };
+    let func_id = fc.ctx.func_ids[mono_id.index()]
+        .ok_or_else(|| CodegenError::Unsupported("closure target not declared".into()))?;
+    let func_ref = fc.ctx.cl_module.declare_func_in_func(func_id, builder.func);
+    Ok(builder.ins().func_addr(fc.ctx.ptr_ty, func_ref))
+}
+
 // ======================================================================
 // Aggregate destructuring
 // ======================================================================
@@ -1029,6 +1392,7 @@ fn compile_apply_partial(
 fn compile_struct_extract(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
+    result: ValueId,
     operand: ValueId,
     field: FieldIdx,
 ) -> Result<Value, CodegenError> {
@@ -1053,6 +1417,27 @@ fn compile_struct_extract(
         .tc
         .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
 
+    // Layout-authority cross-check, deliberately ABOVE the @guaranteed early
+    // return so it is reached on BOTH ownership paths. A scalar-repr struct
+    // whose field is carried by address cannot be consistent: the "value" of
+    // such a struct can only be a smuggled pointer, and every by-repr copy
+    // downstream then moves the address instead of the contents. This is F40 —
+    // `classify_named` must classify a newtype over an aggregate field as
+    // `Aggregate`.
+    //
+    // The previous guard lived below as an `if let (Scalar, Scalar)`, which
+    // does not MATCH a mixed pair and so silently fell through on the one input
+    // it named. An assertion must not be spelled as a pattern that the failure
+    // case fails to match.
+    debug_assert!(
+        !matches!(
+            (operand_repr, field_repr),
+            (TypeRepr::Scalar(_), TypeRepr::Aggregate { .. })
+        ),
+        "scalar-repr struct with an aggregate field {field:?} — classify_named must \
+         carry a newtype over an aggregate by address (F40)"
+    );
+
     // @guaranteed operands are always pointers (Option B invariant).
     // Return the field address — CopyValue handles the load.
     if is_borrowed {
@@ -1068,14 +1453,32 @@ fn compile_struct_extract(
         } else {
             base
         };
+        // Stage 2b ref slot extracted as a POINTEE-typed result (mir-lower
+        // extraction): the result is the REF itself — load the stored
+        // address. A REF-typed result (clone/drop shim projections) keeps
+        // the slot's address per the representation contract; loading here
+        // would make its consumers deref one level too many.
+        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
+            && !matches!(
+                fc.ctx
+                    .module
+                    .ty_arena
+                    .get(fc.body.values[result.index()].ty),
+                MirTy::Ref { .. }
+            )
+        {
+            return Ok(builder
+                .ins()
+                .load(fc.ctx.ptr_ty, MemFlags::new(), addr, Offset32::new(0)));
+        }
         return Ok(addr);
     }
 
     // @owned: single-field scalar newtype — value IS the field. A newtype's
     // representation IS its field's (classify_named delegates to it), so the @owned
     // value already carries the field's scalar; no load or bitcast coercion is needed.
-    // The assert pins that single-source-of-truth invariant — if it ever fires, a
-    // layout authority has diverged from classify_named again.
+    // The mixed (Scalar, Aggregate) case is asserted against above; any other
+    // combination falls through to the offset+load below, which is correct for it.
     if let (TypeRepr::Scalar(base_cl), TypeRepr::Scalar(field_cl)) = (operand_repr, field_repr) {
         debug_assert_eq!(
             base_cl, field_cl,
@@ -1108,6 +1511,7 @@ fn compile_struct_extract(
 fn compile_tuple_extract(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
+    result: ValueId,
     operand: ValueId,
     index: u32,
 ) -> Result<Value, CodegenError> {
@@ -1127,6 +1531,25 @@ fn compile_tuple_extract(
             base
         };
         if is_borrowed {
+            // Stage 2b ref slot with a POINTEE-typed result: load the
+            // stored address (see compile_struct_extract; Ref-typed
+            // results keep the slot address).
+            if matches!(arena.get(elem_ty), MirTy::Ref { .. })
+                && !matches!(
+                    fc.ctx
+                        .module
+                        .ty_arena
+                        .get(fc.body.values[result.index()].ty),
+                    MirTy::Ref { .. }
+                )
+            {
+                return Ok(builder.ins().load(
+                    fc.ctx.ptr_ty,
+                    MemFlags::new(),
+                    addr,
+                    Offset32::new(0),
+                ));
+            }
             return Ok(addr);
         }
         let elem_repr = fc.ctx.tc.repr(elem_ty, arena, fc.ctx.module);
@@ -1141,6 +1564,7 @@ fn compile_tuple_extract(
 fn compile_enum_payload(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
+    result: ValueId,
     operand: ValueId,
     variant: VariantIdx,
     field: FieldIdx,
@@ -1162,10 +1586,29 @@ fn compile_enum_payload(
                 let field_offset = vl.field_offsets[field.index()];
                 let total_offset = payload_offset + field_offset;
                 let addr = builder.ins().iadd_imm(base, total_offset as i64);
+                let field_ty = e.cases[variant.index()].payload_fields[field.index()].ty;
                 if is_borrowed {
+                    // Stage 2b ref slot with a POINTEE-typed result: load
+                    // the stored address (see compile_struct_extract;
+                    // Ref-typed results keep the slot address).
+                    if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
+                        && !matches!(
+                            fc.ctx
+                                .module
+                                .ty_arena
+                                .get(fc.body.values[result.index()].ty),
+                            MirTy::Ref { .. }
+                        )
+                    {
+                        return Ok(builder.ins().load(
+                            fc.ctx.ptr_ty,
+                            MemFlags::new(),
+                            addr,
+                            Offset32::new(0),
+                        ));
+                    }
                     return Ok(addr);
                 }
-                let field_ty = e.cases[variant.index()].payload_fields[field.index()].ty;
                 let field_repr = fc
                     .ctx
                     .tc
@@ -1192,7 +1635,7 @@ fn compile_destructure_struct(
     operand: ValueId,
 ) -> Result<(), CodegenError> {
     for (i, &result_id) in results.iter().enumerate() {
-        let val = compile_struct_extract(fc, builder, operand, FieldIdx::new(i))?;
+        let val = compile_struct_extract(fc, builder, result_id, operand, FieldIdx::new(i))?;
         fc.map_value(builder, result_id, val);
     }
     Ok(())
@@ -1205,7 +1648,7 @@ fn compile_destructure_tuple(
     operand: ValueId,
 ) -> Result<(), CodegenError> {
     for (i, &result_id) in results.iter().enumerate() {
-        let val = compile_tuple_extract(fc, builder, operand, i as u32)?;
+        let val = compile_tuple_extract(fc, builder, result_id, operand, i as u32)?;
         fc.map_value(builder, result_id, val);
     }
     Ok(())
@@ -1219,7 +1662,7 @@ fn compile_destructure_enum(
     variant: VariantIdx,
 ) -> Result<(), CodegenError> {
     for (i, &result_id) in results.iter().enumerate() {
-        let val = compile_enum_payload(fc, builder, operand, variant, FieldIdx::new(i))?;
+        let val = compile_enum_payload(fc, builder, result_id, operand, variant, FieldIdx::new(i))?;
         fc.map_value(builder, result_id, val);
     }
     Ok(())
@@ -1290,8 +1733,7 @@ fn compile_resolved_call(
         .ctx
         .tc
         .repr(target_func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
-    let is_main = fc.ctx.is_main_function(target_func);
-    let ret_mode = abi::return_mode(ret_repr, is_main);
+    let ret_mode = abi::return_mode(ret_repr);
 
     let mut call_args: Vec<Value> = Vec::new();
 
@@ -1317,21 +1759,44 @@ fn compile_resolved_call(
         let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
             == kestrel_mir::value::Ownership::Guaranteed;
 
+        // Stage 2b: a ref-typed PARAM takes the ADDRESS as its value. A
+        // @guaranteed pointee-typed arg's codegen value IS that address —
+        // the guaranteed-scalar load below would deref one level too many.
+        let param_is_ref = matches!(
+            fc.ctx.module.ty_arena.get(param.ty),
+            kestrel_mir::MirTy::Ref { .. }
+        );
+        // A REF-TYPED @guaranteed arg is the other representation (2b
+        // contract): its codegen value is the address OF the ref slot, not
+        // the ref scalar — generic bodies produce these at T=&U. The two
+        // forms need opposite treatment in the ref-param carves below.
+        let arg_is_ref_typed = matches!(
+            fc.ctx
+                .module
+                .ty_arena
+                .get(fc.body.values[call_arg.value.index()].ty),
+            kestrel_mir::MirTy::Ref { .. }
+        );
+
         match pass {
             PassMode::ByVal(expected_ty) => {
                 // @guaranteed scalars are pointers; load the value for by-val passing.
                 let val = if arg_is_guaranteed {
-                    let arg_ty = fc.body.values[call_arg.value.index()].ty;
-                    let arg_repr = fc
-                        .ctx
-                        .tc
-                        .repr(arg_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-                    if let TypeRepr::Scalar(t) = arg_repr {
-                        builder
-                            .ins()
-                            .load(t, MemFlags::new(), val, Offset32::new(0))
-                    } else {
+                    if param_is_ref && !arg_is_ref_typed {
                         val
+                    } else {
+                        let arg_ty = fc.body.values[call_arg.value.index()].ty;
+                        let arg_repr =
+                            fc.ctx
+                                .tc
+                                .repr(arg_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                        if let TypeRepr::Scalar(t) = arg_repr {
+                            builder
+                                .ins()
+                                .load(t, MemFlags::new(), val, Offset32::new(0))
+                        } else {
+                            val
+                        }
                     }
                 } else {
                     let actual_ty = builder.func.dfg.value_type(val);
@@ -1346,7 +1811,15 @@ fn compile_resolved_call(
                 call_args.push(val);
             },
             PassMode::ByRef => {
-                if matches!(
+                if arg_is_guaranteed && param_is_ref && !arg_is_ref_typed {
+                    // The (pointee-typed) ref VALUE is the address itself;
+                    // ByRef wants the address OF the ref value — spill it.
+                    // A REF-TYPED @guaranteed arg is already that address
+                    // and falls through to the pass-directly branches.
+                    let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
+                    mem::store_to_repr(builder, repr, slot, val);
+                    call_args.push(slot);
+                } else if matches!(
                     call_arg.convention,
                     ParamConvention::Borrow | ParamConvention::MutBorrow
                 ) {
@@ -1427,7 +1900,7 @@ fn compile_thin_call(
     };
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, arena, fc.ctx.module);
-    let ret_mode = abi::return_mode(ret_repr, false);
+    let ret_mode = abi::return_mode(ret_repr);
 
     let call_conv = fc.ctx.isa.default_call_conv();
     let mut sig = ir::Signature::new(call_conv);
@@ -1545,7 +2018,7 @@ fn compile_thick_call(
         _ => func_ty,
     };
 
-    let (param_tys, ret_ty) = if let MirTy::FuncThick { params, ret } = arena.get(inner_ty) {
+    let (param_tys, ret_ty) = if let MirTy::FuncThick { params, ret, .. } = arena.get(inner_ty) {
         (params.clone(), *ret)
     } else {
         return Err(CodegenError::Unsupported(format!(
@@ -1555,7 +2028,7 @@ fn compile_thick_call(
     };
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, arena, fc.ctx.module);
-    let ret_mode = abi::return_mode(ret_repr, false);
+    let ret_mode = abi::return_mode(ret_repr);
 
     let call_conv = fc.ctx.isa.default_call_conv();
     let mut sig = ir::Signature::new(call_conv);
@@ -1659,7 +2132,16 @@ fn compile_thick_call(
 // Layout helpers
 // ======================================================================
 
-fn discriminant_width(ty: TyId, arena: &TyArena, module: &MonoModule, tc: &TypeCache) -> ir::Type {
+/// Width of a `Discriminant` read: an enum's tag width, else the result
+/// type's (an integer switch reads its value at its own width; see
+/// `emit_int_discriminant`), else the 32-bit tag default.
+fn discriminant_width(
+    ty: TyId,
+    result_ty: TyId,
+    arena: &TyArena,
+    module: &MonoModule,
+    tc: &TypeCache,
+) -> ir::Type {
     if let MirTy::Named { entity, type_args } = arena.get(ty) {
         let entity = *entity;
         let type_args = type_args.clone();
@@ -1667,7 +2149,12 @@ fn discriminant_width(ty: TyId, arena: &TyArena, module: &MonoModule, tc: &TypeC
             return int_bits_to_cl(e.discriminant_width);
         }
     }
-    ir::types::I32
+    match arena.get(result_ty) {
+        MirTy::I8 => ir::types::I8,
+        MirTy::I16 => ir::types::I16,
+        MirTy::I64 => ir::types::I64,
+        _ => ir::types::I32,
+    }
 }
 
 fn struct_field_offset(

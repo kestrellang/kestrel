@@ -5,13 +5,21 @@ use smallvec::SmallVec;
 use crate::callee::Callee;
 use crate::immediate::Immediate;
 use crate::op::Op;
-use crate::ty::ParamConvention;
+use crate::ty::{FnKind, ParamConvention};
 use crate::{FieldIdx, TyId, ValueId, VariantIdx};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallArg {
     pub value: ValueId,
     pub convention: ParamConvention,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CalleeSite {
+    Call,
+    ApplyPartialTarget,
+    ApplyPartialRetain,
+    ApplyPartialRelease,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -47,6 +55,15 @@ pub enum InstKind {
     DestroyValue {
         operand: ValueId,
     },
+    /// Rebuild a thick function value at another accepted closure kind.
+    /// `Escaping -> Consuming` transfers ownership; the view-tier conversions
+    /// only read the operand, which remains the adapted value's backing owner.
+    CoerceFnKind {
+        result: ValueId,
+        operand: ValueId,
+        from: FnKind,
+        to: FnKind,
+    },
 
     // -- Borrowing --
     BeginBorrow {
@@ -78,6 +95,13 @@ pub enum InstKind {
         result: ValueId,
         address: ValueId,
         ty: TyId,
+        /// Whether the moved-out value needs *independent* storage. `true`
+        /// (the safe default) makes codegen memcpy an aggregate into a fresh
+        /// slot; `false` lets it alias the source slot (zero-copy). Only the
+        /// `mark_independent_takes` pass flips this to `false`, and only when
+        /// the source slot is provably not re-initialized while the result is
+        /// live (see passes/copy_propagation.rs). Scalars never alias.
+        independent: bool,
     },
     BeginBorrowAddr {
         result: ValueId,
@@ -100,6 +124,10 @@ pub enum InstKind {
     DestroyAddr {
         address: ValueId,
         ty: TyId,
+        /// A source-level `deinit x;` (vs. compiler cleanup at scope exit).
+        /// Only these are checked against live refs (E498): a scope-exit
+        /// destroy under a live ref is the escape E494 already reports.
+        user_deinit: bool,
     },
 
     // -- Enum discriminant --
@@ -206,7 +234,21 @@ pub enum InstKind {
         /// instantiation to the first thunk — see the mono `rewrite_callees`
         /// and `compile_apply_partial` handling.
         callee: Callee,
+        /// View tier / bare: the values packed into a freshly allocated stack
+        /// environment (codegen owns the packing).
+        ///
+        /// Owning tier (`FnKind::Escaping`): exactly ONE pointer-sized value —
+        /// the already-boxed environment handle — which becomes word 1
+        /// verbatim; codegen allocates no environment. `retain`/`release` are
+        /// then `Some` and pack into words 2/3.
         captures: Vec<ValueId>,
+        /// Owning tier only: the per-environment type-erased retain shim
+        /// (`(handle) -> ()`, "share this environment"). Packed as word 2 so a
+        /// `CopyValue` on a type-erased `escaping (…) -> …` value can retain
+        /// without knowing the environment type. A new mono root.
+        retain: Option<Callee>,
+        /// Owning tier only: the matching release shim, packed as word 3.
+        release: Option<Callee>,
     },
 
     // -- Address projection --
@@ -225,11 +267,60 @@ pub enum InstKind {
 }
 
 impl InstKind {
+    /// Returns every callable referenced by this instruction.
+    pub fn callees(&self) -> SmallVec<[(CalleeSite, &Callee); 3]> {
+        let mut callees = SmallVec::new();
+        match self {
+            InstKind::Call { callee, .. } => callees.push((CalleeSite::Call, callee)),
+            InstKind::ApplyPartial {
+                callee,
+                retain,
+                release,
+                ..
+            } => {
+                callees.push((CalleeSite::ApplyPartialTarget, callee));
+                if let Some(retain) = retain {
+                    callees.push((CalleeSite::ApplyPartialRetain, retain));
+                }
+                if let Some(release) = release {
+                    callees.push((CalleeSite::ApplyPartialRelease, release));
+                }
+            },
+            _ => {},
+        }
+        callees
+    }
+
+    /// Returns every callable referenced by this instruction for mutation.
+    pub fn callees_mut(&mut self) -> SmallVec<[(CalleeSite, &mut Callee); 3]> {
+        let mut callees = SmallVec::new();
+        match self {
+            InstKind::Call { callee, .. } => callees.push((CalleeSite::Call, callee)),
+            InstKind::ApplyPartial {
+                callee,
+                retain,
+                release,
+                ..
+            } => {
+                callees.push((CalleeSite::ApplyPartialTarget, callee));
+                if let Some(retain) = retain {
+                    callees.push((CalleeSite::ApplyPartialRetain, retain));
+                }
+                if let Some(release) = release {
+                    callees.push((CalleeSite::ApplyPartialRelease, release));
+                }
+            },
+            _ => {},
+        }
+        callees
+    }
+
     /// Returns the single result ValueId, if this instruction produces exactly one.
     pub fn result(&self) -> Option<ValueId> {
         match self {
             InstKind::CopyValue { result, .. }
             | InstKind::MoveValue { result, .. }
+            | InstKind::CoerceFnKind { result, .. }
             | InstKind::BeginBorrow { result, .. }
             | InstKind::BeginMutBorrow { result, .. }
             | InstKind::Load { result, .. }
@@ -287,6 +378,7 @@ impl InstKind {
         match self {
             InstKind::CopyValue { operand, .. }
             | InstKind::MoveValue { operand, .. }
+            | InstKind::CoerceFnKind { operand, .. }
             | InstKind::DestroyValue { operand }
             | InstKind::BeginBorrow { operand, .. }
             | InstKind::EndBorrow { operand }
@@ -317,7 +409,13 @@ impl InstKind {
                 elements.iter().copied().collect()
             },
             InstKind::Enum { payload, .. } => payload.iter().copied().collect(),
-            InstKind::Call { args, .. } => args.iter().map(|a| a.value).collect(),
+            // The callee is read too when it is a value (`call @thick %f`):
+            // a pass that misses it can delete the closure the call invokes.
+            InstKind::Call { callee, args, .. } => callee
+                .value()
+                .into_iter()
+                .chain(args.iter().map(|a| a.value))
+                .collect(),
             InstKind::ApplyPartial { captures, .. } => captures.iter().copied().collect(),
             InstKind::FieldAddr { base, .. } => SmallVec::from_elem(*base, 1),
             InstKind::Uninit { .. } => SmallVec::new(),

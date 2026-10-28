@@ -41,14 +41,14 @@ import quill.error.(DeserializeError, DeserializeErrorKind)
 ///
 /// // Custom type:
 /// // extend MyStruct: Deserialize {
-/// //     public static func fromValue(value: Value) -> Result[MyStruct, DeserializeError] {
+/// //     public static func fromValue(value: Value) -> MyStruct throws DeserializeError {
 /// //         let name = try extractString(from: value, key: "name");
 /// //         .Ok(MyStruct(name))
 /// //     }
 /// // }
 /// ```
 public protocol Deserialize {
-    static func fromValue(value: Value) -> Result[Self, DeserializeError]
+    static func fromValue(value: Value) -> Self throws DeserializeError
 }
 
 // ============================================================================
@@ -57,41 +57,41 @@ public protocol Deserialize {
 
 /// Deserializes from `.Boolean`; rejects all other variants.
 extend Bool: Deserialize {
-    public static func fromValue(value: Value) -> Result[Bool, DeserializeError] {
+    public static func fromValue(value: Value) -> Bool throws DeserializeError {
         match value {
             .Boolean(b) => .Ok(b),
-            _ => .Err(DeserializeError.typeMismatch(expected: "bool", got: value.typeName()))
+            _ => throw DeserializeError.typeMismatch(expected: "bool", got: value.typeName())
         }
     }
 }
 
 /// Deserializes from `.Int`; rejects all other variants.
 extend Int64: Deserialize {
-    public static func fromValue(value: Value) -> Result[Int64, DeserializeError] {
+    public static func fromValue(value: Value) -> Int64 throws DeserializeError {
         match value {
             .Int(n) => .Ok(n),
-            _ => .Err(DeserializeError.typeMismatch(expected: "int", got: value.typeName()))
+            _ => throw DeserializeError.typeMismatch(expected: "int", got: value.typeName())
         }
     }
 }
 
 /// Deserializes from `.Float`, or widens `.Int` to `Float64`.
 extend Float64: Deserialize {
-    public static func fromValue(value: Value) -> Result[Float64, DeserializeError] {
+    public static func fromValue(value: Value) -> Float64 throws DeserializeError {
         match value {
             .Float(f) => .Ok(f),
             .Int(n) => .Ok(Float64(from: n)),
-            _ => .Err(DeserializeError.typeMismatch(expected: "float", got: value.typeName()))
+            _ => throw DeserializeError.typeMismatch(expected: "float", got: value.typeName())
         }
     }
 }
 
 /// Deserializes from `.Str`; rejects all other variants.
 extend String: Deserialize {
-    public static func fromValue(value: Value) -> Result[String, DeserializeError] {
+    public static func fromValue(value: Value) -> String throws DeserializeError {
         match value {
             .Str(s) => .Ok(s),
-            _ => .Err(DeserializeError.typeMismatch(expected: "string", got: value.typeName()))
+            _ => throw DeserializeError.typeMismatch(expected: "string", got: value.typeName())
         }
     }
 }
@@ -99,7 +99,7 @@ extend String: Deserialize {
 /// Deserializes `.Null` as `.None`; all other variants are forwarded
 /// to the inner type's `fromValue` and wrapped in `.Some`.
 extend Optional[T]: Deserialize where T: Deserialize {
-    public static func fromValue(value: Value) -> Result[Optional[T], DeserializeError] {
+    public static func fromValue(value: Value) -> Optional[T] throws DeserializeError {
         match value {
             .Null => .Ok(.None),
             _ => {
@@ -112,26 +112,23 @@ extend Optional[T]: Deserialize where T: Deserialize {
 
 /// Deserializes from `.Arr`, decoding each element via `T.fromValue`.
 extend Array[T]: Deserialize where T: Deserialize {
-    public static func fromValue(value: Value) -> Result[Array[T], DeserializeError] {
+    public static func fromValue(value: Value) -> Array[T] throws DeserializeError {
         match value {
             .Arr(arr) => {
                 var result = Array[T]();
-                var i: Int64 = 0;
-                while i < arr.count {
-                    let item = try T.fromValue(arr(unchecked: i));
-                    result.append(item);
-                    i = i + 1
+                for element in arr {
+                    result.append(try T.fromValue(element))
                 }
                 .Ok(result)
             },
-            _ => .Err(DeserializeError.typeMismatch(expected: "array", got: value.typeName()))
+            _ => throw DeserializeError.typeMismatch(expected: "array", got: value.typeName())
         }
     }
 }
 
 /// Identity — a `Value` always deserializes to itself.
 extend Value: Deserialize {
-    public static func fromValue(value: Value) -> Result[Value, DeserializeError] {
+    public static func fromValue(value: Value) -> Value throws DeserializeError {
         .Ok(value)
     }
 }
@@ -151,15 +148,15 @@ extend Value: Deserialize {
 /// let obj = Value.Obj(["name": Value.Str("Alice")]);
 /// let v = try findKey(from: obj, key: "name");  // Ok(.Str("Alice"))
 /// ```
-public func findKey(from value: Value, key: String) -> Result[Value, DeserializeError] {
+public func findKey(from value: Value, key: String) -> Value throws DeserializeError {
     match value {
         .Obj(obj) => {
-            match obj(key) {
-                .Some(v) => .Ok(v),
-                .None => .Err(DeserializeError.missingKey(key))
+            guard let some found = obj(key) else {
+                throw DeserializeError.missingKey(key)
             }
+            .Ok(found)
         },
-        _ => .Err(DeserializeError.typeMismatch(expected: "object", got: value.typeName()))
+        _ => throw DeserializeError.typeMismatch(expected: "object", got: value.typeName())
     }
 }
 
@@ -175,10 +172,10 @@ public func findKey(from value: Value, key: String) -> Result[Value, Deserialize
 /// let v = try findKeyOpt(from: obj, key: "a");  // Ok(Some(.Int(1)))
 /// let m = try findKeyOpt(from: obj, key: "b");  // Ok(None)
 /// ```
-public func findKeyOpt(from value: Value, key: String) -> Result[Optional[Value], DeserializeError] {
+public func findKeyOpt(from value: Value, key: String) -> Value? throws DeserializeError {
     match value {
         .Obj(obj) => .Ok(obj(key)),
-        _ => .Err(DeserializeError.typeMismatch(expected: "object", got: value.typeName()))
+        _ => throw DeserializeError.typeMismatch(expected: "object", got: value.typeName())
     }
 }
 
@@ -192,11 +189,11 @@ public func findKeyOpt(from value: Value, key: String) -> Result[Optional[Value]
 /// let obj = Value.Obj(["name": Value.Str("Alice")]);
 /// let s = try extractString(from: obj, key: "name");  // Ok("Alice")
 /// ```
-public func extractString(from value: Value, key: String) -> Result[String, DeserializeError] {
+public func extractString(from value: Value, key: String) -> String throws DeserializeError {
     let v = try findKey(from: value, key);
     match v {
         .Str(s) => .Ok(s),
-        _ => .Err(DeserializeError.typeMismatch(expected: "string", got: v.typeName()))
+        _ => throw DeserializeError.typeMismatch(expected: "string", got: v.typeName())
     }
 }
 
@@ -210,11 +207,11 @@ public func extractString(from value: Value, key: String) -> Result[String, Dese
 /// let obj = Value.Obj(["age": Value.Int(30)]);
 /// let n = try extractInt(from: obj, key: "age");  // Ok(30)
 /// ```
-public func extractInt(from value: Value, key: String) -> Result[Int64, DeserializeError] {
+public func extractInt(from value: Value, key: String) -> Int64 throws DeserializeError {
     let v = try findKey(from: value, key);
     match v {
         .Int(n) => .Ok(n),
-        _ => .Err(DeserializeError.typeMismatch(expected: "int", got: v.typeName()))
+        _ => throw DeserializeError.typeMismatch(expected: "int", got: v.typeName())
     }
 }
 
@@ -229,12 +226,12 @@ public func extractInt(from value: Value, key: String) -> Result[Int64, Deserial
 /// let obj = Value.Obj(["pi": Value.Float(3.14)]);
 /// let f = try extractFloat(from: obj, key: "pi");  // Ok(3.14)
 /// ```
-public func extractFloat(from value: Value, key: String) -> Result[Float64, DeserializeError] {
+public func extractFloat(from value: Value, key: String) -> Float64 throws DeserializeError {
     let v = try findKey(from: value, key);
     match v {
         .Float(f) => .Ok(f),
         .Int(n) => .Ok(Float64(from: n)),
-        _ => .Err(DeserializeError.typeMismatch(expected: "float", got: v.typeName()))
+        _ => throw DeserializeError.typeMismatch(expected: "float", got: v.typeName())
     }
 }
 
@@ -248,10 +245,10 @@ public func extractFloat(from value: Value, key: String) -> Result[Float64, Dese
 /// let obj = Value.Obj(["active": Value.Boolean(true)]);
 /// let b = try extractBool(from: obj, key: "active");  // Ok(true)
 /// ```
-public func extractBool(from value: Value, key: String) -> Result[Bool, DeserializeError] {
+public func extractBool(from value: Value, key: String) -> Bool throws DeserializeError {
     let v = try findKey(from: value, key);
     match v {
         .Boolean(b) => .Ok(b),
-        _ => .Err(DeserializeError.typeMismatch(expected: "bool", got: v.typeName()))
+        _ => throw DeserializeError.typeMismatch(expected: "bool", got: v.typeName())
     }
 }

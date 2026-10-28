@@ -21,7 +21,7 @@ fn build_from_source(source: &str) -> (World, Entity) {
 
     let root = world.spawn();
     world.set(root, NodeKind::Module);
-    world.set(root, Name("<root>".to_string()));
+    world.set(root, Name(Name::ROOT.to_string()));
 
     let file_entity = world.spawn();
     let tokens: Vec<_> = kestrel_lexer::lex(source, file_entity.index())
@@ -29,7 +29,7 @@ fn build_from_source(source: &str) -> (World, Entity) {
         .collect();
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
     let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
-    build_declarations(&mut world, file_entity, &result.tree, root, None);
+    build_declarations(&mut world, file_entity, &result.tree(), root, None);
 
     (world, root)
 }
@@ -61,13 +61,13 @@ fn find_function(
     find_child(ctx, module, NodeKind::Function, func_name)
 }
 
-/// Lower a function's body and return the HirBody.
+/// Lower a function's body and return the HirBody (Arc-shared query output).
 fn lower_func(
     ctx: &kestrel_hecs::QueryContext<'_>,
     root: Entity,
     module_name: &str,
     func_name: &str,
-) -> HirBody {
+) -> std::sync::Arc<HirBody> {
     let func = find_function(ctx, root, module_name, func_name);
     ctx.query(LowerBody { entity: func, root })
         .unwrap_or_else(|| panic!("LowerBody returned None for {}.{}", module_name, func_name))
@@ -302,7 +302,7 @@ fn lower_return_statement() {
 // Note: match/if/loop with nested braces require multi-line source
 // which the parser doesn't support in single-line format.
 // These control flow structures are tested in the unit tests
-// (lib.rs) using manually constructed AstBody instances.
+// (lib.rs), which lower real source.
 
 // ===== Tests: Assignment =====
 
@@ -452,4 +452,65 @@ fn lower_multiple_statements() {
 // Loop/break lowering is tested in unit tests.
 
 // Scoped locals test: requires nested braces (if { let x... }),
-// tested in unit tests with manually constructed AstBody.
+// tested in the unit tests (lib.rs).
+
+// ===== Tests: condition-chain fail continuation (fragility audit F31) =====
+
+/// How many times the literal `marker` appears in the lowered body.
+///
+/// The fail continuation of an `if let` chain is lowered from the *else* body,
+/// so a marker literal that appears once in the source and N times here is a
+/// direct count of how many times that else body was lowered.
+fn count_int_literal(hir: &HirBody, marker: i128) -> usize {
+    hir.exprs
+        .iter()
+        .filter(|(_, e)| {
+            matches!(
+                e,
+                HirExpr::Literal {
+                    value: HirLiteral::Integer(v),
+                    ..
+                } if *v == marker
+            )
+        })
+        .count()
+}
+
+/// `lower_condition_chain` recurses once per condition. It used to call
+/// `on_fail` at *every* level, so the else body was lowered once per condition
+/// — duplicating every diagnostic it produces, with nothing downstream to
+/// dedup them (fragility audit F31).
+#[test]
+fn a_conditions_else_body_is_lowered_once_per_chain() {
+    let source = "module TestMod\nfunc foo(x: T, y: T) { if let .Some(a) = x, let .Some(b) = y { 1 } else { 999 } }";
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let hir = lower_func(&ctx, root, "TestMod", "foo");
+
+    assert_eq!(
+        count_int_literal(&hir, 999),
+        1,
+        "the else body was lowered once per condition instead of once"
+    );
+}
+
+/// The compounding case: an `else if let` is itself lowered through
+/// `lower_condition_chain`, so a per-level `on_fail` made the cost 2^depth —
+/// the innermost else of a 2-deep chain of 2 conditions was lowered 4 times,
+/// multiplying the findings of every HIR-walking analyzer with it.
+#[test]
+fn an_else_if_let_chain_does_not_lower_its_tail_exponentially() {
+    let source = "module TestMod\nfunc foo(x: T, y: T, z: T, w: T) { if let .Some(a) = x, let .Some(b) = y { 1 } else if let .Some(c) = z, let .Some(d) = w { 2 } else { 999 } }";
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let hir = lower_func(&ctx, root, "TestMod", "foo");
+
+    assert_eq!(
+        count_int_literal(&hir, 999),
+        1,
+        "the innermost else was lowered 2^depth times"
+    );
+    // The middle arm belongs to the inner chain's success continuation, which
+    // is materialized once at the innermost level — it must not multiply either.
+    assert_eq!(count_int_literal(&hir, 2), 1);
+}

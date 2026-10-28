@@ -9,8 +9,8 @@ public var globalVar: std.numeric.Int64 = 0;
 
 @main
 func main() -> lang.i64 {
-    let _ = println(globalVar);
+     println(globalVar);
     globalVar = 5;
-    let _ = println(globalVar);
+     println(globalVar);
     0
 }

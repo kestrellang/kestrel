@@ -58,7 +58,13 @@ pub enum TyKind {
 
     /// Function type: (params) → return. `conventions` is parallel to `params`
     /// (a `mutating` closure/function param is `MutBorrow`, else `Consuming`).
+    /// `kind` is the whole-type closure tier (`escaping (T) -> R`) and is
+    /// orthogonal to the per-param `conventions`; `unify` requires it to be
+    /// EQUAL (the directional passing table lives in `solve_coerce`), except
+    /// for bare function values registered in `InferCtx::kind_flex`, which
+    /// adopt the other side's kind.
     Function {
+        kind: kestrel_ast::FnTypeKind,
         params: Vec<TyVar>,
         conventions: Vec<kestrel_ast::ParamConvention>,
         ret: TyVar,
@@ -80,12 +86,22 @@ pub enum TyKind {
     /// Opaque return type: `some P`. Callers see only the protocol bounds;
     /// the concrete type is hidden. Created at call sites for functions with
     /// opaque return types. Never created inside the defining body.
+    /// `not_copyable` mirrors an `and not Copyable` negative bound on the
+    /// origin's annotation: the value must be treated as move-only.
     Opaque {
         origin: Entity,
         bounds: Vec<(Entity, Vec<TyVar>)>,
         origin_args: Vec<TyVar>,
         index: u32,
+        not_copyable: bool,
     },
+
+    /// Second-class reference `&T` / `&mutating T` (stage 1). Legal ONLY as
+    /// a return type and, transiently, as a call result's expression type —
+    /// member dispatch peels it (transparent place), value contexts decay to
+    /// the pointee, and `validate_ref_placement` rejects everything else
+    /// (nested in args E492, function types E491).
+    Ref { pointee: TyVar, mutating: bool },
 
     /// Error poison — only created after a diagnostic is emitted.
     /// Unifies with anything silently, preventing cascading errors.

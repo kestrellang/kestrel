@@ -79,9 +79,10 @@ fn collect_main_lenses(
         // the lens to the start of the range's line.
         let range = world
             .get::<CstNode>(entity)
+            .and(kestrel_ast_builder::syntax::cst_node(world, entity))
             .and_then(|cst| {
                 let file_id = world.get::<DeclSpan>(entity).map(|d| d.0.file_id)?;
-                get_name_span(&cst.0, file_id)
+                get_name_span(&cst, file_id)
             })
             .map(|s| li.range_for(s.start, s.end))
             .unwrap_or_else(|| {

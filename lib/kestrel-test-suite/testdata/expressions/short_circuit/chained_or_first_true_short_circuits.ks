@@ -4,17 +4,17 @@ module Main
 import std.io.stdio.println
 
 func effectB() -> Bool {
-    let _ = println("B");
+     println("B");
     false
 }
 
 func effectC() -> Bool {
-    let _ = println("C");
+     println("C");
     false
 }
 
 func main() -> lang.i64 {
     let result = true or effectB() or effectC();
-    let _ = println(result);
+     println(result);
     0
 }

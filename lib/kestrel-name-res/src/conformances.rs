@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{ConformanceItem, Conformances, NodeKind};
+use kestrel_ast_builder::{ConformanceItem, Conformances, ExtensionTarget, NodeKind};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::extensions::ExtensionsFor;
@@ -95,7 +95,12 @@ impl QueryFn for ConformingProtocolInstantiations {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Self::Output {
         let mut instantiations: Vec<(Entity, Entity, Vec<AstType>)> = Vec::new();
-        let mut visited: HashSet<(Entity, Vec<AstType>)> = HashSet::new();
+        // Key includes the source's implementing-type args (third element) so
+        // OVERLAPPING conformances with the same protocol + protocol-args but
+        // different implementing types — `extend Box[T]: P` vs
+        // `extend Box[lang.i64]: P` — are kept as distinct sources rather than
+        // collapsed (which would hide the specialization from witness lowering).
+        let mut visited: HashSet<(Entity, Vec<AstType>, Vec<AstType>)> = HashSet::new();
 
         // Direct conformances on the type itself
         gather_protocol_instantiations(
@@ -165,11 +170,23 @@ fn gather_protocol_instantiations(
     entity: Entity,
     root: Entity,
     instantiations: &mut Vec<(Entity, Entity, Vec<AstType>)>,
-    visited: &mut HashSet<(Entity, Vec<AstType>)>,
+    visited: &mut HashSet<(Entity, Vec<AstType>, Vec<AstType>)>,
 ) {
     let Some(conformances) = ctx.get::<Conformances>(entity) else {
         return;
     };
+
+    // The implementing-type args of this source: the concrete `[lang.i64]` of
+    // `extend Box[lang.i64]` vs the `[T]` of `extend Box[T]`. Empty for direct
+    // (non-extension) conformances. Disambiguates overlapping specializations.
+    let source_target_args: Vec<AstType> =
+        if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Extension) {
+            ctx.get::<ExtensionTarget>(entity)
+                .map(|t| extract_ast_type_args(&t.0))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
     for item in &conformances.0 {
         let ConformanceItem::Positive(ast_ty, _) = item else {
@@ -185,7 +202,7 @@ fn gather_protocol_instantiations(
         }
 
         let type_args = extract_ast_type_args(ast_ty);
-        let key = (resolved, type_args.clone());
+        let key = (resolved, type_args.clone(), source_target_args.clone());
         if !visited.insert(key) {
             continue;
         }
@@ -217,11 +234,11 @@ pub fn extract_ast_type_args(ast_ty: &AstType) -> Vec<AstType> {
 /// `Conformances` component) use this to complete the transitive closure.
 /// Used internally by `ConformingProtocols`; exposed for use by
 /// `kestrel-type-infer` on type-parameter / associated-type bounds.
-pub fn expand_protocol_closure_in_place(
+pub fn expand_protocol_closure_in_place<S: std::hash::BuildHasher>(
     ctx: &QueryContext<'_>,
     root: Entity,
     protocols: &mut Vec<Entity>,
-    visited: &mut HashSet<Entity>,
+    visited: &mut HashSet<Entity, S>,
 ) {
     let mut i = 0;
     while i < protocols.len() {
@@ -264,30 +281,14 @@ pub fn expand_protocol_closure(
 
 /// Gather protocols from an entity's `Conformances` component, recursively
 /// walking inherited protocols (protocol parents).
-fn gather_protocol_conformances(
+fn gather_protocol_conformances<S: std::hash::BuildHasher>(
     ctx: &QueryContext<'_>,
     entity: Entity,
     root: Entity,
     protocols: &mut Vec<Entity>,
-    visited: &mut HashSet<Entity>,
+    visited: &mut HashSet<Entity, S>,
 ) {
-    let Some(conformances) = ctx.get::<Conformances>(entity) else {
-        return;
-    };
-
-    for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
-            continue;
-        };
-        let Some(resolved) = resolve_conformance_entity(ctx, ast_ty, entity, root) else {
-            continue;
-        };
-
-        // Only collect protocol entities
-        if ctx.get::<NodeKind>(resolved) != Some(&NodeKind::Protocol) {
-            continue;
-        }
-
+    for resolved in declared_conformance_protocols(ctx, entity, root) {
         if !visited.insert(resolved) {
             continue;
         }
@@ -297,6 +298,47 @@ fn gather_protocol_conformances(
         // Walk inherited protocols transitively
         gather_protocol_conformances(ctx, resolved, root, protocols, visited);
     }
+}
+
+/// The protocols named by `entity`'s own `Conformances` component, in
+/// declaration order, not expanded. The single edge every protocol-graph walk
+/// in this file is built from.
+fn declared_conformance_protocols(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    root: Entity,
+) -> Vec<Entity> {
+    let Some(conformances) = ctx.get::<Conformances>(entity) else {
+        return Vec::new();
+    };
+    conformances
+        .0
+        .iter()
+        .filter_map(|item| {
+            let ConformanceItem::Positive(ast_ty, _) = item else {
+                return None;
+            };
+            resolve_conformance_entity(ctx, ast_ty, entity, root)
+        })
+        // Only collect protocol entities
+        .filter(|&resolved| ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol))
+        .collect()
+}
+
+/// One level out from `protocol`: the protocols it refines (its own
+/// `Conformances`) and those added by `extend protocol: Q`, in the same order
+/// `expand_protocol_closure_in_place` visits them. Not transitive — a caller
+/// that needs distance from a seed (nearest declaration wins) steps with this;
+/// one that needs the whole closure uses `expand_protocol_closure`.
+pub fn protocol_parents(ctx: &QueryContext<'_>, protocol: Entity, root: Entity) -> Vec<Entity> {
+    let mut parents = declared_conformance_protocols(ctx, protocol, root);
+    for ext in &ctx.query(ExtensionsFor {
+        target: protocol,
+        root,
+    }) {
+        parents.extend(declared_conformance_protocols(ctx, *ext, root));
+    }
+    parents
 }
 
 /// Find the init on `target` that witnesses `protocol`, restricted to those
@@ -418,11 +460,11 @@ mod tests {
 
     /// Build a throwaway SyntaxNode — `ConformanceItem::Positive` stores one
     /// but the conformance walk never reads it.
-    fn fake_syntax() -> SyntaxNode {
+    fn fake_syntax() -> kestrel_syntax_tree::SyntaxNodePtr {
         let mut builder = GreenNodeBuilder::new();
         builder.start_node(SyntaxKind::Root.into());
         builder.finish_node();
-        SyntaxNode::new_root(builder.finish())
+        kestrel_syntax_tree::SyntaxNodePtr::new(&SyntaxNode::new_root(builder.finish()))
     }
 
     fn named_ast(name: &str) -> AstType {
@@ -479,7 +521,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let bare_struct = spawn_struct(&mut world, root, "Bare");
 
@@ -500,7 +542,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let equatable = spawn_protocol(&mut world, root, "Equatable");
         let not_equal = spawn_protocol(&mut world, root, "NotEqual");
@@ -527,7 +569,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let eq = spawn_protocol(&mut world, root, "Eq");
         let ord = spawn_protocol(&mut world, root, "Ord");
@@ -561,7 +603,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let equatable = spawn_protocol(&mut world, root, "Equatable");
         let not_equal = spawn_protocol(&mut world, root, "NotEqual");

@@ -87,8 +87,10 @@ fn top_level_module(ctx: &QueryContext<'_>, module: Entity) -> Entity {
         let Some(parent) = ctx.parent_of(current) else {
             return current;
         };
-        // If parent is root (has name "<root>"), current is top-level
-        if ctx.get::<Name>(parent).is_some_and(|n| n.0 == "<root>") {
+        // If parent is root, current is top-level. This check fails OPEN —
+        // a miss makes every `internal` declaration universally visible — so
+        // it goes through `Name::is_root`, never a literal.
+        if ctx.get::<Name>(parent).is_some_and(Name::is_root) {
             return current;
         }
         // If parent is not a module, current is as high as we go
@@ -141,7 +143,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let mod_a = world.spawn();
         world.set(mod_a, NodeKind::Module);

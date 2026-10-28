@@ -78,7 +78,7 @@ public struct BLAKE2b: Digest {
         var ct1 = self.t1;
 
         // Pad the remaining buffer with zeros
-        var buf = Array[UInt8]();
+        var buf: [UInt8] = [];
         buf.append(contentsOf: self.buffer.asSlice());
         let remaining = UInt64(from: buf.count);
 
@@ -95,7 +95,7 @@ public struct BLAKE2b: Digest {
         BLAKE2b.compress(buf.asSlice(), st, ct0, ct1, true);
 
         // Extract output bytes (little-endian)
-        var result = Array[UInt8]();
+        var result: [UInt8] = [];
         var bytesLeft = self.outputLen;
         var idx: Int64 = 0;
         while bytesLeft > 0 {
@@ -226,6 +226,6 @@ public struct BLAKE2b: Digest {
         v(a) = v(a) + v(b) + y;
         v(d) = (v(d) ^ v(a)).rotateRight(by: 16);
         v(c) = v(c) + v(d);
-        v(b) = (v(b) ^ v(c)).rotateRight(by: 7);
+        v(b) = (v(b) ^ v(c)).rotateRight(by: 63);
     }
 }

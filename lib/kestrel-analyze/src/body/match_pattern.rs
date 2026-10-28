@@ -81,7 +81,7 @@ use std::collections::BTreeSet;
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Name, NodeKind};
 use kestrel_hecs::Entity;
@@ -144,8 +144,8 @@ fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
 pub struct MatchPatternAnalyzer;
 
 impl Describe for MatchPatternAnalyzer {
-    fn id(&self) -> &'static str {
-        "match_pattern"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::MatchPattern
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -432,14 +432,9 @@ fn lookup_enum_case(cx: &BodyContext<'_>, ty: &ResolvedTy, name: &str) -> Option
     if cx.query.get::<NodeKind>(*entity) != Some(&NodeKind::Enum) {
         return None;
     }
-    cx.query
-        .children_of(*entity)
-        .iter()
+    util::children_named_of_kind(cx.query, *entity, name, NodeKind::EnumCase)
+        .first()
         .copied()
-        .find(|&child| {
-            cx.query.get::<NodeKind>(child) == Some(&NodeKind::EnumCase)
-                && cx.query.get::<Name>(child).is_some_and(|n| n.0 == name)
-        })
 }
 
 fn is_named_enum(cx: &BodyContext<'_>, ty: &ResolvedTy) -> bool {

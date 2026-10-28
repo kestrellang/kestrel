@@ -3,8 +3,11 @@
 //! These are used by multiple query implementations. All functions
 //! take a `QueryContext` and record dependencies automatically.
 
-use kestrel_ast_builder::{Name, NodeKind};
+use kestrel_ast_builder::{Name, NodeKind, Subscript as SubscriptMarker};
 use kestrel_hecs::{Entity, QueryContext};
+
+use crate::extensions::ExtensionsFor;
+use crate::visibility::{IsVisibleFrom, VisibleChildrenByName};
 
 /// Walk parent_of chain to find the nearest ancestor with NodeKind::Module.
 /// Returns None if no module ancestor exists (e.g. entity is the root).
@@ -60,6 +63,94 @@ pub fn is_in_std_module(ctx: &QueryContext<'_>, entity: Entity) -> bool {
     }
 }
 
+/// The name `entity` answers to in member lookups, or `None` for members
+/// that can't be addressed by name.
+///
+/// The entity's `Name` component wins; nameless callables fall back to the
+/// keyword sentinels `"init"` (Initializer NodeKind) and `"subscript"`
+/// (Subscript marker). Both sentinels are reserved keywords, so they can't
+/// collide with a user-declared member name.
+///
+/// **The single source of truth for member-name matching.** Everything that
+/// asks "what is this member called?" comes here — `member_name_matches`, the
+/// build-time `MemberMap` name index, and the conformance analyzers. There
+/// were three implementations and they keyed subscripts on *different
+/// components*: this one on the `Subscript` marker, the analyzers on
+/// `NodeKind::Subscript`. They happen to agree today only because the builder
+/// sets both; nothing enforced it, and `witness_lower.rs` already documents a
+/// place where the analogous `Callable`-vs-`Computed` split did drift.
+pub fn member_lookup_name<'a>(ctx: &'a QueryContext<'_>, entity: Entity) -> Option<&'a str> {
+    if let Some(n) = ctx.get::<Name>(entity) {
+        return Some(n.0.as_str());
+    }
+    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Initializer) {
+        return Some("init");
+    }
+    if ctx.get::<SubscriptMarker>(entity).is_some() {
+        return Some("subscript");
+    }
+    None
+}
+
+/// Does `entity` answer to the query name? See `member_lookup_name` for
+/// the matching rule (literal `Name` or init/subscript keyword sentinel).
+pub(crate) fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query: &str) -> bool {
+    member_lookup_name(ctx, entity) == Some(query)
+}
+
+/// Search extensions of `target` for visible members named `member_name`,
+/// keeping only those that pass `filter`. Merges across **every** extension
+/// of `target`, in `ExtensionsFor` order — the result is the complete
+/// overload set, matching what `TypeMembers` reports. Truncating to the
+/// first matching extension here is unrecoverable: value-path resolution
+/// hands this straight to `HirExpr::OverloadSet` and inference never
+/// re-widens a single `Def`, so splitting one `extend` block in two would
+/// silently drop overloads. Shared by value-path resolution for extension
+/// static methods and associated-type static members.
+pub(crate) fn find_in_extensions(
+    ctx: &QueryContext<'_>,
+    target: Entity,
+    member_name: &str,
+    context: Entity,
+    root: Entity,
+    filter: impl Fn(&QueryContext<'_>, Entity) -> bool,
+) -> Vec<Entity> {
+    ctx.query(ExtensionsFor { target, root })
+        .iter()
+        .flat_map(|&ext| {
+            ctx.query(VisibleChildrenByName {
+                parent: ext,
+                name: member_name.to_string(),
+                context,
+            })
+        })
+        .filter(|&e| filter(ctx, e))
+        .collect()
+}
+
+/// Filter discovered members down to those answering to `name` (including
+/// the init/subscript sentinels) that are visible from `context`. Shared by
+/// `TypeMembersByName` and `ProtocolMembersByName`; `entity_of` projects the
+/// member entity out of each provenance-carrying member record.
+pub(crate) fn filter_members_by_name<M>(
+    ctx: &QueryContext<'_>,
+    members: Vec<M>,
+    name: &str,
+    context: Entity,
+    entity_of: impl Fn(&M) -> Entity,
+) -> Vec<M> {
+    members
+        .into_iter()
+        .filter(|m| {
+            let target = entity_of(m);
+            if !member_name_matches(ctx, target, name) {
+                return false;
+            }
+            ctx.query(IsVisibleFrom { target, context })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,7 +163,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let std = world.spawn();
         world.set(std, NodeKind::Module);
@@ -152,7 +243,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let user_mod = world.spawn();
         world.set(user_mod, NodeKind::Module);

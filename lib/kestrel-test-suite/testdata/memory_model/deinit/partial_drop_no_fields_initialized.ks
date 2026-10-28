@@ -22,7 +22,7 @@ struct TwoResources: not Copyable {
     init(fail_early fail_early: Int64)? {
         // Fail before initializing any fields
         if fail_early != 0 { return null }
-        self.a = Resource(id: 1)
+        self.a = Resource(id: 1);
         self.b = Resource(id: 2)
     }
 }

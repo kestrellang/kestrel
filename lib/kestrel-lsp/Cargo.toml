@@ -12,6 +12,7 @@ name = "kestrel-lsp"
 path = "src/main.rs"
 
 [dependencies]
+kestrel-debug = { path = "../kestrel-debug" }
 kestrel-compiler = { path = "../kestrel-compiler" }
 kestrel-compiler-driver = { path = "../kestrel-compiler-driver" }
 kestrel-reporting = { path = "../kestrel-reporting" }

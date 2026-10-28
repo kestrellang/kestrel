@@ -7,7 +7,6 @@
 // before the function's `return`.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

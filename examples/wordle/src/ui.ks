@@ -29,7 +29,7 @@ public func pageHtml(seed: Int64, guesses: Array[String], answer: String, errorM
     h.append("</style></head><body>");
 
     // Toast for errors
-    if errorMsg.byteCount > 0 {
+    if errorMsg.bytes.count > 0 {
         var t = Template();
         t.put("msg", errorMsg);
         h.append(t.render(##"<div class="toast">{msg}</div>"##))
@@ -138,7 +138,7 @@ func kbRowHtml(letters: String, states: Array[LetterState]) -> String {
     var h = String();
     h.append(##"<div class="kb-row">"##);
     var i: Int64 = 0;
-    while i < letters.byteCount {
+    while i < letters.bytes.count {
         let b = letters.bytes(unchecked: i);
         let idx = Int64(from: b) - 65;
         let cls = stateClass(states(unchecked: idx));

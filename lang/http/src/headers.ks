@@ -90,7 +90,7 @@ public struct Headers: Cloneable {
     /// h.values(forName: "x-tag");  // ["a", "b"]
     /// ```
     public func values(forName name: String) -> Array[String] {
-        var result = Array[String]();
+        var result = [];
         for (key, value) in self.entries {
             if key.equalsIgnoreAsciiCase(name) {
                 result.append(value)
@@ -147,7 +147,7 @@ public struct Headers: Cloneable {
         while i < self.entries.count {
             let pair = self.entries(unchecked: i);
             if pair.0.equalsIgnoreAsciiCase(name) {
-                let _ = self.entries.remove(at: i);
+                 self.entries.remove(at: i);
             } else {
                 i = i + 1
             }
@@ -202,7 +202,7 @@ extend Headers {
     public static func parse(from headerBlock: String) -> Headers {
         var headers = Headers();
         for line in headerBlock.split("\r\n") {
-            if line.byteCount == 0 {
+            if line.bytes.count == 0 {
                 break
             }
             match line.firstIndex(of: ":") {

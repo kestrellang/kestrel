@@ -18,7 +18,7 @@ fn build_from_source(source: &str) -> (World, Entity) {
 
     let root = world.spawn();
     world.set(root, NodeKind::Module);
-    world.set(root, Name("<root>".to_string()));
+    world.set(root, Name(Name::ROOT.to_string()));
     // Seed `lang.*` primitives so literal fallback in `apply_literal_defaults`
     // has `lang.i1` / `lang.i64` / `lang.str` / `lang.f64` to bind to when
     // the test source doesn't load stdlib's `Default<Kind>LiteralType`.
@@ -30,7 +30,7 @@ fn build_from_source(source: &str) -> (World, Entity) {
         .collect();
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
     let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
-    build_declarations(&mut world, file_entity, &result.tree, root, None);
+    build_declarations(&mut world, file_entity, &result.tree(), root, None);
 
     (world, root)
 }
@@ -62,13 +62,13 @@ fn find_function(
     find_child(ctx, module, NodeKind::Function, func_name)
 }
 
-/// Infer types for a function and return the TypedBody.
+/// Infer types for a function and return the TypedBody (Arc-shared query output).
 fn infer_func(
     ctx: &kestrel_hecs::QueryContext<'_>,
     root: Entity,
     module_name: &str,
     func_name: &str,
-) -> TypedBody {
+) -> std::sync::Arc<TypedBody> {
     let func = find_function(ctx, root, module_name, func_name);
     ctx.query(InferBody { entity: func, root })
         .unwrap_or_else(|| panic!("InferBody returned None for {}.{}", module_name, func_name))

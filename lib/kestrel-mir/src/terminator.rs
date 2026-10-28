@@ -9,9 +9,24 @@ pub enum SwitchCase {
     Variant(VariantIdx),
     Bool(bool),
     IntLiteral(i64),
-    IntRange { start: i64, end: i64 },
+    /// A range match. `None` bounds are open-ended (`N..` has `end: None`,
+    /// `..<N` has `start: None`) and must be left UNTESTED — filling an absent
+    /// bound with a sentinel (i64::MIN/MAX) truncates under a narrowed switch
+    /// discriminant and makes the test always-false (#186).
+    ///
+    /// Bounds are the type's raw bits (a `UInt64` bound above `i64::MAX` is
+    /// stored wrapped); `signed` picks the comparison, so an unsigned value
+    /// with its top bit set is not compared as negative.
+    IntRange {
+        start: Option<i64>,
+        end: Option<i64>,
+        signed: bool,
+    },
     CharLiteral(u32),
-    CharRange { start: u32, end: u32 },
+    CharRange {
+        start: Option<u32>,
+        end: Option<u32>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

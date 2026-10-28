@@ -6,6 +6,6 @@ import std.result.Optional
 
 func main() -> lang.i64 {
     let x: Int? = .Some(42);
-    let _ = println(x ?? 0);
+     println(x ?? 0);
     0
 }

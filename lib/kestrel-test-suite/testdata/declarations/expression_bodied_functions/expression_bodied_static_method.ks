@@ -10,6 +10,6 @@ struct Factory {
 
 @main
 func main() -> lang.i64 {
-    let _ = println(Factory.create());
+     println(Factory.create());
     0
 }

@@ -40,6 +40,19 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     seed_scalar(world, lang, "f64");
     seed_scalar(world, lang, "str");
     seed_ptr(world, lang);
+    // Structural singletons. `()` and `!` have no nominal entity of their own,
+    // so seed synthetic ones (named "()" / "!") to make them extension targets.
+    // MIR lowering maps these entities back to `MirTy::Tuple([])` / `MirTy::Never`
+    // (see `try_lang_primitive`), so witnesses/uses agree on the structural repr.
+    seed_scalar(world, lang, "()");
+    seed_scalar(world, lang, "!");
+    // Reference types `&T` / `&mutating T` are likewise structural — these
+    // generic synthetic entities (seed_ptr pattern) make them extension
+    // targets (`extend &T: Equatable where T: Equatable`). The type layer
+    // never uses the entities: every chokepoint maps them back to
+    // `HirTy::Ref` / `TyKind::Ref` / `MirTy::Ref` (see `try_lang_primitive`).
+    seed_ref(world, lang, "&");
+    seed_ref(world, lang, "&mutating");
 
     // Intrinsic functions
     seed_integer_ops(world, lang);
@@ -83,6 +96,27 @@ fn seed_ptr(world: &mut World, lang: Entity) {
     world.set(ptr, TypeParams(vec![t]));
 }
 
+/// Create `lang.&` / `lang.&mutating` — generic synthetic entities for the
+/// reference types, pointee type param named `T`. Extension LHS args bind by
+/// NAME against the target's declared params (resolve_extension_type_param),
+/// so ref extensions spell the pointee `T`: `extend &T: P where T: P`.
+fn seed_ref(world: &mut World, lang: Entity, name: &str) {
+    let r = world.spawn();
+    world.set(r, NodeKind::Struct);
+    world.set(r, Name(name.into()));
+    world.set(r, Vis::Public);
+    world.set(r, Typed);
+    world.set(r, Intrinsic);
+    world.set_parent(r, lang);
+
+    let t = world.spawn();
+    world.set(t, NodeKind::TypeParameter);
+    world.set(t, Name("T".into()));
+    world.set_parent(t, r);
+
+    world.set(r, TypeParams(vec![t]));
+}
+
 // ===== AstType helpers =====
 
 /// `lang.<name>` type reference (e.g., `lang.i64`).
@@ -112,6 +146,17 @@ fn param_ty(name: &str) -> AstType {
             type_args: vec![],
             span: Span::synthetic(0),
         }],
+        span: Span::synthetic(0),
+    }
+}
+
+/// `&T` / `&mutating T` return type (stage 1 — Return is the carved-out
+/// position, so a seeded ref-returning intrinsic lowers like any user
+/// `-> &T` signature).
+fn ref_of(inner: AstType, mutating: bool) -> AstType {
+    AstType::Ref {
+        inner: Box::new(inner),
+        mutating,
         span: Span::synthetic(0),
     }
 }
@@ -235,10 +280,38 @@ fn seed_generic_fn_multi(
 
 // ===== Intrinsic function categories =====
 
-/// Integer arithmetic, comparison, bitwise, and unary ops for i1/i8/i16/i32/i64.
+/// Integer arithmetic, comparison, bitwise, and unary ops for i8/i16/i32/i64,
+/// plus the boolean ops on i1.
+///
+/// **`i1` is deliberately not an integer width here.** It is the boolean type,
+/// and it gets exactly the four ops below. Running it through the integer
+/// matrix generated 39 names — `i1_add`, `i1_signed_div`, `i1_popcount`,
+/// `i1_clz`, the overflow predicates, all four orderings — of which mir-lower
+/// has only ever had arms for these four. The other 35 were callable from
+/// source and ICEd at post-mono verify ("Callee::Direct not resolved").
+///
+/// Seed a name only if `kestrel-mir-lower`'s intrinsic table can lower it. The
+/// coverage test in `mir-lower/src/body/call/intrinsic.rs` enforces this: this
+/// function is generative and that table is hand-enumerated, so nothing else
+/// keeps the two in step.
+///
+/// `i1_xor` and `i1_ne` are meaningful but omitted — there is no `Op::BoolXor`
+/// or `Op::BoolNe`, and `a != b` on booleans is `i1_not(i1_eq(a, b))`. Add the
+/// ops and the backend arms first if you want the names.
 fn seed_integer_ops(world: &mut World, lang: Entity) {
-    let int_types = ["i1", "i8", "i16", "i32", "i64"];
+    let int_types = ["i8", "i16", "i32", "i64"];
     let i1 = lang_ty("i1");
+
+    for op in ["and", "or", "eq"] {
+        seed_fn(
+            world,
+            lang,
+            &format!("i1_{op}"),
+            &[("a", i1.clone()), ("b", i1.clone())],
+            i1.clone(),
+        );
+    }
+    seed_fn(world, lang, "i1_not", &[("a", i1.clone())], i1.clone());
 
     for ty_name in int_types {
         let ty = lang_ty(ty_name);
@@ -275,6 +348,17 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
                 ty.clone(),
             );
         }
+        // Unchecked signed div/rem: same signature, no safety guards (UB on
+        // divide-by-zero / min/-1). Back `divideUnchecked`/`moduloUnchecked`.
+        for op in ["div", "rem"] {
+            seed_fn(
+                world,
+                lang,
+                &format!("{ty_name}_signed_{op}_unchecked"),
+                &[("a", ty.clone()), ("b", ty.clone())],
+                ty.clone(),
+            );
+        }
         for op in ["lt", "le", "gt", "ge"] {
             seed_fn(
                 world,
@@ -295,6 +379,16 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
                 ty.clone(),
             );
         }
+        // Unchecked unsigned div/rem (only the divide-by-zero check differs).
+        for op in ["div", "rem"] {
+            seed_fn(
+                world,
+                lang,
+                &format!("{ty_name}_unsigned_{op}_unchecked"),
+                &[("a", ty.clone()), ("b", ty.clone())],
+                ty.clone(),
+            );
+        }
         for op in ["lt", "le", "gt", "ge"] {
             seed_fn(
                 world,
@@ -305,8 +399,30 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
             );
         }
 
-        // Unary ops returning same type
-        for op in ["neg", "not", "popcount", "clz", "ctz", "bswap"] {
+        // Overflow predicates: signed/unsigned add/sub/mul, return i1 (true if
+        // the wrapping op overflows the type). Back the `*Checked` stdlib helpers.
+        for sign in ["signed", "unsigned"] {
+            for op in ["add", "sub", "mul"] {
+                seed_fn(
+                    world,
+                    lang,
+                    &format!("{ty_name}_{sign}_{op}_overflows"),
+                    &[("a", ty.clone()), ("b", ty.clone())],
+                    i1.clone(),
+                );
+            }
+        }
+
+        // Unary ops returning same type. `bswap` is skipped for i8: reversing
+        // the bytes of a single byte is the identity, so there is nothing to
+        // lower — the stdlib's Int8/UInt8 `byteSwapped` already returns `self`
+        // rather than calling it.
+        let unary: &[&str] = if ty_name == "i8" {
+            &["neg", "not", "popcount", "clz", "ctz"]
+        } else {
+            &["neg", "not", "popcount", "clz", "ctz", "bswap"]
+        };
+        for op in unary {
             seed_fn(
                 world,
                 lang,
@@ -401,6 +517,27 @@ fn seed_float_ops(world: &mut World, lang: Entity) {
             &[("a", ty.clone()), ("b", ty.clone())],
             ty.clone(),
         );
+
+        // Bit reinterpretation: float ↔ same-width integer (exact, no value
+        // conversion). f64 ↔ i64, f32 ↔ i32. Used for IEEE-754 decomposition.
+        let int_ty = lang_ty(match ty_name {
+            "f32" => "i32",
+            _ => "i64",
+        });
+        seed_fn(
+            world,
+            lang,
+            &format!("{ty_name}_to_bits"),
+            &[("a", ty.clone())],
+            int_ty.clone(),
+        );
+        seed_fn(
+            world,
+            lang,
+            &format!("{ty_name}_from_bits"),
+            &[("a", int_ty.clone())],
+            ty.clone(),
+        );
     }
 }
 
@@ -428,6 +565,16 @@ fn seed_cast_ops(world: &mut World, lang: Entity) {
             // Skip identity (same name) and also skip where both map to same intrinsic
             // (e.g. cast_u8_i8 is a no-op since both are i8)
             if from == to || intrinsic_ty(from) == intrinsic_ty(to) {
+                continue;
+            }
+            // No MIR `Op` yet for unsigned <-> float or for casts to/from `i1`
+            // (what `cast_i64_i1` should mean is undecided). Declaring them
+            // anyway made every call an ICE at post-mono verify;
+            // `every_seeded_intrinsic_has_a_lowering` (mir-lower) keeps the
+            // two sides in step.
+            let unsigned_float = (from.starts_with('u') && to.starts_with('f'))
+                || (from.starts_with('f') && to.starts_with('u'));
+            if *from == "i1" || *to == "i1" || unsigned_float {
                 continue;
             }
             seed_fn(
@@ -471,6 +618,17 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
         &[("ptr", ptr_t.clone())],
         t.clone(),
     );
+    // Consuming bitwise move-out of the pointee (`Pointer.take`). Lowers to a
+    // MIR `Take`, which produces an @owned value with no `Copyable` requirement
+    // — unlike `ptr_read` (a @guaranteed view). Caller owns the result and must
+    // not read/drop the pointee again until it is re-initialised.
+    seed_generic_fn(
+        world,
+        lang,
+        "ptr_take",
+        &[("ptr", ptr_t.clone())],
+        t.clone(),
+    );
     // Mutable by-reference view of the pointee (used by `Pointer.withMut`).
     // Lowers to `BeginMutBorrowAddr`; the result is passed as a `mutating`
     // closure arg so the pointee is mutated in place.
@@ -480,6 +638,25 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
         "ptr_mut_borrow",
         &[("ptr", ptr_t.clone())],
         t.clone(),
+    );
+    // Stage-1 reference bridge (`Pointer.value` / `.mutatingValue`): borrow
+    // views of the pointee with root_provenance = PointerDerived — the
+    // escape-checker root that may legally escape returns ("inherits the
+    // pointer's contract"). Distinct from ptr_read/ptr_mut_borrow, whose
+    // value-typed signatures with/withMut/COW modify depend on.
+    seed_generic_fn(
+        world,
+        lang,
+        "ptr_ref",
+        &[("ptr", ptr_t.clone())],
+        ref_of(t.clone(), false),
+    );
+    seed_generic_fn(
+        world,
+        lang,
+        "ptr_mut_ref",
+        &[("ptr", ptr_t.clone())],
+        ref_of(t.clone(), true),
     );
     seed_generic_fn(
         world,
@@ -542,15 +719,11 @@ fn seed_string_ops(world: &mut World, lang: Entity) {
 fn seed_misc_ops(world: &mut World, lang: Entity) {
     let str_ty = lang_ty("str");
 
-    // panic(message) → Never (diverging function)
+    // panic() → Never (diverging bare trap). Takes no message: the stdlib
+    // caller (`fatalError`) prints the message via the normal I/O path before
+    // invoking the trap, so the intrinsic itself is argument-free.
     let never = AstType::Never(Span::synthetic(0));
-    seed_fn(
-        world,
-        lang,
-        "panic",
-        &[("message", str_ty.clone())],
-        never.clone(),
-    );
+    seed_fn(world, lang, "panic", &[], never.clone());
     seed_fn(world, lang, "panic_unwind", &[("message", str_ty)], never);
 
     // Atomic ops — generic over value type

@@ -28,7 +28,16 @@ examples/weather/weather
 # Cloudflare Wrangler local state
 .wrangler/
 
+# SQLite databases (e.g. kestrel-wall's wall.db) — runtime state, never commit
+*.db
+*.db-shm
+*.db-wal
+
 .triage
+
+# Python bytecode cache (e.g. from lang/std/numeric/generate.py)
+__pycache__/
+*.pyc
 
 **/flock.lock
 
@@ -38,3 +47,12 @@ examples/weather/weather
 /external/
 
 .wrangler
+
+scripts
+
+# Benchmark build artifacts (see examples/life/bench/)
+examples/life/bench/*.o
+examples/life/bench/*.a
+examples/life/bench/life_bench_c_O*
+examples/life/bench/life_bench_ks
+target-linux/

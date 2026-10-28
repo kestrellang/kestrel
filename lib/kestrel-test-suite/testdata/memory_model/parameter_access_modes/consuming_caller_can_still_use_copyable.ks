@@ -8,6 +8,6 @@ func consume(consuming p: Point) -> lang.i64 {
 }
 func test() -> lang.i64 {
     let p = Point(x: 1, y: 2);
-    let _ = consume(p);
+     consume(p);
     p.x
 }

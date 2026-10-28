@@ -36,6 +36,14 @@ pub enum MonoError {
         source_entity: Entity,
         span: Option<Span>,
     },
+    /// An instantiation whose type arguments nest deeper than
+    /// `MAX_INSTANTIATION_DEPTH`: polymorphic recursion (`recur([x])` from
+    /// `recur[T]`) asks for ever-larger types and would never finish.
+    InstantiationTooDeep {
+        function: String,
+        source_entity: Entity,
+        span: Option<Span>,
+    },
 }
 
 impl fmt::Display for MonoError {
@@ -64,6 +72,11 @@ impl fmt::Display for MonoError {
                 f,
                 "type arg arity mismatch for {function}: expected {expected}, got {got}"
             ),
+            MonoError::InstantiationTooDeep { function, .. } => write!(
+                f,
+                "{function} instantiates itself with ever-larger types (polymorphic \
+                 recursion); generic recursion must call itself at the same type"
+            ),
         }
     }
 }
@@ -73,7 +86,8 @@ impl MonoError {
         match self {
             MonoError::WitnessNotFound { source_entity, .. }
             | MonoError::MethodNotFound { source_entity, .. }
-            | MonoError::TypeArgArityMismatch { source_entity, .. } => *source_entity,
+            | MonoError::TypeArgArityMismatch { source_entity, .. }
+            | MonoError::InstantiationTooDeep { source_entity, .. } => *source_entity,
         }
     }
 
@@ -81,7 +95,8 @@ impl MonoError {
         match self {
             MonoError::WitnessNotFound { span, .. }
             | MonoError::MethodNotFound { span, .. }
-            | MonoError::TypeArgArityMismatch { span, .. } => span.as_ref(),
+            | MonoError::TypeArgArityMismatch { span, .. }
+            | MonoError::InstantiationTooDeep { span, .. } => span.as_ref(),
         }
     }
 }
@@ -144,6 +159,21 @@ pub fn match_pattern(
         // Structural recursion on wrapper types
         (MirTy::Pointer(a), MirTy::Pointer(b)) => match_pattern(arena, a, b, bindings),
 
+        // Refs match exactly by mutability — `extend &T: P` witnesses carry
+        // `Ref{TypeParam}` implementing types; a `&mutating` self never
+        // matches a `&` pattern (no subsumption — each mutability conforms
+        // via its own extension).
+        (
+            MirTy::Ref {
+                pointee: p1,
+                mutating: m1,
+            },
+            MirTy::Ref {
+                pointee: p2,
+                mutating: m2,
+            },
+        ) => m1 == m2 && match_pattern(arena, p1, p2, bindings),
+
         (MirTy::Tuple(a), MirTy::Tuple(b)) => {
             a.len() == b.len()
                 && a.iter()
@@ -160,18 +190,32 @@ pub fn match_pattern(
                 params: p2,
                 ret: r2,
             },
-        )
-        | (
+        ) => {
+            p1.len() == p2.len()
+                && p1
+                    .iter()
+                    .zip(p2.iter())
+                    .all(|((pt, _), (ct, _))| match_pattern(arena, *pt, *ct, bindings))
+                && match_pattern(arena, r1, r2, bindings)
+        },
+
+        // Closure kinds match EXACTLY (plan lockstep 4): a `mutating (T) -> U`
+        // witness must not satisfy a normal `(T) -> U` requirement — the two
+        // have different environment ownership and copy classes.
+        (
             MirTy::FuncThick {
+                kind: k1,
                 params: p1,
                 ret: r1,
             },
             MirTy::FuncThick {
+                kind: k2,
                 params: p2,
                 ret: r2,
             },
         ) => {
-            p1.len() == p2.len()
+            k1 == k2
+                && p1.len() == p2.len()
                 && p1
                     .iter()
                     .zip(p2.iter())
@@ -209,20 +253,33 @@ pub fn find_witness_with_method(
         .unwrap_or(0);
     let expected_proto_args = &method_type_args[..method_type_args.len().min(proto_param_count)];
 
-    // Pass 1: exact protocol match with protocol type arg filtering
+    // Pass 1: exact protocol match with protocol type arg filtering. Collect
+    // ALL structurally-matching witnesses, then pick the most specific — so a
+    // specialized `extend X[Concrete]: P` overrides a generic `extend X[T]: P`
+    // for a concrete `X[Concrete]` self type (instead of first-match-wins, which
+    // could route through the generic body and ICE on its inner witness call).
+    let mut candidates: Vec<(usize, HashMap<Entity, TyId>)> = Vec::new();
     for (i, witness) in witnesses.iter().enumerate() {
         if witness.protocol != protocol {
             continue;
         }
-        if !witness_proto_args_match(arena, witness, expected_proto_args) {
+        if !witness.methods.iter().any(|m| m.key == *method) {
             continue;
         }
+        // Pattern-match BEFORE the proto-args filter: the bindings it produces
+        // are what let the filter substitute pattern-bound params instead of
+        // treating them as wildcards.
         let mut bindings = HashMap::new();
         if match_pattern(arena, witness.implementing_type, self_type, &mut bindings)
-            && witness.methods.iter().any(|m| m.key == *method)
+            && witness_proto_args_match(arena, witness, expected_proto_args, &bindings)
+            && super::entail::witness_constraints_hold(arena, witnesses, witness, &bindings)
         {
-            return Ok((i, bindings));
+            candidates.push((i, bindings));
         }
+    }
+    if !candidates.is_empty() {
+        let best = select_most_specific(arena, witnesses, &candidates);
+        return Ok(candidates.swap_remove(best));
     }
 
     // Pass 2: descendant protocol (inheritance) — no proto arg filter
@@ -252,11 +309,87 @@ pub fn find_witness_with_method(
     })
 }
 
+/// Among several witnesses that all structurally match the self type, return
+/// the position (into `candidates`) of the most specific one. Greedy over the
+/// specificity partial order ([`witness_more_specific`]): a unique global
+/// minimum (e.g. the chain `X[i64,i64]` ⊏ `X[T,i64]` ⊏ `X[T,U]`) is found
+/// regardless of candidate order.
+///
+/// **Genuinely incomparable overlaps are resolved by position, not by rule.**
+/// The scan keeps `best` unless a later candidate is *strictly* more specific,
+/// so a tied pair resolves to whichever appears FIRST in `candidates` — i.e.
+/// first in `witnesses`. This function therefore cannot make itself
+/// deterministic and does not try to: it is deterministic only because every
+/// producer of `module.witnesses` is deterministically ordered. Concretely,
+/// `passes::clone_shim` appends its shim witnesses from an `IndexMap` for
+/// exactly this reason; swapping it back to a `HashMap` would silently change
+/// which witness an incomparable overlap picks (F43d).
+///
+/// Overlaps with no global minimum are not yet diagnosed as ambiguous;
+/// declaration-time overlap-coherence checking is the follow-up, and is the
+/// only thing that can turn "first wins" into a real answer.
+fn select_most_specific(
+    arena: &TyArena,
+    witnesses: &[WitnessDef],
+    candidates: &[(usize, HashMap<Entity, TyId>)],
+) -> usize {
+    let mut best = 0usize;
+    for pos in 1..candidates.len() {
+        if witness_more_specific(
+            arena,
+            &witnesses[candidates[pos].0],
+            &witnesses[candidates[best].0],
+        ) {
+            best = pos;
+        }
+    }
+    best
+}
+
+/// True iff witness `a` is *strictly* more specific than `b`: `a`'s implementing
+/// type is an instance of `b`'s pattern (so `b` subsumes `a`) but not the
+/// reverse. `match_pattern(pattern, concrete)` treats the pattern's TypeParams
+/// as wildcards, so `b`'s `T` matches `a`'s concrete structure but `a`'s
+/// concrete `()`/`i64` does not match back onto `b`'s `T`. E.g. `Result[(), E]`
+/// is more specific than `Result[T, E]`, and `Wrap[i64]` than `Wrap[T]`.
+fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> bool {
+    let mut ab = HashMap::new();
+    let a_is_instance_of_b =
+        match_pattern(arena, b.implementing_type, a.implementing_type, &mut ab);
+    let mut ba = HashMap::new();
+    let b_is_instance_of_a =
+        match_pattern(arena, a.implementing_type, b.implementing_type, &mut ba);
+    // The kernel's rule (shared with the front end): a strictly narrower
+    // implementing type wins; at equal pattern specificity, more `where`
+    // constraints win. Candidates only reach selection after
+    // `witness_constraints_hold` confirmed their bounds, so
+    // `extend Box[T] where T: Show` beats `extend Box[T]` for `Box[Int64]`
+    // when `Int64: Show` — order-independently (#182).
+    kestrel_entail::more_specific_rule(
+        a_is_instance_of_b,
+        b_is_instance_of_a,
+        a.constraints.len(),
+        b.constraints.len(),
+    )
+}
+
 /// Check whether a witness's protocol type args match the expected concrete
 /// types from the call site. Empty expected matches any witness (back-compat
-/// for non-generic protocols). Witness args that are TypeParam wildcards
-/// (from `extend T: Proto[FreeParam]`) match anything.
-fn witness_proto_args_match(arena: &TyArena, witness: &WitnessDef, expected: &[TyId]) -> bool {
+/// for non-generic protocols).
+///
+/// A witness arg that is a TypeParam BOUND by the implementing-type pattern
+/// match (`extend ClosedRange[T]: RandomBounds[T]` at self `ClosedRange[Int64]`
+/// binds `T → Int64`) is substituted before comparing — treating it as a
+/// match-anything wildcard let a `ClosedRange[Int64]` witness satisfy a
+/// `RandomBounds[Int16]` call site and sample at the wrong layout (silent
+/// miscompile). Only a genuinely free param (`extend T: Proto[FreeParam]`,
+/// never mentioned in the implementing type) still matches anything.
+fn witness_proto_args_match(
+    arena: &TyArena,
+    witness: &WitnessDef,
+    expected: &[TyId],
+    bindings: &HashMap<Entity, TyId>,
+) -> bool {
     if expected.is_empty() {
         return true;
     }
@@ -270,7 +403,10 @@ fn witness_proto_args_match(arena: &TyArena, witness: &WitnessDef, expected: &[T
         .proto_type_args
         .iter()
         .zip(expected.iter())
-        .all(|(&w, &e)| matches!(arena.get(w), MirTy::TypeParam(_)) || w == e)
+        .all(|(&w, &e)| match arena.get(w) {
+            MirTy::TypeParam(p) => bindings.get(p).is_none_or(|&bound| bound == e),
+            _ => w == e,
+        })
 }
 
 /// Resolve a `Callee::Witness` to a concrete function entity + type_args + self_type.
@@ -338,11 +474,20 @@ pub fn resolve_witness_call(
     // Detect by checking if the first param is a TypeParam not in the
     // function's type_params list.
     let needs_self = if let Some(func) = concrete_func {
+        // A protocol-extension default depends on `Self` (a TypeParam of the
+        // protocol, not one of the function's own type params), so witness
+        // resolution must propagate self_type to it — otherwise `Self` leaks
+        // unsubstituted to the mangler / inner witness calls (#146). `Self` can
+        // appear ONLY in the body (`static func add() { Self.total = ... }`),
+        // so the structural `provides_protocol_default` flag is authoritative;
+        // the signature scan is a fallback for any default not carrying it.
         let known_tps: std::collections::HashSet<Entity> =
             func.type_params.iter().map(|tp| tp.entity).collect();
-        func.params.first().is_some_and(
-            |p| matches!(arena.get(p.ty), MirTy::TypeParam(e) if !known_tps.contains(e)),
-        )
+        let mentions_outer_tp =
+            |ty: TyId| matches!(arena.get(ty), MirTy::TypeParam(e) if !known_tps.contains(e));
+        func.provides_protocol_default
+            || func.params.iter().any(|p| mentions_outer_tp(p.ty))
+            || mentions_outer_tp(func.ret)
     } else {
         false
     };
@@ -351,10 +496,32 @@ pub fn resolve_witness_call(
     let mut type_args: Vec<TyId> = if needs_self {
         // Protocol-extension default methods receive Self via `self_type`.
         // Their function type params are the protocol-level args followed by
-        // the method-level args, already laid out that way at the call site.
-        // The witness implementation type params describe the concrete Self
-        // pattern and must not be prepended here.
-        method_type_args.to_vec()
+        // the method-level args, already laid out that way at the call site —
+        // so `method_type_args` normally suffices and the witness impl params
+        // (the concrete Self pattern) must not be prepended.
+        //
+        // Exception: a default reached through a *different* protocol than the
+        // one it's defined on (e.g. `Slice.isEqual` satisfying `Equatable`)
+        // has leading type params that `method_type_args` can't carry — they
+        // are the supplying extension's free params. `bind_witness_methods`
+        // records those in `binding.type_args` (mapped to the impl's
+        // vocabulary); recover them when the call-site args underfill the
+        // callee's arity.
+        let mut args = method_type_args.to_vec();
+        if let Some(func) = concrete_func
+            && args.len() < func.type_params.len()
+            && !binding.type_args.is_empty()
+        {
+            let bound: Vec<TyId> = binding
+                .type_args
+                .iter()
+                .map(|&ta| substitute(arena, ta, &subst))
+                .collect();
+            let method_level_args = method_type_args.get(proto_param_count..).unwrap_or(&[]);
+            args = bound;
+            args.extend_from_slice(method_level_args);
+        }
+        args
     } else {
         // Direct implementation: prepend witness implementation type args,
         // then append method-level type args past the protocol's own params.
@@ -856,5 +1023,75 @@ mod tests {
         let witnesses: Vec<WitnessDef> = vec![];
         let result = resolve_associated_type(&mut a, &witnesses, entity(1), i64, entity(2));
         assert!(result.is_none());
+    }
+
+    // -- select_most_specific --
+
+    /// Build `candidates` covering every witness in `witnesses`, in order.
+    fn all_candidates(witnesses: &[WitnessDef]) -> Vec<(usize, HashMap<Entity, TyId>)> {
+        (0..witnesses.len()).map(|i| (i, HashMap::new())).collect()
+    }
+
+    /// A unique global minimum is found regardless of where it sits in the
+    /// candidate list — the greedy scan is order-independent when the
+    /// specificity order actually has an answer.
+    #[test]
+    fn select_most_specific_finds_the_global_minimum_from_any_position() {
+        let mut a = TyArena::new();
+        let proto = entity(1);
+        let wrap = entity(2);
+        let t = a.intern(MirTy::TypeParam(entity(3)));
+        let i64 = a.i64();
+
+        let generic = WitnessDef::new(proto, a.named(wrap, vec![t]));
+        let concrete = WitnessDef::new(proto, a.named(wrap, vec![i64]));
+
+        // Concrete last…
+        let ws = vec![generic.clone(), concrete.clone()];
+        assert_eq!(select_most_specific(&a, &ws, &all_candidates(&ws)), 1);
+
+        // …and concrete first.
+        let ws = vec![concrete, generic];
+        assert_eq!(select_most_specific(&a, &ws, &all_candidates(&ws)), 0);
+    }
+
+    /// A genuinely incomparable overlap resolves to whichever candidate comes
+    /// FIRST — there is no rule, only position.
+    ///
+    /// `Pair[i64, T]` and `Pair[U, str]` both match `Pair[i64, str]` and
+    /// neither is an instance of the other, so `witness_more_specific` is false
+    /// in both directions and the greedy scan never leaves `best = 0`. This
+    /// pins the doc comment on `select_most_specific`: the function is
+    /// deterministic only because `module.witnesses` is deterministically
+    /// ordered by its producers (see `passes::clone_shim`'s `IndexMap`, F43d).
+    #[test]
+    fn select_most_specific_incomparable_overlap_takes_the_first_candidate() {
+        let mut a = TyArena::new();
+        let proto = entity(1);
+        let pair = entity(2);
+        let t = a.intern(MirTy::TypeParam(entity(3)));
+        let u = a.intern(MirTy::TypeParam(entity(4)));
+        let i64 = a.i64();
+        let str_ty = a.str_ty();
+
+        let left = WitnessDef::new(proto, a.named(pair, vec![i64, t]));
+        let right = WitnessDef::new(proto, a.named(pair, vec![u, str_ty]));
+
+        // Precondition: the pair really is incomparable, not merely tied on a
+        // technicality — neither direction is strictly more specific.
+        assert!(!witness_more_specific(&a, &left, &right));
+        assert!(!witness_more_specific(&a, &right, &left));
+
+        let ws = vec![left.clone(), right.clone()];
+        assert_eq!(
+            select_most_specific(&a, &ws, &all_candidates(&ws)),
+            0,
+            "incomparable overlap must resolve to the first candidate"
+        );
+
+        // Swapping the witnesses swaps the answer — the selection is
+        // positional, so witness order is load-bearing.
+        let ws = vec![right, left];
+        assert_eq!(select_most_specific(&a, &ws, &all_candidates(&ws)), 0);
     }
 }

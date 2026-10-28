@@ -1,6 +1,6 @@
 # kestrel-hir-lower — Agent Guide
 
-Patterns and invariants for lowering AST → HIR (the desugaring layer).
+Patterns and invariants for lowering CST → HIR (the desugaring layer).
 Read this before adding or changing a desugaring in `desugar.rs` / `expr.rs`.
 
 ## Operators desugar to a `ProtocolCall` — never hand-roll a match
@@ -20,7 +20,7 @@ stdlib with `@builtin(.XOperatorProtocol)` / `@builtin(.XOperatorMethod)`
 (model on `lang/std/core/coalesce.ks`), register the two `Builtin` variants in
 `kestrel-hir/src/builtin.rs` (enum + `name()` + `from_str` + `kind()`), add a
 row to the relevant lookup table in `kestrel-hir/src/body.rs`, and route the
-AST variant through the matching `desugar_*` helper. The conformance carries
+syntax kind through the matching `desugar_*` helper. The conformance carries
 the behavior; the lowerer only emits the call.
 
 **Why this is a hard rule:** a hand-rolled match has to invent the type of every
@@ -48,3 +48,53 @@ non-terminating dummy value, which breaks any context that expects a real type
 (branch merges, returns). When recovering inside a desugaring, wrap the
 `HirExpr::Error` in the same `Sugar`/diagnostic shape the success path uses (see
 `desugar_try` / `desugar_compound_assign`) so consumers see a uniform node.
+
+## Missing syntax lowers to an explicit error form — never `""`
+
+An absent child in the CST (a recovered parse) lowers to `ExprSrc::Error` →
+`HirExpr::Error`, `PatSrc::Error` → `HirPat::Error`, or `HirName::Missing` for
+an absent member/case name. Never synthesize an empty-string name: `""` looks
+like a real identifier to every later stage (name resolution, the solver, the
+LSP) and produces nonsense diagnostics instead of a silent, already-reported
+gap. This is the recovery case of the rule above.
+
+## HIR ids are allocated in source order
+
+Allocate expression/pattern/statement ids in the order their syntax appears.
+Diagnostic order, `while_conditions`, and several analyzers walk the arenas in
+id order and assume it matches the source. When a desugaring needs a node
+before its operands exist, still lower the operands first.
+
+## Record every user-spelled binding and path segment in the source map
+
+`BodySourceMap` is the only way tools get from a position to HIR and back
+(`src/source_map.rs`). Define a local the user wrote with
+`define_named_local` (binding node + identifier), and record each path segment
+with `alloc_seg` / `record_segments`. A local with no single declaring
+identifier — a desugaring temporary, `self`, an implicit `it`, a struct-pattern
+shorthand — stays UNRECORDED on purpose, so rename/references fail closed
+instead of guessing (audit F2).
+
+## A member named through a type is a member OF that type
+
+`Type[Args].member`, `Type.member` and `Self.member` lower with the **type as
+the receiver** (`lower_type_prefix` in `src/expr.rs`), never as a `Def` of the
+member carrying one flat `[owner…, own…]` type-arg list:
+
+- a static call becomes a `MethodCall` on the type;
+- a computed static property or an unapplied static method becomes a `Field`
+  on the type;
+- an enum case becomes `ImplicitMember { owner: Some(type) }`.
+
+The type's `[args]` bind the type's params, and the member's own `[args]` bind
+the member's. A bare `Type` is `Type[_]`, inferred per use, even inside
+`Type`'s own body. `Self` is the enclosing instantiation. A flat list has no
+answer for `HMAC.setup(..)` inside `HMAC[H]`, and the backend used to guess
+from the raw brackets.
+
+**Exception: a stored `static var` stays `Def(field)`.** It is one global for
+every instantiation, so it has no type args. Every MIR global place and assign
+path stores through `Def`.
+
+Also, `ResolveValuePath` returns `Def(case)` for a case in the **last**
+segment, and `EnumCaseValue` only when more segments follow. Check both.

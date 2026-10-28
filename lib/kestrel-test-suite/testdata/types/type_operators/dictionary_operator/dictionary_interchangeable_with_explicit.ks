@@ -10,7 +10,7 @@ func countExplicit(dict: std.collections.Dictionary[std.numeric.Int64, std.numer
 
 func main() -> lang.i64 {
     var dict: [std.numeric.Int64: std.numeric.Int64] = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-    let _ = dict.insert(1, 1);
-    let _ = println(countExplicit(dict));
+     dict.insert(1, 1);
+     println(countExplicit(dict));
     0
 }

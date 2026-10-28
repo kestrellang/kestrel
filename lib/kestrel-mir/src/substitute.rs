@@ -76,6 +76,15 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             }
         },
 
+        MirTy::Ref { pointee, mutating } => {
+            let sub_pointee = substitute(arena, pointee, subst);
+            if sub_pointee != pointee {
+                arena.ref_ty(sub_pointee, mutating)
+            } else {
+                ty
+            }
+        },
+
         MirTy::Tuple(elems) => {
             let sub_elems: Vec<_> = elems.iter().map(|&e| substitute(arena, e, subst)).collect();
             if sub_elems != elems {
@@ -113,7 +122,7 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             }
         },
 
-        MirTy::FuncThick { params, ret } => {
+        MirTy::FuncThick { kind, params, ret } => {
             let sub_params: Vec<(TyId, ParamConvention)> = params
                 .iter()
                 .map(|&(t, conv)| (substitute(arena, t, subst), conv))
@@ -121,6 +130,7 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             let sub_ret = substitute(arena, ret, subst);
             if sub_params != params || sub_ret != ret {
                 arena.intern(MirTy::FuncThick {
+                    kind,
                     params: sub_params,
                     ret: sub_ret,
                 })

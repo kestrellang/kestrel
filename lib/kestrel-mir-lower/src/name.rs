@@ -17,7 +17,7 @@ pub fn qualified_name(world: &World, entity: Entity) -> String {
     let mut current = Some(entity);
     while let Some(e) = current {
         if let Some(name) = world.get::<Name>(e) {
-            if name.0 != "<root>" {
+            if !name.is_root() {
                 parts.push(name.0.clone());
             }
         } else {

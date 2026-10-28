@@ -87,9 +87,9 @@ pub fn signature_help_at(
     //    argument list (not on the callee) and count commas. The CST is the
     //    source of truth for trivia/comma layout — HIR drops them.
     let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
-    let cst = world.get::<kestrel_ast_builder::Valued>(body_entity)?;
+    let cst = kestrel_ast_builder::syntax::valued_node(world, body_entity)?;
     let pos = TextSize::from(offset as u32);
-    let (_call_node, arg_list) = enclosing_call_at(&cst.0, pos)?;
+    let (_call_node, arg_list) = enclosing_call_at(&cst, pos)?;
     let active = active_param_index(&arg_list, pos);
 
     // 2. Match the CST call to its HirExpr by finding the smallest call-like
@@ -97,7 +97,7 @@ pub fn signature_help_at(
     //    include leading trivia and don't line up exactly with HIR spans, so
     //    we don't try to match end-to-end.)
     let ctx = world.query_context();
-    let hir: HirBody = ctx.query(LowerBody {
+    let hir = ctx.query(LowerBody {
         entity: body_entity,
         root,
     })?;
@@ -108,7 +108,7 @@ pub fn signature_help_at(
         entity: body_entity,
         root,
     });
-    let candidates = resolve_callees(world, &hir, typed.as_ref(), expr_id, body_entity, root)?;
+    let candidates = resolve_callees(world, &hir, typed.as_deref(), expr_id, body_entity, root)?;
     if candidates.is_empty() {
         return None;
     }
@@ -477,6 +477,7 @@ fn ast_type_span(ty: &AstType) -> Span {
         AstType::Never(span) => span.clone(),
         AstType::Inferred(span) => span.clone(),
         AstType::Some { span, .. } => span.clone(),
+        AstType::Ref { span, .. } => span.clone(),
     }
 }
 

@@ -1,6 +1,8 @@
 //! Lowering context — central state during HIR → MIR lowering.
 
-use kestrel_ast_builder::{Callable, EnclosingContainer, Name, NodeKind, Subscript};
+use kestrel_ast_builder::{
+    Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, Subscript,
+};
 use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
 use kestrel_mir::{FieldIdx, MirModule, MirTy, TyId, VariantIdx, WitnessMethodKey};
 use kestrel_name_res::ExtensionTargetEntity;
@@ -15,18 +17,45 @@ pub struct LowerCtx<'w> {
     pub module: MirModule,
     pub closure_counter: u32,
     synthetic_counter: u32,
+    /// The module-wide no-op retain/release shim used by capture-free
+    /// `escaping` closure values (see `body/closure_box.rs`). Synthesized on
+    /// first use so a module with no escaping closures gains nothing.
+    pub escaping_nop_shim: Option<Entity>,
 }
 
 impl<'w> LowerCtx<'w> {
     pub fn new(world: &'w World, root: Entity, name: &str) -> Self {
         let query = world.query_context();
+        // Resolve the copy/clone lang items once here: MIR has no `World`, so
+        // without this it falls back to matching protocol names by suffix.
+        let mut module = MirModule::new(name);
+        module.copyable_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Copyable,
+            root,
+        });
+        module.cloneable_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Cloneable,
+            root,
+        });
+        // Implicit-condition lowering needs both of these at *every* branch
+        // site (~1835 in a trivial stdlib program), so resolve them once here
+        // rather than re-querying per branch.
+        module.boolean_conditional_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::BooleanConditional,
+            root,
+        });
+        module.bool_struct = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Bool,
+            root,
+        });
         Self {
             world,
             query,
             root,
-            module: MirModule::new(name),
+            module,
             closure_counter: 0,
             synthetic_counter: 0,
+            escaping_nop_shim: None,
         }
     }
 
@@ -35,6 +64,18 @@ impl<'w> LowerCtx<'w> {
         let name = qualified_name(self.world, entity);
         self.module.register_name(entity, name.clone());
         name
+    }
+
+    /// Record a nominal type marked `@observabledrop` (dropping it has an
+    /// observable effect). Called from struct and enum lowering.
+    pub fn record_observable_drop(&mut self, entity: Entity) {
+        let marked = self
+            .world
+            .get::<kestrel_ast_builder::Attributes>(entity)
+            .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "observabledrop"));
+        if marked {
+            self.module.observable_drop.insert(entity);
+        }
     }
 
     /// Intern a MirTy into the arena, returning its TyId.
@@ -134,6 +175,15 @@ impl<'w> LowerCtx<'w> {
             .find(|&e| self.world.get::<NodeKind>(e) == Some(&NodeKind::Setter))
     }
 
+    /// Find a `NodeKind::RefAccessor` child of a Field or Subscript entity
+    /// (`mutating` selects the `mutating ref` vs the shared `ref` accessor).
+    pub fn find_ref_accessor_child(&self, parent: Entity, mutating: bool) -> Option<Entity> {
+        self.world.children_of(parent).iter().copied().find(|&e| {
+            self.world.get::<NodeKind>(e) == Some(&NodeKind::RefAccessor)
+                && self.world.get::<MutatingAccessor>(e).is_some() == mutating
+        })
+    }
+
     /// Consume the context and return the built MIR module.
     pub fn finish(self) -> MirModule {
         self.module
@@ -180,3 +230,8 @@ impl QueryFn for IsProtocolMethod {
         }
     }
 }
+
+// `RetRefPointerDerived` (the ptr_ref/ptr_mut_ref thin-wrapper query that
+// stamps PointerDerived roots at call sites) moved to kestrel-type-infer so
+// the analyze crate's dangle lint (E504) can share it — see
+// `kestrel_type_infer::RetRefPointerDerived`.

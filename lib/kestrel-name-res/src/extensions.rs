@@ -3,7 +3,7 @@
 //! Finds extensions for a given type entity and resolves extension
 //! target types from AstType to entities.
 
-use kestrel_ast_builder::{ExtensionTarget, NodeKind};
+use kestrel_ast_builder::{ExtensionLhsParamNames, ExtensionTarget, Name, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::resolve_type::{ResolveTypePath, TypeResolution};
@@ -43,6 +43,29 @@ impl QueryFn for ExtensionTargetEntity {
         let target = ctx.get::<ExtensionTarget>(self.extension)?;
         let ast_type = &target.0;
 
+        // Structural singletons `()` and `!` resolve to synthetic `lang` entities
+        // (named "()" / "!") so they can be extension targets. Reference types
+        // `&T` / `&mutating T` resolve to the generic synthetic entities
+        // `lang.&` / `lang.&mutating` (pointee = the single type arg).
+        match ast_type {
+            kestrel_ast::AstType::Unit(..) => return resolve_lang_child(ctx, self.root, "()"),
+            kestrel_ast::AstType::Never(..) => return resolve_lang_child(ctx, self.root, "!"),
+            kestrel_ast::AstType::Ref { mutating, .. } => {
+                let name = if *mutating { "&mutating" } else { "&" };
+                return resolve_lang_child(ctx, self.root, name);
+            },
+            // Type sugar names its standard type: `extend [T]` is
+            // `extend Array[T]` (and likewise `T?`, `[K: V]`).
+            kestrel_ast::AstType::Array(..)
+            | kestrel_ast::AstType::Optional(..)
+            | kestrel_ast::AstType::Dictionary(..) => {
+                let (builtin, name) = sugar_builtin(ast_type)?;
+                let context = ctx.parent_of(self.extension).unwrap_or(self.root);
+                return crate::resolve_sugar_type(ctx, context, self.root, builtin, name);
+            },
+            _ => {},
+        }
+
         // Extract path segments from the AstType
         let kestrel_ast::AstType::Named { segments, .. } = ast_type else {
             return None;
@@ -64,6 +87,87 @@ impl QueryFn for ExtensionTargetEntity {
             _ => None,
         }
     }
+}
+
+// ===== ExtensionLhsParams =====
+
+/// Query: the target type parameters an extension's LHS actually *binds*.
+///
+/// THE answer to "which type parameters does `extend Foo[…]` bring into
+/// scope?", for every consumer. `extend Box[T]` binds Box's `T`;
+/// `extend Box[Payload]` binds nothing, because `Payload` names no parameter
+/// of Box. The returned entities belong to the target nominal — an extension
+/// never carries `TypeParams` for its LHS.
+///
+/// Both halves matter. Taking the target's parameters unfiltered leaks `T`
+/// into `extend Box[Payload]` bodies; ignoring them entirely (the old
+/// `TypeParams`-only view) makes E439's shadowing walk blind to every generic
+/// extension. Matching is by name, as it has always been, so `extend Box[U]`
+/// binds nothing — positional binding would be a separate behavior change.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ExtensionLhsParams {
+    pub extension: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for ExtensionLhsParams {
+    type Output = Vec<Entity>;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Vec<Entity> {
+        let Some(lhs) = ctx.get::<ExtensionLhsParamNames>(self.extension) else {
+            return Vec::new();
+        };
+        if lhs.0.is_empty() {
+            return Vec::new();
+        }
+        let Some(target) = ctx.query(ExtensionTargetEntity {
+            extension: self.extension,
+            root: self.root,
+        }) else {
+            return Vec::new();
+        };
+        let Some(params) = ctx.get::<TypeParams>(target) else {
+            return Vec::new();
+        };
+        params
+            .0
+            .iter()
+            .copied()
+            .filter(|&tp| ctx.get::<Name>(tp).is_some_and(|n| lhs.0.contains(&n.0)))
+            .collect()
+    }
+}
+
+/// Reverse detector for the synthetic ref-extension entities: `Some(false)`
+/// for `lang.&`, `Some(true)` for `lang.&mutating`, `None` otherwise. THE
+/// shared check for every Entity-keyed site that must map the entity back to
+/// a ref type (the type layer never uses these entities).
+pub fn lang_ref_mutability(ctx: &QueryContext<'_>, entity: Entity) -> Option<bool> {
+    let mutating = match ctx.get::<Name>(entity)?.0.as_str() {
+        "&" => false,
+        "&mutating" => true,
+        _ => return None,
+    };
+    let parent = ctx.parent_of(entity)?;
+    (ctx.get::<NodeKind>(parent) == Some(&NodeKind::Module)
+        && ctx
+            .get::<Name>(parent)
+            .map(|n| n.0 == "lang")
+            .unwrap_or(false))
+    .then_some(mutating)
+}
+
+/// Resolve a synthetic child of the `lang` module by its (possibly
+/// non-identifier) name — used for the structural singletons `()` / `!`.
+pub fn resolve_lang_child(ctx: &QueryContext<'_>, root: Entity, name: &str) -> Option<Entity> {
+    let lang = ctx.children_of(root).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::Module)
+            && ctx.get::<Name>(c).map(|n| n.0 == "lang").unwrap_or(false)
+    })?;
+    ctx.children_of(lang)
+        .iter()
+        .copied()
+        .find(|&c| ctx.get::<Name>(c).map(|n| n.0 == name).unwrap_or(false))
 }
 
 // ===== ExtensionsFor =====
@@ -118,6 +222,17 @@ fn collect_extensions(
     }
 }
 
+/// The lang item and standard type name a piece of type sugar denotes.
+pub fn sugar_builtin(ty: &kestrel_ast::AstType) -> Option<(kestrel_hir::Builtin, &'static str)> {
+    use kestrel_hir::Builtin;
+    Some(match ty {
+        kestrel_ast::AstType::Array(..) => (Builtin::ArrayTypeOperator, "Array"),
+        kestrel_ast::AstType::Optional(..) => (Builtin::OptionalTypeOperator, "Optional"),
+        kestrel_ast::AstType::Dictionary(..) => (Builtin::DictionaryTypeOperator, "Dictionary"),
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,7 +254,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let std = world.spawn();
         world.set(std, NodeKind::Module);

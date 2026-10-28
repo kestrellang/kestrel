@@ -48,7 +48,7 @@ public struct Request: Cloneable {
     public func param(name: String) -> String? = self.pathParams(name)
 
     /// Returns a value from the middleware store, or `None`.
-    public func getValue(forKey key: String) -> String? = self.store(key)
+    public func getValue(for key: String) -> String? = self.store(key)
 
     /// Returns a query parameter value by name, or `None`.
     ///

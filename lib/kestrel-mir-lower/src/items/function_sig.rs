@@ -3,18 +3,13 @@
 //! Lowers function entities into MIR FunctionDefs with params and return types.
 //! Function bodies are lowered in a separate phase.
 
-use kestrel_ast::AstType;
-use kestrel_ast_builder::{
-    Attributes, Callable, Intrinsic, NodeKind, Static, TypeParams, WhereClause as AstWhereClause,
-    WhereConstraint as AstWhereConstraint,
-};
+use kestrel_ast_builder::{Attributes, Callable, Intrinsic, NodeKind, Static, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_mir::item::function::{
     CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef, WhereClause,
     WhereConstraint,
 };
 use kestrel_mir::{ParamConvention, TyId, TypeParamDef, ValueId};
-use kestrel_name_res::resolve_type::{ResolveTypePath, TypeResolution};
 
 use crate::context::LowerCtx;
 use crate::ty::{resolve_callable_return_type, resolve_callable_types};
@@ -27,6 +22,26 @@ pub(crate) fn receiver_convention(kind: &kestrel_ast_builder::ReceiverKind) -> P
     }
 }
 
+/// True when `entity` is a member of an extension whose target is a protocol
+/// (`extend SomeProtocol { ... }`) — a protocol default whose body may use
+/// `Self` even when its signature doesn't, so witness resolution must propagate
+/// `self_type` to it (#146). Mirrors the `in_protocol_extension` check in
+/// `body::lower_function_body`.
+fn is_protocol_extension_member(ctx: &LowerCtx, entity: Entity) -> bool {
+    let Some(parent) = ctx.world.parent_of(entity) else {
+        return false;
+    };
+    if ctx.world.get::<NodeKind>(parent) != Some(&NodeKind::Extension) {
+        return false;
+    }
+    ctx.query
+        .query(kestrel_name_res::ExtensionTargetEntity {
+            extension: parent,
+            root: ctx.root,
+        })
+        .is_some_and(|target| ctx.world.get::<NodeKind>(target) == Some(&NodeKind::Protocol))
+}
+
 /// Lower a function entity into a MIR FunctionDef (signature only, no body).
 pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
     let name = ctx.register_name(entity);
@@ -34,6 +49,7 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
 
     let mut def = FunctionDef::new(entity, &name, ret_ty);
     def.kind = determine_function_kind(ctx, entity);
+    def.provides_protocol_default = is_protocol_extension_member(ctx, entity);
 
     collect_inherited_type_params(ctx, entity, &mut def);
 
@@ -108,23 +124,13 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
 
     // @extern
     if is_extern && let Some(attrs) = ctx.world.get::<Attributes>(entity) {
-        for attr in &attrs.0 {
-            if attr.name == "extern" {
-                let symbol_name = attr
-                    .args
-                    .iter()
-                    .find(|a| a.label.as_deref() == Some("mangleName"))
-                    .map(|a| a.value.trim_matches('"').to_string())
-                    .unwrap_or_else(|| {
-                        def.name.rsplit('.').next().unwrap_or(&def.name).to_string()
-                    });
-                def.extern_info = Some(ExternInfo {
-                    calling_convention: CallingConvention::C,
-                    symbol_name,
-                });
-                break;
-            }
-        }
+        let symbol_name = attrs
+            .extern_mangle_name()
+            .unwrap_or_else(|| def.name.rsplit('.').next().unwrap_or(&def.name).to_string());
+        def.extern_info = Some(ExternInfo {
+            calling_convention: CallingConvention::C,
+            symbol_name,
+        });
     }
 
     // Intrinsic functions have no body
@@ -136,7 +142,11 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
     ctx.module.add_function(def);
 
     // Lower function body if present
-    if ctx.world.get::<kestrel_ast_builder::Body>(entity).is_some() {
+    if ctx
+        .world
+        .get::<kestrel_ast_builder::Valued>(entity)
+        .is_some()
+    {
         crate::body::lower_function_body(ctx, entity, entity);
     }
 }
@@ -181,7 +191,7 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
                 _ => FunctionKind::Free,
             }
         },
-        NodeKind::Field | NodeKind::Subscript | NodeKind::Setter => {
+        NodeKind::Field | NodeKind::Subscript | NodeKind::Setter | NodeKind::RefAccessor => {
             let parent = accessor_enclosing_container(ctx, entity).unwrap_or(ctx.root);
             if let Some(callable) = ctx.world.get::<Callable>(entity) {
                 if let Some(recv) = &callable.receiver {
@@ -266,8 +276,11 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
         }
     }
 
-    // Setter under generic subscript inherits subscript's type params
-    if matches!(ctx.world.get::<NodeKind>(entity), Some(NodeKind::Setter)) {
+    // Setter / ref accessor under a generic subscript inherits its type params
+    if matches!(
+        ctx.world.get::<NodeKind>(entity),
+        Some(NodeKind::Setter | NodeKind::RefAccessor)
+    ) {
         let parent_subscript = ctx
             .world
             .parent_of(entity)
@@ -293,11 +306,7 @@ fn populate_where_clause(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionD
     let mut has_type_params = false;
     let mut current = Some(entity);
     while let Some(e) = current {
-        if let Some(ast_wc) = ctx.world.get::<AstWhereClause>(e) {
-            for ast_constraint in &ast_wc.0 {
-                lower_where_constraint(ctx, ast_constraint, e, &mut wc);
-            }
-        }
+        lower_where_clauses(ctx, e, &mut wc);
         if ctx
             .world
             .get::<TypeParams>(e)
@@ -312,82 +321,129 @@ fn populate_where_clause(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionD
     }
 }
 
-fn lower_where_constraint(
-    ctx: &mut LowerCtx,
-    constraint: &AstWhereConstraint,
-    context: Entity,
-    out: &mut WhereClause,
-) {
-    match constraint {
-        AstWhereConstraint::Bound {
-            subject, protocols, ..
-        } => {
-            let Some(subject_entity) = resolve_ast_type_to_entity(ctx, subject, context) else {
-                return;
-            };
-            for protocol_ty in protocols {
-                let Some(protocol_entity) = resolve_ast_type_to_entity(ctx, protocol_ty, context)
-                else {
+/// `owner`'s explicit where clauses as MIR constraints, read from the front
+/// end's resolved `ExplicitWhereClauses` — never re-resolved from the AST
+/// (bidi §7.2: one resolution, no private name lookup in mir-lower). The
+/// implicit `T: Copyable` / `T: Static` bounds `WhereClausesOf` injects are
+/// deliberately absent: those are structural, and mono has no witnesses for
+/// them.
+pub(crate) fn lower_where_clauses(ctx: &mut LowerCtx, owner: Entity, out: &mut WhereClause) {
+    use kestrel_type_infer::resolve::WhereClause as Clause;
+    let clauses = ctx
+        .query
+        .query(kestrel_type_infer::where_clauses::ExplicitWhereClauses {
+            entity: owner,
+            root: ctx.root,
+        })
+        .clauses;
+    // A `Self` subject constrains `TypeParam(protocol)` when `owner` sits in a
+    // protocol or protocol extension (how abstract `Self` lowers).
+    let self_param = self_protocol(ctx, owner);
+    let subject_entity = |s: &kestrel_type_infer::resolve::WhereSubject| match s {
+        kestrel_type_infer::resolve::WhereSubject::SelfType => self_param,
+        _ => subject_entity(s),
+    };
+    for clause in &clauses {
+        match clause {
+            Clause::Bound {
+                subject,
+                protocol,
+                protocol_type_args,
+            } => {
+                let Some(subject) = subject_entity(subject) else {
                     continue;
                 };
-                // Extract protocol type arguments as entities (e.g., T from SeqIndex[T])
-                let proto_type_arg_entities = extract_type_arg_entities(ctx, protocol_ty, context);
+                let args = protocol_type_args
+                    .iter()
+                    .filter_map(type_arg_entity)
+                    .collect();
                 out.add_constraint(WhereConstraint::implements_with_args(
-                    subject_entity,
-                    protocol_entity,
-                    proto_type_arg_entities,
+                    subject, *protocol, args,
                 ));
-            }
-        },
-        AstWhereConstraint::NegativeBound {
-            subject, protocol, ..
-        } => {
-            let Some(subject_entity) = resolve_ast_type_to_entity(ctx, subject, context) else {
-                return;
-            };
-            let Some(protocol_entity) = resolve_ast_type_to_entity(ctx, protocol, context) else {
-                return;
-            };
-            out.add_constraint(WhereConstraint::not_implements(
-                subject_entity,
-                protocol_entity,
-            ));
-        },
-        AstWhereConstraint::Equality { .. } => {
-            // Deferred — not consulted by copy-behavior check
-        },
+            },
+            Clause::NotBound { subject, protocol } => {
+                if let Some(subject) = subject_entity(subject) {
+                    out.add_constraint(WhereConstraint::not_implements(subject, *protocol));
+                }
+            },
+            Clause::Equality { subject, rhs } => {
+                let Some(subject) = subject_hir(subject) else {
+                    continue;
+                };
+                let subject = crate::ty::lower_type(ctx, &subject);
+                let rhs = crate::ty::lower_type(ctx, rhs);
+                out.add_constraint(WhereConstraint::Equal { subject, rhs });
+            },
+        }
     }
 }
 
-/// Extract protocol type argument entities from an AST type like `SeqIndex[T]`.
-/// Returns entity IDs for each type arg that resolves to a type parameter.
-fn extract_type_arg_entities(ctx: &LowerCtx, ast_ty: &AstType, context: Entity) -> Vec<Entity> {
-    let AstType::Named { segments, .. } = ast_ty else {
-        return Vec::new();
-    };
-    let Some(last_seg) = segments.last() else {
-        return Vec::new();
-    };
-    last_seg
-        .type_args
-        .iter()
-        .filter_map(|arg| resolve_ast_type_to_entity(ctx, arg, context))
-        .collect()
+/// The entity a bound's subject constrains: the param, or the associated
+/// type a projection names (`T.Item: P` constrains `Item`). `Self` has no
+/// entity at this vantage — mono judges it as the receiver — and is skipped.
+fn subject_entity(subject: &kestrel_type_infer::resolve::WhereSubject) -> Option<Entity> {
+    use kestrel_type_infer::resolve::WhereSubject;
+    match subject {
+        WhereSubject::Param(p) => Some(*p),
+        WhereSubject::Projection { assoc, .. } => Some(*assoc),
+        WhereSubject::SelfType => None,
+    }
 }
 
-fn resolve_ast_type_to_entity(ctx: &LowerCtx, ast_ty: &AstType, context: Entity) -> Option<Entity> {
-    let AstType::Named { segments, .. } = ast_ty else {
-        return None;
-    };
-    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-    match ctx.query.query(ResolveTypePath {
-        segments: seg_names,
-        context,
-        root: ctx.root,
-    }) {
-        TypeResolution::Found(e) | TypeResolution::NotAType(e) => Some(e),
-        TypeResolution::SelfType | TypeResolution::NotFound(_) => None,
+/// A protocol type argument as the entity mono keys it by (`T` in
+/// `SeqIndex[T]`, or a nominal).
+fn type_arg_entity(ty: &kestrel_hir::ty::HirTy) -> Option<Entity> {
+    use kestrel_hir::ty::HirTy;
+    match ty {
+        HirTy::Param(e, _)
+        | HirTy::Struct { entity: e, .. }
+        | HirTy::Enum { entity: e, .. }
+        | HirTy::Protocol { entity: e, .. }
+        | HirTy::AbstractAssoc { entity: e, .. } => Some(*e),
+        HirTy::Alias { expanded, .. } => type_arg_entity(expanded),
+        _ => None,
     }
+}
+
+/// A where-clause subject as a type. `Self` has no type at this vantage (it
+/// is the receiver mono judges), so a `Self`-rooted subject is skipped.
+fn subject_hir(
+    subject: &kestrel_type_infer::resolve::WhereSubject,
+) -> Option<kestrel_hir::ty::HirTy> {
+    use kestrel_hir::ty::HirTy;
+    use kestrel_type_infer::resolve::WhereSubject;
+    let span = kestrel_span::Span::synthetic(0);
+    match subject {
+        WhereSubject::Param(p) => Some(HirTy::Param(*p, span)),
+        WhereSubject::SelfType => None,
+        WhereSubject::Projection { base, assoc } => Some(HirTy::AssocProjection {
+            base: Box::new(subject_hir(base)?),
+            assoc: *assoc,
+            span,
+        }),
+    }
+}
+
+/// The protocol whose abstract `Self` is in scope at `owner` (a protocol, a
+/// protocol extension, or anything nested in one), if any.
+fn self_protocol(ctx: &LowerCtx, owner: Entity) -> Option<Entity> {
+    let mut current = Some(owner);
+    while let Some(entity) = current {
+        let target = match ctx.world.get::<NodeKind>(entity) {
+            Some(NodeKind::Protocol) => Some(entity),
+            Some(NodeKind::Extension) => ctx.query.query(kestrel_name_res::ExtensionTargetEntity {
+                extension: entity,
+                root: ctx.root,
+            }),
+            Some(NodeKind::Struct | NodeKind::Enum) => return None,
+            _ => {
+                current = ctx.world.parent_of(entity);
+                continue;
+            },
+        };
+        return target.filter(|t| ctx.world.get::<NodeKind>(*t) == Some(&NodeKind::Protocol));
+    }
+    None
 }
 
 /// Walk the parent chain from a function entity to find the enclosing

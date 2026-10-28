@@ -10,7 +10,7 @@ func main() -> lang.i64 {
     arr.append(10);
     arr.append(20);
     arr.append(30);
-    let _ = println(arr.first().unwrap());
-    let _ = println(arr.last().unwrap());
+     println(arr.first().unwrap());
+     println(arr.last().unwrap());
     0
 }

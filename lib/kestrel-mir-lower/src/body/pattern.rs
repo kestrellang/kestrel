@@ -13,9 +13,10 @@ use kestrel_mir::callee::Callee;
 use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::terminator::{SwitchArm, SwitchCase};
 use kestrel_mir::{
-    FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId, VariantIdx,
+    FieldIdx, Immediate, IntBits, MirTy, Op, Ownership, ParamConvention, Signedness, TyId, ValueId,
+    VariantIdx,
 };
-use kestrel_pattern_matching::constructor::Constructor;
+use kestrel_pattern_matching::constructor::{Constructor, IntDomain};
 use kestrel_pattern_matching::decision_tree::{Binding, DecisionTree, PathElement};
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -74,7 +75,101 @@ impl OssaBodyCtx<'_, '_> {
                 return self.emit_move_value(val);
             }
         }
-        self.lower_expr(scrutinee_expr)
+        let val = self.lower_expr(scrutinee_expr);
+        // Stage-1 scrutinee decay: a match scrutinee is a VALUE context — a
+        // ref-typed scrutinee (ret_borrow call result) is copied out and its
+        // borrow ends here, BEFORE the decision tree's branch terminators
+        // (a live ref at the first Branch would be a false E497). A named
+        // binding scrutinee copies too but its borrow stays — and it had
+        // better be the binding's LAST use, or the branch terminator
+        // reports the binding E497 (bindings never cross blocks).
+        if self.ref_results.contains(&val) {
+            // A non-copyable pointee cannot be copied out: match through the
+            // view itself, like a borrowed parameter (arm bindings are then
+            // views into the referent).
+            if !self.is_copy_type(self.body.value(val).ty) {
+                return val;
+            }
+            let owned = self.emit_copy_value(val);
+            self.end_ref_if_single_use(val);
+            return owned;
+        }
+        val
+    }
+
+    /// Does any arm pattern contain a `&`/`&mutating` binder? Returns the
+    /// place-mode request: `None` = value mode (today's lowering, byte
+    /// identical), `Some(mutating)` = place mode, mutable place iff any
+    /// binder is `&mutating`.
+    fn arms_ref_binding_mode(&self, arms: &[HirMatchArm]) -> Option<bool> {
+        fn walk(hir: &kestrel_hir::body::HirBody, id: kestrel_hir::body::HirPatId) -> Option<bool> {
+            use kestrel_hir::body::HirPat;
+            match &hir.pats[id] {
+                HirPat::Binding { by_ref, .. } => *by_ref,
+                HirPat::At { subpattern, .. } => walk(hir, *subpattern),
+                HirPat::Tuple { prefix, suffix, .. } => prefix
+                    .iter()
+                    .chain(suffix)
+                    .filter_map(|&p| walk(hir, p))
+                    .max(),
+                HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
+                    args.iter().filter_map(|a| walk(hir, a.pattern)).max()
+                },
+                HirPat::Struct { fields, .. } => fields
+                    .iter()
+                    .filter_map(|f| f.pattern.and_then(|p| walk(hir, p)))
+                    .max(),
+                HirPat::Array { prefix, suffix, .. } => prefix
+                    .iter()
+                    .chain(suffix)
+                    .filter_map(|&p| walk(hir, p))
+                    .max(),
+                HirPat::Or { alternatives, .. } => {
+                    alternatives.iter().filter_map(|&p| walk(hir, p)).max()
+                },
+                _ => None,
+            }
+        }
+        arms.iter().filter_map(|a| walk(&self.hir, a.pattern)).max()
+    }
+
+    /// Place-mode scrutinee: evaluate the scrutinee as a PLACE and pin its
+    /// raw address. The address is an OWNED pointer scalar, so it threads
+    /// through the decision tree's block params with the existing machinery
+    /// (no @guaranteed block args needed); each test/leaf materializes an
+    /// intra-block view via `BeginBorrowAddr`. An rvalue scrutinee's owned
+    /// temp stays scope-tracked — it IS the match-scoped pin, destroyed at
+    /// the merge.
+    fn lower_match_scrutinee_place(
+        &mut self,
+        scrutinee_expr: HirExprId,
+        mutating: bool,
+    ) -> ValueId {
+        // A binding scrutinee read bypasses the Local arm's counter.
+        if let HirExpr::Local(l, _) = &self.hir.exprs[scrutinee_expr]
+            && !self.is_var_local(l)
+        {
+            let l = *l;
+            self.note_binding_read(l, scrutinee_expr);
+        }
+        let convention = if mutating {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        };
+        let view = self
+            .prepare_call_arg_for_expr(scrutinee_expr, convention)
+            .value;
+        let pointee = self.body.value(view).ty;
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
+        let addr = self.emit_op1(Op::PtrTo(pointee), view, ptr_ty);
+        // The view's job is done — the address stays valid while the
+        // underlying storage lives (var slot / pinned temp / borrowed
+        // receiver). Named bindings keep their own lifecycle.
+        if !self.ref_binding_vals.contains_key(&view) {
+            self.emit_end_borrow(view);
+        }
+        addr
     }
 
     pub fn lower_match(
@@ -95,9 +190,41 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         let result_ty = self.resolve_expr_type(expr_id);
-        let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
+        // A ref-binding scrutinee (`match r`) matches its POINTEE — the
+        // decision tree's constructors come from the pointee type.
+        let scrutinee_resolved_ty = match self.resolve_expr_resolved_ty(scrutinee_expr) {
+            ResolvedTy::Ref { pointee, .. } => *pointee,
+            other => other,
+        };
 
-        let scrutinee_val = self.lower_match_scrutinee(scrutinee_expr);
+        // Place mode (any `&` binder in the arms): the scrutinee is pinned
+        // as an address; value mode keeps today's lowering byte-identical.
+        let place_mode = self.arms_ref_binding_mode(arms);
+        // A match that moves only its bound parts (partial moves) keeps the
+        // scrutinee in place too: bindings take their fields out of it.
+        let part_moves = self
+            .partial
+            .matches
+            .get(&expr_id)
+            .cloned()
+            .filter(|(root, _)| {
+                matches!(
+                    self.var_entry(*root),
+                    Some(super::ScopeEntry::Var {
+                        borrowed: false,
+                        ..
+                    })
+                )
+            });
+        let place_mode = match (place_mode, &part_moves) {
+            (None, Some(_)) => Some(false),
+            (mode, _) => mode,
+        };
+        let saved_match_moves = std::mem::replace(&mut self.active_match_moves, part_moves);
+        let scrutinee_val = match place_mode {
+            Some(mutating) => self.lower_match_scrutinee_place(scrutinee_expr, mutating),
+            None => self.lower_match_scrutinee(scrutinee_expr),
+        };
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
 
         let saved_tracker = self.tracker.clone();
@@ -120,7 +247,14 @@ impl OssaBodyCtx<'_, '_> {
         // Walk the tree, collecting each reaching arm's exit (block, result,
         // per-slot liveness) instead of jumping to a pre-built merge block.
         let mut exits: Vec<super::ArmExit> = Vec::new();
-        self.emit_decision_tree_threaded(&tree, scrutinee_val, scrutinee_ty, arms, &mut exits);
+        self.emit_decision_tree_threaded(
+            &tree,
+            scrutinee_val,
+            scrutinee_ty,
+            place_mode.is_some(),
+            arms,
+            &mut exits,
+        );
 
         // A slot is live at the merge only if it survived on every reaching edge.
         let mut merge_mask = vec![true; n];
@@ -166,6 +300,25 @@ impl OssaBodyCtx<'_, '_> {
         if result_ownership == Ownership::Owned {
             self.track_owned(result_param);
         }
+        // Stage 2b: a ref-bearing result's escape taint must survive the
+        // merge — join the per-edge result roots (mirror of `lower_if`).
+        if self.ctx.module.escape_carry(result_ty).any() {
+            let convs = self.current_param_convs();
+            let mut joined: Option<kestrel_mir::value::RootProvenance> = None;
+            for exit in &exits {
+                let d = self.body.value(exit.result);
+                if d.root != kestrel_mir::value::RootProvenance::Local(exit.result) {
+                    let r = d.root;
+                    joined = Some(match joined {
+                        None => r,
+                        Some(j) => j.join(r, &convs),
+                    });
+                }
+            }
+            if let Some(root) = joined {
+                self.stamp_root(result_param, root);
+            }
+        }
 
         // Restore outer tracker, propagating survivors and dropping the dead.
         self.tracker = saved_tracker;
@@ -176,9 +329,18 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
 
+        self.active_match_moves = saved_match_moves;
         // Reconcile conditional moves of `var` slots across the match arms.
         let reaching: Vec<&super::ArmExit> = exits.iter().collect();
         self.fold_var_inits(&reaching);
+
+        // Every arm diverged: the merge has no predecessors. Leave no open
+        // block, or an enclosing `if`/loop would treat the dead merge as a
+        // live exit (with every arm's moves applied) and thread or drop
+        // values on a path that never runs.
+        if exits.is_empty() {
+            self.current_block = None;
+        }
 
         result_param
     }
@@ -193,6 +355,25 @@ impl OssaBodyCtx<'_, '_> {
         scrutinee_expr: HirExprId,
         arm: &HirMatchArm,
     ) -> ValueId {
+        // A destructure that moves only some parts of an owned place
+        // (`let (x, _) = t`) keeps the place and takes just those parts.
+        let part_moves = self
+            .partial
+            .matches
+            .get(&_expr_id)
+            .cloned()
+            .filter(|(root, _)| {
+                matches!(
+                    self.var_entry(*root),
+                    Some(super::ScopeEntry::Var {
+                        borrowed: false,
+                        ..
+                    })
+                )
+            });
+        if part_moves.is_some() {
+            return self.lower_destructure_in_place(scrutinee_expr, arm, part_moves);
+        }
         let scrutinee_val = self.lower_expr(scrutinee_expr);
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
         let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
@@ -210,6 +391,32 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_bindings(&bindings, scrutinee_val, scrutinee_ty);
 
         // Lower the arm body (typically `()` for let destructures).
+        self.lower_expr(arm.body)
+    }
+
+    /// `lower_irrefutable_destructure` for a partial move: bind from the
+    /// pinned scrutinee address; moving bindings take their fields out of
+    /// the slot (`emit_bindings_place`), the rest copy or borrow as usual.
+    fn lower_destructure_in_place(
+        &mut self,
+        scrutinee_expr: HirExprId,
+        arm: &HirMatchArm,
+        part_moves: Option<(LocalId, Vec<(LocalId, Vec<FieldIdx>)>)>,
+    ) -> ValueId {
+        let addr = self.lower_match_scrutinee_place(scrutinee_expr, false);
+        let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
+        let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
+        let tree = kestrel_pattern_matching::compile_decision_tree(
+            &self.hir,
+            &self.ctx.query,
+            self.ctx.root,
+            &scrutinee_resolved_ty,
+            std::slice::from_ref(arm),
+        );
+        let bindings = Self::extract_irrefutable_bindings(&tree);
+        let saved = std::mem::replace(&mut self.active_match_moves, part_moves);
+        self.emit_bindings_place(&bindings, addr, scrutinee_ty);
+        self.active_match_moves = saved;
         self.lower_expr(arm.body)
     }
 
@@ -237,11 +444,17 @@ impl OssaBodyCtx<'_, '_> {
     /// through every branch/switch as block parameters. Each reaching arm's
     /// exit (block, result, per-slot liveness) is pushed to `exits` rather than
     /// jumped to a merge block — `lower_match` builds the merge afterward.
+    /// `place` = place mode: `scrutinee` is the pinned ADDRESS of the
+    /// scrutinee place (an owned pointer scalar that threads through block
+    /// params); every read materializes an intra-block view via
+    /// `BeginBorrowAddr`. Value mode (`false`) is byte-identical to the
+    /// pre-place lowering.
     fn emit_decision_tree_threaded(
         &mut self,
         tree: &DecisionTree,
         scrutinee: ValueId,
         scrutinee_ty: TyId,
+        place: bool,
         arms: &[HirMatchArm],
         exits: &mut Vec<super::ArmExit>,
     ) {
@@ -262,6 +475,7 @@ impl OssaBodyCtx<'_, '_> {
                             def_tree,
                             scrutinee,
                             scrutinee_ty,
+                            place,
                             arms,
                             exits,
                         );
@@ -276,6 +490,7 @@ impl OssaBodyCtx<'_, '_> {
                         &cases[0].1,
                         scrutinee,
                         scrutinee_ty,
+                        place,
                         arms,
                         exits,
                     );
@@ -287,14 +502,42 @@ impl OssaBodyCtx<'_, '_> {
                     && matches!(&cases[0].0, Constructor::True)
                     && matches!(&cases[1].0, Constructor::False)
                 {
-                    // Bool is Copyable — extract-copy is fine here.
-                    let (test_val, _) = self.apply_access_path(scrutinee, scrutinee_ty, path);
+                    // Bool is Copyable — extract-copy is fine here. Place
+                    // mode reads through an intra-block view of the pinned
+                    // address; the owned copy joins the extra test values
+                    // destroyed per successor.
+                    let test_val = if place {
+                        let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
+                        let (proj, _) = self.apply_access_path(view, scrutinee_ty, path);
+                        let owned = self.emit_copy_value(proj);
+                        self.emit_end_borrow(view);
+                        owned
+                    } else {
+                        self.apply_access_path(scrutinee, scrutinee_ty, path).0
+                    };
                     let branch_snapshot = self.snapshot_scope();
                     let current_live: Vec<ValueId> =
                         self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
                     let local_descs: Vec<(TyId, Ownership)> = current_live
                         .iter()
                         .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
+                        .collect();
+
+                    // The @owned test copy (and any earlier boolean-test copies
+                    // accumulated through nested splits) are scope-owned but not
+                    // match slots — they exist only for the branch condition. Like
+                    // the general-switch discriminant and the string-chain test
+                    // intermediates below, they must be destroyed in each successor;
+                    // otherwise they reach the leaf live with no consumer and no
+                    // merge edge, failing OSSA verify ("@owned value live at block
+                    // exit but never consumed"). The scrutinee itself stays a slot,
+                    // so the `tracker` filter never destroys it here.
+                    let tracker_set: std::collections::HashSet<ValueId> =
+                        self.tracker.values().into_iter().collect();
+                    let extra_vals: Vec<ValueId> = current_live
+                        .iter()
+                        .filter(|v| !tracker_set.contains(v))
+                        .copied()
                         .collect();
 
                     let (true_block, true_params) = self.new_block_with_params(&local_descs);
@@ -309,11 +552,13 @@ impl OssaBodyCtx<'_, '_> {
 
                     self.switch_to(true_block);
                     self.rebind_scope_values(&current_live, &true_params);
+                    self.destroy_extra_test_values(&extra_vals, &current_live, &true_params);
                     let rebound = rebound_value(scrutinee, &current_live, &true_params);
                     self.emit_decision_tree_threaded(
                         &cases[0].1,
                         rebound,
                         scrutinee_ty,
+                        place,
                         arms,
                         exits,
                     );
@@ -321,11 +566,13 @@ impl OssaBodyCtx<'_, '_> {
                     self.restore_scope(&branch_snapshot);
                     self.switch_to(false_block);
                     self.rebind_scope_values(&current_live, &false_params);
+                    self.destroy_extra_test_values(&extra_vals, &current_live, &false_params);
                     let rebound = rebound_value(scrutinee, &current_live, &false_params);
                     self.emit_decision_tree_threaded(
                         &cases[1].1,
                         rebound,
                         scrutinee_ty,
+                        place,
                         arms,
                         exits,
                     );
@@ -337,14 +584,32 @@ impl OssaBodyCtx<'_, '_> {
                     .iter()
                     .any(|(c, _)| matches!(c, Constructor::StringLiteral(_)))
                 {
-                    // String is Copyable — extract-copy is fine here.
-                    let (test_val, _) = self.apply_access_path(scrutinee, scrutinee_ty, path);
+                    // String is Copyable — extract-copy is fine here (place
+                    // mode: through an intra-block view, see the bool path).
+                    // Place mode copies the projection out once, through an
+                    // intra-block view. Value mode instead borrows the CURRENT
+                    // scrutinee for each test (below): the branch threads the
+                    // scrutinee into its successors, so a value computed before
+                    // the chain is stale after the first test, and an owned
+                    // projection taken here would never be released.
+                    let place_test_val = place.then(|| {
+                        let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
+                        let (proj, _) = self.apply_access_path(view, scrutinee_ty, path);
+                        let owned = self.emit_copy_value(proj);
+                        self.emit_end_borrow(view);
+                        owned
+                    });
                     let test_mir_ty = lower_resolved_ty(self.ctx, ty);
                     let mut current_scrutinee = scrutinee;
                     // Snapshot before the chain so each iteration starts clean.
                     let chain_snapshot = self.snapshot_scope();
                     let chain_live: Vec<ValueId> =
                         self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
+                    // The chain's live values as currently named: each miss
+                    // block renames them, and the next test must thread the
+                    // renamed values (`chain_live` stays the pre-chain names
+                    // that `restore_scope(&chain_snapshot)` brings back).
+                    let mut cur_chain_live = chain_live.clone();
                     let chain_descs: Vec<(TyId, Ownership)> = chain_live
                         .iter()
                         .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
@@ -353,7 +618,23 @@ impl OssaBodyCtx<'_, '_> {
                         let Constructor::StringLiteral(lit) = ctor else {
                             continue;
                         };
-                        let cmp = self.emit_string_match_test(test_val, test_mir_ty, lit);
+                        let cmp = match place_test_val {
+                            Some(test_val) => {
+                                self.emit_string_match_test(test_val, test_mir_ty, lit)
+                            },
+                            None => {
+                                let borrow = (self.body.value(current_scrutinee).ownership
+                                    != Ownership::Guaranteed)
+                                    .then(|| self.emit_begin_borrow(current_scrutinee));
+                                let base = borrow.unwrap_or(current_scrutinee);
+                                let test_val = self.apply_access_path(base, scrutinee_ty, path).0;
+                                let cmp = self.emit_string_match_test(test_val, test_mir_ty, lit);
+                                if let Some(b) = borrow {
+                                    self.emit_end_borrow(b);
+                                }
+                                cmp
+                            },
+                        };
                         // Use the chain-level live set (not the inflated post-test set)
                         // so intermediates from emit_string_match_test are destroyed
                         // in each arm rather than forwarded and accumulated.
@@ -370,7 +651,7 @@ impl OssaBodyCtx<'_, '_> {
                             hit_block,
                             str_live.clone(),
                             miss_block,
-                            chain_live.clone(),
+                            cur_chain_live.clone(),
                         );
 
                         self.switch_to(hit_block);
@@ -378,7 +659,7 @@ impl OssaBodyCtx<'_, '_> {
                         // Destroy test intermediates — they're only needed
                         // for the branch condition, not the arm body.
                         let chain_set: std::collections::HashSet<ValueId> =
-                            chain_live.iter().copied().collect();
+                            cur_chain_live.iter().copied().collect();
                         for (old, new) in str_live.iter().zip(hit_params.iter()) {
                             if !chain_set.contains(old) {
                                 self.emit_destroy_value(*new);
@@ -389,6 +670,7 @@ impl OssaBodyCtx<'_, '_> {
                             subtree,
                             rebound,
                             scrutinee_ty,
+                            place,
                             arms,
                             exits,
                         );
@@ -397,13 +679,15 @@ impl OssaBodyCtx<'_, '_> {
                         self.switch_to(miss_block);
                         self.rebind_scope_values(&chain_live, &miss_params);
                         current_scrutinee =
-                            rebound_value(current_scrutinee, &chain_live, &miss_params);
+                            rebound_value(current_scrutinee, &cur_chain_live, &miss_params);
+                        cur_chain_live = miss_params;
                     }
                     if let Some(def_tree) = default {
                         self.emit_decision_tree_threaded(
                             def_tree,
                             current_scrutinee,
                             scrutinee_ty,
+                            place,
                             arms,
                             exits,
                         );
@@ -416,7 +700,17 @@ impl OssaBodyCtx<'_, '_> {
                 // General switch — read the discriminant via a borrow so a
                 // non-Copyable scrutinee/payload is never illegally copied just
                 // to be inspected. The borrow is closed right after the read.
-                let (disc_operand, borrow_to_end) = if path.is_empty() {
+                // Place mode: the read goes through an intra-block view of
+                // the pinned address.
+                let (disc_operand, borrow_to_end) = if place {
+                    let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
+                    let operand = if path.is_empty() {
+                        view
+                    } else {
+                        self.apply_access_path(view, scrutinee_ty, path).0
+                    };
+                    (operand, Some(view))
+                } else if path.is_empty() {
                     (scrutinee, None)
                 } else if self.body.value(scrutinee).ownership == Ownership::Guaranteed {
                     (
@@ -430,7 +724,36 @@ impl OssaBodyCtx<'_, '_> {
                         Some(borrow),
                     )
                 };
-                let discriminant = self.emit_discriminant(disc_operand);
+                // An array switch dispatches on element COUNT, not the
+                // aggregate's (meaningless) discriminant. Compute the length
+                // via the `ArrayMatchable.matchLength()` witness; the array
+                // cases were mapped to int-literal/range cases against it
+                // (`constructor_to_switch_case`).
+                let is_array_switch = cases
+                    .iter()
+                    .any(|(c, _)| matches!(c, Constructor::Array { .. }));
+                let disc_operand = if is_array_switch {
+                    let array_ty = lower_resolved_ty(self.ctx, ty);
+                    self.emit_array_match_length(disc_operand, array_ty)
+                } else {
+                    disc_operand
+                };
+                // An integer switch reads the value at its own width and
+                // signedness (the enum-tag default is 32-bit, which truncated
+                // `5000000000` to `705032704`).
+                let domain = if is_array_switch {
+                    None
+                } else {
+                    kestrel_pattern_matching::constructor::int_domain(
+                        &self.ctx.query,
+                        self.ctx.root,
+                        ty,
+                    )
+                };
+                let discriminant = match domain {
+                    Some(d) => self.emit_int_discriminant(disc_operand, d.bits),
+                    None => self.emit_discriminant(disc_operand),
+                };
                 if let Some(borrow) = borrow_to_end {
                     self.emit_end_borrow(borrow);
                 }
@@ -447,7 +770,7 @@ impl OssaBodyCtx<'_, '_> {
                 let mut switch_arms: Vec<SwitchArm> = Vec::with_capacity(cases.len());
                 let mut case_blocks = Vec::with_capacity(cases.len());
                 for (ctor, _) in cases.iter() {
-                    let pattern = constructor_to_switch_case(self, ctor);
+                    let pattern = constructor_to_switch_case(self, ctor, domain);
                     let (block, params) = self.new_block_with_params(&switch_descs);
                     switch_arms.push(SwitchArm {
                         pattern,
@@ -488,26 +811,32 @@ impl OssaBodyCtx<'_, '_> {
                     self.switch_to(*block_id);
                     self.rebind_scope_values(&switch_live, params);
                     // Destroy values that aren't in the tracker (e.g., discriminant)
-                    for &extra in &extra_vals {
-                        if let Some(pos) = switch_live.iter().position(|&v| v == extra) {
-                            self.emit_destroy_value(params[pos]);
-                        }
-                    }
+                    self.destroy_extra_test_values(&extra_vals, &switch_live, params);
                     let rebound = rebound_value(scrutinee, &switch_live, params);
-                    self.emit_decision_tree_threaded(subtree, rebound, scrutinee_ty, arms, exits);
+                    self.emit_decision_tree_threaded(
+                        subtree,
+                        rebound,
+                        scrutinee_ty,
+                        place,
+                        arms,
+                        exits,
+                    );
                 }
 
                 if let (Some(def_tree), Some((def_block, def_params))) = (default, default_block) {
                     self.restore_scope(&branch_snapshot);
                     self.switch_to(def_block);
                     self.rebind_scope_values(&switch_live, &def_params);
-                    for &extra in &extra_vals {
-                        if let Some(pos) = switch_live.iter().position(|&v| v == extra) {
-                            self.emit_destroy_value(def_params[pos]);
-                        }
-                    }
+                    self.destroy_extra_test_values(&extra_vals, &switch_live, &def_params);
                     let rebound = rebound_value(scrutinee, &switch_live, &def_params);
-                    self.emit_decision_tree_threaded(def_tree, rebound, scrutinee_ty, arms, exits);
+                    self.emit_decision_tree_threaded(
+                        def_tree,
+                        rebound,
+                        scrutinee_ty,
+                        place,
+                        arms,
+                        exits,
+                    );
                 }
             },
 
@@ -515,7 +844,15 @@ impl OssaBodyCtx<'_, '_> {
                 arm_index,
                 bindings,
             } => {
-                self.emit_success_leaf(*arm_index, bindings, scrutinee, scrutinee_ty, arms, exits);
+                self.emit_success_leaf(
+                    *arm_index,
+                    bindings,
+                    scrutinee,
+                    scrutinee_ty,
+                    place,
+                    arms,
+                    exits,
+                );
             },
 
             DecisionTree::Guard {
@@ -535,6 +872,7 @@ impl OssaBodyCtx<'_, '_> {
                         bindings,
                         scrutinee,
                         scrutinee_ty,
+                        place,
                         arms,
                         exits,
                     );
@@ -544,16 +882,57 @@ impl OssaBodyCtx<'_, '_> {
                 // Bind non-consumingly (borrow views) so the guard can read the
                 // pattern variables without consuming the scrutinee — a failing
                 // guard must leave it intact for the remaining patterns.
+                // Snapshot at the guard's entry depth (before `push_scope`) so the
+                // failure branch can restore to exactly this depth. Restoring the
+                // post-`push_scope` snapshot instead would leave the stack one
+                // frame too shallow (the restore is a no-op once the success
+                // branch has popped), which then drops a live outer frame and
+                // leaks the match's threaded slots at the merge (issue #121).
+                let entry_snapshot = self.snapshot_scope();
                 self.push_scope();
-                self.emit_bindings_for_guard(bindings, scrutinee, scrutinee_ty);
+                if place {
+                    // Place mode: guard reads go through a scope-tracked view
+                    // of the pinned address; `set_terminator` ends it before
+                    // the branch (same contract as the owned-borrow path).
+                    let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
+                    for binding in bindings {
+                        let (proj, _) = self.apply_access_path(view, scrutinee_ty, &binding.path);
+                        self.local_map
+                            .insert(binding.local_id, super::LocalBinding::Ssa(proj));
+                    }
+                } else {
+                    self.emit_bindings_for_guard(bindings, scrutinee, scrutinee_ty);
+                }
                 let guard_val = self.lower_expr(guard_expr);
-                let guard_snapshot = self.snapshot_scope();
+                // A match guard is the one condition position that isn't a
+                // `HirExpr::If`, so it needs the same coercion independently.
+                // The synthesized scalar (when one is emitted) is picked up by
+                // the `extra_vals` sweep below like every other guard temporary.
+                let guard_val = self.coerce_condition_to_i1(guard_val, "guard");
                 let guard_live: Vec<ValueId> =
                     self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
                 let guard_descs: Vec<(TyId, Ownership)> = guard_live
                     .iter()
                     .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
                     .collect();
+
+                // The guard expression's @owned temporaries (boxed literals, the
+                // boolean result, etc.) are scope-owned but not match slots: the
+                // branch only *reads* the condition, and neither the arm body nor
+                // the remaining patterns consume them. Like the switch
+                // discriminant and boolean-split copies above, they must be
+                // destroyed in each successor or they reach the leaf live with no
+                // consumer (OSSA "@owned value live at block exit but never
+                // consumed" — issue #121). The scrutinee stays a tracked slot, so
+                // the filter never drops it.
+                let tracker_set: std::collections::HashSet<ValueId> =
+                    self.tracker.values().into_iter().collect();
+                let extra_vals: Vec<ValueId> = guard_live
+                    .iter()
+                    .filter(|v| !tracker_set.contains(v))
+                    .copied()
+                    .collect();
+
                 let (success_block, success_params) = self.new_block_with_params(&guard_descs);
                 let (failure_block, failure_params) = self.new_block_with_params(&guard_descs);
                 self.emit_branch(
@@ -567,17 +946,36 @@ impl OssaBodyCtx<'_, '_> {
                 // Success: commit the arm — move-out bindings, body, capture exit.
                 self.switch_to(success_block);
                 self.rebind_scope_values(&guard_live, &success_params);
+                self.destroy_extra_test_values(&extra_vals, &guard_live, &success_params);
                 let rebound = rebound_value(scrutinee, &guard_live, &success_params);
                 self.pop_scope();
-                self.emit_success_leaf(*arm_index, bindings, rebound, scrutinee_ty, arms, exits);
+                self.emit_success_leaf(
+                    *arm_index,
+                    bindings,
+                    rebound,
+                    scrutinee_ty,
+                    place,
+                    arms,
+                    exits,
+                );
 
                 // Failure: scrutinee untouched — continue matching other patterns.
-                self.restore_scope(&guard_snapshot);
+                // `restore_scope` to the entry snapshot pops the guard frame and
+                // returns to the entry depth in one step (no trailing `pop_scope`,
+                // which would over-pop and corrupt the merge's slot accounting).
+                self.restore_scope(&entry_snapshot);
                 self.switch_to(failure_block);
                 self.rebind_scope_values(&guard_live, &failure_params);
+                self.destroy_extra_test_values(&extra_vals, &guard_live, &failure_params);
                 let rebound = rebound_value(scrutinee, &guard_live, &failure_params);
-                self.pop_scope();
-                self.emit_decision_tree_threaded(failure, rebound, scrutinee_ty, arms, exits);
+                self.emit_decision_tree_threaded(
+                    failure,
+                    rebound,
+                    scrutinee_ty,
+                    place,
+                    arms,
+                    exits,
+                );
             },
 
             DecisionTree::Failure => {
@@ -595,18 +993,47 @@ impl OssaBodyCtx<'_, '_> {
         bindings: &[Binding],
         scrutinee: ValueId,
         scrutinee_ty: TyId,
+        place: bool,
         arms: &[HirMatchArm],
         exits: &mut Vec<super::ArmExit>,
     ) {
         self.push_scope();
-        self.emit_bindings(bindings, scrutinee, scrutinee_ty);
+        if place {
+            self.emit_bindings_place(bindings, scrutinee, scrutinee_ty);
+        } else {
+            self.emit_bindings(bindings, scrutinee, scrutinee_ty);
+        }
         if let Some(arm) = arms.get(arm_index) {
             let body_val = self.lower_expr(arm.body);
-            if let Some(exit) = self.capture_arm_exit(body_val) {
+            // Arm-value decay copies in `capture_arm_exit` diagnose at the
+            // arm's value expression, not the enclosing statement.
+            let arm_span = super::value_expr_span(&self.hir, arm.body);
+            let prev_span = self.current_span.replace(arm_span);
+            let exit = self.capture_arm_exit(body_val);
+            self.current_span = prev_span;
+            if let Some(exit) = exit {
                 exits.push(exit);
             }
         }
         self.pop_scope();
+    }
+
+    /// Destroy the per-branch test intermediates (the switch discriminant, a
+    /// boolean-split copy, or string-test temporaries) threaded into a
+    /// successor block. These are scope-owned values that aren't match slots:
+    /// they exist only to compute the branch condition and have no edge to the
+    /// merge, so each successor must consume its rebound copy. Skipping this
+    /// leaves them live at the leaf with no consumer, which OSSA verify rejects
+    /// as "@owned value live at block exit but never consumed".
+    ///
+    /// `extra` lists the pre-rebind values to drop; `old`/`new` is the
+    /// successor's block-param rebinding (as passed to `rebind_scope_values`).
+    fn destroy_extra_test_values(&mut self, extra: &[ValueId], old: &[ValueId], new: &[ValueId]) {
+        for &v in extra {
+            if let Some(pos) = old.iter().position(|&o| o == v) {
+                self.emit_destroy_value(new[pos]);
+            }
+        }
     }
 }
 
@@ -638,7 +1065,18 @@ impl OssaBodyCtx<'_, '_> {
                 .any(|b| self.path_requires_moveout(scrutinee_ty, &b.path));
 
         if needs_moveout {
-            let items: Vec<MoveItem> = bindings
+            // Stage 2b: bindings whose path touches a ref slot extract
+            // NON-destructively (the extraction loads the stored address;
+            // through-ref navigation reads the pointee in place) — peel them
+            // off before the consuming destructure so the moveout only
+            // routes components that actually move.
+            let (ref_bindings, move_bindings): (Vec<&Binding>, Vec<&Binding>) = bindings
+                .iter()
+                .partition(|b| self.path_touches_ref_slot(scrutinee_ty, &b.path));
+            for b in ref_bindings {
+                self.bind_path_copy(scrutinee, scrutinee_ty, &b.path, b.local_id);
+            }
+            let items: Vec<MoveItem> = move_bindings
                 .iter()
                 .map(|b| MoveItem {
                     path: b.path.clone(),
@@ -653,9 +1091,119 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
+    /// Place-mode arm bindings: materialize a view of the pinned scrutinee
+    /// address, then per binding either take the projection IN PLACE (`&v` —
+    /// a real nested borrow, so it is scope-tracked: arm-internal control
+    /// flow hits the binding E497 policy, and the borrow ends at arm scope
+    /// exit) or force an owned copy (plain bindings own their value; a
+    /// NotCopyable copy is the E503 backstop — use `&` for those). The view
+    /// ends with the arm's scope.
+    fn emit_bindings_place(
+        &mut self,
+        bindings: &[Binding],
+        scrutinee_addr: ValueId,
+        scrutinee_ty: TyId,
+    ) {
+        // Partial-move bindings first: take each bound field out of the
+        // scrutinee's storage before any view of it is open.
+        let moving = self.active_match_moves.clone();
+        let mut moved_here = std::collections::HashSet::new();
+        if let Some((root, moves)) = &moving {
+            for binding in bindings.iter().filter(|b| b.by_ref.is_none()) {
+                let Some((_, full)) = moves.iter().find(|(l, _)| *l == binding.local_id) else {
+                    continue;
+                };
+                let Some(addr) = self.field_addr_path(scrutinee_addr, scrutinee_ty, &binding.path)
+                else {
+                    continue;
+                };
+                let ty = self.resolve_local_type(binding.local_id);
+                let value = self.emit_take(addr, ty);
+                self.record_var_path(*root, full, super::VarInit::DefUninit);
+                self.bind_pattern_local(binding.local_id, value);
+                moved_here.insert(binding.local_id);
+            }
+        }
+        let bindings: Vec<Binding> = bindings
+            .iter()
+            .filter(|b| !moved_here.contains(&b.local_id))
+            .cloned()
+            .collect();
+        let bindings = bindings.as_slice();
+        let needs_mut = bindings.iter().any(|b| b.by_ref == Some(true));
+        let view = if needs_mut {
+            self.emit_begin_mut_borrow_addr(scrutinee_addr, scrutinee_ty)
+        } else {
+            self.emit_begin_borrow_addr(scrutinee_addr, scrutinee_ty)
+        };
+        for binding in bindings {
+            let (proj, _) = self.apply_access_path(view, scrutinee_ty, &binding.path);
+            match binding.by_ref {
+                Some(_) => {
+                    // On a ref SLOT, `proj` is already the loaded ref; the
+                    // sub-borrow below aliases the same pointee (`&v` on a
+                    // `&T` payload collapses — never a double ref).
+                    let bound = self.emit_begin_borrow(proj);
+                    self.ref_results.insert(bound);
+                    self.ref_binding_vals.insert(bound, binding.local_id);
+                    let uses = self.local_use_count(binding.local_id);
+                    self.ref_binding_remaining.insert(binding.local_id, uses);
+                    self.body.value_names.insert(bound, binding.name.clone());
+                    self.local_map
+                        .insert(binding.local_id, super::LocalBinding::Ssa(bound));
+                },
+                // Stage 2b ref slot: a plain binding of a `&T` payload binds
+                // the REF (front-end types it `&T`; no decay).
+                None if self.ref_results.contains(&proj) => {
+                    self.register_ref_binding(proj, binding.local_id);
+                },
+                None => {
+                    // Force the copy: place-mode plain bindings OWN their
+                    // value (the direct-view binding is the legacy
+                    // borrowed-scrutinee behavior).
+                    let owned = self.emit_copy_value(proj);
+                    self.bind_pattern_local(binding.local_id, owned);
+                },
+            }
+        }
+    }
+
+    /// The address of the stored field/tuple element `path` names under the
+    /// place at `base` (`None` through an enum downcast or array element).
+    fn field_addr_path(
+        &mut self,
+        base: ValueId,
+        base_ty: TyId,
+        path: &[PathElement],
+    ) -> Option<ValueId> {
+        let mut addr = base;
+        let mut ty = base_ty;
+        for elem in path {
+            let idx = match elem {
+                PathElement::Index(i) => FieldIdx::new(*i),
+                PathElement::Field(name) => {
+                    let entity = self.ty_entity(ty)?;
+                    self.ctx.resolve_field_idx(entity, name)?
+                },
+                _ => return None,
+            };
+            let field_ty = match self.ctx.module.ty_arena.get(ty) {
+                MirTy::Tuple(elems) => elems.get(idx.index()).copied()?,
+                _ => self.struct_field_tys(ty).get(idx.index()).copied()?,
+            };
+            addr = self.emit_field_addr(addr, ty, idx);
+            ty = field_ty;
+        }
+        Some(addr)
+    }
+
     /// Borrow-extract-copy a single binding from `base` and insert it into the
     /// local map. @owned results are copied (so the binding owns its value);
     /// @guaranteed results are used directly.
+    ///
+    /// Note: Cloneable and NotCopyable types go through `emit_moveout` via
+    /// `path_requires_moveout` when the scrutinee is @owned, so they never
+    /// reach here as @owned extractions (the copy here is bitwise-safe).
     fn bind_path_copy(
         &mut self,
         base: ValueId,
@@ -664,13 +1212,41 @@ impl OssaBodyCtx<'_, '_> {
         local_id: LocalId,
     ) {
         let (extracted, _) = self.apply_access_path(base, base_ty, path);
+        // Stage 2b: a ref-slot extraction binds as a NAMED ref binding —
+        // `.Some(r)` on `Optional[&T]` gives `r: &T` (no decay; reads
+        // through `r` decay per-use like any binding).
+        if self.ref_results.contains(&extracted) {
+            self.register_ref_binding(extracted, local_id);
+            return;
+        }
         let bound_val = if self.body.value(extracted).ownership == Ownership::Owned {
             self.emit_copy_value(extracted)
         } else {
             extracted
         };
-        self.local_map
-            .insert(local_id, super::LocalBinding::Ssa(bound_val));
+        self.bind_pattern_local(local_id, bound_val);
+    }
+
+    /// Bind a pattern variable to an owned (or borrowed) value. A `var`
+    /// binding of an owned value gets a frame slot, like a `var` statement
+    /// (#107), so writes through it (`r.v = 1`, mutating calls) update the
+    /// binding instead of consuming an immutable SSA value.
+    fn bind_pattern_local(&mut self, local: kestrel_hir::LocalId, value: ValueId) {
+        let is_var = self.hir.locals[local].is_mut;
+        if !is_var || self.body.value(value).ownership != Ownership::Owned {
+            self.local_map
+                .insert(local, super::LocalBinding::Ssa(value));
+            return;
+        }
+        let ty = self.body.value(value).ty;
+        let addr = self.emit_uninit(ty);
+        self.emit_store_init(addr, value);
+        self.body
+            .value_names
+            .insert(addr, self.hir.locals[local].name.clone());
+        self.local_map.insert(local, super::LocalBinding::Var(addr));
+        let flag = self.maybe_alloc_var_flag(ty);
+        self.track_var(addr, ty, Some(local), flag);
     }
 
     /// Bind pattern variables for a guard condition **without consuming** the
@@ -728,7 +1304,17 @@ impl OssaBodyCtx<'_, '_> {
                     } else {
                         self.resolve_struct_field(current_ty, name).1
                     };
-                    if self.is_non_copyable(field_ty)
+                    // A ref slot never moves out (the extraction is a load),
+                    // and nothing BEHIND a ref can move (it's borrowed).
+                    if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+                        return false;
+                    }
+                    // Move out any non-bitwise-Copyable payload: NotCopyable
+                    // (no clone shim, copy is illegal), Cloneable (borrow-
+                    // extract-copy would redundantly clone an already-owned
+                    // temporary — bug #180), or mono-dependent (pre-mono
+                    // Bitwise but may resolve to move-only post-mono).
+                    if !self.is_copy_type(field_ty)
                         || self.copy_behavior_is_mono_dependent(field_ty)
                     {
                         return true;
@@ -745,7 +1331,10 @@ impl OssaBodyCtx<'_, '_> {
                     } else {
                         self.resolve_tuple_element(current_ty, *i)
                     };
-                    if self.is_non_copyable(field_ty)
+                    if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+                        return false;
+                    }
+                    if !self.is_copy_type(field_ty)
                         || self.copy_behavior_is_mono_dependent(field_ty)
                     {
                         return true;
@@ -753,6 +1342,55 @@ impl OssaBodyCtx<'_, '_> {
                     current_ty = field_ty;
                 },
                 // Array suffix/rest patterns aren't aggregate destructures.
+                PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => return false,
+            }
+        }
+        false
+    }
+
+    /// True if any step of `path` extracts through a `&T` slot. Such
+    /// bindings extract non-destructively (the ref loads out; pointee
+    /// components read in place) and must never route into a consuming
+    /// moveout. Mirrors `path_requires_moveout`'s type walk.
+    fn path_touches_ref_slot(&mut self, root_ty: TyId, path: &[PathElement]) -> bool {
+        let mut current_ty = root_ty;
+        let mut pending_downcast: Option<VariantIdx> = None;
+        for elem in path {
+            match elem {
+                PathElement::Downcast(name) => {
+                    let variant_idx = self
+                        .ty_entity(current_ty)
+                        .and_then(|e| self.ctx.resolve_variant_idx(e, name))
+                        .unwrap_or(VariantIdx::new(0));
+                    pending_downcast = Some(variant_idx);
+                },
+                PathElement::Field(name) => {
+                    let field_ty = if let Some(variant_idx) = pending_downcast.take() {
+                        self.resolve_enum_payload_field(current_ty, variant_idx, name)
+                            .1
+                    } else {
+                        self.resolve_struct_field(current_ty, name).1
+                    };
+                    if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+                        return true;
+                    }
+                    current_ty = field_ty;
+                },
+                PathElement::Index(i) => {
+                    let field_ty = if let Some(variant_idx) = pending_downcast.take() {
+                        self.resolve_enum_payload_field_by_index(
+                            current_ty,
+                            variant_idx,
+                            FieldIdx::new(*i),
+                        )
+                    } else {
+                        self.resolve_tuple_element(current_ty, *i)
+                    };
+                    if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+                        return true;
+                    }
+                    current_ty = field_ty;
+                },
                 PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => return false,
             }
         }
@@ -767,8 +1405,7 @@ impl OssaBodyCtx<'_, '_> {
     fn emit_moveout(&mut self, value: ValueId, value_ty: TyId, items: Vec<MoveItem>) {
         // A binding that ends here owns the whole (already @owned) value.
         if let Some(item) = items.iter().find(|it| it.path.is_empty()) {
-            self.local_map
-                .insert(item.local_id, super::LocalBinding::Ssa(value));
+            self.bind_pattern_local(item.local_id, value);
             return;
         }
 
@@ -896,7 +1533,11 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// All payload field types of an enum variant, with generic substitution.
-    fn enum_variant_payload_tys(&mut self, enum_ty: TyId, variant_idx: VariantIdx) -> Vec<TyId> {
+    pub(crate) fn enum_variant_payload_tys(
+        &mut self,
+        enum_ty: TyId,
+        variant_idx: VariantIdx,
+    ) -> Vec<TyId> {
         let (entity, type_args) = match self.ctx.module.ty_arena.get(enum_ty) {
             MirTy::Named {
                 entity, type_args, ..
@@ -925,7 +1566,7 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// All field types of a struct, with generic substitution.
-    fn struct_field_tys(&mut self, struct_ty: TyId) -> Vec<TyId> {
+    pub(crate) fn struct_field_tys(&mut self, struct_ty: TyId) -> Vec<TyId> {
         let (entity, type_args) = match self.ctx.module.ty_arena.get(struct_ty) {
             MirTy::Named {
                 entity, type_args, ..
@@ -947,7 +1588,7 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// All element types of a tuple type.
-    fn tuple_elem_tys(&self, tuple_ty: TyId) -> Vec<TyId> {
+    pub(crate) fn tuple_elem_tys(&self, tuple_ty: TyId) -> Vec<TyId> {
         match self.ctx.module.ty_arena.get(tuple_ty) {
             MirTy::Tuple(elements) => elements.clone(),
             _ => vec![],
@@ -1007,11 +1648,14 @@ impl OssaBodyCtx<'_, '_> {
                         let (field_idx, field_ty) =
                             self.resolve_enum_payload_field(current_ty, variant_idx, name);
                         current = self.emit_enum_payload(current, variant_idx, field_idx, field_ty);
-                        current_ty = field_ty;
+                        // A ref slot's extraction result is POINTEE-typed
+                        // (the loaded ref is a view of the pointee), so the
+                        // path continues navigating the pointee in place.
+                        current_ty = self.ctx.module.ty_arena.peel_ref(field_ty);
                     } else {
                         let (field_idx, field_ty) = self.resolve_struct_field(current_ty, name);
                         current = self.emit_struct_extract(current, field_idx, field_ty);
-                        current_ty = field_ty;
+                        current_ty = self.ctx.module.ty_arena.peel_ref(field_ty);
                     }
                 },
                 PathElement::Index(i) => {
@@ -1023,11 +1667,20 @@ impl OssaBodyCtx<'_, '_> {
                             field_idx,
                         );
                         current = self.emit_enum_payload(current, variant_idx, field_idx, field_ty);
-                        current_ty = field_ty;
+                        current_ty = self.ctx.module.ty_arena.peel_ref(field_ty);
+                    } else if self.is_array_matchable_ty(current_ty) {
+                        // Array prefix element: runtime `matchGet(i)`, not an
+                        // aggregate field-extract (an array is a heap buffer,
+                        // not a flat aggregate). The length switch already
+                        // proved `i < matchLength()`.
+                        let elem_ty = self.array_element_ty(current_ty);
+                        let raw = self.emit_literal(Immediate::i64(*i as i128));
+                        current = self.emit_array_match_get(current, current_ty, raw);
+                        current_ty = self.ctx.module.ty_arena.peel_ref(elem_ty);
                     } else {
                         let elem_ty = self.resolve_tuple_element(current_ty, *i);
                         current = self.emit_tuple_extract(current, *i as u32, elem_ty);
-                        current_ty = elem_ty;
+                        current_ty = self.ctx.module.ty_arena.peel_ref(elem_ty);
                     }
                 },
                 PathElement::Downcast(variant_name) => {
@@ -1037,7 +1690,23 @@ impl OssaBodyCtx<'_, '_> {
                         .unwrap_or(VariantIdx::new(0));
                     pending_downcast = Some((variant_name.clone(), variant_idx));
                 },
-                PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => {},
+                // Array suffix element accessed from the end (`[.., z]`):
+                // `matchGet(matchLength() - offset)`.
+                PathElement::IndexFromEnd(offset) => {
+                    let elem_ty = self.array_element_ty(current_ty);
+                    let raw = self.emit_array_index_from_end(current, current_ty, *offset);
+                    current = self.emit_array_match_get(current, current_ty, raw);
+                    current_ty = self.ctx.module.ty_arena.peel_ref(elem_ty);
+                },
+                // `..rest` binding: `matchSlice(prefix, matchLength() - suffix)`.
+                PathElement::RestSlice {
+                    prefix_len,
+                    suffix_len,
+                } => {
+                    current =
+                        self.emit_array_match_slice(current, current_ty, *prefix_len, *suffix_len);
+                    current_ty = self.body.value(current).ty;
+                },
             }
         }
         (current, current_ty)
@@ -1094,6 +1763,313 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_call_returning(callee, vec![scrutinee_arg, lit_arg], bool_ty)
     }
 
+    // ================================================================
+    // ArrayMatchable — array-pattern length test and element access
+    // ================================================================
+
+    /// Resolve the `ArrayMatchable` protocol entity (registering its name),
+    /// or `None` if the stdlib doesn't define it.
+    fn array_matchable_protocol(&mut self) -> Option<Entity> {
+        let proto = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ArrayMatchable,
+            root: self.ctx.root,
+        })?;
+        self.ctx.register_name(proto);
+        Some(proto)
+    }
+
+    /// Emit a call to an `ArrayMatchable` builtin method on `array` (passed
+    /// by borrow), with `extra_args` (already correctly typed) following
+    /// `self`. The method key is derived from the builtin method entity so it
+    /// matches the witness table exactly. `result_ty` is the method's concrete
+    /// return type at this call site (the caller substitutes the element type).
+    fn emit_array_matchable_call(
+        &mut self,
+        proto: Entity,
+        method_builtin: kestrel_hir::Builtin,
+        array: ValueId,
+        array_ty: TyId,
+        extra_args: Vec<ValueId>,
+        result_ty: TyId,
+    ) -> ValueId {
+        let method = self
+            .ctx
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: method_builtin,
+                root: self.ctx.root,
+            })
+            .map(|e| self.ctx.witness_method_key(e))
+            .unwrap_or_else(|| WitnessMethodKey::simple("matchLength"));
+        let callee = Callee::Witness {
+            protocol: proto,
+            method,
+            self_type: array_ty,
+            method_type_args: vec![],
+        };
+        let mut call_args = vec![self.prepare_call_arg(array, ParamConvention::Borrow)];
+        for arg in extra_args {
+            call_args.push(self.prepare_call_arg(arg, ParamConvention::Borrow));
+        }
+        self.emit_call_returning(callee, call_args, result_ty)
+    }
+
+    /// Emit `array.matchLength()` — the element count as a stdlib `Int64`.
+    /// Used as the discriminant of an array-pattern switch.
+    pub fn emit_array_match_length(&mut self, array: ValueId, array_ty: TyId) -> ValueId {
+        let Some(proto) = self.array_matchable_protocol() else {
+            // No ArrayMatchable in the stdlib — degenerate to zero so the
+            // match stays well-formed (only reachable if stdlib is broken).
+            return self.emit_literal(Immediate::i64(0));
+        };
+        let result_ty = self
+            .ctx
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::ArrayMatchableMatchLength,
+                root: self.ctx.root,
+            })
+            .map(|e| crate::ty::resolve_callable_return_type(self.ctx, e))
+            .unwrap_or_else(|| self.ctx.module.ty_arena.i64());
+        self.emit_array_matchable_call(
+            proto,
+            kestrel_hir::Builtin::ArrayMatchableMatchLength,
+            array,
+            array_ty,
+            vec![],
+            result_ty,
+        )
+    }
+
+    /// Is `ty` an `ArrayMatchable` conformer? Element navigation of these goes
+    /// through `matchGet`/`matchSlice` (runtime, length-checked) rather than
+    /// the aggregate field-extract used for tuples and enum payloads. Driven by
+    /// the conformance, so `Array`/`ArraySlice` and any custom conformer are
+    /// treated uniformly.
+    fn is_array_matchable_ty(&mut self, ty: TyId) -> bool {
+        let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(ty) else {
+            return false;
+        };
+        let entity = *entity;
+        let Some(proto) = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ArrayMatchable,
+            root: self.ctx.root,
+        }) else {
+            return false;
+        };
+        self.ctx
+            .query
+            .query(kestrel_name_res::conformances::ConformingProtocols {
+                entity,
+                root: self.ctx.root,
+            })
+            .contains(&proto)
+    }
+
+    /// Element type of an `ArrayMatchable` conformer — its `Element` associated
+    /// type, resolved from the conformance and substituted with the
+    /// conformer's type args. For a generic conformer (`Array[Int64]`) the
+    /// binding `type Element = T` substitutes `T → Int64`; for a non-generic
+    /// one (`Trio` with `type Element = Int64`) the binding is concrete.
+    fn array_element_ty(&mut self, array_ty: TyId) -> TyId {
+        let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(array_ty).clone()
+        else {
+            return array_ty;
+        };
+        let Some((binding, owner)) = self.resolve_array_element_binding(entity) else {
+            // Binding lookup failed (broken stdlib / missing protocol) — fall
+            // back to the first type arg so generic conformers still work.
+            return type_args.first().copied().unwrap_or(array_ty);
+        };
+        if type_args.is_empty() {
+            return binding;
+        }
+        // Substitute the conformer's type args into the binding. The binding's
+        // `T` may resolve to EITHER the target type's own param (the common
+        // case, `type Element = T` in `extend Bag[T]` reads as the struct's
+        // param) OR the extension's binder — both align positionally with the
+        // scrutinee's type args, so map both entities' params to `type_args`.
+        let mut subst = kestrel_mir::SubstMap::new();
+        for params_owner in [entity, owner] {
+            if let Some(tp) = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::TypeParams>(params_owner)
+            {
+                for (&param, &arg) in tp.0.iter().zip(type_args.iter()) {
+                    subst.type_params.insert(param, arg);
+                }
+            }
+        }
+        kestrel_mir::substitute(&mut self.ctx.module.ty_arena, binding, &subst)
+    }
+
+    /// Find the `type Element = ...` binding for an `ArrayMatchable` conformer,
+    /// returning the (unsubstituted) binding type and the entity that OWNS it
+    /// (the type body, or the conforming extension) — the owner provides the
+    /// type params for substitution.
+    fn resolve_array_element_binding(&mut self, type_entity: Entity) -> Option<(TyId, Entity)> {
+        let proto = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ArrayMatchable,
+            root: self.ctx.root,
+        })?;
+        let elem_member = self
+            .ctx
+            .query
+            .query(kestrel_name_res::ProtocolAssociatedTypes {
+                protocol: proto,
+                root: self.ctx.root,
+            })
+            .into_iter()
+            .find(|m| {
+                self.ctx
+                    .world
+                    .get::<kestrel_ast_builder::Name>(m.entity)
+                    .map(|n| n.0.as_str())
+                    == Some("Element")
+            })?
+            .entity;
+        // Binding in the type body, then in a conforming extension.
+        if let Some(ty) =
+            crate::items::witness_lower::find_associated_type(self.ctx, type_entity, elem_member)
+        {
+            return Some((ty, type_entity));
+        }
+        let extensions = self
+            .ctx
+            .query
+            .query(kestrel_name_res::extensions::ExtensionsFor {
+                target: type_entity,
+                root: self.ctx.root,
+            });
+        for ext in extensions {
+            if let Some(ty) =
+                crate::items::witness_lower::find_associated_type(self.ctx, ext, elem_member)
+            {
+                return Some((ty, ext));
+            }
+        }
+        None
+    }
+
+    /// The stdlib `Int64` type — the index/length type of `ArrayMatchable`,
+    /// taken from `matchLength`'s concrete return type.
+    fn array_match_int64_ty(&mut self) -> TyId {
+        self.ctx
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::ArrayMatchableMatchLength,
+                root: self.ctx.root,
+            })
+            .map(|e| crate::ty::resolve_callable_return_type(self.ctx, e))
+            .unwrap_or_else(|| self.ctx.module.ty_arena.i64())
+    }
+
+    /// Wrap a raw `lang.i64` value into a stdlib `Int64` via its `intLiteral`
+    /// init (the `matchGet`/`matchSlice` bounds are `Int64`-typed).
+    fn emit_int64_wrap(&mut self, raw: ValueId, int64_ty: TyId) -> ValueId {
+        let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(int64_ty) else {
+            return raw;
+        };
+        let entity = *entity;
+        if let Some(init) = self.find_literal_init(
+            entity,
+            kestrel_hir::Builtin::ExpressibleByIntegerLiteral,
+            "intLiteral",
+        ) {
+            self.ctx.register_name(init);
+            let callee = Callee::direct_with_args(init, vec![], None);
+            return self.emit_init_literal_call(callee, vec![raw], int64_ty);
+        }
+        raw
+    }
+
+    /// Emit `array.matchGet(index)` where `raw_index` is a raw `lang.i64`.
+    /// The compiler guarantees `0 <= index < matchLength()`, so the conformer
+    /// skips bounds checks. Returns the (owned) element.
+    fn emit_array_match_get(
+        &mut self,
+        array: ValueId,
+        array_ty: TyId,
+        raw_index: ValueId,
+    ) -> ValueId {
+        let Some(proto) = self.array_matchable_protocol() else {
+            return raw_index;
+        };
+        let int64_ty = self.array_match_int64_ty();
+        let index = self.emit_int64_wrap(raw_index, int64_ty);
+        let elem_ty = self.array_element_ty(array_ty);
+        self.emit_array_matchable_call(
+            proto,
+            kestrel_hir::Builtin::ArrayMatchableMatchGet,
+            array,
+            array_ty,
+            vec![index],
+            elem_ty,
+        )
+    }
+
+    /// Raw `lang.i64` index of a suffix element `offset` positions from the
+    /// end: `matchLength() - offset` (offset is 1-based, 1 = last).
+    fn emit_array_index_from_end(
+        &mut self,
+        array: ValueId,
+        array_ty: TyId,
+        offset: usize,
+    ) -> ValueId {
+        let int64_ty = self.array_match_int64_ty();
+        let len = self.emit_array_match_length(array, array_ty);
+        let (raw_field, raw_ty) = self.resolve_struct_field(int64_ty, "raw");
+        let raw_len = self.emit_struct_extract(len, raw_field, raw_ty);
+        let off_lit = self.emit_literal(Immediate::i64(offset as i128));
+        self.emit_op2(
+            Op::Sub(IntBits::I64, Signedness::Signed),
+            raw_len,
+            off_lit,
+            raw_ty,
+        )
+    }
+
+    /// Emit `array.matchSlice(prefix, matchLength() - suffix)` — the rest
+    /// slice bound by `..rest`. Returns an `ArraySlice[Element]`. The compiler
+    /// guarantees `0 <= from <= to <= matchLength()`.
+    fn emit_array_match_slice(
+        &mut self,
+        array: ValueId,
+        array_ty: TyId,
+        prefix_len: usize,
+        suffix_len: usize,
+    ) -> ValueId {
+        let Some(proto) = self.array_matchable_protocol() else {
+            return array;
+        };
+        let int64_ty = self.array_match_int64_ty();
+        let from_raw = self.emit_literal(Immediate::i64(prefix_len as i128));
+        let from = self.emit_int64_wrap(from_raw, int64_ty);
+        // `to = matchLength() - suffix_len` (the slice ends before the fixed
+        // suffix elements; `suffix_len == 0` gives the whole tail).
+        let to_raw = self.emit_array_index_from_end(array, array_ty, suffix_len);
+        let to = self.emit_int64_wrap(to_raw, int64_ty);
+        let elem_ty = self.array_element_ty(array_ty);
+        let result_ty = self
+            .ctx
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::SliceStruct,
+                root: self.ctx.root,
+            })
+            .map(|e| self.ctx.module.ty_arena.named(e, vec![elem_ty]))
+            .unwrap_or(array_ty);
+        self.emit_array_matchable_call(
+            proto,
+            kestrel_hir::Builtin::ArrayMatchableMatchSlice,
+            array,
+            array_ty,
+            vec![from, to],
+            result_ty,
+        )
+    }
+
     /// Emit an `EnumPayload` instruction to extract a field from an enum
     /// variant's payload.
     pub fn emit_enum_payload(
@@ -1103,6 +2079,22 @@ impl OssaBodyCtx<'_, '_> {
         field: FieldIdx,
         result_ty: TyId,
     ) -> ValueId {
+        // Stage 2b ref slot: extraction LOADS the stored address — the
+        // result IS the ref (@guaranteed pointee, rooted at the aggregate's
+        // root, borrowing nothing: the loaded pointer doesn't depend on the
+        // aggregate staying alive). Never copy through the slot — that
+        // would duplicate the POINTEE.
+        if let MirTy::Ref { pointee, .. } = self.ctx.module.ty_arena.get(result_ty) {
+            let pointee = *pointee;
+            return self.extract_ref_slot(operand, pointee, |s, result, view| {
+                s.push_inst(kestrel_mir::inst::InstKind::EnumPayload {
+                    result,
+                    operand: view,
+                    variant,
+                    field,
+                });
+            });
+        }
         if self.body.value(operand).ownership == Ownership::Guaranteed {
             let result = self.alloc_guaranteed(result_ty, operand);
             self.push_inst(kestrel_mir::inst::InstKind::EnumPayload {
@@ -1263,7 +2255,14 @@ impl OssaBodyCtx<'_, '_> {
 }
 
 /// Map a decision-tree Constructor to an OSSA SwitchCase.
-fn constructor_to_switch_case(bctx: &mut OssaBodyCtx, ctor: &Constructor) -> SwitchCase {
+/// `domain` is the switched integer type's width and signedness (`None` for
+/// a non-integer switch): bounds become its raw bits, compared accordingly.
+fn constructor_to_switch_case(
+    bctx: &mut OssaBodyCtx,
+    ctor: &Constructor,
+    domain: Option<IntDomain>,
+) -> SwitchCase {
+    let signed = domain.is_none_or(|d| d.signed);
     match ctor {
         Constructor::True => SwitchCase::Bool(true),
         Constructor::False => SwitchCase::Bool(false),
@@ -1291,21 +2290,49 @@ fn constructor_to_switch_case(bctx: &mut OssaBodyCtx, ctor: &Constructor) -> Swi
                 });
             SwitchCase::Variant(idx)
         },
-        Constructor::IntLiteral(v) => SwitchCase::IntLiteral(*v),
+        // Values are within the type's domain (E121 rejects the rest), so
+        // the `as i64` keeps exactly the type's raw bits.
+        Constructor::IntLiteral(v) => SwitchCase::IntLiteral(*v as i64),
+        // Keep open ends as `None` — they must be left untested rather than
+        // filled with a sentinel that truncates under the switch discriminant
+        // width (#186).
         Constructor::IntRange { start, end } => SwitchCase::IntRange {
-            start: start.unwrap_or(i64::MIN),
-            end: end.unwrap_or(i64::MAX),
+            start: start.map(|v| v as i64),
+            end: end.map(|v| v as i64),
+            signed,
         },
         Constructor::CharLiteral(c) => SwitchCase::CharLiteral(*c as u32),
         Constructor::CharRange { start, end } => SwitchCase::CharRange {
-            start: start.map(|c| c as u32).unwrap_or(0),
-            end: end.map(|c| c as u32).unwrap_or(u32::MAX),
+            start: start.map(|c| c as u32),
+            end: end.map(|c| c as u32),
+        },
+        // An array pattern dispatches on `matchLength()` (the switch
+        // discriminant is the length, see `array_length_discriminant`). A
+        // fixed-length pattern (`[a, b]`) needs an EXACT length; a
+        // rest-bearing one (`[a, ..]`) matches any length `>= prefix+suffix`.
+        // Source-ordered arms + the codegen's first-match chain make an exact
+        // case correctly shadow an overlapping `>=` case (e.g. `[a]` before
+        // `[a, ..]`).
+        Constructor::Array {
+            prefix_len,
+            suffix_len,
+            has_rest,
+        } => {
+            let min = (prefix_len + suffix_len) as i64;
+            if *has_rest {
+                SwitchCase::IntRange {
+                    start: Some(min),
+                    end: None,
+                    signed: true,
+                }
+            } else {
+                SwitchCase::IntLiteral(min)
+            }
         },
         Constructor::Wildcard
         | Constructor::Tuple { .. }
         | Constructor::Struct { .. }
         | Constructor::Unit
-        | Constructor::Array { .. }
         | Constructor::NonExhaustive
         | Constructor::Missing
         | Constructor::StringLiteral(_) => SwitchCase::Wildcard,

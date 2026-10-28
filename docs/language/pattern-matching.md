@@ -487,38 +487,26 @@ match opt {
 
 ## Errors
 
+Pattern diagnostics are the **E300–E316** family. The authoritative table —
+message text, severity and worked examples — is
+[`docs/error-codes.md`](../error-codes.md#e300e316--patterns--exhaustiveness);
+it is checked against the analyzer registry, so it cannot drift from what the
+compiler actually emits.
+
+The ones you are most likely to meet:
+
 | Code | Description |
 |------|-------------|
-| E0501 | Non-exhaustive match - missing pattern cases |
-| E0502 | Refutable pattern in irrefutable context (use `if let` or `guard let`) |
-| E0503 | Pattern type mismatch |
-| E0504 | Inconsistent bindings in or-pattern |
-| E0505 | Unknown enum case in pattern |
-| E0506 | Missing associated value label |
-| E0507 | Wrong associated value label |
-| W0508 | Unreachable match arm |
-| W0509 | Irrefutable pattern in `if let` (use plain `let` instead) |
-| E0510 | Duplicate binding in pattern |
-| E0511 | Inconsistent mutability in or-pattern |
-| E0512 | Guard condition must be Bool |
-| E0513 | Wrong number of elements in tuple pattern |
-| E0514 | Wrong number of associated values in enum pattern |
-| E0515 | Guard-let else block must diverge |
-| W0516 | Unused binding in pattern (use `_` or `_name` prefix) |
-| E0517 | Empty match on non-Never type |
-| W0518 | Binding name matches enum case (did you mean `.Case`?) |
-| E0519 | Invalid @-pattern (left side must be a binding) |
-| E0520 | Multiple rest patterns in tuple |
-| E0521 | Invalid range pattern bounds (lower > upper) |
-| E0522 | Range pattern type mismatch |
-| E0523 | Range pattern on unsupported type (only Int and Char) |
-| E0524 | Float literal in pattern (use guard instead) |
-| E0525 | Private field in struct pattern |
-| E0526 | Unknown field in struct pattern |
-| E0527 | Missing fields in struct pattern (use `..` to ignore) |
-| E0528 | Multiple rest patterns in array |
-| W0529 | Overlapping range patterns |
-| W0530 | Duplicate pattern |
+| E300 | Refutable pattern in a `let` binding — use `if let` / `guard let` |
+| E304 | Empty `match` on an inhabited type |
+| E305 | Non-exhaustive `match` — the message lists the missing cases |
+| E306 *(warning)* | Unreachable pattern: an earlier arm already covers it |
+| E310 | Duplicate binding in one pattern |
+| E311 | Float literal in a pattern — match a range instead |
+| E312 | Unknown enum case in a pattern |
+| E313 | Wrong payload arity for an enum case |
+| E314 | Tuple pattern arity doesn't match the tuple type |
+| E315 | Inconsistent bindings across `|` alternatives |
 
 ## Grammar
 

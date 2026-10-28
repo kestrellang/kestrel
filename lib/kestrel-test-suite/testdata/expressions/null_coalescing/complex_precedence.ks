@@ -13,6 +13,6 @@ func main() -> lang.i64 {
     // = false or (true and true)
     // = false or true
     // = true
-    let _ = println(a ?? b or c ?? d and e);
+     println(a ?? b or c ?? d and e);
     0
 }

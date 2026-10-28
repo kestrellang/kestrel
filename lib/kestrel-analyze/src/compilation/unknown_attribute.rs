@@ -21,7 +21,7 @@
 
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use kestrel_ast_builder::Attributes;
 use kestrel_hecs::Entity;
 
@@ -33,7 +33,7 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 }];
 
 /// Attributes the compiler recognizes. Keep in sync with the consumers in
-/// `kestrel-mir-lower` (`@extern`, `@fileconstant`, `@main`), `kestrel-name-res`
+/// `kestrel-mir-lower` (`@extern`, `@fileconstant`, `@main`, `@observabledrop`), `kestrel-name-res`
 /// (`@builtin`), `kestrel-analyze/decl/extern_ffi_safe.rs` (`@extern`),
 /// `kestrel-analyze/compilation/entry_point.rs` (`@main`), and
 /// `kestrel-compiler-driver` / frontmatter (`@platform`). `@dummy` is a
@@ -45,14 +45,15 @@ const KNOWN_ATTRIBUTES: &[&str] = &[
     "extern",
     "fileconstant",
     "main",
+    "observabledrop",
     "platform",
 ];
 
 pub struct UnknownAttributeAnalyzer;
 
 impl Describe for UnknownAttributeAnalyzer {
-    fn id(&self) -> &'static str {
-        "unknown_attribute"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::UnknownAttribute
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

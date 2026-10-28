@@ -12,12 +12,80 @@ use kestrel_span::Span;
 
 use crate::ty::TyVar;
 
+/// How a `Conforms` obligation arose — decides what a REF type judges
+/// (stage 2b). An `Expr` obligation (a protocol-dispatched USE of a value:
+/// receiver bounds, operator protocols, literal protocols) keeps the
+/// transparent-place rule: a `&T` peels and the POINTEE is judged. A
+/// `TypeArg` obligation (where-clause bounds, formation wellformedness,
+/// alias bounds — positions whose success instantiates WITNESSES at the
+/// type) must judge the ref ITSELF: refs satisfy only Copyable (bit-copy)
+/// until 2d builds real ref-Item witnesses. Default `Expr`: a missed site
+/// fails toward today's behavior, never toward breaking place dispatch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConformsOrigin {
+    Expr,
+    TypeArg,
+}
+
+/// Which associated type an `Associated` constraint projects (G29).
+///
+/// `Entity` is the associated-type declaration the producer already holds (a
+/// where-clause subject, an `AssocProjection`, a protocol's own child); the
+/// solver looks up **that** requirement, so two protocols that both declare
+/// `Out` cannot be confused. `Name` is only for producers that genuinely start
+/// from a spelling with no declaration in hand (array/dictionary literals,
+/// `Indirection.Target`, `ArrayMatchable.Element`).
+///
+/// `Conformance` is `Entity` with the protocol's args known: `Self.Output`
+/// lowered from a requirement of `Subtractable[Other]` while `Other` is
+/// bound. A type that conforms to the protocol more than once
+/// (`Subtractable[Meters]` + `Subtractable[Stamp]`) reads the binding from the
+/// conformance those args select, not whichever extension comes first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssocKey {
+    Entity(Entity),
+    Name(String),
+    Conformance {
+        assoc: Entity,
+        protocol_args: Vec<TyVar>,
+    },
+}
+
+/// Why a type was expected at a check — shown on a type mismatch as
+/// "expected because of …", pointing at the thing that set the expectation
+/// (bidi design §10, P0d). Carried by `Equal` / `Coerce` / `EqualDecayed` and
+/// attached to the `TypeMismatch` their solving produces.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub enum Reason {
+    /// No user-facing cause (internal plumbing constraints).
+    #[default]
+    Unspecified,
+    /// A type annotation, e.g. `let x: T = …`.
+    Annotation(Span),
+    /// The enclosing function's declared return type.
+    Return(Span),
+    /// Parameter `index` (0-based) of the callee; `decl` is the parameter's
+    /// declared type, when the declaration is known.
+    Param { index: usize, decl: Option<Span> },
+    /// The first branch of an `if` / `match`, which fixed the result type.
+    FirstArm(Span),
+    /// The first element of an array literal.
+    Element(Span),
+    /// The target of an assignment.
+    Assign(Span),
+}
+
 /// A type constraint emitted during constraint generation.
 #[derive(Clone, Debug)]
 pub enum Constraint {
     /// `a = b` — structural type equality.
     /// Used where types must be identical: if/match branches, array elements.
-    Equal { a: TyVar, b: TyVar, span: Span },
+    Equal {
+        a: TyVar,
+        b: TyVar,
+        span: Span,
+        reason: Reason,
+    },
 
     /// `from → to` — value flows from source to target.
     /// Tries Equal first; on failure, falls back to promotion (FromValue).
@@ -25,6 +93,54 @@ pub enum Constraint {
     Coerce {
         from: TyVar,
         to: TyVar,
+        expr: HirExprId,
+        span: Span,
+        reason: Reason,
+    },
+
+    /// `&inner → Ref { pointee }` — a borrow expression's pointee
+    /// (stage 1.5 named ref bindings). The Borrow expr's own TyVar is
+    /// allocated as a structurally-resolved `Ref { pointee }` at
+    /// generation time (order-independence: later reads of the binding
+    /// always see a resolved Ref slot); this constraint fills the
+    /// pointee once `inner` resolves — a ref inner re-borrows (pointee
+    /// ≡ inner's pointee), a value inner borrows the place (pointee ≡
+    /// inner). Mutability legality is analyze's job, not typing's.
+    BorrowPointee {
+        inner: TyVar,
+        pointee: TyVar,
+        span: Span,
+    },
+
+    /// `value ⇒ target` — Equal with the ref-decay dimension (stage 2b):
+    /// a REF-typed value unifies ref-to-ref when the target is a ref
+    /// (annotated ref slots, `-> &T` arm positions), decays to its POINTEE
+    /// when the target is a non-ref, and DEFERS while the target is
+    /// unresolved (an annotation may be about to pin it; targets nothing
+    /// pins take the decay in `apply_ref_decay_defaults`). Non-ref values
+    /// are plain Equal — no promotion, no other coercions. Used at
+    /// if/match arm-result equates and tuple-literal elements, replacing
+    /// the eager generation-time peel (which pattern-payload ref bindings
+    /// resolve too late for, and which annotations could never override).
+    EqualDecayed {
+        value: TyVar,
+        target: TyVar,
+        span: Span,
+        reason: Reason,
+    },
+
+    /// `value → local target` — an assignment whose target is a LOCAL read.
+    /// A ref-typed target is STORE-THROUGH: the RHS coerces to the POINTEE
+    /// (`r = v` on a `&mutating` binding). A non-ref target is a plain
+    /// Coerce. An UNRESOLVED target DEFERS: a pattern-payload ref binding
+    /// (`if let .Some(w) = call()`) resolves only when the deferred
+    /// ImplicitPat fires, and an eager Coerce would pin `w` from the RHS
+    /// literal first — the late payload equate then collided ("expected
+    /// Int64 got &mutating Int64"). Mutability legality is analyze's job (E200/E208), not
+    /// typing's.
+    AssignTarget {
+        value: TyVar,
+        target: TyVar,
         expr: HirExprId,
         span: Span,
     },
@@ -40,13 +156,22 @@ pub enum Constraint {
         /// constraints so cascading Member/ImplicitMember constraints inside
         /// the desugared subtree see an Error receiver and absorb silently.
         poison_ty_on_failure: bool,
+        /// What the conformance judges when `ty` is a ref — see
+        /// `ConformsOrigin`.
+        origin: ConformsOrigin,
+        /// The protocol's type arguments this obligation requires
+        /// (`Int8: Convertible[?From]` from a call through `init(from:)`).
+        /// Empty = only the protocol entity is checked, with args (if any)
+        /// taken from `witness_protocol_args`. Carried on the constraint so
+        /// two calls on one receiver with different args stay distinct.
+        protocol_args: Vec<TyVar>,
     },
 
     /// `Container.Name → result` — associated type projection.
     /// Deferred until container is concrete.
     Associated {
         container: TyVar,
-        name: String,
+        key: AssocKey,
         result: TyVar,
         span: Span,
     },
@@ -115,6 +240,8 @@ pub enum Constraint {
         name: String,
         /// TyVars for each sub-pattern binding (one per payload field).
         arg_tys: Vec<TyVar>,
+        /// Each sub-pattern's label (`.A(x: a)`), checked against the case.
+        labels: Vec<Option<String>>,
         span: Span,
     },
 
@@ -152,6 +279,18 @@ pub enum Constraint {
         span: Span,
     },
 
+    /// A `for` loop's iterator source. Deferred until `iterable` resolves:
+    /// an `Iterator` is the loop's iterator itself (`result = iterable`,
+    /// recorded in `direct_iterators`); anything else must be `Iterable` and
+    /// the loop calls its `iter()` (`protocol`, the Iterable builtin).
+    ForLoopIterator {
+        iterable: TyVar,
+        result: TyVar,
+        protocol: Entity,
+        expr: HirExprId,
+        span: Span,
+    },
+
     /// Links a string interpolation's result type to its accumulator type.
     /// Deferred until result_tv is concrete, then resolves the accumulator
     /// via `ExpressibleByStringInterpolation::Interpolation`.
@@ -160,6 +299,29 @@ pub enum Constraint {
         acc_tv: TyVar,
         span: Span,
     },
+
+    /// A member was committed while its applicability was still `Unknown`
+    /// (bidi design §5.1 step 6): the receiver had an open var, so the
+    /// extension's where clauses (or the protocol conformance it was reached
+    /// through) could not be decided yet. Re-evaluated through the entailment
+    /// kernel as the receiver resolves; `Fails` is reported as the lookup
+    /// failure it stands for ("no member"), never permitted (N1).
+    Applicable {
+        receiver: TyVar,
+        source: ApplicableSource,
+        name: String,
+        is_call: bool,
+        span: Span,
+    },
+}
+
+/// What a tagged member commitment still has to prove.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplicableSource {
+    /// The extension that declared the member.
+    Extension(Entity),
+    /// The protocol the member was resolved through.
+    Protocol(Entity),
 }
 
 /// Argument in a call: optional label + type variable + source expression.

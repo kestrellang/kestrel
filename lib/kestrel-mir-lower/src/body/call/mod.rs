@@ -14,7 +14,7 @@ use kestrel_mir::{
 };
 
 use super::OssaBodyCtx;
-use crate::ty::lower_type;
+use crate::ty::{lower_resolved_ty, lower_type};
 
 impl OssaBodyCtx<'_, '_> {
     pub fn lower_call_expr(
@@ -56,6 +56,25 @@ impl OssaBodyCtx<'_, '_> {
             receiver_ty = crate::ty::build_self_type(self.ctx, entity);
         }
 
+        // `escapingClosure.clone()` — the SHARE operation on a boxed
+        // environment. There is no entity to resolve (a function type has no
+        // nominal), so the solver answers the requirement's shape directly and
+        // this emits the same `CopyValue` an implicit copy does: post-mono
+        // expand turns it into the erased retain (`mono/expand.rs`).
+        // `is_shared`, not `is_boxed`: only a shared environment has a share
+        // operation. A `consuming` closure is `not Copyable` and exposes no
+        // `clone()` at all.
+        if method_name == "clone"
+            && args.is_empty()
+            && matches!(
+                self.ctx.module.ty_arena.get(receiver_ty),
+                MirTy::FuncThick { kind, .. } if kind.is_shared()
+            )
+        {
+            let recv = self.lower_expr_for_borrow(receiver_expr);
+            return self.emit_copy_value(recv);
+        }
+
         let resolved_entity = self
             .typed
             .as_ref()
@@ -67,6 +86,20 @@ impl OssaBodyCtx<'_, '_> {
         let Some(resolved) = resolved_entity else {
             return self
                 .emit_lowering_gap(expr_id, format!("could not resolve method `{method_name}`"));
+        };
+
+        // Stage 1.5 read-provider routing (method-call-shaped subscript
+        // reads, incl. field-subscripts): a subscript with a `ref { … }`
+        // accessor serves READS through the accessor child.
+        let resolved = if matches!(
+            self.ctx.world.get::<NodeKind>(resolved),
+            Some(NodeKind::Subscript)
+        ) {
+            self.ctx
+                .find_ref_accessor_child(resolved, false)
+                .unwrap_or(resolved)
+        } else {
+            resolved
         };
 
         // Field-stored thick/thin function: lower as field access + indirect call.
@@ -123,7 +156,20 @@ impl OssaBodyCtx<'_, '_> {
                 MirTy::FuncThin { .. } => Callee::Thin(receiver_val),
                 _ => Callee::Thick(receiver_val),
             };
-            return self.emit_call_returning(callee, call_args, result_ty);
+            let result = self.emit_call_returning(callee, call_args, result_ty);
+            // Lockstep twin of `lower_indirect_call`: calling a `consuming`
+            // value CONSUMES it, so this is its last owner — release the unique
+            // environment here (the body's prologue already took the payload
+            // out, so `destroy()` only reclaims the block).
+            if matches!(
+                self.ctx.module.ty_arena.get(receiver_ty),
+                MirTy::FuncThick { kind, .. } if kind.is_boxed() && !kind.is_shared()
+            ) && self.body.value(receiver_val).ownership == Ownership::Owned
+            {
+                let receiver_val = self.resolve_value(receiver_val);
+                self.emit_destroy_value(receiver_val);
+            }
+            return result;
         }
 
         // Collect conventions early (needed for arg lowering), but defer
@@ -141,16 +187,44 @@ impl OssaBodyCtx<'_, '_> {
             (convs, None)
         };
 
+        // Writebacks pushed by THIS call's arg prep (accessor-place receiver,
+        // `x(i).mutate()`) drain right after the call — watermark-scoped.
+        let wb_mark = self.pending_writebacks.len();
         let mut call_args = if is_static {
-            self.lower_call_args_bound(args, resolved, &conventions, 0)
+            self.lower_call_args_bound(args, resolved, &conventions, 0, &method_type_args)
         } else {
             let recv_conv = conventions
                 .first()
                 .copied()
                 .unwrap_or(ParamConvention::Borrow);
-            let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
+            // Before the receiver opens its borrow (H12: `x.mutate({ x })`).
+            let arg_convs = self.explicit_arg_conventions(args, Some(resolved), &conventions, 1);
+            self.prepare_closure_arg_snapshots(Some((receiver_expr, recv_conv)), args, &arg_convs);
+            // Indirection method peel: `wrapper.method()` where the wrapper has
+            // no `method` → dispatch to the pointee, reached via
+            // `pointeeRef()` / `pointeeMutRef()`. A mutating method (recv_conv
+            // == MutBorrow) peels through the mutating accessor. `receiver_ty`
+            // is retargeted to the pointee so the callee's type args resolve
+            // against the pointee, not the wrapper.
+            let receiver_arg = if let Some(peels) = self.indirection_peels_of(expr_id) {
+                let mutating = recv_conv == ParamConvention::MutBorrow;
+                let view = self.lower_indirection_chain(receiver_expr, &peels, mutating);
+                receiver_ty = lower_resolved_ty(self.ctx, &peels.last().unwrap().target);
+                CallArg {
+                    value: view,
+                    convention: recv_conv,
+                }
+            } else {
+                self.prepare_call_arg_for_expr(receiver_expr, recv_conv)
+            };
             let mut a = vec![receiver_arg];
-            a.extend(self.lower_call_args_bound(args, resolved, &conventions, 1));
+            a.extend(self.lower_call_args_bound(
+                args,
+                resolved,
+                &conventions,
+                1,
+                &method_type_args,
+            ));
             a
         };
 
@@ -193,7 +267,129 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        self.emit_call_returning(callee, call_args, result_ty)
+        let result = self.emit_call_returning(callee, call_args, result_ty);
+        self.drain_writebacks(wb_mark);
+
+        // Failable-init delegation (#144): `self.init(...)` to a failable/throwing
+        // init returns `Optional[()]` / `Result[(),E]`. Discarding it and falling
+        // through to the implicit `.Some(())`/`.Ok(())` tail makes the outer init
+        // claim success even when the inner failed (which already unwound the
+        // partially-built self) — a stale read + double-drop. Branch on the
+        // result: failure ⇒ propagate as the outer init's failure exit; success
+        // ⇒ continue (the inner fully initialized self). Only matching effects
+        // are handled here (Failable→Failable, Throwing→Throwing); the result
+        // type then equals the outer init's return type.
+        if method_name == "init"
+            && self.is_delegation_self_receiver(receiver_expr)
+            && let Some(inner_effect) = self.ctx.world.get::<InitEffect>(resolved).cloned()
+            && self
+                .ctx
+                .module
+                .functions
+                .get(&self.func_entity)
+                .map(|f| f.ret)
+                == Some(result_ty)
+        {
+            return self.emit_delegation_propagation(result, result_ty, inner_effect);
+        }
+
+        result
+    }
+
+    /// True when `receiver_expr` is exactly the enclosing init's `self` (the
+    /// first body param) — i.e. a genuine `self.init(...)` delegation, not a
+    /// same-named call on a field/local (`self.field.init(...)`, which lowers to
+    /// a `Field` receiver, or `x.init(...)`, a different local). Guards
+    /// `emit_delegation_propagation` against misfiring on non-delegations.
+    fn is_delegation_self_receiver(&self, receiver_expr: HirExprId) -> bool {
+        matches!(
+            &self.hir.exprs[receiver_expr],
+            HirExpr::Local(local, _) if self.hir.params.first() == Some(local)
+        )
+    }
+
+    /// Lower the failure-propagating branch of a failable-init delegation (#144).
+    /// `result` is the inner init's `Optional[()]` / `Result[(),E]` value; on the
+    /// failure variant it already IS the outer init's failure value (same type),
+    /// so the failure arm returns it after dropping any self fields the OUTER
+    /// initialized before delegating (the inner already unwound its own). The
+    /// success arm continues the body with `result` (`.Some`/`.Ok`).
+    fn emit_delegation_propagation(
+        &mut self,
+        result: ValueId,
+        result_ty: TyId,
+        effect: InitEffect,
+    ) -> ValueId {
+        let enum_entity = match self.ctx.module.ty_arena.get(result_ty) {
+            MirTy::Named { entity, .. } => *entity,
+            // Not the expected failable enum — leave the result as-is (defensive;
+            // shouldn't occur for a resolved failable delegation).
+            _ => return result,
+        };
+        let (success_name, failure_name) = match effect {
+            InitEffect::Failable => ("Some", "None"),
+            InitEffect::Throwing => ("Ok", "Err"),
+        };
+        let success_idx = self
+            .ctx
+            .resolve_variant_idx(enum_entity, success_name)
+            .unwrap_or(VariantIdx::new(0));
+        let failure_idx = self
+            .ctx
+            .resolve_variant_idx(enum_entity, failure_name)
+            .unwrap_or(VariantIdx::new(1));
+
+        let disc = self.emit_discriminant(result);
+
+        // Branch region — thread all live owned values (incl. `result`) through
+        // both arms. No merge: the failure arm returns, the success arm becomes
+        // the continuation block.
+        let saved_tracker = self.tracker.clone();
+        self.tracker = super::LiveTracker::from_live(&self.all_live_tracked());
+        let live_vals = self.tracker.values();
+        let descs = self.tracker.descs();
+        let (success_block, success_params) = self.new_block_with_params(&descs);
+        let (failure_block, failure_params) = self.new_block_with_params(&descs);
+
+        self.emit_switch(
+            disc,
+            vec![
+                SwitchArm {
+                    pattern: SwitchCase::Variant(success_idx),
+                    target: success_block,
+                    args: live_vals.clone(),
+                },
+                SwitchArm {
+                    pattern: SwitchCase::Variant(failure_idx),
+                    target: failure_block,
+                    args: live_vals.clone(),
+                },
+            ],
+        );
+
+        let snapshot = self.snapshot_scope();
+        let result_pos = live_vals.iter().position(|&v| v == result);
+
+        // -- Failure: `result` is the failure value; mirror a failure `return`. --
+        self.switch_to(failure_block);
+        self.rebind_scope_values(&live_vals, &failure_params);
+        let rebound_fail = result_pos.map(|p| failure_params[p]).unwrap_or(result);
+        let ret_val = self.prepare_return_value(rebound_fail);
+        let ret_val = self.emit_init_partial_drops(ret_val);
+        self.drain_deferred_borrows();
+        self.destroy_scopes_to_depth(0, &[ret_val]);
+        // A guarded destroy in the exit renames threaded values.
+        let ret_val = self.resolve_value(ret_val);
+        self.emit_ret(ret_val);
+
+        // -- Success: continue the body with `result` (.Some/.Ok). --
+        self.restore_scope(&snapshot);
+        self.switch_to(success_block);
+        self.rebind_scope_values(&live_vals, &success_params);
+        let rebound_ok = result_pos.map(|p| success_params[p]).unwrap_or(result);
+        self.tracker = saved_tracker;
+        self.tracker.rebind(&live_vals, &success_params);
+        rebound_ok
     }
 
     fn rewrite_field_subscript(
@@ -314,6 +510,16 @@ impl OssaBodyCtx<'_, '_> {
         _hir_type_args: Option<&[HirTy]>,
         args: &[HirCallArg],
     ) -> ValueId {
+        // A `for` loop over an Iterator: no `iter()` call — the iterable is
+        // consumed as the loop's iterator (inference decided; the move checker
+        // records the same consume).
+        if self
+            .typed
+            .as_ref()
+            .is_some_and(|t| t.direct_iterators.contains(&expr_id))
+        {
+            return self.lower_expr(receiver_expr);
+        }
         let receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
 
@@ -324,16 +530,30 @@ impl OssaBodyCtx<'_, '_> {
 
         let conventions = self.collect_witness_conventions(protocol, &method_key);
 
+        // Writebacks pushed by THIS call's arg prep (accessor-place receiver,
+        // `x(i) += v`) drain right after the call — watermark-scoped so a
+        // nested call in a sibling arg can't steal them.
+        let wb_mark = self.pending_writebacks.len();
         let recv_conv = conventions
             .first()
             .copied()
             .unwrap_or(ParamConvention::Borrow);
+        // Before the receiver opens its borrow (H12: `x.mutate({ x })`).
+        let method_entity = self.find_protocol_method_entity(protocol, &method_key);
+        let arg_convs = self.explicit_arg_conventions(args, method_entity, &conventions, 1);
+        self.prepare_closure_arg_snapshots(Some((receiver_expr, recv_conv)), args, &arg_convs);
         let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
         let mut call_args = vec![receiver_arg];
         // Bind+fill against the concrete method entity when known (so defaults can
         // be skipped anywhere); otherwise fall back to positional source order.
-        if let Some(method_entity) = self.find_protocol_method_entity(protocol, &method_key) {
-            call_args.extend(self.lower_call_args_bound(args, method_entity, &conventions, 1));
+        if let Some(method_entity) = method_entity {
+            call_args.extend(self.lower_call_args_bound(
+                args,
+                method_entity,
+                &conventions,
+                1,
+                &method_type_args,
+            ));
         } else {
             call_args.extend(self.lower_call_args(args, &conventions, 1));
         }
@@ -345,7 +565,9 @@ impl OssaBodyCtx<'_, '_> {
             method_type_args,
         };
 
-        self.emit_call_returning(callee, call_args, result_ty)
+        let result = self.emit_call_returning(callee, call_args, result_ty);
+        self.drain_writebacks(wb_mark);
+        result
     }
 
     fn emit_resolved_call(
@@ -356,6 +578,18 @@ impl OssaBodyCtx<'_, '_> {
     ) -> ValueId {
         let result_ty = self.resolve_expr_type(expr_id);
 
+        // When the callee is ITSELF a call/method-call (`s.mk()()`, `fs(0)()`,
+        // `p(0)()`), its result is a closure VALUE to be invoked indirectly. The
+        // resolution recorded on that inner call is the INNER call's own callee
+        // (the method `mk`, the `Slice.subscript`, the user `subscript`), NOT the
+        // value the outer `()` calls — so the `callee_expr` resolution fallback
+        // below must skip it, or the outer call re-dispatches to the inner
+        // callee (#175 re-calls the method with the closure as self; #176
+        // emits a Slice/user subscript witness on the FuncThick) (#175/#176).
+        let callee_is_call = matches!(
+            &self.hir.exprs[callee_expr],
+            HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+        );
         let entity = if let Some(&resolved) = self
             .typed
             .as_ref()
@@ -365,6 +599,7 @@ impl OssaBodyCtx<'_, '_> {
         } else if let Some(&resolved) = self
             .typed
             .as_ref()
+            .filter(|_| !callee_is_call)
             .and_then(|t| t.resolutions.get(&callee_expr))
         {
             resolved
@@ -380,6 +615,22 @@ impl OssaBodyCtx<'_, '_> {
             }
         } else {
             return self.lower_indirect_call(expr_id, callee_expr, args);
+        };
+
+        // Stage 1.5 read-provider routing: a subscript with a `ref { … }`
+        // accessor serves READS through the accessor child (the parent may
+        // be bodyless for pure-ref subscripts). Write/RMW operations never
+        // reach this path — they route in the setter-assign / accessor-place
+        // lowerings.
+        let entity = if matches!(
+            self.ctx.world.get::<NodeKind>(entity),
+            Some(NodeKind::Subscript)
+        ) {
+            self.ctx
+                .find_ref_accessor_child(entity, false)
+                .unwrap_or(entity)
+        } else {
+            entity
         };
 
         self.ctx.register_name(entity);
@@ -421,6 +672,11 @@ impl OssaBodyCtx<'_, '_> {
             .get::<Callable>(entity)
             .is_some_and(|c| c.receiver.is_some());
 
+        // Copy the call's type args before they're moved into the callee — used
+        // to substitute the callee's type params into any inline-lowered default
+        // argument (#148).
+        let default_args = type_args.clone();
+
         // Resolve conventions and build callee before lowering args
         let (conventions, callee) = if let Some(protocol) = self.ctx.is_protocol_method(entity) {
             self.ctx.register_name(protocol);
@@ -428,6 +684,15 @@ impl OssaBodyCtx<'_, '_> {
             let convs = self.collect_witness_conventions(protocol, &key);
             let self_type = if key.name == "init" {
                 result_ty
+            } else if self.ctx.world.get::<Static>(entity).is_some() {
+                // `Self.staticReq()` inside a protocol-extension default body
+                // collapses to a bare `Def(requirement)` with no receiver
+                // expression, so the base type is lost. The witness self_type
+                // is the protocol's `Self` (a TypeParam that mono substitutes
+                // to the conformer) — NOT `resolve_expr_type(callee_expr)`,
+                // which yields the requirement's *function* type and leaves the
+                // witness unresolvable at mono (#146).
+                crate::ty::build_self_type(self.ctx, protocol)
             } else {
                 self.resolve_expr_type(callee_expr)
             };
@@ -453,8 +718,12 @@ impl OssaBodyCtx<'_, '_> {
             (convs, callee)
         };
 
+        // Writebacks pushed by THIS call's arg prep drain right after the
+        // call — watermark-scoped.
+        let wb_mark = self.pending_writebacks.len();
         let conv_offset = if has_receiver { 1 } else { 0 };
-        let mut call_args = self.lower_call_args_bound(args, entity, &conventions, conv_offset);
+        let mut call_args =
+            self.lower_call_args_bound(args, entity, &conventions, conv_offset, &default_args);
         if has_receiver {
             let recv_conv = conventions
                 .first()
@@ -465,7 +734,9 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        self.emit_call_returning(callee, call_args, result_ty)
+        let result = self.emit_call_returning(callee, call_args, result_ty);
+        self.drain_writebacks(wb_mark);
+        result
     }
 
     fn try_enum_construct(
@@ -511,16 +782,38 @@ impl OssaBodyCtx<'_, '_> {
 
     fn emit_struct_construct(
         &mut self,
-        _struct_entity: Entity,
+        struct_entity: Entity,
         args: &[HirCallArg],
         result_ty: TyId,
     ) -> ValueId {
+        // Bind labeled arguments by NAME. Position-only binding made any
+        // disagreement between the memberwise-init roster (type-infer) and the
+        // MIR layout a silent wrong-slot write — that was F3. An unknown label
+        // must ICE rather than fall back to position: falling back is precisely
+        // the behaviour that hid the divergence.
+        //
+        // A struct missing from `module.structs` never reached the items phase,
+        // so there is no roster to check against; those stay positional.
+        let known_struct = self.ctx.module.structs.contains_key(&struct_entity);
         let fields: Vec<(FieldIdx, ValueId)> = args
             .iter()
             .enumerate()
             .map(|(i, arg)| {
+                let idx = match (&arg.label, known_struct) {
+                    (Some(label), true) => self
+                        .ctx
+                        .resolve_field_idx(struct_entity, label)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "ICE: struct {struct_entity:?} has no field '{label}' \
+                                 (argument {i}); the memberwise-init roster and the MIR \
+                                 layout disagree"
+                            )
+                        }),
+                    _ => FieldIdx::new(i),
+                };
                 let val = self.lower_expr(arg.value);
-                (FieldIdx::new(i), val)
+                (idx, val)
             })
             .collect();
 
@@ -565,7 +858,9 @@ impl OssaBodyCtx<'_, '_> {
             value: self_addr,
             convention: ParamConvention::MutBorrow,
         }];
-        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1));
+        // Init defaults referencing the init's own type params (rare) aren't
+        // substituted here — pass no args (#148 covers the common free-fn case).
+        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1, &[]));
 
         self.emit_call_void(callee, call_args);
         let ownership = self.ownership_for(result_ty);
@@ -654,7 +949,7 @@ impl OssaBodyCtx<'_, '_> {
             value: self_addr,
             convention: ParamConvention::MutBorrow,
         }];
-        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1));
+        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1, &[]));
 
         // Call returns Optional[()] or Result[(), E]
         let init_ret = self.emit_call_returning(callee, call_args, init_ret_ty);
@@ -762,7 +1057,17 @@ impl OssaBodyCtx<'_, '_> {
         args: &[HirCallArg],
     ) -> ValueId {
         let callee_ty = self.resolve_expr_type(callee_expr);
-        let callee_val = self.lower_callee_value(callee_expr);
+        // A `consuming` closure's call CONSUMES the value: the one call owns
+        // the environment (docs/design/closures.md §"consuming"). The callee
+        // value is therefore MOVED out of its binding and released after the
+        // call — the release reclaims the unique block, whose payload the
+        // body's prologue already took out. A second call is E500 in the front
+        // end, so a consumed binding is never read again.
+        let consuming_callee = matches!(
+            self.ctx.module.ty_arena.get(callee_ty),
+            MirTy::FuncThick { kind, .. } if kind.is_boxed() && !kind.is_shared()
+        );
+        let (callee_val, callee_is_temp) = self.lower_callee_value(callee_expr, consuming_callee);
         let result_ty = self.resolve_expr_type(expr_id);
 
         // Read the callee's per-param conventions from its function type. Only a
@@ -796,7 +1101,31 @@ impl OssaBodyCtx<'_, '_> {
             _ => Callee::Thick(callee_val),
         };
 
-        self.emit_call_returning(callee, call_args, result_ty)
+        let result = self.emit_call_returning(callee, call_args, result_ty);
+
+        // A call READS its callee; for a BOXED closure the temp materialized
+        // above is a RETAINED handle. Release it here rather than at scope
+        // exit: otherwise the environment stays alive past its last real
+        // owner, and `f = makeThunk(2)` cannot observe the old environment's
+        // last release (docs/design/closures.md §"Copy and Drop"). View kinds
+        // are POD — the destroy expands to nothing.
+        //
+        // A `consuming` callee is released whether or not it was a temp: the
+        // CALL consumed it, so this is its last owner by definition. That also
+        // makes conversion 4 (`escaping` → `consuming`, plan D5) fall out
+        // without an adapter — the coerced value is one retained shared
+        // handle, and this release is the one that gives it back.
+        if (consuming_callee || callee_is_temp)
+            && self.body.value(callee_val).ownership == Ownership::Owned
+            && matches!(
+                self.ctx.module.ty_arena.get(callee_ty),
+                MirTy::FuncThick { kind, .. } if kind.is_boxed()
+            )
+        {
+            let callee_val = self.resolve_value(callee_val);
+            self.emit_destroy_value(callee_val);
+        }
+        result
     }
 
     /// Lower a call's callee to its value. A call reads (does not consume) its
@@ -804,17 +1133,41 @@ impl OssaBodyCtx<'_, '_> {
     /// once — is used directly rather than moved/copied. The callee value is
     /// not an OSSA operand of `Call`, so leaving it @owned and live is correct:
     /// it is dropped once at scope exit.
-    fn lower_callee_value(&mut self, callee_expr: HirExprId) -> ValueId {
-        if let HirExpr::Local(hir_local, _) = &self.hir.exprs[callee_expr]
-            && !self.is_var_local(hir_local)
-        {
-            return self.map_local(*hir_local);
+    ///
+    /// `consume` (a `consuming`-kind callee) inverts that: the call is the
+    /// value's one and only use, so an addressable binding is MOVED out of its
+    /// slot (`Take` + mark empty) instead of loaded. Loading would leave the
+    /// slot's scope-exit release live and free the environment twice.
+    ///
+    /// Returns `(value, is_temp)`; `is_temp` marks a value MATERIALIZED here
+    /// (a load out of an addressable binding, a field projection) rather than
+    /// an existing binding — only a temp may be released after the call.
+    fn lower_callee_value(&mut self, callee_expr: HirExprId, consume: bool) -> (ValueId, bool) {
+        if let HirExpr::Local(hir_local, _) = &self.hir.exprs[callee_expr] {
+            let hir_local = *hir_local;
+            if !self.is_var_local(&hir_local) {
+                return (self.map_local(hir_local), false);
+            }
+            if consume {
+                let addr = self.map_local(hir_local);
+                let addr = self.whole_slot_addr(addr);
+                let ty = self.resolve_expr_type(callee_expr);
+                let value = self.emit_take(addr, ty);
+                self.record_var_whole(hir_local, crate::body::VarInit::DefUninit);
+                return (value, true);
+            }
         }
-        self.lower_expr(callee_expr)
+        (self.lower_expr(callee_expr), true)
     }
 
     fn resolve_callee_entity_from_expr(&self, callee_expr: HirExprId) -> Option<Entity> {
-        if let Some(&resolved) = self
+        // A call/method-call callee_expr produces a closure VALUE — its
+        // resolution is the inner call's own callee, not an entity the outer
+        // call dispatches to. Don't surface it (mirrors emit_resolved_call).
+        if !matches!(
+            &self.hir.exprs[callee_expr],
+            HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+        ) && let Some(&resolved) = self
             .typed
             .as_ref()
             .and_then(|t| t.resolutions.get(&callee_expr))

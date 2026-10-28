@@ -9,17 +9,26 @@
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, DeclSpan, ExtensionTarget, NodeKind, TypeAnnotation, TypeParams,
+    Callable, Computed, DeclSpan, ExtensionTarget, Gettable, MutatingAccessor, NodeKind, Settable,
+    TypeAnnotation, TypeParams,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
+use kestrel_hir::Builtin;
 use kestrel_hir::ty::HirTy;
-use kestrel_name_res::{ExtensionTargetEntity, ResolveTypePath, TypeResolution};
+use kestrel_name_res::{ExtensionTargetEntity, ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_reporting::{Diagnostic, Label};
 use kestrel_span::Span;
 
 use crate::ctx::LowerCtx;
 
 // ===== Standalone type lowering =====
+
+thread_local! {
+    /// Trivial aliases currently being expanded by `lower_ast_type` (a
+    /// re-entry is a cycle). Pushes nest strictly; popped on unwind too.
+    static EXPANDING_ALIASES: std::cell::RefCell<Vec<Entity>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
 
 /// Lower an AstType to HirTy using name resolution.
 ///
@@ -45,6 +54,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                     } else {
                         ctx.accumulate(
                             Diagnostic::error()
+                                .with_code("E138")
                                 .with_message("'Self' is not valid in this scope")
                                 .with_labels(vec![Label::primary(span.file_id, span.range())]),
                         );
@@ -59,6 +69,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                         .join(".");
                     ctx.accumulate(
                         Diagnostic::error()
+                            .with_code("E476")
                             .with_message(format!("cannot find type '{type_name}' in this scope"))
                             .with_labels(vec![
                                 Label::primary(span.file_id, span.range())
@@ -88,6 +99,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                     }
                     ctx.accumulate(
                         Diagnostic::error()
+                            .with_code("E139")
                             .with_message(format!("'{type_name}' is not a type"))
                             .with_labels(labels),
                     );
@@ -105,6 +117,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
         },
 
         AstType::Function {
+            kind,
             params,
             param_conventions,
             return_type,
@@ -116,6 +129,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                 .collect();
             let lowered_ret = Box::new(lower_ast_type(ctx, owner, root, return_type));
             HirTy::Function {
+                kind: *kind,
                 params: lowered_params,
                 param_conventions: param_conventions.clone(),
                 ret: lowered_ret,
@@ -123,17 +137,32 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
             }
         },
 
-        // Sugar types → resolve standard library entity + Struct
-        AstType::Array(elem, span) => {
-            lower_sugar_type(ctx, owner, root, "Array", &[elem.as_ref()], span)
-        },
-        AstType::Optional(inner, span) => {
-            lower_sugar_type(ctx, owner, root, "Optional", &[inner.as_ref()], span)
-        },
+        // Sugar types → resolve standard library entity + Struct.
+        // The `Builtin` is the `@builtin(.XTypeOperator)` lang item that binds
+        // the syntax; the string is only a fallback for worlds without it.
+        AstType::Array(elem, span) => lower_sugar_type(
+            ctx,
+            owner,
+            root,
+            Builtin::ArrayTypeOperator,
+            "Array",
+            &[elem.as_ref()],
+            span,
+        ),
+        AstType::Optional(inner, span) => lower_sugar_type(
+            ctx,
+            owner,
+            root,
+            Builtin::OptionalTypeOperator,
+            "Optional",
+            &[inner.as_ref()],
+            span,
+        ),
         AstType::Dictionary(key, val, span) => lower_sugar_type(
             ctx,
             owner,
             root,
+            Builtin::DictionaryTypeOperator,
             "Dictionary",
             &[key.as_ref(), val.as_ref()],
             span,
@@ -142,6 +171,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
             ctx,
             owner,
             root,
+            Builtin::ResultTypeOperator,
             "Result",
             &[ok.as_ref(), err.as_ref()],
             span,
@@ -149,15 +179,59 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
         AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
         AstType::Never(span) => HirTy::Never(span.clone()),
         AstType::Inferred(span) => HirTy::Infer(span.clone()),
-        AstType::Some { bounds, span } => {
+        AstType::Some {
+            bounds,
+            negative,
+            span,
+        } => {
             let hir_bounds: Vec<HirTy> = bounds
                 .iter()
                 .map(|b| lower_ast_type(ctx, owner, root, b))
                 .collect();
+            // The only legal negative bound is `Copyable` (same rule as the
+            // E424 conformance-list check). Recovery keeps the flag set so a
+            // bad negative doesn't cascade into "underlier must be Copyable".
+            let not_copyable = match negative {
+                None => false,
+                Some(neg) => {
+                    if !negative_bound_is_copyable(ctx, owner, root, neg) {
+                        let neg_span = ast_type_span(neg);
+                        ctx.accumulate(
+                            Diagnostic::error()
+                                .with_code("E140")
+                                .with_message("negative bound on an opaque type must be 'Copyable'")
+                                .with_labels(vec![
+                                    Label::primary(neg_span.file_id, neg_span.range())
+                                        .with_message("only 'not Copyable' is supported here"),
+                                ])
+                                .with_notes(vec![
+                                    "`not` is only legal on builtin protocols with implicit \
+                                     conformance (e.g. `Copyable`)"
+                                        .into(),
+                                ]),
+                        );
+                    }
+                    true
+                },
+            };
             HirTy::Opaque {
                 bounds: hir_bounds,
+                not_copyable,
                 span: span.clone(),
             }
+        },
+
+        // Lowered structurally so the pointee still gets name resolution
+        // (and its diagnostics); the Ref itself is rejected and rewritten to
+        // Error by `reject_ref_types` at every lowering-query boundary.
+        AstType::Ref {
+            inner,
+            mutating,
+            span,
+        } => HirTy::Ref {
+            inner: Box::new(lower_ast_type(ctx, owner, root, inner)),
+            mutating: *mutating,
+            span: span.clone(),
         },
     }
 }
@@ -182,6 +256,10 @@ fn build_hir_ty_for_entity(
 
     // Type parameter: no args, no projection.
     if kind == Some(NodeKind::TypeParameter) {
+        if let Some(nested) = nested_type_capturing_param(ctx, owner, root, entity) {
+            report_outer_param_in_nested_type(ctx, nested, entity, segments, span);
+            return HirTy::Error(span.clone());
+        }
         return HirTy::Param(entity, span.clone());
     }
 
@@ -218,22 +296,7 @@ fn build_hir_ty_for_entity(
                     span: span.clone(),
                 };
             }
-            // Trivial (non-generic, bound-free) aliases with a concrete
-            // TypeAnnotation are eagerly expanded — avoids constraint bloat
-            // for `type Fd = Int32` style declarations.
-            if is_trivial_alias(ctx, entity)
-                && args.is_empty()
-                && let Some(ann) = ctx.get::<TypeAnnotation>(entity)
-            {
-                return lower_ast_type(ctx, owner, root, &ann.0);
-            }
-            // Non-associated aliases (parameterized or constrained) flow as
-            // AliasUse. The solver reduces concrete ones via Reduce.
-            HirTy::AliasUse {
-                entity,
-                args,
-                span: span.clone(),
-            }
+            expand_alias(ctx, root, entity, args, span)
         },
         Some(NodeKind::Enum) => HirTy::Enum {
             entity,
@@ -255,13 +318,110 @@ fn build_hir_ty_for_entity(
     }
 }
 
+/// A type-naming RHS that may itself BE a ref (stage 2d): an assoc-type
+/// binding (`type Item = &T`) or a where-clause equality RHS
+/// (`where I.Item = &Int64`). Keeps a top-level ref (mirror of the
+/// function-return carve) and walks everything else with the aggregate
+/// policy — bare refs in nested non-aggregate positions still reject.
+pub fn reject_ref_types_allowing_top_ref(ctx: &QueryContext<'_>, ty: HirTy) -> HirTy {
+    if let HirTy::Ref {
+        inner,
+        mutating,
+        span,
+    } = ty
+    {
+        let inner = reject_ref_types(ctx, *inner, RefPosition::Other, RefPolicy::AllowAggregate);
+        return HirTy::Ref {
+            inner: Box::new(inner),
+            mutating,
+            span,
+        };
+    }
+    reject_ref_types(ctx, ty, RefPosition::Other, RefPolicy::AllowAggregate)
+}
+
+/// True if the annotation is spelled literally `Self` (one bare segment, no
+/// args). Used to recognize params whose top-level ref came from Self
+/// SUBSTITUTION inside a ref-target extension rather than a written `&T`.
+fn is_bare_self_ast(ty: &AstType) -> bool {
+    matches!(
+        ty,
+        AstType::Named { segments, .. }
+            if segments.len() == 1
+                && segments[0].name == "Self"
+                && segments[0].type_args.is_empty()
+    )
+}
+
 /// True if an alias entity is trivial — has no type params, no protocol bounds,
 /// no where clause. These aliases can be safely expanded at HIR lowering.
+/// Expand a use of type alias `alias` with `args`: its definition, lowered in
+/// its own scope, with its type parameters replaced by `args`. This is the
+/// only place an alias name becomes a type, and `HirTy::Alias` cannot be
+/// built without the expansion, so no later stage ever sees an unexpanded
+/// alias. A bounded alias keeps its name and arguments in that wrapper for
+/// the bound check; an alias with no definition is an abstract associated
+/// type.
+fn expand_alias(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    alias: Entity,
+    args: Vec<HirTy>,
+    span: &Span,
+) -> HirTy {
+    let Some(ann) = ctx.get::<TypeAnnotation>(alias) else {
+        return HirTy::AbstractAssoc {
+            entity: alias,
+            span: span.clone(),
+        };
+    };
+    // A cyclic alias (`type A = B; type B = A`) would expand forever; the
+    // E447 analyzer reports it, so stop here.
+    if EXPANDING_ALIASES.with(|s| s.borrow().contains(&alias)) {
+        return HirTy::Error(span.clone());
+    }
+    EXPANDING_ALIASES.with(|s| s.borrow_mut().push(alias));
+    let _guard = kestrel_hecs::guard::OnDrop::new(|| {
+        EXPANDING_ALIASES.with(|s| {
+            s.borrow_mut().pop();
+        });
+    });
+    let definition = lower_ast_type(ctx, alias, root, &ann.0);
+    let params: Vec<Entity> = ctx
+        .get::<TypeParams>(alias)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let subs: Vec<(Entity, HirTy)> = params.iter().copied().zip(args.iter().cloned()).collect();
+    let expanded = definition.substitute_params(&subs);
+    // Only a bounded alias keeps a wrapper (inference checks the bounds);
+    // any other is exactly its expansion, so code that reads a type's shape
+    // (`-> Item` with `type Item = &T` is a reference return) sees it as is.
+    if !alias_has_bounds(ctx, alias) {
+        return expanded;
+    }
+    HirTy::Alias {
+        alias,
+        args,
+        expanded: Box::new(expanded),
+        span: span.clone(),
+    }
+}
+
+/// Whether an alias states bounds (`type Keyed[K] where K: Equatable = ...`
+/// or a conformance list), which inference must check at every use.
+fn alias_has_bounds(ctx: &QueryContext<'_>, alias: Entity) -> bool {
+    ctx.get::<kestrel_ast_builder::WhereClause>(alias).is_some()
+        || ctx
+            .get::<kestrel_ast_builder::Conformances>(alias)
+            .is_some()
+}
+
+/// Whether an alias is non-generic and carries no bounds of its own (no
+/// conformances, no `where` clause).
 fn is_trivial_alias(ctx: &QueryContext<'_>, entity: Entity) -> bool {
     let has_type_params = ctx
         .get::<TypeParams>(entity)
-        .map(|tp| !tp.0.is_empty())
-        .unwrap_or(false);
+        .is_some_and(|tp| !tp.0.is_empty());
     if has_type_params {
         return false;
     }
@@ -293,10 +453,31 @@ fn build_assoc_projection_base(
     span: &Span,
 ) -> HirTy {
     if segments.len() >= 2 {
-        // Lower segments[..last] as a standalone path.
+        // Lower segments[..last] as a standalone path, spanning only those
+        // segments (`B` in `B.Item`), so each node's span says which segment
+        // names which entity — LSP hover/definition on a `TypeRef` read it
+        // (G26). A synthesized path whose segment spans fall outside `span`
+        // keeps the whole span.
+        let prefix_segments = &segments[..segments.len() - 1];
+        let (first, last) = (
+            &prefix_segments[0],
+            &prefix_segments[prefix_segments.len() - 1],
+        );
+        let prefix_span = if span.start <= first.span.start
+            && first.span.start <= last.span.end
+            && last.span.end <= span.end
+        {
+            Span {
+                file_id: span.file_id,
+                start: first.span.start,
+                end: last.span.end,
+            }
+        } else {
+            span.clone()
+        };
         let prefix = AstType::Named {
-            segments: segments[..segments.len() - 1].to_vec(),
-            span: span.clone(),
+            segments: prefix_segments.to_vec(),
+            span: prefix_span,
         };
         lower_ast_type(ctx, owner, root, &prefix)
     } else {
@@ -391,7 +572,8 @@ fn override_span(ty: &mut HirTy, span: &Span) {
         HirTy::Struct { span: s, .. }
         | HirTy::Enum { span: s, .. }
         | HirTy::Protocol { span: s, .. }
-        | HirTy::AliasUse { span: s, .. }
+        | HirTy::Alias { span: s, .. }
+        | HirTy::AbstractAssoc { span: s, .. }
         | HirTy::Tuple(_, s)
         | HirTy::Function { span: s, .. }
         | HirTy::Param(_, s)
@@ -400,8 +582,224 @@ fn override_span(ty: &mut HirTy, span: &Span) {
         | HirTy::Error(s)
         | HirTy::Infer(s)
         | HirTy::Never(s)
-        | HirTy::Opaque { span: s, .. } => *s = span.clone(),
+        | HirTy::Opaque { span: s, .. }
+        | HirTy::Ref { span: s, .. } => *s = span.clone(),
     }
+}
+
+// ===== Reference-type rejection (stage 0.5) =====
+
+/// The type position a reference type occurs in — reported if the type
+/// handed to `reject_ref_types` is itself a `Ref`. Callers pass the
+/// outermost position; the walk sets nested positions (tuple element,
+/// generic arg, function-type param/return) structurally as it descends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefPosition {
+    /// Parameter position — the one PERMANENT rejection (references-gaps.md
+    /// §10.6): conventions are the only parameter spelling, forever.
+    Param,
+    /// Return position — carved out (made legal) in stage 1.
+    Return,
+    /// `var`/`let` annotation.
+    Binding,
+    /// Struct/enum field (incl. enum case payload).
+    Field,
+    /// Tuple element (set by the walk).
+    TupleElement,
+    /// Generic type argument (`Array[&T]`; set by the walk).
+    GenericArg,
+    /// Function-type return (`() -> &T`; set by the walk).
+    FunctionReturn,
+    /// Anything else (alias RHS, where-clause, protocol bound, ...).
+    Other,
+}
+
+impl RefPosition {
+    fn code_and_message(self) -> (&'static str, &'static str) {
+        match self {
+            // Permanent rule — worded as "are not", never "not yet".
+            RefPosition::Param => (
+                "E480",
+                "parameters are not reference-typed; spell the convention instead — `x: T` borrows, `mutating x: T` mutably borrows",
+            ),
+            RefPosition::Return => ("E481", "reference return types are not supported yet"),
+            RefPosition::Binding => ("E482", "references cannot be stored in bindings"),
+            RefPosition::Field => ("E483", "references cannot be stored in fields"),
+            RefPosition::TupleElement => ("E484", "references cannot be stored in tuples"),
+            RefPosition::GenericArg => ("E485", "references cannot be used as type arguments"),
+            RefPosition::FunctionReturn => (
+                "E486",
+                "reference returns are not supported in function types yet",
+            ),
+            RefPosition::Other => ("E489", "reference types cannot be used here"),
+        }
+    }
+}
+
+/// Whether the walk ACCEPTS refs at aggregate positions (stage 2b) or
+/// rejects every position (stage 0.5). The policy is per ENTRY POINT, not
+/// per position: a Strict entry (alias RHS, assoc-type default, protocol
+/// bound, extension target, where-clause type) rejects refs even inside
+/// nested type args, because those whole annotations feed machinery that
+/// has no ref story yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefPolicy {
+    Strict,
+    /// Refs are legal at {Field, TupleElement, GenericArg} positions —
+    /// enum payloads route as Field. Bare-position rules (E480 param,
+    /// E482 binding, E486 fn-type return, E487 nesting, E489 other) and
+    /// the protocol-arg rejection still hold.
+    AllowAggregate,
+}
+
+/// THE type-position walk (stage 0.5): rejects `HirTy::Ref` with a
+/// position-specific diagnostic and rewrites it to `HirTy::Error`. Called
+/// at every lowering-query boundary. Stage 1 carved out only
+/// `RefPosition::Return`; stage 2b accepts aggregate positions under
+/// `RefPolicy::AllowAggregate`.
+pub fn reject_ref_types(
+    ctx: &QueryContext<'_>,
+    ty: HirTy,
+    pos: RefPosition,
+    policy: RefPolicy,
+) -> HirTy {
+    match ty {
+        HirTy::Ref {
+            inner,
+            mutating,
+            span,
+        } => {
+            let nested = matches!(*inner, HirTy::Ref { .. });
+            // Stage 2b carve: a ref in an aggregate slot is an honest type.
+            // Nesting (`& &T`) stays banned; the pointee subtree is still
+            // walked (its own aggregate args may carry refs; its bare
+            // positions still reject).
+            if !nested
+                && policy == RefPolicy::AllowAggregate
+                && matches!(
+                    pos,
+                    RefPosition::Field | RefPosition::TupleElement | RefPosition::GenericArg
+                )
+            {
+                let inner = reject_ref_types(ctx, *inner, RefPosition::Other, policy);
+                return HirTy::Ref {
+                    inner: Box::new(inner),
+                    mutating,
+                    span,
+                };
+            }
+            let (code, message) = if nested {
+                // `&&T` / `&mutating &T`: one diagnostic for the whole
+                // cluster — fixing the nesting then surfaces the positional
+                // error, if any (E-REF-08).
+                ("E487", "a reference cannot reference a reference")
+            } else {
+                pos.code_and_message()
+            };
+            ctx.accumulate(
+                Diagnostic::error()
+                    .with_code(code)
+                    .with_message(message)
+                    .with_labels(vec![Label::primary(span.file_id, span.range())]),
+            );
+            // Peel any nested refs without further positional noise, then
+            // keep walking the pointee so deeper refs still get diagnosed.
+            let mut core = *inner;
+            while let HirTy::Ref { inner, .. } = core {
+                core = *inner;
+            }
+            reject_ref_types(ctx, core, RefPosition::Other, policy);
+            HirTy::Error(span)
+        },
+        HirTy::Struct { entity, args, span } => HirTy::Struct {
+            entity,
+            args: reject_ref_args(ctx, args, policy),
+            span,
+        },
+        HirTy::Enum { entity, args, span } => HirTy::Enum {
+            entity,
+            args: reject_ref_args(ctx, args, policy),
+            span,
+        },
+        // Protocol type args stay Strict regardless of policy: a ref
+        // protocol arg instantiates witnesses at the ref (2d, not 2b).
+        HirTy::Protocol { entity, args, span } => HirTy::Protocol {
+            entity,
+            args: reject_ref_args(ctx, args, RefPolicy::Strict),
+            span,
+        },
+        // Aliases are expanded before this walk, so the positional rules see
+        // the real type. A bounded alias's args stay Strict as well: they are
+        // also checked against the alias's bounds, which never admit a ref.
+        HirTy::Alias {
+            alias,
+            args,
+            expanded,
+            span,
+        } => HirTy::Alias {
+            alias,
+            args: reject_ref_args(ctx, args, RefPolicy::Strict),
+            expanded: Box::new(reject_ref_types(ctx, *expanded, pos, policy)),
+            span,
+        },
+        HirTy::Tuple(elems, span) => HirTy::Tuple(
+            elems
+                .into_iter()
+                .map(|e| reject_ref_types(ctx, e, RefPosition::TupleElement, policy))
+                .collect(),
+            span,
+        ),
+        HirTy::Function {
+            kind,
+            params,
+            param_conventions,
+            ret,
+            span,
+        } => HirTy::Function {
+            kind,
+            params: params
+                .into_iter()
+                .map(|p| reject_ref_types(ctx, p, RefPosition::Param, policy))
+                .collect(),
+            param_conventions,
+            ret: Box::new(reject_ref_types(
+                ctx,
+                *ret,
+                RefPosition::FunctionReturn,
+                policy,
+            )),
+            span,
+        },
+        HirTy::AssocProjection { base, assoc, span } => HirTy::AssocProjection {
+            base: Box::new(reject_ref_types(ctx, *base, RefPosition::Other, policy)),
+            assoc,
+            span,
+        },
+        HirTy::Opaque {
+            bounds,
+            not_copyable,
+            span,
+        } => HirTy::Opaque {
+            bounds: bounds
+                .into_iter()
+                .map(|b| reject_ref_types(ctx, b, RefPosition::Other, RefPolicy::Strict))
+                .collect(),
+            not_copyable,
+            span,
+        },
+        leaf @ (HirTy::Param(..)
+        | HirTy::AbstractAssoc { .. }
+        | HirTy::SelfType(..)
+        | HirTy::Never(_)
+        | HirTy::Infer(_)
+        | HirTy::Error(_)) => leaf,
+    }
+}
+
+fn reject_ref_args(ctx: &QueryContext<'_>, args: Vec<HirTy>, policy: RefPolicy) -> Vec<HirTy> {
+    args.into_iter()
+        .map(|a| reject_ref_types(ctx, a, RefPosition::GenericArg, policy))
+        .collect()
 }
 
 /// Validate that the number of type arguments matches the entity's TypeParams.
@@ -432,6 +830,7 @@ fn validate_arity(
             .join(".");
         ctx.accumulate(
             Diagnostic::error()
+                .with_code("E438")
                 .with_message(format!("too few type arguments for '{type_name}'"))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
@@ -447,6 +846,7 @@ fn validate_arity(
             .join(".");
         ctx.accumulate(
             Diagnostic::error()
+                .with_code("E438")
                 .with_message(format!("too many type arguments for '{type_name}'"))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
@@ -464,6 +864,7 @@ fn lower_sugar_type(
     ctx: &QueryContext<'_>,
     owner: Entity,
     root: Entity,
+    builtin: Builtin,
     name: &str,
     type_args: &[&AstType],
     span: &Span,
@@ -473,7 +874,7 @@ fn lower_sugar_type(
         .map(|t| lower_ast_type(ctx, owner, root, t))
         .collect();
 
-    if let Some(entity) = resolve_std_type(ctx, owner, root, name) {
+    if let Some(entity) = kestrel_name_res::resolve_sugar_type(ctx, owner, root, builtin, name) {
         let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
         // Dispatch by NodeKind — Optional is an enum, Array/Dictionary are structs.
         match ctx.get::<NodeKind>(entity).cloned() {
@@ -496,6 +897,7 @@ fn lower_sugar_type(
     } else {
         ctx.accumulate(
             Diagnostic::error()
+                .with_code("E141")
                 .with_message(format!("{name} is not defined"))
                 .with_labels(vec![Label::primary(span.file_id, span.range())])
                 .with_notes(vec!["is the standard library imported?".to_string()]),
@@ -533,30 +935,24 @@ fn fill_type_arg_defaults(
     args
 }
 
-/// Resolve a well-known standard library type name (e.g. "Array", "Optional").
-fn resolve_std_type(
-    ctx: &QueryContext<'_>,
-    owner: Entity,
-    root: Entity,
-    name: &str,
-) -> Option<Entity> {
-    let result = ctx.query(ResolveTypePath {
-        segments: vec![name.to_string()],
-        context: owner,
-        root,
-    });
-    match result {
-        TypeResolution::Found(entity) => Some(entity),
-        _ => None,
-    }
-}
-
 // ===== LowerCtx delegation =====
 
 impl LowerCtx<'_> {
     /// Lower an AST type to an HIR type. Delegates to the standalone function.
+    /// In-body types here are overwhelmingly expression type arguments
+    /// (`make[T]()`), so refs default to the generic-arg rejection; binding
+    /// annotations and closure params use `lower_type_in` instead.
     pub fn lower_type(&mut self, ty: &AstType) -> HirTy {
-        lower_ast_type(self.ctx, self.owner, self.root, ty)
+        self.lower_type_in(ty, RefPosition::GenericArg)
+    }
+
+    /// Lower an AST type, classifying a top-level `&T` by `pos`. In-body
+    /// positions accept aggregate refs (stage 2b): explicit `f[&T]` type
+    /// args and `let o: Optional[&T]` annotations are legal; the bare
+    /// positions (E482 binding, E480 closure param) still reject by `pos`.
+    pub fn lower_type_in(&mut self, ty: &AstType, pos: RefPosition) -> HirTy {
+        let lowered = lower_ast_type(self.ctx, self.owner, self.root, ty);
+        reject_ref_types(self.ctx, lowered, pos, RefPolicy::AllowAggregate)
     }
 }
 
@@ -581,7 +977,115 @@ impl QueryFn for LowerTypeAnnotation {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Option<HirTy> {
         let type_ann = ctx.get::<TypeAnnotation>(self.entity)?;
-        Some(lower_ast_type(ctx, self.entity, self.root, &type_ann.0))
+        let nk = ctx.get::<NodeKind>(self.entity);
+
+        // E490: `throws` desugars the return to `Result` sugar — a ref can
+        // never ride an effect wrapper (the ret_borrow ABI is not
+        // expressible in an enum payload). Two shapes: `Result{ok: Ref}`
+        // (init effect) and `Ref{inner: Result}` (`-> &T throws E` — the
+        // `&` prefix binds looser than the throws tail, wrapping the
+        // sugar). Checked on the AST so the wording names the sugar, not a
+        // generic nested-arg error. An explicit `&Result[T, E]` annotation
+        // spells the generic by NAME and is untouched.
+        let throws_ref = match &type_ann.0 {
+            AstType::Result { ok, span, .. } if matches!(ok.as_ref(), AstType::Ref { .. }) => {
+                Some(span)
+            },
+            AstType::Ref { inner, span, .. }
+                if matches!(inner.as_ref(), AstType::Result { .. }) =>
+            {
+                Some(span)
+            },
+            _ => None,
+        };
+        if matches!(nk, Some(NodeKind::Function))
+            && let Some(span) = throws_ref
+        {
+            ctx.accumulate(
+                Diagnostic::error()
+                    .with_code("E490")
+                    .with_message("a throwing function cannot return a reference")
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range()).with_message(
+                            "`throws` wraps the return in `Result` — a reference \
+                                       cannot live in an enum payload",
+                        ),
+                    ]),
+            );
+            return Some(HirTy::Error(span.clone()));
+        }
+
+        let lowered = lower_ast_type(ctx, self.entity, self.root, &type_ann.0);
+
+        // E481 carve-out (stage 1): a ref RETURN is legal for functions and
+        // computed-property GETTERS (the Pointer-bridge `var value: &T`
+        // shape — Field + Computed + Gettable, NOT Settable: a settable
+        // property pairs with a setter, which is the call-as-place world of
+        // stage 1.5). Subscripts stay rejected for the same reason;
+        // init/deinit never return. The pointee subtree is still walked
+        // (E487 nesting, E480 fn-type params, ...).
+        // Stage 1.5: RefAccessor entities carry the SYNTHESIZED `&T` /
+        // `&mutating T` return built by `spawn_ref_accessor` — always legal
+        // (the user-facing rule is unchanged: a ref type never appears in a
+        // subscript/property SOURCE signature).
+        let is_computed_getter = matches!(nk, Some(NodeKind::Field))
+            && ctx.get::<Computed>(self.entity).is_some()
+            && ctx.get::<Gettable>(self.entity).is_some()
+            && ctx.get::<Settable>(self.entity).is_none();
+        if (matches!(nk, Some(NodeKind::Function | NodeKind::RefAccessor)) || is_computed_getter)
+            && let HirTy::Ref {
+                inner,
+                mutating,
+                span,
+            } = lowered
+        {
+            let inner =
+                reject_ref_types(ctx, *inner, RefPosition::Other, RefPolicy::AllowAggregate);
+            return Some(HirTy::Ref {
+                inner: Box::new(inner),
+                mutating,
+                span,
+            });
+        }
+
+        // Stage 2d: an ASSOC-TYPE BINDING (`type Item = &T` in a struct/
+        // enum/extension conformance) may be a bare ref or carry refs in
+        // aggregate positions — ref-Item iterators hang off this. The carve
+        // is restricted to TRIVIAL member aliases: those are eagerly
+        // expanded at every named use (`let x: Foo.Item` re-applies the
+        // use-site position rules, E482/E480 — nothing smuggles), while
+        // generic or bounded aliases stay Strict (their RHS is reused across
+        // instantiations). Protocol-parented
+        // aliases (assoc DECLS and their defaults) also stay Strict.
+        let parent_kind = ctx
+            .parent_of(self.entity)
+            .and_then(|p| ctx.get::<NodeKind>(p).cloned());
+        if matches!(nk, Some(NodeKind::TypeAlias))
+            && matches!(
+                parent_kind,
+                Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Extension)
+            )
+            && is_trivial_alias(ctx, self.entity)
+        {
+            return Some(reject_ref_types_allowing_top_ref(ctx, lowered));
+        }
+
+        // A TypeAnnotation on a callable is its return annotation; on a
+        // field/enum-case it is the stored type. Classify the ref rejection
+        // accordingly (stage 1 carved out only the Return position, above;
+        // stage 2b accepts aggregate positions everywhere EXCEPT alias
+        // RHS / other annotations, which stay Strict).
+        let (pos, policy) = match nk {
+            Some(
+                NodeKind::Function | NodeKind::Initializer | NodeKind::Subscript | NodeKind::Deinit,
+            ) => (RefPosition::Return, RefPolicy::AllowAggregate),
+            Some(NodeKind::Field | NodeKind::EnumCase) => {
+                (RefPosition::Field, RefPolicy::AllowAggregate)
+            },
+            Some(NodeKind::TypeParameter) => (RefPosition::GenericArg, RefPolicy::AllowAggregate),
+            _ => (RefPosition::Other, RefPolicy::Strict),
+        };
+        Some(reject_ref_types(ctx, lowered, pos, policy))
     }
 }
 
@@ -620,6 +1124,93 @@ impl QueryFn for LowerCallableReturnType {
     }
 }
 
+/// A callable's reference-return convention (`-> &T` / `-> &mutating T`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RefReturn {
+    pub mutating: bool,
+}
+
+/// Query: does this callable return a reference (the `ret_borrow` ABI)?
+///
+/// THE single front-end derivation of the return convention (the MIR twin is
+/// `kestrel_mir::item::function::ret_convention`). Consumers — the solver's
+/// ref-returning-function-as-value check, analyze's mutability classifier and
+/// ambiguous-root rule, MIR signature lowering — ask this query; nobody
+/// re-matches `HirTy::Ref` ad hoc. CONTRACT: this (keyed by the resolved
+/// callee entity) is the ground truth for "is this call a place"; an
+/// expression's recorded `&T` type is a sufficient-but-not-necessary signal
+/// (solver ordering can pin a call-result var to the pointee type first).
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct CallableRefReturn {
+    pub entity: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for CallableRefReturn {
+    type Output = Option<RefReturn>;
+
+    fn describe(&self) -> String {
+        format!("CallableRefReturn(entity={:?})", self.entity)
+    }
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Option<RefReturn> {
+        let ret = ctx.query(LowerCallableReturnType {
+            entity: self.entity,
+            root: self.root,
+        });
+        match ret {
+            HirTy::Ref { mutating, .. } => Some(RefReturn { mutating }),
+            _ => None,
+        }
+    }
+}
+
+/// A subscript's / computed property's place-accessor children (stage 1.5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PlaceAccessorInfo {
+    /// The `ref { … }` child (read provider), if declared.
+    pub ref_accessor: Option<Entity>,
+    /// The `mutating ref { … }` child (write/RMW provider), if declared.
+    pub mutating_ref_accessor: Option<Entity>,
+}
+
+/// Query: the place-accessor children of a Subscript/Field member.
+///
+/// THE single discovery source for provider routing — type inference (read
+/// provider types the member expr `&T`), analyze (mutability classification,
+/// decl checks), and mir-lower (per-operation callee routing) all ask this
+/// query; nobody walks `children_of` for `NodeKind::RefAccessor` ad hoc.
+/// Returns None when the member has no ref accessors (the get/set world).
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct PlaceAccessors {
+    pub entity: Entity,
+}
+
+impl QueryFn for PlaceAccessors {
+    type Output = Option<PlaceAccessorInfo>;
+
+    fn describe(&self) -> String {
+        format!("PlaceAccessors(entity={:?})", self.entity)
+    }
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Option<PlaceAccessorInfo> {
+        let mut info = PlaceAccessorInfo {
+            ref_accessor: None,
+            mutating_ref_accessor: None,
+        };
+        for &child in ctx.children_of(self.entity) {
+            if matches!(ctx.get::<NodeKind>(child), Some(NodeKind::RefAccessor)) {
+                if ctx.get::<MutatingAccessor>(child).is_some() {
+                    info.mutating_ref_accessor = Some(child);
+                } else {
+                    info.ref_accessor = Some(child);
+                }
+            }
+        }
+        (info.ref_accessor.is_some() || info.mutating_ref_accessor.is_some()).then_some(info)
+    }
+}
+
 /// Query: lower a declaration entity's Callable param types to HirTy.
 ///
 /// Reads the `Callable` component and lowers each param's type annotation.
@@ -635,13 +1226,32 @@ impl QueryFn for LowerCallableTypes {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Option<Vec<Option<HirTy>>> {
         let callable = ctx.get::<Callable>(self.entity)?;
+        // Enum payloads live in the Callable component but are STORAGE
+        // slots, not parameters: stage 2b accepts refs there (Field
+        // position), while real params keep E480 on bare refs — ref-bearing
+        // AGGREGATE params (`o: Optional[&T]`) are legal either way.
+        let pos = if matches!(ctx.get::<NodeKind>(self.entity), Some(NodeKind::EnumCase)) {
+            RefPosition::Field
+        } else {
+            RefPosition::Param
+        };
         Some(
             callable
                 .params
                 .iter()
                 .map(|p| {
-                    p.ty.as_ref()
-                        .map(|ast_ty| lower_ast_type(ctx, self.entity, self.root, ast_ty))
+                    p.ty.as_ref().map(|ast_ty| {
+                        let lowered = lower_ast_type(ctx, self.entity, self.root, ast_ty);
+                        // A param spelled literally `Self` inside a ref-target
+                        // extension (`extend &T`) resolves to the extended ref
+                        // type itself — the one place a top-level ref param is
+                        // the EXTENDED TYPE, not a smuggled `&T` annotation
+                        // (which keeps E480). The pointee subtree still walks.
+                        if is_bare_self_ast(ast_ty) {
+                            return reject_ref_types_allowing_top_ref(ctx, lowered);
+                        }
+                        reject_ref_types(ctx, lowered, pos, RefPolicy::AllowAggregate)
+                    })
                 })
                 .collect(),
         )
@@ -668,6 +1278,30 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Option<Vec<HirTy>> {
         let target = ctx.get::<ExtensionTarget>(self.extension)?;
+        // Ref target (`extend &T` / `extend &mutating T`): the POINTEE is the
+        // synthetic `lang.&` entity's single type arg. Strict pointee walk —
+        // `&&T` never parses past E487, and a ref-bearing pointee has no
+        // meaning here.
+        if let AstType::Ref { inner, .. } = &target.0 {
+            let lowered = lower_ast_type(ctx, self.extension, self.root, inner);
+            let lowered =
+                reject_ref_types(ctx, lowered, RefPosition::GenericArg, RefPolicy::Strict);
+            return Some(vec![lowered]);
+        }
+        // Sugar targets (`extend [T]`, `extend T?`, `extend [K: V]`) carry
+        // their type arguments inline.
+        let sugar_args: Option<Vec<&AstType>> = match &target.0 {
+            AstType::Array(elem, _) | AstType::Optional(elem, _) => Some(vec![elem.as_ref()]),
+            AstType::Dictionary(key, val, _) => Some(vec![key.as_ref(), val.as_ref()]),
+            _ => None,
+        };
+        if let Some(args) = sugar_args {
+            return Some(
+                args.into_iter()
+                    .map(|a| lower_ast_type(ctx, self.extension, self.root, a))
+                    .collect(),
+            );
+        }
         let AstType::Named { segments, .. } = &target.0 else {
             return Some(vec![]);
         };
@@ -702,7 +1336,10 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
             .enumerate()
             .map(|(i, ast_ty)| {
                 if i < limit {
-                    lower_ast_type(ctx, context, self.root, ast_ty)
+                    let lowered = lower_ast_type(ctx, context, self.root, ast_ty);
+                    // Extension targets stay Strict: extending a
+                    // ref-instantiation engages witness machinery (2d).
+                    reject_ref_types(ctx, lowered, RefPosition::GenericArg, RefPolicy::Strict)
                 } else {
                     HirTy::Error(ast_type_span(ast_ty))
                 }
@@ -710,6 +1347,34 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
             .collect();
         Some(args)
     }
+}
+
+/// Is the negative bound of `some P and not X` the `Copyable` builtin?
+///
+/// Entity comparison is the source of truth; the last-segment string match is
+/// a fallback for stdlib-less fixtures where the builtin entity isn't
+/// registered (mirrors `nominal_copy_semantics_impl` in kestrel-semantics).
+fn negative_bound_is_copyable(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    neg: &AstType,
+) -> bool {
+    let AstType::Named { segments, .. } = neg else {
+        return false;
+    };
+    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    if let TypeResolution::Found(entity) = ctx.query(ResolveTypePath {
+        segments: seg_names,
+        context: owner,
+        root,
+    }) {
+        return ctx.query(ResolveBuiltin {
+            builtin: Builtin::Copyable,
+            root,
+        }) == Some(entity);
+    }
+    segments.last().is_some_and(|s| s.name == "Copyable")
 }
 
 fn ast_type_span(ty: &AstType) -> Span {
@@ -724,8 +1389,81 @@ fn ast_type_span(ty: &AstType) -> Span {
         | AstType::Unit(span)
         | AstType::Never(span)
         | AstType::Inferred(span)
-        | AstType::Some { span, .. } => span.clone(),
+        | AstType::Some { span, .. }
+        | AstType::Ref { span, .. } => span.clone(),
     }
+}
+
+/// If `param` is used from inside a struct/enum nested in the declaration
+/// that binds it, return that nested type. Nested types don't inherit their
+/// container's type parameters (fuzz M13): `Outer[Int64].Inner` has no slot
+/// for `T`, so a use would leave `T` unbound after specialization. Uses
+/// directly in the binder — or its methods — are fine.
+fn nested_type_capturing_param(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    param: Entity,
+) -> Option<Entity> {
+    let binder = ctx.parent_of(param)?;
+    let mut nested = None;
+    let mut cur = Some(owner);
+    while let Some(e) = cur {
+        if e == binder {
+            return nested;
+        }
+        match ctx.get::<NodeKind>(e) {
+            // The innermost nominal type we pass through is the offender.
+            Some(NodeKind::Struct | NodeKind::Enum) if nested.is_none() => nested = Some(e),
+            // `extend Outer[T] { struct Inner { ... T ... } }` binds Outer's
+            // own parameter, so the extension stands in for the binder.
+            Some(NodeKind::Extension) => {
+                let lhs = ctx.query(kestrel_name_res::ExtensionLhsParams { extension: e, root });
+                if lhs.contains(&param) {
+                    return nested;
+                }
+            },
+            _ => {},
+        }
+        cur = ctx.parent_of(e);
+    }
+    None
+}
+
+fn report_outer_param_in_nested_type(
+    ctx: &QueryContext<'_>,
+    nested: Entity,
+    param: Entity,
+    segments: &[kestrel_ast::PathSegment],
+    span: &Span,
+) {
+    let name = segments.last().map(|s| s.name.clone()).unwrap_or_default();
+    let nested_name = ctx
+        .get::<kestrel_ast_builder::Name>(nested)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    let mut labels = vec![
+        Label::primary(span.file_id, span.range())
+            .with_message(format!("'{name}' belongs to an enclosing type")),
+    ];
+    if let Some(decl) = ctx.get::<DeclSpan>(param) {
+        labels.push(
+            Label::secondary(decl.0.file_id, decl.0.range())
+                .with_message(format!("'{name}' is declared here")),
+        );
+    }
+    ctx.accumulate(
+        Diagnostic::error()
+            .with_code("E634")
+            .with_message(format!(
+                "nested type '{nested_name}' cannot use type parameter '{name}' of an enclosing type"
+            ))
+            .with_labels(labels)
+            .with_notes(vec![format!(
+                "nested types do not inherit their container's type parameters; give \
+                 '{nested_name}' its own parameter, e.g. `{nested_name}[{name}2]`"
+            )]),
+    );
 }
 
 #[cfg(test)]
@@ -760,7 +1498,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let iter_proto = world.spawn();
         world.set(iter_proto, NodeKind::Protocol);
@@ -792,25 +1530,24 @@ mod tests {
         }
     }
 
-    /// Non-associated TypeAliases (parent is Module, not Protocol) still
-    /// lower to `HirTy::AliasUse`. Guards against over-broadening the
-    /// `parent_is_protocol` branch.
+    /// Non-associated TypeAliases (parent is Module, not Protocol) never
+    /// become an `AssocProjection`. Guards against over-broadening the
+    /// `parent_is_protocol` branch. Without a definition there is nothing to
+    /// expand, so the alias stays abstract.
     #[test]
-    fn module_level_alias_stays_alias_use() {
+    fn module_level_alias_is_not_a_projection() {
         let mut world = World::new();
         world.begin_revision();
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let alias = world.spawn();
         world.set(alias, NodeKind::TypeAlias);
         world.set(alias, Name("Fd".into()));
         world.set(alias, Typed);
-        // no TypeAnnotation → non-trivial; stays as AliasUse
-        let tp = world.spawn();
-        world.set(alias, kestrel_ast_builder::TypeParams(vec![tp]));
+        // no TypeAnnotation → nothing to expand
         world.set_parent(alias, root);
 
         let ctx = world.query_context();
@@ -819,6 +1556,78 @@ mod tests {
             span: span(),
         };
         let lowered = lower_ast_type(&ctx, root, root, &ast_ty);
-        matches!(lowered, HirTy::AliasUse { .. });
+        assert!(
+            matches!(lowered, HirTy::AbstractAssoc { entity, .. } if entity == alias),
+            "got {lowered:?}"
+        );
+    }
+
+    /// A generic alias expands at lowering: `Pair[Int64]` with
+    /// `type Pair[T] = (T, T)` is the tuple itself, so no later stage can
+    /// see an unexpanded alias.
+    #[test]
+    fn generic_alias_expands_with_its_arguments() {
+        let mut world = World::new();
+        world.begin_revision();
+
+        let root = world.spawn();
+        world.set(root, NodeKind::Module);
+        world.set(root, Name(Name::ROOT.into()));
+
+        let int = world.spawn();
+        world.set(int, NodeKind::Struct);
+        world.set(int, Name("Int64".into()));
+        world.set(int, Typed);
+        world.set_parent(int, root);
+
+        let alias = world.spawn();
+        world.set(alias, NodeKind::TypeAlias);
+        world.set(alias, Name("Pair".into()));
+        world.set(alias, Typed);
+        world.set_parent(alias, root);
+        let t = world.spawn();
+        world.set(t, NodeKind::TypeParameter);
+        world.set(t, Name("T".into()));
+        world.set_parent(t, alias);
+        world.set(alias, kestrel_ast_builder::TypeParams(vec![t]));
+        world.set(
+            alias,
+            TypeAnnotation(AstType::Tuple(
+                vec![
+                    AstType::Named {
+                        segments: vec![seg("T")],
+                        span: span(),
+                    },
+                    AstType::Named {
+                        segments: vec![seg("T")],
+                        span: span(),
+                    },
+                ],
+                span(),
+            )),
+        );
+
+        let ctx = world.query_context();
+        let mut pair = seg("Pair");
+        pair.type_args = vec![AstType::Named {
+            segments: vec![seg("Int64")],
+            span: span(),
+        }];
+        let ast_ty = AstType::Named {
+            segments: vec![pair],
+            span: span(),
+        };
+        match lower_ast_type(&ctx, root, root, &ast_ty) {
+            HirTy::Tuple(elems, _) => {
+                assert_eq!(elems.len(), 2);
+                for e in elems {
+                    assert!(
+                        matches!(e, HirTy::Struct { entity, .. } if entity == int),
+                        "{e:?}"
+                    );
+                }
+            },
+            other => panic!("expected the expanded tuple, got {other:?}"),
+        }
     }
 }

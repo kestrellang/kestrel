@@ -48,7 +48,7 @@ func main() -> lang.i64 {
         .Err(_) => return 4
     };
     match buildString() {
-        some s => { if s.byteCount != 4 { return 5; } },
+        some s => { if s.bytes.count != 4 { return 5; } },
         null => return 6
     };
     0

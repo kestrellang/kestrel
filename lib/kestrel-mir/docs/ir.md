@@ -461,19 +461,78 @@ Convention on `CallArg` determines ownership at the call site:
 
 ### Closures
 
+A closure value has type `MirTy::FuncThick { kind, params, ret }`. The
+`kind` is a `FnKind` — the MIR mirror of the surface `escaping (T) -> U`
+prefixes — and is part of the interned type identity (see "Closure kinds").
+
 ```rust
-/// Create a thick closure (partial application). Captures are
-/// consumed (if @owned) or copied trivially (if @none). Borrow
-/// captures are not supported directly — the lowerer materializes
-/// borrowed captures as ref temps (Pointer(T), which is @none)
-/// before ApplyPartial. This is consistent with "borrows are
-/// call-scoped only" — closure environments own their captures.
+/// Create a thick closure (partial application).
 ApplyPartial {
     result: ValueId,
-    func: Entity,
+    /// Pre-mono a `Callee::Direct` (entity + type args); mono rewrites it
+    /// to `Callee::Resolved` exactly like a `Call`. A bare `Entity` here
+    /// bound every instantiation to the first thunk.
+    callee: Callee,
+    /// View tier: the values packed into a freshly allocated stack
+    /// environment (codegen owns the packing) — each one an address into
+    /// the enclosing frame, so the env owns nothing.
+    /// Owning tier: exactly ONE pointer-sized value, the already-boxed
+    /// environment handle, which becomes word 1 verbatim; codegen
+    /// allocates no environment.
     captures: Vec<ValueId>,
+    /// Owning tier only: the per-environment type-erased retain shim
+    /// (`(handle) -> ()`, "share this environment"), packed as word 2, so
+    /// a `CopyValue` on a type-erased closure value can retain without
+    /// naming the environment type. Each shim is a new mono root.
+    retain: Option<Callee>,
+    /// Owning tier only: the matching release shim, packed as word 3.
+    release: Option<Callee>,
 }
 ```
+
+Borrow captures are not supported directly — the lowerer materializes
+borrowed captures as ref temps (`Pointer(T)`, which is `@none`) before
+`ApplyPartial`, consistent with "borrows are call-scoped only".
+
+#### Closure kinds
+
+`FnKind` has four variants (`Normal`, `Mutating`, `Consuming`, `Escaping`),
+but every kind-sensitive site asks one of three *predicates* by name rather
+than matching variants:
+
+| Predicate | True for | Meaning |
+|-----------|----------|---------|
+| `is_view()` | `Normal`, `Mutating` | The env holds addresses into the enclosing frame and owns nothing; the value is frame-bound. |
+| `is_boxed()` | `Consuming`, `Escaping` | The env is heap-allocated and owned, so the value is droppable and carries the erased shim pair inline. |
+| `is_shared()` | `Escaping` | Duplicating the value is the box's *share* operation, so the value is `Clone`-copyable. |
+
+`Consuming` is boxed but **not** shared: a unique one-shot owner has no
+duplication operation at all, so its copy behavior is `None` (move-only),
+never `Clone`. The two owning kinds also use different containers —
+`@builtin(.SharedBox)` vs `@builtin(.UniqueBox)` — because a shared box's
+release drops the *whole* environment, which would double-free the slots a
+one-shot body already moved out.
+
+Layout follows from `is_boxed()` alone:
+
+| Tier | Words | Shape |
+|------|-------|-------|
+| view / bare | 2 | `{fn_ptr, env_ptr}` |
+| owning | 4 | `{fn_ptr, env_handle, retain_fn, release_fn}` |
+
+`func_thick_words(kind)` is the single source of that width, shared by
+`passes/layout.rs`, both codegen `ty.rs` classifiers, and both
+`compile_apply_partial`s.
+
+#### `Op::ClosureWord(n)`
+
+Projects one machine word out of a `FuncThick` value: `0` = code pointer,
+`1` = environment handle, `2` = retain shim, `3` = release shim (the last
+two exist only at the owning kinds). Its only consumer is the type-erased
+retain/release dispatch in `mono/expand.rs` — a value of type
+`escaping (…) -> …` does not name its environment type, so copy and destroy
+load the shim pointer out of the value and call it indirectly. Codegen is a
+GEP + load, never pointer arithmetic on an address.
 
 ### Address Projection
 
@@ -614,3 +673,4 @@ invariant structural in the IR rather than recovered by a separate analysis:
 | `BeginBorrow` / `EndBorrow` instructions | Borrow scopes are explicit |
 | `CopyAddr` / `Take` / `StoreInit` / `StoreAssign` / `DestroyAddr` | Memory ownership is explicit |
 | `FieldAddr { base, ty, field }` | Verifier tracks per-field init state without layout |
+| `FnKind` on `MirTy::FuncThick` | Closure environment ownership is in the type, not recovered from the capture list |

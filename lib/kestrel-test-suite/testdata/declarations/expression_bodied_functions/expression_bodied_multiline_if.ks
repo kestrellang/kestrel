@@ -10,7 +10,7 @@ func max(a: std.numeric.Int64, b: std.numeric.Int64) -> std.numeric.Int64 =
 
 @main
 func main() -> lang.i64 {
-    let _ = println(max(10, 5));
-    let _ = println(max(3, 8));
+     println(max(10, 5));
+     println(max(3, 8));
     0
 }

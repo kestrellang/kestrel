@@ -1,0 +1,42 @@
+name: Install LLVM 18
+description: >
+  Installs LLVM 18.1 dev libraries (needed by inkwell/llvm-sys for the
+  `kestrel-codegen-llvm` backend) and exports `LLVM_SYS_181_PREFIX` for every
+  later cargo step. Single source of truth for "how CI gets LLVM" — used by the
+  Lint & test job and, via `build-toolchain`, the bootstrap smoke + release
+  builds.
+
+  `LLVM_SYS_181_PREFIX` is checked into `.cargo/config.toml` pointing at a local
+  Homebrew path; that entry is not `force`d, so the value we export here (via
+  $GITHUB_ENV) takes precedence on the runners.
+
+runs:
+  using: composite
+  steps:
+    - name: Install LLVM 18 (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -uo pipefail
+        sudo apt-get update
+        # ubuntu-latest (24.04) ships llvm-18 in universe. Fall back to
+        # apt.llvm.org if a future runner image drops it. Both install to
+        # /usr/lib/llvm-18.
+        if ! sudo apt-get install -y llvm-18 llvm-18-dev libpolly-18-dev; then
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/llvm-snapshot.gpg
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-18 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm-18.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-18 llvm-18-dev libpolly-18-dev
+        fi
+        echo "LLVM_SYS_181_PREFIX=/usr/lib/llvm-18" >> "$GITHUB_ENV"
+
+    - name: Install LLVM 18 (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        set -euo pipefail
+        brew install llvm@18
+        echo "LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)" >> "$GITHUB_ENV"

@@ -488,7 +488,8 @@ public struct Deque[T]: Iterable, Cloneable {
     public mutating func popFront() -> T? {
         if self.len() == 0 { return .None; }
         let value = self.storage.modify { (mutating s) in
-            let v = s.ptr.offset(by: s.head).read();
+            // Moved out: the slot leaves the live range, so nothing drops it.
+            let v = s.ptr.offset(by: s.head).take();
             s.head = s.head + 1;
             if s.head >= s.cap { s.head = 0; }
             s.len = s.len - 1;
@@ -517,7 +518,8 @@ public struct Deque[T]: Iterable, Cloneable {
             s.len = s.len - 1;
             var tail = s.head + s.len;
             if tail >= s.cap { tail = tail - s.cap; }
-            s.ptr.offset(by: tail).read()
+            // Moved out: the slot leaves the live range, so nothing drops it.
+            s.ptr.offset(by: tail).take()
         };
         .Some(value)
     }

@@ -8,7 +8,7 @@ struct Box[T] {
 }
 
 struct Container[T] {
-    let make: () -> Box[T]
+    let make: escaping () -> Box[T]
 }
 
 @main

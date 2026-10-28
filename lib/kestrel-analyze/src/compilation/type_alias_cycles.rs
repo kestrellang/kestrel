@@ -40,7 +40,7 @@ use std::collections::HashSet;
 use crate::compilation::cycle_util::{Cycle, CycleDetector};
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{NodeKind, TypeAnnotation};
@@ -65,8 +65,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct TypeAliasCycleAnalyzer;
 
 impl Describe for TypeAliasCycleAnalyzer {
-    fn id(&self) -> &'static str {
-        "type_alias_cycles"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::TypeAliasCycles
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -152,9 +152,27 @@ fn check_type(
             if let TypeResolution::Found(entity) = result
                 && cx.query.get::<NodeKind>(entity) == Some(&NodeKind::TypeAlias)
             {
-                return enter_alias(cx, entity, detector);
+                enter_alias(cx, entity, detector)?;
+            }
+            // An alias is transparent: `type A = Array[A]` names an infinitely
+            // nested type, so type arguments are walked too.
+            for seg in segments {
+                for arg in &seg.type_args {
+                    check_type(cx, arg, context, detector)?;
+                }
             }
             Ok(())
+        },
+        AstType::Array(inner, _) | AstType::Optional(inner, _) => {
+            check_type(cx, inner, context, detector)
+        },
+        AstType::Dictionary(key, value, _) => {
+            check_type(cx, key, context, detector)?;
+            check_type(cx, value, context, detector)
+        },
+        AstType::Result { ok, err, .. } => {
+            check_type(cx, ok, context, detector)?;
+            check_type(cx, err, context, detector)
         },
         AstType::Tuple(elements, _) => {
             for elem in elements {
@@ -172,9 +190,7 @@ fn check_type(
             }
             check_type(cx, return_type, context, detector)
         },
-        // Array/Optional/Dictionary/Result/Pointer/Unit/Never/Inferred:
-        // nominal indirection — an alias nested inside one of these does
-        // not produce a self-expanding alias.
+        // Unit/Never/Inferred: no nested types.
         _ => Ok(()),
     }
 }

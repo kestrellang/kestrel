@@ -17,6 +17,6 @@ struct Thing: Valuable {
 @main
 func main() -> lang.i64 {
     let t = Thing(n: 21);
-    let _ = println(t.value());
+     println(t.value());
     0
 }

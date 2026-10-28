@@ -15,7 +15,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Callable, NodeKind, ReceiverKind, Settable};
 use kestrel_hir::body::*;
@@ -45,13 +45,51 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    // Stage-1 references (E-REF-20): mutating use through a SHARED `&T` —
+    // the const-cast guard. Sibling of E203-E205, hence this family.
+    DiagnosticDescriptor {
+        id: "E207",
+        name: "mutating_through_shared_ref",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    // Stage-1.5 named ref bindings: `&mutating expr` of a place that
+    // isn't mutable (let local/field, shared ref, get/set-only member).
+    DiagnosticDescriptor {
+        id: "E210",
+        name: "mutable_borrow_of_immutable",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    // Stage-1.5 named ref bindings: `&expr` of an rvalue — there is no
+    // place to borrow.
+    DiagnosticDescriptor {
+        id: "E499",
+        name: "borrow_of_temporary",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
+
+/// Look a descriptor up by its E-code.
+///
+/// Emit sites name the code, never a position. The positional form
+/// (`DESCRIPTORS[5]`, aliased behind `const E210: usize = 5;`) tied a code to
+/// an array index with nothing but the constant's *name* — inserting a
+/// descriptor in the middle silently reassigned every later code, its severity
+/// and its docs link (F16). `descriptor()` makes that reordering a no-op.
+fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
+    DESCRIPTORS
+        .iter()
+        .find(|d| d.id == id)
+        .expect("descriptor id must be declared in this analyzer's DESCRIPTORS")
+}
 
 pub struct AccessModeAnalyzer;
 
 impl Describe for AccessModeAnalyzer {
-    fn id(&self) -> &'static str {
-        "access_mode"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::AccessMode
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -63,6 +101,9 @@ enum MutClass {
     Mutable,
     ImmutableLocal(String), // local name
     ImmutableField(String), // field name
+    /// A shared `&T` place (ret_borrow call result). Distinct from Temporary
+    /// — temporaries are owned and may be mutated; a shared ref must not be.
+    SharedRef,
     Temporary,
 }
 
@@ -73,6 +114,7 @@ impl BodyCheck for AccessModeAnalyzer {
         for (expr_id, expr) in cx.hir.exprs.iter() {
             match expr {
                 HirExpr::Call { callee, args, .. } => {
+                    check_mutating_kind_call(cx, *callee, &mut diags);
                     // Resolve callee entity from typed resolutions
                     let callee_entity = match &cx.hir.exprs[*callee] {
                         HirExpr::Def(entity, _, _) => Some(*entity),
@@ -102,11 +144,132 @@ impl BodyCheck for AccessModeAnalyzer {
                         check_call_args(cx, method_entity, args, Some(*receiver), &mut diags);
                     }
                 },
+                HirExpr::Borrow {
+                    inner,
+                    mutating,
+                    span,
+                } => {
+                    check_borrow_init(cx, *inner, *mutating, span, &mut diags);
+                },
+                HirExpr::Match {
+                    scrutinee,
+                    arms,
+                    span,
+                    ..
+                } => {
+                    // `&mutating v` patterns need a MUTABLE scrutinee place
+                    // (E495's predicate family) — writes through the binding
+                    // must land in real storage, not a match-scoped temp.
+                    if arms
+                        .iter()
+                        .any(|arm| pat_has_mutating_ref_binder(cx, arm.pattern))
+                        && !matches!(classify_mutability(cx, *scrutinee), MutClass::Mutable)
+                    {
+                        diags.push(AnalyzeDiagnostic {
+                            descriptor_id: descriptor("E210").id,
+                            severity: descriptor("E210").default_severity,
+                            message: "`&mutating` pattern bindings need a mutable scrutinee place"
+                                .to_string(),
+                            labels: vec![DiagLabel {
+                                span: span.clone(),
+                                message: "scrutinee is not a mutable place".into(),
+                                is_primary: true,
+                            }],
+                            notes: vec![
+                                "match on a `var`, a `&mutating` reach, or a mutable element place"
+                                    .to_string(),
+                            ],
+                        });
+                    }
+                },
                 _ => {},
             }
         }
 
         diags
+    }
+}
+
+/// Borrow-initializer legality (`let r = &expr;`, stage 1.5 item 2): a
+/// borrow needs a PLACE (E499 otherwise); a `&mutating` borrow needs a
+/// MUTABLE place (E210 otherwise). Mutability is `classify_mutability` —
+/// the same predicate every access-mode check uses.
+fn check_borrow_init(
+    cx: &BodyContext<'_>,
+    inner: HirExprId,
+    mutating: bool,
+    span: &kestrel_span::Span,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let push = |diags: &mut Vec<AnalyzeDiagnostic>, code: &str, message: String, note: String| {
+        let d = descriptor(code);
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: d.id,
+            severity: d.default_severity,
+            message,
+            labels: vec![DiagLabel {
+                span: span.clone(),
+                message: "borrow initializer".into(),
+                is_primary: true,
+            }],
+            notes: vec![note],
+        });
+    };
+
+    // A get/set-only member has no mutable place to lend — the writeback
+    // temp the lowering would borrow strands every later store made
+    // through the binding.
+    if mutating
+        && let Some(&member) = cx.typed.resolutions.get(&inner)
+        && matches!(
+            cx.query.get::<NodeKind>(member),
+            Some(NodeKind::Subscript | NodeKind::Field)
+        )
+        && util::accessor_place_mut_base(cx, inner).is_some()
+        && cx
+            .query
+            .query(kestrel_hir_lower::PlaceAccessors { entity: member })
+            .is_none_or(|info| info.mutating_ref_accessor.is_none())
+    {
+        push(
+            diags,
+            "E210",
+            "cannot take a `&mutating` borrow of a get/set member".to_string(),
+            "writes through this member go get→set; a borrowable place needs a \
+             `mutating ref` accessor"
+                .to_string(),
+        );
+        return;
+    }
+
+    match classify_mutability(cx, inner) {
+        MutClass::Temporary => push(
+            diags,
+            "E499",
+            "cannot borrow a temporary value".to_string(),
+            "a borrow names an existing place; bind the value first (`let x = ...;`) \
+             and borrow that"
+                .to_string(),
+        ),
+        MutClass::SharedRef if mutating => push(
+            diags,
+            "E210",
+            "cannot take a `&mutating` borrow through a shared reference".to_string(),
+            "the place is reached through `&T`, which permits reads only".to_string(),
+        ),
+        MutClass::ImmutableLocal(name) if mutating => push(
+            diags,
+            "E210",
+            format!("cannot take a `&mutating` borrow of immutable variable '{name}'"),
+            "declare the variable with `var`, or take a shared `&` borrow".to_string(),
+        ),
+        MutClass::ImmutableField(name) if mutating => push(
+            diags,
+            "E210",
+            format!("cannot take a `&mutating` borrow of immutable field '{name}'"),
+            "the field is declared with `let`".to_string(),
+        ),
+        _ => {},
     }
 }
 
@@ -140,9 +303,99 @@ fn check_call_args(
         if let Some(param) = callable.params.get(i)
             && param.is_mut
             && !param.is_consuming
+            && !arg_is_closure_value(cx, arg.value)
         {
             check_mutating_arg(cx, arg.value, diags);
         }
+    }
+}
+
+/// Is this argument a CLOSURE value?
+///
+/// A `mutating` convention on a closure-typed parameter does not mean "the
+/// callee writes back into the caller's binding" — it declares that the callee
+/// calls the closure EXCLUSIVELY, which is the convention a `mutating`-kind
+/// closure type requires (docs/design/closures.md, "Passing: What Fits Where";
+/// the pairing itself is E625). The mutable place such a call needs is the
+/// closure's own environment — views into the caller's frame — not the
+/// argument expression, so a literal (a temporary) and a `let`-bound normal
+/// closure adapted to `mutating` both pass. Non-exclusive *calls* of a
+/// mutating-kind closure are still an E203-family mutating use of the callee
+/// binding; that is a different site.
+fn arg_is_closure_value(cx: &BodyContext<'_>, arg_id: HirExprId) -> bool {
+    matches!(
+        cx.typed.expr_types.get(&arg_id),
+        Some(kestrel_type_infer::result::ResolvedTy::Function { .. })
+    )
+}
+
+/// Calling a `mutating`-KIND closure is an EXCLUSIVE use of whatever holds it.
+///
+/// docs/design/closures.md, "`mutating`: write-back": "Calling one is an
+/// exclusive use — it must be held in a `var` (or `mutating` parameter)".
+/// Plan D8 deliberately routes this through the EXISTING mutability band
+/// rather than the kind machinery (E624 is the passing table, E625 the
+/// signature-level kind/convention pairing): the callee binding sits in a
+/// mutating position, so the ordinary classification decides — `let`-held is
+/// E203, an immutable field E204, a shared `&` reach E207.
+///
+/// What still passes: an inline literal (a temporary the caller owns for the
+/// duration of the call), a `var` binding, and a `mutating`/MutBorrow
+/// parameter. This is about CALLING, never about PASSING — passing a
+/// closure-typed argument to a `mutating` parameter has its own exemption
+/// (`arg_is_closure_value`).
+fn check_mutating_kind_call(
+    cx: &BodyContext<'_>,
+    callee: HirExprId,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    if !matches!(
+        cx.typed.expr_types.get(&callee),
+        Some(kestrel_type_infer::result::ResolvedTy::Function {
+            kind: kestrel_ast::FnTypeKind::Mutating,
+            ..
+        })
+    ) {
+        return;
+    }
+    let span = util::expr_span(cx.hir, callee);
+    let note = "a `mutating` closure writes back through its captures, so calling it needs \
+                exclusive access — hold it in a `var`, or take it as a `mutating` parameter";
+    match classify_mutability(cx, callee) {
+        // Owned temporary (an inline literal) or a mutable place: exclusive.
+        MutClass::Mutable | MutClass::Temporary => {},
+        MutClass::SharedRef => {
+            diags.push(shared_ref_diag(
+                span,
+                "cannot call a `mutating` closure through a shared reference",
+            ));
+        },
+        MutClass::ImmutableLocal(name) => {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: descriptor("E203").id,
+                severity: descriptor("E203").default_severity,
+                message: format!("cannot call `mutating` closure '{name}': it is bound with 'let'"),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "calling this needs exclusive access".into(),
+                    is_primary: true,
+                }],
+                notes: vec![note.into()],
+            });
+        },
+        MutClass::ImmutableField(name) => {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: descriptor("E204").id,
+                severity: descriptor("E204").default_severity,
+                message: format!("cannot call `mutating` closure in immutable field '{name}'"),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "calling this needs exclusive access".into(),
+                    is_primary: true,
+                }],
+                notes: vec![note.into()],
+            });
+        },
     }
 }
 
@@ -157,10 +410,16 @@ fn check_mutating_receiver(
     let span = util::expr_span(cx.hir, recv_id);
     match classify_mutability(cx, recv_id) {
         MutClass::Mutable | MutClass::Temporary => {}, // ok — owned or mutable place
+        MutClass::SharedRef => {
+            diags.push(shared_ref_diag(
+                span,
+                "cannot call a 'mutating' method through a shared reference",
+            ));
+        },
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
+                descriptor_id: descriptor("E203").id,
+                severity: descriptor("E203").default_severity,
                 message: format!(
                     "cannot pass immutable binding '{}' to 'mutating' parameter",
                     name
@@ -175,8 +434,8 @@ fn check_mutating_receiver(
         },
         MutClass::ImmutableField(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[1].id,
-                severity: DESCRIPTORS[1].default_severity,
+                descriptor_id: descriptor("E204").id,
+                severity: descriptor("E204").default_severity,
                 message: format!(
                     "cannot pass immutable field '{}' to 'mutating' parameter",
                     name
@@ -197,10 +456,16 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
     let span = util::expr_span(cx.hir, arg_id);
     match classify_mutability(cx, arg_id) {
         MutClass::Mutable => {}, // ok
+        MutClass::SharedRef => {
+            diags.push(shared_ref_diag(
+                span,
+                "cannot pass a shared reference to a 'mutating' parameter",
+            ));
+        },
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
+                descriptor_id: descriptor("E203").id,
+                severity: descriptor("E203").default_severity,
                 message: format!(
                     "cannot pass immutable binding '{}' to 'mutating' parameter",
                     name
@@ -215,8 +480,8 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
         },
         MutClass::ImmutableField(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[1].id,
-                severity: DESCRIPTORS[1].default_severity,
+                descriptor_id: descriptor("E204").id,
+                severity: descriptor("E204").default_severity,
                 message: format!(
                     "cannot pass immutable field '{}' to 'mutating' parameter",
                     name
@@ -231,8 +496,8 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
         },
         MutClass::Temporary => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[2].id,
-                severity: DESCRIPTORS[2].default_severity,
+                descriptor_id: descriptor("E205").id,
+                severity: descriptor("E205").default_severity,
                 message: "cannot pass temporary value to 'mutating' parameter".into(),
                 labels: vec![DiagLabel {
                     span,
@@ -245,8 +510,45 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
     }
 }
 
+/// E207: mutating use through a shared `&T` — the const-cast guard.
+fn shared_ref_diag(span: kestrel_span::Span, message: &str) -> AnalyzeDiagnostic {
+    AnalyzeDiagnostic {
+        descriptor_id: descriptor("E207").id,
+        severity: descriptor("E207").default_severity,
+        message: message.into(),
+        labels: vec![DiagLabel {
+            span,
+            message: "this is a shared `&` reference".into(),
+            is_primary: true,
+        }],
+        notes: vec![
+            "mutation needs `&mutating` — use the mutable accessor (e.g. `mutableAt`, \
+             `mutatingValue`) on a mutable base"
+                .into(),
+        ],
+    }
+}
+
 /// Classify an expression's mutability for access mode checking.
 fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
+    // Stage-1.5 accessor places FIRST: a member with a `mutating ref`
+    // accessor is a place PROJECTION — classify the base (`x(i) += 1`
+    // requires `x` mutable). Must precede the ref_place consult below:
+    // a ref-provider member's READ types `&T`, which would wrongly
+    // classify the projection as SharedRef.
+    if let Some(base) = util::accessor_place_mut_base(cx, expr_id) {
+        return classify_mutability(cx, base);
+    }
+    // Stage-1 refs next, before the syntactic walk: a `&mutating T` call
+    // result is a mutable place (it would fall to Temporary below and
+    // wrongly trip E205), and a shared `&T` must not fall to Temporary —
+    // the receiver check ACCEPTS temporaries, so without this consult a
+    // mutating method on a shared ref would silently pass (const-cast hole).
+    match util::ref_place(cx, expr_id) {
+        Some(true) => return MutClass::Mutable,
+        Some(false) => return MutClass::SharedRef,
+        None => {},
+    }
     match &cx.hir.exprs[expr_id] {
         // Local variable reference — check if binding is mutable
         HirExpr::Local(local_id, _) => {
@@ -278,21 +580,37 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
     }
 }
 
+/// Does this pattern (recursively) contain a `&mutating name` binder?
+fn pat_has_mutating_ref_binder(cx: &BodyContext<'_>, pat: kestrel_hir::body::HirPatId) -> bool {
+    use kestrel_hir::body::HirPat;
+    match &cx.hir.pats[pat] {
+        HirPat::Binding { by_ref, .. } => *by_ref == Some(true),
+        HirPat::At { subpattern, .. } => pat_has_mutating_ref_binder(cx, *subpattern),
+        HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => prefix
+            .iter()
+            .chain(suffix)
+            .any(|&p| pat_has_mutating_ref_binder(cx, p)),
+        HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => args
+            .iter()
+            .any(|a| pat_has_mutating_ref_binder(cx, a.pattern)),
+        HirPat::Struct { fields, .. } => fields.iter().any(|f| {
+            f.pattern
+                .is_some_and(|p| pat_has_mutating_ref_binder(cx, p))
+        }),
+        HirPat::Or { alternatives, .. } => alternatives
+            .iter()
+            .any(|&p| pat_has_mutating_ref_binder(cx, p)),
+        _ => false,
+    }
+}
+
 /// Find a method entity on a protocol by name.
 fn find_protocol_method(
     cx: &BodyContext<'_>,
     protocol: kestrel_hecs::Entity,
     method_name: &str,
 ) -> Option<kestrel_hecs::Entity> {
-    cx.query
-        .children_of(protocol)
-        .iter()
-        .find(|&&child| {
-            cx.query.get::<NodeKind>(child) == Some(&NodeKind::Function)
-                && cx
-                    .query
-                    .get::<kestrel_ast_builder::Name>(child)
-                    .is_some_and(|n| n.0 == method_name)
-        })
+    util::children_named_of_kind(cx.query, protocol, method_name, NodeKind::Function)
+        .first()
         .copied()
 }
