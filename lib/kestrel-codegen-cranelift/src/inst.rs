@@ -637,11 +637,25 @@ fn compile_op1(
             slot
         },
         Op::PtrCast(_) | Op::PtrBitcast(_) => arg,
+        // Same layout as the (data, table) tuple it views.
+        Op::FatPtr(_) => arg,
+        // Legalized at mono (`mono::fat`) when the pointee is unsized, so
+        // only the static case reaches codegen.
+        Op::SizeOfVal(ty) => {
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            builder.ins().iconst(ptr_ty, repr.size() as i64)
+        },
+        Op::AlignOfVal(ty) => {
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            builder.ins().iconst(ptr_ty, repr.align() as i64)
+        },
         Op::RefToPtr => arg,
         // Project word `i` out of a closure value. A `FuncThick` is always
         // addressed (TypeRepr::Aggregate), so `arg` is the base address and the
         // word is a plain pointer-sized load at `i * ptr_size`.
-        Op::ClosureWord(i) => {
+        // A fat (data, table) value is addressed like a closure value; a
+        // table word is the same load. Cranelift pointers are integers.
+        Op::ClosureWord(i) | Op::FatWord(i) | Op::WordInt(i) => {
             let off = (i as u64 * fc.ctx.ptr_size) as i32;
             builder
                 .ins()
@@ -973,16 +987,24 @@ fn compile_op3(
 
 /// Resolve an aggregate-slot operand's store value. A REF slot (stage 2b)
 /// stores the ADDRESS: a @guaranteed pointee-typed operand's codegen value
-/// IS that address, and an @owned `MirTy::Ref` operand already carries the
-/// pointer scalar — neither may go through `resolve_scalar` (it would load
-/// a scalar POINTEE through the address).
+/// IS that address, so it must not go through `resolve_scalar` (that would
+/// load a scalar POINTEE through it). A REF-typed operand is the `&&U = &U`
+/// collapse (a generic `&T` slot at `T=&U`): the slot stores the operand's
+/// pointer, which `resolve_scalar` yields for both ownerships — the same
+/// rule as ref-typed call args.
 fn resolve_slot_value(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
     slot_ty: TyId,
     value_id: ValueId,
 ) -> Value {
-    if matches!(fc.ctx.module.ty_arena.get(slot_ty), MirTy::Ref { .. }) {
+    let arena = &fc.ctx.module.ty_arena;
+    let slot_is_ref = matches!(arena.get(slot_ty), MirTy::Ref { .. });
+    let operand_is_ref = matches!(
+        arena.get(fc.body.values[value_id.index()].ty),
+        MirTy::Ref { .. }
+    );
+    if slot_is_ref && !operand_is_ref {
         fc.get_value(builder, value_id)
     } else {
         fc.resolve_scalar(builder, value_id)

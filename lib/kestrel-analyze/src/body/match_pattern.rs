@@ -249,6 +249,7 @@ fn count_string_literal_alts(cx: &BodyContext<'_>, pat: HirPatId) -> usize {
             .map(|&p| count_string_literal_alts(cx, p))
             .sum(),
         HirPat::At { subpattern, .. } => count_string_literal_alts(cx, *subpattern),
+        HirPat::TypeTest { sub, .. } => count_string_literal_alts(cx, *sub),
         _ => 0,
     }
 }
@@ -401,6 +402,8 @@ fn walk_pat(
         HirPat::At { subpattern, .. } => {
             walk_pat(cx, *subpattern, expected, diags);
         },
+        // The payload's own type is the target, not the scrutinee's.
+        HirPat::TypeTest { sub, .. } => walk_pat(cx, *sub, None, diags),
 
         HirPat::Wildcard { .. }
         | HirPat::Binding { .. }
@@ -425,7 +428,11 @@ fn variant_arity(cx: &BodyContext<'_>, case: Entity) -> usize {
 /// Look up an enum case by name on a resolved enum type. Returns the case
 /// entity if found, `None` otherwise (caller distinguishes "unknown case"
 /// from "scrutinee isn't an enum").
-fn lookup_enum_case(cx: &BodyContext<'_>, ty: &ResolvedTy, name: &str) -> Option<Entity> {
+pub(crate) fn lookup_enum_case(
+    cx: &BodyContext<'_>,
+    ty: &ResolvedTy,
+    name: &str,
+) -> Option<Entity> {
     let ResolvedTy::Named { entity, .. } = ty else {
         return None;
     };
@@ -541,6 +548,15 @@ fn walk_dup(
                 emit_duplicate(cx, pat_id, &name, diags);
             }
             walk_dup(cx, *subpattern, seen, diags);
+        },
+        HirPat::TypeTest { binding, sub, .. } => {
+            if let Some(binding) = binding {
+                let name = cx.hir.locals[*binding].name.clone();
+                if name != "_" && !seen.insert(name.clone()) {
+                    emit_duplicate(cx, pat_id, &name, diags);
+                }
+            }
+            walk_dup(cx, *sub, seen, diags);
         },
         HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => {
             for &p in prefix.iter().chain(suffix.iter()) {
@@ -678,6 +694,15 @@ fn gather_bindings(cx: &BodyContext<'_>, pat_id: HirPatId, out: &mut BTreeSet<St
             }
             gather_bindings(cx, *subpattern, out);
         },
+        HirPat::TypeTest { binding, sub, .. } => {
+            if let Some(binding) = binding {
+                let name = &cx.hir.locals[*binding].name;
+                if name != "_" {
+                    out.insert(name.clone());
+                }
+            }
+            gather_bindings(cx, *sub, out);
+        },
         HirPat::Array {
             prefix,
             rest,
@@ -713,6 +738,7 @@ fn pat_children(pat: &HirPat) -> Vec<HirPatId> {
         HirPat::Struct { fields, .. } => fields.iter().filter_map(|f| f.pattern).collect(),
         HirPat::Or { alternatives, .. } => alternatives.clone(),
         HirPat::At { subpattern, .. } => vec![*subpattern],
+        HirPat::TypeTest { sub, .. } => vec![*sub],
         HirPat::Wildcard { .. }
         | HirPat::Binding { .. }
         | HirPat::Literal { .. }
@@ -799,6 +825,7 @@ pub fn is_invalid(cx: &BodyContext<'_>, pat_id: HirPatId, expected: Option<&Reso
                 || alternatives.iter().any(|&a| is_invalid(cx, a, expected))
         },
         HirPat::At { subpattern, .. } => is_invalid(cx, *subpattern, expected),
+        HirPat::TypeTest { sub, .. } => is_invalid(cx, *sub, None),
         HirPat::Literal {
             value: HirLiteral::Float(_),
             ..
@@ -841,6 +868,7 @@ pub fn has_inconsistent_or(hir: &HirBody, pat_id: HirPatId) -> bool {
             .iter()
             .any(|f| f.pattern.is_some_and(|p| has_inconsistent_or(hir, p))),
         HirPat::At { subpattern, .. } => has_inconsistent_or(hir, *subpattern),
+        HirPat::TypeTest { sub, .. } => has_inconsistent_or(hir, *sub),
         HirPat::Wildcard { .. }
         | HirPat::Binding { .. }
         | HirPat::Literal { .. }
@@ -873,6 +901,15 @@ fn gather_bindings_pure(hir: &HirBody, pat_id: HirPatId, out: &mut BTreeSet<Stri
                 out.insert(name.clone());
             }
             gather_bindings_pure(hir, *subpattern, out);
+        },
+        HirPat::TypeTest { binding, sub, .. } => {
+            if let Some(binding) = binding {
+                let name = &hir.locals[*binding].name;
+                if name != "_" {
+                    out.insert(name.clone());
+                }
+            }
+            gather_bindings_pure(hir, *sub, out);
         },
         HirPat::Array {
             prefix,

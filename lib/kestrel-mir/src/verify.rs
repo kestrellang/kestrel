@@ -2733,6 +2733,14 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 });
             };
 
+            kestrel_debug::ktrace!(
+                "escape",
+                "{}: returned {:?} rooted {:?}\n{}",
+                func.name,
+                v,
+                vd_root,
+                crate::display::display_body(body, module)
+            );
             let mut root = vd_root;
             if root.is_derived_placeholder() {
                 // Hand-built bodies may bypass alloc_value; treat as a local

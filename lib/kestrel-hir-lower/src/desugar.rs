@@ -23,7 +23,7 @@ use crate::syntax::{BlockSyntax, Cond, ExprSrc, PatSrc, expr_children, first_exp
 ///
 /// This is a syntactic check used by `desugar_compound_assign`. Mutability
 /// of the resolved binding is enforced later by the assignment analyzer.
-fn is_place_syntax(expr: &SyntaxNode) -> bool {
+pub(crate) fn is_place_syntax(expr: &SyntaxNode) -> bool {
     match expr.kind() {
         SyntaxKind::ExprPath | SyntaxKind::ExprTupleIndex => true,
         SyntaxKind::ExprGrouping => first_expr(expr)
@@ -1294,7 +1294,7 @@ impl LowerCtx<'_> {
 
     /// Resolve a builtin type/protocol to its entity ID.
     /// Uses ResolveBuiltin query (cached, resolves from root context).
-    fn resolve_builtin(&self, builtin: Builtin) -> Option<kestrel_hecs::Entity> {
+    pub(crate) fn resolve_builtin(&self, builtin: Builtin) -> Option<kestrel_hecs::Entity> {
         let result = self.ctx.query(ResolveBuiltin {
             builtin,
             root: self.root,

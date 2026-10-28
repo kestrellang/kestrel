@@ -72,7 +72,11 @@ pub fn display_module_filtered(module: &MirModule, filter: &str) -> String {
                 out.push('\n');
             }
             first = false;
-            writeln!(out, "; function: {}", func.name).unwrap();
+            write!(out, "; function: {}", func.name).unwrap();
+            if let Some(mode) = func.inline {
+                write!(out, " [{}]", mode.as_str()).unwrap();
+            }
+            out.push('\n');
             out.push_str(&display_body(body, module));
             out.push('\n');
         }
@@ -98,7 +102,11 @@ pub fn display_mono_module_filtered(module: &crate::mono::MonoModule, filter: &s
                 out.push('\n');
             }
             first = false;
-            writeln!(out, "; function: {}", func.name).unwrap();
+            write!(out, "; function: {}", func.name).unwrap();
+            if let Some(mode) = func.inline {
+                write!(out, " [{}]", mode.as_str()).unwrap();
+            }
+            out.push('\n');
             out.push_str(&display_body(body, module));
             out.push('\n');
         }
@@ -200,6 +208,30 @@ fn fmt_ty(ty: TyId, arena: &TyArena, module: &dyn NameResolver) -> String {
         MirTy::Ref { pointee, mutating } => {
             let prefix = if *mutating { "&mutating " } else { "&" };
             format!("{prefix}{}", fmt_ty(*pointee, arena, module))
+        },
+
+        MirTy::RawExistential { bounds, bindings } => {
+            let bounds: Vec<String> = bounds
+                .iter()
+                .map(|(p, args)| {
+                    let name = module.resolve_name(*p).to_string();
+                    if args.is_empty() {
+                        name
+                    } else {
+                        let args: Vec<_> = args.iter().map(|t| fmt_ty(*t, arena, module)).collect();
+                        format!("{name}[{}]", args.join(", "))
+                    }
+                })
+                .collect();
+            let pins: Vec<String> = bindings
+                .iter()
+                .map(|(a, t)| format!("{} = {}", module.resolve_name(*a), fmt_ty(*t, arena, module)))
+                .collect();
+            if pins.is_empty() {
+                format!("rawany {}", bounds.join(" and "))
+            } else {
+                format!("rawany {}[{}]", bounds.join(" and "), pins.join(", "))
+            }
         },
 
         MirTy::Tuple(elems) => {
@@ -896,6 +928,12 @@ fn fmt_immediate(
             format!("string_ptr \"{}\"", s.escape_default())
         },
         ImmediateKind::Unit => "()".into(),
+        ImmediateKind::VTable { template, payload } => format!(
+            "vtable {}[{}]",
+            module.resolve_name(*template),
+            fmt_ty(*payload, arena, module)
+        ),
+        ImmediateKind::MonoVTable(id) => format!("vtable #{}", id.index()),
         ImmediateKind::FunctionRef {
             func,
             type_args,

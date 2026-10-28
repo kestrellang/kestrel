@@ -11,8 +11,9 @@ import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator)
 // single allocation. The word is 1 while the payload is present and 0 once
 // `takeValue()` has moved it out, so `destroy()` knows whether the slot still
 // owns anything. It is an `Int64` (not a `Bool`) for the same reason
-// `RcBoxStorage.refCount` is: the payload sits at a fixed `sizeof[Int64]`
-// offset, which `valuePtr()` computes without a field-offset intrinsic.
+// `RcBoxStorage.refCount` is: the payload sits right after the word, rounded
+// up to its alignment, which `valuePtr()` computes without a field-offset
+// intrinsic.
 //
 // `where T: not Copyable` is a RELAXATION, not a requirement: the payload is
 // a consuming closure's environment struct, which owns its captures.
@@ -88,10 +89,11 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     }
 
     /// Pointer to the payload slot inside the block. Mirrors
-    /// `RcBox.valuePtr()`: the header is one `Int64`, so the payload starts at
-    /// `sizeof[Int64]` bytes.
+    /// `RcBox.valuePtr()`: the header is one `Int64` rounded up to the
+    /// payload's alignment, which is the block's own alignment
+    /// (max(8, align T)), so an `@align`ed payload lands where the layout put it.
     fileprivate func valuePtr() -> Pointer[T] {
-        let valueOffset = Int64(intLiteral: lang.sizeof[Int64]());
+        let valueOffset = Int64(intLiteral: lang.alignof[UniqueBoxStorage[T]]());
         self.ptr.asRaw().offset(by: valueOffset).cast[T]()
     }
 

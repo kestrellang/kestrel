@@ -4,7 +4,19 @@
 //! downstream phases need so analyzers, type inference, move tracking, and MIR
 //! lowering do not each reinterpret raw conformance syntax differently.
 
+pub mod existential;
+pub mod sizedness;
 pub mod staticness;
+
+pub use existential::{
+    Dispatch, ExistentialLayout, Layout, RequirementDispatch, SelfConformance, bound_closure,
+    is_requirement, reachable_protocols, self_conformance,
+};
+pub use sizedness::{
+    NominalSizedness, SizeRequirement, SizedLayer, Sizedness, TypeParamSizeRequirement,
+    assoc_may_be_unsized, hir_type_is_sized, instance_is_sized, last_stored_field,
+    last_stored_field_type, relaxed_param_by_value, BoxDefect, ExistentialBoxDefect,
+};
 
 pub use staticness::{
     NominalStaticness, StaticLayer, StaticRequirement, Staticness, StaticnessInfo,
@@ -13,7 +25,7 @@ pub use staticness::{
 
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
@@ -127,6 +139,61 @@ impl QueryFn for ResolvedConformances {
     fn describe(&self) -> String {
         format!("ResolvedConformances({:?})", self.entity)
     }
+}
+
+// ===== Raw existential copy class =====
+
+/// The copy class of a raw existential with these bound protocols — THE
+/// rule for every layer (semantics, solver, analyze). Unsized, so never
+/// bit-copied; `Cloneable` iff a bound refines `Cloneable`, because then
+/// every payload is Cloneable and the function table's clone entry is
+/// always filled (existentials design §1).
+pub fn raw_existential_copy_semantics(
+    ctx: &QueryContext<'_>,
+    bounds: impl IntoIterator<Item = Entity>,
+    root: Entity,
+) -> CopySemantics {
+    let Some(cloneable) = ctx.query(ResolveBuiltin {
+        builtin: Builtin::Cloneable,
+        root,
+    }) else {
+        return CopySemantics::NotCopyable;
+    };
+    let refines = bounds.into_iter().any(|protocol| {
+        ctx.query(ProtocolRefines {
+            protocol,
+            base: cloneable,
+            root,
+        })
+    });
+    if refines {
+        CopySemantics::Cloneable
+    } else {
+        CopySemantics::NotCopyable
+    }
+}
+
+/// Is a raw existential with these bounds Static — THE rule for every
+/// layer? Only when a bound refines `Static`, since then every payload is
+/// reference-free (existentials design §10).
+pub fn raw_existential_is_static(
+    ctx: &QueryContext<'_>,
+    bounds: impl IntoIterator<Item = Entity>,
+    root: Entity,
+) -> bool {
+    let Some(static_proto) = ctx.query(ResolveBuiltin {
+        builtin: Builtin::Static,
+        root,
+    }) else {
+        return false;
+    };
+    bounds.into_iter().any(|protocol| {
+        ctx.query(ProtocolRefines {
+            protocol,
+            base: static_proto,
+            root,
+        })
+    })
 }
 
 // ===== Protocol Refinement =====
@@ -420,22 +487,8 @@ impl QueryFn for TypeParamCopyRequirement {
             root: self.root,
         });
 
-        let mut checked = HashSet::new();
-        let mut contexts = Vec::new();
-        if let Some(parent) = ctx.parent_of(self.param) {
-            contexts.push(parent);
-        }
-        let mut current = Some(self.context);
-        while let Some(entity) = current {
-            contexts.push(entity);
-            current = ctx.parent_of(entity);
-        }
-
         let mut requires_cloneable = false;
-        for context in contexts {
-            if !checked.insert(context) {
-                continue;
-            }
+        for context in param_bound_contexts(ctx, self.param, self.context) {
             let Some(wc) = ctx.get::<AstWhereClause>(context) else {
                 continue;
             };
@@ -748,6 +801,14 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
             HirTy::AbstractAssoc { entity, .. } => self.base_semantics(*entity),
             HirTy::Alias { expanded, .. } => self.member_semantics(expanded),
             HirTy::Protocol { .. } => CopySemantics::Copyable,
+            HirTy::RawExistential { bounds, .. } => raw_existential_copy_semantics(
+                self.ctx,
+                bounds.iter().filter_map(|b| match b {
+                    HirTy::Protocol { entity, .. } => Some(*entity),
+                    _ => None,
+                }),
+                self.root,
+            ),
             // `some P and not Copyable` may hide a move-only underlier; the
             // plain form guarantees a duplicable one (post-solve check).
             HirTy::Opaque { not_copyable, .. } => {
@@ -935,6 +996,30 @@ fn resolve_protocol_target(
     }
 }
 
+/// The entities whose where-clauses govern `param` when asked from
+/// `context`: the param's owner, then `context` and each of its ancestors,
+/// deduplicated, nearest first. THE walk behind the copy, static and size
+/// requirement queries — a method consults its container's clauses, and an
+/// `extend Box[T] where …` consults both its own and `Box`'s.
+pub(crate) fn param_bound_contexts(
+    ctx: &QueryContext<'_>,
+    param: Entity,
+    context: Entity,
+) -> Vec<Entity> {
+    let mut out = Vec::new();
+    if let Some(owner) = ctx.parent_of(param) {
+        out.push(owner);
+    }
+    let mut current = Some(context);
+    while let Some(entity) = current {
+        if !out.contains(&entity) {
+            out.push(entity);
+        }
+        current = ctx.parent_of(entity);
+    }
+    out
+}
+
 fn resolve_type_entity(
     ctx: &QueryContext<'_>,
     ast_ty: &AstType,
@@ -968,6 +1053,7 @@ fn ast_type_span(ast_ty: &AstType) -> Span {
         | AstType::Never(span)
         | AstType::Inferred(span)
         | AstType::Some { span, .. }
+        | AstType::Any { span, .. }
         | AstType::Ref { span, .. } => span.clone(),
     }
 }
@@ -989,6 +1075,7 @@ fn ast_type_name(ast_ty: &AstType) -> String {
         AstType::Never(_) => "Never".into(),
         AstType::Inferred(_) => "_".into(),
         AstType::Some { .. } => "some".into(),
+        AstType::Any { .. } => "any".into(),
         AstType::Ref { .. } => "reference".into(),
     }
 }

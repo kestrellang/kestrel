@@ -154,6 +154,12 @@ pub(super) fn solve_tuple_index(
     if matches!(kind, TyKind::Error) {
         return SolveResult::Solved;
     }
+    // Index through a reference like field access does: `r.0` on
+    // `r: &(A, B)` reads the pointee's element (the `?.` binder is a ref).
+    if let TyKind::Ref { pointee, .. } = kind {
+        let pointee = *pointee;
+        return solve_tuple_index(ctx, pointee, index, result, span);
+    }
     if let TyKind::Tuple(elems) = kind {
         if index < elems.len() {
             let elem = elems[index];
@@ -328,7 +334,7 @@ pub(super) fn member_not_found_error(
 /// returning that pointee TyVar for the caller to requeue the member on.
 /// Returns `None` (no peel) when the receiver isn't a nominal or doesn't
 /// conform to `Indirection`.
-pub(super) fn try_indirection_peel(
+pub(crate) fn try_indirection_peel(
     ctx: &mut InferCtx<'_>,
     recv_kind: &TyKind,
     receiver: TyVar,
@@ -457,6 +463,35 @@ pub(super) fn solve_member(
         );
     }
 
+    // Existential receiver (`B[rawany P]`): protocol members first, then
+    // the box's own (existentials design §7). Operators and for-in go
+    // through self-conformance instead, so they skip the peel.
+    if !ctx.protocol_dispatch_members.contains(&expr)
+        && let Some(peeled) =
+            crate::existential::peel_for_member(
+                ctx, receiver, &recv_kind, name, &args, is_call, expr, &span,
+            )
+    {
+        return match peeled {
+            Ok(payload) => solve_member(
+                ctx,
+                payload,
+                name,
+                args,
+                result,
+                expr,
+                is_call,
+                is_static_context,
+                explicit_type_args,
+                span,
+            ),
+            Err(err) => {
+                ctx.poison(result);
+                SolveResult::Error(err)
+            },
+        };
+    }
+
     // If the receiver is an AssocProjection or a TypeAlias whose entity is
     // bound via a where-clause equality AND that bound resolves to a concrete
     // type, substitute the bound TyVar before member dispatch. If the bound is
@@ -556,9 +591,22 @@ pub(super) fn solve_member(
     // A projection receiver carries its base spine so the bound search sees
     // only bounds that name *this* receiver (G17 S4).
     let spine = projection_base_spine(ctx, &recv_kind);
-    let lookup = ctx
-        .resolver
-        .resolve_member_with_base(&recv_kind, spine.as_deref(), name, &args);
+    // On an existential, an extension method of its protocol (and anything
+    // operators / for-in reach) resolves with the box itself as `Self`,
+    // through `any P: P` (existentials design §6).
+    let lookup = match crate::existential::self_conformance_member(
+        ctx,
+        receiver,
+        &recv_kind,
+        name,
+        &args,
+        ctx.protocol_dispatch_members.contains(&expr),
+    ) {
+        Some(res) => Ok(res),
+        None => ctx
+            .resolver
+            .resolve_member_with_base(&recv_kind, spine.as_deref(), name, &args),
+    };
     let resolution = match lookup {
         Ok(res) => res,
         Err(crate::resolve::MemberError::NotFound) => {

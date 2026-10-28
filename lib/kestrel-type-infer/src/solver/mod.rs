@@ -44,12 +44,14 @@ mod equality;
 mod lower;
 mod member;
 use assoc::*;
+pub(crate) use assoc::solve_associated;
 use call::*;
 pub(crate) use conformance::*;
 pub(crate) use defaults::*;
 pub(crate) use equality::*;
 use lower::*;
 use member::*;
+pub(crate) use member::try_indirection_peel;
 
 /// Diagnose type parameters at generic call sites that inference couldn't
 /// pin down. Lib1 silently defaulted these to `Never` (RFC 1216-style
@@ -296,6 +298,12 @@ pub(super) fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bo
                     .any(|(_, args)| args.iter().any(|&a| walk(ctx, a, seen)))
                     || origin_args.iter().any(|&a| walk(ctx, a, seen))
             },
+            TySlot::Resolved(TyKind::RawExistential { bounds, bindings }) => {
+                bounds
+                    .iter()
+                    .any(|(_, args)| args.iter().any(|&a| walk(ctx, a, seen)))
+                    || bindings.iter().any(|&(_, t)| walk(ctx, t, seen))
+            },
             TySlot::Resolved(
                 TyKind::Param { .. } | TyKind::SelfType { .. } | TyKind::Never | TyKind::Error,
             ) => false,
@@ -337,6 +345,7 @@ pub(super) fn expr_span(expr: &HirExpr) -> &Span {
         | HirExpr::Assign { span, .. }
         | HirExpr::Block { span, .. }
         | HirExpr::Error { span }
+        | HirExpr::TakePayload { span, .. }
         | HirExpr::Sugar { span, .. } => span,
     }
 }
@@ -856,7 +865,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
 }
 
 /// Result of attempting to solve a single constraint.
-pub(super) enum SolveResult {
+pub(crate) enum SolveResult {
     /// Constraint was fully resolved.
     Solved,
     /// Not enough info yet — put back for later.

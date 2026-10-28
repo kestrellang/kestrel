@@ -27,6 +27,8 @@
 //! - `Constructor::matches()` — compatibility check for specialization
 //! - `Constructor::field_types()` — sub-pattern types for a constructor
 //! - `Constructor::all_for_type()` — enumerate all constructors (via TypeShape)
+//! - `Constructor::all_at_site()` — the same, seen from a match's module:
+//!   a `@nonExhaustive` enum from another module is open there
 
 use std::collections::HashSet;
 
@@ -87,6 +89,10 @@ pub enum Constructor {
         suffix_len: usize,
         has_rest: bool,
     },
+    /// `is T` on an existential: the payload is a `T`. One field, the
+    /// payload viewed as `T`. Existentials have an open set of payload types,
+    /// so like integer literals these never cover the type.
+    TypeTest(ResolvedTy),
     /// Marker for types with infinite constructors
     NonExhaustive,
     /// Placeholder for missing constructors in witness generation
@@ -103,6 +109,7 @@ impl Constructor {
             Constructor::IntLiteral(_) | Constructor::IntRange { .. } => 0,
             Constructor::CharLiteral(_) | Constructor::CharRange { .. } => 0,
             Constructor::StringLiteral(_) => 0,
+            Constructor::TypeTest(_) => 1,
             Constructor::Unit => 0,
             Constructor::Wildcard => 0,
             Constructor::Array {
@@ -153,6 +160,7 @@ impl Constructor {
 
             // String
             (Constructor::StringLiteral(s1), Constructor::StringLiteral(s2)) => s1 == s2,
+            (Constructor::TypeTest(t1), Constructor::TypeTest(t2)) => t1 == t2,
 
             // Array length compatibility
             (
@@ -194,6 +202,7 @@ impl Constructor {
     ) -> Vec<ResolvedTy> {
         match (self, parent_ty) {
             (Constructor::Tuple { .. }, ResolvedTy::Tuple(elems)) => elems.clone(),
+            (Constructor::TypeTest(target), _) => vec![target.clone()],
 
             (
                 Constructor::Variant { entity, arity },
@@ -265,6 +274,22 @@ impl Constructor {
         shape.constructors(query)
     }
 
+    /// [`Self::all_for_type`] as seen from a match at `site`: outside a
+    /// `@nonExhaustive` enum's module the case list also holds
+    /// [`Constructor::NonExhaustive`], the cases a later version may add,
+    /// which only a catch-all covers.
+    pub fn all_at_site(
+        query: &QueryContext<'_>,
+        site: MatchSite,
+        ty: &ResolvedTy,
+    ) -> Option<Vec<Constructor>> {
+        let mut all = Self::all_for_type(query, site.root, ty)?;
+        if open_enum_at(query, site, ty).is_some() {
+            all.push(Constructor::NonExhaustive);
+        }
+        Some(all)
+    }
+
     /// Find constructors not covered by `covered`. Returns `None` if impossible.
     pub fn missing(
         query: &QueryContext<'_>,
@@ -334,6 +359,7 @@ impl Constructor {
                 }
             },
             Constructor::StringLiteral(s) => format!("\"{}\"", s),
+            Constructor::TypeTest(t) => format!("is {}", type_test_name(query, t)),
             Constructor::Unit => "()".into(),
             Constructor::Wildcard | Constructor::NonExhaustive | Constructor::Missing => "_".into(),
             Constructor::Array {
@@ -390,6 +416,9 @@ impl Constructor {
                 }
             },
             Constructor::StringLiteral(s) => Witness::string(s),
+            Constructor::TypeTest(t) => {
+                Witness::Literal(format!("is {}", type_test_name(query, t)))
+            },
             Constructor::Unit => Witness::tuple(vec![]),
             Constructor::Array {
                 prefix_len,
@@ -400,6 +429,14 @@ impl Constructor {
                 Witness::any()
             },
         }
+    }
+}
+
+/// The target of an `is` constructor, for messages.
+fn type_test_name(query: &QueryContext<'_>, ty: &ResolvedTy) -> String {
+    match ty {
+        ResolvedTy::Named { entity, .. } => entity_name(query, *entity),
+        _ => "_".into(),
     }
 }
 
@@ -446,6 +483,14 @@ impl TypeShape {
                 } else {
                     TypeShape::Tuple(elems.len())
                 }
+            },
+
+            // An existential box (`B[rawany P]`): its payload type is open,
+            // so only `_` covers it, whatever the box's own shape.
+            ResolvedTy::Named { args, .. }
+                if matches!(args.first(), Some(ResolvedTy::RawExistential { .. })) =>
+            {
+                TypeShape::Infinite
             },
 
             ResolvedTy::Named { entity, .. } => {
@@ -531,6 +576,49 @@ impl TypeShape {
             TypeShape::Infinite | TypeShape::Unknown => None,
         }
     }
+}
+
+// ===== Match sites =====
+
+/// Where a match is written, for `@nonExhaustive` enums.
+#[derive(Clone, Copy, Debug)]
+pub struct MatchSite {
+    pub root: Entity,
+    /// The `internal_boundary` (top-level module) of the matching code.
+    /// `None` treats every enum as closed: code generation compiles the
+    /// cases that exist today.
+    pub boundary: Option<Entity>,
+}
+
+impl MatchSite {
+    /// A site that sees every enum as closed.
+    pub fn closed(root: Entity) -> Self {
+        Self {
+            root,
+            boundary: None,
+        }
+    }
+
+    /// The site of code in `owner` (a function, initializer, accessor, ...).
+    pub fn of(query: &QueryContext<'_>, root: Entity, owner: Entity) -> Self {
+        Self {
+            root,
+            boundary: kestrel_name_res::internal_boundary(query, owner),
+        }
+    }
+}
+
+/// The enum `ty` names if it is `@nonExhaustive` and `site` is outside its
+/// module, so its case list is open there.
+pub fn open_enum_at(query: &QueryContext<'_>, site: MatchSite, ty: &ResolvedTy) -> Option<Entity> {
+    let ResolvedTy::Named { entity, .. } = ty else {
+        return None;
+    };
+    let boundary = site.boundary?;
+    (query.get::<NodeKind>(*entity) == Some(&NodeKind::Enum)
+        && kestrel_ast_builder::attrs::attrs_of(query, *entity).is_non_exhaustive()
+        && kestrel_name_res::internal_boundary(query, *entity) != Some(boundary))
+    .then_some(*entity)
 }
 
 // ===== Helpers =====

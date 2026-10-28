@@ -55,7 +55,7 @@ use kestrel_name_res::{
 use kestrel_type_infer::compare::{
     AssocBinding, TypeCompareEnv, TypeCompareResult, compare_hir_types,
 };
-use kestrel_type_infer::conformance::type_satisfies;
+use kestrel_type_infer::conformance::resolved_satisfies;
 use kestrel_type_infer::entailment::constraint_entailed_by;
 use kestrel_type_infer::resolve::{WhereClause as ResolvedWhereClause, WhereSubject};
 use kestrel_type_infer::result::ResolvedTy;
@@ -313,6 +313,15 @@ fn check_protocol_requirements(
         // visible to readers as a (would-be) default, so the conformance is
         // not missing in the sense E454 is meant to flag.
         if cx.query.get::<kestrel_ast_builder::Valued>(child).is_some() {
+            continue;
+        }
+        // An `@unavailable` requirement can never be called, so it needs no
+        // witness (attributes design §B6).
+        if cx
+            .query
+            .query(kestrel_ast_builder::attrs::UseRestrictionOf { entity: child })
+            .is_some_and(|r| r.kind == kestrel_ast_builder::attrs::RestrictionKind::Unavailable)
+        {
             continue;
         }
         let child_kind = cx.query.get::<NodeKind>(child);
@@ -1983,30 +1992,6 @@ fn collect_provided_members_for_conformance(
     }
 }
 
-/// Convert a `ResolvedTy` to a `HirTy` for a bound-aware conformance check
-/// (`type_satisfies`). Spans are irrelevant to the check, so a dummy is used.
-/// Concrete nominals/tuples/refs are reproduced faithfully (so a real violation
-/// can be disproven); abstract positions (`Param`/`SelfType`/projections/opaque/
-/// functions) collapse to `Infer`, which `type_satisfies` permits — matching its
-/// conservative "reject only on a provable concrete violation" contract.
-fn resolved_ty_to_hir(ty: &ResolvedTy) -> kestrel_hir::ty::HirTy {
-    use kestrel_hir::ty::HirTy;
-    let sp = kestrel_span::Span::new(0, 0..0);
-    match ty {
-        // `Struct` vs `Enum` doesn't matter: `nominal_satisfies` keys off the
-        // entity's own NodeKind, not the HirTy variant.
-        ResolvedTy::Named { entity, args } => HirTy::Struct {
-            entity: *entity,
-            args: args.iter().map(resolved_ty_to_hir).collect(),
-            span: sp,
-        },
-        ResolvedTy::Tuple(elems) => {
-            HirTy::Tuple(elems.iter().map(resolved_ty_to_hir).collect(), sp)
-        },
-        _ => HirTy::Infer(sp),
-    }
-}
-
 /// True if every where clause on `extension` (substituted via `proto_subs`
 /// from the protocol's type params to the conforming type's bindings) is
 /// entailed by `context_clauses`. Empty extension clauses always entail.
@@ -2028,7 +2013,7 @@ fn extension_clauses_entailed(
         cx.query.get::<NodeKind>(type_entity),
         Some(NodeKind::Struct | NodeKind::Enum)
     )
-    .then(|| resolved_ty_to_hir(&self_type_for_compare(cx, type_entity)));
+    .then(|| self_type_for_compare(cx, type_entity));
     ext_clauses.iter().all(|c| {
         if let (
             ResolvedWhereClause::Bound {
@@ -2039,7 +2024,7 @@ fn extension_clauses_entailed(
             Some(self_ty),
         ) = (c, &concrete_self)
         {
-            return type_satisfies(cx.query, self_ty, *protocol, cx.root);
+            return resolved_satisfies(cx.query, self_ty, *protocol, cx.root);
         }
         // A bound whose param maps to a CONCRETE type can't be discharged by
         // param-to-param entailment — it needs a real conforms-to check
@@ -2058,7 +2043,7 @@ fn extension_clauses_entailed(
             && let Some(binding) = proto_subs.get(&param)
             && !matches!(binding, ResolvedTy::Param { .. })
         {
-            return type_satisfies(cx.query, &resolved_ty_to_hir(binding), *protocol, cx.root);
+            return resolved_satisfies(cx.query, binding, *protocol, cx.root);
         }
         // Param-to-param (or unsubstituted) bound: discharge by entailment from
         // the conformance context's own where clauses.

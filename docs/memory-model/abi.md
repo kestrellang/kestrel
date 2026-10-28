@@ -110,7 +110,14 @@ why capturing closures cannot escape it — E494).
 
 ### Structs and Tuples
 
-Struct fields and tuple elements are laid out in declaration order:
+**A struct's default layout is unspecified.** A later release may reorder
+fields to save padding. Code that depends on field order or offsets (C
+interop, wire formats) declares it with `@layout(.C)`; a struct that conforms
+to `FFISafe` gets `@layout(.C)` implicitly. Tuples have no attributes and
+always follow the rules below.
+
+Today the default and `@layout(.C)` are the same: fields and tuple elements
+are laid out in declaration order:
 
 1. Start with `(size=0, align=1)`.
 2. For each field: offset = round_up(current size, field align);
@@ -123,6 +130,27 @@ Example (64-bit):
 struct Pair { a: i8, b: i64 }
 // a @ 0, b @ 8, size = 16, align = 8
 ```
+
+**`@layout(.Packed)`** places every field at alignment 1 with no padding;
+the struct's alignment is 1. Fields may be misaligned, so the backends access
+memory without assuming alignment, and no reference to a packed field may be
+taken (E912).
+
+**`@align(N)`** (a power of two, 1 to 4096) raises the alignment of a struct
+or enum to `max(N, natural alignment)`, after the rules above, and pads the
+size to a multiple of it. Stack slots and heap blocks honour it. A newtype
+or payload-less enum whose `@align` changes its size or alignment is carried
+in memory rather than as its field's scalar.
+
+```
+@layout(.Packed) struct WireHeader { tag: i8, length: i32 }
+// tag @ 0, length @ 1, size = 5, align = 1
+@align(16) struct Wide { v: i32 }
+// v @ 0, size = 16, align = 16
+```
+
+All of these are computed by one constructor (`StructLayout::with_attrs` and
+`build_enum_layout` in `kestrel-mir`), which both backends read.
 
 ### Enums
 
@@ -137,6 +165,10 @@ Enums are tagged unions:
 
 Case payloads are laid out as case-specific structs using the struct rules
 above; empty cases have zero-sized payloads.
+
+`@layout(.C)` applies only to payload-less enums (E910) and makes the
+discriminant a C `int` (`i32`) whose values are the case indices.
+`@layout(.Packed)` does not apply to enums.
 
 Note: drop order within a dropped value is **reverse declaration order** for
 struct fields and enum payload fields (see

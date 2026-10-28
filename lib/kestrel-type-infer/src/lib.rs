@@ -17,7 +17,10 @@ pub mod constraint;
 pub mod ctx;
 mod entail_layer;
 pub mod entailment;
+mod optional_chain;
+mod pipe;
 pub mod error;
+mod existential;
 pub mod generate;
 pub mod obligations;
 pub mod resolve;
@@ -43,7 +46,9 @@ use resolve::WorldResolver;
 use result::TypedBody;
 
 pub use captures::{CaptureKind, CapturedPlace, ClosureCaptureMap, ClosureCaptures, PlaceKey};
-pub use conformance::{extension_bounds_hold, type_satisfies};
+pub use conformance::{
+    extension_bounds_hold, resolved_satisfies, type_satisfies, type_test_blocker,
+};
 pub use error::describe_fn_kind;
 
 /// Resolve the logical enclosing container for a function-like entity.
@@ -111,6 +116,12 @@ impl QueryFn for InferBody {
 
         // Solve
         obligations::finish_body(&mut infer_ctx, &hir);
+
+        // Settle each `?.` bind's method now that members are resolved.
+        optional_chain::decide_chain_modes(&mut infer_ctx, &hir);
+
+        // A failed `|>` reports one fix-it instead of its call's errors.
+        pipe::reword_pipe_errors(&mut infer_ctx, &hir);
 
         // Detect circular opaque returns: if the concrete type behind `some P`
         // is itself another opaque, the body never grounded to a real type.

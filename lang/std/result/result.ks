@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable, Bool, ControlFlow, Tryable, FromResidual, FromValue, Coalesce, fatalError)
+import std.core.(Equatable, Bool, ControlFlow, Tryable, FromResidual, FromValue, Coalesce, OptionalChain, fatalError)
 import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.result.(Optional)
 import std.iter.(Iterator)
@@ -485,6 +485,40 @@ extend Result[T, E]: Coalesce[T] {
             .Ok(value) => value,
             .Err(_) => default()
         }
+    }
+}
+
+/// `OptionalChain` — `r?.x` chains on the `.Ok` value. The chain's result
+/// is `Optional`, so an `.Err` becomes `.None` and the error is dropped;
+/// use `map` or `match` to keep it.
+///
+/// # Examples
+///
+/// ```
+/// let n = parse(text)?.count;   // Int64?
+/// ```
+extend Result[T, E]: OptionalChain {
+    type Wrapped = T
+
+    /// A borrow of the `.Ok` value, for read-only chains.
+    public func chainBorrow() -> Optional[&T] {
+        self.okRef()
+    }
+
+    /// A mutable borrow of the `.Ok` value, for chains that mutate it.
+    public mutating func chainMutate() -> Optional[&mutating T] {
+        match self {
+            .Ok(&mutating value) => {
+                let result: Optional[&mutating T] = .Some(value);
+                result
+            },
+            .Err(_) => .None
+        }
+    }
+
+    /// The `.Ok` value itself, for chains on a temporary.
+    public consuming func chainTake() -> Optional[T] {
+        self.ok()
     }
 }
 

@@ -320,6 +320,12 @@ pub(super) fn solve_coerce(
         if ctx.is_error(fr) && matches!(ctx.slot(tr), TySlot::Unresolved { .. }) {
             ctx.poison(to);
         }
+        // A failed `?.` arm leaves the chain's `Optional[α]` with nothing
+        // to pin `α`; poison it so the root cause (E157) isn't buried
+        // under "could not infer type".
+        if ctx.is_error(fr) && ctx.optional_chain_leaves.contains(&expr) {
+            poison_unresolved_type_args(ctx, to);
+        }
         if ctx.is_error(tr) && matches!(ctx.slot(fr), TySlot::Unresolved { .. }) {
             ctx.poison(from);
         }
@@ -420,7 +426,7 @@ pub(super) fn solve_coerce(
 
     // Check-mode leaf with a pending synthesized type (see
     // `InferCtx::synth_pending_exprs`): wait for it, so promotion can apply.
-    if ctx.synth_gate
+    if (ctx.synth_gate || ctx.optional_chain_leaves.contains(&expr))
         && ctx.synth_pending_exprs.contains(&expr)
         && matches!(ctx.slot(fr), TySlot::Unresolved { literal: None })
         && matches!(ctx.slot(tr), TySlot::Resolved(_))
@@ -527,6 +533,17 @@ pub(super) fn solve_coerce(
         _ => unreachable!(),
     };
 
+    // Existential conversions (Box / Unsize / Upcast, E147, E151) at this
+    // check leaf, before promotion: an existential target is never
+    // `FromValue`.
+    if let Some(result) = crate::existential::try_convert(ctx, from, to, expr, &span) {
+        if matches!(result, SolveResult::Error(_)) {
+            ctx.errored_coerce_exprs.insert(expr);
+            ctx.poison(from);
+        }
+        return result;
+    }
+
     if let Some(method) = ctx.resolver.check_promotion(&from_kind, &to_kind) {
         // Verify the source type matches the `from` method's `value: T` parameter
         // once T is bound to the target's type args. Without this, any source
@@ -573,19 +590,6 @@ pub(super) fn solve_coerce(
                 target_ty: to,
             },
         );
-        return SolveResult::Solved;
-    }
-
-    // Check protocol conformance: if the target is a protocol and the source conforms,
-    // the coercion is valid (protocol existential boxing handled at codegen).
-    // `SelfType { entity: P }` acts as an abstract `P` for this purpose.
-    let to_protocol_entity = match &to_kind {
-        TyKind::Protocol { entity, .. } | TyKind::SelfType { entity } => Some(*entity),
-        _ => None,
-    };
-    if let Some(to_entity) = to_protocol_entity
-        && ctx.resolver.conforms_to(&from_kind, to_entity)
-    {
         return SolveResult::Solved;
     }
 

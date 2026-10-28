@@ -73,6 +73,9 @@ pub enum Reason {
     Element(Span),
     /// The target of an assignment.
     Assign(Span),
+    /// A later or-pattern alternative binds `name`, which the first
+    /// alternative (declared at `first`) already bound at another type.
+    OrPatternBinding { name: String, first: Span },
 }
 
 /// A type constraint emitted during constraint generation.

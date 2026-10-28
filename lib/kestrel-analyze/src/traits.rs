@@ -35,6 +35,10 @@ pub enum AnalyzerId {
     Exhaustiveness,
     StringEscape,
     IntegerLiteralRange,
+    TypeTest,
+    RestrictedUse,
+    PackedFieldBorrow,
+    OptionalChain,
 
     // Decl checks
     FunctionBody,
@@ -42,6 +46,9 @@ pub enum AnalyzerId {
     StaticContext,
     StaticValueType,
     ClosureField,
+    UnsizedParam,
+    ExistentialBox,
+    ExistentialBoxBody,
     BuiltinMarkerProtocol,
     DuplicateBuiltin,
     ConformanceRules,
@@ -71,6 +78,9 @@ pub enum AnalyzerId {
     TypeArgArity,
     Visibility,
     TypeAliasValidation,
+    RestrictedSignature,
+    AttributeSemantics,
+    DeriveSite,
 
     // Compilation checks (run via `analyze_compilation`, never the `Analyze` query)
     TypeAliasCycles,
@@ -81,7 +91,7 @@ pub enum AnalyzerId {
     ExtensionConflict,
     ConformanceCompleteness,
     TypeAnnotationResolution,
-    UnknownAttribute,
+    AttributeValidation,
     EntryPoint,
 }
 
@@ -108,11 +118,18 @@ impl AnalyzerId {
             AnalyzerId::Exhaustiveness => "exhaustiveness",
             AnalyzerId::StringEscape => "string_escape",
             AnalyzerId::IntegerLiteralRange => "integer_literal_range",
+            AnalyzerId::TypeTest => "type_test",
+            AnalyzerId::RestrictedUse => "restricted_use",
+            AnalyzerId::PackedFieldBorrow => "packed_field_borrow",
+            AnalyzerId::OptionalChain => "optional_chain",
             AnalyzerId::FunctionBody => "function_body",
             AnalyzerId::ProtocolMethod => "protocol_method",
             AnalyzerId::StaticContext => "static_context",
             AnalyzerId::StaticValueType => "static_value_type",
             AnalyzerId::ClosureField => "closure_field",
+            AnalyzerId::UnsizedParam => "unsized_param",
+            AnalyzerId::ExistentialBox => "existential_box",
+            AnalyzerId::ExistentialBoxBody => "existential_box_body",
             AnalyzerId::BuiltinMarkerProtocol => "builtin_marker_protocol",
             AnalyzerId::DuplicateBuiltin => "duplicate_builtin",
             AnalyzerId::ConformanceRules => "conformance_rules",
@@ -142,6 +159,9 @@ impl AnalyzerId {
             AnalyzerId::TypeArgArity => "type_arg_arity",
             AnalyzerId::Visibility => "visibility",
             AnalyzerId::TypeAliasValidation => "type_alias_validation",
+            AnalyzerId::RestrictedSignature => "restricted_signature",
+            AnalyzerId::AttributeSemantics => "attribute_semantics",
+            AnalyzerId::DeriveSite => "derive_site",
             AnalyzerId::TypeAliasCycles => "type_alias_cycles",
             AnalyzerId::GlobalInitCycles => "global_init_cycles",
             AnalyzerId::StructCycles => "struct_cycles",
@@ -150,7 +170,7 @@ impl AnalyzerId {
             AnalyzerId::ExtensionConflict => "extension_conflict",
             AnalyzerId::ConformanceCompleteness => "conformance_completeness",
             AnalyzerId::TypeAnnotationResolution => "type_annotation_resolution",
-            AnalyzerId::UnknownAttribute => "unknown_attribute",
+            AnalyzerId::AttributeValidation => "attribute_validation",
             AnalyzerId::EntryPoint => "entry_point",
         }
     }

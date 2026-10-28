@@ -46,46 +46,46 @@ public func O_WRONLY() -> Int32 { 0x0001 }
 public func O_RDWR() -> Int32 { 0x0002 }
 
 // errno access
-@platform(.darwin)
+@platform(.Darwin)
 @extern(.C, mangleName: "__error")
 func __errno_ptr() -> Pointer[Int32]
 
-@platform(.linux)
+@platform(.Linux)
 @extern(.C, mangleName: "__errno_location")
 func __errno_ptr() -> Pointer[Int32]
 
 // Open flags (platform-specific values)
 
 /// Create file if it doesn't exist.
-@platform(.darwin)
+@platform(.Darwin)
 public func O_CREAT() -> Int32 { 0x0200 }
 
 /// Create file if it doesn't exist.
-@platform(.linux)
+@platform(.Linux)
 public func O_CREAT() -> Int32 { 0x0040 }
 
 /// Truncate file to zero length.
-@platform(.darwin)
+@platform(.Darwin)
 public func O_TRUNC() -> Int32 { 0x0400 }
 
 /// Truncate file to zero length.
-@platform(.linux)
+@platform(.Linux)
 public func O_TRUNC() -> Int32 { 0x0200 }
 
 /// Append to end of file.
-@platform(.darwin)
+@platform(.Darwin)
 public func O_APPEND() -> Int32 { 0x0008 }
 
 /// Append to end of file.
-@platform(.linux)
+@platform(.Linux)
 public func O_APPEND() -> Int32 { 0x0400 }
 
 /// Fail if file exists (with O_CREAT).
-@platform(.darwin)
+@platform(.Darwin)
 public func O_EXCL() -> Int32 { 0x0800 }
 
 /// Fail if file exists (with O_CREAT).
-@platform(.linux)
+@platform(.Linux)
 public func O_EXCL() -> Int32 { 0x0080 }
 
 // ============================================================================

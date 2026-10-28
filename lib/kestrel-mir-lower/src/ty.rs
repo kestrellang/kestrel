@@ -170,6 +170,28 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
         HirTy::AbstractAssoc { .. } => ctx.module.ty_arena.error(),
         HirTy::AssocProjection { base, assoc, .. } => lower_assoc_projection(ctx, base, *assoc),
         HirTy::Opaque { .. } => ctx.module.ty_arena.error(),
+        HirTy::RawExistential {
+            bounds, bindings, ..
+        } => {
+            let bounds: Vec<(Entity, Vec<TyId>)> = bounds
+                .iter()
+                .filter_map(|b| match b {
+                    HirTy::Protocol { entity, args, .. } => {
+                        ctx.register_name(*entity);
+                        Some((*entity, args.iter().map(|a| lower_type(ctx, a)).collect()))
+                    },
+                    _ => None,
+                })
+                .collect();
+            let bindings: Vec<(Entity, TyId)> = bindings
+                .iter()
+                .map(|b| {
+                    ctx.register_name(b.assoc);
+                    (b.assoc, lower_type(ctx, &b.ty))
+                })
+                .collect();
+            ctx.module.ty_arena.raw_existential(bounds, bindings)
+        },
         HirTy::Never(_) => ctx.module.ty_arena.never(),
         HirTy::Infer(_) => ctx.module.ty_arena.error(),
         HirTy::Error(_) => ctx.module.ty_arena.error(),
@@ -333,6 +355,23 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
 
             let substituted = substitute_resolved_ty(&concrete, &type_params, origin_args);
             lower_resolved_ty_preserving(ctx, &substituted)
+        },
+        ResolvedTy::RawExistential { bounds, bindings } => {
+            let bounds: Vec<(Entity, Vec<TyId>)> = bounds
+                .iter()
+                .map(|(p, args)| {
+                    ctx.register_name(*p);
+                    (*p, args.iter().map(|a| lower_resolved_ty_preserving(ctx, a)).collect())
+                })
+                .collect();
+            let bindings: Vec<(Entity, TyId)> = bindings
+                .iter()
+                .map(|(a, t)| {
+                    ctx.register_name(*a);
+                    (*a, lower_resolved_ty_preserving(ctx, t))
+                })
+                .collect();
+            ctx.module.ty_arena.raw_existential(bounds, bindings)
         },
         ResolvedTy::Never => ctx.module.ty_arena.never(),
         ResolvedTy::Error => ctx.module.ty_arena.error(),
@@ -617,6 +656,24 @@ fn substitute_resolved_ty(
                 .collect(),
             index: *index,
             not_copyable: *not_copyable,
+        },
+        ResolvedTy::RawExistential { bounds, bindings } => ResolvedTy::RawExistential {
+            bounds: bounds
+                .iter()
+                .map(|(protocol, bound_args)| {
+                    (
+                        *protocol,
+                        bound_args
+                            .iter()
+                            .map(|a| substitute_resolved_ty(a, type_params, args))
+                            .collect(),
+                    )
+                })
+                .collect(),
+            bindings: bindings
+                .iter()
+                .map(|(assoc, t)| (*assoc, substitute_resolved_ty(t, type_params, args)))
+                .collect(),
         },
         // Leaves: no nested types to walk into.
         ResolvedTy::SelfType { .. } | ResolvedTy::Never | ResolvedTy::Error => ty.clone(),

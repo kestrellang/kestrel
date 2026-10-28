@@ -72,11 +72,15 @@ impl<'a, 'i> SolverLayer<'a, 'i> {
             )),
             // Functions, opaques and unreduced aliases: nothing for the
             // kernel to evaluate; the layer decides them structurally.
-            TyKind::Function { .. } | TyKind::Opaque { .. } | TyKind::TypeAlias { .. } => {
-                self.fe.abstract_of(kestrel_hir::ty::HirTy::Error(
-                    kestrel_span::Span::synthetic(0),
-                ))
-            },
+            // A raw existential keeps its bounds for the layer's `any P: P`.
+            TyKind::RawExistential { .. } => self
+                .fe
+                .abstract_of(crate::solver::reify_kind(self.ctx, kind)),
+            TyKind::Function { .. }
+            | TyKind::Opaque { .. }
+            | TyKind::TypeAlias { .. } => self.fe.abstract_of(kestrel_hir::ty::HirTy::Error(
+                kestrel_span::Span::synthetic(0),
+            )),
         }
     }
 }

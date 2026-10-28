@@ -405,6 +405,28 @@ pub enum SyntaxKind {
     StringEnd,
     /// (T) - grouping parentheses around a type
     TyParen,
+    Is,
+    AsQuestion,
+    /// any P / any[B] P - boxed existential (`any` is contextual)
+    TyAny,
+    /// x as? T / consuming x as? T - existential downcast
+    ExprCast,
+    /// x is T / x is not T - existential type test
+    ExprTypeTest,
+    /// is T / name is T / name is T { fields } - type-test pattern
+    IsPattern,
+    /// Item = Int64 inside a type argument list (existential bounds)
+    TypeArgBinding,
+    /// x |> f - pipe operator
+    PipeGreater,
+    /// `_` as a whole call argument: a hole (`f(_, 1)`)
+    ExprPlaceholder,
+    /// `_` inside a larger argument (`map(_.name)`, `map(_ * 2)`)
+    ExprPlaceholderUse,
+    /// `a?` before `.member` / `.(args)`: one bind of an optional chain
+    ExprOptionalBind,
+    /// the whole postfix chain holding a `?.` (`a?.b.c()`)
+    ExprOptionalChain,
     /// Not a syntax kind — the end-of-enum marker. Its discriminant is the
     /// variant count, which lets `syntax_kind_table_round_trips` prove `ALL`
     /// complete. Never construct it.
@@ -680,6 +702,18 @@ impl SyntaxKind {
         SyntaxKind::FormatSpec,
         SyntaxKind::StringEnd,
         SyntaxKind::TyParen,
+        SyntaxKind::Is,
+        SyntaxKind::AsQuestion,
+        SyntaxKind::TyAny,
+        SyntaxKind::ExprCast,
+        SyntaxKind::ExprTypeTest,
+        SyntaxKind::IsPattern,
+        SyntaxKind::TypeArgBinding,
+        SyntaxKind::PipeGreater,
+        SyntaxKind::ExprPlaceholder,
+        SyntaxKind::ExprPlaceholderUse,
+        SyntaxKind::ExprOptionalBind,
+        SyntaxKind::ExprOptionalChain,
     ];
 }
 
@@ -795,6 +829,9 @@ impl From<Token> for SyntaxKind {
             Token::InterpEnd => SyntaxKind::InterpEnd,
             Token::FormatSpec => SyntaxKind::FormatSpec,
             Token::StringEnd => SyntaxKind::StringEnd,
+            Token::Is => SyntaxKind::Is,
+            Token::AsQuestion => SyntaxKind::AsQuestion,
+            Token::PipeGreater => SyntaxKind::PipeGreater,
         }
     }
 }

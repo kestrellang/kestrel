@@ -575,6 +575,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
         module.structs.insert(
             (entity(2), vec![]),
@@ -633,6 +634,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -741,6 +743,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -787,6 +790,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -831,6 +835,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -883,6 +888,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -925,6 +931,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -978,6 +985,7 @@ mod tests {
             }),
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -999,6 +1007,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -1038,6 +1047,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);

@@ -96,6 +96,22 @@ pub struct PathSegment {
     pub span: Span,
 }
 
+/// One protocol bound of an `any` type, with the associated types it pins:
+/// `Iterator[Item = Int64]` is `protocol: Iterator`, `bindings: [Item = Int64]`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AnyBound {
+    pub protocol: AstType,
+    pub bindings: Vec<AssocTypeBinding>,
+}
+
+/// `Name = Type` pinning an associated type in an `any` bound.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AssocTypeBinding {
+    pub name: String,
+    pub ty: AstType,
+    pub span: Span,
+}
+
 /// AST-level type representation extracted from CST.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AstType {
@@ -146,6 +162,15 @@ pub enum AstType {
         negative: Option<Box<AstType>>,
         span: Span,
     },
+    /// Boxed existential, e.g. `any P`, `any[UniqueBox] P and Q`,
+    /// `any Iterator[Item = Int64]`. Sugar for `Box[<raw existential>]`:
+    /// `box_ty` is the unapplied box (`None` = the builtin default box), and
+    /// HIR lowering does the desugaring.
+    Any {
+        box_ty: Option<Box<AstType>>,
+        bounds: Vec<AnyBound>,
+        span: Span,
+    },
     /// Reference type, e.g. `&T` or `&mutating T`. Parses in every type
     /// position but is accepted in none (stage 0.5) — every occurrence is
     /// rejected at HIR lowering, so no `Ref` survives past it.
@@ -154,4 +179,22 @@ pub enum AstType {
         mutating: bool,
         span: Span,
     },
+}
+
+impl AstType {
+    /// The types written inside an `any` type, in source order: the box
+    /// (if named), each bound protocol, and each pinned associated type.
+    /// Empty for every other variant. Shared by the AST walkers so none of
+    /// them forgets a part.
+    pub fn any_children(&self) -> Vec<&AstType> {
+        let AstType::Any { box_ty, bounds, .. } = self else {
+            return Vec::new();
+        };
+        let mut out: Vec<&AstType> = box_ty.iter().map(|b| b.as_ref()).collect();
+        for bound in bounds {
+            out.push(&bound.protocol);
+            out.extend(bound.bindings.iter().map(|b| &b.ty));
+        }
+        out
+    }
 }

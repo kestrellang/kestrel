@@ -18,6 +18,8 @@ pub mod closure;
 pub mod definite_assignment;
 pub mod exclusive_args;
 pub mod initializer;
+// `?.` consuming through a borrowed bind (E158)
+pub mod optional_chain;
 // HIR-level move/use-after-move checker (E500/E501). Restored from the
 // pre-MIR-rewrite (0.15) tree: it models `while-let` loops, pattern re-binding
 // across iterations, and other control-flow shapes the OSSA verifier currently
@@ -34,8 +36,17 @@ pub mod for_loop_pattern;
 pub mod match_pattern;
 pub mod refutable_pattern;
 
+// `is` patterns, `is`, `as?` (E148, E149, E152)
+pub mod type_test;
+
 // Literal/lexing checks (E700-E799)
 pub mod string_escape;
 
 // Integer-literal range check (E121)
 pub mod integer_literal_range;
+
+// Uses of `@deprecated` / `@unavailable` declarations (E908, E913)
+pub mod restricted_use;
+
+// Borrows of `@layout(.Packed)` fields (E912)
+pub mod packed_field_borrow;

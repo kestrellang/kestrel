@@ -17,13 +17,12 @@ use crate::components::*;
 /// Build an extension declaration entity from CST.
 ///
 /// Components: NodeKind::Extension, FileId, ExtensionTarget,
-/// [Conformances], [WhereClause], [Documentation],
+/// [Conformances], [WhereClause], [Documentation], [Attributes],
 /// [TypeParams] — when the RHS conformance list introduces free type
 /// parameters that aren't bound by the extension target's own LHS args
 /// (e.g. `extend Int64: ArrayIndex[T]` → free `T`).
 ///
-/// Extensions have no Name — they extend an existing type — and take no
-/// attributes (the grammar has none on `extend`).
+/// Extensions have no Name — they extend an existing type.
 pub fn build_extension(
     world: &mut World,
     node: &ast::ExtensionDeclaration,
@@ -45,6 +44,7 @@ pub fn build_extension(
     }
 
     set_documentation(world, entity, syntax);
+    set_attributes(world, entity, node, file_id);
     set_conformances(world, entity, node, file_id);
     set_where_clause(world, entity, node, file_id);
 

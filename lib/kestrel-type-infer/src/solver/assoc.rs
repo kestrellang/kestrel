@@ -113,7 +113,7 @@ pub(crate) fn emit_alias_bounds(
     }
 }
 
-pub(super) fn solve_associated(
+pub(crate) fn solve_associated(
     ctx: &mut InferCtx<'_>,
     container: TyVar,
     key: crate::constraint::AssocKey,
@@ -141,6 +141,13 @@ pub(super) fn solve_associated(
         TySlot::Resolved(k) => k.clone(),
         _ => unreachable!(),
     };
+
+    // A raw existential pins associated types in its bindings
+    // (`rawany Iterator[Item = Int64]`, existentials design §9).
+    if let Some(bound) = crate::existential::pinned_assoc_of(ctx, &kind, &key) {
+        ctx.equal(result, bound, span);
+        return SolveResult::Solved;
+    }
 
     let found = match &key {
         crate::constraint::AssocKey::Entity(assoc) => ctx

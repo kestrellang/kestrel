@@ -75,7 +75,7 @@ impl BodyCheck for RefutablePatternAnalyzer {
             if kestrel_pattern_matching::is_irrefutable(
                 cx.hir,
                 cx.query,
-                cx.root,
+                kestrel_pattern_matching::MatchSite::of(cx.query, cx.root, cx.entity),
                 arm.pattern,
                 scrutinee_ty,
             ) {
@@ -126,6 +126,8 @@ pub(crate) fn is_pattern_irrefutable(hir: &HirBody, pat_id: HirPatId) -> bool {
         },
         // At-pattern is irrefutable if the subpattern is irrefutable
         HirPat::At { subpattern, .. } => is_pattern_irrefutable(hir, *subpattern),
+        // The payload's type is open: a type test can always fail.
+        HirPat::TypeTest { .. } => false,
         // Error patterns: treat as irrefutable to avoid cascading
         HirPat::Error { .. } => true,
     }
@@ -250,6 +252,12 @@ pub(crate) fn describe_pattern(hir: &HirBody, pat_id: HirPatId) -> String {
                 hir.locals[*binding].name,
                 describe_pattern(hir, *subpattern)
             )
+        },
+        HirPat::TypeTest { binding, sub, .. } => {
+            let name = binding
+                .map(|b| format!("{} ", hir.locals[b].name))
+                .unwrap_or_default();
+            format!("{name}is {}", describe_pattern(hir, *sub))
         },
         HirPat::Error { .. } => "<error>".into(),
     }

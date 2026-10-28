@@ -109,6 +109,31 @@ pub enum CallingConvention {
     C,
 }
 
+/// How the backend should inline a function (`@inline`). Set at MIR
+/// lowering from the attribute, copied to every mono instance, and read by
+/// codegen. Thunks never carry it: the marked function is their direct
+/// callee, so it can still be inlined into them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InlineMode {
+    /// `@inline`: LLVM `inlinehint`.
+    Hint,
+    /// `@inline(.Always)`: LLVM `alwaysinline`.
+    Always,
+    /// `@inline(.Never)`: LLVM `noinline`.
+    Never,
+}
+
+impl InlineMode {
+    /// The spelling in MIR dumps.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            InlineMode::Hint => "inline",
+            InlineMode::Always => "inline(always)",
+            InlineMode::Never => "inline(never)",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExternInfo {
     pub calling_convention: CallingConvention,
@@ -221,6 +246,8 @@ pub struct FunctionDef {
     /// propagate `self_type` to it, not just when `Self` appears in the
     /// signature (#146). Set during MIR sig lowering (`function_sig.rs`).
     pub provides_protocol_default: bool,
+    /// `@inline`, if written. See [`InlineMode`].
+    pub inline: Option<InlineMode>,
 }
 
 impl FunctionDef {
@@ -242,6 +269,7 @@ impl FunctionDef {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         }
     }
 }

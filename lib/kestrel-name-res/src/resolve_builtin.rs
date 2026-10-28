@@ -14,7 +14,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Attributes, TypeAnnotation};
+use kestrel_ast_builder::TypeAnnotation;
+use kestrel_ast_builder::attrs::attrs_of;
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::Builtin;
 
@@ -22,7 +23,7 @@ use crate::resolve_type::{ResolveTypePath, TypeResolution};
 
 // ===== EntityBuiltin: forward lookup (entity → Builtin) =====
 
-/// Query: extract `@builtin(.Feature)` from an entity's Attributes component.
+/// Query: the entity's well-formed `@builtin(.Feature)`, from `AttrsOf`.
 ///
 /// Returns `Some(Builtin)` if the entity has a valid `@builtin` attribute,
 /// `None` otherwise.
@@ -35,20 +36,7 @@ impl QueryFn for EntityBuiltin {
     type Output = Option<Builtin>;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Option<Builtin> {
-        let attrs = ctx.get::<Attributes>(self.entity)?;
-
-        // Find the @builtin attribute
-        let builtin_attr = attrs.0.iter().find(|a| a.name == "builtin")?;
-
-        // Must have exactly one unlabeled arg with implicit member syntax (.Name)
-        let arg = builtin_attr.args.first()?;
-        if arg.label.is_some() {
-            return None;
-        }
-
-        // Value is ".FeatureName" from the implicit member syntax
-        let feature_name = arg.value.strip_prefix('.')?;
-        Builtin::from_attribute_name(feature_name)
+        attrs_of(ctx, self.entity).builtin()
     }
 }
 

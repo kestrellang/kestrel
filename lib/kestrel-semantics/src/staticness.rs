@@ -21,7 +21,6 @@
 //! nominal instantiations through it via a `StaticLayer` impl.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
 
 use kestrel_ast_builder::{TypeParams, WhereClause as AstWhereClause, WhereConstraint};
 use kestrel_hecs::guard::OnDrop;
@@ -29,7 +28,9 @@ use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::{Builtin, HirTy};
 use kestrel_name_res::ResolveBuiltin;
 
-use crate::{ExplicitlyNegatesProtocol, collect_child_types, resolve_type_entity};
+use crate::{
+    ExplicitlyNegatesProtocol, collect_child_types, param_bound_contexts, resolve_type_entity,
+};
 
 // ===== Vocabulary =====
 
@@ -138,24 +139,8 @@ impl QueryFn for TypeParamStaticRequirement {
             return StaticRequirement::MayBeNonStatic;
         }
 
-        // Same context-chain walk as TypeParamCopyRequirement: the param's
-        // parent plus the ancestry of the asking context (covers methods
-        // consulting their container's clauses).
-        let mut checked = HashSet::new();
-        let mut contexts = Vec::new();
-        if let Some(owner) = owner {
-            contexts.push(owner);
-        }
-        let mut current = Some(self.context);
-        while let Some(entity) = current {
-            contexts.push(entity);
-            current = ctx.parent_of(entity);
-        }
-
-        for context in contexts {
-            if !checked.insert(context) {
-                continue;
-            }
+        // The shared context-chain walk (copy / static / size requirements).
+        for context in param_bound_contexts(ctx, self.param, self.context) {
             let Some(wc) = ctx.get::<AstWhereClause>(context) else {
                 continue;
             };
@@ -367,6 +352,14 @@ impl StaticLayer for HirStaticWalk<'_, '_> {
             HirTy::Function { kind, .. } => !kind.is_view(),
             // Conservative never-block leaves, mirroring the copy layer:
             // refs cannot reach these positions in 2a (revisit in 2b).
+            HirTy::RawExistential { bounds, .. } => crate::raw_existential_is_static(
+                self.ctx,
+                bounds.iter().filter_map(|b| match b {
+                    HirTy::Protocol { entity, .. } => Some(*entity),
+                    _ => None,
+                }),
+                self.root,
+            ),
             HirTy::Protocol { .. }
             | HirTy::Opaque { .. }
             | HirTy::AssocProjection { .. }

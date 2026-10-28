@@ -159,7 +159,7 @@ pub fn build_initializer(
 
 /// Build a deinit declaration entity from CST.
 ///
-/// Components: NodeKind::Deinit, FileId, [Valued (body)]
+/// Components: NodeKind::Deinit, FileId, [Valued (body)], [Attributes]
 pub fn build_deinit(
     world: &mut World,
     node: &ast::DeinitDeclaration,
@@ -189,6 +189,7 @@ pub fn build_deinit(
     if let Some(block) = node.function_body().and_then(|b| b.code_block()) {
         set_block_body(world, entity, &block);
     }
+    set_attributes(world, entity, node, file_id);
 }
 
 /// Desugar `some P` in parameter types to synthetic type parameters.

@@ -465,6 +465,33 @@ pub struct ExtensionLhsParamNames(pub Vec<String>);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct QualifiedTarget(pub AstType);
 
+// ===== Derives =====
+
+/// On the file entity of the source one `@derive(...)` expanded to (see
+/// `crate::derive`). The file has a `FileSyntax` but no `SourceText`: it is
+/// never shown. Its declarations are owned by `origin` (unbuilding `origin`
+/// removes them), and diagnostics inside it are reported at `attr_span`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DerivedFile {
+    pub origin: Entity,
+    /// The declaration carrying the `@derive`.
+    pub site: Entity,
+    /// The whole attribute, `@` to `)`.
+    pub attr_span: Span,
+}
+
+/// On an extension `@derive` generated: `extend S: P { <witnesses> }`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DerivedFrom {
+    /// The declaration carrying the `@derive` (the type, or an extension of it).
+    pub site: Entity,
+    /// The type whose fields the witnesses read. Code in the extension sees
+    /// the type's private members as if written inside it.
+    pub ty: Entity,
+    /// The protocol path as written in `@derive(...)`.
+    pub protocol: Vec<String>,
+}
+
 // ===== Modifiers =====
 
 /// Marker: enum has indirect representation.
@@ -478,39 +505,64 @@ pub struct Intrinsic;
 
 // ===== Metadata =====
 
-/// Attributes on a declaration (e.g. `@inline`, `@available`).
+/// Attributes on a declaration (e.g. `@inline`, `@deprecated`), as written.
+///
+/// This is the raw syntax and the only stored form. Typed values come from
+/// the `AttrsOf` query (`crate::attrs`), which is the one place argument text
+/// is interpreted.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Attributes(pub Vec<AstAttribute>);
 
-impl Attributes {
-    /// The explicit C symbol of an `@extern(.., mangleName: "sym")` function,
-    /// if any. Callers fall back to the function's own name. Single source of
-    /// truth for MIR lowering and analyzers.
-    pub fn extern_mangle_name(&self) -> Option<String> {
-        self.0
-            .iter()
-            .find(|a| a.name == "extern")?
-            .args
-            .iter()
-            .find(|a| a.label.as_deref() == Some("mangleName"))
-            .map(|a| a.value.trim_matches('"').to_string())
-    }
-}
-
-/// A single attribute (e.g. `@inline(always)`).
+/// A single attribute (e.g. `@inline(.Always)`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AstAttribute {
     pub name: String,
     pub args: Vec<AstAttributeArg>,
-    /// Span of the full attribute (including `@` and args).
+    /// Span of the attribute's name token.
     pub span: Span,
 }
 
-/// A single argument within an attribute.
+/// A single argument within an attribute: `label: value` or `value`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AstAttributeArg {
     pub label: Option<String>,
-    pub value: String,
+    /// Span of the label token, when there is one.
+    pub label_span: Option<Span>,
+    pub value: AttrLiteral,
+    /// Span of the whole argument (label and value).
+    pub span: Span,
+}
+
+/// The syntactic shape of an attribute argument's value. Literal text is kept
+/// raw (a string keeps its quotes and escapes); `crate::attrs` decodes it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AttrLiteral {
+    /// A string literal, as written (with quotes).
+    Str(String),
+    /// An integer literal, as written.
+    Int(String),
+    /// A float literal, as written.
+    Float(String),
+    Bool(bool),
+    /// An implicit member `.Name`: the name, no dot.
+    Case(String),
+    /// A dotted path `a.b.C`.
+    Path(Vec<String>),
+    /// Nothing parseable (the parser already reported it).
+    Missing,
+}
+
+impl AttrLiteral {
+    /// The value as it reads in source, for diagnostics.
+    pub fn display(&self) -> String {
+        match self {
+            AttrLiteral::Str(s) | AttrLiteral::Int(s) | AttrLiteral::Float(s) => s.clone(),
+            AttrLiteral::Bool(b) => b.to_string(),
+            AttrLiteral::Case(c) => format!(".{c}"),
+            AttrLiteral::Path(p) => p.join("."),
+            AttrLiteral::Missing => String::new(),
+        }
+    }
 }
 
 /// Documentation comment text.
@@ -561,7 +613,7 @@ impl TargetConfig {
     }
 }
 
-/// Target operating system for `@platform(.darwin)` / `@platform(.linux)`.
+/// Target operating system for `@platform(.Darwin)` / `@platform(.Linux)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Os {
     Darwin,
@@ -571,8 +623,9 @@ pub enum Os {
 impl Os {
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
-            "darwin" => Some(Os::Darwin),
-            "linux" => Some(Os::Linux),
+            // Lowercase is the pre-0.18 spelling (warned by `AttrsOf`).
+            "Darwin" | "darwin" => Some(Os::Darwin),
+            "Linux" | "linux" => Some(Os::Linux),
             _ => None,
         }
     }

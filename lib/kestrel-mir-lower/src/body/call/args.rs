@@ -1,5 +1,6 @@
 use kestrel_ast_builder::arg_binding::{BindParam, Binding, bind_arguments};
-use kestrel_ast_builder::{Attributes, Callable, DeclSpan, NodeKind};
+use kestrel_ast_builder::attrs::attrs_of;
+use kestrel_ast_builder::{Callable, DeclSpan, NodeKind};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_hir_lower::LowerBody;
@@ -515,11 +516,7 @@ impl OssaBodyCtx<'_, '_> {
         let Some(callable) = self.ctx.world.get::<Callable>(callee_entity) else {
             return Vec::new();
         };
-        let is_extern = self
-            .ctx
-            .world
-            .get::<Attributes>(callee_entity)
-            .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "extern"));
+        let is_extern = attrs_of(&self.ctx.query, callee_entity).is_extern();
         conventions_from_callable(callable, is_extern)
     }
 

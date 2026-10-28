@@ -65,6 +65,9 @@ pub enum PathElement {
     /// `offset` is 1-based: 1 = last, 2 = second-to-last, etc.
     /// MIR lowers as `matchGet(matchLength() - offset)`.
     IndexFromEnd(usize),
+    /// The payload of an existential box, viewed as the given type (an
+    /// `is T` pattern proved it is one). Borrowed in place, never moved.
+    Payload(ResolvedTy),
     /// Rest slice of an array pattern (the `..name` binding).
     /// MIR lowers as `matchSlice(prefix_len, matchLength() - suffix_len)`.
     RestSlice {
@@ -377,6 +380,9 @@ fn build_specialized_paths(
                     .unwrap_or_default();
                 field_path.push(PathElement::Field(field));
             },
+            Constructor::TypeTest(target) => {
+                field_path.push(PathElement::Payload(target.clone()));
+            },
             _ => {}, // Literals have no sub-fields
         }
         new_paths.push(field_path);
@@ -567,11 +573,35 @@ fn collect_bindings(
             let chosen = alternatives
                 .iter()
                 .copied()
-                .find(|&alt| or_alternative_matches(hir, query, alt, cx.matched))
+                .find(|&alt| or_alternative_matches(hir, query, cx.root, alt, cx.matched))
                 .or_else(|| alternatives.first().copied());
             if let Some(alt) = chosen {
                 collect_bindings(cx, alt, ty, path, bindings);
             }
+        },
+
+        // `c is T { .. }`: `c` borrows the payload; `sub` reads into it.
+        HirPat::TypeTest {
+            binding,
+            target,
+            sub,
+            ..
+        } => {
+            let target = kestrel_type_infer::compare::resolve_hir_type(query, target);
+            let mut payload_path = path.clone();
+            payload_path.push(PathElement::Payload(target.clone()));
+            if let Some(local) = binding {
+                let local_data = &hir.locals[*local];
+                bindings.push(Binding {
+                    local_id: *local,
+                    name: local_data.name.clone(),
+                    is_mutable: false,
+                    by_ref: Some(false),
+                    ty: ResolvedTy::Error,
+                    path: payload_path.clone(),
+                });
+            }
+            collect_bindings(cx, *sub, &target, &payload_path, bindings);
         },
 
         HirPat::Wildcard { .. }
@@ -590,6 +620,7 @@ fn collect_bindings(
 fn or_alternative_matches(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     alt: HirPatId,
     matched: &[Constructor],
 ) -> bool {
@@ -619,7 +650,13 @@ fn or_alternative_matches(
                 (Constructor::True, true) | (Constructor::False, false)
             )
         }),
-        HirPat::At { subpattern, .. } => or_alternative_matches(hir, query, *subpattern, matched),
+        HirPat::At { subpattern, .. } => {
+            or_alternative_matches(hir, query, root, *subpattern, matched)
+        },
+        HirPat::TypeTest { target, .. } => {
+            let target = kestrel_type_infer::compare::resolve_hir_type(query, target);
+            matched.contains(&Constructor::TypeTest(target))
+        },
         _ => false,
     }
 }

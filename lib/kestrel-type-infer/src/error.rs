@@ -159,6 +159,34 @@ pub enum InferError {
     /// Implicit `it` parameter used in a context expecting != 1 parameter.
     ItWrongArity { expected: usize, span: Span },
 
+    /// E147: an existential converted into an existential with a different
+    /// box. Boxes are never interconverted (existentials design §4). The
+    /// types are described when the error is raised.
+    ExistentialBoxMismatch { from: String, to: String, span: Span },
+
+    /// E145: a requirement that can't be called through an existential
+    /// (static, generic, `Self`-using, or naming an unbound associated
+    /// type). `message` is complete; it names the member and the reason.
+    NotDispatchable { message: String, span: Span },
+
+    /// E146: an existential passed where `T: P` is needed, but `any P: P`
+    /// doesn't hold. `message` names the blocking requirement.
+    NotSelfConforming { message: String, span: Span },
+
+    /// E148: the existential's box doesn't grant the access a call needs
+    /// (`consuming` without `ConsumingIndirection`, `mutating` without
+    /// `MutableIndirection`). `message` is complete.
+    ExistentialAccess { message: String, span: Span },
+
+    /// E151: a value converted to `any P[A = X]` whose own `A` is not `X`.
+    ExistentialBindingMismatch {
+        from: String,
+        to: String,
+        assoc: String,
+        actual: String,
+        span: Span,
+    },
+
     /// A literal of a given kind can't be accepted by the target type.
     /// Emitted when an unresolved literal TyVar meets a concrete type that
     /// doesn't conform to the corresponding `ExpressibleBy*Literal` protocol.
@@ -223,6 +251,19 @@ pub enum InferError {
     MethodNotCalled {
         receiver: TyVar,
         method: String,
+        span: Span,
+    },
+
+    /// `a?.b` on a type that does not conform to `OptionalChain` (E157). The
+    /// `DoesNotConform` for that protocol, reworded for the operator.
+    OptionalChainNotConforming { ty: TyVar, span: Span },
+
+    /// A failed `x |> rhs`, reworded with a fix-it for the right side's
+    /// shape (`pipe::reword_pipe_errors`). Keeps the replaced error's code.
+    PipeFixIt {
+        code: &'static str,
+        message: String,
+        note: String,
         span: Span,
     },
 
@@ -365,7 +406,13 @@ impl InferError {
 
         match self {
             Self::TypeMismatch { reason, .. } => {
-                let mut r = detailed("type mismatch".into());
+                let headline = match reason {
+                    Reason::OrPatternBinding { name, .. } => {
+                        format!("variable '{name}' has different types in or-pattern alternatives")
+                    },
+                    _ => "type mismatch".into(),
+                };
+                let mut r = detailed(headline);
                 reason.explain(&mut r);
                 r
             },
@@ -481,6 +528,38 @@ impl InferError {
                 )
             },
 
+            Self::ExistentialBoxMismatch { from, to, .. } => labeled(
+                format!(
+                    "cannot convert '{from}' to '{to}': existentials in different boxes are \
+                     different types"
+                ),
+                format!("this is '{from}'"),
+            ),
+
+            Self::NotDispatchable { message, .. } => labeled(
+                message.clone(),
+                "not callable through an existential".into(),
+            ),
+
+            Self::ExistentialAccess { message, .. } => {
+                labeled(message.clone(), "the box does not allow this".into())
+            },
+
+            Self::NotSelfConforming { message, .. } => {
+                labeled(message.clone(), "an existential is needed to conform here".into())
+            },
+
+            Self::ExistentialBindingMismatch {
+                from,
+                to,
+                assoc,
+                actual,
+                ..
+            } => labeled(
+                format!("cannot convert '{from}' to '{to}': its '{assoc}' is '{actual}'"),
+                format!("'{from}.{assoc}' is '{actual}'"),
+            ),
+
             Self::ItWrongArity { expected, .. } => labeled(
                 "implicit 'it' parameter requires single-parameter context".into(),
                 format!("expected {expected} parameter(s)"),
@@ -530,6 +609,24 @@ impl InferError {
                 notes: vec![format!(
                     "primitive methods cannot be used as first-class values; use '.{method}()' instead"
                 )],
+                secondary: Vec::new(),
+            },
+
+            Self::OptionalChainNotConforming { .. } => RenderedInferError {
+                code: self.code(),
+                message: format!(
+                    "`?.` requires a type that conforms to `OptionalChain`, found `{detail}`"
+                ),
+                label: Some("this has no payload to chain on".into()),
+                notes: vec!["use `.` for a non-optional value".into()],
+                secondary: Vec::new(),
+            },
+
+            Self::PipeFixIt { message, note, .. } => RenderedInferError {
+                code: self.code(),
+                message: message.clone(),
+                label: Some("this pipe".into()),
+                notes: vec![note.clone()],
                 secondary: Vec::new(),
             },
 
@@ -634,6 +731,11 @@ impl InferError {
             Self::CannotInferType { .. } | Self::UnresolvedTypeParam { .. } => "E105",
             Self::DoesNotConform { .. } => "E107",
             Self::ItWrongArity { .. } => "E108",
+            Self::NotDispatchable { .. } => "E145",
+            Self::NotSelfConforming { .. } => "E146",
+            Self::ExistentialBoxMismatch { .. } => "E147",
+            Self::ExistentialAccess { .. } => "E148",
+            Self::ExistentialBindingMismatch { .. } => "E151",
             Self::TypeMismatch { .. } | Self::ConventionMismatch { .. } => "E109",
             Self::ArgCountMismatch { .. }
             | Self::LabelMismatch { .. }
@@ -650,6 +752,8 @@ impl InferError {
             Self::InfiniteType { .. } => "E117",
             Self::TypeMustBeKnown { .. } => "E106",
             Self::CircularOpaqueReturn { .. } | Self::OpaqueUnderlierNotCopyable { .. } => "E118",
+            Self::OptionalChainNotConforming { .. } => "E157",
+            Self::PipeFixIt { code, .. } => code,
             Self::KindMismatch { .. } => "E624",
             Self::RefFunctionAsValue { .. } => "E491",
             Self::RefInTypeArgument { .. } => "E492",
@@ -661,7 +765,9 @@ impl InferError {
     pub fn mentioned_types(&self) -> Vec<TyVar> {
         match self {
             Self::TypeMismatch { expected, got, .. } => vec![*expected, *got],
-            Self::DoesNotConform { ty, .. } => vec![*ty],
+            Self::DoesNotConform { ty, .. } | Self::OptionalChainNotConforming { ty, .. } => {
+                vec![*ty]
+            },
             Self::NoMember { receiver, .. }
             | Self::MemberNotVisible { receiver, .. }
             | Self::MemberIsStatic { receiver, .. } => vec![*receiver],
@@ -694,6 +800,11 @@ impl InferError {
             | Self::MemberwiseInitArity { span, .. }
             | Self::MemberwiseInitLabel { span, .. }
             | Self::ItWrongArity { span, .. }
+            | Self::ExistentialBoxMismatch { span, .. }
+            | Self::NotDispatchable { span, .. }
+            | Self::ExistentialAccess { span, .. }
+            | Self::NotSelfConforming { span, .. }
+            | Self::ExistentialBindingMismatch { span, .. }
             | Self::LiteralNotAccepted { span, .. }
             | Self::UnresolvedTypeParam { span, .. }
             | Self::CannotInferType { span, .. }
@@ -702,6 +813,8 @@ impl InferError {
             | Self::MemberAccessOnPrimitive { span, .. }
             | Self::MethodNotCalled { span, .. }
             | Self::CircularOpaqueReturn { span }
+            | Self::OptionalChainNotConforming { span, .. }
+            | Self::PipeFixIt { span, .. }
             | Self::OpaqueUnderlierNotCopyable { span, .. }
             | Self::RefFunctionAsValue { span }
             | Self::RefInTypeArgument { span }
@@ -730,6 +843,15 @@ impl Reason {
             Reason::FirstArm(s) => (s, "expected because the first branch has this type"),
             Reason::Element(s) => (s, "expected because the first element has this type"),
             Reason::Assign(s) => (s, "expected because of the type of this target"),
+            Reason::OrPatternBinding { name, first } => {
+                if !first.is_synthetic() {
+                    r.secondary.push((
+                        first.clone(),
+                        format!("'{name}' has this type in the first alternative"),
+                    ));
+                }
+                return;
+            },
         };
         if !span.is_synthetic() {
             r.secondary.push((span.clone(), text.into()));

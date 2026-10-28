@@ -350,6 +350,31 @@ x @ (.Some(_) or .None) => use(x)
 x @ .Some(_) or .None => use(x)
 ```
 
+### Type-Test Patterns
+
+On an [existential](existentials.md) (`any P`), an `is` pattern tests the payload's concrete type:
+
+```kestrel
+func classify(s: any Shape) -> Int64 {
+    match s {
+        is Circle => 1,                       // test only
+        q is Square => q.side * 10,           // test, bind q: &Square
+        is Rect { w: 0, .. } => 2,            // test, then a struct pattern
+        r is Rect { w, .. } => r.h * 100 + w, // both
+        _ => 0,
+    }
+}
+
+if let c is Circle = s { use(c.r) }
+guard let q is Square = s else { return -1 }
+```
+
+- The binding **borrows** the payload (`&T`, which decays to a copy when `T: Copyable`), so `var c is Circle` is an error (E153). To move the payload out, use `consuming x as? T`.
+- `x @ is Circle` binds the whole existential, as `@` always does.
+- `c is Circle or c is Square` is rejected: `c` would have two different types. `is Circle or is Square` is fine.
+- The scrutinee must be an existential (E152). A target that can't conform to the existential's protocols never matches (warning E149).
+- A struct pattern on an existential (`Rect { .. }` without `is`) is not a type test; type tests always say `is`.
+
 ## If-Let Expressions
 
 Use `if let` for conditional pattern matching when you only care about one pattern:
@@ -467,6 +492,7 @@ Match expressions must be exhaustive - all possible values must be covered.
 | Array | Requires `_` or `[..]` wildcard |
 | Char | Requires `_` wildcard |
 | Int/String | Requires `_` wildcard |
+| Existential (`any P`) | Requires `_` wildcard: the set of payload types is open, so `is` arms never cover it. A repeated `is T` arm is unreachable |
 
 Guards are treated conservatively - the compiler assumes they may fail:
 

@@ -312,6 +312,32 @@ pub(super) fn lower_hir_ty_sub(
             let ret_tv = lower_hir_ty_sub(ctx, ret, self_entity, recv_tv, subs);
             ctx.function_conv(*kind, param_tvs, param_conventions.clone(), ret_tv)
         },
+        HirTy::RawExistential {
+            bounds, bindings, ..
+        } => {
+            let bounds = bounds
+                .iter()
+                .filter_map(|b| match b {
+                    HirTy::Protocol { entity, args, .. } => Some((
+                        *entity,
+                        args.iter()
+                            .map(|a| lower_hir_ty_sub(ctx, a, self_entity, recv_tv, subs))
+                            .collect(),
+                    )),
+                    _ => None,
+                })
+                .collect();
+            let bindings = bindings
+                .iter()
+                .map(|b| {
+                    (
+                        b.assoc,
+                        lower_hir_ty_sub(ctx, &b.ty, self_entity, recv_tv, subs),
+                    )
+                })
+                .collect();
+            ctx.raw_existential_ty(bounds, bindings)
+        },
         // Opaque types at call sites: create a fresh TyVar for now.
         // Full `TyKind::Opaque` creation requires the callee entity (origin),
         // which is not available in `lower_hir_ty_sub`. The callee entity

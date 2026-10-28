@@ -443,6 +443,40 @@ fn unify_concrete(
             Ok(())
         },
 
+        // Raw existentials: the same canonical bound list and pinned
+        // associated types → unify the type args and pinned types pairwise.
+        (
+            TyKind::RawExistential {
+                bounds: ba,
+                bindings: pa,
+            },
+            TyKind::RawExistential {
+                bounds: bb,
+                bindings: pb,
+            },
+        ) => {
+            let same_shape = ba.len() == bb.len()
+                && pa.len() == pb.len()
+                && ba
+                    .iter()
+                    .zip(bb.iter())
+                    .all(|(x, y)| x.0 == y.0 && x.1.len() == y.1.len())
+                && pa.iter().zip(pb.iter()).all(|(x, y)| x.0 == y.0);
+            if !same_shape {
+                return Err(UnifyError::Mismatch);
+            }
+            let pairs: Vec<(TyVar, TyVar)> = ba
+                .iter()
+                .zip(bb.iter())
+                .flat_map(|(x, y)| x.1.iter().copied().zip(y.1.iter().copied()))
+                .chain(pa.iter().zip(pb.iter()).map(|(x, y)| (x.1, y.1)))
+                .collect();
+            for (a, b) in pairs {
+                unify(ctx, a, b)?;
+            }
+            Ok(())
+        },
+
         // Opaque vs any concrete type is a mismatch (opaque hides identity)
         (TyKind::Opaque { .. }, _) | (_, TyKind::Opaque { .. }) => Err(UnifyError::Mismatch),
 
@@ -493,6 +527,17 @@ fn occurs_check(ctx: &InferCtx<'_>, tv: TyVar, target: TyVar) -> Result<(), Unif
             }
             for &arg in origin_args {
                 occurs_check(ctx, tv, arg)?;
+            }
+            Ok(())
+        },
+        TySlot::Resolved(TyKind::RawExistential { bounds, bindings }) => {
+            for (_, args) in bounds {
+                for &arg in args {
+                    occurs_check(ctx, tv, arg)?;
+                }
+            }
+            for &(_, t) in bindings {
+                occurs_check(ctx, tv, t)?;
             }
             Ok(())
         },

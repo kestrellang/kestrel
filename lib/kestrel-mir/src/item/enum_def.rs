@@ -44,6 +44,8 @@ pub struct EnumDef {
     /// T: Copyable`). Empty unless conditionally copyable. See
     /// `kestrel_semantics::ConditionalCopyableParams` and `StructDef`.
     pub conditionally_copyable: Vec<usize>,
+    /// `@layout` / `@align`, the input to every layout of this type.
+    pub layout_attrs: crate::layout::LayoutAttrs,
 }
 
 impl EnumDef {
@@ -55,6 +57,7 @@ impl EnumDef {
             cases: Vec::new(),
             type_info: TypeInfo::default(),
             conditionally_copyable: Vec::new(),
+            layout_attrs: crate::layout::LayoutAttrs::default(),
         }
     }
 

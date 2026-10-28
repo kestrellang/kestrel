@@ -1,7 +1,7 @@
 pub(crate) mod body;
 mod context;
+mod existential;
 mod items;
-mod name;
 pub mod ty;
 mod validate;
 
@@ -21,6 +21,8 @@ pub fn lower_module(world: &World, root: Entity) -> MirModule {
 
     // Phase 2: witness tables
     items::witness_lower::lower_witnesses(&mut ctx);
+    // `any P: P` for every existential box the module mentions.
+    existential::lower_self_conformance_witnesses(&mut ctx);
 
     // Phase 3: static init thunks + master init + inject into main
     items::static_lower::synthesize_static_inits(&mut ctx);

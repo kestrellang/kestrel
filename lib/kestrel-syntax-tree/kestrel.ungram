@@ -51,7 +51,7 @@ ImportItem =
   'ident' ('as' alias:'ident')?
 
 ExtensionDeclaration =
-  'extend' Ty ConformanceList? WhereClause? ExtensionBody
+  AttributeList? 'extend' Ty ConformanceList? WhereClause? ExtensionBody
 
 ExtensionBody =
   '{' Item* '}'
@@ -102,7 +102,7 @@ InitEffect =
   '?' | 'throws' Ty
 
 DeinitDeclaration =
-  'deinit' FunctionBody
+  AttributeList? 'deinit' FunctionBody
 
 FunctionBody =
   CodeBlock
@@ -233,7 +233,12 @@ PathElement =
   'ident'
 
 TypeArgumentList =
-  '[' (Ty (',' Ty)* ','?)? ']'
+  '[' ((Ty | TypeArgBinding) (',' (Ty | TypeArgBinding))* ','?)? ']'
+
+// `Item = Int64`: pins an associated type. Only meaningful in an `any`
+// bound; HIR lowering rejects it elsewhere.
+TypeArgBinding =
+  'ident' '=' Ty
 
 //*************************//
 //        Types            //
@@ -254,6 +259,7 @@ TyKind =
 | TyOptional
 | TyResult
 | TySome
+| TyAny
 | TyRef
 | TyMutRef
 | TyParen
@@ -300,6 +306,11 @@ TyResult =
 
 TySome =
   'some' Ty ('and' Ty)* ('and' NegativeConformance)?
+
+// `any` is contextual (the leading 'ident'), so `any(where:)` stays a
+// method name. The optional list holds one unapplied box type.
+TyAny =
+  'ident' TypeArgumentList? Ty ('and' Ty)*
 
 TyRef =
   '&' Ty
@@ -387,6 +398,12 @@ Expr =
 | ExprTry
 | ExprClosure
 | ExprMatch
+| ExprCast
+| ExprTypeTest
+| ExprPlaceholder
+| ExprPlaceholderUse
+| ExprOptionalBind
+| ExprOptionalChain
 
 ExprInteger = 'int'
 ExprFloat = 'float'
@@ -448,7 +465,7 @@ ExprBinary =
   | '..=' | '..<'
   | '+' | '-' | '|' | '^'
   | '*' | '/' | '%' | '&'
-  | '<<' | '>>' )
+  | '<<' | '>>' | '|>' )
   rhs:Expression
 
 ExprAssignment =
@@ -515,6 +532,28 @@ ExprThrow =
 ExprTry =
   'try' Expression
 
+// `consuming` is only accepted directly before a cast.
+ExprCast =
+  'consuming'? Expression 'as?' Ty
+
+ExprTypeTest =
+  Expression 'is' 'not'? Ty
+
+// `_` as a whole call argument: the call becomes a closure over the slot.
+ExprPlaceholder = '_'
+
+// `_` inside a larger argument: the argument becomes a closure over it.
+ExprPlaceholderUse = '_'
+
+// `a?` in `a?.b` / `f?.(x)`: asks `a` for its payload. The `.` of `?.(`
+// belongs here; the `.` of `?.b` belongs to the member access.
+ExprOptionalBind =
+  Expression '?' '.'?
+
+// The maximal postfix chain holding one or more binds: `a?.b?.c()`.
+ExprOptionalChain =
+  Expression
+
 ExprClosure =
   '{' (ClosureParams 'in')? BlockItem* '}'
 
@@ -555,6 +594,7 @@ Pat =
 | AtPattern
 | RestPattern
 | OrPattern
+| IsPattern
 
 WildcardPattern =
   '_'
@@ -621,6 +661,11 @@ AtPattern =
 
 RestPattern =
   '..'
+
+// `var` parses so lowering can reject it with a clear error (an `is`
+// binding is a borrow).
+IsPattern =
+  'var'? 'ident'? 'is' Ty ('{' (StructPatternMember (',' StructPatternMember)* ','?)? '}')?
 
 OrPattern =
   Pat 'or' Pat ('or' Pat)*

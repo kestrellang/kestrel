@@ -72,6 +72,10 @@ define_id!(
     /// Index into `MonoModule.functions`.
     MonoFuncId
 );
+define_id!(
+    /// Index into `MonoModule.vtables`.
+    MonoVTableId
+);
 
 define_idx!(
     /// Index into `StructDef.fields` or `EnumCaseDef.payload_fields`.

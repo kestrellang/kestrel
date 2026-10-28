@@ -47,59 +47,86 @@ pub fn set_attributes(
 }
 
 /// Extract a single attribute.
-fn extract_attribute(attr: &ast::Attribute, file_id: usize) -> Option<AstAttribute> {
+pub(crate) fn extract_attribute(attr: &ast::Attribute, file_id: usize) -> Option<AstAttribute> {
     let name_token = attr.identifier_token()?;
     let args = attr
         .attribute_args()
         .map(|args| {
             args.attribute_args()
-                .filter_map(|a| extract_attribute_arg(&a))
+                .map(|a| extract_attribute_arg(&a, file_id))
                 .collect()
         })
         .unwrap_or_default();
     // Span the name token: the node's range starts at its leading trivia
     // (the previous line's newline), which would put diagnostics a line early.
-    let range = name_token.text_range();
-    let span = Span::new(file_id, (range.start().into())..(range.end().into()));
     Some(AstAttribute {
         name: name_token.text().to_string(),
         args,
-        span,
+        span: token_span(&name_token, file_id),
     })
 }
 
+fn token_span(token: &kestrel_syntax_tree::SyntaxToken, file_id: usize) -> Span {
+    let range = token.text_range();
+    Span::new(file_id, (range.start().into())..(range.end().into()))
+}
+
 /// Extract a single attribute argument: `label: value` or `value`.
-fn extract_attribute_arg(arg: &ast::AttributeArg) -> Option<AstAttributeArg> {
+fn extract_attribute_arg(arg: &ast::AttributeArg, file_id: usize) -> AstAttributeArg {
     let tokens: Vec<_> = arg
         .syntax()
         .children_with_tokens()
         .filter_map(|e| e.into_token())
         .filter(|t| !t.kind().is_trivia())
         .collect();
-    match tokens.iter().position(|t| t.kind() == SyntaxKind::Colon) {
-        Some(pos) => Some(AstAttributeArg {
-            label: pos.checked_sub(1).map(|i| tokens[i].text().to_string()),
-            value: extract_value_from_tokens(&tokens[(pos + 1)..]).unwrap_or_default(),
-        }),
-        None => Some(AstAttributeArg {
-            label: None,
-            value: extract_value_from_tokens(&tokens)?,
-        }),
+    let (label, value_tokens) = match tokens.iter().position(|t| t.kind() == SyntaxKind::Colon) {
+        Some(pos) => (pos.checked_sub(1).map(|i| &tokens[i]), &tokens[(pos + 1)..]),
+        None => (None, &tokens[..]),
+    };
+    // The argument's span covers its tokens only (not leading trivia).
+    let span = match (tokens.first(), tokens.last()) {
+        (Some(first), Some(last)) => Span::new(
+            file_id,
+            first.text_range().start().into()..last.text_range().end().into(),
+        ),
+        _ => {
+            let r = arg.syntax().text_range();
+            Span::new(file_id, r.start().into()..r.end().into())
+        },
+    };
+    AstAttributeArg {
+        label: label.map(|t| t.text().to_string()),
+        label_span: label.map(|t| token_span(t, file_id)),
+        value: literal_from_tokens(value_tokens),
+        span,
     }
 }
 
-/// Extract a value from tokens, handling implicit member syntax (.Name).
-///
-/// For `@builtin(.Copyable)`, the tokens are [Dot, Identifier("Copyable")].
-/// We combine them into ".Copyable" so consumers can recognize the pattern.
-fn extract_value_from_tokens(tokens: &[kestrel_syntax_tree::SyntaxToken]) -> Option<String> {
-    if tokens.len() >= 2
-        && tokens[0].kind() == SyntaxKind::Dot
-        && tokens[1].kind() == SyntaxKind::Identifier
-    {
-        Some(format!(".{}", tokens[1].text()))
-    } else {
-        tokens.first().map(|t| t.text().to_string())
+/// Classify an argument's value tokens: a literal, an implicit member
+/// `.Name`, or a dotted path.
+fn literal_from_tokens(tokens: &[kestrel_syntax_tree::SyntaxToken]) -> AttrLiteral {
+    let Some(first) = tokens.first() else {
+        return AttrLiteral::Missing;
+    };
+    match first.kind() {
+        SyntaxKind::String => AttrLiteral::Str(first.text().to_string()),
+        SyntaxKind::Integer => AttrLiteral::Int(first.text().to_string()),
+        SyntaxKind::Float => AttrLiteral::Float(first.text().to_string()),
+        SyntaxKind::Boolean => AttrLiteral::Bool(first.text() == "true"),
+        SyntaxKind::Dot => tokens
+            .get(1)
+            .filter(|t| t.kind() == SyntaxKind::Identifier)
+            .map_or(AttrLiteral::Missing, |t| {
+                AttrLiteral::Case(t.text().to_string())
+            }),
+        SyntaxKind::Identifier => AttrLiteral::Path(
+            tokens
+                .iter()
+                .filter(|t| t.kind() == SyntaxKind::Identifier)
+                .map(|t| t.text().to_string())
+                .collect(),
+        ),
+        _ => AttrLiteral::Missing,
     }
 }
 

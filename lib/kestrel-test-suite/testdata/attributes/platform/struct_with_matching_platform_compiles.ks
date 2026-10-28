@@ -3,7 +3,7 @@
 
 module Test
 
-@platform(.darwin)
+@platform(.Darwin)
 struct Foo {
     var x: lang.i64
 }

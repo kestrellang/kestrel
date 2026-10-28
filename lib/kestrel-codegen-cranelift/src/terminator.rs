@@ -127,7 +127,9 @@ fn compile_return(
     // `resolve_scalar` below would LOAD a scalar pointee through it and
     // silently return it by value (the scalar_ret_borrow_not_loaded
     // miscompile). Bypass for aggregates too (only accidentally correct).
-    if fc.func.ret_borrow {
+    // A borrow of an unsized pointee is a fat (data, table) value, returned
+    // like any two-word aggregate (sret).
+    if fc.func.ret_borrow && !fc.ctx.module.is_fat(fc.func.ret) {
         let val = fc.get_value(builder, value_id);
         builder.ins().return_(&[val]);
         return Ok(());

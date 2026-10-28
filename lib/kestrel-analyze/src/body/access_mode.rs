@@ -137,10 +137,12 @@ impl BodyCheck for AccessModeAnalyzer {
                     args,
                     ..
                 } => {
-                    // Find the protocol method entity
-                    if let Some(method_entity) =
-                        find_protocol_method(cx, *protocol, method.as_str_or_empty())
-                    {
+                    // Find the protocol method entity (a `?.` bind's is the
+                    // one inference settled on).
+                    let method = cx
+                        .typed
+                        .protocol_method_name(expr_id, method.as_str_or_empty());
+                    if let Some(method_entity) = find_protocol_method(cx, *protocol, method) {
                         check_call_args(cx, method_entity, args, Some(*receiver), &mut diags);
                     }
                 },

@@ -1482,10 +1482,39 @@ pub(crate) fn try_intrinsic(
         type_args = bctx.resolve_type_args(callee_expr);
     }
     match name.as_str() {
+        // `*_val` measure the pointee at runtime: mono folds a sized pointee
+        // to the static answer and reads an unsized one's function table
+        // (`kestrel_mir::mono::fat`).
+        "sizeof_val" | "alignof_val" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let ptr = bctx.lower_expr(args.first()?.value);
+            let op = if name == "sizeof_val" {
+                Op::SizeOfVal(ty_arg)
+            } else {
+                Op::AlignOfVal(ty_arg)
+            };
+            return Some(bctx.emit_op1(op, ptr, result_ty));
+        },
+        // Mono picks the table's clone word or the clone thunk at `T`.
+        "clone_val_into" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            crate::existential::clone_thunk(bctx.ctx)?;
+            let src = bctx.lower_expr(args.first()?.value);
+            let dst = bctx.lower_expr(args.get(1)?.value);
+            return Some(bctx.emit_op2(Op::CloneIntoVal(ty_arg), src, dst, result_ty));
+        },
+        "ptr_with_meta" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let addr = bctx.lower_expr(args.first()?.value);
+            let from = bctx.lower_expr(args.get(1)?.value);
+            return Some(bctx.emit_op2(Op::PtrWithMeta(result_ty), addr, from, result_ty));
+        },
         "sizeof" | "alignof" => {
             let ty_arg = *type_args.first()?;
             let result_ty = bctx.resolve_expr_type(expr_id);
-            let op = if name == "sizeof" {
+            let op = if name.starts_with("sizeof") {
                 Op::SizeOf(ty_arg)
             } else {
                 Op::AlignOf(ty_arg)

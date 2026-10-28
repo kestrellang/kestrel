@@ -79,7 +79,11 @@ fn collect_pattern_bound_locals(hir: &HirBody, out: &mut HashSet<LocalId>) {
             HirPat::Binding { local, .. } => {
                 out.insert(*local);
             },
-            HirPat::At { binding, .. } => {
+            HirPat::At { binding, .. }
+            | HirPat::TypeTest {
+                binding: Some(binding),
+                ..
+            } => {
                 out.insert(*binding);
             },
             _ => {},
@@ -193,7 +197,7 @@ fn analyze_expr(
         },
 
         // `&inner` reads the borrowed place — it must be initialized.
-        HirExpr::Borrow { inner, .. } => {
+        HirExpr::Borrow { inner, .. } | HirExpr::TakePayload { expr: inner, .. } => {
             state = analyze_expr(cx, *inner, state, false, pattern_bound, diags);
         },
 
@@ -496,6 +500,10 @@ fn mark_pattern_assigned(hir: &HirBody, pat_id: HirPatId, assigned: &mut HashSet
         } => {
             assigned.insert(*binding);
             mark_pattern_assigned(hir, *subpattern, assigned);
+        },
+        HirPat::TypeTest { binding, sub, .. } => {
+            assigned.extend(*binding);
+            mark_pattern_assigned(hir, *sub, assigned);
         },
         HirPat::Wildcard { .. }
         | HirPat::Literal { .. }

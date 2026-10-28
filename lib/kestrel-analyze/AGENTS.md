@@ -177,7 +177,8 @@ IDs follow the pattern `E<NNN>`:
 - **E700–E799**: Literals and lexing (escape sequences, malformed literals)
 - **E800–E899**: Syntax — parser diagnostics. Not analyzer descriptors:
   `kestrel-parser/src/syntax_error.rs` is the only place they are assigned,
-  and they reach codespan via `with_code`. E800–E809 allocated (2026-10).
+  and they reach codespan via `with_code`. E800–E809 allocated (2026-10); E810 (misplaced associated-type binding) added with existentials.
+- **E900–E999**: Attributes and derives. E900–E949 are attributes, E950–E999 are derives. The shape checks (unknown attribute, wrong target, arguments, duplicates, conflicts: E900–E907, E909, E914) are decided in `kestrel-ast-builder/src/attrs/parse.rs` as `AttrError`s and only forwarded by `compilation/attribute_validation.rs`; add a new shape code there and to its `DESCRIPTORS`. Meaning checks get their own analyzer (`decl/attribute_semantics.rs` E910/E911, `body/restricted_use.rs` E908/E913, `body/packed_field_borrow.rs` E912).
 
 Current allocations:
 - E001: `missing_return` (exhaustive_return.rs)
@@ -247,6 +248,18 @@ Current allocations:
   `body/access_mode.rs`). The only free E4xx codes are the gaps
   **E402–E410 and E414** (E400 and E401 taken 2026-10). As of 2026-09-23 they are not emitted, documented or
   reserved anywhere. Take a new E4xx from those gaps.
+  - E402–E404: existentials (docs/plans/existentials/). E404 (malformed
+    `any[...]` box) is emitted by `kestrel-hir-lower/src/ty.rs`; E402 (invalid
+    box, `decl/existential_box.rs`, rules in `kestrel_semantics::ExistentialBoxDefect`)
+    and E403 (unsized type parameter by value, `decl/unsized_param.rs`) are
+    analyzers. **Free E4xx gaps are now E405–E410 and E414.**
+  - E1xx E144–E155 are existentials too: E144, E150, E153 and E154 are
+    emitted by hir-lower; E145–E148 and E151 by type inference (`InferError`
+    variants, `kestrel-type-infer/src/existential.rs`); E149, E152 and the
+    `consuming as?` E148 by `body/type_test.rs`. E155 (the pre-M5 stub) is
+    retired — don't reuse it. E157 (`?.` on a non-`OptionalChain` type) is a
+    type-inference `InferError`; E158 (consume through `?.` on a place) is
+    `body/optional_chain.rs`. Next free E1xx: **E156**, then **E159**.
   - E479: `ambiguous_where_clause_associated_type` (decl/generics.rs) — G29,
     `6ef0782c`. It is reported at the clause when the associated type in a
     where-clause equality (`Item.Out = X`) is declared by two or more of the

@@ -405,7 +405,7 @@ fn analyze_expr(
         },
 
         // `&inner` reads the borrowed place.
-        HirExpr::Borrow { inner, .. } => {
+        HirExpr::Borrow { inner, .. } | HirExpr::TakePayload { expr: inner, .. } => {
             state = analyze_expr(cx, *inner, state, false, vctx);
         },
 

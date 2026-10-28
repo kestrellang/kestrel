@@ -2,14 +2,16 @@
 //!
 //! ```text
 //! expr      = binary (('=' | op'=') expr)?            // ExprAssignment / ExprCompoundAssignment
-//! binary    = operand (binop operand)*                // ExprBinary, left-folded
+//! binary    = operand (binop operand | 'is' 'not'? Ty | 'as?' Ty)*  // ExprBinary / ExprTypeTest / ExprCast
 //! operand   = 'try' postfix                           // ExprTry
+//!           | 'consuming' postfix 'as?' Ty            // ExprCast (consuming downcast)
 //!           | unop+ postfix                           // ExprUnary
 //!           | postfix
 //! postfix   = stmt_like tight*                        // if/while/loop/for/match/return/throw
 //!           | primary tight* trailing* ('.' member tight*)*
 //! tight     = '(' args ')'                            // no line break before `(`
 //!           | '.' member                              // `.` touching the operand
+//!           | '?' '.' member | '?' '.' '(' args ')'   // optional chain bind
 //!           | '!' | '..'
 //! trailing  = ('Identifier' ':')? closure             // same line as the call
 //! ```
@@ -27,7 +29,7 @@ use kestrel_syntax_tree::SyntaxKind as K;
 
 use super::blocks::{self, BlockFlavor};
 use super::patterns::{at_param_pattern_start, param_pattern, pattern};
-use super::types::{try_type_argument_list, ty};
+use super::types::{cast_target_ty, try_type_argument_list, ty};
 use super::{delimited, is_label_keyword, matching_close};
 use crate::core::{CompletedMarker, Marker, Parser};
 use crate::syntax_error::{SyntaxError, codes};
@@ -65,6 +67,7 @@ pub(super) fn at_expr_start(p: &Parser<'_>) -> bool {
         K::Return,
         K::Throw,
         K::Try,
+        K::Consuming,
         K::Minus,
         K::Plus,
         K::Bang,
@@ -72,6 +75,8 @@ pub(super) fn at_expr_start(p: &Parser<'_>) -> bool {
         K::DotDotLess,
         K::DotDotEquals,
         K::Ampersand,
+        // A placeholder inside arguments; elsewhere `primary` reports E811.
+        K::Underscore,
     ])
 }
 
@@ -123,16 +128,22 @@ fn is_compound_assign(kind: Option<K>) -> bool {
 ///
 /// | power | operators |
 /// |------:|-----------|
+/// | 5 | `\|>` (pipe: the whole left side is piped) |
 /// | 10 | `or` |
 /// | 15 | `??` (right-assoc) |
 /// | 20 | `and` |
-/// | 30 | `==` `!=` `<` `>` `<=` `>=` (left-assoc: `a < b < c` is `(a < b) < c`) |
+/// | 30 | `==` `!=` `<` `>` `<=` `>=` `is` (left-assoc: `a < b < c` is `(a < b) < c`) |
 /// | 40 | `..=` `..<` |
 /// | 50 | `+` `-` `\|` `^` |
 /// | 60 | `*` `/` `%` `&` |
 /// | 70 | `<<` `>>` |
+/// | 80 | `as?` (binds tighter than every binary operator) |
+///
+/// `is` and `as?` take a type, not an expression, on the right, so they
+/// are folded by [`type_operator`] rather than listed here.
 pub(crate) fn binary_binding_power(kind: K) -> Option<(u8, u8)> {
     let prec = match kind {
+        K::PipeGreater => 5,
         K::Or => 10,
         K::QuestionQuestion => return Some((15, 15)),
         K::And => 20,
@@ -197,9 +208,37 @@ fn binary(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
     binary_bp(p, cond, 0)
 }
 
+/// Binding power of `is` / `as?`, which take a type on the right.
+const IS_BP: u8 = 30;
+const AS_BP: u8 = 80;
+
+/// Fold `lhs is [not] T` or `lhs as? T` if one is at the cursor and binds
+/// at least as tightly as `min_bp`.
+fn type_operator(p: &mut Parser<'_>, lhs: ExprInfo, min_bp: u8) -> Option<ExprInfo> {
+    match p.current() {
+        Some(K::AsQuestion) if AS_BP >= min_bp => Some(wrap(p, lhs.cm, K::ExprCast, |p| {
+            p.bump(K::AsQuestion);
+            cast_target_ty(p);
+        })),
+        Some(K::Is) if IS_BP >= min_bp => Some(wrap(p, lhs.cm, K::ExprTypeTest, |p| {
+            p.bump(K::Is);
+            p.eat(K::Not);
+            cast_target_ty(p);
+        })),
+        _ => None,
+    }
+}
+
 fn binary_bp(p: &mut Parser<'_>, cond: bool, min_bp: u8) -> Option<ExprInfo> {
     let mut lhs = operand(p, cond)?;
-    while let Some((left, right)) = p.current().and_then(binary_binding_power) {
+    loop {
+        if let Some(folded) = type_operator(p, lhs, min_bp) {
+            lhs = folded;
+            continue;
+        }
+        let Some((left, right)) = p.current().and_then(binary_binding_power) else {
+            break;
+        };
         if left < min_bp {
             break;
         }
@@ -213,6 +252,18 @@ fn binary_bp(p: &mut Parser<'_>, cond: bool, min_bp: u8) -> Option<ExprInfo> {
 }
 
 fn operand(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
+    if p.at(K::Consuming) {
+        // `consuming` is only an expression prefix directly before `as?`.
+        let m = start2(p);
+        p.bump(K::Consuming);
+        postfix(p, cond);
+        if p.eat(K::AsQuestion) {
+            cast_target_ty(p);
+        } else {
+            p.error_expected_what("'as?' after 'consuming'");
+        }
+        return Some(finish2(p, m, K::ExprCast));
+    }
     if p.at(K::Try) {
         let m = start2(p);
         p.bump(K::Try);
@@ -281,36 +332,65 @@ fn close(p: &mut Parser<'_>, chain: Chain) -> ExprInfo {
     }
 }
 
+/// A postfix chain. When it holds a `?.` bind it is wrapped in
+/// `ExprOptionalChain`, so the chain's extent — what `.None` skips — is
+/// fixed here: everything up to the first binary operator, cast or closing
+/// delimiter.
 fn postfix(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
-    if cond {
+    let mut binds = false;
+    let info = if cond {
         let chain = cond_primary(p)?;
-        let chain = tight_ops(p, chain, true);
-        return Some(close(p, chain));
-    }
-    if at_stmt_like(p) {
+        let chain = tight_ops(p, chain, true, &mut binds);
+        close(p, chain)
+    } else if at_stmt_like(p) {
         let info = stmt_like(p);
-        let chain = tight_ops(p, Chain::Done(info.cm, info.kind), false);
-        return Some(close(p, chain));
+        let chain = tight_ops(p, Chain::Done(info.cm, info.kind), false, &mut binds);
+        close(p, chain)
+    } else {
+        let chain = primary(p)?;
+        let mut chain = tight_ops(p, chain, false, &mut binds);
+        chain = trailing_closures(p, chain);
+        // Continuation: `.member` on a later line, followed by tight operators.
+        while p.at(K::Dot) {
+            chain = member(p, chain, true);
+            chain = tight_ops(p, chain, false, &mut binds);
+        }
+        close(p, chain)
+    };
+    if !binds {
+        return Some(info);
     }
-    let chain = primary(p)?;
-    let mut chain = tight_ops(p, chain, false);
-    chain = trailing_closures(p, chain);
-    // Continuation: `.member` on a later line, followed by tight operators.
-    while p.at(K::Dot) {
-        chain = member(p, chain, true);
-        chain = tight_ops(p, chain, false);
-    }
-    Some(close(p, chain))
+    Some(wrap(p, info.cm, K::ExprOptionalChain, |_| {}))
 }
 
-/// Calls, adjacent member accesses, `!` and `..`. In a condition, `.`
-/// may also follow a line break and `init` is not a member name.
-fn tight_ops(p: &mut Parser<'_>, mut chain: Chain, cond: bool) -> Chain {
+/// `?` joined to a following `.`: an optional-chain bind.
+fn at_optional_bind(p: &Parser<'_>) -> bool {
+    p.at(K::Question) && p.nth_at(1, K::Dot) && p.joined_at(p.token_pos() + 1)
+}
+
+/// Calls, adjacent member accesses, `?.` binds, `!` and `..`. In a
+/// condition, `.` may also follow a line break and `init` is not a member
+/// name. Sets `binds` when a `?.` is consumed.
+fn tight_ops(p: &mut Parser<'_>, mut chain: Chain, cond: bool, binds: &mut bool) -> Chain {
     loop {
         match p.current() {
             Some(K::LParen) if !p.nl_before() => chain = call(p, chain),
             Some(K::Dot) if cond || p.joined_at(p.token_pos()) => {
                 chain = member(p, chain, !cond);
+            },
+            Some(K::Question) if at_optional_bind(p) => {
+                // `a?.b` keeps the `.` for the member access; `f?.(x)` has
+                // no member, so the bind owns it and the call follows.
+                let info = close(p, chain);
+                let w = wrap(p, info.cm, K::ExprOptionalBind, |p| {
+                    p.bump(K::Question);
+                    if p.nth_at(1, K::LParen) {
+                        p.bump(K::Dot);
+                    }
+                });
+                *binds = true;
+                // `?.b` / `?.0`: the joined-`.` arm takes the member next.
+                chain = Chain::Done(w.cm, w.kind);
             },
             Some(K::Bang | K::DotDot) => {
                 let info = close(p, chain);
@@ -372,7 +452,9 @@ fn call(p: &mut Parser<'_>, chain: Chain) -> Chain {
 }
 
 /// `( arg, label: arg, … )` — the caller has opened the `ArgumentList`.
+/// Inside, `_` is a placeholder (see [`argument`] and [`primary`]).
 fn argument_list_body(p: &mut Parser<'_>) {
+    let outer = p.enter_arguments();
     delimited(p, K::LParen, K::RParen, true, |p| {
         if !at_expr_start(p) && !at_label(p) {
             p.error_expected_what("expression");
@@ -381,6 +463,7 @@ fn argument_list_body(p: &mut Parser<'_>) {
         argument(p);
         true
     });
+    p.set_arg_depth(outer);
 }
 
 /// `label:` at the cursor (an identifier or keyword followed by `:`).
@@ -396,7 +479,14 @@ fn argument(p: &mut Parser<'_>) {
         p.bump_as(K::Identifier);
         p.bump(K::Colon);
     }
-    expr(p);
+    if p.at(K::Underscore) && p.at_any_nth(1, &[K::Comma, K::RParen]) {
+        // A hole: `_` is the whole argument (`f(_, 1)`, `f(x: _)`).
+        let h = start2(p);
+        p.bump(K::Underscore);
+        finish2(p, h, K::ExprPlaceholder);
+    } else {
+        expr(p);
+    }
     m.complete(p, K::Argument);
 }
 
@@ -474,12 +564,31 @@ fn primary(p: &mut Parser<'_>) -> Option<Chain> {
         Some(K::LBrace) => closure(p),
         Some(K::Dot) => implicit_member(p),
         Some(K::Identifier) => return Some(path(p)),
+        Some(K::Underscore) => placeholder_use(p),
         _ => {
             p.error_expected_what("expression");
             return None;
         },
     };
     Some(Chain::Done(info.cm, info.kind))
+}
+
+/// `_` inside a larger argument (`_.name`, `_ * 2`): it starts a postfix
+/// chain like any primary. Outside arguments it is E811; the node is still
+/// built so recovery sees one operand.
+fn placeholder_use(p: &mut Parser<'_>) -> ExprInfo {
+    if !p.in_arguments() {
+        let range = p.range_of(p.token_pos());
+        p.push_error(SyntaxError::new(
+            codes::MISPLACED_PLACEHOLDER,
+            "`_` here isn't a placeholder: `_` is a placeholder only inside a call's \
+             arguments (`f(_, 1)`, `map(_.name)`, `map(_ * 2)`); use `{ it … }` otherwise",
+            range,
+        ));
+    }
+    let m = start2(p);
+    p.bump(K::Underscore);
+    finish2(p, m, K::ExprPlaceholderUse)
 }
 
 fn cond_primary(p: &mut Parser<'_>) -> Option<Chain> {
@@ -492,6 +601,7 @@ fn cond_primary(p: &mut Parser<'_>) -> Option<Chain> {
         Some(K::LParen) => paren(p),
         Some(K::Dot) => implicit_member(p),
         Some(K::Identifier) => return Some(path(p)),
+        Some(K::Underscore) => placeholder_use(p),
         _ => {
             p.error_expected_what("expression");
             return None;
@@ -739,8 +849,11 @@ fn implicit_member(p: &mut Parser<'_>) -> ExprInfo {
 }
 
 /// `{ (params) in body }` or `{ body }`.
+/// A closure literal resets the argument depth: `_` in its body is not a
+/// placeholder of an enclosing call (`f({ _.x })` is E811; use `it`).
 pub(super) fn closure(p: &mut Parser<'_>) -> ExprInfo {
     let m = start2(p);
+    let depth = p.set_arg_depth(0);
     p.bump(K::LBrace);
     if p.at(K::LParen) && at_closure_params(p) {
         closure_params(p);
@@ -748,6 +861,7 @@ pub(super) fn closure(p: &mut Parser<'_>) -> ExprInfo {
     }
     blocks::block_items(p, BlockFlavor::Closure);
     p.expect(K::RBrace);
+    p.set_arg_depth(depth);
     finish2(p, m, K::ExprClosure)
 }
 

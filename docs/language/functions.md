@@ -402,6 +402,43 @@ Use cases:
 - Utility functions related to the type
 - Type-level operations
 
+## Pipe
+
+`x |> f` passes `x` to `f`, so a chain of calls reads left to right:
+
+```kestrel
+let report = path |> read |> parse |> summarize |> render;
+// same as render(summarize(parse(read(path))))
+```
+
+A call with a `_` on the right takes the value in that slot (no closure is
+built), which is how to pipe into a parameter other than the first or a
+labeled one:
+
+```kestrel
+let n = text |> Int64.parse(_, radix: 16) |> clamp(_, min: 0, max: 255);
+let s = user |> greet(_.name);       // greet(user.name)
+```
+
+Any other right side is evaluated and then called with the value:
+`x |> makeAdder(1)` is `makeAdder(1)(x)`, and `x |> { it * 2 }` calls the
+closure. `|>` never guesses a slot.
+
+- `|>` binds loosest of all operators: `a + b |> f` is `f(a + b)`.
+- A place on the left (`buf`, `self.items`) is passed exactly as if written
+  in the call, so a borrowing parameter borrows it. Any other left side is
+  evaluated first, before the call's other arguments, and only once.
+- A line may start with `|>`.
+
+When a pipe fails, the error names the likely mistake:
+
+| You wrote | The error suggests |
+|-----------|--------------------|
+| `5 \|> sub(1)` | `sub(_, 1)`: a call with no `_` is called with its result |
+| `5 \|> scale` (first parameter labeled `by`) | `scale(by: _)` |
+| `o \|> double ?? 0` | `(o \|> double) ?? 0`: `\|>` binds looser than `??` |
+| `5 \|> 3` | the right side is not callable |
+
 ## Nested Functions
 
 Functions can be declared inside other functions (though this is not commonly used):

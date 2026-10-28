@@ -11,6 +11,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::ctx::{LowerCtx, hir_name};
+use crate::placeholder::{ArgFill, PlaceholderFill, is_hole};
 use crate::syntax::{
     ArgSyntax, BlockSyntax, Cond, ExprSrc, PatSrc, PathBase, PathSeg, PathSyntax, StmtSyntax,
     arguments, binary_op, closure_body_syntax, closure_params, code_block, compound_assign_op,
@@ -187,15 +188,25 @@ impl LowerCtx<'_> {
                 let args = node
                     .children()
                     .find(|c| c.kind() == SyntaxKind::ArgumentList)
-                    .map(|list| {
-                        let args = arguments(&list, self.file_id);
-                        self.lower_call_args(&args)
-                    });
-                self.alloc_expr(HirExpr::ImplicitMember {
-                    owner: None,
-                    name: hir_name(name),
-                    args,
-                    span,
+                    .map(|list| arguments(&list, self.file_id));
+                let holes = args.iter().flatten().filter(|a| is_hole(&a.value)).count();
+                let build = |this: &mut Self, fill: ArgFill<'_>| {
+                    let args = args
+                        .as_ref()
+                        .map(|args| this.lower_call_args_filling(args, fill));
+                    this.alloc_expr(HirExpr::ImplicitMember {
+                        owner: None,
+                        name: hir_name(name.clone()),
+                        args,
+                        span: span.clone(),
+                    })
+                };
+                if holes == 0 {
+                    return build(self, ArgFill::Closures);
+                }
+                // `.Case(_)` is a call too: its holes bind to it.
+                self.lower_placeholder_closure(holes, &span.clone(), |this, params| {
+                    build(this, ArgFill::Holes(params))
                 })
             },
             SyntaxKind::ExprUnary => {
@@ -224,6 +235,11 @@ impl LowerCtx<'_> {
                 let Some(op) = binary_op(node) else {
                     return self.alloc_expr(HirExpr::Error { span });
                 };
+                // Pipe is a call, not an operator: the right side's shape
+                // decides the lowering, so it is not lowered generically.
+                if op == kestrel_ast::BinaryOp::Pipe {
+                    return self.lower_pipe(node, &span);
+                }
                 let (lhs, rhs) = self.operands(node, &span);
                 let lhs = self.lower_expr_src(&lhs);
                 let rhs = self.lower_expr_src(&rhs);
@@ -231,6 +247,19 @@ impl LowerCtx<'_> {
             },
             SyntaxKind::ExprAssignment => {
                 let (lhs, rhs) = self.operands(node, &span);
+                // `a?.b = v`: the assignment is the chain's tail, so `v` is
+                // evaluated only when the chain reaches its target.
+                if let Some(chain) = optional_chain_node(&lhs) {
+                    return self.lower_optional_chain(&chain, &span, |this, target| {
+                        let target = this.lower_expr_src(target);
+                        let value = this.lower_expr_src(&rhs);
+                        this.alloc_expr(HirExpr::Assign {
+                            target,
+                            value,
+                            span: span.clone(),
+                        })
+                    });
+                }
                 let target = self.lower_expr_src(&lhs);
                 let value = self.lower_expr_src(&rhs);
                 self.alloc_expr(HirExpr::Assign {
@@ -244,9 +273,14 @@ impl LowerCtx<'_> {
                     return self.alloc_expr(HirExpr::Error { span });
                 };
                 let (lhs, rhs) = self.operands(node, &span);
+                if let Some(chain) = optional_chain_node(&lhs) {
+                    return self.lower_optional_chain(&chain, &span, |this, target| {
+                        this.desugar_compound_assign(target, &op, &rhs, &span)
+                    });
+                }
                 self.desugar_compound_assign(&lhs, &op, &rhs, &span)
             },
-            SyntaxKind::ExprCall => self.lower_call(node, &span),
+            SyntaxKind::ExprCall => self.lower_call(node, &span, None),
             SyntaxKind::ExprIf => self.lower_if(node, &span),
             SyntaxKind::ExprWhile => {
                 let label = loop_label(node);
@@ -326,6 +360,15 @@ impl LowerCtx<'_> {
             },
             SyntaxKind::ExprClosure => self.lower_closure(node, &span),
             SyntaxKind::ExprMatch => self.lower_match(node, &span),
+            SyntaxKind::ExprCast => self.desugar_cast(node, &span),
+            SyntaxKind::ExprTypeTest => self.desugar_type_test(node, &span),
+            SyntaxKind::ExprPlaceholderUse => self.lower_placeholder_use(&span),
+            SyntaxKind::ExprOptionalChain => {
+                self.lower_optional_chain(node, &span, |this, inner| this.lower_expr_src(inner))
+            },
+            SyntaxKind::ExprOptionalBind => self.lower_optional_bind(node, &span),
+            // A hole outside an argument list is never built by the parser;
+            // `lower_call_args_filling` consumes the ones it builds.
             _ => self.alloc_expr(HirExpr::Error { span }),
         }
     }
@@ -336,7 +379,7 @@ impl LowerCtx<'_> {
 
     /// The two operands of a binary-shaped node, each an error at `span`
     /// when absent.
-    fn operands(&self, node: &SyntaxNode, span: &Span) -> (ExprSrc, ExprSrc) {
+    pub(crate) fn operands(&self, node: &SyntaxNode, span: &Span) -> (ExprSrc, ExprSrc) {
         let mut exprs = expr_children(node);
         let lhs = ExprSrc::or_error(exprs.next(), span);
         let rhs = ExprSrc::or_error(exprs.next(), span);
@@ -791,15 +834,44 @@ impl LowerCtx<'_> {
     /// 2. a multi-segment path — `local.method()`, `Type.staticMethod()`,
     ///    `T.method()` — whose meaning depends on what its prefix names in
     ///    scope, decided by [`Self::lower_path_call`].
-    fn lower_call(&mut self, node: &SyntaxNode, span: &Span) -> HirExprId {
+    ///
+    /// `pipe` is the value a pipe (`x |> f(_, 1)`) puts in every top-level
+    /// `_`; without it, holes make the call a closure (`f(_, 1)`).
+    pub(crate) fn lower_call(
+        &mut self,
+        node: &SyntaxNode,
+        span: &Span,
+        pipe: Option<&PlaceholderFill>,
+    ) -> HirExprId {
         let callee = ExprSrc::or_error(first_expr(node), span);
         let args = node
             .children()
             .find(|c| c.kind() == SyntaxKind::ArgumentList)
             .map(|list| arguments(&list, self.file_id))
             .unwrap_or_default();
-        let lowered_args = self.lower_call_args(&args);
+        if let Some(fill) = pipe {
+            let lowered_args = self.lower_call_args_filling(&args, ArgFill::Pipe(fill));
+            return self.lower_call_with_args(&callee, lowered_args, span);
+        }
+        let holes = args.iter().filter(|a| is_hole(&a.value)).count();
+        if holes == 0 {
+            let lowered_args = self.lower_call_args(&args);
+            return self.lower_call_with_args(&callee, lowered_args, span);
+        }
+        self.lower_placeholder_closure(holes, span, |this, params| {
+            let lowered_args = this.lower_call_args_filling(&args, ArgFill::Holes(params));
+            this.lower_call_with_args(&callee, lowered_args, span)
+        })
+    }
 
+    /// A call whose arguments are already lowered, dispatched on the
+    /// callee's shape (method, static, path or direct call).
+    pub(crate) fn lower_call_with_args(
+        &mut self,
+        callee: &ExprSrc,
+        lowered_args: Vec<HirCallArg>,
+        span: &Span,
+    ) -> HirExprId {
         let callee_path = callee
             .inner()
             .filter(|n| n.kind() == SyntaxKind::ExprPath)
@@ -1071,7 +1143,7 @@ impl LowerCtx<'_> {
     /// Lower a call's callee. Identical to `lower_expr` except that a path
     /// here is in *callee* position: it names something being invoked, so it
     /// is exempt from `lower_path`'s "instance method used as a value" check.
-    fn lower_callee(&mut self, callee: &ExprSrc) -> HirExprId {
+    pub(crate) fn lower_callee(&mut self, callee: &ExprSrc) -> HirExprId {
         self.in_callee_position = true;
         let lowered = self.lower_expr_src(callee);
         // Cleared by the `lower_path` that consumed it; reset for callees that
@@ -1455,14 +1527,10 @@ impl LowerCtx<'_> {
         self.lower_trailing_member_segments(local, &segments[1..segments.len() - 1])
     }
 
-    /// Lower call arguments.
+    /// Lower call arguments. An argument containing `_` becomes a
+    /// placeholder closure (see [`Self::lower_call_args_filling`]).
     fn lower_call_args(&mut self, args: &[ArgSyntax]) -> Vec<HirCallArg> {
-        args.iter()
-            .map(|arg| HirCallArg {
-                label: arg.label.clone(),
-                value: self.lower_expr_src(&arg.value),
-            })
-            .collect()
+        self.lower_call_args_filling(args, ArgFill::Closures)
     }
 
     /// Lower an if expression.
@@ -1788,7 +1856,10 @@ impl LowerCtx<'_> {
         // and MIR's `lower_break` then finds no loop and emits a unit literal —
         // the `break` becomes a silent no-op.
         let saved_loops = std::mem::take(&mut self.loop_labels);
+        // `_` never reaches into a closure literal (the parser reports E811).
+        let saved_frames = std::mem::take(&mut self.placeholder_frames);
         let mut lowered_body = self.lower_block(&closure_body);
+        self.placeholder_frames = saved_frames;
         self.loop_labels = saved_loops;
 
         // Prepend destructure statements to closure body
@@ -2143,8 +2214,16 @@ impl LowerCtx<'_> {
 
 /// The text of a literal's token (empty when the parser recovered without
 /// one).
+/// The `ExprOptionalChain` an assignment's left side is, if any.
+fn optional_chain_node(lhs: &ExprSrc) -> Option<SyntaxNode> {
+    lhs.inner()
+        .filter(|n| n.kind() == SyntaxKind::ExprOptionalChain)
+}
+
 fn literal_text(node: &SyntaxNode) -> String {
     first_token(node)
         .map(|t| t.text().to_string())
         .unwrap_or_default()
 }
+
+impl LowerCtx<'_> {}

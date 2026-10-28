@@ -499,6 +499,12 @@ fn analyze_expr(
             state = analyze_expr(mcx, *inner, state, false, diags);
         },
 
+        // `consuming x as? T`'s hit arm consumes the box.
+        HirExpr::TakePayload { expr, .. } => {
+            state = analyze_expr(mcx, *expr, state, false, diags);
+            record_operand_move(mcx, &mut state, diags, *expr, FreezeReason::Move);
+        },
+
         // ===== Assignment =====
         HirExpr::Assign { target, value, .. } => {
             state = analyze_expr(mcx, *value, state, false, diags);
@@ -1030,9 +1036,12 @@ fn analyze_expr(
                 for arg in args {
                     state = analyze_expr(mcx, arg.value, state, false, diags);
                 }
-                if let Some(method_entity) =
-                    find_protocol_method(mcx.cx, *protocol, method.as_str_or_empty())
-                {
+                // A `?.` bind's method is the one inference settled on.
+                let method = mcx
+                    .cx
+                    .typed
+                    .protocol_method_name(id, method.as_str_or_empty());
+                if let Some(method_entity) = find_protocol_method(mcx.cx, *protocol, method) {
                     apply_call_moves(mcx, method_entity, args, Some(*receiver), &mut state, diags);
                 }
             }
@@ -1565,9 +1574,9 @@ fn collect_expr_bound_locals(hir: &HirBody, id: HirExprId, out: &mut HashSet<Loc
         HirExpr::Loop { body, .. } | HirExpr::Block { body, .. } => {
             collect_block_bound_locals(hir, body, out)
         },
-        HirExpr::Sugar { inner, .. } | HirExpr::Borrow { inner, .. } => {
-            collect_expr_bound_locals(hir, *inner, out)
-        },
+        HirExpr::Sugar { inner, .. }
+        | HirExpr::Borrow { inner, .. }
+        | HirExpr::TakePayload { expr: inner, .. } => collect_expr_bound_locals(hir, *inner, out),
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
             collect_expr_bound_locals(hir, *base, out)
         },
@@ -1674,6 +1683,10 @@ fn collect_pattern_bindings(hir: &HirBody, pat: HirPatId, out: &mut HashSet<Loca
         } => {
             out.insert(*binding);
             collect_pattern_bindings(hir, *subpattern, out);
+        },
+        HirPat::TypeTest { binding, sub, .. } => {
+            out.extend(*binding);
+            collect_pattern_bindings(hir, *sub, out);
         },
         HirPat::Tuple { prefix, suffix, .. } => {
             for &p in prefix.iter().chain(suffix) {
@@ -2202,7 +2215,7 @@ fn local_is_non_copyable(mcx: &MoveCtx<'_>, local: LocalId) -> bool {
 /// analyze / MIR). Layer-specific plumbing: the body owner (`mcx.cx.entity`)
 /// scopes type-param bound lookups.
 struct MoveCopyLayer<'a, 'b> {
-    mcx: &'a MoveCtx<'b>,
+    cx: &'a BodyContext<'b>,
 }
 
 impl CopyLayer for MoveCopyLayer<'_, '_> {
@@ -2210,20 +2223,19 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
     type Sem = CopySemantics;
 
     fn base_semantics(&self, entity: Entity) -> CopySemantics {
-        self.mcx
-            .cx
+        self.cx
             .query
             .query(NominalCopySemantics {
                 entity,
-                root: self.mcx.cx.root,
+                root: self.cx.root,
             })
             .semantics
     }
 
     fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
-        Cow::Owned(self.mcx.cx.query.query(ConditionalCopyableParams {
+        Cow::Owned(self.cx.query.query(ConditionalCopyableParams {
             entity,
-            root: self.mcx.cx.root,
+            root: self.cx.root,
         }))
     }
 
@@ -2237,20 +2249,19 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
             // A protocol's abstract `Self` is only as copyable as the protocol
             // (or a `where Self:` bound) guarantees; a concrete `Self` is its nominal.
             ResolvedTy::SelfType { entity } => kestrel_semantics::self_type_copy_semantics(
-                self.mcx.cx.query,
+                self.cx.query,
                 *entity,
-                self.mcx.cx.entity,
-                self.mcx.cx.root,
+                self.cx.entity,
+                self.cx.root,
             ),
             // HOOK: body-owner context scopes the bound lookup.
             ResolvedTy::Param { entity } => self
-                .mcx
                 .cx
                 .query
                 .query(TypeParamCopyRequirement {
                     param: *entity,
-                    context: self.mcx.cx.entity,
-                    root: self.mcx.cx.root,
+                    context: self.cx.entity,
+                    root: self.cx.root,
                 })
                 .into(),
             ResolvedTy::Tuple(elems) => {
@@ -2270,6 +2281,13 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
             // binding a `mutating`/`consuming` closure to a second name is a
             // MOVE, and an `escaping` one clones (shares) its environment.
             ResolvedTy::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),
+            ResolvedTy::RawExistential { bounds, .. } => {
+                kestrel_semantics::raw_existential_copy_semantics(
+                    self.cx.query,
+                    bounds.iter().map(|(protocol, _)| *protocol),
+                    self.cx.root,
+                )
+            },
             // Assoc projections are Copyable-by-default (matches
             // `hir_type_copy_semantics`); never/error are recovery — all
             // Copyable. Explicit so a future ResolvedTy variant forces a
@@ -2290,7 +2308,14 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
 /// duplicable (a use copies/clones, never moves); only `NotCopyable` forces a
 /// move.
 fn resolved_ty_copy_semantics(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> CopySemantics {
-    MoveCopyLayer { mcx }.member_semantics(ty)
+    ty_copy_semantics(mcx.cx, ty)
+}
+
+/// Per-instantiation copy semantics of a settled type, for any body analyzer
+/// (the same `CopyLayer` the move checker uses). Needs the stdlib's
+/// `Copyable` builtin; without it every type answers `Copyable`.
+pub(crate) fn ty_copy_semantics(cx: &BodyContext<'_>, ty: &ResolvedTy) -> CopySemantics {
+    MoveCopyLayer { cx }.member_semantics(ty)
 }
 
 fn ty_is_copyable(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> bool {

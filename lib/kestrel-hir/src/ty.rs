@@ -13,6 +13,14 @@
 use kestrel_hecs::Entity;
 use kestrel_span::Span;
 
+/// `Item = Int64` in `any Iterator[Item = Int64]`: `assoc` is the associated
+/// type's declaration (a protocol's `TypeAlias` child).
+#[derive(Clone, Debug, Hash)]
+pub struct HirAssocBinding {
+    pub assoc: Entity,
+    pub ty: HirTy,
+}
+
 /// A resolved type in HIR. All syntactic sugar has been expanded:
 /// Optional, Array, Dictionary, Result are just `Struct` with the
 /// appropriate entity and type arguments.
@@ -92,6 +100,17 @@ pub enum HirTy {
     Opaque {
         bounds: Vec<HirTy>,
         not_copyable: bool,
+        span: Span,
+    },
+    /// The raw existential `any P and Q`: some unknown type conforming to
+    /// every bound, with the associated types in `bindings` pinned. Unsized
+    /// and unspellable — it only ever appears as a box's type argument, since
+    /// `any[B] P` lowers to `Struct { B, [RawExistential] }`. Bounds are
+    /// `Protocol`s in canonical (entity) order, so `any P and Q` and
+    /// `any Q and P` are the same type.
+    RawExistential {
+        bounds: Vec<HirTy>,
+        bindings: Vec<HirAssocBinding>,
         span: Span,
     },
     /// Never type (diverging expressions, e.g. `panic()`)
@@ -225,6 +244,25 @@ impl HirTy {
                     ..
                 },
             ) => n1 == n2 && all(b1, b2),
+            (
+                HirTy::RawExistential {
+                    bounds: b1,
+                    bindings: p1,
+                    ..
+                },
+                HirTy::RawExistential {
+                    bounds: b2,
+                    bindings: p2,
+                    ..
+                },
+            ) => {
+                all(b1, b2)
+                    && p1.len() == p2.len()
+                    && p1
+                        .iter()
+                        .zip(p2)
+                        .all(|(x, y)| x.assoc == y.assoc && x.ty.same_type(&y.ty))
+            },
             (HirTy::Never(_), HirTy::Never(_)) => true,
             (
                 HirTy::Ref {
@@ -340,6 +378,23 @@ impl HirTy {
             } => HirTy::Opaque {
                 bounds: list(bounds, map)?,
                 not_copyable: *not_copyable,
+                span: span.clone(),
+            },
+            HirTy::RawExistential {
+                bounds,
+                bindings,
+                span,
+            } => HirTy::RawExistential {
+                bounds: list(bounds, map)?,
+                bindings: bindings
+                    .iter()
+                    .map(|b| {
+                        Some(HirAssocBinding {
+                            assoc: b.assoc,
+                            ty: b.ty.try_map_params(map)?,
+                        })
+                    })
+                    .collect::<Option<_>>()?,
                 span: span.clone(),
             },
             HirTy::Ref {

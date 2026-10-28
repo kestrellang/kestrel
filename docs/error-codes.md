@@ -26,7 +26,8 @@ the type checker, and the code is assigned in one place,
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
 - [E624–E626 — Closure kinds](#e624e626--closure-kinds)
 - [E700–E710 — String & character literals, escapes, format specs](#e700e710--string--character-literals-escapes-format-specs)
-- [E800–E809 — Syntax](#e800e809--syntax)
+- [E800–E811 — Syntax](#e800e811--syntax)
+- [E900–E999 — Attributes & derives](#e900e999--attributes--derives)
 
 ---
 
@@ -88,9 +89,22 @@ the type checker, and the code is assigned in one place,
 | E138 | 'Self' is not valid in this scope | `Self` in a type position outside any type scope. |
 | E139 | '{name}' is not a type | A type annotation names a value or module. |
 | E140 | negative bound on an opaque type must be 'Copyable' | `some P and not Q` only supports `not Copyable`. |
-| E141 | {name} is not defined | A type operator's lang item (`Optional`, `Result`, …) is missing; is the standard library imported? |
+| E141 | {name} is not defined | A type operator's lang item (`Optional`, `Result`, …) or the default existential box (`DefaultBox`, for plain `any P`) is missing; is the standard library imported? |
 | E142 *(warning)* | implicit parameter 'it' shadows the 'it' of an enclosing closure | A closure written without a parameter list uses `it` inside another such closure; the inner `it` is the inner closure's own parameter. Name one of the parameters to make the intent explicit. |
 | E143 *(warning)* | implicit parameter 'it' shadows the outer binding 'it' | A closure's implicit `it` hides an outer `let it` or parameter named `it`; the closure uses its own parameter, never the outer binding. |
+| E144 | protocol '{name}' cannot be used as a type; write 'any {name}' for a boxed existential or 'some {name}' for an opaque type | A protocol names a type only through `any` (a boxed existential) or `some` (an opaque type). Bounds (`T: P`, `some P`, `any P`) and `extend P` are unaffected. |
+| E145 | '{member}' cannot be called on '{any P}': {reason} | A protocol requirement that can't go through an existential's function table: `it is a static requirement`, `it is generic`, `it uses 'Self' as a parameter or return type`, or `it mentions associated type '{A}', which '{any P}' leaves unbound`. Emitted by type inference. |
+| E146 | '{any P}' does not conform to '{P}': {why} | An existential passed where `T: P` is needed, but `any P: P` doesn't hold: a requirement can't be called through the table, or the box lacks the access a requirement needs. Emitted by type inference. |
+| E147 | cannot convert '{from}' to '{to}': existentials in different boxes are different types | `any[A] P` and `any[B] P` are unrelated types; boxes are never converted into each other. Emitted by type inference. |
+| E148 | cannot call {consuming/mutating} method '{m}' on '{any P}': {reason} / cannot consume the payload of '{any P}': {reason} | The existential's box doesn't grant the access the call needs: `consuming` (and `consuming x as? T`) needs `ConsumingIndirection` (shared boxes can't give up their payload), `mutating` needs `MutableIndirection`. Suggests `any[OwnedBox] P`. Calls: type inference; `consuming as?`: the `type_test` analyzer. |
+| E149 *(warning)* | cast from '{any P}' to '{T}' always fails: '{T}' does not conform to '{P}' | `x as? T`, `x is T` or an `is T` pattern whose target can't conform to every bound, so it never matches. |
+| E150 | '{protocol}' has no associated type named '{name}' | An `any P[Name = T]` bound pins an associated type the protocol (and its parents) doesn't declare. |
+| E151 | cannot convert '{T}' to '{any P[A = X]}': its '{A}' is '{Y}' | A value converted to an existential that pins an associated type the value's own type binds differently. Emitted by type inference. |
+| E152 | 'is' needs an existential on the left: '{T}' {is known at compile time / is a generic parameter} | `x is T` (and `as?`, `is` patterns) only test an existential's payload. A concrete type's answer is static; a generic parameter is rejected for now. |
+| E153 | an 'is' pattern binds a borrow of the payload, so it cannot be 'var' | `var c is Circle`: the binding refers to the payload in place. |
+| E154 | '{type}' in an 'any' bound is not a protocol | Every bound of `any` must be a protocol. |
+| E157 | \`?.\` requires a type that conforms to \`OptionalChain\`, found '{T}' | `a?.b` on a value with no payload to chain on (not an `Optional`, a `Result`, or another `OptionalChain` type). Use `.` for a non-optional value. Emitted by type inference. |
+| E158 | can't consume through \`?.\` on a place | A chain on a variable or field lends its payload by reference, so a `consuming` method or argument can't take it. Move the value out first: `a.take()?.…`. Emitted by the `optional_chain` analyzer. |
 
 ### Example — E109 (type mismatch)
 
@@ -169,6 +183,9 @@ func unwrap(opt: Int64?) -> Int64 {
 |---|---|---|
 | E400 | duplicate @builtin(.{feature}): already declared by '{name}' | Two declarations carry the same `@builtin` annotation. A lang item is identified by its annotation alone, so only the first (in declaration order) is used. |
 | E401 | @builtin(.{feature}) is reserved for the standard library | With a stdlib loaded, only declarations in `std` may claim a lang item; the annotation is ignored. `--no-std` programs declare their own. |
+| E402 | '{B}' cannot box an existential: {reason} | `any[B] P` names a box that cannot hold a raw existential. `B` needs exactly one type parameter declared `not Sized`, a conformance to `ExistentialBox`, and no stored field holding `T` by value. Reasons: `it must have exactly one type parameter`, `its type parameter is not declared 'not Sized'`, `it does not conform to 'ExistentialBox'`, `field '{f}' stores '{T}' by value`. |
+| E403 | '{T}' may be unsized here ('where {T}: not Sized'), so it can only be used behind a pointer or as the last stored field | A `not Sized` type parameter used by value in a signature or a non-tail field. Move by-value members into an extension `where T: Sized`. |
+| E404 | the box in 'any[...]' is written without type arguments: '{suggestion}' / must name a box type | `any[B] P` takes the box unapplied (`any[RcBox] P`, not `any[RcBox[T]] P`), and it must be a type name. Emitted by HIR lowering. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |
@@ -218,7 +235,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E458 | method '{name}' has wrong return type for protocol '{proto}' | A witness method's return type doesn't match the requirement. |
 | E459 | circular protocol inheritance: '{A}' -> ... -> '{A}' | Protocols inherit from each other in a cycle. |
 | E460 | property '{name}' requires a setter to satisfy protocol '{proto}' | The protocol requires `get set` but the witness property is read-only. |
-| E461 *(warning)* | unknown attribute '{name}' | An `@attribute` isn't recognized by the compiler. |
+| E461 | unknown attribute '{name}' (; did you mean '@{x}'?) | An `@attribute` isn't in the attribute registry (`kestrel-ast-builder/src/attrs/registry.rs`). An error since 0.18: a misspelled attribute used to be a warning and then did nothing. |
 | E462 | conflicting associated type '{name}' inherited by protocol '{proto}' | Two inherited protocols declare incompatible versions of the same associated type. |
 | E463 | method '{name}' is ambiguous: satisfies requirements of multiple protocols ({list}) | One method would witness several unrelated protocols; implement each conformance in its own `extend Type: Protocol` block. |
 | E464 | init has wrong effect for protocol '{proto}' | A witness `init`'s failability/throwing effect doesn't match the protocol requirement. |
@@ -423,7 +440,7 @@ func outlives() -> Int64 {
 | E609 | @extern functions cannot be generic | Generic functions have no stable ABI to export. |
 | E610 | @extern functions cannot have a body | Extern functions are implemented in external code. |
 | E611 | @extern function parameter '{name}' must use consuming access mode | Extern functions receive values, not references. |
-| E612 | @extern requires a calling convention | Write e.g. `@extern(.C)`. |
+| E612 | '@extern' needs a calling convention: '@extern(.C)' | Reported by attribute validation (the registry's missing-argument check, keeping its pre-registry code). |
 | E613 | required parameter '{name}' cannot follow parameter '{default_name}' which has a default value | Defaulted parameters must come last. |
 | E614 | default value cannot reference parameter '{name}' | Defaults are evaluated at each call site and can't see other parameters. |
 | E623 | function '{name}' requires a body | A non-protocol, non-extern function was declared without a body. |
@@ -550,7 +567,7 @@ func eachOk(mutating action: mutating (Int64) -> ()) { }   // ok
 | E709 | empty character literal | `''` — a character literal needs one codepoint. |
 | E710 | character literal may only contain one codepoint | `'ab'` — use a string for more than one codepoint. |
 
-## E800–E809 — Syntax
+## E800–E811 — Syntax
 
 Emitted by the parser (`kestrel-parser`, `syntax_error.rs`). Every syntax
 error carries one of these codes; the message names what was expected and
@@ -569,3 +586,38 @@ is reported on the token *before* the gap, where it belongs.
 | E807 | expected type, found {token} | A type was required (after `:`, `->`, in `[...]` type arguments). |
 | E808 | expected pattern, found {token} | A pattern was required (after `let`, `case`-style match arms, parameters). |
 | E809 | expected a name, found {token} | A declaration's name is missing; a keyword in name position (`func case()`) is reported here. |
+| E810 | associated-type binding '{name} = ...' is only allowed in an 'any' bound | `Item = Int64` inside `[...]` pins an associated type of an existential (`any Iterator[Item = Int64]`); anywhere else it has no meaning. |
+| E811 | \`_\` here isn't a placeholder | `_` is a placeholder only inside a call's arguments (`f(_, 1)`, `map(_.name)`). A closure literal is a boundary: inside `{ … }` use `it`. |
+
+## E900–E999 — Attributes & derives
+
+E900–E949 are attributes, E950–E999 are derives. The shape checks (E900–E907,
+E914, plus E461 and E612 above) are decided next to the attribute registry
+(`kestrel-ast-builder/src/attrs/`) and reported by the `attribute_validation`
+analyzer. The derive checks (E950–E958) are the `derive_site` analyzer's.
+See `docs/plans/attributes/attributes-design.md`.
+
+| Code | Message | Explanation |
+|---|---|---|
+| E900 | '@{name}' cannot be applied to {target}; it applies to {targets} | The attribute isn't allowed on this kind of declaration. |
+| E901 | duplicate attribute '@{name}' | A non-repeatable attribute is written twice; the second is ignored. `@platform` says "'@platform' appears twice; list every platform in one '@platform(...)'". |
+| E902 | '@{name}' needs {what} | A required argument is missing (`@fileconstant` without a path). |
+| E903 | '.{case}' is not {a noun}; expected {cases} | An argument has an unknown case or the wrong kind of value (`expected a string literal, found '42'`, `unknown builtin '.Foo'`). |
+| E904 | '@{name}' has no argument '{label}' | An unknown, repeated (`argument '{label}' given twice`) or misplaced (`positional argument after a labeled one`) label. |
+| E905 | '@{name}' needs a body; {target} has none | `@inline` on a bodiless protocol requirement. |
+| E906 | '@{a}' cannot be combined with '@{b}': {reason} | Two attributes that contradict each other (`@inline` + `@extern`, `@main` + `@extern`, `@layout(.Packed)` + `@align`). |
+| E907 | '@{name}' takes at most one argument | Too many positional arguments. |
+| E908 *(warning)* | '{name}' is deprecated[ since {since}][: {message}][; use '{replacement}' instead] | A use of a `@deprecated` declaration: a call, reference, member access, enum case, or a type named in a body or signature. Not reported inside a declaration that is itself deprecated or unavailable, or nested in one. |
+| E909 | '@align({n})' must be a power of two between 1 and 4096 | `@align` takes a power of two; 4096 is the most `posix_memalign` and the stack provide without a special path. |
+| E910 | '@nonExhaustive' has no effect: '{name}' is not visible outside its module | An attribute that does not fit this type: `@nonExhaustive` on an enum that isn't `public` (only other modules must add a catch-all arm, so it does nothing); `'@layout(.Packed)' cannot be applied to an enum`; `'@layout(.Packed)' cannot be applied to a type with an unsized tail`; `'@layout(.C)' on an enum needs every case to be payload-less; 'Shape.Circle' has a payload`. |
+| E911 | field '{field}' of packed struct '{name}' is not Copyable; packed fields are copied on every read | Every field of a `@layout(.Packed)` struct must be bitwise `Copyable`: it may sit at a misaligned address, so a read copies it out first. |
+| E912 | cannot borrow '{place}' in place: '{name}' is packed, so the field may be misaligned | `&h.length`, `&mutating h.length`, a `mutating` method on `h.length`, or `h.length` passed to a `mutating` parameter. Copy it first: `var n = h.length`. Reads and whole-field writes are fine. |
+| E913 | '{name}' is unavailable[: {message}][; use '{replacement}' instead] | A use of an `@unavailable` declaration. Reported everywhere, including inside other unavailable code. An unavailable protocol requirement needs no witness. |
+| E914 *(warning)* | '.{old}' is the old spelling; write '.{New}' | `@platform(.linux)` / `.darwin`: accepted for one release, renamed to `.Linux` / `.Darwin` in 0.18. |
+| E950 | cannot find protocol '{P}' | A `@derive` argument doesn't resolve, or resolves to something that isn't a protocol (`'Point' in '@derive' is not a protocol`). |
+| E951 | '{P}' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable and Defaultable | The protocol has no built-in deriver. `Copyable` and `Cloneable` say why instead: `'Cloneable' is not derived: whether 'Doc' is Cloneable follows from its fields`. |
+| E952 | cannot derive '{P}' for '{S}': field '{f}' has type '{T}', which is not '{P}' | A field (or enum payload: `payload 'radius' of case 'Circle'`) doesn't conform. For a generic type the derived bound `T: P` is assumed. `Defaultable` skips fields with an initializer and reads only the `@default` case. |
+| E953 | '{S}' already declares '{P}' | The type also declares the protocol itself, or a member written for it implements a requirement (`'Point' derives 'Equatable' but also implements 'isEqual'; remove one`), or `@derive` names the protocol twice. |
+| E954 | '@derive' on an extension needs a type declared in this module | `@derive` on an extension of another module's type, or (0.18) of a type declared in another file; also `cannot derive 'P' for 'S': its last field is unsized`. |
+| E957 | cannot derive 'Defaultable' for '{E}': mark exactly one case '@default' | An enum derives `Defaultable` by building its one `@default` case. |
+| E958 | deriving '{P}' requires '{S}' to be '{Q}'; add '{Q}' to '@derive' | A parent protocol doesn't hold. Parents are never derived implicitly: derive them alongside, declare them, or derive them in another `@derive`. |

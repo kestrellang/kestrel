@@ -103,6 +103,8 @@ The full attribute pipeline parsed and propagated through AST → HIR → MIR. A
 
 Optional chaining, the pipe operator (`|>`), and placeholder arguments (`_` for partial application).
 
+Designs: [optional chaining](docs/plans/optional-chaining/optional-chaining-design.md) · [pipe operator](docs/plans/pipe-operator/pipe-operator-design.md) · [placeholder arguments](docs/plans/placeholder-arguments/placeholder-arguments-design.md).
+
 ## 0.20 — Properties & conditional conformance
 
 Lazy properties (`lazy let expensive = compute()`), property observers (`willSet` / `didSet`), `mutating get` on computed properties and subscripts, and conditional conformance (`Box[T]: Copyable where T: Copyable`).

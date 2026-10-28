@@ -182,6 +182,12 @@ impl<'a> CompilerDriver<'a> {
             root,
             is_executable,
         ));
+        // Diagnostics inside `@derive`-generated code move to the attribute.
+        let derived = kestrel_compiler::diagnostic::DerivedSources::new(world, root);
+        let diags: Vec<_> = diags
+            .into_iter()
+            .filter_map(|d| derived.remap_analyze(d))
+            .collect();
 
         let mut summary = AnalyzeSummary::default();
         for d in &diags {
@@ -384,6 +390,11 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::InstanceMethodAsStatic { .. } => "InstanceMethodAsStatic",
         InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
         InferError::TypeMustBeKnown { .. } => "TypeMustBeKnown",
+        InferError::ExistentialBoxMismatch { .. } => "ExistentialBoxMismatch",
+        InferError::NotDispatchable { .. } => "NotDispatchable",
+        InferError::ExistentialAccess { .. } => "ExistentialAccess",
+        InferError::NotSelfConforming { .. } => "NotSelfConforming",
+        InferError::ExistentialBindingMismatch { .. } => "ExistentialBindingMismatch",
         InferError::TypeArgCountMismatch { .. } => "TypeArgCountMismatch",
         InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
         InferError::MemberwiseInitArity { .. } => "MemberwiseInitArity",
@@ -402,6 +413,8 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::KindMismatch { .. } => "KindMismatch",
         InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
         InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
+        InferError::OptionalChainNotConforming { .. } => "OptionalChainNotConforming",
+        InferError::PipeFixIt { .. } => "PipeFixIt",
     }
 }
 
@@ -414,6 +427,15 @@ fn format_error(err: &InferError) -> String {
         },
         InferError::DoesNotConform { .. } => {
             format!("DoesNotConform at {}:{}", span.file_id, span.start)
+        },
+        InferError::OptionalChainNotConforming { .. } => {
+            format!(
+                "OptionalChainNotConforming at {}:{}",
+                span.file_id, span.start
+            )
+        },
+        InferError::PipeFixIt { .. } => {
+            format!("PipeFixIt at {}:{}", span.file_id, span.start)
         },
         InferError::NoMember { name, .. } => {
             format!("NoMember '{}' at {}:{}", name, span.file_id, span.start)
@@ -481,6 +503,21 @@ fn format_error(err: &InferError) -> String {
                 member, span.file_id, span.start
             )
         },
+        InferError::NotDispatchable { message, .. }
+        | InferError::ExistentialAccess { message, .. }
+        | InferError::NotSelfConforming { message, .. } => {
+            format!("{} at {}:{}", message, span.file_id, span.start)
+        },
+        InferError::ExistentialBoxMismatch { from, to, .. } => format!(
+            "ExistentialBoxMismatch '{}' -> '{}' at {}:{}",
+            from, to, span.file_id, span.start
+        ),
+        InferError::ExistentialBindingMismatch {
+            from, to, assoc, ..
+        } => format!(
+            "ExistentialBindingMismatch '{}' -> '{}' ({}) at {}:{}",
+            from, to, assoc, span.file_id, span.start
+        ),
         InferError::TypeArgCountMismatch { expected, got, .. } => {
             format!(
                 "TypeArgCountMismatch expected={} got={} at {}:{}",

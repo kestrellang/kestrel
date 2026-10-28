@@ -38,6 +38,7 @@ use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::NodeKind;
+use kestrel_ast_builder::attrs::attrs_of;
 use kestrel_name_res::{BuiltinIndex, EntityBuiltin, builtin_annotation_allowed};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -133,33 +134,20 @@ impl DeclCheck for DuplicateBuiltinAnalyzer {
     }
 }
 
-/// The entity's `@builtin` attribute.
-fn builtin_attr<'a>(
-    query: &'a kestrel_hecs::QueryContext<'_>,
-    entity: kestrel_hecs::Entity,
-) -> Option<&'a kestrel_ast_builder::AstAttribute> {
-    let attrs = query.get::<kestrel_ast_builder::Attributes>(entity)?;
-    attrs.0.iter().find(|a| a.name == "builtin")
-}
-
 /// Span of the `@builtin(...)` attribute, falling back to the declaration.
 fn builtin_span(
     query: &kestrel_hecs::QueryContext<'_>,
     entity: kestrel_hecs::Entity,
 ) -> kestrel_span::Span {
-    builtin_attr(query, entity)
-        .map(|a| a.span.clone())
-        .unwrap_or_else(|| util::entity_span(query, entity))
+    attrs_of(query, entity)
+        .builtin_written()
+        .map_or_else(|| util::entity_span(query, entity), |(_, span)| span)
 }
 
 /// The feature as written in the annotation (`.AddOperatorProtocol`), which
 /// is not always `Builtin::name()` (`Addable`).
 fn written_feature(cx: &DeclContext<'_>) -> Option<String> {
-    Some(
-        builtin_attr(cx.query, cx.entity)?
-            .args
-            .first()?
-            .value
-            .clone(),
-    )
+    attrs_of(cx.query, cx.entity)
+        .builtin_written()
+        .map(|(name, _)| format!(".{name}"))
 }

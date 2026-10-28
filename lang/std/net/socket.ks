@@ -14,19 +14,19 @@ import std.io.read.(Readable)
 import std.io.write.(Writable)
 
 /// Size in bytes of `struct addrinfo` on darwin (`48`).
-@platform(.darwin)
+@platform(.Darwin)
 func ADDRINFO_SIZE() -> Int64 { 48 }
 
 /// Size in bytes of `struct addrinfo` on linux (`48`).
-@platform(.linux)
+@platform(.Linux)
 func ADDRINFO_SIZE() -> Int64 { 48 }
 
 /// Byte offset of the `ai_addr` pointer within `addrinfo` on darwin.
-@platform(.darwin)
+@platform(.Darwin)
 func AI_ADDR_OFFSET() -> Int64 { 32 }
 
 /// Byte offset of the `ai_addr` pointer within `addrinfo` on linux. Differs from darwin because of `ai_canonname` ordering.
-@platform(.linux)
+@platform(.Linux)
 func AI_ADDR_OFFSET() -> Int64 { 24 }
 
 /// Builds a 16-byte `sockaddr_in` for binding to the wildcard IPv4 address on `port`.
@@ -35,7 +35,7 @@ func AI_ADDR_OFFSET() -> Int64 { 24 }
 /// `sin_family`; this accessor lays out the bytes accordingly. The
 /// port is encoded big-endian (network byte order). The address is
 /// hard-coded to `INADDR_ANY` (`0.0.0.0`).
-@platform(.darwin)
+@platform(.Darwin)
 func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
     var addr = Array[UInt8]();
     // sin_len = 16, sin_family = AF_INET (2)
@@ -57,7 +57,7 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
 }
 
 /// Linux variant of `buildSockaddrIn` — `sin_family` is a 16-bit field with no leading `sin_len`.
-@platform(.linux)
+@platform(.Linux)
 func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
     var addr = Array[UInt8]();
     // sin_family = AF_INET (2) as little-endian uint16

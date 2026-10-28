@@ -43,6 +43,39 @@ pub struct HirBody {
     /// Original condition expressions from while-loop desugaring.
     /// Used by the condition type analyzer to check that while conditions are Bool.
     pub while_conditions: Vec<HirExprId>,
+    /// Every `|>` in the body, with what its right side was. Type inference
+    /// rewords a failed pipe's errors into a fix-it from this.
+    pub pipes: Vec<PipeSite>,
+}
+
+/// One `lhs |> rhs` (`SugarKind::Pipe`), as HIR lowering saw its right side.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct PipeSite {
+    /// The whole pipe's span; the call it builds carries it too.
+    pub span: Span,
+    /// The right side's span.
+    pub rhs_span: Span,
+    /// The right side, as written.
+    pub rhs_text: String,
+    pub shape: PipeShape,
+}
+
+/// What a pipe's right side was, for its fix-it.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum PipeShape {
+    /// A call with `_` in its arguments: the slot is explicit, no fix-it.
+    Slotted,
+    /// A path, called with the piped value: `x |> f`. `call` is that call.
+    Path { call: HirExprId },
+    /// A call with no `_`, whose result is called: `x |> f(a)`.
+    /// `suggestion` is the call with a leading slot: `f(_, a)`.
+    CallValue { suggestion: String },
+    /// `x |> f ?? d`, which is `x |> (f ?? d)`.
+    Coalesce,
+    /// A closure literal: its own errors say what's wrong.
+    Closure,
+    /// Anything else, called with the piped value.
+    Value,
 }
 
 impl HirBody {
@@ -61,8 +94,63 @@ impl HirBody {
             tail_expr: None,
             guard_stmts: Vec::new(),
             while_conditions: Vec::new(),
+            pipes: Vec::new(),
         }
     }
+
+    /// Every `?.` bind in the body: its scrutinee `ProtocolCall` and the
+    /// `.Some` arm's binder `$o` (see `MatchSource::OptionalChain`).
+    pub fn optional_chain_binds(&self) -> Vec<OptionalChainBind> {
+        let mut binds = Vec::new();
+        for (_, expr) in self.exprs.iter() {
+            let HirExpr::Match {
+                scrutinee,
+                arms,
+                source: MatchSource::OptionalChain,
+                ..
+            } = expr
+            else {
+                continue;
+            };
+            // Arm 0 is `.Some($o)` by construction.
+            let Some(HirPat::ImplicitVariant { args, .. }) =
+                arms.first().map(|a| &self.pats[a.pattern])
+            else {
+                continue;
+            };
+            let Some(HirPat::Binding { local, .. }) = args.first().map(|a| &self.pats[a.pattern])
+            else {
+                continue;
+            };
+            binds.push(OptionalChainBind {
+                scrutinee: *scrutinee,
+                binder: *local,
+            });
+        }
+        binds
+    }
+
+    /// The local a place expression projects from, through fields, tuple
+    /// elements and transparent sugar (`a.b.0` → `a`).
+    pub fn place_root(&self, mut expr: HirExprId) -> Option<LocalId> {
+        loop {
+            match &self.exprs[expr] {
+                HirExpr::Local(local, _) => return Some(*local),
+                HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => expr = *base,
+                HirExpr::Sugar { inner, .. } => expr = *inner,
+                _ => return None,
+            }
+        }
+    }
+}
+
+/// One `?.` bind (`HirBody::optional_chain_binds`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct OptionalChainBind {
+    /// `ProtocolCall(base, OptionalChain, …)`.
+    pub scrutinee: HirExprId,
+    /// `$o`: the payload binder of the `.Some` arm.
+    pub binder: LocalId,
 }
 
 /// Where a `HirExpr::Match` came from. Drives diagnostic phrasing and lets
@@ -92,6 +180,13 @@ pub enum MatchSource {
     ParamDestructure,
     /// Desugared from `try expr` (Continue/Break matching on ControlFlow).
     TryOp,
+    /// Desugared from `x is T` or `x as? T`: one `is T` arm and `_`.
+    TypeTest,
+    /// One `?.` bind of an optional chain: the scrutinee is
+    /// `ProtocolCall(base, OptionalChain, chainBorrow | chainTake)`, the arms
+    /// are `.Some($o) => <rest of the chain>` and `.None => .None`. Arms are
+    /// checked against `Optional[α]`, so the tail is wrapped or flattened.
+    OptionalChain,
 }
 
 impl MatchSource {
@@ -123,6 +218,25 @@ pub enum SugarKind {
     /// `"hello \(name)!"` — `inner` is the Block containing the
     /// DefaultStringInterpolation init/append/build sequence.
     StringInterpolation,
+    /// `x is T` / `x is not T` — `inner` is `match x { is T => true, _ =>
+    /// false }` (arms swapped for `is not`).
+    TypeTest,
+    /// `x as? T` — `inner` is the Block `{ let $cast: Optional[&T] = match x
+    /// { &$hit is T => .Some($hit), _ => .None }; $cast }`.
+    Cast,
+    /// `consuming x as? T` — `inner` is the Block `{ let $boxed = x; if
+    /// $boxed is T { .Ok(TakePayload($boxed)) } else { .Err($boxed) } }`.
+    ConsumingCast,
+    /// `lhs |> rhs` — `inner` is the call it rewrites to (`rhs(lhs)`, or
+    /// `rhs` with its `_` slots filled), wrapped in `{ let $pipe = lhs; … }`
+    /// when `lhs` is not a place. No protocol: pipe is function application.
+    Pipe,
+    /// `f(_, 1)` / `map(_.name)` — `inner` is the synthesized `Closure` whose
+    /// parameters stand for the `_`s.
+    Placeholder,
+    /// `a?.b.c` — `inner` is the outermost `Match { source: OptionalChain }`;
+    /// each further bind is a nested match in the `.Some` arm.
+    OptionalChain,
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).
@@ -354,6 +468,14 @@ pub enum HirExpr {
     Error {
         span: Span,
     },
+    /// Consume an existential box whose payload is known to be `target`
+    /// (a preceding `is` test proved it) and return the payload by value.
+    /// Only produced by the `consuming x as? T` desugaring.
+    TakePayload {
+        expr: HirExprId,
+        target: crate::ty::HirTy,
+        span: Span,
+    },
 
     /// Transparent wrapper marking that `inner` was synthesized from
     /// desugaring a user-language construct identified by `kind`.
@@ -463,6 +585,15 @@ pub enum HirPat {
     At {
         binding: LocalId,
         subpattern: HirPatId,
+        span: Span,
+    },
+    /// `[c] is T [{ .. }]`: the scrutinee is an existential whose payload is
+    /// a `target`. `binding` (`c`) borrows the payload as `&T`; `sub` (a
+    /// struct pattern, or `_`) matches the payload in place.
+    TypeTest {
+        binding: Option<LocalId>,
+        target: crate::ty::HirTy,
+        sub: HirPatId,
         span: Span,
     },
     /// Error recovery
@@ -1004,6 +1135,8 @@ mod tests {
             BinaryOp::Coalesce,
             BinaryOp::RangeInclusive,
             BinaryOp::RangeExclusive,
+            // BinaryOp::Pipe is intentionally absent: it is rewritten into a
+            // call by HIR lowering, not desugared to a protocol.
         ];
 
         for op in &all_ops {

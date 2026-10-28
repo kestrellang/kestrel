@@ -781,6 +781,7 @@ pub(crate) fn binary_op_of(kind: SyntaxKind) -> Option<BinaryOp> {
         SyntaxKind::QuestionQuestion => BinaryOp::Coalesce,
         SyntaxKind::DotDotEquals => BinaryOp::RangeInclusive,
         SyntaxKind::DotDotLess => BinaryOp::RangeExclusive,
+        SyntaxKind::PipeGreater => BinaryOp::Pipe,
         _ => return None,
     };
     Some(op)

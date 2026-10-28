@@ -152,7 +152,9 @@ fn compile_return<'ctx>(
     // ret_borrow: return the raw POINTER (a true `ptr`) — `resolve_scalar`
     // would load a scalar pointee through it (the
     // scalar_ret_borrow_not_loaded miscompile). Twin of the Cranelift branch.
-    if fc.func.ret_borrow {
+    // A borrow of an unsized pointee is a fat (data, table) value, returned
+    // like any two-word aggregate (sret). Twin of the Cranelift branch.
+    if fc.func.ret_borrow && !fc.ctx.module.is_fat(fc.func.ret) {
         let val = fc.get_value(value_id);
         builder.build_return(Some(&val)).unwrap();
         return Ok(());

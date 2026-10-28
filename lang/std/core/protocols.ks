@@ -29,6 +29,7 @@ import std.numeric.(UInt64, Int64)
 ///
 /// Point(x: 1, y: 2) == Point(x: 1, y: 2)   // true
 /// ```
+@builtin(.EquatableProtocol)
 public protocol Equatable {
     /// Returns `true` iff `self` and `other` are considered equal. Should
     /// be reflexive, symmetric, and transitive — `Hashable` requires equal
@@ -139,6 +140,7 @@ extend Equatable: Equal[Self], NotEqual[Self] {
 ///     }
 /// }
 /// ```
+@builtin(.ComparableProtocol)
 public protocol Comparable: Equatable {
     /// Returns the ordering of `self` relative to `other`. Must be a
     /// total order — for any `a`, `b`, `c` exactly one of `Less`,
@@ -217,6 +219,7 @@ extend Comparable: RangeMatchable[Self] {
 ///     }
 /// }
 /// ```
+@builtin(.HashableProtocol)
 public protocol Hashable: Equatable {
     /// Feeds this value's bytes into `hasher`. Must be deterministic
     /// across calls and consistent with `isEqual`.
@@ -244,6 +247,7 @@ public protocol Hasher {
 /// `""` for strings, the empty collection for containers. Don't
 /// conform just to satisfy a generic bound — the absence of a default
 /// is information.
+@builtin(.DefaultableProtocol)
 public protocol Defaultable {
     /// @name Default
     /// Builds the default-valued instance.

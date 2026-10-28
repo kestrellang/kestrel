@@ -75,6 +75,75 @@ pub struct TypedBody {
     /// the iterable itself is CONSUMED as the loop's iterator. Decided once
     /// by inference; the move checker and MIR lowering both read it.
     pub direct_iterators: HashSet<HirExprId>,
+    /// Existential conversions at check leaves: `expr` (of type `from`)
+    /// becomes the existential `to` by the recorded rule. MIR lowering emits
+    /// them from here and never re-derives one (existentials design §4).
+    pub existential_conversions: HashMap<HirExprId, ExistentialConversion>,
+
+    /// Every `is T` pattern, with the type of the value it tests (an
+    /// existential box when well-typed; analyzers report E152 otherwise).
+    pub type_tests: HashMap<kestrel_hir::body::HirPatId, ResolvedTy>,
+
+    /// The method each `?.` bind calls, keyed by its scrutinee
+    /// `ProtocolCall` (optional-chaining design §2). Overrides the
+    /// provisional name HIR lowering wrote; MIR lowering and `access_mode`
+    /// read it through `protocol_method_name`.
+    pub chain_modes: HashMap<HirExprId, ChainMode>,
+}
+
+/// How a `?.` bind reaches its payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ChainMode {
+    /// `chainBorrow`: the chain only reads the payload.
+    Borrow,
+    /// `chainMutate`: the chain mutates the payload of a place base.
+    Mutate,
+    /// `chainTake`: the base is a temporary; the chain owns its payload.
+    Take,
+}
+
+impl ChainMode {
+    /// The `OptionalChain` requirement this mode calls.
+    pub fn method_name(self) -> &'static str {
+        match self {
+            ChainMode::Borrow => "chainBorrow",
+            ChainMode::Mutate => "chainMutate",
+            ChainMode::Take => "chainTake",
+        }
+    }
+}
+
+impl TypedBody {
+    /// The method a `ProtocolCall` really calls: the written name, unless
+    /// it is a `?.` bind whose mode inference settled.
+    pub fn protocol_method_name<'a>(&self, expr: HirExprId, written: &'a str) -> &'a str {
+        match self.chain_modes.get(&expr) {
+            Some(mode) => mode.method_name(),
+            None => written,
+        }
+    }
+}
+
+/// How a value becomes an existential (existentials design §4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ConversionKind {
+    /// A sized `T` is boxed: `B[T].init(consuming:)`, then unsized.
+    Box,
+    /// `B[T]` widens to `B[rawany P]` in place; no allocation.
+    Unsize,
+    /// `B[rawany Q]` becomes `B[rawany P]` for a `P` that `Q` implies; the
+    /// table pointer moves to the parent table.
+    Upcast,
+}
+
+/// One accepted existential conversion, fully resolved.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExistentialConversion {
+    pub kind: ConversionKind,
+    /// The expression's own type.
+    pub from: ResolvedTy,
+    /// The existential it becomes (`B[rawany P]`).
+    pub to: ResolvedTy,
 }
 
 /// One level of an `Indirection` member peel: the concrete pointee accessors
@@ -116,6 +185,9 @@ impl Hash for TypedBody {
             indirection_peels,
             kind_coercions,
             direct_iterators,
+            existential_conversions,
+            type_tests,
+            chain_modes,
         } = self;
         hash_sorted(expr_types, state);
         hash_sorted(local_types, state);
@@ -131,6 +203,9 @@ impl Hash for TypedBody {
         let mut direct: Vec<_> = direct_iterators.iter().map(|e| e.raw()).collect();
         direct.sort_unstable();
         direct.hash(state);
+        hash_sorted(existential_conversions, state);
+        hash_sorted(type_tests, state);
+        hash_sorted(chain_modes, state);
     }
 }
 
@@ -180,6 +255,12 @@ pub enum ResolvedTy {
         /// Parallel to `params`; carries the `mutating` convention to MIR.
         conventions: Vec<kestrel_ast::ParamConvention>,
         ret: Box<ResolvedTy>,
+    },
+    /// The raw existential `any P and Q` — a box's payload type. Bounds in
+    /// canonical order with their type args; `bindings` pins associated types.
+    RawExistential {
+        bounds: Vec<(Entity, Vec<ResolvedTy>)>,
+        bindings: Vec<(Entity, ResolvedTy)>,
     },
     /// Opaque return type from a call to a function with `some P` return.
     /// Preserved through inference output so MIR lowering can resolve it
@@ -304,6 +385,23 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
             pointee: Box::new(resolve_to_concrete(ctx, *pointee)),
             mutating: *mutating,
         },
+        TyKind::RawExistential { bounds, bindings } => ResolvedTy::RawExistential {
+            bounds: bounds
+                .iter()
+                .map(|(e, args)| {
+                    (
+                        *e,
+                        args.iter()
+                            .map(|&tv| resolve_to_concrete(ctx, tv))
+                            .collect(),
+                    )
+                })
+                .collect(),
+            bindings: bindings
+                .iter()
+                .map(|&(assoc, tv)| (assoc, resolve_to_concrete(ctx, tv)))
+                .collect(),
+        },
         TyKind::Never => ResolvedTy::Never,
         TyKind::Error => ResolvedTy::Error,
     }
@@ -383,6 +481,26 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
             .collect(),
         kind_coercions: ctx.kind_coercions.clone(),
         direct_iterators: ctx.direct_iterators.clone(),
+        existential_conversions: ctx
+            .existential_conversions
+            .iter()
+            .map(|(&expr, c)| {
+                (
+                    expr,
+                    ExistentialConversion {
+                        kind: c.kind,
+                        from: resolve_to_concrete(ctx, c.from),
+                        to: resolve_to_concrete(ctx, c.to),
+                    },
+                )
+            })
+            .collect(),
+        type_tests: ctx
+            .type_tests
+            .iter()
+            .map(|(&pat, &tv)| (pat, resolve_to_concrete(ctx, tv)))
+            .collect(),
+        chain_modes: ctx.chain_modes.clone(),
     }
 }
 
@@ -414,6 +532,9 @@ fn literal_kind_name(lit: LiteralKind) -> &'static str {
 
 /// Describe a TyKind as a short type name string.
 fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
+    if let Some(existential) = describe_existential(ctx, kind) {
+        return existential;
+    }
     match kind {
         TyKind::Struct { entity, args }
         | TyKind::Enum { entity, args }
@@ -504,6 +625,12 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                 format!("some {}{suffix}", bound_names.join(" and "))
             }
         },
+        TyKind::RawExistential { bounds, bindings } => {
+            format!(
+                "rawany {}",
+                describe_existential_bounds(ctx, bounds, bindings)
+            )
+        },
         TyKind::Never => "Never".into(),
         // The `Error` absorber is an internal placeholder, not a type the
         // user wrote: print it like an open var. It can't be suppressed
@@ -511,6 +638,64 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
         // an error mentioning it may be the only one (bidi design §10, P0c).
         TyKind::Error => "_".into(),
     }
+}
+
+/// A box over a raw existential prints the way it is written: `any P` for
+/// the default box, `any[B] P` otherwise.
+fn describe_existential(ctx: &InferCtx<'_>, kind: &TyKind) -> Option<String> {
+    let TyKind::Struct { entity, args } = kind else {
+        return None;
+    };
+    let [payload] = args.as_slice() else {
+        return None;
+    };
+    let TySlot::Resolved(TyKind::RawExistential { bounds, bindings }) =
+        &ctx.types[ctx.resolve(*payload).0 as usize]
+    else {
+        return None;
+    };
+    let bounds = describe_existential_bounds(ctx, bounds, bindings);
+    if ctx.resolver.builtin(kestrel_hir::Builtin::DefaultBoxType) == Some(*entity) {
+        return Some(format!("any {bounds}"));
+    }
+    let name = ctx
+        .query_ctx
+        .get::<kestrel_ast_builder::Name>(*entity)
+        .map_or_else(|| "?".to_string(), |n| n.0.clone());
+    Some(format!("any[{name}] {bounds}"))
+}
+
+/// `P and Q[Item = Int64]`: each bound, with the associated types it pins.
+pub(crate) fn describe_existential_bounds(
+    ctx: &InferCtx<'_>,
+    bounds: &[(Entity, Vec<TyVar>)],
+    bindings: &[(Entity, TyVar)],
+) -> String {
+    let name_of = |e: Entity| {
+        ctx.query_ctx
+            .get::<kestrel_ast_builder::Name>(e)
+            .map_or_else(|| format!("{e:?}"), |n| n.0.clone())
+    };
+    let parts: Vec<String> = bounds
+        .iter()
+        .map(|(protocol, args)| {
+            let mut inner: Vec<String> = args.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
+            inner.extend(
+                bindings
+                    .iter()
+                    .filter(|(assoc, _)| ctx.query_ctx.parent_of(*assoc) == Some(*protocol))
+                    .map(|&(assoc, tv)| {
+                        format!("{} = {}", name_of(assoc), describe_tyvar(ctx, tv))
+                    }),
+            );
+            if inner.is_empty() {
+                name_of(*protocol)
+            } else {
+                format!("{}[{}]", name_of(*protocol), inner.join(", "))
+            }
+        })
+        .collect();
+    parts.join(" and ")
 }
 
 /// Build a human-readable error description with resolved types.
@@ -527,6 +712,8 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 describe_tyvar(ctx, *got)
             )
         },
+        InferError::OptionalChainNotConforming { ty, .. } => describe_tyvar(ctx, *ty),
+        InferError::PipeFixIt { message, .. } => message.clone(),
         InferError::DoesNotConform {
             ty,
             protocol,
@@ -550,7 +737,9 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             }
             // Static failures get a "because" detail — deep in generic
             // instantiation chains the bare `T !: Static` is miserable.
-            if let Some(why) = describe_static_failure(ctx, *ty, *protocol) {
+            if let Some(why) = describe_static_failure(ctx, *ty, *protocol)
+                .or_else(|| describe_sized_failure(ctx, *ty, *protocol))
+            {
                 return format!("{} !: {} ({})", ty_name, proto_name, why);
             }
             // A ref TYPE ARGUMENT conforms to exactly what `extend &T: P`
@@ -638,6 +827,15 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::TypeParamAsValue { .. } => "type parameter cannot be used as a value".into(),
         InferError::TypeMustBeKnown { member, .. } => {
             format!("type must be known to look up '{member}'")
+        },
+        InferError::NotDispatchable { message, .. }
+        | InferError::ExistentialAccess { message, .. }
+        | InferError::NotSelfConforming { message, .. } => message.clone(),
+        InferError::ExistentialBoxMismatch { from, to, .. } => {
+            format!("'{from}' and '{to}' use different boxes")
+        },
+        InferError::ExistentialBindingMismatch { assoc, actual, .. } => {
+            format!("its '{assoc}' is '{actual}'")
         },
         InferError::TypeArgCountMismatch { expected, got, .. } => {
             if *got < *expected {
@@ -745,6 +943,28 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
     }
 }
 
+/// "Because" detail for a failed `Sized` bound (existentials).
+fn describe_sized_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Option<String> {
+    if !crate::solver::is_sized_builtin(ctx, protocol) {
+        return None;
+    }
+    let TySlot::Resolved(kind) = ctx.slot(ctx.resolve(ty)) else {
+        return None;
+    };
+    match kind {
+        TyKind::Param { .. } => Some(
+            "the type parameter is relaxed with 'not Sized'; use it behind a pointer, or in an \
+             extension 'where T: Sized'"
+                .into(),
+        ),
+        TyKind::RawExistential { .. } => {
+            Some("a raw existential has no compile-time size; it only lives in a box".into())
+        },
+        TyKind::Struct { .. } => Some("its last stored field is unsized".into()),
+        _ => None,
+    }
+}
+
 /// "Because" detail for a failed `Static` bound (references 2a): names the
 /// declaration, the offending stored member, or the offending type argument.
 /// `None` for non-Static protocols or shapes with nothing specific to say.
@@ -837,6 +1057,9 @@ mod tests {
             indirection_peels: HashMap::default(),
             kind_coercions: HashMap::default(),
             direct_iterators: HashSet::default(),
+            existential_conversions: HashMap::default(),
+            type_tests: HashMap::default(),
+            chain_modes: HashMap::default(),
         }
     }
 
@@ -904,6 +1127,22 @@ mod tests {
                 "error_details",
                 TypedBody {
                     error_details: vec!["type 'B'".into()],
+                    ..base.clone()
+                },
+            ),
+            (
+                "existential_conversions",
+                TypedBody {
+                    existential_conversions: [(
+                        e,
+                        ExistentialConversion {
+                            kind: ConversionKind::Box,
+                            from: ty(a),
+                            to: ty(b),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
                     ..base.clone()
                 },
             ),

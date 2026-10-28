@@ -1,6 +1,6 @@
 # Opaque Types (`some P`)
 
-An opaque return type, written `some P`, lets a function promise "I return *some specific* type that conforms to `P`" without naming it. The caller programs against the protocol; the implementation keeps the concrete type private and free to change. Unlike a boxed existential, an opaque type is a purely compile-time abstraction — the compiler always knows the real type underneath, so there is no boxing, no vtable, and no runtime cost.
+An opaque return type, written `some P`, lets a function promise "I return *some specific* type that conforms to `P`" without naming it. The caller programs against the protocol; the implementation keeps the concrete type private and free to change. Unlike a boxed [existential](existentials.md) (`any P`), an opaque type is a purely compile-time abstraction — the compiler always knows the real type underneath, so there is no boxing, no function table, and no runtime cost. Reach for `any P` when one variable or collection must hold *different* conforming types.
 
 ## Returning `some P`
 

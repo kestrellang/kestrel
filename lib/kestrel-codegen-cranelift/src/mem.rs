@@ -94,18 +94,35 @@ pub fn zero_memory(builder: &mut FunctionBuilder, ptr: Value, size: u64) {
     }
 }
 
+/// The most alignment a Cranelift stack slot gets on its own: the frame
+/// itself is only 16-byte aligned.
+const FRAME_ALIGN: u64 = 16;
+
 pub fn alloc_stack_slot(
     builder: &mut FunctionBuilder,
     size: u64,
     align: u64,
     ptr_ty: ir::Type,
 ) -> Value {
+    let align = align.max(1);
+    if align <= FRAME_ALIGN {
+        let slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            size.max(1) as u32,
+            align.trailing_zeros() as u8,
+        ));
+        return builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
+    }
+    // An `@align(N)` type above the frame's alignment: over-allocate and
+    // round the address up inside the slot.
     let slot = builder.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
-        size.max(1) as u32,
-        align.trailing_zeros() as u8,
+        (size.max(1) + align - FRAME_ALIGN) as u32,
+        FRAME_ALIGN.trailing_zeros() as u8,
     ));
-    builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0))
+    let base = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
+    let bumped = builder.ins().iadd_imm(base, (align - 1) as i64);
+    builder.ins().band_imm(bumped, -(align as i64))
 }
 
 pub fn store_to_repr(builder: &mut FunctionBuilder, repr: TypeRepr, dest: Value, value: Value) {

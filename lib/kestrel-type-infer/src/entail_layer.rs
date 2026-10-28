@@ -82,7 +82,8 @@ impl<'q, 'c> FrontEndLayer<'q, 'c> {
             HirTy::Function { .. }
             | HirTy::AbstractAssoc { .. }
             | HirTy::SelfType(..)
-            | HirTy::Opaque { .. } => self.abstract_of(ty.clone()),
+            | HirTy::Opaque { .. }
+            | HirTy::RawExistential { .. } => self.abstract_of(ty.clone()),
         }
     }
 
@@ -300,6 +301,30 @@ impl<'q, 'c> FrontEndLayer<'q, 'c> {
 
 impl EntailLayer for FrontEndLayer<'_, '_> {
     fn supply(&self, ty: &ETy, protocol: Entity) -> Supply {
+        // Sized is structural, never declared. A relaxed (`not Sized`) param
+        // can still be Sized under an in-scope `where T: Sized`.
+        if self.builtin(Builtin::Sized) == Some(protocol) {
+            if let ETy::Param(p) = ty {
+                let owner = self.ctx.parent_of(*p).unwrap_or(*p);
+                let relaxed = self.ctx.query(kestrel_semantics::TypeParamSizeRequirement {
+                    param: *p,
+                    context: owner,
+                    root: self.root,
+                }) == kestrel_semantics::SizeRequirement::MayBeUnsized;
+                return Supply::Decided(if relaxed {
+                    self.param_supply(*p, protocol)
+                } else {
+                    Tri::Holds
+                });
+            }
+            if self.abstract_for_classifier(ty) {
+                return Supply::Decided(Tri::Holds);
+            }
+            let hir = self.ety_to_hir(ty);
+            return Supply::Decided(Tri::from_bool(kestrel_semantics::hir_type_is_sized(
+                self.ctx, &hir, self.root, self.root,
+            )));
+        }
         // Static is structural, never declared.
         if self.builtin(Builtin::Static) == Some(protocol) {
             if self.abstract_for_classifier(ty) {
@@ -324,9 +349,15 @@ impl EntailLayer for FrontEndLayer<'_, '_> {
             let ok = if cloneable {
                 sem == kestrel_semantics::CopySemantics::Cloneable
             } else {
+                // `Copyable` also needs a compile-time size (the solver's
+                // `type_conforms_copyable` twin).
                 sem != kestrel_semantics::CopySemantics::NotCopyable
+                    && kestrel_semantics::hir_type_is_sized(self.ctx, &hir, self.root, self.root)
             };
             return Supply::Decided(Tri::from_bool(ok));
+        }
+        if let Some(supply) = self.existential_supply(ty, protocol) {
+            return supply;
         }
         match ty {
             ETy::Nominal { entity, .. } => self.nominal_supply(*entity, protocol),
@@ -393,6 +424,117 @@ impl EntailLayer for FrontEndLayer<'_, '_> {
 }
 
 impl FrontEndLayer<'_, '_> {
+    /// `any P: P` (existentials design §6), for a raw existential and for a
+    /// box holding one. It holds when `protocol` is a bound (or refined by
+    /// one), every requirement can be called through the table, and the box
+    /// grants the access the requirements need. `None` for a non-existential,
+    /// and for a box asked about a protocol outside its bounds (the box's
+    /// own conformances answer that).
+    fn existential_supply(&self, ty: &ETy, protocol: Entity) -> Option<Supply> {
+        let (box_ty, raw) = match ty {
+            ETy::Abstract(i) => (None, self.abstracts.borrow()[*i as usize].clone()),
+            ETy::Nominal { args, .. } => match args.as_slice() {
+                [ETy::Abstract(i)] => (Some(ty), self.abstracts.borrow()[*i as usize].clone()),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let HirTy::RawExistential {
+            bounds, bindings, ..
+        } = raw
+        else {
+            return None;
+        };
+        let bounds: Vec<Entity> = bounds
+            .iter()
+            .filter_map(|b| match b {
+                HirTy::Protocol { entity, .. } => Some(*entity),
+                _ => None,
+            })
+            .collect();
+        kestrel_debug::ktrace!(
+            "existential",
+            "supply {:?}: {:?} (box: {})",
+            bounds,
+            protocol,
+            box_ty.is_some()
+        );
+        if !kestrel_semantics::bound_closure(self.ctx, &bounds, self.root).contains(&protocol) {
+            // Reached through a blanket `extend Q: protocol` (or a parent of
+            // such): it holds when the existential conforms to `Q`.
+            let sources = self.blanket_sources(&bounds, protocol);
+            kestrel_debug::ktrace!("existential", "  blanket sources: {:?}", sources.len());
+            if sources.is_empty() && box_ty.is_some() {
+                return None;
+            }
+            return Some(Supply::Sources(sources));
+        }
+        let pinned: Vec<Entity> = bindings.iter().map(|b| b.assoc).collect();
+        let needs = kestrel_semantics::self_conformance(self.ctx, protocol, &pinned, self.root);
+        kestrel_debug::ktrace!("existential", "  pinned {:?}; self-conformance: {:?}", pinned, needs);
+
+        if needs.blocker.is_some() {
+            return Some(Supply::Decided(Tri::Fails));
+        }
+        let Some(box_ty) = box_ty else {
+            return Some(Supply::Decided(Tri::Holds));
+        };
+        let access = [
+            (needs.needs_mutable, Builtin::MutableIndirection),
+            (needs.needs_consuming, Builtin::ConsumingIndirection),
+        ];
+        let granted = access.iter().all(|&(needed, builtin)| {
+            !needed
+                || self.builtin(builtin).is_some_and(|p| {
+                    kestrel_entail::entails(
+                        self,
+                        &Goal::Conforms {
+                            ty: box_ty.clone(),
+                            protocol: p,
+                        },
+                    ) != Tri::Fails
+                })
+        });
+        Some(Supply::Decided(Tri::from_bool(granted)))
+    }
+
+    /// How `protocol` reaches an existential with `bounds` other than by
+    /// declared refinement: each blanket extension `extend Q: protocol`
+    /// (and each protocol that declares `protocol` as a parent along such a
+    /// path) supplies it through `Q`.
+    fn blanket_sources(&self, bounds: &[Entity], protocol: Entity) -> Vec<Source> {
+        let mut sources = Vec::new();
+        for &b in bounds {
+            for (proto, source, _) in self
+                .ctx
+                .query(ConformingProtocolInstantiations {
+                    entity: b,
+                    root: self.root,
+                })
+                .iter()
+            {
+                if *proto != protocol {
+                    continue;
+                }
+                let through = match self.ctx.get::<NodeKind>(*source) {
+                    Some(NodeKind::Extension) => self.ctx.query(ExtensionTargetEntity {
+                        extension: *source,
+                        root: self.root,
+                    }),
+                    Some(NodeKind::Protocol) => Some(*source),
+                    _ => None,
+                };
+                if let Some(q) = through
+                    && q != protocol
+                    && self.ctx.get::<NodeKind>(q) == Some(&NodeKind::Protocol)
+                {
+                    sources.push(Source::Refines(q));
+                }
+            }
+        }
+        sources
+    }
+
     fn lang_supply(&self, name: &str, protocol: Entity) -> Supply {
         match kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, name) {
             Some(e) => self.nominal_supply(e, protocol),

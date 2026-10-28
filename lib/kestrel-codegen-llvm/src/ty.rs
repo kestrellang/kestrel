@@ -161,6 +161,14 @@ impl TypeCache {
         let ptr_scalar = self.ptr_scalar;
         let ptr_size = self.ptr_size;
 
+        // A pointer/ref to an unsized type, or a borrowed raw-existential
+        // value: (data, table), two words (existentials plan Phase 9).
+        if module.is_fat(ty) {
+            return TypeRepr::Aggregate {
+                size: ptr_size * 2,
+                align: ptr_size,
+            };
+        }
         match arena.get(ty) {
             MirTy::I8 | MirTy::Bool => TypeRepr::Scalar(ScalarTy::I8),
             MirTy::I16 => TypeRepr::Scalar(ScalarTy::I16),
@@ -177,6 +185,12 @@ impl TypeCache {
             },
 
             MirTy::Never => TypeRepr::Zst,
+
+            // Always fat (handled above); kept for exhaustiveness.
+            MirTy::RawExistential { .. } => TypeRepr::Aggregate {
+                size: ptr_size * 2,
+                align: ptr_size,
+            },
 
             MirTy::Tuple(elems) => {
                 let elems = elems.clone();
@@ -286,19 +300,26 @@ impl TypeCache {
                 // construction (the body builds a slot and returns its `ptr`,
                 // which is not an integer scalar). See IoError (a newtype over a
                 // payload-carrying enum).
-                if let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module) {
+                // Only when the layout is the field's own: `@align` or
+                // `@layout(.Packed)` give the newtype a different size or
+                // alignment, so it stays in memory.
+                if let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module)
+                    && t.bytes() == size
+                    && t.bytes() == align
+                {
                     return TypeRepr::Scalar(t);
                 }
                 return TypeRepr::Aggregate { size, align };
             }
-            // Pure-discriminant enum: a small integer discriminant.
-            let scalar = match size {
-                1 => ScalarTy::I8,
-                2 => ScalarTy::I16,
-                3..=4 => ScalarTy::I32,
-                _ => ScalarTy::I64,
-            };
-            return TypeRepr::Scalar(scalar);
+            // Pure-discriminant enum: its discriminant, unless `@align`
+            // padded it.
+            if let Some(e) = module.enums.get(&key) {
+                let t = int_bits_to_scalar(e.discriminant_width);
+                if t.bytes() == size && t.bytes() == align {
+                    return TypeRepr::Scalar(t);
+                }
+            }
+            return TypeRepr::Aggregate { size, align };
         }
 
         TypeRepr::Aggregate { size, align }

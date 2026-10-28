@@ -114,6 +114,24 @@ fn scan_head(p: &Parser<'_>) -> (Option<K>, bool) {
     (p.kind_at(i), i != start)
 }
 
+/// Whether the head before the item keyword is attributes and nothing else.
+fn at_attributes_only_head(p: &Parser<'_>) -> bool {
+    let mut i = p.token_pos();
+    while p.kind_at(i) == Some(K::At) {
+        i += 1;
+        if p.kind_at(i) == Some(K::Identifier) {
+            i += 1;
+        }
+        if p.kind_at(i) == Some(K::LParen) {
+            match p.closer_of(i) {
+                Some(close) => i = close + 1,
+                None => return false,
+            }
+        }
+    }
+    matches!(p.kind_at(i), Some(K::Extend | K::Deinit))
+}
+
 /// The top-level item list.
 pub(super) fn item_list(p: &mut Parser<'_>) {
     while !p.at_eof() {
@@ -138,10 +156,16 @@ fn member_list(p: &mut Parser<'_>, ctx: Ctx, kind: K) {
 
 fn item_or_recover(p: &mut Parser<'_>, ctx: Ctx) {
     let (kw, has_head) = scan_head(p);
-    let headless = matches!(kw, Some(K::Module | K::Import | K::Extend | K::Deinit));
+    // `module`/`import` take no head at all; `extend`/`deinit` take
+    // attributes but no visibility or modifiers.
+    let headless = match kw {
+        Some(K::Module | K::Import) => has_head,
+        Some(K::Extend | K::Deinit) => has_head && !at_attributes_only_head(p),
+        _ => false,
+    };
     let ok = at_item_start(p)
         && kw.is_some_and(|k| ctx.allows(k))
-        && !(headless && has_head)
+        && !headless
         && !(kw == Some(K::Case) && has_head && !p.at(K::At));
     if ok {
         item(p, ctx, kw.unwrap_or(K::Error));
@@ -329,6 +353,7 @@ fn import_decl(p: &mut Parser<'_>) {
 /// `extend Ty (: conformances)? (where …)? { members }`
 fn extension_decl(p: &mut Parser<'_>) {
     let m = p.start();
+    attribute_list(p);
     p.bump(K::Extend);
     ty(p);
     opt_conformance_list(p);
@@ -422,6 +447,7 @@ fn init_decl(p: &mut Parser<'_>) {
 /// `deinit { body }`
 fn deinit_decl(p: &mut Parser<'_>) {
     let m = p.start();
+    attribute_list(p);
     p.bump(K::Deinit);
     if p.at(K::LBrace) {
         opt_block_body(p);
@@ -587,19 +613,9 @@ fn type_alias_decl(p: &mut Parser<'_>) {
     p.expect(K::Type);
     type_alias_target(p);
     opt_type_parameter_list(p);
-    if p.at(K::Colon) {
-        let b = p.start();
-        p.bump(K::Colon);
-        loop {
-            let item = p.start();
-            ty(p);
-            item.complete(p, K::ConformanceItem);
-            if !p.eat(K::Comma) {
-                break;
-            }
-        }
-        b.complete(p, K::ConformanceList);
-    }
+    // The shared list, so an associated type can relax an implicit bound
+    // (`type Target: not Sized`) like a type parameter or nominal can.
+    opt_conformance_list(p);
     opt_where_clause(p);
     if p.at(K::Equals) {
         p.bump(K::Equals);

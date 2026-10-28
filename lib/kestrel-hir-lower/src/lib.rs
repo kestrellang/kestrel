@@ -12,10 +12,13 @@
 
 mod ctx;
 mod desugar;
+mod existential;
 mod expr;
 pub mod format_spec;
 pub mod literal;
+mod optional_chain;
 pub(crate) mod pat;
+mod placeholder;
 pub mod source_map;
 mod stmt;
 pub(crate) mod string_token;
@@ -188,6 +191,7 @@ impl QueryFn for LowerBodyWithSourceMap {
             tail_expr,
             guard_stmts: lower.guard_stmts,
             while_conditions: lower.while_conditions,
+            pipes: lower.pipes,
         };
         Some(Arc::new(LoweredBody {
             body: Arc::new(body),

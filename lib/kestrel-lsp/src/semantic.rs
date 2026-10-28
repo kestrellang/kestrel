@@ -76,6 +76,7 @@ pub fn hir_expr_span(expr: &HirExpr) -> Span {
         HirExpr::TypeRef { span, .. } => span.clone(),
         HirExpr::OverloadSet { span, .. } => span.clone(),
         HirExpr::Borrow { span, .. } => span.clone(),
+        HirExpr::TakePayload { span, .. } => span.clone(),
         HirExpr::Field { span, .. } => span.clone(),
         HirExpr::TupleIndex { span, .. } => span.clone(),
         HirExpr::ImplicitMember { span, .. } => span.clone(),
@@ -139,6 +140,14 @@ fn collect_hir_ty_entities(ty: &HirTy, out: &mut Vec<(Entity, Span)>) {
             collect_hir_ty_entities(ret, out);
         },
         HirTy::Opaque { bounds, .. } => bounds.iter().for_each(|b| collect_hir_ty_entities(b, out)),
+        HirTy::RawExistential {
+            bounds, bindings, ..
+        } => {
+            bounds.iter().for_each(|b| collect_hir_ty_entities(b, out));
+            bindings
+                .iter()
+                .for_each(|b| collect_hir_ty_entities(&b.ty, out));
+        },
         HirTy::Ref { inner, .. } => collect_hir_ty_entities(inner, out),
         HirTy::Never(_) | HirTy::Infer(_) | HirTy::Error(_) => {},
     }
@@ -319,6 +328,7 @@ pub fn hir_pat_span(pat: &HirPat) -> Span {
         | HirPat::Array { span, .. }
         | HirPat::Or { span, .. }
         | HirPat::At { span, .. }
+        | HirPat::TypeTest { span, .. }
         | HirPat::Error { span } => span.clone(),
     }
 }

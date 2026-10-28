@@ -132,6 +132,43 @@ var total: Int64 = 0;
 [1, 2, 3, 4].iter().forEach { total = total + it };   // total == 10
 ```
 
+## Placeholders
+
+A `_` in a call's arguments builds a closure without writing one out.
+
+**Holes.** A bare `_` argument leaves that slot open. The call becomes a
+closure with one parameter per hole, left to right:
+
+```kestrel
+let addOne = add(_, 1);                  // { (a) in add(a, 1) }
+let between = clamp(_, min: 0, max: _);  // { (x, hi) in clamp(x, min: 0, max: hi) }
+let make = Point(x: _, y: _);            // { (x, y) in Point(x: x, y: y) }
+```
+
+**Argument placeholders.** A `_` inside a larger argument makes that
+*argument* a one-parameter closure. Every `_` in it is the same value:
+
+```kestrel
+let names = users.map(_.name);               // users.map { it.name }
+let adults = users.filter(where: _.age >= 18);
+let full = users.map(_.first + " " + _.last);
+let doubled = xs.map(_ + _);                 // { x in x + x }, one parameter
+let tags = users.map("\(_.name)!");          // interpolation passes through
+```
+
+Rules:
+
+- **Nearest wins.** A hole binds to the innermost call (`f(g(_))` is
+  `f({ p in g(p) })`); an argument placeholder binds to the innermost argument
+  (`xs.map(f(_.x))` is `xs.map(f({ p in p.x }))`).
+- **Closures are a boundary.** `_` doesn't reach into a closure literal:
+  `f({ _.x })` is an error (E811). Use `it` there.
+- **Everything else in the call runs on every call.** `log(_, timestamp())`
+  calls `timestamp()` each time the closure runs, not once.
+- **The parameter type comes from context**, as for `{ it.name }`. With no
+  expected function type (`let f = keep(_.name)`), it can't be inferred.
+- `_` outside a call's arguments (`let f = _.name`) is E811.
+
 ## Multi-Statement Closures
 
 Closures can contain multiple statements. The last expression is the result:

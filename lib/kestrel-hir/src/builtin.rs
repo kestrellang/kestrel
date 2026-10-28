@@ -227,6 +227,12 @@ pub enum Builtin {
     FromResidualProtocol,
     FromResidualMethod,
 
+    // ===== Optional chaining (`a?.b`) =====
+    OptionalChainProtocol,
+    OptionalChainBorrowMethod,
+    OptionalChainMutateMethod,
+    OptionalChainTakeMethod,
+
     // ===== Value promotion =====
     FromValueProtocol,
     FromValueMethod,
@@ -263,6 +269,15 @@ pub enum Builtin {
     FormattableProtocol,
     FormattableFormatIntoMethod,
 
+    // ===== Derivable protocols (`@derive`) =====
+    // With `FormattableProtocol`, the protocols `@derive` has a built-in
+    // deriver for. A protocol is derivable iff it is the target of one of
+    // these, never by its name.
+    EquatableProtocol,
+    HashableProtocol,
+    ComparableProtocol,
+    DefaultableProtocol,
+
     // ===== Exitable / @main return =====
     Exitable,
     ExitableReport,
@@ -272,6 +287,9 @@ pub enum Builtin {
     /// `Indirection` — opt-in transparent member access: `wrapper.foo` peels
     /// to `Target.foo` via `pointeeRef()`. Explicit conformance, non-marker.
     Indirection,
+    /// `MutableIndirection` — the wrapper also hands out `&mutating Target`.
+    /// A `mutating` requirement called through `any[B] P` needs it.
+    MutableIndirection,
 
     // ===== Shared-ownership box (implicit boxing) =====
     /// The generic struct the compiler instantiates for implicit boxing —
@@ -291,6 +309,26 @@ pub enum Builtin {
     /// payload, which double-frees the capture slots a one-shot body already
     /// moved out (docs/plans/closure-kinds/closure-kinds-plan.md D5).
     UniqueBox,
+
+    // ===== Existentials =====
+    /// The box `any P` desugars to: `any P` is `DefaultBox[<raw any P>]`.
+    /// `@builtin(.DefaultBoxType) public type DefaultBox[T] = RcBox[T]`
+    /// denotes the alias *target*, like the default literal types
+    /// (docs/plans/existentials/existentials-design.md).
+    DefaultBoxType,
+    /// A type whose size is known at compile time — every type except a raw
+    /// existential and a struct whose unsized tail is unsized. Structural,
+    /// like `Static`: never declared; every type parameter carries an
+    /// implicit `T: Sized`, relaxed with `where T: not Sized`.
+    Sized,
+    /// The contract a box type must meet to appear in `any[B] P`.
+    ExistentialBox,
+    /// A box that can give up its payload: consuming requirements and
+    /// `consuming x as? T` go through `consumePointee`.
+    ConsumingIndirection,
+    /// The stdlib's single-owner box (`OwnedBox`): the box diagnostics
+    /// suggest when an existential's payload must be consumed.
+    OwnedBox,
 }
 
 impl Builtin {
@@ -449,6 +487,12 @@ impl Builtin {
             Self::FromResidualProtocol => "FromResidualProtocol",
             Self::FromResidualMethod => "FromResidualMethod",
 
+            // Optional chaining
+            Self::OptionalChainProtocol => "OptionalChain",
+            Self::OptionalChainBorrowMethod => "OptionalChainBorrowMethod",
+            Self::OptionalChainMutateMethod => "OptionalChainMutateMethod",
+            Self::OptionalChainTakeMethod => "OptionalChainTakeMethod",
+
             // Value promotion
             Self::FromValueProtocol => "FromValue",
             Self::FromValueMethod => "FromValueMethod",
@@ -489,6 +533,12 @@ impl Builtin {
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
 
+            // Derivable protocols
+            Self::EquatableProtocol => "EquatableProtocol",
+            Self::HashableProtocol => "HashableProtocol",
+            Self::ComparableProtocol => "ComparableProtocol",
+            Self::DefaultableProtocol => "DefaultableProtocol",
+
             // Exitable — `Exitable`/`ExitCode` resolve by source name; the method
             // by its `@builtin` attribute name.
             Self::Exitable => "Exitable",
@@ -497,6 +547,7 @@ impl Builtin {
 
             // Indirection — resolves by source name (auto-imported from std.core).
             Self::Indirection => "Indirection",
+            Self::MutableIndirection => "MutableIndirection",
 
             // Shared box — a display name only, deliberately neither the
             // conformer's name (`RcBox`) nor the protocol's (`SharedBox`):
@@ -510,6 +561,14 @@ impl Builtin {
             // must go through the attribute index so the binding stays
             // swappable, and the sentinel must not name any source type.
             Self::UniqueBox => "UniqueBoxBinding",
+
+            // Default existential box — resolved through the index only, like
+            // the boxes above.
+            Self::DefaultBoxType => "DefaultBoxBinding",
+            Self::Sized => "Sized",
+            Self::ExistentialBox => "ExistentialBox",
+            Self::ConsumingIndirection => "ConsumingIndirection",
+            Self::OwnedBox => "OwnedBox",
         }
     }
 
@@ -674,6 +733,12 @@ impl Builtin {
             "FromResidualProtocol" => Some(Self::FromResidualProtocol),
             "FromResidualMethod" => Some(Self::FromResidualMethod),
 
+            // Optional chaining
+            "OptionalChainProtocol" => Some(Self::OptionalChainProtocol),
+            "OptionalChainBorrowMethod" => Some(Self::OptionalChainBorrowMethod),
+            "OptionalChainMutateMethod" => Some(Self::OptionalChainMutateMethod),
+            "OptionalChainTakeMethod" => Some(Self::OptionalChainTakeMethod),
+
             // Value promotion
             "FromValueProtocol" => Some(Self::FromValueProtocol),
             "FromValueMethod" => Some(Self::FromValueMethod),
@@ -714,6 +779,12 @@ impl Builtin {
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
 
+            // Derivable protocols
+            "EquatableProtocol" => Some(Self::EquatableProtocol),
+            "HashableProtocol" => Some(Self::HashableProtocol),
+            "ComparableProtocol" => Some(Self::ComparableProtocol),
+            "DefaultableProtocol" => Some(Self::DefaultableProtocol),
+
             // Exitable / @main return
             "Exitable" => Some(Self::Exitable),
             "ExitableReport" => Some(Self::ExitableReport),
@@ -721,12 +792,20 @@ impl Builtin {
 
             // Indirection / smart-pointer member peel
             "Indirection" => Some(Self::Indirection),
+            "MutableIndirection" => Some(Self::MutableIndirection),
 
             // Shared-ownership box (implicit boxing)
             "SharedBox" => Some(Self::SharedBox),
 
             // Unique-ownership box (one-shot closure environments)
             "UniqueBox" => Some(Self::UniqueBox),
+
+            // Existentials
+            "DefaultBoxType" => Some(Self::DefaultBoxType),
+            "Sized" => Some(Self::Sized),
+            "ExistentialBox" => Some(Self::ExistentialBox),
+            "ConsumingIndirection" => Some(Self::ConsumingIndirection),
+            "OwnedBox" => Some(Self::OwnedBox),
 
             _ => None,
         }
@@ -749,6 +828,7 @@ impl Builtin {
                 | Self::DefaultNullLiteralType
                 | Self::DefaultArrayLiteralType
                 | Self::DefaultDictionaryLiteralType
+                | Self::DefaultBoxType
         )
     }
 
@@ -806,7 +886,8 @@ impl Builtin {
             | Self::DefaultCharLiteralType
             | Self::DefaultNullLiteralType
             | Self::DefaultArrayLiteralType
-            | Self::DefaultDictionaryLiteralType => BuiltinKind::TypeAlias,
+            | Self::DefaultDictionaryLiteralType
+            | Self::DefaultBoxType => BuiltinKind::TypeAlias,
 
             // FFI
             Self::FFISafe => BuiltinKind::Protocol {
@@ -905,6 +986,12 @@ impl Builtin {
             Self::TryableProtocol | Self::FromResidualProtocol => BuiltinKind::protocol(),
             Self::TryExtractMethod | Self::FromResidualMethod => BuiltinKind::ProtocolMethod,
 
+            // Optional chaining
+            Self::OptionalChainProtocol => BuiltinKind::protocol(),
+            Self::OptionalChainBorrowMethod
+            | Self::OptionalChainMutateMethod
+            | Self::OptionalChainTakeMethod => BuiltinKind::ProtocolMethod,
+
             // Value promotion
             Self::FromValueProtocol => BuiltinKind::protocol(),
             Self::FromValueMethod => BuiltinKind::ProtocolMethod,
@@ -934,6 +1021,10 @@ impl Builtin {
             | Self::DefaultStringInterpolationBuild => BuiltinKind::Function,
             Self::FormattableProtocol => BuiltinKind::protocol(),
             Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
+            Self::EquatableProtocol
+            | Self::HashableProtocol
+            | Self::ComparableProtocol
+            | Self::DefaultableProtocol => BuiltinKind::protocol(),
 
             // Exitable: non-marker protocol with a required `report()` method.
             Self::Exitable => BuiltinKind::protocol(),
@@ -942,7 +1033,16 @@ impl Builtin {
 
             // Indirection: non-marker protocol with a required `pointeeRef()`
             // method; explicit conformance (NOT implicit, unlike Copyable).
-            Self::Indirection => BuiltinKind::protocol(),
+            Self::Indirection | Self::MutableIndirection => BuiltinKind::protocol(),
+            // Structural like `Static`: computed, never declared.
+            Self::Sized => BuiltinKind::Protocol {
+                implicit_conformance: true,
+                must_be_marker: true,
+                tuple_conformance_propagation: false,
+                requires_fields_conform: false,
+                disallow_enum_conformance: false,
+            },
+            Self::ExistentialBox | Self::ConsumingIndirection => BuiltinKind::protocol(),
 
             // Shared box: the annotated symbol is the generic *struct* the
             // compiler instantiates (`RcBox`), not the `SharedBox` protocol
@@ -952,6 +1052,7 @@ impl Builtin {
             // Unique box: the annotated symbol is the generic *struct* the
             // compiler instantiates (`UniqueBox`).
             Self::UniqueBox => BuiltinKind::Struct,
+            Self::OwnedBox => BuiltinKind::Struct,
 
             // Well-known types — `Bool` resolves by name first, but carries
             // `@builtin(.Bool)` as the attribute anchor so strategy 2 works too.

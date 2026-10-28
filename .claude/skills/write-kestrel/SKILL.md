@@ -418,6 +418,25 @@ extend Circle: Hashable { func hash() -> Int64 { 0 } }  // via extension
 extend Drawable { func redraw() { self.draw(); } }       // default impl
 ```
 
+### Existentials (`any P`)
+
+```kestrel
+let shapes: Array[any Shape] = [Circle(r: 1), Square(side: 2)];  // boxed automatically
+let owned: any[OwnedBox] Shape = Circle(r: 3);   // explicit box
+let both: any Shape and Printable = Circle(r: 1); // composition
+func sum(xs: any Iterator[Item = Int64]) -> Int64 { … } // pinned associated type
+
+if let .Some(c) = s as? Circle { … }             // as? borrows: Optional[&Circle]
+match consuming o as? Circle { .Ok(c) => …, .Err(back) => … }  // needs any[OwnedBox]
+if s is Circle { … }                              // typed like `true`
+match s { c is Circle => c.r, is Rect { w, .. } => w, _ => 0 }
+```
+
+- A bare protocol is **not** a type: `let s: Shape` is E144 — write `any Shape` or `some Shape`.
+- **The box is part of the type.** `any P` is `RcBox` (copies *share* the payload — a `mutating` call is visible through every copy); `any[CowBox] P` forks on write (needs `P: Cloneable`); `any[OwnedBox] P` is single-owner and the only one that allows `consuming` requirements and `consuming as?`. `any P` and `any[OwnedBox] P` don't convert into each other.
+- Not callable through `any P`: static/init requirements, generic ones, ones using `Self` as a parameter/return (`==`), ones mentioning an unpinned associated type.
+- An `is` match is never exhaustive — always add `_`. An `is` binding borrows (`var c is T` is E153).
+
 ## Generics
 
 ```kestrel
@@ -576,3 +595,4 @@ struct Connection: not Copyable { deinit { self.close(); } }         // RAII
 - Calling a closure held in a **field** from outside the type needs parens — `(h.action)()`; inside the type `self.predicate(x)` works directly.
 - `F.Type` metatype syntax is not yet supported.
 - `!` is the Never type, not `Never`.
+- `!` on a value is **bitwise** not; logical negation is `not` (`if not done { … }`, `if not (a or b)`). `Bool` has no `!`.

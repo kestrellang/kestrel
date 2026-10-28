@@ -117,6 +117,28 @@ Two side-channels carry the results downstream:
   this is the single source of truth for the difference, never re-derived
   downstream.
 
+## Existentials
+
+`any P` / `any[B] P` reach inference as an ordinary box type over
+`TyKind::RawExistential { bounds, bindings }` (`existential.rs`):
+
+- **Conversions** (`try_convert`, called from `solve_coerce` at the check
+  leaf): Box (sized `T: P`), Unsize (`B[T]`), Upcast (same box, narrower
+  bounds). Recorded per expression in `TypedBody::existential_conversions`
+  for MIR; a different box is E147.
+- **Member lookup** peels the box eagerly for a requirement of `P`
+  (`peel_for_member`, E145 / E148), before the box's own members; extension
+  methods and operator / `for-in` members go through self-conformance
+  (`existential_supply` in `entail_layer.rs`, E146).
+- **Type tests.** An `is T` pattern types its sub-pattern at `T` and its
+  binding at `&T`, and records the scrutinee's type in
+  `TypedBody::type_tests`; the `type_test` analyzer checks it (E149, E152).
+  `x is T`, `x as? T` and `consuming x as? T` are hir-lower desugarings onto
+  the pattern, so they need no inference rules of their own beyond
+  `HirExpr::TakePayload` (its result is the target type).
+  `conformance::type_test_blocker` is the one "can this target ever match"
+  check, shared by the analyzer and MIR.
+
 ## Module Map
 
 | File | Responsibility |

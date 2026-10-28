@@ -142,6 +142,11 @@ pub fn resolve_where_clauses(
     // Static` (or when its owner is itself `not Static`).
     inject_implicit_static_bounds(ctx, entity, root, &mut result);
 
+    // And the implicit `T: Sized` (existentials design §2): generic code may
+    // hold its params by value, so a param accepts an unsized argument (a
+    // raw existential) only when relaxed with `where T: not Sized`.
+    inject_implicit_sized_bounds(ctx, entity, root, &mut result);
+
     result
 }
 
@@ -424,6 +429,55 @@ fn inject_implicit_static_bounds(
             result.push(WhereClause::Bound {
                 subject: WhereSubject::Param(param),
                 protocol: static_proto,
+                protocol_type_args: Vec::new(),
+            });
+        }
+    }
+}
+
+/// The implicit `T: Sized` bound — the twin of `inject_implicit_static_bounds`
+/// (same exclusions: extensions have no callers passing type args, and
+/// intrinsics such as `lang.ptr[T]` must accept an unsized pointee). Params
+/// relaxed with `where T: not Sized` get nothing.
+fn inject_implicit_sized_bounds(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    root: Entity,
+    result: &mut Vec<WhereClause>,
+) {
+    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Extension) {
+        return;
+    }
+    if ctx.get::<Intrinsic>(entity).is_some() {
+        return;
+    }
+    let Some(type_params) = ctx.get::<TypeParams>(entity) else {
+        return;
+    };
+    let Some(sized) = ctx.query(ResolveBuiltin {
+        builtin: Builtin::Sized,
+        root,
+    }) else {
+        return;
+    };
+    for &param in &type_params.0 {
+        let requirement = ctx.query(kestrel_semantics::TypeParamSizeRequirement {
+            param,
+            context: entity,
+            root,
+        });
+        if requirement == kestrel_semantics::SizeRequirement::MayBeUnsized {
+            continue;
+        }
+        let already_bound = result.iter().any(|wc| {
+            matches!(wc,
+                WhereClause::Bound { subject: WhereSubject::Param(p), protocol: pr, .. }
+                if *p == param && *pr == sized)
+        });
+        if !already_bound {
+            result.push(WhereClause::Bound {
+                subject: WhereSubject::Param(param),
+                protocol: sized,
                 protocol_type_args: Vec::new(),
             });
         }

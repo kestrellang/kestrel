@@ -673,7 +673,7 @@ fn collect_bound_locals_expr(
     }
 }
 
-fn collect_pat_bindings(
+pub(crate) fn collect_pat_bindings(
     hir: &kestrel_hir::body::HirBody,
     pat_id: HirPatId,
     out: &mut HashSet<LocalId>,
@@ -689,6 +689,10 @@ fn collect_pat_bindings(
         } => {
             out.insert(*binding);
             collect_pat_bindings(hir, *subpattern, out);
+        },
+        HirPat::TypeTest { binding, sub, .. } => {
+            out.extend(*binding);
+            collect_pat_bindings(hir, *sub, out);
         },
         HirPat::Tuple { prefix, suffix, .. } => {
             for &p in prefix.iter().chain(suffix) {

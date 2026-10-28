@@ -26,7 +26,9 @@ pub fn link_executable(
     for (i, c_src) in options.c_sources.iter().enumerate() {
         let link_id = LINK_COUNTER.fetch_add(1, Ordering::Relaxed);
         let c_obj = tmp_dir.join(format!(
-            "kestrel_c{}_{}_{}.o",
+            // `llvm` keeps the name apart from the Cranelift backend's,
+            // which counts with its own counter in the same process.
+            "kestrel_llvm_c{}_{}_{}.o",
             std::process::id(),
             link_id,
             i

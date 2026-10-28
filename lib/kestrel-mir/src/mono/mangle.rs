@@ -142,6 +142,17 @@ fn mangle_ident(name: &str, out: &mut String) {
 
 // -- Type encoding --
 
+/// A type's mangled form on its own, for symbol suffixes (table names).
+pub fn mangle_type_suffix(
+    arena: &TyArena,
+    entity_names: &IndexMap<Entity, String>,
+    ty: TyId,
+) -> String {
+    let mut out = String::new();
+    mangle_type(arena, entity_names, ty, &mut out);
+    out
+}
+
 fn mangle_type(
     arena: &TyArena,
     entity_names: &IndexMap<Entity, String>,
@@ -178,6 +189,34 @@ fn mangle_type(
             let inner = *inner;
             out.push('P');
             mangle_type(arena, entity_names, inner, out);
+        },
+
+        // `Z` + each bound (path + args) + `B` + each pinned associated
+        // type (path + type) + `E`.
+        MirTy::RawExistential { bounds, bindings } => {
+            let bounds = bounds.clone();
+            let bindings = bindings.clone();
+            out.push('Z');
+            for (protocol, args) in &bounds {
+                let name = entity_names
+                    .get(protocol)
+                    .map_or("<unknown>", |s| s.as_str());
+                mangle_path(name, out);
+                if !args.is_empty() {
+                    out.push('I');
+                    for &arg in args {
+                        mangle_type(arena, entity_names, arg, out);
+                    }
+                    out.push('E');
+                }
+            }
+            out.push('B');
+            for (assoc, ty) in &bindings {
+                let name = entity_names.get(assoc).map_or("<unknown>", |s| s.as_str());
+                mangle_path(name, out);
+                mangle_type(arena, entity_names, *ty, out);
+            }
+            out.push('E');
         },
 
         // `R`/`Rm` must stay distinct from both `P` (Pointer) and the bare

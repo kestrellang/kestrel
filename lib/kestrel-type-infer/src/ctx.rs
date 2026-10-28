@@ -6,6 +6,7 @@
 use crate::collections::{HashMap, HashSet};
 
 use kestrel_hecs::{Entity, QueryContext};
+use kestrel_hir::Builtin;
 use kestrel_hir::body::HirExprId;
 use kestrel_hir::res::LocalId;
 use kestrel_span::Span;
@@ -157,6 +158,16 @@ pub struct InferCtx<'a> {
     /// whose type only the target can give (`none()`) still unifies.
     pub(crate) synth_pending_exprs: HashSet<HirExprId>,
     pub(crate) synth_gate: bool,
+    /// Tail leaves of optional-chain arms. Their pending coerce waits for
+    /// the leaf's own type even after `synth_gate` drops: unifying first
+    /// would assume flattening, a silent miscompile when the tail is not an
+    /// `Optional` (optional-chaining design, Q4).
+    pub(crate) optional_chain_leaves: HashSet<HirExprId>,
+
+    /// Each `?.` bind's mode, decided after solving
+    /// (`optional_chain::decide_chain_modes`). Surfaced on
+    /// `TypedBody.chain_modes`.
+    pub(crate) chain_modes: HashMap<HirExprId, crate::result::ChainMode>,
 
     /// Nesting depth of string-interpolation desugarings being generated;
     /// their accumulator calls are exempt from the known-receiver rule.
@@ -306,6 +317,16 @@ pub struct InferCtx<'a> {
     pub(crate) kind_coercions:
         HashMap<HirExprId, (kestrel_ast::FnTypeKind, kestrel_ast::FnTypeKind)>,
 
+    /// Existential conversions accepted at check leaves (`T → any P`,
+    /// `B[T] → any[B] P`, `any Q → any P`), keyed by the converted
+    /// expression. Surfaced on `TypedBody.existential_conversions`; the
+    /// single source MIR lowering reads them from (existentials design §4).
+    pub(crate) existential_conversions: HashMap<HirExprId, crate::existential::PendingConversion>,
+
+    /// `is T` patterns, keyed by pattern, with the scrutinee's TyVar there.
+    /// Surfaced on `TypedBody.type_tests`.
+    pub(crate) type_tests: HashMap<kestrel_hir::body::HirPatId, TyVar>,
+
     /// HirExprIds of closure-*literal* expressions, recorded during constraint
     /// generation. `solve_call` uses this to gate the no-annotation `MutBorrow`
     /// convention upgrade to literals only — a named function value's
@@ -437,6 +458,8 @@ impl<'a> InferCtx<'a> {
             direct_callee_exprs: HashSet::default(),
             binding_init_exprs: HashSet::default(),
             synth_pending_exprs: HashSet::default(),
+            optional_chain_leaves: HashSet::default(),
+            chain_modes: HashMap::default(),
             synth_gate: true,
             interpolation_depth: 0,
             solving_depth: 0,
@@ -467,6 +490,8 @@ impl<'a> InferCtx<'a> {
             closure_it: HashSet::default(),
             kind_flex: HashSet::default(),
             kind_coercions: HashMap::default(),
+            existential_conversions: HashMap::default(),
+            type_tests: HashMap::default(),
             closure_literal_exprs: HashSet::default(),
             never_fallback_targets: HashSet::default(),
             expectation: None,
@@ -584,6 +609,20 @@ impl<'a> InferCtx<'a> {
         let idx = self.types.len() as u32;
         self.types
             .push(TySlot::Resolved(TyKind::Protocol { entity, args }));
+        TyVar(idx)
+    }
+
+    /// Allocate a TyVar bound to a raw existential (`any`'s box payload).
+    pub fn raw_existential_ty(
+        &mut self,
+        bounds: Vec<(Entity, Vec<TyVar>)>,
+        bindings: Vec<(Entity, TyVar)>,
+    ) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types.push(TySlot::Resolved(TyKind::RawExistential {
+            bounds,
+            bindings,
+        }));
         TyVar(idx)
     }
 
@@ -893,6 +932,7 @@ impl<'a> InferCtx<'a> {
     /// state *before* any cascade-suppression poisoning rewrites the
     /// referenced TyVars to `TyKind::Error`.
     pub fn report_error(&mut self, err: InferError) -> TyVar {
+        let err = self.reword_conformance(err);
         let detail = crate::result::describe_error(self, &err);
         kestrel_debug::ktrace!(
             "infer-err",
@@ -911,6 +951,20 @@ impl<'a> InferCtx<'a> {
         let idx = self.types.len() as u32;
         self.types.push(TySlot::Resolved(TyKind::Error));
         TyVar(idx)
+    }
+
+    /// A failed conformance to a protocol that backs an operator, in the
+    /// operator's words.
+    fn reword_conformance(&self, err: InferError) -> InferError {
+        match err {
+            InferError::DoesNotConform {
+                ty, protocol, span, ..
+            } if self.resolver.builtin(Builtin::OptionalChainProtocol) == Some(protocol) =>
+            {
+                InferError::OptionalChainNotConforming { ty, span }
+            },
+            other => other,
+        }
     }
 
     /// Record the instantiated type args for a call/ref expression along

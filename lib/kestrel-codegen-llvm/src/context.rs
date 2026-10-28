@@ -18,6 +18,7 @@ use inkwell::values::{FunctionValue, GlobalValue};
 
 use kestrel_codegen::TargetConfig;
 use kestrel_hecs::Entity;
+use kestrel_mir::item::function::InlineMode;
 use kestrel_mir::mono::{MonoFunction, MonoModule};
 use kestrel_mir::{FloatBits, ImmediateKind, IntBits};
 
@@ -42,6 +43,8 @@ pub struct CodegenCtx<'ctx> {
     pub func_ids: Vec<Option<FunctionValue<'ctx>>>,
     pub string_data: HashMap<String, GlobalValue<'ctx>>,
     pub static_data: HashMap<Entity, GlobalValue<'ctx>>,
+    /// Existential function tables, indexed like `MonoModule::vtables`.
+    pub vtable_data: Vec<GlobalValue<'ctx>>,
     pub ir_outputs: Vec<(String, String)>,
 }
 
@@ -99,6 +102,7 @@ impl<'ctx> CodegenCtx<'ctx> {
             func_ids: vec![None; module.functions.len()],
             string_data: HashMap::new(),
             static_data: HashMap::new(),
+            vtable_data: Vec::new(),
             ir_outputs: Vec::new(),
         })
     }
@@ -106,6 +110,7 @@ impl<'ctx> CodegenCtx<'ctx> {
     pub fn compile_all(&mut self) -> Result<(), CodegenError> {
         self.define_all_statics()?;
         self.declare_all_functions()?;
+        self.define_all_vtables();
         self.define_all_functions()?;
         Ok(())
     }
@@ -177,6 +182,50 @@ impl<'ctx> CodegenCtx<'ctx> {
     }
 
     // -- Statics --
+
+    /// Each `MonoVTable` as a constant `[N x ptr]` (`kestrel_mir::item::vtable`
+    /// has the layout; integer words are `inttoptr` constants). All are
+    /// declared before any is initialized: tables point at one another.
+    fn define_all_vtables(&mut self) {
+        let ptr_ty = self.cx.ptr_type(inkwell::AddressSpace::default());
+        for table in &self.module.vtables {
+            let ty = ptr_ty.array_type(table.entries.len().max(1) as u32);
+            let global = self.llmod.add_global(ty, None, &table.name);
+            global.set_constant(true);
+            global.set_linkage(Linkage::Internal);
+            self.vtable_data.push(global);
+        }
+        for (i, table) in self.module.vtables.iter().enumerate() {
+            let int = |v: u64| {
+                crate::mem::ptr_int_type(self.cx, self.ptr_size)
+                    .const_int(v, false)
+                    .const_to_pointer(ptr_ty)
+            };
+            let mut words: Vec<inkwell::values::PointerValue<'ctx>> = table
+                .entries
+                .iter()
+                .map(|entry| match entry {
+                    kestrel_mir::mono::MonoVTableEntry::Func(f) => self.func_ids[f.index()]
+                        .map(|fv| fv.as_global_value().as_pointer_value())
+                        .unwrap_or_else(|| ptr_ty.const_null()),
+                    kestrel_mir::mono::MonoVTableEntry::Size(ty) => {
+                        int(self.tc.repr(*ty, &self.module.ty_arena, self.module).size())
+                    },
+                    kestrel_mir::mono::MonoVTableEntry::Align(ty) => {
+                        int(self.tc.repr(*ty, &self.module.ty_arena, self.module).align())
+                    },
+                    kestrel_mir::mono::MonoVTableEntry::Table(t) => {
+                        self.vtable_data[t.index()].as_pointer_value()
+                    },
+                    kestrel_mir::mono::MonoVTableEntry::Null => ptr_ty.const_null(),
+                })
+                .collect();
+            if words.is_empty() {
+                words.push(ptr_ty.const_null());
+            }
+            self.vtable_data[i].set_initializer(&ptr_ty.const_array(&words));
+        }
+    }
 
     fn define_all_statics(&mut self) -> Result<(), CodegenError> {
         let keys: Vec<_> = self.module.statics.keys().copied().collect();
@@ -303,7 +352,23 @@ impl<'ctx> CodegenCtx<'ctx> {
             (sig, Linkage::Internal, format!("{}.mono{}", func.name, idx))
         };
 
-        Ok(self.llmod.add_function(&name, fn_type, Some(linkage)))
+        let fn_value = self.llmod.add_function(&name, fn_type, Some(linkage));
+        if let Some(mode) = func.inline {
+            self.add_inline_attribute(fn_value, mode);
+        }
+        Ok(fn_value)
+    }
+
+    /// `@inline` → `inlinehint` / `alwaysinline` / `noinline`.
+    fn add_inline_attribute(&self, fn_value: FunctionValue<'ctx>, mode: InlineMode) {
+        let name = match mode {
+            InlineMode::Hint => "inlinehint",
+            InlineMode::Always => "alwaysinline",
+            InlineMode::Never => "noinline",
+        };
+        let kind = inkwell::attributes::Attribute::get_named_enum_kind_id(name);
+        let attr = self.cx.create_enum_attribute(kind, 0);
+        fn_value.add_attribute(inkwell::attributes::AttributeLoc::Function, attr);
     }
 
     fn define_all_functions(&mut self) -> Result<(), CodegenError> {

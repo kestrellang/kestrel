@@ -8,11 +8,13 @@ use kestrel_ast_builder::{Callable, InitEffect, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
+use kestrel_hir::res::LocalId;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_span::Span;
 
+use crate::collections::{HashMap, HashSet};
 use crate::constraint::{CallArg, Constraint, Reason, labels_match};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
@@ -151,9 +153,21 @@ fn check_leaf(
 /// Record a leaf whose type its own call/method/operator constraint will
 /// produce (see `InferCtx::synth_pending_exprs`).
 fn mark_synth_pending(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, tv: TyVar) {
+    // A field or tuple index is typed by its member resolution, so it waits
+    // too: `let x: Int64? = s.count` must not unify `count` with the target.
+    // Sugar is transparent: `a?.n += 1` checks `Sugar(CompoundAssign,
+    // addAssign(…))`, whose type is the protocol call's.
+    let mut leaf = id;
+    while let HirExpr::Sugar { inner, .. } = hir.exprs[leaf] {
+        leaf = inner;
+    }
     let computed = matches!(
-        hir.exprs[id],
-        HirExpr::Call { .. } | HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. }
+        hir.exprs[leaf],
+        HirExpr::Call { .. }
+            | HirExpr::MethodCall { .. }
+            | HirExpr::ProtocolCall { .. }
+            | HirExpr::Field { .. }
+            | HirExpr::TupleIndex { .. }
     );
     if computed
         && matches!(
@@ -347,8 +361,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Struct construction: Def(struct) used as callee. Free-standing
             // type aliases are already dereferenced by name resolution, so
             // `type C = Counter; C(42)` reaches here with Def(Counter).
+            // An enum's initializers (`Mode()`, from a derived `Defaultable`
+            // or written by hand) resolve the same way, minus memberwise.
             if let HirExpr::Def(entity, explicit_type_args, _) = &hir.exprs[*callee]
-                && ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Struct)
+                && matches!(
+                    ctx.query_ctx.get::<NodeKind>(*entity),
+                    Some(NodeKind::Struct | NodeKind::Enum)
+                )
             {
                 let arg_tvs = gen_call_args(ctx, hir, args);
                 return gen_struct_init(ctx, *entity, explicit_type_args, &arg_tvs, id, span);
@@ -808,6 +827,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // rather than from a deferred ImplicitPat.
             settle_scrutinee(ctx, scrut_tv);
             let result_tv = ctx.fresh();
+            // An optional-chain bind is always checked against `Optional[α]`
+            // (wrap-or-flatten at the tail leaf); an outer expectation pins α.
+            let had_expect = expect.is_some();
+            let expect = match source {
+                MatchSource::OptionalChain => optional_chain_expectation(ctx, expect, span),
+                _ => expect,
+            };
 
             // Empty match has no arms to pin the result type. An analyzer
             // reports the `empty match` diagnostic — poison the result so a
@@ -840,10 +866,18 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // ref return at the tail of a `-> &T` function containing a
                 // `guard let`. The remaining sources have synthetic arm
                 // values (unit/Never/ControlFlow).
-                if matches!(*source, MatchSource::UserMatch | MatchSource::IfLet) {
+                if matches!(
+                    *source,
+                    MatchSource::UserMatch | MatchSource::IfLet | MatchSource::OptionalChain
+                ) {
                     mark_arm_value(ctx, hir, arm.body);
                 }
                 if let Some((expected, reason)) = expect.clone() {
+                    if *source == MatchSource::OptionalChain {
+                        // Wrap vs flatten is decided by the tail's own
+                        // type: never by unifying it early (Q4).
+                        ctx.optional_chain_leaves.insert(arm.body);
+                    }
                     check_leaf(ctx, hir, arm.body, expected, reason);
                     continue;
                 }
@@ -860,7 +894,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             }
             if let Some((expected, _)) = expect.filter(|_| !arms.is_empty()) {
                 ctx.equal(result_tv, expected, span.clone());
-                ctx.expectation_pushed = true;
+                // Only an expectation the caller pushed was consumed here.
+                ctx.expectation_pushed |= had_expect;
             }
             result_tv
         },
@@ -1112,6 +1147,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         HirExpr::Error { span } => ctx.report_error(InferError::FromHir { span: span.clone() }),
 
+        // `consuming x as? T`'s hit arm: the box is consumed and its payload,
+        // a `T`, comes out (the analyzer checks the box can give it up).
+        HirExpr::TakePayload { expr, target, .. } => {
+            gen_expr(ctx, hir, *expr);
+            lower_hir_ty(ctx, target)
+        },
+
         // Sugar wrapper: kind-aware primary-constraint emission for cascade
         // suppression. The relevant inner ProtocolCall expr_id is recorded in
         // `poison_protocol_call_recv_on_failure` BEFORE recursing, so when
@@ -1123,6 +1165,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // its desugared accumulator calls are not user receivers.
             let interp = matches!(kind, kestrel_hir::body::SugarKind::StringInterpolation);
             ctx.interpolation_depth += interp as u32;
+            // A placeholder closure (`map(_.name)`) is the closure literal it
+            // stands for: the expected function type types its parameter.
+            if matches!(kind, kestrel_hir::body::SugarKind::Placeholder) {
+                ctx.expectation = expect;
+            }
             let result_tv = gen_expr(ctx, hir, *inner);
             ctx.interpolation_depth -= interp as u32;
 
@@ -1206,6 +1253,29 @@ fn mark_sugar_primary(
                 return;
             };
             ctx.poison_protocol_call_recv_on_failure.insert(*scrutinee);
+        },
+        // No protocol call to poison: the type-test match carries the errors.
+        SugarKind::TypeTest | SugarKind::Cast | SugarKind::ConsumingCast => {},
+        // Plain calls and closures: their own constraints report errors.
+        SugarKind::Pipe | SugarKind::Placeholder => {},
+        SugarKind::OptionalChain => {
+            // inner is `Match { scrutinee: chainBorrow/chainTake pcall, source: OptionalChain }`,
+            // later binds nested in the `.Some` arm. Poison every bind's call so a
+            // non-conforming base reports E157 once instead of cascading.
+            let mut cur = inner;
+            while let HirExpr::Match {
+                scrutinee,
+                arms,
+                source: kestrel_hir::body::MatchSource::OptionalChain,
+                ..
+            } = &hir.exprs[cur]
+            {
+                ctx.poison_protocol_call_recv_on_failure.insert(*scrutinee);
+                let Some(some_arm) = arms.first() else {
+                    break;
+                };
+                cur = some_arm.body;
+            }
         },
         SugarKind::CompoundAssign => {
             // inner is the addAssign ProtocolCall (or HirExpr::Error if the
@@ -1429,9 +1499,36 @@ fn gen_pat(
             gen_struct_pat(ctx, hir, *entity, fields, scrutinee_tv, span, source);
         },
 
-        HirPat::Or { alternatives, .. } => {
+        HirPat::Or { alternatives, span } => {
+            // hir-lower makes every alternative reuse the first one's local
+            // per name, so a later alternative's binding would overwrite the
+            // local's type. Require it to agree with the first instead;
+            // otherwise `.A(v) or .B(v)` silently reads one payload as the
+            // other's type.
+            let mut first_types: HashMap<LocalId, TyVar> = HashMap::default();
             for &alt in alternatives {
                 gen_pat(ctx, hir, alt, scrutinee_tv, source);
+                let mut bound = HashSet::default();
+                crate::captures::collect_pat_bindings(hir, alt, &mut bound);
+                for local in bound {
+                    let Some(&tv) = ctx.local_types.get(&local) else {
+                        continue;
+                    };
+                    let Some(&first) = first_types.get(&local) else {
+                        first_types.insert(local, tv);
+                        continue;
+                    };
+                    if first == tv {
+                        continue;
+                    }
+                    let decl = &hir.locals[local];
+                    let reason = Reason::OrPatternBinding {
+                        name: decl.name.clone(),
+                        first: decl.span.clone(),
+                    };
+                    ctx.equal_because(first, tv, span.clone(), reason);
+                    ctx.local_types.insert(local, first);
+                }
             }
         },
 
@@ -1449,6 +1546,24 @@ fn gen_pat(
             // Bind the whole matched value to the local, then constrain via subpattern
             ctx.local_types.insert(*binding, scrutinee_tv);
             gen_pat(ctx, hir, *subpattern, scrutinee_tv, source);
+        },
+
+        // `[c] is T [{ .. }]`: the payload is a `T`, matched in place; `c`
+        // borrows it. Whether the scrutinee is an existential at all is the
+        // analyzer's call (E152), from `type_tests`.
+        HirPat::TypeTest {
+            binding,
+            target,
+            sub,
+            ..
+        } => {
+            ctx.type_tests.insert(pat_id, scrutinee_tv);
+            let payload = lower_hir_ty(ctx, target);
+            if let Some(local) = binding {
+                let view = ctx.ref_ty(payload, false);
+                ctx.local_types.insert(*local, view);
+            }
+            gen_pat(ctx, hir, *sub, payload, source);
         },
 
         HirPat::Array {
@@ -1585,6 +1700,20 @@ fn gen_struct_init(
         }
     }
 
+    // A derived `Defaultable` adds `init()`, but deriving must not take the
+    // memberwise init away: with no hand-written init, the derived ones are
+    // only candidates for a call they match (`Point()`).
+    let is_derived = |init: &Entity| {
+        qctx.parent_of(*init)
+            .is_some_and(|ext| qctx.has::<kestrel_ast_builder::DerivedFrom>(ext))
+    };
+    if inits.iter().all(is_derived) {
+        inits.retain(|&init| {
+            qctx.get::<Callable>(init)
+                .is_some_and(|c| labels_match(&c.params, &arg_labels))
+        });
+    }
+
     // Track the matched init entity for effect wrapping
     let mut matched_init: Option<Entity> = None;
 
@@ -1678,6 +1807,16 @@ fn gen_struct_init(
             ctx.expr_types.insert(expr_id, result_tv);
             return result_tv;
         }
+    } else if qctx.get::<NodeKind>(struct_entity) == Some(&NodeKind::Enum) {
+        // An enum has no memberwise init: it is built through its cases.
+        let name = qctx
+            .get::<Name>(struct_entity)
+            .map(|n| n.0.clone())
+            .unwrap_or_else(|| "<enum>".into());
+        ctx.report_error(InferError::NoMatchingOverload {
+            name,
+            span: span.clone(),
+        });
     } else {
         // The memberwise init's type args are the struct's own — recorded so
         // MIR reads the solved args, not the raw `[..]` written (or omitted).
@@ -2371,7 +2510,7 @@ fn gen_call_args_phased(
     let args = args
         .iter()
         .map(|arg| {
-            let ty = if matches!(hir.exprs[arg.value], HirExpr::Closure { .. }) {
+            let ty = if is_closure_literal(hir, arg.value) {
                 let placeholder = ctx.fresh();
                 // The call's own coercion treats it as the closure literal it
                 // stands for.
@@ -2389,6 +2528,45 @@ fn gen_call_args_phased(
         })
         .collect();
     (args, postponed)
+}
+
+/// `Optional[α]` for an optional-chain match, unified first with the outer
+/// expectation when there is one (`let x: Int64? = a?.b` pins α).
+fn optional_chain_expectation(
+    ctx: &mut InferCtx<'_>,
+    expect: Option<(TyVar, Reason)>,
+    span: &Span,
+) -> Option<(TyVar, Reason)> {
+    let Some(optional) = ctx.query_ctx.query(kestrel_name_res::ResolveBuiltin {
+        builtin: kestrel_hir::Builtin::OptionalEnum,
+        root: ctx.root,
+    }) else {
+        return expect;
+    };
+    let payload = ctx.fresh();
+    let optional_tv = ctx.named(optional, vec![payload]);
+    let reason = match expect {
+        Some((outer, reason)) => {
+            ctx.equal_because(outer, optional_tv, span.clone(), reason.clone());
+            reason
+        },
+        None => Reason::Unspecified,
+    };
+    Some((optional_tv, reason))
+}
+
+/// A closure literal as written, or the closure a placeholder argument
+/// (`map(_.name)`, `f(_, 1)`) desugars to.
+fn is_closure_literal(hir: &HirBody, id: HirExprId) -> bool {
+    match &hir.exprs[id] {
+        HirExpr::Closure { .. } => true,
+        HirExpr::Sugar {
+            kind: kestrel_hir::body::SugarKind::Placeholder,
+            inner,
+            ..
+        } => is_closure_literal(hir, *inner),
+        _ => false,
+    }
 }
 
 /// Phase 2: solve what the call and its other arguments determined, then
@@ -2858,6 +3036,21 @@ pub(crate) fn emit_formation_wellformedness(
     }
 }
 
+/// Is `entity[args]` an `any[B] P` whose `B` cannot box an existential?
+/// E402 (`existential_box` analyzer) reports that once; the box's own
+/// Copyable/Static wellformedness bounds against `rawany P` would only be
+/// cascades of it.
+fn is_invalid_existential_box(ctx: &InferCtx<'_>, entity: Entity, args: &[HirTy]) -> bool {
+    matches!(args, [HirTy::RawExistential { .. }])
+        && ctx
+            .query_ctx
+            .query(kestrel_semantics::ExistentialBoxDefect {
+                entity,
+                root: ctx.root,
+            })
+            .is_some()
+}
+
 /// Convert an HirTy (already resolved during HIR lowering) to a TyVar.
 pub fn lower_hir_ty(ctx: &mut InferCtx<'_>, ty: &HirTy) -> TyVar {
     lower_hir_ty_with_subs(ctx, ty, &[])
@@ -3155,7 +3348,9 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .iter()
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
-            emit_formation_wellformedness(ctx, *entity, &arg_tvs, span, FormationScope::Written);
+            if !is_invalid_existential_box(ctx, *entity, args) {
+                emit_formation_wellformedness(ctx, *entity, &arg_tvs, span, FormationScope::Written);
+            }
             ctx.struct_ty(*entity, arg_tvs)
         },
         HirTy::Enum { entity, args, span } => {
@@ -3163,7 +3358,9 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .iter()
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
-            emit_formation_wellformedness(ctx, *entity, &arg_tvs, span, FormationScope::Written);
+            if !is_invalid_existential_box(ctx, *entity, args) {
+                emit_formation_wellformedness(ctx, *entity, &arg_tvs, span, FormationScope::Written);
+            }
             ctx.enum_ty(*entity, arg_tvs)
         },
         HirTy::Protocol { entity, args, .. } => {
@@ -3172,6 +3369,27 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
             ctx.protocol_ty(*entity, arg_tvs)
+        },
+        HirTy::RawExistential {
+            bounds, bindings, ..
+        } => {
+            let bounds = bounds
+                .iter()
+                .filter_map(|b| match b {
+                    HirTy::Protocol { entity, args, .. } => Some((
+                        *entity,
+                        args.iter()
+                            .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
+                            .collect(),
+                    )),
+                    _ => None,
+                })
+                .collect();
+            let bindings = bindings
+                .iter()
+                .map(|b| (b.assoc, lower_hir_ty_with_subs(ctx, &b.ty, subs)))
+                .collect();
+            ctx.raw_existential_ty(bounds, bindings)
         },
         // Opaque types: in `lower_hir_ty_with_subs`, HirTy::Opaque is only
         // reached for the defining body's own return type annotation, which
@@ -3437,6 +3655,7 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Assign { span, .. }
         | HirExpr::Block { span, .. }
         | HirExpr::Error { span }
+        | HirExpr::TakePayload { span, .. }
         | HirExpr::Sugar { span, .. } => span.clone(),
     }
 }
@@ -3455,6 +3674,7 @@ pub(crate) fn hir_ty_span(ty: &HirTy) -> Span {
         | HirTy::Param(_, span)
         | HirTy::SelfType(_, span)
         | HirTy::Opaque { span, .. }
+        | HirTy::RawExistential { span, .. }
         | HirTy::Never(span)
         | HirTy::Infer(span)
         | HirTy::Error(span)

@@ -44,6 +44,16 @@ pub fn compile_immediate<'ctx>(
 
         ImmediateKind::MonoFunctionRef(mono_id) => compile_mono_func_ref(fc, builder, *mono_id),
 
+        // The address of an existential function table.
+        ImmediateKind::MonoVTable(id) => Ok(fc.ctx.vtable_data[id.index()]
+            .as_pointer_value()
+            .into()),
+
+        ImmediateKind::VTable { .. } => {
+            debug_assert!(false, "unresolved VTable in codegen");
+            Ok(mem::null_ptr(cx).into())
+        },
+
         ImmediateKind::FunctionRef { .. } => {
             debug_assert!(false, "unresolved FunctionRef in codegen");
             Ok(mem::null_ptr(cx).into())

@@ -7,7 +7,7 @@ use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
 use kestrel_mir::{FieldIdx, MirModule, MirTy, TyId, VariantIdx, WitnessMethodKey};
 use kestrel_name_res::ExtensionTargetEntity;
 
-use crate::name::qualified_name;
+use kestrel_ast_builder::qualified_name;
 
 /// Central state maintained during lowering.
 pub struct LowerCtx<'w> {
@@ -21,6 +21,8 @@ pub struct LowerCtx<'w> {
     /// `escaping` closure values (see `body/closure_box.rs`). Synthesized on
     /// first use so a module with no escaping closures gains nothing.
     pub escaping_nop_shim: Option<Entity>,
+    /// Existential thunks and table templates built so far.
+    pub existentials: crate::existential::ExistentialState,
 }
 
 impl<'w> LowerCtx<'w> {
@@ -56,6 +58,7 @@ impl<'w> LowerCtx<'w> {
             closure_counter: 0,
             synthetic_counter: 0,
             escaping_nop_shim: None,
+            existentials: Default::default(),
         }
     }
 
@@ -69,11 +72,7 @@ impl<'w> LowerCtx<'w> {
     /// Record a nominal type marked `@observabledrop` (dropping it has an
     /// observable effect). Called from struct and enum lowering.
     pub fn record_observable_drop(&mut self, entity: Entity) {
-        let marked = self
-            .world
-            .get::<kestrel_ast_builder::Attributes>(entity)
-            .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "observabledrop"));
-        if marked {
+        if kestrel_ast_builder::attrs::attrs_of(&self.query, entity).is_observable_drop() {
             self.module.observable_drop.insert(entity);
         }
     }
