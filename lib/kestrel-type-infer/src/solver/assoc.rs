@@ -414,7 +414,10 @@ fn conformance_binding(
     if conformances.len() < 2 {
         return ConformancePick::Unselected;
     }
-    if protocol_args.iter().any(|&tv| !ctx.is_concrete(ctx.resolve(tv))) {
+    if protocol_args
+        .iter()
+        .any(|&tv| !ctx.is_concrete(ctx.resolve(tv)))
+    {
         return ConformancePick::Wait;
     }
 
@@ -430,10 +433,18 @@ fn conformance_binding(
         return ConformancePick::Unselected;
     };
 
-    let binding = ctx.query_ctx.children_of(source).iter().copied().find(|&child| {
-        ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-            && ctx.query_ctx.get::<Name>(child).is_some_and(|n| n.0 == name)
-    });
+    let binding = ctx
+        .query_ctx
+        .children_of(source)
+        .iter()
+        .copied()
+        .find(|&child| {
+            ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
+                && ctx
+                    .query_ctx
+                    .get::<Name>(child)
+                    .is_some_and(|n| n.0 == name)
+        });
     let Some(resolved) = binding.and_then(|alias| {
         ctx.query_ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
             entity: alias,
@@ -459,26 +470,21 @@ fn written_arg_matches(ctx: &InferCtx<'_>, written: &kestrel_hir::ty::HirTy, tv:
     };
     match (written, kind) {
         (HirTy::Param(..), _) => true,
-        (
-            HirTy::Struct { entity, args, .. },
-            TyKind::Struct {
-                entity: e,
-                args: a,
-            },
-        )
-        | (
-            HirTy::Enum { entity, args, .. },
-            TyKind::Enum {
-                entity: e,
-                args: a,
-            },
-        ) => {
+        (HirTy::Struct { entity, args, .. }, TyKind::Struct { entity: e, args: a })
+        | (HirTy::Enum { entity, args, .. }, TyKind::Enum { entity: e, args: a }) => {
             entity == e
                 && args.len() == a.len()
-                && args.iter().zip(a).all(|(w, &t)| written_arg_matches(ctx, w, t))
+                && args
+                    .iter()
+                    .zip(a)
+                    .all(|(w, &t)| written_arg_matches(ctx, w, t))
         },
         (HirTy::Tuple(ws, _), TyKind::Tuple(ts)) => {
-            ws.len() == ts.len() && ws.iter().zip(ts).all(|(w, &t)| written_arg_matches(ctx, w, t))
+            ws.len() == ts.len()
+                && ws
+                    .iter()
+                    .zip(ts)
+                    .all(|(w, &t)| written_arg_matches(ctx, w, t))
         },
         _ => false,
     }

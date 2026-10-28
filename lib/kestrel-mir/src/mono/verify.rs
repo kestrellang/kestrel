@@ -4,7 +4,7 @@ use kestrel_span::Span;
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
 use crate::inst::{CalleeSite, InstKind};
-use crate::mono::ty_sites::{for_each_fn_ty, for_each_ty_node, TySite};
+use crate::mono::ty_sites::{TySite, for_each_fn_ty, for_each_ty_node};
 use crate::mono::types::{MonoFunction, MonoModule};
 use crate::ty::MirTy;
 use crate::{BlockId, CopyBehavior, TyId};
@@ -278,15 +278,7 @@ fn verify_function(
             }
             // Check FunctionRef is rewritten to MonoFunctionRef
             if let InstKind::Literal { value, .. } = &inst.kind {
-                check_literal(
-                    fi,
-                    block_id,
-                    ii,
-                    inst_span,
-                    &value.kind,
-                    func_count,
-                    errors,
-                );
+                check_literal(fi, block_id, ii, inst_span, &value.kind, func_count, errors);
             }
         }
     }
@@ -501,9 +493,7 @@ fn check_type_concrete(
     };
     for_each_ty_node(&module.ty_arena, ty, &mut |_, node| match node {
         MirTy::TypeParam(e) => report(format!("TypeParam({e:?}) in {context}")),
-        MirTy::AssociatedProjection { .. } => {
-            report(format!("AssociatedProjection in {context}"))
-        },
+        MirTy::AssociatedProjection { .. } => report(format!("AssociatedProjection in {context}")),
         // The real G2 failure mode is ABSENCE from the mono maps, not
         // presence with a null layout: `MonoStruct`/`MonoEnum` are only
         // inserted inside `if all_resolved`, one line after `layout =

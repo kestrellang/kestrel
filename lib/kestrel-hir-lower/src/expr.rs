@@ -558,7 +558,9 @@ impl LowerCtx<'_> {
         if let ValueResolution::Def(entity) = result
             && matches!(
                 self.ctx.get::<kestrel_ast_builder::NodeKind>(entity),
-                Some(kestrel_ast_builder::NodeKind::Field | kestrel_ast_builder::NodeKind::Function)
+                Some(
+                    kestrel_ast_builder::NodeKind::Field | kestrel_ast_builder::NodeKind::Function
+                )
             )
             && let Some(kind) = self.static_property_prefix(entity, segments, segments.len() - 1)
         {
@@ -1211,7 +1213,9 @@ impl LowerCtx<'_> {
         };
         let names_static = match &full_result {
             ValueResolution::Def(e) => is_static_fn(self, *e),
-            ValueResolution::Overloaded(es) => !es.is_empty() && es.iter().all(|&e| is_static_fn(self, e)),
+            ValueResolution::Overloaded(es) => {
+                !es.is_empty() && es.iter().all(|&e| is_static_fn(self, e))
+            },
             _ => false,
         };
         if !names_static {
@@ -1238,7 +1242,10 @@ impl LowerCtx<'_> {
             root: self.root,
         });
         let is_nominal = |e: kestrel_hecs::Entity| {
-            matches!(self.ctx.get::<NodeKind>(e), Some(&NodeKind::Struct | &NodeKind::Enum))
+            matches!(
+                self.ctx.get::<NodeKind>(e),
+                Some(&NodeKind::Struct | &NodeKind::Enum)
+            )
         };
         match resolution {
             ValueResolution::Def(e) if is_nominal(e) => Some(TypePrefix::Named),
@@ -1258,7 +1265,10 @@ impl LowerCtx<'_> {
             return self.lower_type_receiver_path(prefix);
         }
         let first = &prefix[0];
-        let span = Span::new(first.span.file_id, first.span.start..prefix[prefix.len() - 1].span.end);
+        let span = Span::new(
+            first.span.file_id,
+            first.span.start..prefix[prefix.len() - 1].span.end,
+        );
         let receiver = self.lower_path(prefix, &span);
         self.record_segments(prefix, receiver);
         receiver
@@ -1278,7 +1288,10 @@ impl LowerCtx<'_> {
     ) -> Option<TypePrefix> {
         if index == 0
             || !self.ctx.has::<kestrel_ast_builder::Static>(entity)
-            || self.ctx.get::<kestrel_ast_builder::Callable>(entity).is_none()
+            || self
+                .ctx
+                .get::<kestrel_ast_builder::Callable>(entity)
+                .is_none()
         {
             return None;
         }
@@ -1333,7 +1346,12 @@ impl LowerCtx<'_> {
 
     /// `segments[index]` as a static property of the type prefix
     /// `segments[..index]`: a `Field` on the type receiver.
-    fn lower_static_property(&mut self, segments: &[PathSeg], index: usize, kind: TypePrefix) -> HirExprId {
+    fn lower_static_property(
+        &mut self,
+        segments: &[PathSeg],
+        index: usize,
+        kind: TypePrefix,
+    ) -> HirExprId {
         let receiver = self.lower_type_prefix(&segments[..index], kind);
         let seg = &segments[index];
         let field = HirExpr::Field {

@@ -266,22 +266,24 @@ impl DeclCheck for FieldAnalyzer {
         // Check 3: static stored properties not supported in generic types
         // (Swift's rule). Skip protocol fields — they're abstract
         // declarations, not stored properties.
-        if is_static && !is_computed && !matches!(parent_kind, Some(NodeKind::Protocol)) {
-            if let Some(generic_type) = generic_owner(cx, parent) {
-                let type_name = util::entity_name(cx.query, generic_type);
+        if is_static
+            && !is_computed
+            && !matches!(parent_kind, Some(NodeKind::Protocol))
+            && let Some(generic_type) = generic_owner(cx, parent)
+        {
+            let type_name = util::entity_name(cx.query, generic_type);
 
-                diags.push(AnalyzeDiagnostic {
-                    descriptor_id: DESCRIPTORS[2].id,
-                    severity: DESCRIPTORS[2].default_severity,
-                    message: "static stored properties not supported in generic types".into(),
-                    labels: vec![DiagLabel {
-                        span,
-                        message: format!("static stored property in generic type '{}'", type_name),
-                        is_primary: true,
-                    }],
-                    notes: vec![],
-                });
-            }
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[2].id,
+                severity: DESCRIPTORS[2].default_severity,
+                message: "static stored properties not supported in generic types".into(),
+                labels: vec![DiagLabel {
+                    span,
+                    message: format!("static stored property in generic type '{}'", type_name),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
         }
 
         diags
@@ -294,7 +296,10 @@ impl DeclCheck for FieldAnalyzer {
 /// over every conformer). The rule is about the TYPE, so `extend Box[Int64]`
 /// counts: `Box` is generic even though this extension names one
 /// instantiation.
-fn generic_owner(cx: &DeclContext<'_>, parent: kestrel_hecs::Entity) -> Option<kestrel_hecs::Entity> {
+fn generic_owner(
+    cx: &DeclContext<'_>,
+    parent: kestrel_hecs::Entity,
+) -> Option<kestrel_hecs::Entity> {
     let owner = match cx.query.get::<NodeKind>(parent) {
         Some(NodeKind::Extension) => cx.query.query(kestrel_name_res::ExtensionTargetEntity {
             extension: parent,
@@ -303,6 +308,9 @@ fn generic_owner(cx: &DeclContext<'_>, parent: kestrel_hecs::Entity) -> Option<k
         _ => parent,
     };
     let is_generic = matches!(cx.query.get::<NodeKind>(owner), Some(NodeKind::Protocol))
-        || cx.query.get::<TypeParams>(owner).is_some_and(|tp| !tp.0.is_empty());
+        || cx
+            .query
+            .get::<TypeParams>(owner)
+            .is_some_and(|tp| !tp.0.is_empty());
     is_generic.then_some(owner)
 }

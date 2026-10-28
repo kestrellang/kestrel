@@ -906,7 +906,10 @@ impl TypeResolver for WorldResolver<'_> {
             return match static_candidates.as_slice() {
                 [member] => self.build_member_resolution(*member),
                 _ => Err(MemberError::Ambiguous(
-                    static_candidates.into_iter().map(|e| (e, None, 0)).collect(),
+                    static_candidates
+                        .into_iter()
+                        .map(|e| (e, None, 0))
+                        .collect(),
                 )),
             };
         }

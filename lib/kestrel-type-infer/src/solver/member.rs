@@ -107,7 +107,10 @@ pub(super) fn solve_for_loop_iterator(
             }
         },
     };
-    kestrel_debug::ktrace!("infer", "for-loop iterable {expr:?}: direct iterator = {is_iterator}");
+    kestrel_debug::ktrace!(
+        "infer",
+        "for-loop iterable {expr:?}: direct iterator = {is_iterator}"
+    );
     if is_iterator {
         ctx.direct_iterators.insert(expr);
         ctx.equal(result, iterable, span);
@@ -560,7 +563,10 @@ pub(super) fn solve_member(
         Ok(res) => res,
         Err(crate::resolve::MemberError::NotFound) => {
             // Fall back to static member search
-            match ctx.resolver.resolve_static_member(&recv_kind, name, &args, is_call) {
+            match ctx
+                .resolver
+                .resolve_static_member(&recv_kind, name, &args, is_call)
+            {
                 Ok(res) => res,
                 Err(_) => {
                     // Lazy `Indirection` peel: the member is on neither the
@@ -690,7 +696,10 @@ pub(super) fn solve_member(
             // The member exists but is static — fall back to static resolution.
             // Only error if static resolution also fails (the instance-on-static
             // diagnostic is for cases where no static call is possible).
-            match ctx.resolver.resolve_static_member(&recv_kind, name, &args, is_call) {
+            match ctx
+                .resolver
+                .resolve_static_member(&recv_kind, name, &args, is_call)
+            {
                 Ok(res) => res,
                 Err(_) => {
                     ctx.poison(result);
@@ -1283,7 +1292,10 @@ fn has_enum_case(ctx: &InferCtx<'_>, kind: &TyKind, name: &str) -> bool {
     };
     ctx.query_ctx.children_of(entity).iter().any(|&child| {
         ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::EnumCase)
-            && ctx.query_ctx.get::<Name>(child).is_some_and(|n| n.0 == name)
+            && ctx
+                .query_ctx
+                .get::<Name>(child)
+                .is_some_and(|n| n.0 == name)
     })
 }
 
@@ -1330,7 +1342,10 @@ pub(super) fn solve_implicit(
             // it is a call, without them a read (only a var/func name clash
             // can tell the two apart).
             let is_call = !args.is_empty();
-            match ctx.resolver.resolve_static_member(&kind, name, &args, is_call) {
+            match ctx
+                .resolver
+                .resolve_static_member(&kind, name, &args, is_call)
+            {
                 Ok(res) => res,
                 // The case exists but its labels/arity don't fit the args
                 // (`Shape.Rectangle(width: 5.0)`): an overload mismatch, not
@@ -1654,7 +1669,9 @@ pub(super) fn resolve_proto_param_via_conformance(
 ) -> Option<TyVar> {
     let recv = recv_entity?;
     // The first positive conformance to `protocol` wins.
-    let (source, ast_ty) = positive_conformances_to(ctx, recv, protocol).into_iter().next()?;
+    let (source, ast_ty) = positive_conformances_to(ctx, recv, protocol)
+        .into_iter()
+        .next()?;
     let type_args = kestrel_name_res::extract_ast_type_args(&ast_ty);
 
     // Implicit-positional: empty args means "match struct params positionally".
