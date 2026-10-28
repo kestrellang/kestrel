@@ -267,74 +267,117 @@ public struct ChaCha20Poly1305 {
     // Poly1305 MAC
     // ========================================================================
 
+    /// RFC 8439 §2.8 tag: Poly1305 over `aad ‖ pad16 ‖ ciphertext ‖ pad16 ‖
+    /// len(aad) ‖ len(ciphertext)`, as ONE message — the pads make every block
+    /// full, so only the length-free spec construction is valid here.
     static func computeTag(
         key: Array[UInt8],
         aad: ArraySlice[UInt8],
         ciphertext: ArraySlice[UInt8]
     ) -> Array[UInt8] {
-        // r (clamped) and s from the 32-byte key
-        var r0 = loadLE32(key, 0);
-        var r1 = loadLE32(key, 4);
-        var r2 = loadLE32(key, 8);
-        var r3 = loadLE32(key, 12);
-        r0 = r0 & 0x0fffffff;
-        r1 = r1 & 0x0ffffffc;
-        r2 = r2 & 0x0ffffffc;
-        r3 = r3 & 0x0ffffffc;
-        let s0 = loadLE32(key, 16);
-        let s1 = loadLE32(key, 20);
-        let s2 = loadLE32(key, 24);
-        let s3 = loadLE32(key, 28);
+        var mac: [UInt8] = [];
+        mac.append(contentsOf: aad);
+        while mac.count % 16 != 0 { mac.append(0); }
+        mac.append(contentsOf: ciphertext);
+        while mac.count % 16 != 0 { mac.append(0); }
+        mac.append(contentsOf: UInt64(from: aad.count).toBytesLittleEndian().asSlice());
+        mac.append(contentsOf: UInt64(from: ciphertext.count).toBytesLittleEndian().asSlice());
+        ChaCha20Poly1305.poly1305(key, mac.asSlice())
+    }
 
-        // Accumulator (5 x UInt64 limbs for 130-bit arithmetic)
-        var a0: UInt64 = 0;
-        var a1: UInt64 = 0;
-        var a2: UInt64 = 0;
-        var a3: UInt64 = 0;
-        var a4: UInt64 = 0;
+    /// Poly1305 (RFC 8439 §2.5) with five 26-bit limbs, after poly1305-donna-32.
+    /// 26-bit limbs keep every product below 2^55 and each five-term sum below
+    /// 2^58, so the 130-bit arithmetic never overflows a `UInt64`.
+    static func poly1305(key: Array[UInt8], message: ArraySlice[UInt8]) -> Array[UInt8] {
+        let mask: UInt64 = 0x3ffffff;
+        // r, clamped, split into 26-bit limbs; s_i = 5 r_i folds 2^130 ≡ 5.
+        let r0 = UInt64(from: loadLE32(key, 0)) & 0x3ffffff;
+        let r1 = (UInt64(from: loadLE32(key, 3)) >> 2) & 0x3ffff03;
+        let r2 = (UInt64(from: loadLE32(key, 6)) >> 4) & 0x3ffc0ff;
+        let r3 = (UInt64(from: loadLE32(key, 9)) >> 6) & 0x3f03fff;
+        let r4 = (UInt64(from: loadLE32(key, 12)) >> 8) & 0x00fffff;
+        let s1 = r1 * 5;
+        let s2 = r2 * 5;
+        let s3 = r3 * 5;
+        let s4 = r4 * 5;
 
-        let rr0 = UInt64(from: r0);
-        let rr1 = UInt64(from: r1);
-        let rr2 = UInt64(from: r2);
-        let rr3 = UInt64(from: r3);
-        let ss1 = rr1 * 5;
-        let ss2 = rr2 * 5;
-        let ss3 = rr3 * 5;
+        var h0: UInt64 = 0;
+        var h1: UInt64 = 0;
+        var h2: UInt64 = 0;
+        var h3: UInt64 = 0;
+        var h4: UInt64 = 0;
 
-        // Process AAD
-        ChaCha20Poly1305.poly1305Process(aad, a0, a1, a2, a3, a4, rr0, rr1, rr2, rr3, ss1, ss2, ss3);
+        var offset: Int64 = 0;
+        while offset < message.count {
+            // A full block gets the 2^128 bit (1 << 24 in limb 4); the final
+            // partial block is padded with 0x01 then zeros instead.
+            var block = Array[UInt8](repeating: 0, count: 16);
+            var hibit: UInt64 = 1 << 24;
+            let len = message.count - offset;
+            if len >= 16 {
+                for i in 0..<16 { block(i) = message(offset + i); }
+            } else {
+                for i in 0..<len { block(i) = message(offset + i); }
+                block(len) = 1;
+                hibit = 0;
+            }
 
-        // Pad AAD
-        let aadPad = (16 - (aad.count % 16)) % 16;
-        if aadPad > 0 {
-            let zeros = Array[UInt8](repeating: 0, count: aadPad);
-            ChaCha20Poly1305.poly1305Process(zeros.asSlice(), a0, a1, a2, a3, a4, rr0, rr1, rr2, rr3, ss1, ss2, ss3);
+            h0 = h0 + (UInt64(from: loadLE32(block, 0)) & mask);
+            h1 = h1 + ((UInt64(from: loadLE32(block, 3)) >> 2) & mask);
+            h2 = h2 + ((UInt64(from: loadLE32(block, 6)) >> 4) & mask);
+            h3 = h3 + ((UInt64(from: loadLE32(block, 9)) >> 6) & mask);
+            h4 = h4 + ((UInt64(from: loadLE32(block, 12)) >> 8) | hibit);
+
+            // h *= r (mod 2^130 - 5)
+            let d0 = h0 * r0 + h1 * s4 + h2 * s3 + h3 * s2 + h4 * s1;
+            var d1 = h0 * r1 + h1 * r0 + h2 * s4 + h3 * s3 + h4 * s2;
+            var d2 = h0 * r2 + h1 * r1 + h2 * r0 + h3 * s4 + h4 * s3;
+            var d3 = h0 * r3 + h1 * r2 + h2 * r1 + h3 * r0 + h4 * s4;
+            var d4 = h0 * r4 + h1 * r3 + h2 * r2 + h3 * r1 + h4 * r0;
+
+            var c = d0 >> 26;
+            h0 = d0 & mask;
+            d1 = d1 + c; c = d1 >> 26; h1 = d1 & mask;
+            d2 = d2 + c; c = d2 >> 26; h2 = d2 & mask;
+            d3 = d3 + c; c = d3 >> 26; h3 = d3 & mask;
+            d4 = d4 + c; c = d4 >> 26; h4 = d4 & mask;
+            h0 = h0 + c * 5; c = h0 >> 26; h0 = h0 & mask;
+            h1 = h1 + c;
+
+            offset = offset + 16;
         }
 
-        // Process ciphertext
-        ChaCha20Poly1305.poly1305Process(ciphertext, a0, a1, a2, a3, a4, rr0, rr1, rr2, rr3, ss1, ss2, ss3);
+        // Fully carry h.
+        var c = h1 >> 26; h1 = h1 & mask;
+        h2 = h2 + c; c = h2 >> 26; h2 = h2 & mask;
+        h3 = h3 + c; c = h3 >> 26; h3 = h3 & mask;
+        h4 = h4 + c; c = h4 >> 26; h4 = h4 & mask;
+        h0 = h0 + c * 5; c = h0 >> 26; h0 = h0 & mask;
+        h1 = h1 + c;
 
-        // Pad ciphertext
-        let ctPad = (16 - (ciphertext.count % 16)) % 16;
-        if ctPad > 0 {
-            let zeros = Array[UInt8](repeating: 0, count: ctPad);
-            ChaCha20Poly1305.poly1305Process(zeros.asSlice(), a0, a1, a2, a3, a4, rr0, rr1, rr2, rr3, ss1, ss2, ss3);
+        // g = h + 5 - 2^130; if it doesn't go negative, h >= p and g is h mod p.
+        var g0 = h0 + 5; c = g0 >> 26; g0 = g0 & mask;
+        var g1 = h1 + c; c = g1 >> 26; g1 = g1 & mask;
+        var g2 = h2 + c; c = g2 >> 26; g2 = g2 & mask;
+        var g3 = h3 + c; c = g3 >> 26; g3 = g3 & mask;
+        let top = h4 + c;
+        if top >= 1 << 26 {
+            h0 = g0; h1 = g1; h2 = g2; h3 = g3; h4 = top - (1 << 26);
         }
 
-        // Append lengths
-        var lengths: [UInt8] = [];
-        lengths.append(contentsOf: UInt64(from: aad.count).toBytesLittleEndian().asSlice());
-        lengths.append(contentsOf: UInt64(from: ciphertext.count).toBytesLittleEndian().asSlice());
-        ChaCha20Poly1305.poly1305Process(lengths.asSlice(), a0, a1, a2, a3, a4, rr0, rr1, rr2, rr3, ss1, ss2, ss3);
+        // Repack into four 32-bit words and add s (mod 2^128).
+        let w0 = (h0 | (h1 << 26)) & 0xffffffff;
+        let w1 = ((h1 >> 6) | (h2 << 20)) & 0xffffffff;
+        let w2 = ((h2 >> 12) | (h3 << 14)) & 0xffffffff;
+        let w3 = ((h3 >> 18) | (h4 << 8)) & 0xffffffff;
 
-        // Finalize: acc + s mod 2^128
-        var f: UInt64 = a0 + UInt64(from: s0);
+        var f = w0 + UInt64(from: loadLE32(key, 16));
         let t0 = UInt32(from: f & 0xffffffff);
-        f = (f >> 32) + a1 + UInt64(from: s1);
+        f = (f >> 32) + w1 + UInt64(from: loadLE32(key, 20));
         let t1 = UInt32(from: f & 0xffffffff);
-        f = (f >> 32) + a2 + UInt64(from: s2);
+        f = (f >> 32) + w2 + UInt64(from: loadLE32(key, 24));
         let t2 = UInt32(from: f & 0xffffffff);
-        f = (f >> 32) + a3 + UInt64(from: s3);
+        f = (f >> 32) + w3 + UInt64(from: loadLE32(key, 28));
         let t3 = UInt32(from: f & 0xffffffff);
 
         var tag: [UInt8] = [];
@@ -342,88 +385,7 @@ public struct ChaCha20Poly1305 {
         tag.append(contentsOf: t1.toBytesLittleEndian().asSlice());
         tag.append(contentsOf: t2.toBytesLittleEndian().asSlice());
         tag.append(contentsOf: t3.toBytesLittleEndian().asSlice());
-        return tag;
-    }
-
-    static func poly1305Process(
-        data: ArraySlice[UInt8],
-        mutating a0: UInt64, mutating a1: UInt64,
-        mutating a2: UInt64, mutating a3: UInt64,
-        mutating a4: UInt64,
-        r0: UInt64, r1: UInt64, r2: UInt64, r3: UInt64,
-        s1: UInt64, s2: UInt64, s3: UInt64
-    ) {
-        var offset: Int64 = 0;
-        while offset + 16 <= data.count {
-            let n0 = UInt64(from: loadLE32Slice(data, offset));
-            let n1 = UInt64(from: loadLE32Slice(data, offset + 4));
-            let n2 = UInt64(from: loadLE32Slice(data, offset + 8));
-            let n3 = UInt64(from: loadLE32Slice(data, offset + 12));
-
-            a0 = a0 + n0;
-            a1 = a1 + n1;
-            a2 = a2 + n2;
-            a3 = a3 + n3;
-            a4 = a4 + 1;
-
-            ChaCha20Poly1305.poly1305Mul(a0, a1, a2, a3, a4, r0, r1, r2, r3, s1, s2, s3);
-            offset = offset + 16;
-        }
-
-        if offset < data.count {
-            var block = Array[UInt8](repeating: 0, count: 17);
-            var i: Int64 = 0;
-            while offset + i < data.count {
-                block(i) = data(offset + i);
-                i = i + 1;
-            }
-            block(i) = 1;
-
-            let n0 = UInt64(from: loadLE32(block, 0));
-            let n1 = UInt64(from: loadLE32(block, 4));
-            let n2 = UInt64(from: loadLE32(block, 8));
-            let n3 = UInt64(from: loadLE32(block, 12));
-
-            a0 = a0 + n0;
-            a1 = a1 + n1;
-            a2 = a2 + n2;
-            a3 = a3 + n3;
-
-            ChaCha20Poly1305.poly1305Mul(a0, a1, a2, a3, a4, r0, r1, r2, r3, s1, s2, s3);
-        }
-    }
-
-    static func poly1305Mul(
-        mutating a0: UInt64, mutating a1: UInt64,
-        mutating a2: UInt64, mutating a3: UInt64,
-        mutating a4: UInt64,
-        r0: UInt64, r1: UInt64, r2: UInt64, r3: UInt64,
-        s1: UInt64, s2: UInt64, s3: UInt64
-    ) {
-        var d0 = a0 * r0 + a1 * s3 + a2 * s2 + a3 * s1;
-        var d1 = a0 * r1 + a1 * r0 + a2 * s3 + a3 * s2;
-        var d2 = a0 * r2 + a1 * r1 + a2 * r0 + a3 * s3;
-        var d3 = a0 * r3 + a1 * r2 + a2 * r1 + a3 * r0;
-        var d4 = a4 * r0;
-
-        var c: UInt64 = d0 >> 32;
-        a0 = d0 & 0xffffffff;
-        d1 = d1 + c;
-        c = d1 >> 32;
-        a1 = d1 & 0xffffffff;
-        d2 = d2 + c;
-        c = d2 >> 32;
-        a2 = d2 & 0xffffffff;
-        d3 = d3 + c;
-        c = d3 >> 32;
-        a3 = d3 & 0xffffffff;
-        d4 = d4 + c;
-        a4 = d4 & 3;
-        let carry = (d4 >> 2) * 5;
-        a0 = a0 + carry;
-        c = a0 >> 32;
-        a0 = a0 & 0xffffffff;
-        a1 = a1 + c;
+        tag
     }
 
     // ========================================================================
@@ -435,14 +397,6 @@ public struct ChaCha20Poly1305 {
         let b1 = UInt32(from: bytes(offset + 1));
         let b2 = UInt32(from: bytes(offset + 2));
         let b3 = UInt32(from: bytes(offset + 3));
-        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-    }
-
-    static func loadLE32Slice(data: ArraySlice[UInt8], offset: Int64) -> UInt32 {
-        let b0 = UInt32(from: data(offset));
-        let b1 = UInt32(from: data(offset + 1));
-        let b2 = UInt32(from: data(offset + 2));
-        let b3 = UInt32(from: data(offset + 3));
         return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
     }
 }

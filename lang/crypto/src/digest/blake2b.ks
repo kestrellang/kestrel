@@ -226,6 +226,6 @@ public struct BLAKE2b: Digest {
         v(a) = v(a) + v(b) + y;
         v(d) = (v(d) ^ v(a)).rotateRight(by: 16);
         v(c) = v(c) + v(d);
-        v(b) = (v(b) ^ v(c)).rotateRight(by: 7);
+        v(b) = (v(b) ^ v(c)).rotateRight(by: 63);
     }
 }

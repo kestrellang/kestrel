@@ -9,7 +9,7 @@ public func getString(v: Value) -> String {
 }
 
 public func getField(obj: Value, key: String) -> Value {
-    obj.value(for: key) or Value.Null
+    obj.value(for: key) ?? Value.Null
 }
 
 /// Returns the field as a string, or an empty string if the key is missing.
