@@ -12,8 +12,8 @@ enum Foo {
 
 @main
 func main() -> lang.i64 {
-    let _ = println(Foo.staticVar);
+     println(Foo.staticVar);
     Foo.staticVar = 2;
-    let _ = println(Foo.staticVar);
+     println(Foo.staticVar);
     0
 }

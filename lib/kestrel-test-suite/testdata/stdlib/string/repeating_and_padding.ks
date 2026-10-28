@@ -40,12 +40,12 @@ module Test
             let s4: std.text.String = "42";
             let padded = s4.pad(leading: 6, with: ' ');
             if padded.isEqual(to: "    42") == false { return 8 }
-            if padded.byteCount != 6 { return 9 }
+            if padded.bytes.count != 6 { return 9 }
 
             // Pad end with space
             let padded2 = s4.pad(trailing: 6, with: ' ');
             if padded2.isEqual(to: "42    ") == false { return 10 }
-            if padded2.byteCount != 6 { return 11 }
+            if padded2.bytes.count != 6 { return 11 }
 
             0
         }

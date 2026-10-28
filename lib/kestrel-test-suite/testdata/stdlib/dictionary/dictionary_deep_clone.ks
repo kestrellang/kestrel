@@ -6,9 +6,9 @@ module Test
         @main
         func main() -> lang.i64 {
             var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = dict.insert(1, 100);
-            let _ = dict.insert(2, 200);
-            let _ = dict.insert(3, 300);
+             dict.insert(1, 100);
+             dict.insert(2, 200);
+             dict.insert(3, 300);
 
             // deepClone creates a fully independent copy
             let cloned = dict.deepClone();
@@ -18,7 +18,7 @@ module Test
             if cloned(3).unwrap() != 300 { return 4 }
 
             // Mutating original should not affect clone
-            let _ = dict.insert(4, 400);
+             dict.insert(4, 400);
             if dict.count != 4 { return 5 }
             if cloned.count != 3 { return 6 }
 

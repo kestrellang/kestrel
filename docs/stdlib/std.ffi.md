@@ -24,7 +24,7 @@ the caller must `free()` the result.
 func puts(s: CString) -> Int32
 
 let cstr = "Hello, C!".toCString();
-let _ = puts(cstr);
+ puts(cstr);
 cstr.free();
 ```
 
@@ -128,6 +128,8 @@ public var raw: Pointer[UInt8]
 The underlying pointer to the null-terminated bytes.
 
 _Defined in `lang/std/ffi/cstring.ks`._
+
+### Implements `FFISafe`
 
 ## protocol `FFISafe`
 
@@ -304,6 +306,19 @@ the low 8 bits are used; pass `0` to zero the region. Returns
 ### Safety
 
 `dest` must be valid for `n` bytes of writes.
+
+_Defined in `lang/std/ffi/libc.ks`._
+
+## function `posixMemalign`
+
+```kestrel
+public func posixMemalign(consuming RawPointer, consuming Int64, consuming Int64) -> Int32
+```
+
+Wraps `posix_memalign(3)` — stores an allocation aligned to `alignment`
+in `out`. `alignment` must be a power of two and a multiple of the native
+pointer size. Returns zero on success and an error code otherwise.
+Memory returned through `out` is released with `free`.
 
 _Defined in `lang/std/ffi/libc.ks`._
 

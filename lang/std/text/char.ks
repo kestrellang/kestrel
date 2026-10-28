@@ -7,7 +7,7 @@ import std.numeric.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.collections.(Array)
 import std.memory.(ArraySlice, Pointer)
-import std.text.(String, StringBuilder, Formattable, FormatOptions)
+import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.text.unicode as unicode
 
 // ============================================================================
@@ -488,7 +488,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
 // -- Formattable conformance -------------------------------------------------
 
 extend Char: Formattable {
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: self)
     }
 }
@@ -725,7 +725,7 @@ extend Grapheme: Hashable {
 }
 
 extend Grapheme: Formattable {
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         for c in self.chars {
             writer.append(char: c)
         }

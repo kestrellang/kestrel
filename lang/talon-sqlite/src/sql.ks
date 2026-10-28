@@ -23,7 +23,7 @@ public struct SqlAccumulator: Interpolatable, Cloneable {
 
     public init(literalCapacity literalCapacity: Int64, interpolationCount interpolationCount: Int64) {
         self.template = StringBuilder(capacity: literalCapacity + interpolationCount * 2);
-        self.bindings = Array[SqliteValue]();
+        self.bindings = [];
     }
 
     public func clone() -> SqlAccumulator {

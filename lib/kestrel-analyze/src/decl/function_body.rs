@@ -6,7 +6,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### E606 -- `function_missing_body` (Error, Correctness)
+//! ### E623 -- `function_missing_body` (Error, Correctness)
 //!
 //! **Message:** "function '{name}' requires a body"
 //!
@@ -19,12 +19,12 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Attributes, Body, Intrinsic, NodeKind, Valued};
+use kestrel_ast_builder::{Attributes, Intrinsic, NodeKind, Valued};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "E606",
+    id: "E623",
     name: "function_missing_body",
     default_severity: Severity::Error,
     category: Category::Correctness,
@@ -33,8 +33,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct FunctionBodyAnalyzer;
 
 impl Describe for FunctionBodyAnalyzer {
-    fn id(&self) -> &'static str {
-        "function_body"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::FunctionBody
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -70,8 +70,7 @@ impl DeclCheck for FunctionBodyAnalyzer {
         }
 
         // Function has a body or computed value -- no error
-        if cx.query.get::<Body>(cx.entity).is_some() || cx.query.get::<Valued>(cx.entity).is_some()
-        {
+        if cx.query.get::<Valued>(cx.entity).is_some() {
             return vec![];
         }
 

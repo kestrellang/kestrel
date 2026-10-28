@@ -26,12 +26,10 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::ast_type::AstType;
-use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, Name, NodeKind, TypeAnnotation,
-};
+use kestrel_ast_builder::{Callable, ConformanceItem, Conformances, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ExtensionsFor, ProtocolMembers, ResolveTypePath, TypeResolution};
 use std::collections::{HashMap, HashSet};
@@ -46,8 +44,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct ParentProtocolConformanceAnalyzer;
 
 impl Describe for ParentProtocolConformanceAnalyzer {
-    fn id(&self) -> &'static str {
-        "parent_protocol_conformance"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ParentProtocolConformance
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -130,10 +128,11 @@ fn parent_requirements_satisfied(
     let provided = collect_provided_members(cx, type_entity);
     let mut saw_method_requirement = false;
 
-    for member in cx.query.query(ProtocolMembers {
+    let members = cx.query.query(ProtocolMembers {
         protocol: parent_protocol,
         root: cx.root,
-    }) {
+    });
+    for member in members.iter() {
         if member.extension.is_some() {
             continue;
         }
@@ -203,15 +202,11 @@ fn collect_from_entity(cx: &DeclContext<'_>, entity: Entity, provided: &mut Prov
     }
 }
 
+/// The name this member answers to. Delegates to name resolution's rule —
+/// this was a fork that keyed subscripts on `NodeKind::Subscript` while the
+/// real lookup keys them on the `Subscript` marker component.
 fn member_lookup_name(cx: &DeclContext<'_>, entity: Entity) -> Option<String> {
-    if let Some(name) = cx.query.get::<Name>(entity) {
-        return Some(name.0.clone());
-    }
-    match cx.query.get::<NodeKind>(entity) {
-        Some(NodeKind::Initializer) => Some("init".into()),
-        Some(NodeKind::Subscript) => Some("subscript".into()),
-        _ => None,
-    }
+    kestrel_name_res::helpers::member_lookup_name(cx.query, entity).map(str::to_owned)
 }
 
 fn signatures_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {

@@ -12,8 +12,8 @@ public struct Foo {
 @main
 func main() -> lang.i64 {
     var foo = Foo(structVar: 0);
-    let _ = println(foo.structVar);
+     println(foo.structVar);
     foo.structVar = 3;
-    let _ = println(foo.structVar);
+     println(foo.structVar);
     0
 }

@@ -43,6 +43,11 @@ pub struct MonoModule {
     pub statics: IndexMap<Entity, crate::item::static_def::StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
+    /// Duplications of a `not Copyable` instantiation found by
+    /// `expand_destroy_copy`; `verify_mono` reports each one as an error.
+    pub instantiation_findings: Vec<crate::mono::expand::InstantiationFinding>,
+    /// Carried over from [`crate::MirModule::observable_drop`].
+    pub observable_drop: indexmap::IndexSet<Entity>,
 }
 
 impl MonoModule {
@@ -54,6 +59,8 @@ impl MonoModule {
             statics: IndexMap::new(),
             ty_arena,
             entity_names: IndexMap::new(),
+            instantiation_findings: Vec::new(),
+            observable_drop: indexmap::IndexSet::new(),
         }
     }
 
@@ -86,6 +93,11 @@ pub struct MonoFunction {
     /// True for the `@main` entry point (propagated from `FunctionDef.is_main`).
     /// Consumed by the codegen backend to select the entry and export C `main`.
     pub is_main: bool,
+    /// True when `ret` is a `MirTy::Ref` (`-> &T`): the function returns the
+    /// raw pointer (`ret_borrow` ABI). Derived once at creation via
+    /// `item::function::ret_convention`; codegen reads the bit, never
+    /// re-matches the type.
+    pub ret_borrow: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -269,6 +281,7 @@ mod tests {
             body: None,
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         };
         let id = module.add_function(func);
         assert_eq!(id.index(), 0);

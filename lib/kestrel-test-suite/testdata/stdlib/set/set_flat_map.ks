@@ -6,14 +6,14 @@ module Test
         @main
         func main() -> lang.i64 {
             var s = std.collections.Set[std.numeric.Int64]();
-            let _ = s.insert(1);
-            let _ = s.insert(2);
+             s.insert(1);
+             s.insert(2);
 
             // flatMap: transform returns Set, results are unioned
             let result = s.flatMap({ (x) in
                 var inner = std.collections.Set[std.numeric.Int64]();
-                let _ = inner.insert(x);
-                let _ = inner.insert(x * 10);
+                 inner.insert(x);
+                 inner.insert(x * 10);
                 inner
             });
             // {1} union {10} union {2} union {20} = {1, 2, 10, 20}
@@ -25,13 +25,13 @@ module Test
 
             // flatMap with overlapping sets
             var s2 = std.collections.Set[std.numeric.Int64]();
-            let _ = s2.insert(1);
-            let _ = s2.insert(2);
-            let _ = s2.insert(3);
+             s2.insert(1);
+             s2.insert(2);
+             s2.insert(3);
             let overlap = s2.flatMap({ (x) in
                 var inner = std.collections.Set[std.numeric.Int64]();
-                let _ = inner.insert(x);
-                let _ = inner.insert(x + 1);
+                 inner.insert(x);
+                 inner.insert(x + 1);
                 inner
             });
             // {1,2} union {2,3} union {3,4} = {1, 2, 3, 4}
@@ -43,7 +43,7 @@ module Test
             let empty = std.collections.Set[std.numeric.Int64]();
             let emptyResult = empty.flatMap({ (x) in
                 var inner = std.collections.Set[std.numeric.Int64]();
-                let _ = inner.insert(x);
+                 inner.insert(x);
                 inner
             });
             if emptyResult.count != 0 { return 9 }

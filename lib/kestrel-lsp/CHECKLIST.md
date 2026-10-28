@@ -46,7 +46,7 @@ Tracks progress against the milestone plan. Tick each item as it lands.
 
 ## M2 — Hover, go-to-definition, semantic tokens
 - [x] **Confirmed** `DeclSpan` component already exists in `kestrel-ast-builder/src/components.rs:43` and is set by every builder via `get_decl_span()`. No compiler changes needed.
-- [x] `semantic.rs` — `body_entity_at(world, file, offset)`, `hir_expr_at(body, offset)`, `hir_expr_span(expr)`. Unit tests cover both lookups.
+- [x] `semantic.rs` — `body_entity_at(world, file, offset)`, `hir_expr_at(body, offset)`, `hir_expr_span(expr)`. Unit tests cover both lookups. *(Later replaced: `expr_at` / `pat_at` / `local_declared_at` / `target_at` read the body's `BodySourceMap`; see `docs/design/frontend.md`.)*
 - [x] `ty_format.rs` — `format_ty(world, ResolvedTy)` walks `Named`/`Param`/`SelfType`/`Tuple`/`Function`/`Never`/`Error` and resolves entity paths from the world.
 - [x] `handlers/hover.rs` — find body via `Valued.text_range`, run `LowerBody` + `InferBody`, look up `expr_types[id]`, render via `format_ty`. Smoke verified: hover on `42` → `lang.i64` with the literal's exact range.
 - [x] `handlers/definition.rs` — Three-way dispatch on the HIR expression: `Def(entity)` → `DeclSpan`, `Local(id)` → `HirBody.locals[id].span`, `MethodCall`/`Field`/`Call`/`ProtocolCall` → `TypedBody.resolutions[id]`. Smoke verified: jump from `foo()` call to its `func foo` declaration.

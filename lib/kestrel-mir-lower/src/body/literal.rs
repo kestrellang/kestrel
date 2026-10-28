@@ -69,7 +69,7 @@ impl OssaBodyCtx<'_, '_> {
                     "floatLiteral",
                     kestrel_hir::Builtin::ExpressibleByFloatLiteral,
                 ),
-                HirLiteral::Char(_) => (
+                HirLiteral::Char { .. } => (
                     "charLiteral",
                     kestrel_hir::Builtin::ExpressibleByCharLiteral,
                 ),
@@ -91,10 +91,10 @@ impl OssaBodyCtx<'_, '_> {
     fn lower_literal_primitive(&mut self, lit: &HirLiteral, target_ty: TyId) -> ValueId {
         let imm = match lit {
             HirLiteral::Integer(v) => match self.ctx.module.ty_arena.get(target_ty) {
-                MirTy::I8 => Immediate::i8(*v as i128),
-                MirTy::I16 => Immediate::i16(*v as i128),
-                MirTy::I32 => Immediate::i32(*v as i128),
-                _ => Immediate::i64(*v as i128),
+                MirTy::I8 => Immediate::i8(*v),
+                MirTy::I16 => Immediate::i16(*v),
+                MirTy::I32 => Immediate::i32(*v),
+                _ => Immediate::i64(*v),
             },
             HirLiteral::Float(v) => match self.ctx.module.ty_arena.get(target_ty) {
                 MirTy::F32 => Immediate::f32(*v),
@@ -102,7 +102,7 @@ impl OssaBodyCtx<'_, '_> {
             },
             HirLiteral::Bool(v) => Immediate::bool(*v),
             HirLiteral::String { value, .. } => Immediate::string(value.clone()),
-            HirLiteral::Char(c) => Immediate::i32(*c as i128),
+            HirLiteral::Char { value: c, .. } => Immediate::i32(*c as i128),
             HirLiteral::Null => Immediate::unit(),
         };
         self.emit_literal(imm)
@@ -245,6 +245,9 @@ impl OssaBodyCtx<'_, '_> {
         let unit_ty = self.ctx.module.ty_arena.unit();
         for (i, &elem_expr) in elements.iter().enumerate() {
             let elem_val = self.lower_expr(elem_expr);
+            // Stage 1.5: a ref element decays to an owned copy (the buffer
+            // owns its elements); the copy ends the ref's borrow.
+            let elem_val = self.decay_if_ref(elem_val);
             let elem_ptr = if i == 0 {
                 ptr
             } else {
@@ -342,7 +345,11 @@ impl OssaBodyCtx<'_, '_> {
         let unit_ty = self.ctx.module.ty_arena.unit();
         for (i, entry) in entries.iter().enumerate() {
             let key = self.lower_expr(entry.key);
+            // Stage 1.5: ref entries decay to owned copies (the dict owns
+            // its keys and values).
+            let key = self.decay_if_ref(key);
             let val = self.lower_expr(entry.value);
+            let val = self.decay_if_ref(val);
 
             // Build (key, val) tuple
             let pair = self.emit_tuple(pair_ty, vec![key, val]);
@@ -418,7 +425,7 @@ impl OssaBodyCtx<'_, '_> {
         )
     }
 
-    fn find_literal_init(
+    pub(crate) fn find_literal_init(
         &self,
         struct_entity: Entity,
         protocol: kestrel_hir::Builtin,

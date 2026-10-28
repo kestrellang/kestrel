@@ -7,18 +7,23 @@
 
 use std::path::PathBuf;
 
-use kestrel_ast::ast_body::{AstExpr, AstLiteral};
-use kestrel_ast_builder::{Attributes, Body, FileId, FilePath, Settable};
+use kestrel_ast_builder::{Attributes, FileId, FilePath, Settable, Valued};
 use kestrel_hecs::Entity;
 use kestrel_mir::body::OssaBody;
 use kestrel_mir::item::function::{FunctionDef, FunctionKind};
 use kestrel_mir::item::static_def::{FileConstantData, StaticDef};
-use kestrel_mir::{Immediate, MirTy, TyId};
+use kestrel_mir::op::IntBits;
+use kestrel_mir::{FieldIdx, Immediate, MirTy, TyId, WitnessMethodKey};
+use kestrel_syntax_tree::SyntaxKind;
+use kestrel_syntax_tree::ast::{self, AstNode};
 
 use crate::context::LowerCtx;
 use crate::ty::resolve_type_annotation;
 
 const INIT_STATICS_NAME: &str = "__kestrel_init_statics";
+/// Internal name of the synthesized C entry point. Codegen exports the
+/// `is_main` function as the symbol `main` regardless of this name.
+const MAIN_WRAPPER_NAME: &str = "__kestrel_main";
 
 pub fn lower_static(ctx: &mut LowerCtx, entity: Entity) {
     let name = ctx.register_name(entity);
@@ -38,68 +43,292 @@ pub fn lower_static(ctx: &mut LowerCtx, entity: Entity) {
 }
 
 /// Synthesize init thunks for statics with initializer bodies, a master
-/// `__kestrel_init_statics` function, and inject its call into `main`.
+/// `__kestrel_init_statics` function, and the C `main` wrapper that runs static
+/// init then the user `@main`.
 pub fn synthesize_static_inits(ctx: &mut LowerCtx) {
     let with_init: Vec<(Entity, TyId)> = ctx
         .module
         .statics
         .values()
         .filter(|s| s.file_constant_data.is_none())
-        .filter(|s| ctx.world.get::<Body>(s.entity).is_some())
+        .filter(|s| ctx.world.get::<Valued>(s.entity).is_some())
         .map(|s| (s.entity, s.ty))
         .collect();
+    let with_init = dependency_order(ctx, with_init);
 
-    if with_init.is_empty() {
-        return;
-    }
+    // Per-static thunks + master init (only when there are statics to initialize).
+    let master = if with_init.is_empty() {
+        None
+    } else {
+        let thunks: Vec<(Entity, Entity, TyId)> = with_init
+            .into_iter()
+            .map(|(entity, ty)| {
+                let thunk_entity = synthesize_init_thunk(ctx, entity, ty);
+                (entity, thunk_entity, ty)
+            })
+            .collect();
+        Some(synthesize_master_init(ctx, &thunks))
+    };
 
-    // One thunk per static
-    let thunks: Vec<(Entity, Entity, TyId)> = with_init
-        .into_iter()
-        .map(|(entity, ty)| {
-            let thunk_entity = synthesize_init_thunk(ctx, entity, ty);
-            (entity, thunk_entity, ty)
-        })
-        .collect();
-
-    // Master init function, called from the start of `main`.
-    let master = synthesize_master_init(ctx, &thunks);
-    inject_init_call_into_main(ctx, master);
+    // The entry point itself — synthesized whenever a `@main` exists, even with
+    // no statics to initialize.
+    synthesize_main_wrapper(ctx, master);
 }
 
-/// Prepend `call __kestrel_init_statics()` to the entry point's entry block so
-/// global constants are initialized before any user code runs. The entry point
-/// is the `@main`-marked function (mirrors codegen's `is_main_function`, which
-/// also keys off `is_main`). No entry (a library) → nothing to inject.
-fn inject_init_call_into_main(ctx: &mut LowerCtx, master_entity: Entity) {
-    use kestrel_mir::callee::Callee;
-    use kestrel_mir::inst::{InstKind, Instruction};
+/// Order initializers so each runs after the globals it reads
+/// (`let a = b + 1; let b = 2` initializes `b` first). Post-order DFS over
+/// `GlobalInitDeps`; a cycle is already an analyzer error (E633), so the
+/// visited set only has to stop the walk.
+fn dependency_order(ctx: &mut LowerCtx, statics: Vec<(Entity, TyId)>) -> Vec<(Entity, TyId)> {
+    let ty_of: std::collections::HashMap<Entity, TyId> = statics.iter().copied().collect();
+    let mut order = Vec::with_capacity(statics.len());
+    let mut visited = std::collections::HashSet::new();
+    let mut stack: Vec<(Entity, bool)> = statics.iter().rev().map(|&(e, _)| (e, false)).collect();
+    while let Some((e, children_done)) = stack.pop() {
+        if children_done {
+            order.push((e, ty_of[&e]));
+            continue;
+        }
+        if !visited.insert(e) {
+            continue;
+        }
+        stack.push((e, true));
+        let deps = ctx.query.query(kestrel_hir_lower::GlobalInitDeps {
+            entity: e,
+            root: ctx.root,
+        });
+        for d in deps.into_iter().rev() {
+            if ty_of.contains_key(&d) && !visited.contains(&d) {
+                stack.push((d, false));
+            }
+        }
+    }
+    order
+}
 
-    let main_entity = ctx
+/// Synthesize the real C `main`: a wrapper `__kestrel_main() -> i64` that runs
+/// static init (if any), calls the user `@main` (now an ordinary function), and
+/// turns its result into the process exit code. The user `@main` is demoted to
+/// `is_main = false`; the wrapper carries `is_main = true` so codegen exports it
+/// as the `main` symbol. No `@main` (a library) → nothing to synthesize.
+///
+/// The wrapper branches on the user return type:
+/// - `()` / `!`              → run, return `0` (`!` diverges → unreachable)
+/// - raw `lang.iN`           → run, sign-extend the result to `i64` (back-compat)
+/// - any `Exitable` conformer → `run().report().rawValue`, sign-extended to `i64`
+fn synthesize_main_wrapper(ctx: &mut LowerCtx, master_init: Option<Entity>) {
+    use kestrel_hir::builtin::Builtin;
+    use kestrel_mir::ParamConvention;
+    use kestrel_mir::callee::Callee;
+    use kestrel_mir::inst::{CallArg, InstKind, Instruction};
+    use kestrel_mir::terminator::{Terminator, TerminatorKind};
+    use kestrel_mir::value::ValueDef;
+    use kestrel_name_res::ResolveBuiltin;
+
+    // Find the user `@main` and demote it; no entry point ⇒ a library.
+    let Some(run_entity) = ctx
         .module
         .functions
         .iter()
         .find(|(_, f)| f.body.is_some() && f.is_main)
-        .map(|(entity, _)| *entity);
-
-    let Some(main_entity) = main_entity else {
+        .map(|(entity, _)| *entity)
+    else {
         return;
     };
+    let run_ret = ctx.module.functions.get(&run_entity).unwrap().ret;
+    ctx.module.functions.get_mut(&run_entity).unwrap().is_main = false;
 
-    let call = Instruction::new(InstKind::Call {
-        result: None,
-        callee: Callee::direct(master_entity),
-        args: vec![],
-    });
+    // Wrapper: `__kestrel_main() -> i64`, marked as the entry point.
+    let i64_ty = ctx.module.ty_arena.i64();
+    let wrapper = ctx.next_synthetic_entity();
+    ctx.module.register_name(wrapper, MAIN_WRAPPER_NAME);
+    let mut def = FunctionDef::new(wrapper, MAIN_WRAPPER_NAME, i64_ty);
+    def.kind = FunctionKind::Free;
+    def.is_main = true;
+    ctx.module.add_function(def);
 
-    let body = ctx
-        .module
-        .functions
-        .get_mut(&main_entity)
-        .and_then(|f| f.body.as_mut())
-        .expect("main has a body");
-    let entry = body.entry;
-    body.block_mut(entry).insts.insert(0, call);
+    let mut body = OssaBody::new();
+    let entry = body.alloc_block();
+    body.entry = entry;
+
+    // 1. Static initialization (moved out of the user `@main`).
+    if let Some(master) = master_init {
+        body.block_mut(entry)
+            .insts
+            .push(Instruction::new(InstKind::Call {
+                result: None,
+                callee: Callee::direct(master),
+                args: vec![],
+            }));
+    }
+
+    // Branch on the user `@main`'s return type. INVARIANT: this set must track
+    // `kestrel-analyze`'s `exitable_return_type` (E616) — the analyzer accepts
+    // exactly the types lowered here. `()`/`!`/`lang.iN` are handled structurally
+    // (no `Exitable` conformance, so they work with no stdlib); everything else
+    // goes through the `Exitable.report()` witness.
+    let run_mir = ctx.module.ty_arena.get(run_ret).clone();
+
+    if matches!(&run_mir, MirTy::Tuple(elems) if elems.is_empty()) {
+        // `()` — run for effect, exit 0.
+        push_call(&mut body, entry, None, Callee::direct(run_entity), vec![]);
+        let zero = body.alloc_value(ValueDef::owned(i64_ty));
+        body.block_mut(entry)
+            .insts
+            .push(Instruction::new(InstKind::Literal {
+                result: zero,
+                value: Immediate::i64(0),
+            }));
+        body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(zero));
+    } else if matches!(&run_mir, MirTy::Never) {
+        // `!` — the call diverges; the wrapper never returns.
+        push_call(&mut body, entry, None, Callee::direct(run_entity), vec![]);
+        body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Unreachable);
+    } else if let Some(src_bits) = int_bits(&run_mir) {
+        // Raw `lang.iN` — sign-extend the result into the C `int` (back-compat).
+        let run_val = body.alloc_value(ValueDef::owned(run_ret));
+        push_call(
+            &mut body,
+            entry,
+            Some(run_val),
+            Callee::direct(run_entity),
+            vec![],
+        );
+        let ret_val = widen_to_i64(&mut body, entry, run_val, src_bits, i64_ty);
+        body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(ret_val));
+    } else {
+        // Any `Exitable` conformer — `run().report().rawValue`.
+        let exitable = ctx.query.query(ResolveBuiltin {
+            builtin: Builtin::Exitable,
+            root: ctx.root,
+        });
+        let exitcode_ent = ctx.query.query(ResolveBuiltin {
+            builtin: Builtin::ExitCode,
+            root: ctx.root,
+        });
+
+        let run_val = body.alloc_value(ValueDef::owned(run_ret));
+        push_call(
+            &mut body,
+            entry,
+            Some(run_val),
+            Callee::direct(run_entity),
+            vec![],
+        );
+
+        let ret_val = match (exitable, exitcode_ent) {
+            (Some(exitable), Some(exitcode_ent)) => {
+                let exitcode_ty = ctx.module.ty_arena.named(exitcode_ent, vec![]);
+                let i8_ty = ctx.module.ty_arena.i8();
+                let field = ctx
+                    .resolve_field_idx(exitcode_ent, "rawValue")
+                    .unwrap_or(FieldIdx::new(0));
+
+                // run_val.report() -> ExitCode  (consumes run_val)
+                let code = body.alloc_value(ValueDef::owned(exitcode_ty));
+                push_call(
+                    &mut body,
+                    entry,
+                    Some(code),
+                    Callee::Witness {
+                        protocol: exitable,
+                        method: WitnessMethodKey::simple("report"),
+                        self_type: run_ret,
+                        method_type_args: vec![],
+                    },
+                    vec![CallArg {
+                        value: run_val,
+                        convention: ParamConvention::Consuming,
+                    }],
+                );
+
+                // code.rawValue : lang.i8
+                let raw = body.alloc_value(ValueDef::owned(i8_ty));
+                body.block_mut(entry)
+                    .insts
+                    .push(Instruction::new(InstKind::StructExtract {
+                        result: raw,
+                        operand: code,
+                        field,
+                    }));
+                widen_to_i64(&mut body, entry, raw, IntBits::I8, i64_ty)
+            },
+            // Exitable/ExitCode unavailable (e.g. `--no-std`) — best effort: exit 0.
+            _ => {
+                let zero = body.alloc_value(ValueDef::owned(i64_ty));
+                body.block_mut(entry)
+                    .insts
+                    .push(Instruction::new(InstKind::Literal {
+                        result: zero,
+                        value: Immediate::i64(0),
+                    }));
+                zero
+            },
+        };
+        body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(ret_val));
+    }
+
+    ctx.module.functions.get_mut(&wrapper).unwrap().body = Some(body);
+}
+
+/// Push a `Call` instruction onto `entry`.
+fn push_call(
+    body: &mut OssaBody,
+    entry: kestrel_mir::BlockId,
+    result: Option<kestrel_mir::ValueId>,
+    callee: kestrel_mir::callee::Callee,
+    args: Vec<kestrel_mir::inst::CallArg>,
+) {
+    use kestrel_mir::inst::{InstKind, Instruction};
+    body.block_mut(entry)
+        .insts
+        .push(Instruction::new(InstKind::Call {
+            result,
+            callee,
+            args,
+        }));
+}
+
+/// Sign-extend `value` (of width `src_bits`) to `i64`, returning the widened
+/// value (or `value` itself when already 64-bit).
+fn widen_to_i64(
+    body: &mut OssaBody,
+    entry: kestrel_mir::BlockId,
+    value: kestrel_mir::ValueId,
+    src_bits: IntBits,
+    i64_ty: TyId,
+) -> kestrel_mir::ValueId {
+    use kestrel_mir::inst::{InstKind, Instruction};
+    use kestrel_mir::op::Op;
+    use kestrel_mir::value::ValueDef;
+    if src_bits == IntBits::I64 {
+        return value;
+    }
+    let widened = body.alloc_value(ValueDef::owned(i64_ty));
+    body.block_mut(entry)
+        .insts
+        .push(Instruction::new(InstKind::Op1 {
+            result: widened,
+            op: Op::IntWiden(src_bits, IntBits::I64),
+            arg: value,
+        }));
+    // `Op1` is a non-consuming read, so the @owned source scalar must still be
+    // consumed. DestroyValue on a trivial scalar is a no-op the expand pass drops.
+    body.block_mut(entry)
+        .insts
+        .push(Instruction::new(InstKind::DestroyValue { operand: value }));
+    widened
+}
+
+/// The `IntBits` for a raw `lang.iN` primitive type, if `ty` is one.
+fn int_bits(ty: &MirTy) -> Option<IntBits> {
+    match ty {
+        MirTy::I8 => Some(IntBits::I8),
+        MirTy::I16 => Some(IntBits::I16),
+        MirTy::I32 => Some(IntBits::I32),
+        MirTy::I64 => Some(IntBits::I64),
+        _ => None,
+    }
 }
 
 /// Create `func __init$<name>() -> T { <initializer expr> }`.
@@ -189,36 +418,34 @@ fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, Entity, TyId)])
     entity
 }
 
-/// If the initializer body is a single literal expression (no statements),
+/// If the initializer is a single decimal integer, float or bool literal,
 /// extract it as an Immediate so it can be baked into the static data section
-/// without needing an init thunk.
+/// without needing an init thunk. Anything else (including hex or `_`-grouped
+/// integers, which this does not parse) gets an init thunk.
 fn extract_literal_initializer(ctx: &LowerCtx, entity: Entity, ty: TyId) -> Option<Immediate> {
-    let body = &ctx.world.get::<Body>(entity)?.0;
-    if !body.statements.is_empty() {
-        return None;
-    }
-    let tail = body.tail_expr?;
-    match &body.exprs[tail] {
-        AstExpr::Literal { kind, .. } => match kind {
-            AstLiteral::Integer(s) => {
-                let v: i128 = s.parse().ok()?;
-                Some(match ctx.module.ty_arena.get(ty) {
-                    MirTy::I8 => Immediate::i8(v),
-                    MirTy::I16 => Immediate::i16(v),
-                    MirTy::I32 => Immediate::i32(v),
-                    _ => Immediate::i64(v),
-                })
-            },
-            AstLiteral::Float(s) => {
-                let v: f64 = s.parse().ok()?;
-                Some(match ctx.module.ty_arena.get(ty) {
-                    MirTy::F32 => Immediate::f32(v),
-                    _ => Immediate::f64(v),
-                })
-            },
-            AstLiteral::Bool(v) => Some(Immediate::bool(*v)),
-            _ => None,
+    ctx.world.get::<Valued>(entity)?;
+    let node = kestrel_ast_builder::syntax::valued_node(ctx.world, entity)?;
+    let literal = ast::Expression::cast(node)?.expr()?;
+    let token = kestrel_syntax_tree::ast::first_token(literal.syntax())?;
+    let text = token.text();
+    match literal.syntax().kind() {
+        SyntaxKind::ExprInteger => {
+            let v: i128 = text.parse().ok()?;
+            Some(match ctx.module.ty_arena.get(ty) {
+                MirTy::I8 => Immediate::i8(v),
+                MirTy::I16 => Immediate::i16(v),
+                MirTy::I32 => Immediate::i32(v),
+                _ => Immediate::i64(v),
+            })
         },
+        SyntaxKind::ExprFloat => {
+            let v: f64 = text.parse().ok()?;
+            Some(match ctx.module.ty_arena.get(ty) {
+                MirTy::F32 => Immediate::f32(v),
+                _ => Immediate::f64(v),
+            })
+        },
+        SyntaxKind::ExprBool => Some(Immediate::bool(text == "true")),
         _ => None,
     }
 }

@@ -19,9 +19,10 @@
 //!
 //! **Notes:** (none)
 
+use crate::body::control_flow;
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
 
@@ -35,8 +36,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct GuardDivergenceAnalyzer;
 
 impl Describe for GuardDivergenceAnalyzer {
-    fn id(&self) -> &'static str {
-        "guard_divergence"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::GuardDivergence
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -58,7 +59,7 @@ impl BodyCheck for GuardDivergenceAnalyzer {
             let Some(else_block) = else_body else {
                 continue;
             };
-            if !block_diverges(cx.hir, else_block) {
+            if !control_flow::block_diverges(cx, else_block) {
                 let span = non_diverging_span(cx.hir, else_block)
                     .unwrap_or_else(|| util::stmt_span(cx.hir, stmt_id));
                 diags.push(guard_diverge_diagnostic(span));
@@ -74,7 +75,7 @@ impl BodyCheck for GuardDivergenceAnalyzer {
                 ..
             } = expr
                 && let Some(else_arm) = arms.last()
-                && !expr_diverges(cx.hir, else_arm.body)
+                && !control_flow::expr_diverges(cx, else_arm.body)
             {
                 let arm_span = util::expr_span(cx.hir, else_arm.body);
                 diags.push(guard_diverge_diagnostic(arm_span));
@@ -113,50 +114,4 @@ fn non_diverging_span(hir: &HirBody, block: &HirBlock) -> Option<kestrel_span::S
         return Some(util::expr_span(hir, *expr));
     }
     None
-}
-
-// ===== Divergence analysis (private to this analyzer) =====
-
-/// Check if a block definitely diverges.
-fn block_diverges(hir: &HirBody, block: &HirBlock) -> bool {
-    for &stmt_id in &block.stmts {
-        if stmt_diverges(hir, stmt_id) {
-            return true;
-        }
-    }
-    if let Some(tail) = block.tail_expr {
-        return expr_diverges(hir, tail);
-    }
-    false
-}
-
-fn stmt_diverges(hir: &HirBody, id: HirStmtId) -> bool {
-    match &hir.stmts[id] {
-        HirStmt::Expr { expr, .. } => expr_diverges(hir, *expr),
-        _ => false,
-    }
-}
-
-fn expr_diverges(hir: &HirBody, id: HirExprId) -> bool {
-    match &hir.exprs[id] {
-        HirExpr::Return { .. } | HirExpr::Break { .. } | HirExpr::Continue { .. } => true,
-        HirExpr::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            let then_div = block_diverges(hir, then_body);
-            match else_body {
-                Some(else_block) => then_div && block_diverges(hir, else_block),
-                None => false,
-            }
-        },
-        HirExpr::Match { arms, .. } => {
-            !arms.is_empty() && arms.iter().all(|arm| expr_diverges(hir, arm.body))
-        },
-        // Infinite loop (no break) diverges
-        HirExpr::Loop { .. } => true,
-        HirExpr::Block { body, .. } => block_diverges(hir, body),
-        _ => false,
-    }
 }

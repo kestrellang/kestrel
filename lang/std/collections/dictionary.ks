@@ -3,7 +3,7 @@
 module std.collections
 
 import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Addable, fatalError)
-import std.text.(Formattable, FormatOptions, String, StringBuilder)
+import std.text.(Formattable, Formatter, FormatOptions, String, StringBuilder)
 import std.numeric.(Int64, UInt64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, CowBox)
@@ -361,10 +361,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// COW write barrier — ensures the storage is uniquely owned.
     private mutating func makeUnique() {
-        if self.storage.isUnique() == false {
-            var s = self.storage.write();
-            self.storage.setValue(s)
-        }
+        self.storage.ensureUnique()
     }
 
     /// @name From Storage
@@ -463,7 +460,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         self.init();
         var iter = pairs.iter();
         while let .Some(pair) = iter.next() {
-            let _ = self.insert( pair.0, pair.1);
+             self.insert( pair.0, pair.1);
         }
     }
 
@@ -499,12 +496,12 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 .Some(arr) => {
                     var newArr: Array[E] = arr;
                     newArr.append( element);
-                    let _ = self.insert( key, newArr);
+                     self.insert( key, newArr);
                 },
                 .None => {
                     var arr = Array[E]();
                     arr.append( element);
-                    let _ = self.insert( key, arr);
+                     self.insert( key, arr);
                 }
             }
         }
@@ -538,7 +535,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             if self.contains( pair.0) {
                 fatalError("Dictionary(uniquePairs:): duplicate key")
             }
-            let _ = self.insert( pair.0, pair.1);
+             self.insert( pair.0, pair.1);
         }
     }
 
@@ -673,10 +670,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         set {
             match newValue {
                 .Some(value) => {
-                    let _ = self.insert( key, value);
+                     self.insert( key, value);
                 },
                 .None => {
-                    let _ = self.remove( key);
+                     self.remove( key);
                 }
             }
         }
@@ -739,7 +736,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             }
         }
         set {
-            let _ = self.insert( key, newValue);
+             self.insert( key, newValue);
         }
     }
 
@@ -1006,7 +1003,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
             let myBuckets = self.buckets();
-            let oldBucket = myBuckets.offset(by: index).read();
+            // Move the old entry out: `write` overwrites without dropping,
+            // so a `read()` copy here leaked the replaced key and value.
+            let oldBucket = myBuckets.offset(by: index).take();
             let oldValue: V? = match oldBucket {
                 .Occupied(_, v, _) => .Some(v),
                 _ => .None
@@ -1052,7 +1051,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
             let removedValue = self.storage.modify { (mutating s) in
-                let bucket = s.buckets.offset(by: index).read();
+                // Moved out (not `read()`): the tombstone write drops nothing.
+                let bucket = s.buckets.offset(by: index).take();
                 let rv: V? = match bucket {
                     .Occupied(_, v, _) => .Some(v),
                     _ => .None
@@ -1065,6 +1065,46 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             };
 
             return removedValue
+        }
+
+        .None
+    }
+
+    /// Removes `key` and returns the *stored* `(key, value)` pair, or
+    /// `None` if absent.
+    ///
+    /// Like `remove(...)`, but also hands back the stored key — useful
+    /// when key equality is coarser than identity (the stored key may
+    /// differ from the probe). Same tombstone/COW behaviour as
+    /// `remove(...)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1, "b": 2];
+    /// dict.removeEntry("a");  // Some(("a", 1)); dict = ["b": 2]
+    /// dict.removeEntry("z");  // None;           dict unchanged
+    /// ```
+    public mutating func removeEntry(key: K) -> (K, V)? {
+        let maybeIndex = self.findEntry(key);
+
+        if let .Some(index) = maybeIndex {
+            self.makeUnique();
+            let removedEntry = self.storage.modify { (mutating s) in
+                // Moved out (not `read()`): the tombstone write drops nothing.
+                let bucket = s.buckets.offset(by: index).take();
+                let rv: (K, V)? = match bucket {
+                    .Occupied(k, v, _) => .Some((k, v)),
+                    _ => .None
+                };
+
+                // Mark as deleted (tombstone)
+                s.buckets.offset(by: index).write(.Deleted);
+                s.len = s.len - 1;
+                rv
+            };
+
+            return removedEntry
         }
 
         .None
@@ -1096,6 +1136,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Applies `transform` to the existing value for `key` and writes
     /// the result back; returns whether the key was found.
     ///
+    /// **Deprecated:** prefer `modify(...)`, which mutates in place with
+    /// a single probe (no re-hash on write-back) and returns the
+    /// closure's result. `update` will be removed in a future release.
+    ///
     /// No-op when the key is absent — for "update or insert" semantics
     /// use `upsert(...)`. Internally re-uses `insert(...)`, so the
     /// hash is recomputed.
@@ -1111,11 +1155,50 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let maybeValue = self(key);
         match maybeValue {
             .Some(v) => {
-                let _ = self.insert( key, transform(v));
+                 self.insert( key, transform(v));
                 true
             },
             .None => false
         }
+    }
+
+    /// Mutates the value for `key` in place and returns the closure's
+    /// result, or `None` (without invoking `body`) if the key is absent.
+    ///
+    /// The interim form of in-place value access — the conditional
+    /// ref-returning lookup (`find(key:) -> Optional[&V]`) waits for
+    /// `Optional[&T]`. Today this is a bucket read → mutate → write-back
+    /// under the hood; it can upgrade to true in-place mutation later with
+    /// no API change. One probe (no re-hash on write-back, unlike
+    /// `update(...)`); triggers COW only when the key is present.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1];
+    /// dict.modify("a") { (mutating v) in v = v + 1 };  // .Some(())
+    /// dict.modify("z") { (mutating v) in v = v + 1 };  // .None; body not invoked
+    /// dict("a");  // Some(2)
+    /// ```
+    public mutating func modify[R](key: K, body: (mutating V) -> R) -> R? {
+        let maybeIndex = self.findEntry(key);
+        if let .Some(index) = maybeIndex {
+            self.makeUnique();
+            let myBuckets = self.buckets();
+            // Moved out and written back below: `write` drops nothing.
+            let bucket = myBuckets.offset(by: index).take();
+            match bucket {
+                .Occupied(k, v, h) => {
+                    var value = v;
+                    let result = body(value);
+                    myBuckets.offset(by: index).write(.Occupied(k, value, h));
+                    return .Some(result)
+                },
+                // Unreachable: findEntry only returns occupied slots.
+                _ => {}
+            }
+        }
+        .None
     }
 
     /// Inserts `transform(defaultValue)` for a new key, or
@@ -1138,10 +1221,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let maybeValue = self(key);
         match maybeValue {
             .Some(v) => {
-                let _ = self.insert( key, transform(v));
+                 self.insert( key, transform(v));
             },
             .None => {
-                let _ = self.insert( key, transform(defaultValue));
+                 self.insert( key, transform(defaultValue));
             }
         }
     }
@@ -1168,10 +1251,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             let maybeExisting = self(pair.0);
             match maybeExisting {
                 .Some(existing) => {
-                    let _ = self.insert( pair.0, combine(existing, pair.1));
+                     self.insert( pair.0, combine(existing, pair.1));
                 },
                 .None => {
-                    let _ = self.insert( pair.0, pair.1);
+                     self.insert( pair.0, pair.1);
                 }
             }
         }
@@ -1199,10 +1282,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             let maybeExisting = self(pair.0);
             match maybeExisting {
                 .Some(existing) => {
-                    let _ = self.insert( pair.0, combine(existing, pair.1));
+                     self.insert( pair.0, combine(existing, pair.1));
                 },
                 .None => {
-                    let _ = self.insert( pair.0, pair.1);
+                     self.insert( pair.0, pair.1);
                 }
             }
         }
@@ -1241,7 +1324,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         var removeIter = keysToRemove.iter();
         while let .Some(key) = removeIter.next() {
-            let _ = self.remove( key);
+             self.remove( key);
         }
     }
 
@@ -1328,7 +1411,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     ///
     /// ```
     /// for (k, v) in dict.iter() { ... }
-    /// let entries = Array(from: dict.iter());
+    /// let entries = Array(from: dict);
     /// ```
     public func iter() -> DictionaryIterator[K, V] {
         DictionaryIterator(buckets: self.buckets(), capacity: self.cap())
@@ -1509,7 +1592,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             let bucket = myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
-                    let _ = result.insert( key, transform(value));
+                     result.insert( key, transform(value));
                 },
                 _ => {}
             }
@@ -1542,7 +1625,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             match bucket {
                 .Occupied(key, value, _) => {
                     if let .Some(transformed) = transform(value) {
-                        let _ = result.insert( key, transformed);
+                         result.insert( key, transformed);
                     }
                 },
                 _ => {}
@@ -1574,7 +1657,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             match bucket {
                 .Occupied(key, value, _) => {
                     if predicate(key, value) {
-                        let _ = result.insert( key, value);
+                         result.insert( key, value);
                     }
                 },
                 _ => {}
@@ -1637,6 +1720,40 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
 /// `Equatable` conformance for dictionaries whose values are themselves
 /// `Equatable`.
+/// `Hashable` conformance — order-independent over entries, so two
+/// dictionaries with the same `(key, value)` pairs hash equal
+/// regardless of insertion order.
+extend Dictionary[K, V, H]: Hashable where K: Hashable, V: Hashable, H: Hasher, H: Defaultable {
+
+    /// Order-independent hash: hashes each `(key, value)` entry with a
+    /// fresh hasher (key then value) and combines the per-entry digests
+    /// with a commutative (wrapping) sum, then feeds the count and the
+    /// combined sum into `hasher`.
+    ///
+    /// Consistent with `Equatable`: equal dictionaries produce equal
+    /// hashes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var h = DefaultHasher();
+    /// ["a": 1, "b": 2].hash(into: h);  // same digest as ["b": 2, "a": 1]
+    /// ```
+    public func hash[H2](mutating into hasher: H2) where H2: Hasher {
+        var combined: UInt64 = 0;
+        var entries = self.iter();
+        while let .Some(pair) = entries.next() {
+            var entryHasher = H();
+            pair.0.hash(into: entryHasher);
+            pair.1.hash(into: entryHasher);
+            // `+` wraps by default, so the sum is a safe commutative combiner.
+            combined = combined + entryHasher.finish();
+        }
+        self.count.hash(into: hasher);
+        combined.hash(into: hasher);
+    }
+}
+
 extend Dictionary[K, V, H]: Equatable where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
     /// Order-independent equality: dictionaries are equal iff they have
     /// the same `count` and every key in `self` is present in `other`
@@ -1793,7 +1910,7 @@ extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Fo
     /// Dictionary[String, Int64]().format();  // "{}"
     /// "\{["a": 1, "b": 2]}";      // "{a: 1, b: 2}"  via interpolation
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: '{');
         var first = true;
         let myCap = self.capacity;
@@ -1847,7 +1964,7 @@ extend Dictionary[K, V, H] where K: Hashable, H: Hasher, H: Defaultable {
             let bucket = myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
-                    let _ = result.insert( key, value);
+                     result.insert( key, value);
                 },
                 _ => {}
             }
@@ -2165,7 +2282,7 @@ extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.E
         // Insert each key-value pair
         var iter = elements.iter();
         while let .Some(pair) = iter.next() {
-            let _ = self.insert(pair.0, pair.1);
+             self.insert(pair.0, pair.1);
         }
     }
 }

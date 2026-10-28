@@ -4,17 +4,17 @@ module Main
 import std.io.stdio.println
 
 func alwaysFalse() -> Bool {
-    let _ = println("FALSE");
+     println("FALSE");
     false
 }
 
 func alwaysTrue() -> Bool {
-    let _ = println("TRUE");
+     println("TRUE");
     true
 }
 
 func main() -> lang.i64 {
     let r = alwaysTrue() or alwaysFalse();
-    let _ = println(r);
+     println(r);
     0
 }

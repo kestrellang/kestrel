@@ -1,14 +1,14 @@
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::accumulator::AccumulatorStore;
-use crate::change::ChangeSet;
 use crate::component::{Component, ComponentStore};
 use crate::entity::Entity;
 use crate::fingerprint::Fingerprint;
+use crate::guard::OnDrop;
 use crate::world::Revision;
 
 /// Identifies a specific query invocation (type + key hash).
@@ -50,8 +50,8 @@ pub enum Dependency {
 ///     }
 /// }
 /// ```
-pub trait QueryFn: Hash + Eq + Clone + 'static {
-    type Output: Clone + Hash + 'static;
+pub trait QueryFn: Hash + Eq + Clone + Send + Sync + 'static {
+    type Output: Clone + Hash + Send + Sync + 'static;
 
     /// Execute the query. All component reads and sub-query calls go
     /// through `ctx`, which records dependencies automatically.
@@ -86,25 +86,29 @@ struct MemoEntry<V> {
 ///
 /// Used by `deps_unchanged` to recursively verify sub-query dependencies
 /// without knowing the sub-query's concrete type.
-type VerifierFn = Arc<dyn Fn(&QueryContext<'_>) -> Revision>;
+type VerifierFn = Arc<dyn Fn(&QueryContext<'_>) -> Revision + Send + Sync>;
 
-/// Type-erased store that can be cloned. Pairs a `Box<dyn Any>` with a
-/// clone function so we can duplicate query caches across snapshots.
+/// One query type's memo map, type-erased. The fn pointers are the only
+/// operations that need the concrete `Q`: cloning (snapshots) and finding
+/// the memos that read given entities (`World::despawn`).
 struct ErasedStore {
-    data: Box<dyn Any>,
-    clone_fn: fn(&dyn Any) -> Box<dyn Any>,
+    data: Box<dyn Any + Send + Sync>,
+    clone_fn: fn(&(dyn Any + Send + Sync)) -> Box<dyn Any + Send + Sync>,
+    readers_fn: fn(&(dyn Any + Send + Sync), &FxHashSet<Entity>, &mut Vec<QueryKey>),
 }
 
 impl ErasedStore {
-    fn new<T: Clone + 'static>(value: T) -> Self {
+    fn new<Q: QueryFn>() -> Self {
         Self {
-            data: Box::new(value),
-            clone_fn: |any| {
-                Box::new(
-                    any.downcast_ref::<T>()
-                        .expect("type mismatch in ErasedStore clone")
-                        .clone(),
-                )
+            data: Box::new(MemoMap::<Q>::default()),
+            clone_fn: |any| Box::new(downcast_memos::<Q>(any).clone()),
+            readers_fn: |any, entities, out| {
+                out.extend(
+                    downcast_memos::<Q>(any)
+                        .iter()
+                        .filter(|(_, memo)| memo.reads_any(entities))
+                        .map(|(q, _)| query_key(q)),
+                );
             },
         }
     }
@@ -112,51 +116,66 @@ impl ErasedStore {
     fn clone_store(&self) -> Self {
         Self {
             data: (self.clone_fn)(&*self.data),
-            clone_fn: self.clone_fn,
+            ..*self
         }
     }
 }
 
+type MemoMap<Q> = FxHashMap<Q, MemoEntry<<Q as QueryFn>::Output>>;
+
+fn downcast_memos<Q: QueryFn>(any: &(dyn Any + Send + Sync)) -> &MemoMap<Q> {
+    any.downcast_ref::<MemoMap<Q>>()
+        .expect("type mismatch in query storage")
+}
+
+impl<V> MemoEntry<V> {
+    /// Whether this memo read a component (or the children) of one of
+    /// `entities` itself — not through a sub-query.
+    fn reads_any(&self, entities: &FxHashSet<Entity>) -> bool {
+        self.deps.iter().any(
+            |dep| matches!(dep, Dependency::Component { entity, .. } if entities.contains(entity)),
+        )
+    }
+}
+
 /// Type-erased memoization storage. Each query type Q gets its own
-/// `HashMap<Q, MemoEntry<Q::Output>>`.
+/// `FxHashMap<Q, MemoEntry<Q::Output>>`.
 pub(crate) struct QueryStorage {
-    stores: HashMap<TypeId, ErasedStore>,
+    stores: FxHashMap<TypeId, ErasedStore>,
     /// Type-erased verifiers keyed by QueryKey. Registered when a query
     /// is first computed. Called during dep verification to recursively
     /// check if sub-queries have changed.
-    verifiers: HashMap<QueryKey, VerifierFn>,
+    verifiers: FxHashMap<QueryKey, VerifierFn>,
 }
 
 impl QueryStorage {
     pub fn new() -> Self {
         Self {
-            stores: HashMap::new(),
-            verifiers: HashMap::new(),
+            stores: FxHashMap::default(),
+            verifiers: FxHashMap::default(),
         }
     }
 
     fn get_memo<Q: QueryFn>(&self, key: &Q) -> Option<&MemoEntry<Q::Output>> {
         self.stores
             .get(&TypeId::of::<Q>())
-            .and_then(|s| s.data.downcast_ref::<HashMap<Q, MemoEntry<Q::Output>>>())
+            .and_then(|s| s.data.downcast_ref::<MemoMap<Q>>())
             .and_then(|map| map.get(key))
     }
 
     fn insert_memo<Q: QueryFn>(&mut self, key: Q, entry: MemoEntry<Q::Output>) {
         self.stores
             .entry(TypeId::of::<Q>())
-            .or_insert_with(|| ErasedStore::new(HashMap::<Q, MemoEntry<Q::Output>>::new()))
+            .or_insert_with(ErasedStore::new::<Q>)
             .data
-            .downcast_mut::<HashMap<Q, MemoEntry<Q::Output>>>()
+            .downcast_mut::<MemoMap<Q>>()
             .expect("type mismatch in query storage")
             .insert(key, entry);
     }
 
     fn update_verified<Q: QueryFn>(&mut self, key: &Q, revision: Revision) {
         if let Some(store) = self.stores.get_mut(&TypeId::of::<Q>())
-            && let Some(map) = store
-                .data
-                .downcast_mut::<HashMap<Q, MemoEntry<Q::Output>>>()
+            && let Some(map) = store.data.downcast_mut::<MemoMap<Q>>()
             && let Some(memo) = map.get_mut(key)
         {
             memo.verified_at = revision;
@@ -165,6 +184,15 @@ impl QueryStorage {
 
     fn register_verifier(&mut self, key: QueryKey, verifier: VerifierFn) {
         self.verifiers.insert(key, verifier);
+    }
+
+    /// Every memoized query that directly read one of `entities`.
+    pub(crate) fn readers_of(&self, entities: &FxHashSet<Entity>) -> Vec<QueryKey> {
+        let mut out = Vec::new();
+        for store in self.stores.values() {
+            (store.readers_fn)(&*store.data, entities, &mut out);
+        }
+        out
     }
 }
 
@@ -205,7 +233,8 @@ struct ActiveQuery {
 pub struct QueryContext<'a> {
     pub(crate) revision: Revision,
     pub(crate) components: &'a ComponentStore,
-    pub(crate) changes: &'a ChangeSet,
+    /// Per-entity `last_changed` stamps — the invalidation signal.
+    pub(crate) entities: &'a [crate::world::EntityRecord],
     pub(crate) hierarchy: &'a crate::world::Hierarchy,
     pub(crate) queries: &'a RefCell<QueryStorage>,
     pub(crate) accumulators: &'a RefCell<AccumulatorStore>,
@@ -221,7 +250,7 @@ impl<'a> QueryContext<'a> {
     pub(crate) fn new(
         revision: Revision,
         components: &'a ComponentStore,
-        changes: &'a ChangeSet,
+        entities: &'a [crate::world::EntityRecord],
         hierarchy: &'a crate::world::Hierarchy,
         queries: &'a RefCell<QueryStorage>,
         accumulators: &'a RefCell<AccumulatorStore>,
@@ -230,7 +259,7 @@ impl<'a> QueryContext<'a> {
         Self {
             revision,
             components,
-            changes,
+            entities,
             hierarchy,
             queries,
             accumulators,
@@ -288,7 +317,7 @@ impl<'a> QueryContext<'a> {
     /// in kestrel-compiler) for reporting diagnostics — it enforces that
     /// errors go through `ToDiagnostic` for consistent formatting.
     /// Use `accumulate` directly only for non-diagnostic side-effects.
-    pub fn accumulate<T: Clone + 'static>(&self, value: T) {
+    pub fn accumulate<T: Clone + Send + Sync + 'static>(&self, value: T) {
         // Associate with the current active query
         let active = self.active.borrow();
         let query_key = active.last().map(|a| a.key.clone()).unwrap_or(QueryKey {
@@ -312,38 +341,60 @@ impl<'a> QueryContext<'a> {
     /// Returns (value, changed_at). Does NOT record a dependency —
     /// the caller (query() or a verifier) handles that.
     fn ensure_fresh<Q: QueryFn>(&self, q: &Q, qk: &QueryKey) -> (Q::Output, Revision) {
-        // Phase 1: Check memo (borrow, clone what we need, drop borrow)
+        // Phase 1: Check memo. The fast path (already verified this revision)
+        // is by far the hottest, so return from it before cloning the deps
+        // vector — for widely-used queries deps can be long, and cloning it
+        // on every cache hit dominated batch-build profiles.
         let memo_info = {
             let storage = self.queries.borrow();
-            storage.get_memo::<Q>(q).map(|memo| {
-                (
-                    memo.value.clone(),
-                    memo.verified_at,
-                    memo.changed_at,
-                    memo.deps.clone(),
-                    memo.fingerprint,
-                )
-            })
+            match storage.get_memo::<Q>(q) {
+                Some(memo) if memo.verified_at >= self.revision => {
+                    return (memo.value.clone(), memo.changed_at);
+                },
+                Some(memo) => Some((memo.verified_at, memo.changed_at, memo.deps.clone())),
+                None => None,
+            }
         };
 
-        if let Some((value, verified_at, changed_at, deps, _fp)) = memo_info {
-            // Already verified this revision — fast path
-            if verified_at >= self.revision {
-                return (value, changed_at);
-            }
-
+        if let Some((verified_at, changed_at, deps)) = memo_info {
             // Tentatively mark as verified to break verification cycles.
             // If deps check fails, we'll re-execute and overwrite the memo.
             self.queries
                 .borrow_mut()
                 .update_verified::<Q>(q, self.revision);
 
+            // The mark is a *promise*, made good either by `deps_unchanged`
+            // agreeing or by `execute_query` rewriting the memo. If anything
+            // between here and one of those panics and a host catches it, the
+            // promise is never kept: the memo keeps its OLD value behind a
+            // `verified_at` that says "confirmed this revision", so every
+            // later reader in this revision silently takes a stale value.
+            // Roll the mark back on the unwind path only — the normal path
+            // legitimately keeps it (F22). The guard must outlive the
+            // re-execution below, not just the verification.
+            let queries = self.queries;
+            let _verify_guard = OnDrop::new(|| {
+                if std::thread::panicking() {
+                    queries.borrow_mut().update_verified::<Q>(q, verified_at);
+                }
+            });
+
             // Check if all deps are still valid (may recursively verify sub-queries)
             if self.deps_unchanged(&deps, verified_at) {
-                return (value, changed_at);
+                // Memo still valid — clone the value only now; cloning it
+                // before verification would be wasted work whenever the
+                // deps turn out to be stale. The tentative verified-mark
+                // above guarantees a recursive verify of `q` couldn't have
+                // re-executed it, so the memo entry is still the same one.
+                let storage = self.queries.borrow();
+                if let Some(memo) = storage.get_memo::<Q>(q) {
+                    return (memo.value.clone(), changed_at);
+                }
+                // Memo unexpectedly gone — fall through to re-execute.
             }
 
-            // Deps changed — fall through to re-execute
+            // Deps changed — re-execute, still under the guard.
+            return self.execute_query(q, qk);
         }
 
         // Phase 2: Execute the query
@@ -374,19 +425,48 @@ impl<'a> QueryContext<'a> {
             key: qk.clone(),
             label: q.describe(),
         });
+        // The pop MUST also happen when `q.execute` panics. Hosts catch
+        // per-unit-of-work panics and keep using the same context (see
+        // `kestrel_hecs::guard`); a leaked entry makes every later query
+        // that touches this key report a fabricated cycle, and misfiles
+        // top-level `accumulate` calls under the dead key. Pushes/pops are
+        // strictly LIFO (a nested execute completes inside this one), and
+        // guards unwind innermost-first, so `pop` removes our own entry.
+        let active = &self.active;
+        let _active_guard = OnDrop::new(|| {
+            active.borrow_mut().pop();
+        });
 
-        // Clear old accumulators for this query
-        self.accumulators.borrow_mut().clear_for_query(qk);
+        // Take (don't drop) this query's old accumulated values: the
+        // execution about to replace them can panic partway through, and
+        // losing previously-valid diagnostics to a caught ICE is worse than
+        // keeping stale ones for a revision.
+        let accumulators = self.accumulators;
+        let saved_acc = Cell::new(Some(accumulators.borrow_mut().take_for_query(qk)));
+        let acc_key = qk.clone();
+        let _acc_guard = OnDrop::new(|| {
+            if std::thread::panicking()
+                && let Some(snapshot) = saved_acc.take()
+            {
+                accumulators
+                    .borrow_mut()
+                    .restore_for_query(&acc_key, snapshot);
+            }
+        });
 
-        // Execute in a fresh dependency scope
-        let saved_deps = self.deps.take();
+        // Execute in a fresh dependency scope. The caller's list is restored
+        // by the guard on both paths — `execute_query` records no deps of
+        // its own after `q.execute` returns.
+        let deps = &self.deps;
+        let saved_deps = Cell::new(Some(deps.take()));
+        let _deps_guard = OnDrop::new(|| {
+            if let Some(saved) = saved_deps.take() {
+                deps.replace(saved);
+            }
+        });
         self.exec_count.set(self.exec_count.get() + 1);
         let result = q.execute(self);
         let new_deps = self.deps.take();
-        self.deps.replace(saved_deps);
-
-        // Pop from active stack
-        self.active.borrow_mut().pop();
 
         // Backdating: if the result fingerprint matches the old memo,
         // keep the old changed_at so dependents skip re-execution.
@@ -429,7 +509,11 @@ impl<'a> QueryContext<'a> {
 
     /// Check if all dependencies are still unchanged.
     ///
-    /// For component deps, checks the ChangeSet directly.
+    /// For component deps, the entity is changed if it was stamped after
+    /// `since` (the memo's `verified_at`). The stamp is durable: unlike the
+    /// per-revision `ChangeSet`, it is still visible revisions later, so a
+    /// change made in a revision where no query read the entity is not lost.
+    /// A despawned entity keeps its record, stamped at despawn.
     /// For sub-query deps, recursively verifies the sub-query via its
     /// registered type-erased verifier and checks if its changed_at
     /// is still within bounds.
@@ -437,7 +521,11 @@ impl<'a> QueryContext<'a> {
         for dep in deps {
             match dep {
                 Dependency::Component { entity, .. } => {
-                    if self.changes.is_changed(*entity) {
+                    let stamped_after = self
+                        .entities
+                        .get(entity.index())
+                        .is_none_or(|record| record.last_changed > since);
+                    if stamped_after {
                         return false;
                     }
                 },
@@ -480,12 +568,12 @@ fn hierarchy_dep_type() -> TypeId {
 fn query_key<Q: QueryFn>(q: &Q) -> QueryKey {
     // Use TypeId bits as the type discriminant
     let type_id_hash = {
-        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut h = FxHasher::default();
         TypeId::of::<Q>().hash(&mut h);
         h.finish()
     };
     let key_hash = {
-        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut h = FxHasher::default();
         q.hash(&mut h);
         h.finish()
     };

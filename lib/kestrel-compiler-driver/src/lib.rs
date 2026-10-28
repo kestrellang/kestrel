@@ -10,26 +10,57 @@ use std::collections::HashMap;
 use std::fmt;
 use std::panic::AssertUnwindSafe;
 
-use kestrel_ast_builder::{Body, Name, NodeKind};
-use kestrel_compiler::{Compiler, InferWithDiagnostics, diagnostic::WorldFiles};
+use kestrel_ast_builder::{Name, NodeKind, Valued};
+use kestrel_compiler::diagnostic::{SourceOrder, WorldFiles, source_order};
+use kestrel_compiler::{Compiler, InferWithDiagnostics};
 use kestrel_hecs::Entity;
 use kestrel_type_infer::error::InferError;
 
 /// Driver for running whole-program compilation phases on a borrowed `Compiler`.
+///
+/// # The two halves of "the diagnostics of this compilation"
+///
+/// Every phase except analysis deposits into the hECS accumulator, which
+/// `Compiler::diagnostics()` reads. Analyzers instead *return* a
+/// `Vec<AnalyzeDiagnostic>` on their `AnalyzeSummary`. That second home is why
+/// `kestrel dump` printed nothing and exited 0 for a file whose only error was
+/// an analyzer code (F17): the caller has to remember both, and one caller
+/// didn't.
+///
+/// The driver now remembers for them. `analyze_all` records its summary, and
+/// `emit_diagnostics` / `has_errors` read **both** halves, so no consumer can
+/// see only one. Emission is also idempotent: repeated calls print only what
+/// has not been printed yet (`build` emits once before codegen and again
+/// after).
 pub struct CompilerDriver<'a> {
     compiler: &'a Compiler,
+    /// The analyzer half, recorded by `analyze_all`. `None` until analysis runs
+    /// — an un-analyzed compilation legitimately has no analyzer diagnostics.
+    analyze: std::cell::RefCell<Option<AnalyzeSummary>>,
+    /// Accumulator diagnostics `emit_diagnostics` has already printed, by
+    /// their source-order key. A key, not a count: the accumulator's order is
+    /// not append-only, so a count prefix could reprint one diagnostic and
+    /// skip another.
+    emitted_accumulated: std::cell::RefCell<std::collections::HashSet<SourceOrder>>,
+    /// Whether the analyzer half has already been printed.
+    emitted_analyze: std::cell::Cell<bool>,
 }
 
 impl<'a> CompilerDriver<'a> {
     pub fn new(compiler: &'a Compiler) -> Self {
-        Self { compiler }
+        Self {
+            compiler,
+            analyze: std::cell::RefCell::new(None),
+            emitted_accumulated: std::cell::RefCell::default(),
+            emitted_analyze: std::cell::Cell::new(false),
+        }
     }
 
-    /// Run type inference on every entity with a `Body` component.
+    /// Run type inference on every entity with a body (a `Valued` component).
     ///
     /// Each body is queried through `InferWithDiagnostics`, so per-body
     /// results are memoized by the query cache. The outer scan is not
-    /// incremental — it visits every `Body` entity every call.
+    /// incremental — it visits every body entity every call.
     ///
     /// Panics in the solver are caught per-body and recorded in the
     /// summary so one bad body doesn't abort the whole run.
@@ -37,7 +68,7 @@ impl<'a> CompilerDriver<'a> {
         let world = self.compiler.world();
         let root = self.compiler.root();
 
-        let entities: Vec<Entity> = world.iter_component::<Body>().map(|(e, _)| e).collect();
+        let entities: Vec<Entity> = world.iter_component::<Valued>().map(|(e, _)| e).collect();
 
         let ctx = world.query_context();
         let mut summary = InferSummary::default();
@@ -139,7 +170,7 @@ impl<'a> CompilerDriver<'a> {
         let world = self.compiler.world();
         let root = self.compiler.root();
 
-        let body_entities: Vec<Entity> = world.iter_component::<Body>().map(|(e, _)| e).collect();
+        let body_entities: Vec<Entity> = world.iter_component::<Valued>().map(|(e, _)| e).collect();
         let decl_entities: Vec<Entity> =
             world.iter_component::<NodeKind>().map(|(e, _)| e).collect();
 
@@ -162,18 +193,119 @@ impl<'a> CompilerDriver<'a> {
             *summary.by_check.entry(d.descriptor_id).or_insert(0) += 1;
         }
         summary.diagnostics = diags;
+        // Record the analyzer half so `emit_diagnostics` / `has_errors` see it
+        // without every caller having to thread the summary back in (F17).
+        *self.analyze.borrow_mut() = Some(summary.clone());
+        self.emitted_analyze.set(false);
         summary
     }
 
-    /// Emit all accumulated diagnostics to stderr with source context.
+    /// Analyzer diagnostics that belong on stderr: errors, plus warnings when
+    /// `include_warnings` (`kestrel dump diagnostics` promises every
+    /// diagnostic; `build` keeps its output to errors). Info stays in the
+    /// summary.
+    fn emittable_analyze(
+        summary: &AnalyzeSummary,
+        include_warnings: bool,
+    ) -> Vec<&kestrel_analyze::AnalyzeDiagnostic> {
+        use kestrel_analyze::Severity;
+        summary
+            .diagnostics
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error
+                    || (include_warnings && d.severity == Severity::Warning)
+            })
+            .collect()
+    }
+
+    /// Emit every diagnostic of this compilation to stderr with source context
+    /// — both the accumulator half (lex, parse, infer, MIR) and the analyzer
+    /// half recorded by `analyze_all`.
+    ///
+    /// Idempotent: only diagnostics not already printed by an earlier call are
+    /// emitted, so a caller may flush at several points without duplicating.
     pub fn emit_diagnostics(&self) -> Result<(), codespan_reporting::files::Error> {
-        let diagnostics = self.compiler.diagnostics();
-        if diagnostics.is_empty() {
+        self.emit(false)
+    }
+
+    /// [`Self::emit_diagnostics`], with analyzer warnings too.
+    pub fn emit_diagnostics_with_warnings(&self) -> Result<(), codespan_reporting::files::Error> {
+        self.emit(true)
+    }
+
+    fn emit(&self, include_warnings: bool) -> Result<(), codespan_reporting::files::Error> {
+        let fresh: Vec<_> = {
+            let mut emitted = self.emitted_accumulated.borrow_mut();
+            self.compiler
+                .diagnostics()
+                .into_iter()
+                .filter(|d| emitted.insert(source_order(d)))
+                .collect()
+        };
+
+        let analyze = self.analyze.borrow();
+        let analyzer_diags = match analyze.as_ref() {
+            Some(s) if !self.emitted_analyze.get() => Self::emittable_analyze(s, include_warnings),
+            _ => Vec::new(),
+        };
+
+        if fresh.is_empty() && analyzer_diags.is_empty() {
             return Ok(());
         }
+
         let files = WorldFiles::from_world(self.compiler.world(), self.compiler.files());
-        kestrel_reporting::emit_all(&files, &diagnostics)
+        let mut to_emit: Vec<codespan_reporting::diagnostic::Diagnostic<usize>> = fresh;
+        to_emit.extend(analyzer_diags.iter().map(|d| analyze_to_codespan(d)));
+
+        if analyze.is_some() {
+            self.emitted_analyze.set(true);
+        }
+        kestrel_reporting::emit_all(&files, &to_emit)
     }
+
+    /// Does this compilation have an error in **either** diagnostic half?
+    ///
+    /// The single gate for "should this command fail?". Reading only
+    /// `Compiler::diagnostics()` misses every analyzer code (F17).
+    pub fn has_errors(&self) -> bool {
+        let accumulated = self
+            .compiler
+            .diagnostics()
+            .iter()
+            .any(|d| d.severity >= codespan_reporting::diagnostic::Severity::Error);
+        accumulated || self.analyze.borrow().as_ref().is_some_and(|s| s.errors > 0)
+    }
+}
+
+/// Render an analyzer diagnostic as a codespan diagnostic, so both halves
+/// print identically. The descriptor id becomes the diagnostic code.
+fn analyze_to_codespan(
+    d: &kestrel_analyze::AnalyzeDiagnostic,
+) -> codespan_reporting::diagnostic::Diagnostic<usize> {
+    use codespan_reporting::diagnostic::{Diagnostic, Label};
+
+    let labels = d
+        .labels
+        .iter()
+        .map(|l| {
+            let label = if l.is_primary {
+                Label::primary(l.span.file_id, l.span.range())
+            } else {
+                Label::secondary(l.span.file_id, l.span.range())
+            };
+            label.with_message(&l.message)
+        })
+        .collect();
+    let diag = match d.severity {
+        kestrel_analyze::Severity::Error => Diagnostic::error(),
+        kestrel_analyze::Severity::Warning => Diagnostic::warning(),
+        _ => Diagnostic::note(),
+    };
+    diag.with_code(d.descriptor_id)
+        .with_message(&d.message)
+        .with_labels(labels)
+        .with_notes(d.notes.clone())
 }
 
 /// Build a human-readable dotted path for an entity (e.g. "std.core.Bool.init").
@@ -251,6 +383,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::LabelMismatch { .. } => "LabelMismatch",
         InferError::InstanceMethodAsStatic { .. } => "InstanceMethodAsStatic",
         InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
+        InferError::TypeMustBeKnown { .. } => "TypeMustBeKnown",
         InferError::TypeArgCountMismatch { .. } => "TypeArgCountMismatch",
         InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
         InferError::MemberwiseInitArity { .. } => "MemberwiseInitArity",
@@ -264,7 +397,11 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::MemberAccessOnPrimitive { .. } => "MemberAccessOnPrimitive",
         InferError::MethodNotCalled { .. } => "MethodNotCalled",
         InferError::CircularOpaqueReturn { .. } => "CircularOpaqueReturn",
+        InferError::OpaqueUnderlierNotCopyable { .. } => "OpaqueUnderlierNotCopyable",
         InferError::ConventionMismatch { .. } => "ConventionMismatch",
+        InferError::KindMismatch { .. } => "KindMismatch",
+        InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
+        InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
     }
 }
 
@@ -338,6 +475,12 @@ fn format_error(err: &InferError) -> String {
         InferError::TypeParamAsValue { .. } => {
             format!("TypeParamAsValue at {}:{}", span.file_id, span.start)
         },
+        InferError::TypeMustBeKnown { member, .. } => {
+            format!(
+                "TypeMustBeKnown '{}' at {}:{}",
+                member, span.file_id, span.start
+            )
+        },
         InferError::TypeArgCountMismatch { expected, got, .. } => {
             format!(
                 "TypeArgCountMismatch expected={} got={} at {}:{}",
@@ -405,8 +548,28 @@ fn format_error(err: &InferError) -> String {
         InferError::CircularOpaqueReturn { .. } => {
             format!("CircularOpaqueReturn at {}:{}", span.file_id, span.start)
         },
+        InferError::OpaqueUnderlierNotCopyable { .. } => {
+            format!(
+                "OpaqueUnderlierNotCopyable at {}:{}",
+                span.file_id, span.start
+            )
+        },
         InferError::ConventionMismatch { .. } => {
             format!("ConventionMismatch at {}:{}", span.file_id, span.start)
+        },
+        InferError::KindMismatch {
+            expected, actual, ..
+        } => {
+            format!(
+                "KindMismatch (expected {expected:?}, got {actual:?}) at {}:{}",
+                span.file_id, span.start
+            )
+        },
+        InferError::RefFunctionAsValue { .. } => {
+            format!("RefFunctionAsValue at {}:{}", span.file_id, span.start)
+        },
+        InferError::RefInTypeArgument { .. } => {
+            format!("RefInTypeArgument at {}:{}", span.file_id, span.start)
         },
     }
 }
@@ -501,7 +664,7 @@ impl fmt::Display for InferSummary {
 }
 
 /// Summary of analysis results across all bodies.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AnalyzeSummary {
     pub errors: usize,
     pub warnings: usize,
@@ -537,12 +700,10 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    /// Path to the stdlib directory (relative to workspace root).
+    /// Path to this repo's stdlib. One resolver — see
+    /// `kestrel_compiler::stdlib_path`.
     fn stdlib_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../lang/std")
-            .canonicalize()
-            .expect("stdlib path should exist at lang/std")
+        kestrel_compiler::stdlib_path::repo_std_path()
     }
 
     #[test]

@@ -464,148 +464,31 @@ func processFile(path: String) -> Result[Array[String], ReadError] {
 
 ## Common Errors
 
-### E0601: Module Not Found
+> **Status (2026-08).** The seven `E06xx` codes this section used to document —
+> module-not-found, symbol-not-found, not-accessible, import conflict, duplicate
+> import — were never implemented. They are not in
+> [`docs/error-codes.md`](../error-codes.md), and the compiler emits **nothing**
+> for `import Some.Missing.Module`: the import resolves to nothing and the first
+> real error is whatever use of the missing symbol fails later. The transcripts
+> that used to appear here were fabricated.
+>
+> The scenarios below are still the ones worth designing for; they are listed as
+> open work, not as diagnostics you can expect today.
 
-```kestrel
-module Test
+| Scenario | Example | Today |
+|---|---|---|
+| Module not found | `import NonExistent` | silent; the missing name errors at use |
+| Path segment not found | `import Library.Nonexistent` | silent |
+| Symbol not found in module | `import Library.(NonExistent)` | silent |
+| Symbol not accessible | importing a `private` declaration | silent |
+| Import conflict | `Widget` imported from two modules | silent; one wins |
+| Import shadows a local declaration | `import Library.(Widget)` beside `struct Widget` | silent |
+| Duplicate import | the same symbol imported twice | silent |
 
-import NonExistent  // ERROR
-```
-
-```
-error[E0601]: module 'NonExistent' not found
-  --> test.ks:3:8
-   |
- 3 | import NonExistent
-   |        ^^^^^^^^^^^ no module named 'NonExistent'
-   |
-   = note: the module 'NonExistent' does not exist or is not visible from this scope
-```
-
-### E0602: Module Path Segment Not Found
-
-```kestrel
-module Test
-
-import Library.Nonexistent  // ERROR: if Library.Nonexistent doesn't exist
-```
-
-```
-error[E0602]: module 'Library.Nonexistent' not found
-  --> test.ks:3:8
-   |
- 3 | import Library.Nonexistent
-   |                ^^^^^^^^^^^ no module named 'Nonexistent'
-   |        ------------------- in this import
-   |
-   = note: the module 'Library.Nonexistent' does not exist or is not visible from this scope
-```
-
-### E0603: Symbol Not Found in Module
-
-```kestrel
-module Test
-
-import Library.(NonExistent)  // ERROR: if Library has no such symbol
-```
-
-```
-error[E0603]: symbol 'NonExistent' not found in module 'Library'
-  --> test.ks:3:17
-   |
- 3 | import Library.(NonExistent)
-   |                 ^^^^^^^^^^^ 'NonExistent' does not exist
-   |        ------- in module 'Library'
-```
-
-### E0604: Symbol Not Accessible
-
-```kestrel
-// library.ks
-module Library
-
-private struct PrivateClass {}
-```
-
-```kestrel
-// consumer.ks
-module Consumer
-
-import Library.(PrivateClass)  // ERROR
-```
-
-```
-error[E0604]: 'PrivateClass' is not accessible
-  --> consumer.ks:3:17
-   |
- 3 | import Library.(PrivateClass)
-   |                 ^^^^^^^^^^^^ 'PrivateClass' is private
-   |
-   = note: only public symbols can be imported from other modules
-```
-
-### E0605: Import Conflict
-
-```kestrel
-module Test
-
-import LibraryA.(Widget)
-import LibraryB.(Widget)  // ERROR: Widget already imported
-```
-
-```
-error[E0605]: 'Widget' is already imported
-  --> test.ks:4:17
-   |
- 3 | import LibraryA.(Widget)
-   |                  ------ 'Widget' first imported here
- 4 | import LibraryB.(Widget)
-   |                  ^^^^^^ cannot import 'Widget'
-   |
-   = help: use an alias: import LibraryB.(Widget as WidgetB)
-```
-
-### E0606: Import Conflicts with Local Declaration
-
-```kestrel
-module Test
-
-import Library.(Widget)
-
-struct Widget {}  // ERROR: Widget already imported
-```
-
-```
-error[E0606]: 'Widget' is already declared
-  --> test.ks:5:8
-   |
- 3 | import Library.(Widget)
-   |                 ------ 'Widget' imported here
- 4 |
- 5 | struct Widget {}
-   |        ^^^^^^ 'Widget' is already declared
-   |
-   = help: rename the local declaration or use an import alias
-```
-
-### E0607: Duplicate Import
-
-```kestrel
-module Test
-
-import Library.(Foo)
-import Library.(Foo)  // ERROR
-```
-
-```
-error[E0607]: 'Foo' is already imported
-  --> test.ks:4:17
-   |
- 3 | import Library.(Foo)
-   |                 --- 'Foo' first imported here
- 4 | import Library.(Foo)
-   |                 ^^^ 'Foo' is already imported
-```
+When these are implemented they get freshly allocated codes from the registry
+(`lib/kestrel-analyze/AGENTS.md` tracks the next free code) and land in
+`docs/error-codes.md`, which is checked against the registry by
+`registry.rs::every_registered_code_is_documented`.
 
 ## Grammar
 

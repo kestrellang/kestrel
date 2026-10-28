@@ -186,7 +186,7 @@ public func isFile(path: String) -> Bool {
 func statMode(path: String) -> Optional[Int32] {
     let cpath = path.toCString();
     let buf = malloc(STAT_BUF_SIZE());
-    let _ = memset(buf, 0, STAT_BUF_SIZE());
+     memset(buf, 0, STAT_BUF_SIZE());
 
     let result = libc_stat(cpath.raw.asRaw(), buf);
     cpath.free();
@@ -302,25 +302,29 @@ public func removeDir(path: String) -> Result[(), IoError] {
 ///
 /// Wraps `opendir`/`readdir`/`closedir`. The returned names are
 /// relative to `path`; join with `path` yourself if you need full
-/// paths. On failure to open the directory (missing path, permission
-/// denied, etc.), returns an empty array — the function does not
-/// distinguish "empty directory" from "open failed".
+/// paths.
+///
+/// # Errors
+///
+/// Returns `Err(IoError)` if the directory cannot be opened (missing
+/// path, permission denied, not a directory, etc.); `errno` is
+/// captured. An empty directory is `Ok` with an empty array.
 ///
 /// # Examples
 ///
 /// ```
-/// for entry in listDir("/tmp") {
+/// for entry in try listDir("/tmp") {
 ///     print(entry);
 /// }
 /// ```
-public func listDir(path: String) -> Array[String] {
+public func listDir(path: String) -> Result[Array[String], IoError] {
     var result = Array[String]();
     let cpath = path.toCString();
     let dirp = libc_opendir(cpath.raw.asRaw());
     cpath.free();
 
     if dirp.isNull {
-        return result
+        return .Err(lastError())
     }
 
     while true {
@@ -340,8 +344,8 @@ public func listDir(path: String) -> Array[String] {
         }
     }
 
-    let _ = libc_closedir(dirp);
-    result
+     libc_closedir(dirp);
+    .Ok(result)
 }
 
 // ============================================================================
@@ -492,30 +496,33 @@ public func chmod(path: String, mode: Int32) -> Result[(), IoError] {
 
 /// Returns the calling process's current working directory.
 ///
-/// Wraps `getcwd(2)` with a 1 KiB buffer. Returns the empty string if
-/// the cwd has been deleted, is longer than 1 KiB, or any other
-/// `getcwd` failure occurs — the function does not surface the
-/// error code.
+/// Wraps `getcwd(2)` with a 1 KiB buffer.
+///
+/// # Errors
+///
+/// Returns `Err(IoError)` if the cwd has been deleted, is longer than
+/// 1 KiB (`ERANGE`), or any other `getcwd` failure occurs; `errno` is
+/// captured.
 ///
 /// # Examples
 ///
 /// ```
-/// let here = getcwd();
+/// let here = try getcwd();
 /// ```
-public func getcwd() -> String {
+public func getcwd() -> Result[String, IoError] {
     let size: Int64 = 1024;
     let buf = malloc(size);
     let result = libc_getcwd(buf, size);
 
     if result.isNull {
         free(buf);
-        return String()
+        return .Err(lastError())
     }
 
     let cstr = CString(raw: buf.cast[UInt8]());
     let s = String(from: cstr);
     free(buf);
-    s
+    .Ok(s)
 }
 
 // ============================================================================
@@ -528,7 +535,7 @@ public func getcwd() -> String {
 /// byte scan — works correctly for UTF-8 because `/` is ASCII and
 /// cannot appear inside a multi-byte sequence.
 func findLastSlash(s: String) -> Int64 {
-    let len = s.byteCount;
+    let len = s.bytes.count;
     var i: Int64 = len - 1;
     while i >= 0 {
         if s.bytes(unchecked: i) == 47 {

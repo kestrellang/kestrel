@@ -18,8 +18,8 @@ enum Foo {
 @main
 func main() -> lang.i64 {
     var f: Foo = .A;
-    let _ = println(f.computed);
+     println(f.computed);
     f.computed = 3;
-    let _ = println(f.computed);
+     println(f.computed);
     0
 }

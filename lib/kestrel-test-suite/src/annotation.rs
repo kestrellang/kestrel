@@ -5,6 +5,8 @@
 
 use std::str::FromStr;
 
+use crate::runner::Backend;
+
 /// Which pipeline stage this test targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestMode {
@@ -33,6 +35,16 @@ pub struct TestConfig {
     /// requirement (E618). Execution-mode tests imply this; a diagnostics test
     /// opts in via `// executable: true` to exercise the missing-`@main` check.
     pub executable: bool,
+    /// Execution tests: check post-monomorphization warnings (E508) against
+    /// `// WARN:` annotations both ways even when the file has none
+    /// (`// warnings: checked`), so "no warning" is assertable. A file with
+    /// any `// WARN:` annotation is checked regardless.
+    pub warnings_checked: bool,
+    /// Backends this test must run on (`// backends: cranelift,llvm`): one
+    /// trial per backend, pinned regardless of `KESTREL_BACKEND`. Empty =
+    /// one trial on the env-default backend. ABI-sensitive tests (ret_borrow)
+    /// list both — Cranelift-only runs can't see LLVM ABI miscompiles.
+    pub backends: Vec<Backend>,
 }
 
 impl Default for TestConfig {
@@ -48,6 +60,8 @@ impl Default for TestConfig {
             mir_snapshot: None,
             mir_filter: None,
             executable: false,
+            warnings_checked: false,
+            backends: Vec::new(),
         }
     }
 }
@@ -136,11 +150,25 @@ pub fn parse_test_config(source: &str) -> TestConfig {
             "executable" => {
                 config.executable = value.to_lowercase() == "true";
             },
+            "warnings" => {
+                config.warnings_checked = value.to_lowercase() == "checked";
+            },
             "include" => {
                 config.include.push(value.trim().to_string());
             },
             "skip" => {
                 config.skip = Some(value.to_string());
+            },
+            // `// host: darwin` — run only on that host OS (platform-gated
+            // tests whose outcome depends on `@platform` matching the host).
+            // Uses the compiler's own `Os` so both agree on "the host".
+            "host" => {
+                use kestrel_ast_builder::components::Os;
+                match Os::from_name(value.trim()) {
+                    Some(os) if os == Os::host() => {},
+                    Some(_) => config.skip = Some(format!("host-only test ({value})")),
+                    None => config.skip = Some(format!("unknown host '{value}'")),
+                }
             },
             "expect-exit" => {
                 config.expect_exit = i32::from_str(value).ok();
@@ -156,6 +184,11 @@ pub fn parse_test_config(source: &str) -> TestConfig {
             },
             "mir-filter" => {
                 config.mir_filter = Some(value.to_string());
+            },
+            "backends" => {
+                // Unknown names are skipped, matching the header parser's
+                // lenient policy for every other key.
+                config.backends = value.split(',').filter_map(Backend::parse).collect();
             },
             _ => {},
         }
@@ -281,6 +314,17 @@ module Test
         assert_eq!(config.expect_exit, Some(42));
         assert_eq!(config.expect_stdout.as_deref(), Some("hello world"));
         assert_eq!(config.skip.as_deref(), Some("codegen incomplete"));
+    }
+
+    #[test]
+    fn parse_backends_header() {
+        let source = "// test: execution\n// backends: cranelift,llvm\nmodule Test\n";
+        let config = parse_test_config(source);
+        assert_eq!(config.backends, vec![Backend::Cranelift, Backend::Llvm]);
+        // Unknown names are skipped (lenient header policy); empty default.
+        let config = parse_test_config("// backends: llvm, wasm\nmodule Test\n");
+        assert_eq!(config.backends, vec![Backend::Llvm]);
+        assert!(parse_test_config("module Test\n").backends.is_empty());
     }
 
     #[test]

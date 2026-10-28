@@ -15,9 +15,16 @@
 //! let diagnostics = compiler.diagnostics();
 //! ```
 
+/// Stack size for a thread that runs the compiler. The front end and MIR
+/// lowering recurse once per nesting level, so the default 2–8 MB overflowed
+/// on a few thousand levels (long generated `+` chains, deep `else if`
+/// ladders). 256 MB is reserved virtual memory, committed only as used.
+pub const COMPILER_STACK_SIZE: usize = 256 * 1024 * 1024;
+
 pub mod components;
 pub mod diagnostic;
 pub mod queries;
+pub mod stdlib_path;
 
 pub use components::{FilePath, SourceText};
 pub use diagnostic::ThrowDiagnostic;
@@ -46,6 +53,10 @@ pub struct Compiler {
     root: Entity,
     /// Compilation target for conditional filtering (@platform, etc.)
     target: TargetConfig,
+    /// Warnings found after monomorphization (E508), from the most recent
+    /// `monomorphize_mir`. They live outside the query system because the
+    /// mono pipeline runs outside it; read them with [`Self::mono_warnings`].
+    mono_warnings: std::sync::Mutex<Vec<codespan_reporting::diagnostic::Diagnostic<usize>>>,
 }
 
 impl Compiler {
@@ -54,7 +65,10 @@ impl Compiler {
         world.begin_revision();
         let root = world.spawn();
         world.set(root, kestrel_ast_builder::NodeKind::Module);
-        world.set(root, kestrel_ast_builder::Name("<root>".to_string()));
+        world.set(
+            root,
+            kestrel_ast_builder::Name(kestrel_ast_builder::Name::ROOT.to_string()),
+        );
         // Seed the lang module so lang.* builtins (lang.i64, lang.alloc, etc.) are available
         kestrel_ast_builder::seed_lang_module(&mut world, root);
         // Register default analyzers on the root entity
@@ -68,6 +82,7 @@ impl Compiler {
             files: HashMap::new(),
             root,
             target: TargetConfig::host(),
+            mono_warnings: Default::default(),
         }
     }
 
@@ -82,6 +97,7 @@ impl Compiler {
             files,
             root,
             target: TargetConfig::host(),
+            mono_warnings: Default::default(),
         }
     }
 
@@ -129,14 +145,21 @@ impl Compiler {
         ctx.query(ParseFile { entity })
     }
 
-    /// Collect all diagnostics from the current revision.
+    /// Collect all diagnostics from the current revision, in source order.
     ///
     /// Returns codespan-reporting `Diagnostic`s accumulated by lex, parse,
     /// and type inference queries. Use `CompilerDriver::emit_diagnostics()`
     /// (from `kestrel-compiler-driver`) to render them to a terminal.
+    ///
+    /// The accumulator holds values per query in map order, so this is the
+    /// one place that gives every consumer (CLI, LSP, test harness) the same
+    /// deterministic order: by file, then primary-label position.
     pub fn diagnostics(&self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
-        self.world
-            .accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>()
+        let mut diags = self
+            .world
+            .accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>();
+        diags.sort_by_cached_key(diagnostic::source_order);
+        diags
     }
 
     /// Begin a new compilation cycle. Call before updating sources.
@@ -164,7 +187,7 @@ impl Compiler {
         kestrel_ast_builder::build_declarations(
             &mut self.world,
             file_entity,
-            &result.tree,
+            &result.tree(),
             self.root,
             Some(&self.target),
         );
@@ -225,15 +248,29 @@ impl Compiler {
         let errors = kestrel_mir::passes::run_pipeline(&mut mir, &target, &mut next_entity);
         if !errors.is_empty() {
             let ctx = self.world().query_context();
-            for error in &errors {
+            // Cascade suppression: a coded user error (escape check) makes the
+            // module invalid, and the ownership ICEs that follow from lowering
+            // an invalid ret_borrow body are noise — report only the coded
+            // ones. Uncoded errors alone are real ICEs and surface as such.
+            let has_coded = errors.iter().any(|e| e.diag.is_some());
+            let reported: Vec<_> = errors
+                .iter()
+                .filter(|e| !has_coded || e.diag.is_some())
+                .collect();
+            for error in &reported {
                 ctx.accumulate(diagnostic::mir_verify_error_to_diagnostic(
                     error,
                     self.world(),
                 ));
             }
-            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(
-                format!("OSSA verification failed with {} error(s)", errors.len()),
-            ));
+            // Coded errors are ordinary user diagnostics (escape check); only
+            // uncoded ones are internal verify failures. Count what was shown.
+            let msg = if has_coded {
+                format!("compilation failed with {} error(s)", reported.len())
+            } else {
+                format!("OSSA verification failed with {} error(s)", reported.len())
+            };
+            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(msg));
         }
         Ok(mir)
     }
@@ -241,8 +278,13 @@ impl Compiler {
     /// Best-effort lowering to a PRE-MONO `Stage` for inspection (`kestrel dump
     /// mir -s <stage>`). Runs passes up to `stop`; runs verify only at
     /// `Stage::Verify`. Returns the module plus any verify errors (empty unless
-    /// `stop == Verify`). Never aborts and never accumulates diagnostics — the
-    /// caller decides whether/how to surface errors.
+    /// `stop == Verify`). Never aborts.
+    ///
+    /// It does **not** accumulate the *verify* errors it returns — the caller
+    /// decides how to surface those. It does not follow that nothing is
+    /// accumulated: `lower_module` deposits its own coded diagnostics (the
+    /// move-out-of-borrow E503 backstop, E497) straight into the context, so a
+    /// caller must still flush the accumulator (F18).
     pub fn lower_to_mir_stage(
         &self,
         stop: kestrel_mir::passes::Stage,
@@ -259,6 +301,35 @@ impl Compiler {
         (mir, errors)
     }
 
+    /// A failed build must not emit an object or binary. MIR lowering can
+    /// accumulate hard errors directly to the diagnostic context — e.g. the
+    /// move-out-of-borrow `E503` backstop in `kestrel-mir-lower` — while still
+    /// returning a structurally-complete `MirModule` (`lower_to_mir` returns
+    /// `Ok`). Those must gate codegen exactly like a front-end error; otherwise
+    /// the binary is written and `rc=1` only lands *after* it is on disk (#152).
+    /// On the CLI driver's main build path the pre-codegen gate (`src/main.rs`)
+    /// already returned before reaching here if a front-end error existed, so
+    /// the only error-severity diagnostics present came from lowering. Other
+    /// callers (test harness, library embedders) have no such gate, so a
+    /// pre-existing error would also be counted here — which is conservative:
+    /// it only ever *tightens* (refuses to emit a binary), never relaxes. Lives
+    /// on the codegen path only — `dump mir` / the test harness still inspect a
+    /// module that lowered with errors.
+    #[allow(clippy::result_large_err)]
+    fn ensure_no_lowering_errors(&self) -> Result<(), kestrel_codegen_cranelift::CodegenError> {
+        let errors = self
+            .diagnostics()
+            .iter()
+            .filter(|d| d.severity >= Severity::Error)
+            .count();
+        if errors > 0 {
+            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(
+                format!("compilation failed with {errors} error(s)"),
+            ));
+        }
+        Ok(())
+    }
+
     /// Lower to MIR, monomorphize, expand, compile, and link to an executable.
     #[allow(clippy::result_large_err)]
     pub fn compile_and_link(
@@ -267,9 +338,93 @@ impl Compiler {
         options: &kestrel_codegen_cranelift::CodegenOptions,
     ) -> Result<(), kestrel_codegen_cranelift::CodegenError> {
         let mir = self.lower_to_mir()?;
+        self.ensure_no_lowering_errors()?;
         let mono = self.monomorphize_mir(mir)?;
         let target = kestrel_codegen::TargetConfig::host();
         kestrel_codegen_cranelift::compile_and_link(&mono, &target, options, output_path)
+    }
+
+    /// Same as [`Self::compile_and_link`] but uses the LLVM backend. Reuses the
+    /// shared lower -> monomorphize pipeline (whose errors are mapped into the
+    /// LLVM backend's error type) and hands the `MonoModule` to the LLVM codegen.
+    #[allow(clippy::result_large_err)]
+    pub fn compile_and_link_llvm(
+        &self,
+        output_path: &Path,
+        options: &kestrel_codegen_llvm::CodegenOptions,
+    ) -> Result<(), kestrel_codegen_llvm::CodegenError> {
+        let to_llvm = |e: kestrel_codegen_cranelift::CodegenError| {
+            kestrel_codegen_llvm::CodegenError::Unsupported(e.to_string())
+        };
+        let mir = self.lower_to_mir().map_err(to_llvm)?;
+        self.ensure_no_lowering_errors().map_err(to_llvm)?;
+        let mono = self.monomorphize_mir(mir).map_err(to_llvm)?;
+        let target = kestrel_codegen::TargetConfig::host();
+        kestrel_codegen_llvm::compile_and_link(&mono, &target, options, output_path)
+    }
+
+    /// Warnings found after monomorphization by the most recent build
+    /// (currently E508 `observable_drop_unmarked`).
+    pub fn mono_warnings(&self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
+        self.mono_warnings
+            .lock()
+            .map(|w| w.clone())
+            .unwrap_or_default()
+    }
+
+    /// E508: a `Cloneable` type whose deinit reaches an observable extern but
+    /// is not `@observabledrop`. Replaces the previous build's warnings.
+    fn record_mono_warnings(&self, mono: &kestrel_mir::mono::MonoModule) {
+        use codespan_reporting::diagnostic::{Diagnostic, Label};
+        let name = |e: Entity| {
+            self.world
+                .get::<kestrel_ast_builder::Name>(e)
+                .map(|n| n.0.clone())
+                .unwrap_or_default()
+        };
+        let warnings =
+            kestrel_mir::passes::copy_lifetime::unmarked_observable_drops(mono)
+                .into_iter()
+                .filter_map(|f| {
+                    let span = self
+                        .world
+                        .get::<kestrel_ast_builder::DeclSpan>(f.type_entity)?
+                        .0
+                        .clone();
+                    // Name the first source-level function on the path (the
+                    // deinit's direct callee may be a synthesized helper).
+                    let type_name = name(f.type_entity);
+                    let callee = f
+                        .path
+                        .iter()
+                        .map(|e| name(*e))
+                        .find(|n| !n.is_empty())
+                        .unwrap_or_else(|| f.symbol.clone());
+                    let notes = if callee == f.symbol {
+                        vec![]
+                    } else {
+                        vec![format!(
+                            "`{callee}` reaches the external function `{}`",
+                            f.symbol
+                        )]
+                    };
+                    Some(
+                    Diagnostic::warning()
+                        .with_code("E508")
+                        .with_message(format!(
+                            "`Cloneable` type `{type_name}` has a `deinit` that calls `{callee}`; \
+                             mark it `@observabledrop` so its copies are not dropped early"
+                        ))
+                        .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
+                            "copies of this type may be dropped before the end of their scope",
+                        )])
+                        .with_notes(notes),
+                )
+                })
+                .collect();
+        if let Ok(mut slot) = self.mono_warnings.lock() {
+            *slot = warnings;
+        }
     }
 
     #[allow(clippy::result_large_err)]
@@ -296,10 +451,35 @@ impl Compiler {
         // CopyValue/DestroyValue into real clone()/drop calls. The lowering copies
         // every @owned value (emit_value_use) by design and defers cleanup to here.
         kestrel_mir::passes::copy_propagation::eliminate_redundant_copies(&mut mono);
+        // Cross-block twin: collapse a copy whose operand is threaded by a jump
+        // into a single-predecessor block that only drops it (the block-local
+        // pass bails because the operand is used in the terminator). Fixes the
+        // mono-dependent `consuming` value cloned-then-double-dropped class
+        // (#127: array literals via `RcBox.init`).
+        kestrel_mir::passes::copy_propagation::eliminate_cross_block_copies(&mut mono);
+        // Keep implicit copies from holding COW storage shared: move at last
+        // use, drop at last read, or read through a borrow instead.
+        kestrel_mir::passes::copy_lifetime::run(&mut mono);
+        self.record_mono_warnings(&mono);
+        // Recover zero-copy aggregate moves: flip provably-safe Takes to aliasing
+        // before expand/codegen turn them into memcpys (#219).
+        kestrel_mir::passes::copy_propagation::mark_independent_takes(&mut mono);
+
+        // The ownership walk again, now that copyability is CONCRETE, but BEFORE
+        // expand_destroy_copy. The ordering is load-bearing: expand removes and
+        // remaps DestroyValue, so afterwards the walk's leak check ("every
+        // @owned value must be consumed") is no longer true of well-formed IR —
+        // running it after expand reports ~34k false positives on hello world.
+        // Here the types are concrete and the destroys are still intact.
+        //
+        // Diagnostic only; no-op unless KESTREL_VERIFY_FLOW_MONO is set. Walks
+        // every INSTANTIATION, so it stays opt-in rather than riding the
+        // pre-mono default.
+        let _mono_flow = kestrel_mir::verify::verify_mono_flow(&mono);
 
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
 
-        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        // Diagnostic only; no-op unless KESTREL_DEBUG=audit-dup.
         kestrel_mir::mono::audit::run_audit(&mono);
 
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);
@@ -361,13 +541,23 @@ impl Compiler {
         }
 
         kestrel_mir::passes::copy_propagation::eliminate_redundant_copies(&mut mono);
+        kestrel_mir::passes::copy_propagation::eliminate_cross_block_copies(&mut mono);
+        kestrel_mir::passes::copy_lifetime::run(&mut mono);
+        self.record_mono_warnings(&mono);
+        kestrel_mir::passes::copy_propagation::mark_independent_takes(&mut mono);
         if stop == kestrel_mir::passes::Stage::CopyProp {
             return Ok((mono, Vec::new()));
         }
 
+        // Before expand — see the twin call site above for why the ordering is
+        // load-bearing. Diagnostic only; no-op unless KESTREL_VERIFY_FLOW_MONO
+        // is set.
+        let _mono_flow = kestrel_mir::verify::verify_mono_flow(&mono);
+
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
-        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        // Diagnostic only; no-op unless KESTREL_DEBUG=audit-dup.
         kestrel_mir::mono::audit::run_audit(&mono);
+
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);
         Ok((mono, mono_verify.errors))
     }
@@ -417,6 +607,31 @@ mod tests {
     use super::*;
     use kestrel_lexer::Token;
     use kestrel_syntax_tree::SyntaxKind;
+
+    /// The one producer of the root name must satisfy the predicate every
+    /// consumer uses. These sit in different crates (`kestrel-compiler` writes
+    /// it; `kestrel-name-res`, `kestrel-mir-lower`, `kestrel-doc` and the LSP
+    /// read it), so nothing but a test connects them — and the visibility
+    /// consumer fails *open*, silently publishing every `internal` declaration.
+    #[test]
+    fn the_root_entity_is_recognized_as_root() {
+        let compiler = Compiler::new();
+        let name = compiler
+            .world()
+            .get::<kestrel_ast_builder::Name>(compiler.root())
+            .expect("root entity has a Name");
+        assert!(
+            name.is_root(),
+            "Compiler::new spawned root named {name:?}, which Name::is_root rejects"
+        );
+        // Unspellable by construction: no source identifier can collide.
+        assert!(
+            kestrel_ast_builder::Name::ROOT
+                .chars()
+                .any(|c| !c.is_alphanumeric() && c != '_'),
+            "Name::ROOT must not be a legal identifier"
+        );
+    }
 
     /// Helper: extract non-trivia token kinds from a token stream.
     fn structural_tokens(tokens: &[SpannedToken]) -> Vec<Token> {
@@ -614,7 +829,7 @@ mod tests {
         // Any parse through the query always yields a SourceFile root node
         let mut c = Compiler::new();
         let f = c.set_source("t.ks", "module Main".into());
-        assert_eq!(c.parse(f).tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(c.parse(f).tree().kind(), SyntaxKind::SourceFile);
     }
 
     #[test]
@@ -625,7 +840,7 @@ mod tests {
         let result = c.parse(f);
 
         assert!(result.errors.is_empty());
-        assert_eq!(result.tree.children().count(), 3);
+        assert_eq!(result.tree().children().count(), 3);
     }
 
     #[test]
@@ -636,7 +851,7 @@ mod tests {
         let result = c.parse(f);
         assert!(result.errors.is_empty());
 
-        let child_kinds: Vec<_> = result.tree.children().map(|n| n.kind()).collect();
+        let child_kinds: Vec<_> = result.tree().children().map(|n| n.kind()).collect();
         // SourceFile children are module declaration + struct declaration nodes
         assert!(
             child_kinds.contains(&SyntaxKind::ModuleDeclaration),
@@ -657,8 +872,8 @@ mod tests {
         let f = c.set_source("t.ks", "".into());
         let result = c.parse(f);
 
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
-        assert_eq!(result.tree.children().count(), 0);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().children().count(), 0);
         assert!(result.errors.is_empty());
         assert!(c.diagnostics().is_empty());
     }
@@ -703,7 +918,7 @@ mod tests {
         let f = c.set_source("t.ks", "module".into());
         let result = c.parse(f);
 
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
     }
 
     // ================================================================
@@ -718,7 +933,7 @@ mod tests {
 
         let r1 = c.parse(f);
         let r2 = c.parse(f);
-        assert_eq!(r1.tree.children().count(), r2.tree.children().count());
+        assert_eq!(r1.tree().children().count(), r2.tree().children().count());
         assert_eq!(r1.errors.len(), r2.errors.len());
     }
 
@@ -733,7 +948,7 @@ mod tests {
         c.set_source("t.ks", "module A\nstruct B {}\nstruct C {}".into());
         let r2 = c.parse(f);
 
-        assert!(r2.tree.children().count() > r1.tree.children().count());
+        assert!(r2.tree().children().count() > r1.tree().children().count());
     }
 
     #[test]
@@ -765,8 +980,8 @@ mod tests {
         let e = c.world.spawn();
         let result = c.parse(e);
 
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
-        assert_eq!(result.tree.children().count(), 0);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().children().count(), 0);
         assert!(c.diagnostics().is_empty());
     }
 
@@ -916,7 +1131,7 @@ mod tests {
         // Parse should reflect the new source.
         let r = c.parse(f2);
         assert!(
-            r.tree
+            r.tree()
                 .children()
                 .any(|n| n.kind() == kestrel_syntax_tree::SyntaxKind::StructDeclaration)
         );
@@ -959,7 +1174,7 @@ mod tests {
         // Verify f2 actually got updated results
         let r2 = c.parse(f2);
         assert_eq!(
-            r2.tree.children().count(),
+            r2.tree().children().count(),
             2,
             "f2 should have module + struct"
         );

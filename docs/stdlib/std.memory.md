@@ -210,61 +210,6 @@ _Defined in `lang/std/memory/pointer.ks`._
 
 ### Implements `Slice`
 
-#### function `all`
-
-```kestrel
-public func all(where: (T) -> Bool) -> Bool
-```
-
-`true` when every element satisfies `predicate`. O(n).
-
-Short-circuits on the first failure. Vacuously true for empty
-collections.
-
-##### Examples
-
-```
-[2, 4, 6].all(where: { it % 2 == 0 });  // true
-[2, 3, 6].all(where: { it % 2 == 0 });  // false
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `any`
-
-```kestrel
-public func any(where: (T) -> Bool) -> Bool
-```
-
-`true` when at least one element satisfies `predicate`. O(n).
-
-Short-circuits on the first match. Always `false` for empty
-collections.
-
-##### Examples
-
-```
-[1, 2, 3].any(where: { it > 2 });  // true
-[1, 2, 3].any(where: { it > 5 });  // false
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `asPointer`
-
-```kestrel
-public func asPointer() -> Pointer[T]
-```
-
-Pointer to the first element. The pointer aliases the collection's
-buffer; do not outlive the source or mutate through it.
-
-##### Safety
-
-Reading past `count` is undefined behavior.
-
-_Defined in `lang/std/collections/slice.ks`._
-
 #### function `asSlice`
 
 ```kestrel
@@ -275,167 +220,6 @@ Returns `self` — `ArraySlice` is already the borrowed view.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-#### function `binarySearch`
-
-```kestrel
-public func binarySearch(T) -> Int64?
-```
-
-Binary search for `element`. Returns its index or `None`. O(log n).
-
-When duplicates exist, which index is returned is unspecified.
-
-##### Safety
-
-The collection must be sorted in ascending order. Calling on
-unsorted data won't crash but may produce false negatives.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].binarySearch(3);  // Some(2)
-[1, 2, 3, 4, 5].binarySearch(6);  // None
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `chunks`
-
-```kestrel
-public func chunks(of: Int64) -> ChunksView[T]
-```
-
-Multi-pass lazy view over non-overlapping `size`-sized chunks.
-
-The trailing chunk may be shorter than `size`. Multi-pass: query
-`count`, index with `view.get(i)`, and iterate repeatedly without
-re-creating the view.
-
-##### Errors
-
-Panics if `size <= 0`.
-
-##### Examples
-
-```
-let v = [1, 2, 3, 4, 5].chunks(of: 2);
-v.count;          // 3
-v.get(2);          // ArraySlice[5]
-for c in v { ... }
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `compactMap`
-
-```kestrel
-public func compactMap[U]((T) -> Optional[U]) -> Array[U]
-```
-
-Maps every element through `transform`, dropping `.None` results.
-O(n).
-
-##### Examples
-
-```
-["1", "x", "3"].compactMap { Int64.parse(it) };  // [1, 3]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `contains`
-
-```kestrel
-public func contains(T) -> Bool
-```
-
-`true` if the collection contains `element`. O(n).
-
-Linear scan; short-circuits on the first match.
-
-##### Examples
-
-```
-[1, 2, 3].contains(2);  // true
-[1, 2, 3].contains(5);  // false
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### field `count`
-
-```kestrel
-public var count: Int64 { get }
-```
-
-Element count. O(1).
-
-##### Examples
-
-```
-[1, 2, 3].count;  // 3
-[].count;          // 0
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `countItems`
-
-```kestrel
-public func countItems(where: (T) -> Bool) -> Int64
-```
-
-Number of elements for which `predicate` is true. O(n).
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].countItems(where: { it % 2 == 0 });  // 2
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `drop`
-
-```kestrel
-public func drop(first: Int64) -> ArraySlice[T]
-```
-
-Returns a slice with the first `count` elements skipped. O(1).
-
-Complement of `prefix`.
-
-##### Errors
-
-Panics if `count > self.count`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].drop(first: 2);  // ArraySlice[3, 4, 5]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `ends`
-
-```kestrel
-public func ends[__opaque_0](with: __opaque_0) -> Bool where __opaque_0: Slice[T]
-```
-
-`true` if the trailing elements match `suffix`. O(k) where k is
-the suffix length. Accepts any `Slice[T]` conformer.
-
-##### Examples
-
-```
-[1, 2, 3].ends(with: [2, 3]);  // true
-[1, 2, 3].ends(with: [1, 2]);  // false
-[1, 2, 3].ends(with: []);       // true (vacuous)
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 #### function `ensureUnique`
 
 ```kestrel
@@ -445,469 +229,6 @@ public mutating func ensureUnique()
 No-op — `ArraySlice` is a non-owning view with no COW barrier.
 
 _Defined in `lang/std/memory/pointer.ks`._
-
-#### function `filter`
-
-```kestrel
-public func filter(where: (T) -> Bool) -> Array[T]
-```
-
-Returns a new array containing every element matching `predicate`.
-O(n). Result size is unknown; uses geometric growth.
-
-##### Examples
-
-```
-[1, 2, 3, 4].filter(where: { it % 2 == 0 });  // [2, 4]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `first`
-
-```kestrel
-public func first() -> T?
-```
-
-First element, or `.None` for an empty collection. O(1).
-
-Read-only — to remove the first element from an `Array`, use
-`popFirst()`.
-
-##### Examples
-
-```
-[1, 2, 3].first();  // Some(1)
-[].first();          // None
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `firstIndex`
-
-```kestrel
-public func firstIndex(where: (T) -> Bool) -> Int64?
-```
-
-Index of the first element matching `predicate`, or `None`. O(n).
-
-Short-circuits on the first match. For value-based search on
-`Equatable` collections, use `firstIndex(of:)`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].firstIndex(where: { it > 3 });   // Some(3)
-[1, 2, 3].firstIndex(where: { it > 10 });         // None
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `flatMap`
-
-```kestrel
-public func flatMap[U]((T) -> Array[U]) -> Array[U]
-```
-
-Maps every element through `transform` and concatenates the results
-into one flat array. O(n + total_output).
-
-##### Examples
-
-```
-[1, 2, 3].flatMap { [it, it * 10] };  // [1, 10, 2, 20, 3, 30]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `format`
-
-```kestrel
-public func format(into: mutating StringBuilder, FormatOptions)
-```
-
-Renders as `"[e1, e2, ...]"`. Empty collections render as `"[]"`.
-
-##### Examples
-
-```
-[1, 2, 3].format();  // "[1, 2, 3]"
-[].format();          // "[]"
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### field `indices`
-
-```kestrel
-public var indices: Range[Int64] { get }
-```
-
-Half-open range `0..<count`.
-
-##### Examples
-
-```
-[10, 20, 30].indices;  // 0..<3
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### field `isEmpty`
-
-```kestrel
-public var isEmpty: Bool { get }
-```
-
-`true` when `count == 0`.
-
-##### Examples
-
-```
-[].isEmpty;   // true
-[1].isEmpty;  // false
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `isEqual`
-
-```kestrel
-public func isEqual(to: Self) -> Bool
-```
-
-Element-wise equality. O(n).
-
-Short-circuits on the first mismatch. Order matters.
-
-##### Examples
-
-```
-[1, 2, 3].isEqual(to: [1, 2, 3]);  // true
-[1, 2, 3].isEqual(to: [3, 2, 1]);  // false
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `isSorted`
-
-```kestrel
-public func isSorted() -> Bool
-```
-
-`true` if elements are in non-decreasing order. O(n).
-
-Equal adjacent elements are allowed. Empty and single-element
-collections are vacuously sorted.
-
-##### Examples
-
-```
-[1, 2, 3].isSorted();  // true
-[1, 3, 2].isSorted();  // false
-[1, 1, 1].isSorted();  // true
-[].isSorted();          // true
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `isValidIndex`
-
-```kestrel
-public func isValidIndex(Int64) -> Bool
-```
-
-`true` if `index` is in `[0, count)`.
-
-##### Examples
-
-```
-[10, 20, 30].isValidIndex(2);   // true
-[10, 20, 30].isValidIndex(3);   // false
-[10, 20, 30].isValidIndex(-1);  // false
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `iter`
-
-```kestrel
-public func iter() -> ArraySliceIterator[T]
-```
-
-Forward iterator over the elements.
-
-##### Examples
-
-```
-for item in [1, 2, 3] { ... }
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `last`
-
-```kestrel
-public func last() -> T?
-```
-
-Last element, or `.None` for an empty collection. O(1).
-
-Read-only — to remove the last element from an `Array`, use
-`pop()`.
-
-##### Examples
-
-```
-[1, 2, 3].last();  // Some(3)
-[].last();          // None
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `lastIndex`
-
-```kestrel
-public func lastIndex(where: (T) -> Bool) -> Int64?
-```
-
-Index of the last element matching `predicate`, or `None`. O(n).
-
-Scans from the back; short-circuits on the first match.
-
-##### Examples
-
-```
-[1, 2, 3, 2, 1].lastIndex(where: { it == 2 });  // Some(3)
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `map`
-
-```kestrel
-public func map[U]((T) -> U) -> Array[U]
-```
-
-Maps every element through `transform` into a new array. O(n).
-
-Pre-sizes the result buffer to `self.count`, so no growth steps. For
-the lazy version that fuses into a chain, use `iter().map { ... }`.
-
-##### Examples
-
-```
-[1, 2, 3].map { it * 2 };       // [2, 4, 6]
-[1, 2, 3].map { it.format() };  // ["1", "2", "3"]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `max`
-
-```kestrel
-public func max() -> T?
-```
-
-Largest element, or `None` if empty. O(n).
-
-Ties go to the first occurrence.
-
-##### Examples
-
-```
-[3, 1, 4].max();  // Some(4)
-[].max();          // None
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `min`
-
-```kestrel
-public func min() -> T?
-```
-
-Smallest element, or `None` if empty. O(n).
-
-Ties go to the first occurrence.
-
-##### Examples
-
-```
-[3, 1, 4].min();  // Some(1)
-[].min();          // None
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `prefix`
-
-```kestrel
-public func prefix(Int64) -> ArraySlice[T]
-```
-
-Returns a slice over the first `count` elements. O(1).
-
-##### Errors
-
-Panics if `count > self.count`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].prefix(3);  // ArraySlice[1, 2, 3]
-[1, 2].prefix(0);            // empty slice
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `reversed`
-
-```kestrel
-public func reversed() -> ReversedView[T]
-```
-
-Multi-pass lazy reversed view. Iterates back-to-front and
-supports indexed access in O(1).
-
-##### Examples
-
-```
-let v = [1, 2, 3].reversed();
-v.first();        // Some(3)
-v.toArray();       // [3, 2, 1] — eager copy
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `sorted`
-
-```kestrel
-public func sorted() -> Array[T]
-```
-
-Returns a new sorted array; original unchanged. O(n log n).
-
-##### Examples
-
-```
-let arr = [3, 1, 4, 1, 5];
-arr.sorted();  // [1, 1, 3, 4, 5]
-// arr is still [3, 1, 4, 1, 5]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `split`
-
-```kestrel
-public func split(where: (T) -> Bool) -> ArraySplitWhereView[T]
-```
-
-Multi-pass lazy view over the segments produced by splitting at
-each element matching `predicate`. Matching elements are dropped.
-
-##### Examples
-
-```
-let v = [1, -1, 2, 3, -1, 4].split(where: { it < 0 });
-for seg in v { ... }
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `starts`
-
-```kestrel
-public func starts[__opaque_0](with: __opaque_0) -> Bool where __opaque_0: Slice[T]
-```
-
-`true` if the leading elements match `prefix`. O(k) where k is
-the prefix length. Accepts any `Slice[T]` conformer.
-
-##### Examples
-
-```
-[1, 2, 3].starts(with: [1, 2]);     // true
-[1, 2, 3].starts(with: [2, 3]);     // false
-[1, 2, 3].starts(with: []);          // true (vacuous)
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### subscript `subscript`
-
-```kestrel
-public subscript[I](I) -> I.SeqOutput { get set }
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `suffix`
-
-```kestrel
-public func suffix(Int64) -> ArraySlice[T]
-```
-
-Returns a slice over the last `count` elements. O(1).
-
-##### Errors
-
-Panics if `count > self.count`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].suffix(2);  // ArraySlice[4, 5]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `unique`
-
-```kestrel
-public func unique() -> Array[T]
-```
-
-Returns a new array with duplicates removed, preserving
-first-occurrence order. O(n²).
-
-For the mutating variant on `Array`, see `removeDuplicates()`.
-
-##### Examples
-
-```
-[1, 2, 1, 3, 2, 4].unique();  // [1, 2, 3, 4]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `windows`
-
-```kestrel
-public func windows(of: Int64) -> WindowsView[T]
-```
-
-Multi-pass lazy view over overlapping `size`-sized sliding
-windows.
-
-Adjacent windows overlap by `size - 1` elements. Empty when the
-source has fewer than `size` elements.
-
-##### Errors
-
-Panics if `size <= 0`.
-
-##### Examples
-
-```
-let v = [1, 2, 3, 4].windows(of: 2);
-v.count;          // 3
-for w in v { ... }
-```
-
-_Defined in `lang/std/collections/slice.ks`._
 
 ### Implements `Iterable`
 
@@ -939,45 +260,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 
 ### Implements `Equatable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `isEqual`
-
-```kestrel
-func isEqual(to: Self) -> Bool
-```
-
-Returns `true` iff `self` and `other` are considered equal. Should
-be reflexive, symmetric, and transitive — `Hashable` requires equal
-values to hash equal, so don't drift from those laws.
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
+_Conditional: `where T: Equatable`._
 
 ## struct `ArraySliceIterator`
 
@@ -1016,507 +299,6 @@ type Item = T
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-#### typealias `TargetIterator`
-
-```kestrel
-type TargetIterator = Self
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `all`
-
-```kestrel
-public mutating func all(where: (Item) -> Bool) -> Bool
-```
-
-True if every element satisfies `predicate`. Stops at the first
-failure. True for an empty iterator (vacuous truth).
-
-##### Examples
-
-```
-[2, 4, 6].iter().all { it % 2 == 0 };   // true
-[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
-[].iter().all { false };                // true (empty)
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `any`
-
-```kestrel
-public mutating func any(where: (Item) -> Bool) -> Bool
-```
-
-True if any element satisfies `predicate`. Stops at the first
-match. False for an empty iterator.
-
-##### Examples
-
-```
-[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
-[1, 2, 3].iter().any { it > 10 };      // false
-[].iter().any { true };                // false
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `chain`
-
-```kestrel
-public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
-```
-
-Yields all of `self`, then all of `other`. Both must produce the
-same `Item` type.
-
-##### Examples
-
-```
-[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `collect`
-
-```kestrel
-public consuming func collect() -> Array[Item]
-```
-
-Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
-at the end of an adapter chain to materialise the result.
-
-##### Examples
-
-```
-[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
-(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `compactMap`
-
-```kestrel
-public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
-```
-
-Drops `None`s and unwraps `Some`s — the identity-transform special
-case of `filterMap`. Available when the iterator already yields
-optionals.
-
-##### Examples
-
-```
-let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
-xs.iter().compactMap().collect();   // [1, 2, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `contains`
-
-```kestrel
-public mutating func contains(Item) -> Bool
-```
-
-True if any element equals `element`. Short-circuits.
-
-##### Examples
-
-```
-[1, 2, 3].iter().contains(2);   // true
-[1, 2, 3].iter().contains(5);   // false
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `count`
-
-```kestrel
-public consuming func count() -> Int64
-```
-
-Counts the elements by walking the whole iterator. `O(n)` — for
-types that already know their length, prefer
-`ExactSizeIterator.remaining`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `cycle`
-
-```kestrel
-public func cycle() -> CycleIterator[Self]
-```
-
-Restarts iteration from the beginning whenever the inner iterator
-is exhausted, producing an infinite sequence. Always combine with
-`take` (or another short-circuiting consumer) — otherwise the
-result is unbounded.
-
-##### Examples
-
-```
-[1, 2, 3].iter().cycle().take(7).collect();
-// [1, 2, 3, 1, 2, 3, 1]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `enumerate`
-
-```kestrel
-public func enumerate() -> EnumerateIterator[Self]
-```
-
-Pairs each element with its zero-based position.
-
-##### Examples
-
-```
-for (i, item) in arr.iter().enumerate() {
-    print("Index \{i}: \{item}")
-};
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `filter`
-
-```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
-```
-
-Yields only elements where `predicate` returns `true`. Lazy —
-elements are tested as they're pulled.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `filterMap`
-
-```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
-```
-
-Combined map + filter — `transform` returns `Optional[U]`; `None`
-values are skipped. Use over `map(...).filter(...)` when the
-transform itself decides whether the element belongs.
-
-##### Examples
-
-```
-["1", "two", "3"].iter()
-    .filterMap { Int64.parse(it) }
-    .collect();   // [1, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `first`
-
-```kestrel
-public mutating func first(where: (Item) -> Bool) -> Item?
-```
-
-First element matching `predicate`, or `None`. Stops at the first
-match.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
-[1, 2, 3].iter().first { it > 10 };        // None
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `firstIndex`
-
-```kestrel
-public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
-```
-
-Index of the first element matching `predicate`, or `None`.
-
-##### Examples
-
-```
-["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
-[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `flatMap`
-
-```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
-```
-
-Maps each element to an iterator and concatenates the results.
-The monadic bind for iterators.
-
-##### Examples
-
-```
-[[1, 2], [3, 4], [5]].iter()
-    .flatMap { it.iter() }
-    .collect();   // [1, 2, 3, 4, 5]
-```
-
-```
-// Conditional expand — drop odd, double even
-[1, 2, 3].iter()
-    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
-    .collect();   // [2, 2]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `flatten`
-
-```kestrel
-public func flatten() -> FlattenIterator[Self]
-```
-
-Concatenates the inner iterators into one flat stream. Each inner
-iterator is fully drained before moving to the next. The
-already-have-iterators counterpart of `flatMap`.
-
-##### Examples
-
-```
-let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
-nested.flatten().collect();   // [1, 2, 3, 4, 5]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `fold`
-
-```kestrel
-public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
-```
-
-Left fold — start at `initial` and walk left to right, applying
-`combine(acc, element)`. Returns `initial` for an empty iterator.
-
-##### Examples
-
-```
-[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
-[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
-[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `forEach`
-
-```kestrel
-public consuming func forEach((Item) -> ())
-```
-
-Calls `action` on every element, discarding return values. Use
-`tryForEach` if you need to short-circuit on failure.
-
-##### Examples
-
-```
-[1, 2, 3].iter().forEach { print(it) };
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `fuse`
-
-```kestrel
-public func fuse() -> FusedIterator[Self]
-```
-
-Locks `None` once seen — protects against iterators that aren't
-fused (i.e. that may produce more elements after returning `None`
-once). After the first `None`, this adapter returns `None`
-forever.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `inspect`
-
-```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
-```
-
-Calls `inspector` on each element as it flows through, leaving
-the value otherwise untouched. Useful for logging or
-instrumenting an adapter chain mid-pipeline.
-
-##### Examples
-
-```
-[1, 2, 3].iter()
-    .inspect { print("before filter: \{it}") }
-    .filter { it > 1 }
-    .inspect { print("after filter: \{it}") }
-    .collect();
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `intersperse`
-
-```kestrel
-public func intersperse(with: Item) -> IntersperseIterator[Self]
-```
-
-Inserts `separator` between consecutive elements. Empty inputs
-stay empty; single-element inputs get no separator.
-
-##### Examples
-
-```
-[1, 2, 3].iter().intersperse(with: 0).collect();
-// [1, 0, 2, 0, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `intersperseWith`
-
-```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
-```
-
-Like `intersperse`, but builds each separator on demand by calling
-`separator()`. Use when the separator is expensive or needs to
-vary by call.
-
-##### Examples
-
-```
-var counter = 0;
-[1, 2, 3].iter()
-    .intersperseWith { counter += 1; counter * 10 }
-    .collect();   // [1, 10, 2, 20, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `isSorted`
-
-```kestrel
-public consuming func isSorted() -> Bool
-```
-
-True if elements come out in ascending order. True for empty or
-single-element iterators (vacuous). Short-circuits on the first
-out-of-order pair.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().isSorted();   // true
-[1, 3, 2, 4, 5].iter().isSorted();   // false
-[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `isSortedDescending`
-
-```kestrel
-public consuming func isSortedDescending() -> Bool
-```
-
-True if elements come out in descending order. Mirror of
-`isSorted`.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `iter`
-
-```kestrel
-func iter() -> Self
-```
-
-Returns `self`. The blanket conformance pivot — iterators *are*
-iterables.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `last`
-
-```kestrel
-public consuming func last() -> Item?
-```
-
-Last element, or `None` if empty. Consumes the entire iterator —
-`O(n)` even for sequences whose last element is cheap to address
-directly.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `map`
-
-```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
-```
-
-Applies `transform` to each element. Lazy — the function only
-fires when the downstream pulls a value.
-
-##### Examples
-
-```
-[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
-["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `max`
-
-```kestrel
-public consuming func max() -> Item?
-```
-
-Largest element, or `None` for an empty iterator. Ties go to the
-first occurrence.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `min`
-
-```kestrel
-public consuming func min() -> Item?
-```
-
-Smallest element, or `None` for an empty iterator. Ties go to the
-first occurrence.
-
-##### Examples
-
-```
-[3, 1, 4, 1, 5].iter().min();   // Some(1)
-[].iter().min();                // None
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
 #### function `next`
 
 ```kestrel
@@ -1527,328 +309,10 @@ Yields the next element, or `.None` when the count reaches zero.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-#### function `nth`
-
-```kestrel
-public mutating func nth(Int64) -> Item?
-```
-
-Returns the element at index `n` (zero-based), consuming
-everything up to and including it. `None` if `n` is past the end.
-
-##### Examples
-
-```
-[10, 20, 30, 40].iter().nth(2);   // Some(30)
-[10, 20].iter().nth(5);           // None
-[10, 20, 30].iter().nth(0);       // Some(10)
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `peekable`
-
-```kestrel
-public func peekable() -> PeekableIterator[Self]
-```
-
-Wraps `self` so you can look at the next element without
-consuming it.
-
-##### Examples
-
-```
-var it = [1, 2, 3].iter().peekable();
-it.peek();   // Some(1) — no consumption
-it.peek();   // Some(1) — still
-it.next();   // Some(1) — now consumed
-it.peek();   // Some(2)
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `product`
-
-```kestrel
-public consuming func product() -> Item
-```
-
-Product of every element. Returns `Item.one` for an empty
-iterator.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().product();   // 120
-(1..=5).iter().product();           // 120  (5!)
-[].iter().product();                // 1
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `reduce`
-
-```kestrel
-public consuming func reduce(by: (Item, Item) -> Item) -> Item?
-```
-
-Like `fold`, but seeds the accumulator with the first element
-instead of taking an explicit `initial`. Returns `None` for an
-empty iterator.
-
-##### Examples
-
-```
-[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
-[5].iter().reduce { (a, b) in a + b };            // Some(5)
-[].iter().reduce { (a, b) in a + b };             // None
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `scan`
-
-```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
-```
-
-Like `fold`, but yields each intermediate accumulator value
-instead of just the final one. Useful for prefix sums, running
-products, and any "carry state along" pattern.
-
-##### Examples
-
-```
-// Running sum
-[1, 2, 3, 4].iter()
-    .scan(from: 0) { (acc, x) in acc + x }
-    .collect();   // [1, 3, 6, 10]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `skip`
-
-```kestrel
-public func skip(Int64) -> SkipIterator[Self]
-```
-
-Drops the first `count` elements, then yields the rest.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
-[1, 2].iter().skip(10).collect();           // []
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `skipWhile`
-
-```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
-```
-
-Drops elements while `predicate` is `true`, then yields *every*
-remaining element (including ones that would also satisfy the
-predicate). Mirror of `takeWhile`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 1, 2].iter()
-    .skipWhile { it < 3 }
-    .collect();   // [3, 4, 1, 2]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `sorted`
-
-```kestrel
-public consuming func sorted() -> Array[Item]
-```
-
-Collects into an `Array[Item]`, sorted ascending. Eager and
-`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
-
-##### Examples
-
-```
-[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
-[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `stepBy`
-
-```kestrel
-public func stepBy(Int64) -> StepByIterator[Self]
-```
-
-Yields every `n`-th element, starting at the first. `n == 0` is
-undefined (the adapter will spin forever).
-
-##### Examples
-
-```
-[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `sum`
-
-```kestrel
-public consuming func sum() -> Item
-```
-
-Sum of every element. Returns `Item.zero` for an empty iterator.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().sum();    // 15
-[1.5, 2.5, 3.0].iter().sum();    // 7.0
-[].iter().sum();                 // 0
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `take`
-
-```kestrel
-public func take(Int64) -> TakeIterator[Self]
-```
-
-Yields at most the first `count` elements; stops early even if
-more are available.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
-[1, 2].iter().take(10).collect();           // [1, 2]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `takeWhile`
-
-```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
-```
-
-Yields elements until `predicate` first returns `false`, then
-stops. The "first failing" element is *not* yielded.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 1, 2].iter()
-    .takeWhile { it < 4 }
-    .collect();   // [1, 2, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `tryFold`
-
-```kestrel
-public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
-```
-
-Fold with early exit on `Err`. The combine returns `Result`; the
-first `Err` halts iteration and is returned. If everything
-succeeds, returns `Ok(final accumulator)`.
-
-##### Examples
-
-```
-// Stop the moment a parse fails
-["1", "2", "3"].iter()
-    .tryFold(from: 0) { (acc, s) in
-        match Int64.parse(s) {
-            .Some(n) => .Ok(acc + n),
-            .None    => .Err("parse error")
-        }
-    };   // Ok(6)
-
-["1", "bad", "3"].iter()
-    .tryFold(from: 0) { (acc, s) in
-        match Int64.parse(s) {
-            .Some(n) => .Ok(acc + n),
-            .None    => .Err("parse error")
-        }
-    };   // Err("parse error")
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `tryForEach`
-
-```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
-```
-
-`forEach` with early exit on `Err`. Mirror of `tryFold` for the
-"do something with each element" shape.
-
-##### Examples
-
-```
-files.iter().tryForEach { (path) in
-    File.delete(path)   // Result[(), IoError]
-};   // stops on first failure
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `unzip`
-
-```kestrel
-public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
-```
-
-Splits an iterator of pairs into two parallel arrays. Inverse of
-`zip`.
-
-##### Examples
-
-```
-let pairs = [(1, "a"), (2, "b"), (3, "c")];
-let (nums, strs) = pairs.iter().unzip();
-// nums = [1, 2, 3], strs = ["a", "b", "c"]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `zip`
-
-```kestrel
-public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
-```
-
-Pairs elements from `self` and `other`. Stops as soon as either
-side runs out.
-
-##### Examples
-
-```
-let names = ["Alice", "Bob", "Charlie"];
-let ages  = [30, 25, 35];
-names.iter().zip(ages.iter()).collect();
-// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
 ## struct `Buffer`
 
 ```kestrel
-public struct Buffer[T, A] where A: Allocator { /* private fields */ }
+public struct Buffer[T, A]: not Copyable where A: Allocator { /* private fields */ }
 ```
 
 Owning, allocator-parameterised contiguous storage.
@@ -2054,7 +518,7 @@ _Defined in `lang/std/memory/cowbox.ks`._
 #### initializer `From Value`
 
 ```kestrel
-public init(T)
+public init(consuming T)
 ```
 
 Allocates fresh storage holding `value` with refcount 1.
@@ -2071,6 +535,14 @@ Adopts an existing `RcBox` without allocating.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
+#### typealias `Target`
+
+```kestrel
+type Target = T where T: Cloneable
+```
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
 #### function `isUnique`
 
 ```kestrel
@@ -2078,6 +550,27 @@ public func isUnique() -> Bool
 ```
 
 Returns `true` when no other clone shares this storage.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+#### function `modify`
+
+```kestrel
+public mutating func modify[R]((T) -> R) -> R
+```
+
+In-place mutation barrier: ensures unique storage (deep-copying if
+shared), then passes the heap value to `body` as a `mutating` argument
+to mutate directly — no per-call clone or write-back. This is the O(1)
+replacement for the `read()` → modify → `setValue()` dance.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+#### function `pointeeRef`
+
+```kestrel
+public func pointeeRef() -> &T where T: Cloneable
+```
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
@@ -2118,6 +611,18 @@ types like `StringSlice`.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
+#### function `valuePtr`
+
+```kestrel
+public func valuePtr() -> Pointer[T]
+```
+
+Returns a pointer to the wrapped value on the heap, bypassing
+the clone that `read()` / `getValue()` would create. Use this
+to read individual scalar fields without triggering `T.deinit`.
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
 #### function `write`
 
 ```kestrel
@@ -2138,6 +643,18 @@ public func clone() -> CowBox[T]
 ```
 
 Shares storage with the returned clone (refcount bump).
+
+_Defined in `lang/std/memory/cowbox.ks`._
+
+### Implements `MutableIndirection`
+
+_Conditional: `where T: Cloneable`._
+
+#### function `pointeeMutRef`
+
+```kestrel
+public mutating func pointeeMutRef() -> &mutating T where T: Cloneable
+```
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
@@ -2175,9 +692,9 @@ allocator.allocate(l)
 
 ### Representation
 
-Two `Int64`s — `size` and `alignment`. No invariants enforced at
-construction; misaligned layouts are caught (or undefined) at the
-allocator level.
+Two `Int64`s — `size` and `alignment`. Explicitly constructed layouts
+are validated by allocators; the factories in this type reject negative
+sizes, invalid alignments, and arithmetic overflow.
 
 _Defined in `lang/std/memory/layout.ks`._
 
@@ -2208,12 +725,23 @@ _Defined in `lang/std/memory/layout.ks`._
 #### function `array`
 
 ```kestrel
-public static func array[T](Int64) -> Layout
+public static func array[T](Int64) -> Layout where T: not Copyable
 ```
 
-Layout for `count` contiguous `T` values. Inherits the element's
-alignment; size is `sizeof[T] * count` with no inter-element padding
-(T is assumed already padded to its own alignment).
+Layout for `count` contiguous `T` values. Traps if `count` is negative
+or the total size cannot be represented by `Int64`. Use
+`arrayChecked` to handle those cases explicitly.
+
+_Defined in `lang/std/memory/layout.ks`._
+
+#### function `arrayChecked`
+
+```kestrel
+public static func arrayChecked[T](Int64) -> Layout? where T: not Copyable
+```
+
+Checked counterpart to `array`. Returns `None` for a negative count
+or when `sizeof[T] * count` overflows.
 
 _Defined in `lang/std/memory/layout.ks`._
 
@@ -2230,10 +758,21 @@ access tables by hand).
 
 _Defined in `lang/std/memory/layout.ks`._
 
+#### function `mergeChecked`
+
+```kestrel
+public func mergeChecked(with: Layout) -> (Layout, Int64)?
+```
+
+Checked counterpart to `merge`. Returns `None` if either input is
+invalid or if padding/size arithmetic overflows.
+
+_Defined in `lang/std/memory/layout.ks`._
+
 #### function `of`
 
 ```kestrel
-public static func of[T]() -> Layout
+public static func of[T]() -> Layout where T: not Copyable
 ```
 
 Layout for a single value of `T` — uses the compiler-known
@@ -2247,9 +786,19 @@ _Defined in `lang/std/memory/layout.ks`._
 public func padToAlign() -> Layout
 ```
 
-Rounds `size` up to the next multiple of `alignment`. Use when
-emitting a value into a packed array — without padding, element
-`i+1` would land at the wrong offset.
+Rounds `size` up to the next multiple of `alignment`. Traps for an
+invalid layout or arithmetic overflow; use `padToAlignChecked` to
+handle failure explicitly.
+
+_Defined in `lang/std/memory/layout.ks`._
+
+#### function `padToAlignChecked`
+
+```kestrel
+public func padToAlignChecked() -> Layout?
+```
+
+Checked counterpart to `padToAlign`.
 
 _Defined in `lang/std/memory/layout.ks`._
 
@@ -2265,24 +814,6 @@ _Defined in `lang/std/memory/layout.ks`._
 
 ### Implements `Equatable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `isEqual`
 
 ```kestrel
@@ -2292,16 +823,6 @@ public func isEqual(to: Layout) -> Bool
 Equal when both fields match.
 
 _Defined in `lang/std/memory/layout.ks`._
-
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 ## struct `LiteralSlice`
 
@@ -2487,507 +1008,6 @@ type Item = T
 
 _Defined in `lang/std/memory/literal_slice.ks`._
 
-#### typealias `TargetIterator`
-
-```kestrel
-type TargetIterator = Self
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `all`
-
-```kestrel
-public mutating func all(where: (Item) -> Bool) -> Bool
-```
-
-True if every element satisfies `predicate`. Stops at the first
-failure. True for an empty iterator (vacuous truth).
-
-##### Examples
-
-```
-[2, 4, 6].iter().all { it % 2 == 0 };   // true
-[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
-[].iter().all { false };                // true (empty)
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `any`
-
-```kestrel
-public mutating func any(where: (Item) -> Bool) -> Bool
-```
-
-True if any element satisfies `predicate`. Stops at the first
-match. False for an empty iterator.
-
-##### Examples
-
-```
-[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
-[1, 2, 3].iter().any { it > 10 };      // false
-[].iter().any { true };                // false
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `chain`
-
-```kestrel
-public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
-```
-
-Yields all of `self`, then all of `other`. Both must produce the
-same `Item` type.
-
-##### Examples
-
-```
-[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `collect`
-
-```kestrel
-public consuming func collect() -> Array[Item]
-```
-
-Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
-at the end of an adapter chain to materialise the result.
-
-##### Examples
-
-```
-[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
-(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `compactMap`
-
-```kestrel
-public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
-```
-
-Drops `None`s and unwraps `Some`s — the identity-transform special
-case of `filterMap`. Available when the iterator already yields
-optionals.
-
-##### Examples
-
-```
-let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
-xs.iter().compactMap().collect();   // [1, 2, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `contains`
-
-```kestrel
-public mutating func contains(Item) -> Bool
-```
-
-True if any element equals `element`. Short-circuits.
-
-##### Examples
-
-```
-[1, 2, 3].iter().contains(2);   // true
-[1, 2, 3].iter().contains(5);   // false
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `count`
-
-```kestrel
-public consuming func count() -> Int64
-```
-
-Counts the elements by walking the whole iterator. `O(n)` — for
-types that already know their length, prefer
-`ExactSizeIterator.remaining`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `cycle`
-
-```kestrel
-public func cycle() -> CycleIterator[Self]
-```
-
-Restarts iteration from the beginning whenever the inner iterator
-is exhausted, producing an infinite sequence. Always combine with
-`take` (or another short-circuiting consumer) — otherwise the
-result is unbounded.
-
-##### Examples
-
-```
-[1, 2, 3].iter().cycle().take(7).collect();
-// [1, 2, 3, 1, 2, 3, 1]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `enumerate`
-
-```kestrel
-public func enumerate() -> EnumerateIterator[Self]
-```
-
-Pairs each element with its zero-based position.
-
-##### Examples
-
-```
-for (i, item) in arr.iter().enumerate() {
-    print("Index \{i}: \{item}")
-};
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `filter`
-
-```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
-```
-
-Yields only elements where `predicate` returns `true`. Lazy —
-elements are tested as they're pulled.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `filterMap`
-
-```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
-```
-
-Combined map + filter — `transform` returns `Optional[U]`; `None`
-values are skipped. Use over `map(...).filter(...)` when the
-transform itself decides whether the element belongs.
-
-##### Examples
-
-```
-["1", "two", "3"].iter()
-    .filterMap { Int64.parse(it) }
-    .collect();   // [1, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `first`
-
-```kestrel
-public mutating func first(where: (Item) -> Bool) -> Item?
-```
-
-First element matching `predicate`, or `None`. Stops at the first
-match.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
-[1, 2, 3].iter().first { it > 10 };        // None
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `firstIndex`
-
-```kestrel
-public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
-```
-
-Index of the first element matching `predicate`, or `None`.
-
-##### Examples
-
-```
-["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
-[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `flatMap`
-
-```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
-```
-
-Maps each element to an iterator and concatenates the results.
-The monadic bind for iterators.
-
-##### Examples
-
-```
-[[1, 2], [3, 4], [5]].iter()
-    .flatMap { it.iter() }
-    .collect();   // [1, 2, 3, 4, 5]
-```
-
-```
-// Conditional expand — drop odd, double even
-[1, 2, 3].iter()
-    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
-    .collect();   // [2, 2]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `flatten`
-
-```kestrel
-public func flatten() -> FlattenIterator[Self]
-```
-
-Concatenates the inner iterators into one flat stream. Each inner
-iterator is fully drained before moving to the next. The
-already-have-iterators counterpart of `flatMap`.
-
-##### Examples
-
-```
-let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
-nested.flatten().collect();   // [1, 2, 3, 4, 5]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `fold`
-
-```kestrel
-public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
-```
-
-Left fold — start at `initial` and walk left to right, applying
-`combine(acc, element)`. Returns `initial` for an empty iterator.
-
-##### Examples
-
-```
-[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
-[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
-[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `forEach`
-
-```kestrel
-public consuming func forEach((Item) -> ())
-```
-
-Calls `action` on every element, discarding return values. Use
-`tryForEach` if you need to short-circuit on failure.
-
-##### Examples
-
-```
-[1, 2, 3].iter().forEach { print(it) };
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `fuse`
-
-```kestrel
-public func fuse() -> FusedIterator[Self]
-```
-
-Locks `None` once seen — protects against iterators that aren't
-fused (i.e. that may produce more elements after returning `None`
-once). After the first `None`, this adapter returns `None`
-forever.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `inspect`
-
-```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
-```
-
-Calls `inspector` on each element as it flows through, leaving
-the value otherwise untouched. Useful for logging or
-instrumenting an adapter chain mid-pipeline.
-
-##### Examples
-
-```
-[1, 2, 3].iter()
-    .inspect { print("before filter: \{it}") }
-    .filter { it > 1 }
-    .inspect { print("after filter: \{it}") }
-    .collect();
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `intersperse`
-
-```kestrel
-public func intersperse(with: Item) -> IntersperseIterator[Self]
-```
-
-Inserts `separator` between consecutive elements. Empty inputs
-stay empty; single-element inputs get no separator.
-
-##### Examples
-
-```
-[1, 2, 3].iter().intersperse(with: 0).collect();
-// [1, 0, 2, 0, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `intersperseWith`
-
-```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
-```
-
-Like `intersperse`, but builds each separator on demand by calling
-`separator()`. Use when the separator is expensive or needs to
-vary by call.
-
-##### Examples
-
-```
-var counter = 0;
-[1, 2, 3].iter()
-    .intersperseWith { counter += 1; counter * 10 }
-    .collect();   // [1, 10, 2, 20, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `isSorted`
-
-```kestrel
-public consuming func isSorted() -> Bool
-```
-
-True if elements come out in ascending order. True for empty or
-single-element iterators (vacuous). Short-circuits on the first
-out-of-order pair.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().isSorted();   // true
-[1, 3, 2, 4, 5].iter().isSorted();   // false
-[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `isSortedDescending`
-
-```kestrel
-public consuming func isSortedDescending() -> Bool
-```
-
-True if elements come out in descending order. Mirror of
-`isSorted`.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `iter`
-
-```kestrel
-func iter() -> Self
-```
-
-Returns `self`. The blanket conformance pivot — iterators *are*
-iterables.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `last`
-
-```kestrel
-public consuming func last() -> Item?
-```
-
-Last element, or `None` if empty. Consumes the entire iterator —
-`O(n)` even for sequences whose last element is cheap to address
-directly.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `map`
-
-```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
-```
-
-Applies `transform` to each element. Lazy — the function only
-fires when the downstream pulls a value.
-
-##### Examples
-
-```
-[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
-["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `max`
-
-```kestrel
-public consuming func max() -> Item?
-```
-
-Largest element, or `None` for an empty iterator. Ties go to the
-first occurrence.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `min`
-
-```kestrel
-public consuming func min() -> Item?
-```
-
-Smallest element, or `None` for an empty iterator. Ties go to the
-first occurrence.
-
-##### Examples
-
-```
-[3, 1, 4, 1, 5].iter().min();   // Some(1)
-[].iter().min();                // None
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
 #### function `next`
 
 ```kestrel
@@ -2997,324 +1017,6 @@ public mutating func next() -> T?
 Yields the next element, or `.None` once the buffer is exhausted.
 
 _Defined in `lang/std/memory/literal_slice.ks`._
-
-#### function `nth`
-
-```kestrel
-public mutating func nth(Int64) -> Item?
-```
-
-Returns the element at index `n` (zero-based), consuming
-everything up to and including it. `None` if `n` is past the end.
-
-##### Examples
-
-```
-[10, 20, 30, 40].iter().nth(2);   // Some(30)
-[10, 20].iter().nth(5);           // None
-[10, 20, 30].iter().nth(0);       // Some(10)
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `peekable`
-
-```kestrel
-public func peekable() -> PeekableIterator[Self]
-```
-
-Wraps `self` so you can look at the next element without
-consuming it.
-
-##### Examples
-
-```
-var it = [1, 2, 3].iter().peekable();
-it.peek();   // Some(1) — no consumption
-it.peek();   // Some(1) — still
-it.next();   // Some(1) — now consumed
-it.peek();   // Some(2)
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `product`
-
-```kestrel
-public consuming func product() -> Item
-```
-
-Product of every element. Returns `Item.one` for an empty
-iterator.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().product();   // 120
-(1..=5).iter().product();           // 120  (5!)
-[].iter().product();                // 1
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `reduce`
-
-```kestrel
-public consuming func reduce(by: (Item, Item) -> Item) -> Item?
-```
-
-Like `fold`, but seeds the accumulator with the first element
-instead of taking an explicit `initial`. Returns `None` for an
-empty iterator.
-
-##### Examples
-
-```
-[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
-[5].iter().reduce { (a, b) in a + b };            // Some(5)
-[].iter().reduce { (a, b) in a + b };             // None
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `scan`
-
-```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
-```
-
-Like `fold`, but yields each intermediate accumulator value
-instead of just the final one. Useful for prefix sums, running
-products, and any "carry state along" pattern.
-
-##### Examples
-
-```
-// Running sum
-[1, 2, 3, 4].iter()
-    .scan(from: 0) { (acc, x) in acc + x }
-    .collect();   // [1, 3, 6, 10]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `skip`
-
-```kestrel
-public func skip(Int64) -> SkipIterator[Self]
-```
-
-Drops the first `count` elements, then yields the rest.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
-[1, 2].iter().skip(10).collect();           // []
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `skipWhile`
-
-```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
-```
-
-Drops elements while `predicate` is `true`, then yields *every*
-remaining element (including ones that would also satisfy the
-predicate). Mirror of `takeWhile`.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 1, 2].iter()
-    .skipWhile { it < 3 }
-    .collect();   // [3, 4, 1, 2]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `sorted`
-
-```kestrel
-public consuming func sorted() -> Array[Item]
-```
-
-Collects into an `Array[Item]`, sorted ascending. Eager and
-`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
-
-##### Examples
-
-```
-[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
-[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `stepBy`
-
-```kestrel
-public func stepBy(Int64) -> StepByIterator[Self]
-```
-
-Yields every `n`-th element, starting at the first. `n == 0` is
-undefined (the adapter will spin forever).
-
-##### Examples
-
-```
-[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `sum`
-
-```kestrel
-public consuming func sum() -> Item
-```
-
-Sum of every element. Returns `Item.zero` for an empty iterator.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().sum();    // 15
-[1.5, 2.5, 3.0].iter().sum();    // 7.0
-[].iter().sum();                 // 0
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `take`
-
-```kestrel
-public func take(Int64) -> TakeIterator[Self]
-```
-
-Yields at most the first `count` elements; stops early even if
-more are available.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
-[1, 2].iter().take(10).collect();           // [1, 2]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `takeWhile`
-
-```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
-```
-
-Yields elements until `predicate` first returns `false`, then
-stops. The "first failing" element is *not* yielded.
-
-##### Examples
-
-```
-[1, 2, 3, 4, 1, 2].iter()
-    .takeWhile { it < 4 }
-    .collect();   // [1, 2, 3]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `tryFold`
-
-```kestrel
-public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
-```
-
-Fold with early exit on `Err`. The combine returns `Result`; the
-first `Err` halts iteration and is returned. If everything
-succeeds, returns `Ok(final accumulator)`.
-
-##### Examples
-
-```
-// Stop the moment a parse fails
-["1", "2", "3"].iter()
-    .tryFold(from: 0) { (acc, s) in
-        match Int64.parse(s) {
-            .Some(n) => .Ok(acc + n),
-            .None    => .Err("parse error")
-        }
-    };   // Ok(6)
-
-["1", "bad", "3"].iter()
-    .tryFold(from: 0) { (acc, s) in
-        match Int64.parse(s) {
-            .Some(n) => .Ok(acc + n),
-            .None    => .Err("parse error")
-        }
-    };   // Err("parse error")
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `tryForEach`
-
-```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
-```
-
-`forEach` with early exit on `Err`. Mirror of `tryFold` for the
-"do something with each element" shape.
-
-##### Examples
-
-```
-files.iter().tryForEach { (path) in
-    File.delete(path)   // Result[(), IoError]
-};   // stops on first failure
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `unzip`
-
-```kestrel
-public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
-```
-
-Splits an iterator of pairs into two parallel arrays. Inverse of
-`zip`.
-
-##### Examples
-
-```
-let pairs = [(1, "a"), (2, "b"), (3, "c")];
-let (nums, strs) = pairs.iter().unzip();
-// nums = [1, 2, 3], strs = ["a", "b", "c"]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `zip`
-
-```kestrel
-public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
-```
-
-Pairs elements from `self` and `other`. Stops as soon as either
-side runs out.
-
-##### Examples
-
-```
-let names = ["Alice", "Bob", "Charlie"];
-let ages  = [30, 25, 35];
-names.iter().zip(ages.iter()).collect();
-// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
 
 ## struct `ManuallyDrop`
 
@@ -3342,38 +1044,69 @@ public var value: T { get }
 
 _Defined in `lang/std/memory/manually_drop.ks`._
 
-## struct `Pointer`
+## struct `MutRefSliceIterator`
 
 ```kestrel
-public struct Pointer[T] { /* private fields */ }
+public struct MutRefSliceIterator[T] { /* private fields */ }
 ```
 
-Typed pointer to a single value of `T`.
+Forward iterator yielding MUTABLE REFERENCES (`&mutating T`) to
+contiguous elements — in-place mutation without writeback
+(`for x in arr.mutableRefs() { x += 1 }`). Surfaced as
+`Array.mutableRefs()`, which runs the COW barrier before handing out
+the buffer.
 
-Element-typed counterpart to `RawPointer`: `offset(by:)` strides in
-units of `sizeof[T]`, and `pointee` reads/writes through the address.
-`Pointer[T]` is FFI-safe when `T` is.
+### Invalidation
 
-### Examples
-
-```
-var x = 42;
-let p = Pointer(to: x);
-p.read()                       // 42
-p.write(100)                   // x is now 100
-p.pointee = 7                  // x is now 7
-```
+Same contract as `RefSliceIterator`: mutating the source collection's
+STRUCTURE while iterating invalidates the cursor and any yielded
+reference. Element writes through the yielded references are the
+intended use.
 
 ### Representation
 
-One `lang.ptr[T]`. The wrapping struct is purely a typing convenience —
-it lowers to a bare machine pointer.
+A `Pointer[T]` cursor and an `Int64` countdown.
 
-### Memory Model
+_Defined in `lang/std/memory/pointer.ks`._
 
-Non-owning. The pointee's lifetime is the caller's responsibility; the
-pointer does not increment any refcount, register with any GC, or
-trigger a deinit.
+### Members
+
+#### initializer `From Storage`
+
+```kestrel
+public init(ptr: Pointer[T], remaining: Int64)
+```
+
+Builds an iterator from a starting pointer and remaining count.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = &mutating T
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> Optional[&mutating T]
+```
+
+Yields a mutable reference to the next element in place, or
+`.None` when the count reaches zero.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+## struct `Pointer`
+
+```kestrel
+public struct Pointer[T] where T: not Copyable, T: not Static { /* private fields */ }
+```
 
 _Defined in `lang/std/memory/pointer.ks`._
 
@@ -3389,6 +1122,14 @@ Wraps an existing primitive pointer.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
+#### typealias `Target`
+
+```kestrel
+type Target = T
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
 #### initializer `To Value`
 
 ```kestrel
@@ -3396,8 +1137,19 @@ public init(to: T)
 ```
 
 Takes the address of `value`. Equivalent to `&value` in C — the
-caller must ensure `value` outlives any use of the resulting
-pointer.
+borrowed place itself is captured; no copy is made.
+
+##### Safety
+
+The pointer does not keep `value` alive: the caller must ensure the
+place outlives every use of the resulting pointer, or any read is
+undefined behavior.
+
+This is the sole capture init and it accepts any place — `var` or
+`let` — yielding the same write-capable `Pointer[T]`. Writing
+through a pointer captured from an immutable place is the C
+const-cast footgun: it compiles, and it is on the caller to know the
+storage is actually mutable.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
@@ -3407,6 +1159,15 @@ _Defined in `lang/std/memory/pointer.ks`._
 public var address: UInt64 { get }
 ```
 
+Live view of the value at the address. `get` reads through the
+pointer; `set` writes. Both are unchecked — see `# Safety`.
+
+##### Safety
+
+The pointer must be non-null and the storage must hold a valid
+initialised `T`. Reading past the end of an allocation, after
+the pointee has been freed, or through a dangling pointer is
+undefined behavior.
 Numeric address — same value as `asRaw().address`.
 
 _Defined in `lang/std/memory/pointer.ks`._
@@ -3424,7 +1185,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `cast`
 
 ```kestrel
-public func cast[U]() -> Pointer[U]
+public func cast[U]() -> Pointer[U] where U: not Copyable
 ```
 
 Reinterprets the address as a `Pointer[U]`.
@@ -3457,6 +1218,29 @@ Convenience for `address == 0`.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
+#### field `mutatingValue`
+
+```kestrel
+public var mutatingValue: &mutating T { get }
+```
+
+Mutable borrowed view of the pointee. Mutating methods and
+`mutating`-convention arguments through the result write the storage
+in place — no clone, no write-back.
+
+##### Safety
+
+- Same validity preconditions as `value`.
+- This is the const-cast escape hatch: `Pointer(to: x).mutatingValue`
+  on a `let`/shared place compiles and writes through it — the
+  compiler does not stop it (same class as `write()` after
+  `Pointer(to:)` on a `let`).
+- Writing through a pointer into storage shared by a COW container
+  (`Array`, `String`, `Dictionary`) is visible through every copy,
+  breaking value semantics. Make the storage unique first.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
 #### function `nullPointer`
 
 ```kestrel
@@ -3481,18 +1265,16 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### field `pointee`
 
 ```kestrel
-public var pointee: T { get set }
+public var pointee: T where T: Copyable { get set }
 ```
 
-Live view of the value at the address. `get` reads through the
-pointer; `set` writes. Both are unchecked — see `# Safety`.
+_Defined in `lang/std/memory/pointer.ks`._
 
-##### Safety
+#### function `pointeeRef`
 
-The pointer must be non-null and the storage must hold a valid
-initialised `T`. Reading past the end of an allocation, after
-the pointee has been freed, or through a dangling pointer is
-undefined behavior.
+```kestrel
+public func pointeeRef() -> &T
+```
 
 _Defined in `lang/std/memory/pointer.ks`._
 
@@ -3509,10 +1291,83 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `read`
 
 ```kestrel
-public func read() -> T
+public func read() -> T where T: Copyable
 ```
 
-Reads `T` from the address. Same safety preconditions as `pointee.get`.
+Bit-copies `T` out of the address — `T.deinit` does not run. This is
+a copy, so it requires `T: Copyable`; for non-Copyable pointees use
+`with` (borrow) or `move` (consuming read-out).
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `take`
+
+```kestrel
+public func take() -> T
+```
+
+Moves `T` out of the address bitwise — a *consuming* read-out. Unlike
+`read()` there is no `Copyable` requirement: ownership of the value
+transfers to the caller, and the pointee is left logically
+uninitialised. `T.deinit` does not run here.
+
+This is the dual of `write(consuming:)` and the building block for
+relocating non-Copyable values (e.g. `swap`).
+
+##### Safety
+
+Same validity preconditions as `read()`, and additionally: after the
+take the pointee must not be read or dropped until the slot is
+re-initialised (e.g. via `write`). Taking the same slot twice without
+an intervening write double-owns the value and will double-free.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### field `value`
+
+```kestrel
+public var value: &T { get }
+```
+
+Borrowed view of the pointee — no copy, no clone, no `T: Copyable`
+requirement. Member access, operators, and borrow-convention calls
+go through it in place; binding it (`let x = p.value;`) stores an
+owned copy instead (binding decay).
+
+##### Safety
+
+- The pointer must be non-null and the storage must hold a valid,
+  initialized `T` for as long as the reference is used.
+- The reference inherits this pointer's contract: the compiler does
+  not verify the pointee's lifetime. Using it after the storage is
+  freed is undefined behavior — the same trust point as `read()`,
+  returning a view instead of a copy.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `with`
+
+```kestrel
+public func with[R]((T) -> R) -> R
+```
+
+Borrows the pointee in place and passes it to `body`. The pointee
+is never copied or cloned — `T.deinit` does not run. Use this
+to extract fields from heap-allocated structs without triggering
+resource cleanup on a temporary clone.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `withMut`
+
+```kestrel
+public func withMut[R]((T) -> R) -> R
+```
+
+Mutably borrows the pointee in place and passes it to `body` as a
+`mutating` argument. The pointee is mutated directly on the heap —
+never copied, cloned, or written back — so `T.deinit` does not run on
+a temporary. This is the in-place primitive behind COW `modify`.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
@@ -3525,27 +1380,17 @@ public func write(consuming T)
 Writes `value` through the pointer. Same safety preconditions as
 `pointee.set`.
 
+##### Safety
+
+The pointer must be non-null and the storage valid for writes of
+`T`. The previous pointee is overwritten without running its
+`deinit`. If the pointer was captured with `Pointer(to:)` from a
+`let` place, writing is the documented const-cast footgun — the
+compiler does not stop it.
+
 _Defined in `lang/std/memory/pointer.ks`._
 
 ### Implements `Equatable`
-
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -3556,16 +1401,6 @@ public func isEqual(to: Pointer[T]) -> Bool
 Address-based equality.
 
 _Defined in `lang/std/memory/pointer.ks`._
-
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Hashable`
 
@@ -3583,6 +1418,20 @@ Murmur3's `fmix64` finalizer (two rounds of `xor-shift /
 multiply`) before hashing so every input bit avalanches across
 the 64-bit output. Without this, pointer-keyed maps see
 collision clustering driven by the allocator's stride.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `FFISafe`
+
+_Conditional: `where T: FFISafe`._
+
+### Implements `MutableIndirection`
+
+#### function `pointeeMutRef`
+
+```kestrel
+public mutating func pointeeMutRef() -> &mutating T
+```
 
 _Defined in `lang/std/memory/pointer.ks`._
 
@@ -3651,7 +1500,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### function `cast`
 
 ```kestrel
-public func cast[T]() -> Pointer[T]
+public func cast[T]() -> Pointer[T] where T: not Copyable
 ```
 
 Reinterprets the address as a `Pointer[T]`.
@@ -3708,24 +1557,6 @@ _Defined in `lang/std/memory/pointer.ks`._
 
 ### Implements `Equatable`
 
-#### typealias `Output`
-
-```kestrel
-type Output = Bool
-```
-
-_Defined in `lang/std/core/protocols.ks`._
-
-#### function `equal`
-
-```kestrel
-public func equal(to: Self) -> Bool
-```
-
-Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
-
-_Defined in `lang/std/core/protocols.ks`._
-
 #### function `isEqual`
 
 ```kestrel
@@ -3737,15 +1568,7 @@ allocations are equal iff their addresses coincide.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-#### function `notEqual`
-
-```kestrel
-public func notEqual(to: Self) -> Bool
-```
-
-Default `!=`: delegates to `==` so there's a single source of truth.
-
-_Defined in `lang/std/core/protocols.ks`._
+### Implements `FFISafe`
 
 ### Implements `Hashable`
 
@@ -3769,7 +1592,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 ## struct `RcBox`
 
 ```kestrel
-public struct RcBox[T] { /* private fields */ }
+public struct RcBox[T] where T: not Copyable { /* private fields */ }
 ```
 
 Heap allocation with a strong-reference count, used as the underlying
@@ -3780,6 +1603,11 @@ plain assignment shares storage and only the first mutating call pays
 for a deep copy. Reach for `RcBox` directly when building a similar
 COW type; for plain shared ownership without mutation prefer a more
 purpose-built container.
+
+`RcBox` is also the `@builtin(.SharedBox)` binding — the box the compiler
+instantiates for implicit boxing (escaping closure environments today).
+That binding is what promises deterministic last-release cleanup and no
+strong-cycle collection; the `SharedBox` protocol itself promises neither.
 
 ### Examples
 
@@ -3806,6 +1634,11 @@ the count and shares storage; `deinit` decrements and frees on zero.
   how COW types decide whether to copy.
 - The refcount is currently **not** atomic, so `RcBox` is not safe to
   share across threads.
+- The payload may be non-`Copyable` (`where T: not Copyable` is a
+  relaxation, the same shape `Pointer[T]` uses): implicit boxing needs it,
+  because a boxed closure environment owns its captures. The two
+  operations that copy the payload back out — `getValue()` and
+  `deepClone()` — are therefore only available when `T: Copyable`.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
@@ -3814,7 +1647,7 @@ _Defined in `lang/std/memory/rcbox.ks`._
 #### initializer `From Value`
 
 ```kestrel
-public init(T)
+public init(consuming T)
 ```
 
 Allocates fresh storage holding `value` with refcount 1. Panics if
@@ -3826,10 +1659,18 @@ Panics with `"RcBox allocation failed"` on allocation failure.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
+#### typealias `Target`
+
+```kestrel
+type Target = T
+```
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
 #### function `deepClone`
 
 ```kestrel
-public func deepClone() -> RcBox[T]
+public func deepClone() -> RcBox[T] where T: Copyable
 ```
 
 Allocates fresh storage with a copy of the value. Used by COW
@@ -3841,23 +1682,33 @@ _Defined in `lang/std/memory/rcbox.ks`._
 #### function `getValue`
 
 ```kestrel
-public func getValue() -> T
+public func getValue() -> T where T: Copyable
 ```
 
-Reads the wrapped value out of storage. Returns a copy — the
-underlying `T` is read through a pointer, so callers see a
-snapshot, not a live reference.
+Reads the wrapped value out of storage. Returns a bitwise copy read
+straight from the payload slot, so no temporary `RcBoxStorage` is
+created or dropped and `T.deinit` does not run.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
-#### function `isUnique`
+#### function `modify`
 
 ```kestrel
-public func isUnique() -> Bool
+public func modify[R]((T) -> R) -> R
 ```
 
-Returns `true` when no other clone is sharing storage. The litmus
-test for "safe to mutate in place" in COW collections.
+Mutates the wrapped value in place, passing it to `body` as a
+`mutating` argument. No clone or write-back — `body` mutates the
+heap value directly. Safe only when this is the unique owner
+(`isUnique() == true`); COW types check that first (see `CowBox.modify`).
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
+#### function `pointeeRef`
+
+```kestrel
+public func pointeeRef() -> &T
+```
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
@@ -3886,6 +1737,19 @@ Takes `value` by consuming — the caller's copy is dead after this.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
+#### function `valuePtr`
+
+```kestrel
+public func valuePtr() -> Pointer[T]
+```
+
+Returns a pointer to the wrapped value on the heap. The pointer
+is valid as long as the RcBox (and its storage) is alive. Use
+this to read individual fields without creating a full `T` clone
+whose deinit would free owned resources prematurely.
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
 ### Implements `Cloneable`
 
 #### function `clone`
@@ -3899,6 +1763,243 @@ same storage. The receiver and the returned box now both reference
 the value; the next mutation should test `isUnique`.
 
 _Defined in `lang/std/memory/rcbox.ks`._
+
+### Implements `MutableIndirection`
+
+#### function `pointeeMutRef`
+
+```kestrel
+public mutating func pointeeMutRef() -> &mutating T
+```
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
+### Implements `SharedBox`
+
+#### function `isIdentical`
+
+```kestrel
+public func isIdentical(to: RcBox[T]) -> Bool
+```
+
+Do the two handles point at the same storage block? Compares raw
+storage addresses, the same way `Pointer.isEqual(to:)` does — payload
+equality is irrelevant, two independently allocated boxes holding equal
+values are never identical.
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
+#### function `isUnique`
+
+```kestrel
+public func isUnique() -> Bool
+```
+
+Returns `true` when no other clone is sharing storage. The litmus
+test for "safe to mutate in place" in COW collections.
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
+#### function `sharedMutRef`
+
+```kestrel
+public func sharedMutRef() -> &mutating T
+```
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
+## struct `RefSliceIterator`
+
+```kestrel
+public struct RefSliceIterator[T] { /* private fields */ }
+```
+
+Forward iterator yielding SHARED REFERENCES (`&T`) to contiguous
+elements in place — no copies, no clones. The by-reference sibling of
+`ArraySliceIterator`; surfaced as `Array.refs()`.
+
+### Invalidation
+
+Holds a raw pointer into the underlying buffer. Mutating the source
+collection's STRUCTURE while iterating (append/realloc, removal)
+invalidates the cursor and any yielded reference — the same contract
+as every pointer-backed iterator, met through references here.
+
+### Representation
+
+A `Pointer[T]` cursor and an `Int64` countdown.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Members
+
+#### initializer `From Storage`
+
+```kestrel
+public init(ptr: Pointer[T], remaining: Int64)
+```
+
+Builds an iterator from a starting pointer and remaining count.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = &T
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> Optional[&T]
+```
+
+Yields a reference to the next element in place, or `.None` when
+the count reaches zero.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
+## protocol `SharedBox`
+
+```kestrel
+public protocol SharedBox
+```
+
+The contract for a shared-ownership container the compiler may use for
+implicit boxing: escaping closure environments, class storage, `any`
+payloads, `indirect enum` payloads.
+
+Conformers are *handles*: small, fixed-layout values pointing at managed
+storage that owns one `Target`. Duplicating a handle (`clone()`) shares the
+storage; dropping the last handle destroys the payload exactly once.
+Most of the contract is inherited rather than invented — sharing is
+`Cloneable.clone()`, releasing is the conformer's own `deinit`, and reading
+the payload is `MutableIndirection.pointeeRef()` (which also supplies
+transparent member access, so `box.field` reaches the payload's field).
+Only creation, shared mutation, identity and uniqueness are new.
+
+The mechanism-neutral name belongs to this protocol; each conformer says
+what it actually does. `RcBox` is the stdlib default (non-atomic
+refcounting, deterministic last-release cleanup, no strong-cycle
+collection); a future `ArcBox` or `GcBox` would make different promises.
+This protocol deliberately promises neither determinism nor cycle
+collection — those are properties of the binding, documented there.
+
+### Examples
+
+```
+// Generic over any conforming box; uses only SharedBox requirements.
+func roundTrip[B](value: Int64) -> Int64 where B: SharedBox, B.Target = Int64 {
+    let box: B = B(value);          // init(consuming value: Target)
+    let alias = box.clone();        // shares the managed storage
+    box.isIdentical(to: alias);     // true — one storage, two handles
+    alias.pointeeRef()              // read the payload through the peel
+}
+```
+
+### Memory Model
+
+A conformer is a handle onto storage that is owned collectively by every
+live handle. Lifecycle is ordinary value semantics — no compiler hooks are
+involved: the aggregate copy fold routes a struct/enum copy through
+`clone()`, so a struct holding a handle becomes `Cloneable` and shares on
+copy for free, and the drop machinery releases handles like any other
+value.
+
+### Guarantees
+
+- Handles are never bitwise-`Copyable` (the `Cloneable` refinement says
+  so): a bit-copied handle would skip the share operation and
+  over-release the payload.
+- The handle's size and alignment do not depend on `Target`, so a handle
+  can be type-erased and can appear in a recursive layout.
+- The payload is destroyed exactly once, when the last handle goes away.
+- `sharedMutRef()` is the marked exception to value semantics; it is sound
+  while Kestrel is single-threaded.
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+### Members
+
+#### initializer `init`
+
+```kestrel
+init(consuming Target)
+```
+
+Takes ownership of `value`, moves it into managed storage and returns
+the first handle onto it.
+
+`value` is a single-name parameter, so call sites are positional:
+`B(payload)`, never `B(value: payload)`.
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+#### function `isIdentical`
+
+```kestrel
+func isIdentical(to: Self) -> Bool
+```
+
+Do the two handles refer to the same managed storage? Backs class
+identity (`===`).
+
+Required instead of exposing an address so that a moving collector can
+still conform. Handles derived from one `init` — by `clone()` or by the
+copy fold — are identical; handles from independent `init`s are not,
+however equal their payloads.
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+#### function `isUnique`
+
+```kestrel
+func isUnique() -> Bool
+```
+
+`true` only when this handle is provably the sole owner. Backs
+copy-on-write forking.
+
+Implementations without cheap uniqueness information (a tracing
+collector) may conservatively return `false`; callers must therefore
+treat `false` as "fork before mutating" rather than as proof of
+sharing. A box that always answers `false` degrades to fork-always —
+slower, still correct.
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+#### function `sharedMutRef`
+
+```kestrel
+func sharedMutRef() -> &mutating Target
+```
+
+Mutable access to the payload through a *shared*, non-`mutating`
+handle — the interior-mutability primitive. Every handle onto the same
+storage observes the write; nothing forks and uniqueness is unchanged.
+
+This is the marked exception to value semantics, and the operation
+escaping closures and (later) classes are built on. Value-semantic
+clients — `any` payloads, `indirect enum`s — must not use it; they
+check `isUnique()` and fork instead.
+
+##### Safety
+
+Sound only while Kestrel is single-threaded: the returned reference
+aliases storage that other handles can read at the same time. Writing
+through it while a copy-on-write client assumes value semantics breaks
+those semantics for every sharer.
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+### Implements `Cloneable`
+
+### Implements `MutableIndirection`
 
 ## struct `SystemAllocator`
 
@@ -3937,9 +2038,8 @@ _Defined in `lang/std/memory/allocator.ks`._
 public mutating func allocate(Layout) -> RawPointer?
 ```
 
-Calls `malloc(layout.size)`. Alignment beyond `malloc`'s natural
-alignment (typically 16) is **not** honoured — types that need
-larger alignment should use a different allocator.
+Allocates storage with the requested alignment. Naturally aligned
+layouts use `malloc`; over-aligned layouts use `posix_memalign`.
 
 _Defined in `lang/std/memory/allocator.ks`._
 
@@ -3960,8 +2060,141 @@ _Defined in `lang/std/memory/allocator.ks`._
 public mutating func reallocate(RawPointer, Layout, Layout) -> RawPointer?
 ```
 
-Calls `realloc(ptr, newLayout.size)`. As with `allocate`, only
-`malloc`-natural alignment is guaranteed.
+Resizes while preserving the requested alignment. When either layout
+is over-aligned, this allocates a new block, copies the common prefix,
+and frees the old block only after allocation succeeds.
 
 _Defined in `lang/std/memory/allocator.ks`._
+
+## struct `UniqueBox`
+
+```kestrel
+public struct UniqueBox[T]: not Copyable where T: not Copyable { /* private fields */ }
+```
+
+Heap allocation with exactly one owner, used for the environment of a
+`consuming` (one-shot) closure.
+
+Unlike `RcBox` there is no reference count and no sharing: the single
+owner either *takes* the payload out (`takeValue()`, the one call a
+`consuming` closure gets) or *destroys* it (`destroy()`, the drop of a
+closure that was never called). Exactly one of the two runs, and both
+free the block.
+
+This is deliberately NOT a `SharedBox` conformer. A shared box releases by
+dropping its whole payload, which would double-free the capture slots a
+one-shot body already moved out; the point of the unique box is that the
+payload leaves the allocation intact and its per-slot teardown then happens
+in the caller's frame, where the ordinary partial-move machinery applies.
+
+### Examples
+
+```
+let box = UniqueBox(value: makeResource());
+let r = box.takeValue();   // moves the payload out and frees the block
+```
+
+### Representation
+
+One `Pointer[UniqueBoxStorage[T]]`. The pointed-to block holds an `Int64`
+liveness word followed by the `T` value, allocated via `SystemAllocator`.
+
+### Memory Model
+
+Single owner, no counting. `UniqueBox` has no `deinit` on purpose: it is a
+compiler-internal handle whose lifetime is driven by the closure value that
+carries it, and dropping the handle value itself must never free the block
+(the raw pointer word is forgotten and reconstituted across the closure
+representation). Every allocation is released by exactly one `takeValue()`
+or `destroy()`.
+
+### Guarantees
+
+- `takeValue()` transfers ownership of the payload to the caller and never
+  runs `T.deinit`.
+- `destroy()` runs `T.deinit` exactly once when the payload is still
+  present, and never when it has already been taken.
+
+_Defined in `lang/std/memory/uniquebox.ks`._
+
+### Members
+
+#### initializer `From Value`
+
+```kestrel
+public init(consuming T)
+```
+
+Allocates fresh storage holding `value`. Panics if the underlying
+`SystemAllocator` returns `.None`.
+
+##### Errors
+
+Panics with `"UniqueBox allocation failed"` on allocation failure.
+
+_Defined in `lang/std/memory/uniquebox.ks`._
+
+#### function `destroy`
+
+```kestrel
+public func destroy()
+```
+
+Drops the payload (if it is still present) and frees the block. This is
+the box's single reclamation point — it runs exactly once, whether or
+not `takeValue()` emptied the block first.
+
+##### Safety
+
+Must be called exactly once per box, after any `takeValue()`.
+
+_Defined in `lang/std/memory/uniquebox.ks`._
+
+#### function `takeValue`
+
+```kestrel
+public func takeValue() -> T
+```
+
+Moves the payload out of the block, leaving the block itself alive and
+marked empty. The caller becomes the sole owner of the returned value;
+`T.deinit` does not run here.
+
+The block is NOT freed: a `consuming` closure's call function takes the
+environment out this way, and the closure value's release shim
+(`destroy()`) reclaims the now-empty block afterwards. That keeps
+exactly one free per allocation whether or not the closure was ever
+called.
+
+##### Safety
+
+Must be called at most once per box, and never after `destroy()`.
+
+_Defined in `lang/std/memory/uniquebox.ks`._
+
+## function `swap`
+
+```kestrel
+public func swap[T](mutating T, mutating T) where T: not Copyable, T: not Static
+```
+
+Exchanges the contents of two mutable locations without cloning or
+dropping either — three bitwise moves, like Rust's `mem::swap`. For a
+COW value (`Array`, `String`, `Dictionary`) this swaps the *handles*, so
+it never touches the heap buffers: an `O(1)` pointer exchange regardless
+of contents.
+
+This is the idiomatic way to rotate double buffers (`swap(a, b)` instead
+of the `let tmp = a; a = b; b = tmp` dance, which clones for non-`Copyable`
+types).
+
+### Examples
+
+```
+var a = [1, 2, 3];
+var b = [9, 8];
+swap(a, b);          // a == [9, 8], b == [1, 2, 3] — no element copies
+```
+
+_Defined in `lang/std/memory/pointer.ks`._
 

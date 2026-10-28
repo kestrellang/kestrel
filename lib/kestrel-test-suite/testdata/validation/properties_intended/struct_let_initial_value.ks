@@ -12,6 +12,6 @@ public struct Foo {
 @main
 func main() -> lang.i64 {
     let foo = Foo(structLet: 11);
-    let _ = println(foo.structLet);
+     println(foo.structLet);
     0
 }

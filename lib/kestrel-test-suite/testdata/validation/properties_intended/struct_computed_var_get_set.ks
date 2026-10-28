@@ -19,8 +19,8 @@ public struct Foo {
 @main
 func main() -> lang.i64 {
     var foo = Foo();
-    let _ = println(foo.structComputedVar);
+     println(foo.structComputedVar);
     foo.structComputedVar = 9;
-    let _ = println(foo.structComputedVar);
+     println(foo.structComputedVar);
     0
 }

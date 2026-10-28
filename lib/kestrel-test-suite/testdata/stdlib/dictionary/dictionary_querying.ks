@@ -6,9 +6,9 @@ module Test
         @main
         func main() -> lang.i64 {
             var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = dict.insert(1, 10);
-            let _ = dict.insert(2, 20);
-            let _ = dict.insert(3, 30);
+             dict.insert(1, 10);
+             dict.insert(2, 20);
+             dict.insert(3, 30);
 
             // Test keys - iterate and count
             var keyCount: std.numeric.Int64 = 0;

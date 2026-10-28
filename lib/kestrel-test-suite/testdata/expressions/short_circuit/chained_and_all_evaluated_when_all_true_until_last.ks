@@ -4,22 +4,22 @@ module Main
 import std.io.stdio.println
 
 func effectA() -> Bool {
-    let _ = println("A");
+     println("A");
     true
 }
 
 func effectB() -> Bool {
-    let _ = println("B");
+     println("B");
     true
 }
 
 func effectC() -> Bool {
-    let _ = println("C");
+     println("C");
     true
 }
 
 func main() -> lang.i64 {
     let result = effectA() and effectB() and effectC();
-    let _ = println(result);
+     println(result);
     0
 }

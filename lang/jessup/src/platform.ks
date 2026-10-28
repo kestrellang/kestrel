@@ -70,9 +70,9 @@ public struct Platform: Cloneable {
 // ============================================================================
 
 /// Detects the current platform from uname.
-public func detectPlatform() -> Result[Platform, JessupError] {
-    let rawOs = captureOutput("uname -s");
-    let rawArch = captureOutput("uname -m");
+public func detectPlatform() -> Platform throws JessupError {
+    let rawOs = captureOutput("uname -s").unwrap(or: String());
+    let rawArch = captureOutput("uname -m").unwrap(or: String());
 
     let os = trimWhitespace(rawOs);
     let arch = trimWhitespace(rawArch);
@@ -87,7 +87,7 @@ public func detectPlatform() -> Result[Platform, JessupError] {
         var errMsg = String();
         errMsg.append("unsupported operating system: ");
         errMsg.append(os);
-        return .Err(JessupError.InstallError(errMsg))
+        throw JessupError.InstallError(errMsg)
     };
 
     // Map architecture
@@ -100,7 +100,7 @@ public func detectPlatform() -> Result[Platform, JessupError] {
         var errMsg = String();
         errMsg.append("unsupported architecture: ");
         errMsg.append(arch);
-        return .Err(JessupError.InstallError(errMsg))
+        throw JessupError.InstallError(errMsg)
     };
 
     return .Ok(Platform(os: mappedOs, arch: mappedArch))
@@ -112,7 +112,7 @@ public func detectPlatform() -> Result[Platform, JessupError] {
 
 /// Trims trailing whitespace (newlines, spaces) from a string.
 func trimWhitespace(s: String) -> String {
-    let len = s.byteCount;
+    let len = s.bytes.count;
     var end = len;
     while end > 0 {
         let b = s.bytes(unchecked: end - 1);

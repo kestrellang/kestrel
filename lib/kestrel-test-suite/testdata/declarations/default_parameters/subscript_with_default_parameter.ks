@@ -11,7 +11,7 @@ struct Container {
     }
 
     subscript(index: lang.i64 = 0) -> lang.i64 {
-        get { value }
+        get { self.value }
     }
 }
 

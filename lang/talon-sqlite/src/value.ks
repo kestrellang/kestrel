@@ -87,7 +87,7 @@ extend String: FromSqliteValue {
 }
 
 extend Optional[T]: FromSqliteValue where T: FromSqliteValue {
-    public static func fromSqliteValue(value: SqliteValue) -> T? throws SqliteError {
+    public static func fromSqliteValue(value: SqliteValue) -> Optional[T] throws SqliteError {
         match value {
             .Null => .Ok(.None),
             _ => {

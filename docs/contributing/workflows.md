@@ -19,7 +19,7 @@ A "feature" here means new syntax or a new semantic construct that spans several
 | 7. Name resolution | `lib/kestrel-name-res/src/` |
 | 8. HIR shape | `lib/kestrel-hir/src/body.rs` |
 | 9. HIR lowering | `lib/kestrel-hir-lower/src/` |
-| 10. Inference | `lib/kestrel-type-infer/src/constraint.rs`, `solver.rs`, `generate.rs` |
+| 10. Inference | `lib/kestrel-type-infer/src/constraint.rs`, `solver/`, `generate.rs` |
 | 11. Analyzers | `lib/kestrel-analyze/src/body|decl|compilation/` |
 | 12. MIR lowering | `lib/kestrel-mir-lower/src/` |
 | 13. Codegen | `lib/kestrel-codegen-cranelift/src/` |
@@ -72,15 +72,15 @@ All user-visible diagnostics are emitted by analyzers or by the inference solver
 
 ### From the type-inference solver
 
-Inference diagnostics go through `InferError`. Adding a variant requires changes in **five** files — `lib/kestrel-type-infer/AGENTS.md` has the canonical list. The short version:
+Inference diagnostics go through `InferError`. Adding a variant requires changes in **three** files — `lib/kestrel-type-infer/AGENTS.md` has the canonical list. The short version:
 
 | File | Change |
 |------|--------|
-| `kestrel-type-infer/src/error.rs` | Add the variant + its span arm. |
+| `kestrel-type-infer/src/error.rs` | The variant, its `span()` arm, and its `render()` arm (code + message + label + notes). |
 | `kestrel-type-infer/src/result.rs` | `describe_error()` match arm. |
-| `kestrel-compiler/src/diagnostic.rs` | `InferError` → `Diagnostic` match arm. |
-| `kestrel-analyze/src/body/type_check.rs` | `format_error()` match arm. |
 | `kestrel-compiler-driver/src/lib.rs` | `describe()` and `format_error()` arms. |
+
+`kestrel-compiler/src/diagnostic.rs` is a thin wrapper over `render()` and needs no per-variant change.
 
 Missing any one of these produces a non-exhaustive-match error only when the dependent crate is compiled — so do the whole set in one pass.
 
@@ -115,21 +115,22 @@ To report the error from the solver, call `ctx.report_error(InferError::YourVari
 The standard library is Kestrel source in `lang/std/`, one module per directory.
 
 1. **Implement the method** in the appropriate `.ks` file. Match the patterns in the surrounding code — visibility, mutating annotations, COW conventions.
-2. **Add an execution test** under `lib/kestrel-test-suite/testdata/stdlib/<type>/<test_name>.ks`:
+2. **Add an execution test** under `lib/kestrel-test-suite/testdata/stdlib/<type>/<test_name>.ks` (see `testdata/stdlib/array/access_operations.ks` for a real example):
    ```kestrel
-   // test: runs
+   // test: execution
    // stdlib: true
 
    module Main
 
+   @main
    func main() -> lang.i64 {
-       let arr = Array[lang.i64]()
+       var arr = std.collections.Array[std.numeric.Int64]()
        arr.append(5)
        if arr.count != 1 { return 1 }
        0
    }
    ```
-   Non-zero exit codes surface as test failures; each check returns a unique non-zero value so a regression points at the exact assertion.
+   The kind must be spelled `execution` — unknown kinds (e.g. `runs`) silently fall back to `diagnostics`. Non-zero exit codes surface as test failures; each check returns a unique non-zero value so a regression points at the exact assertion.
 3. **Run it:** `triage <test_name>`.
 
 ---
@@ -140,7 +141,7 @@ Type-inference constraints live in `lib/kestrel-type-infer/src/constraint.rs`.
 
 1. Add the variant with the minimum data it needs, and a doc comment explaining the rule ("`a = b` — structural type equality", "`ty : Protocol` — protocol conformance", etc.).
 2. Decide whether the variant is **eager** (solves on first visit) or **deferred** (requires concrete input, re-checked each solver round). Document this in the variant's doc comment.
-3. Add a `try_solve_*` function in `lib/kestrel-type-infer/src/solver.rs` and wire it into the solver loop.
+3. Add a `try_solve_*` function in `lib/kestrel-type-infer/src/solver/` and wire it into the solver loop.
 4. Generate the constraint where the language construct is lowered — typically in `generate.rs`.
 5. Add focused tests under `testdata/inference/`.
 
@@ -153,7 +154,7 @@ See the `debug` skill for the full protocol. The headline rules:
 1. **Reproduce first.** `triage <test>` — look at the actual error.
 2. **One hypothesis at a time.** Form a specific hypothesis, test it, evaluate the result before forming the next one.
 3. **Stop after 3 failed attempts of the same class.** List what you tried, what you ruled out, ask for guidance.
-4. **Use `debug_trace!`** in compiler source and rerun with `VERBOSE_DEBUG_OUTPUT=1`. Do not use `eprintln!` / `println!`.
+4. **Use `ktrace!("<category>", …)`** in compiler source and rerun with `KESTREL_DEBUG=<category>` (or `KESTREL_DEBUG=all`). Do not use `eprintln!` / `println!`.
 5. **`kestrel dump`** can print intermediate representations (CST, AST, HIR, types, MIR) for a `.ks` file — handy for narrowing the stage where the bug lives.
 
 ---

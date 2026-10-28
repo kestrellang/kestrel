@@ -10,7 +10,7 @@ use crate::item::protocol::ProtocolDef;
 use crate::item::struct_def::StructDef;
 use crate::terminator::{SwitchArm, Terminator, TerminatorKind};
 use crate::ty::MirTy;
-use crate::value::{Ownership, ValueDef};
+use crate::value::{Ownership, RootProvenance, ValueDef};
 use crate::{BlockId, FieldIdx, MirModule, Op, TyId, ValueId, VariantIdx};
 
 /// Builder for constructing OSSA bodies programmatically.
@@ -101,6 +101,28 @@ impl OssaBuilder {
         self.body.alloc_value(ValueDef::guaranteed(ty, source))
     }
 
+    /// Allocate an entry parameter value: stamps `Param(idx)` provenance and
+    /// bumps `param_count`, mirroring the real lowering's param loop.
+    pub fn new_param_value(&mut self, ty: TyId, ownership: Ownership) -> ValueId {
+        let idx = self.body.param_count as u32;
+        // Params have no in-body borrow source; they arrive borrowed.
+        let def = ValueDef {
+            ty,
+            ownership,
+            borrow_source: None,
+            root: RootProvenance::Param(idx),
+            span: None,
+        };
+        let val = self.body.alloc_value(def);
+        self.body.param_count += 1;
+        val
+    }
+
+    /// Override a value's provenance root (tests for the escape checker).
+    pub fn set_root(&mut self, value: ValueId, root: RootProvenance) {
+        self.body.values[value.index()].root = root;
+    }
+
     /// Allocate a value with ownership derived from type.
     pub fn new_value_auto(&mut self, ty: TyId) -> ValueId {
         self.new_value(ty, Ownership::Owned)
@@ -113,6 +135,11 @@ impl OssaBuilder {
     }
 
     /// Create a block with typed, ownership-annotated params. Returns (block_id, param_value_ids).
+    /// A Guaranteed param is a THREADED borrow (a binding crossing the block
+    /// boundary as a forwarded block arg — verify Check 4's accepted form);
+    /// it carries no borrow_source here — use `add_guaranteed_block_param`
+    /// to attach one, or stamp the metadata after creation (the lowering
+    /// stamps at block entry, `rebind_scope_values`).
     pub fn new_block_with_params(
         &mut self,
         params: &[(TyId, Ownership)],
@@ -122,7 +149,13 @@ impl OssaBuilder {
         for &(ty, ownership) in params {
             let def = match ownership {
                 Ownership::Owned => ValueDef::owned(ty),
-                Ownership::Guaranteed => panic!("use add_guaranteed_block_param for @guaranteed"),
+                Ownership::Guaranteed => ValueDef {
+                    ty,
+                    ownership: Ownership::Guaranteed,
+                    borrow_source: None,
+                    root: RootProvenance::derived(),
+                    span: None,
+                },
             };
             let val = self.body.alloc_value(def);
             self.body.block_mut(block).params.push(BlockParam {
@@ -133,6 +166,25 @@ impl OssaBuilder {
             values.push(val);
         }
         (block, values)
+    }
+
+    /// Append a @guaranteed param to an existing block — a forwarded borrow
+    /// continuing across the block boundary. `source` is the borrowed value
+    /// (verify registers the param as an open borrow so a later EndBorrow
+    /// lands and Check 4 holds in the new block).
+    pub fn add_guaranteed_block_param(
+        &mut self,
+        block: BlockId,
+        ty: TyId,
+        source: ValueId,
+    ) -> ValueId {
+        let val = self.body.alloc_value(ValueDef::guaranteed(ty, source));
+        self.body.block_mut(block).params.push(BlockParam {
+            value: val,
+            ty,
+            ownership: Ownership::Guaranteed,
+        });
+        val
     }
 
     pub fn switch_to(&mut self, block: BlockId) {
@@ -210,10 +262,13 @@ impl OssaBuilder {
 
     pub fn emit_take(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.new_value(ty, Ownership::Owned);
+        // Default to independent (memcpy) — the safe choice; mark_independent_takes
+        // flips it to aliasing only when provably safe.
         self.emit(InstKind::Take {
             result,
             address,
             ty,
+            independent: true,
         });
         result
     }
@@ -247,7 +302,11 @@ impl OssaBuilder {
     }
 
     pub fn emit_destroy_addr(&mut self, address: ValueId, ty: TyId) {
-        self.emit(InstKind::DestroyAddr { address, ty });
+        self.emit(InstKind::DestroyAddr {
+            address,
+            ty,
+            user_deinit: false,
+        });
     }
 
     pub fn emit_discriminant(&mut self, operand: ValueId) -> ValueId {
@@ -303,6 +362,8 @@ impl OssaBuilder {
     pub fn emit_global_ref(&mut self, entity: Entity) -> ValueId {
         let i64_ty = self.i64();
         let result = self.new_value(i64_ty, Ownership::Owned);
+        // Parity with lowering: globals are Static-rooted (escape-legal).
+        self.set_root(result, RootProvenance::Static);
         self.emit(InstKind::GlobalRef { result, entity });
         result
     }
@@ -468,6 +529,8 @@ impl OssaBuilder {
             result,
             callee,
             captures,
+            retain: None,
+            release: None,
         });
         result
     }

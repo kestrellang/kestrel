@@ -24,4 +24,5 @@ kestrel-codegen = { path = "../kestrel-codegen" }
 kestrel-mir = { path = "../kestrel-mir" }
 kestrel-mir-lower = { path = "../kestrel-mir-lower" }
 kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }
+kestrel-codegen-llvm = { path = "../kestrel-codegen-llvm" }
 codespan-reporting = { workspace = true }

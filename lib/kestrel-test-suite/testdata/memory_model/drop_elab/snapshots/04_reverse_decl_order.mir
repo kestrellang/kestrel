@@ -2,10 +2,24 @@
 bb0:
     %v0 = literal i64 1  // @owned Int64
     %v1 = struct Test.Handle { .0: %v0 }  // @owned Test.Handle
-    %v2 = literal i64 2  // @owned Int64
-    %v3 = struct Test.Handle { .0: %v2 }  // @owned Test.Handle
-    %v4 = literal ()  // @owned ()
+    %v2 = uninit Test.Handle  // @owned Pointer[Test.Handle]
+    store_init %v2, %v1
+    %v3 = uninit Bool  // @owned Pointer[Bool]
+    %v4 = literal true  // @owned Bool
+    store_init %v3, %v4
+    %v5 = literal i64 2  // @owned Int64
+    %v6 = struct Test.Handle { .0: %v5 }  // @owned Test.Handle
+    %v7 = uninit Test.Handle  // @owned Pointer[Test.Handle]
+    store_init %v7, %v6
+    %v8 = uninit Bool  // @owned Pointer[Bool]
+    %v9 = literal true  // @owned Bool
+    store_init %v8, %v9
+    %v10 = literal ()  // @owned ()
+    destroy_addr %v7, Test.Handle
+    destroy_value %v8
+    destroy_value %v7
+    destroy_addr %v2, Test.Handle
     destroy_value %v3
-    destroy_value %v1
-    return %v4
+    destroy_value %v2
+    return %v10
 

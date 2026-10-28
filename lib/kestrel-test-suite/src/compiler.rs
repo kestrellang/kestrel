@@ -91,30 +91,33 @@ impl TestCompiler {
         // Ensure inference has run (triggers lex/parse/infer diagnostics)
         self.infer();
 
+        // Run analyzers BEFORE snapshotting codespan diagnostics: analyzers
+        // may force lowering queries (e.g. the stage-0.5 ref rejection on a
+        // field no body touches) whose accumulated codespan diagnostics
+        // would otherwise be dropped.
+        let analyze_summary = self.analyze();
+
         let mut result = Vec::new();
 
         // Collect sources for byte-offset-to-line resolution
         let sources = self.source_map();
 
-        // Codespan diagnostics (lex + parse + infer)
+        // Codespan diagnostics (lex + parse + infer + analyzer-forced lowering)
         let codespan_diags = self.compiler.diagnostics();
         result.extend(from_codespan_diagnostics(&codespan_diags, &sources));
 
-        // Analyzer diagnostics. Two dedup passes:
-        //  1. Skip E100 — duplicates an inference error already in the codespan stream.
-        //  2. Skip any analyzer diag whose (file_id, line, severity, message) is
-        //     a prefix of a codespan diag already collected. HIR lowering and the
-        //     analyzer both independently emit "cannot find type 'X' in this scope"
-        //     for the same unresolved annotation; the codespan version appends a
-        //     label suffix (": not found (failed at 'X')"), so prefix-match catches it.
-        let analyze_summary = self.analyze();
-        let analyzer_diags: Vec<_> = analyze_summary
-            .diagnostics
-            .iter()
-            .filter(|d| d.descriptor_id != "E100")
-            .cloned()
-            .collect();
-        let analyzer_test_diags = from_analyze_diagnostics_with_source(&analyzer_diags, &sources);
+        // Analyzer diagnostics. One dedup pass: skip any analyzer diag whose
+        // (file_id, line, severity, message) is a prefix of a codespan diag
+        // already collected. HIR lowering and the analyzer both independently
+        // emit "cannot find type 'X' in this scope" for the same unresolved
+        // annotation; the codespan version appends a label suffix (": not found
+        // (failed at 'X')"), so prefix-match catches it.
+        //
+        // The old "skip E100" pass is gone with the duplicate renderer it
+        // guarded (F15): inference errors are now rendered exactly once, by the
+        // codespan stream, and no analyzer re-surfaces them.
+        let analyzer_test_diags =
+            from_analyze_diagnostics_with_source(&analyze_summary.diagnostics, &sources);
         for a in analyzer_test_diags {
             let duplicate = result.iter().any(|c| {
                 c.file_id == a.file_id
@@ -128,6 +131,29 @@ impl TestCompiler {
             }
         }
 
+        // MIR-stage diagnostics (escape check E494-E496, ref-across-merge
+        // E497): the MIR pipeline never ran for diagnostics tests before, so
+        // these were invisible. Run lowering only when the front end is clean
+        // (error-recovery HIR would ICE-spam) and append only CODED
+        // diagnostics — uncoded verify errors are ICEs, not an annotatable
+        // surface (and lower_to_mir suppresses them as cascade noise anyway).
+        let front_end_clean = !result.iter().any(|d| d.severity == TestSeverity::Error);
+        if front_end_clean {
+            let before = self.compiler.diagnostics();
+            let _ = self.compiler.lower_to_mir();
+            let new: Vec<_> = self
+                .compiler
+                .diagnostics()
+                .into_iter()
+                .filter(|d| !before.contains(d))
+                .collect();
+            result.extend(
+                from_codespan_diagnostics(&new, &sources)
+                    .into_iter()
+                    .filter(|d| d.code.is_some()),
+            );
+        }
+
         result
     }
 
@@ -139,10 +165,21 @@ impl TestCompiler {
             .map_err(|e| format!("MIR lowering failed: {e}"))
     }
 
-    /// Compile, link, and run. Returns the run result.
+    /// Warnings found after monomorphization (E508) by the most recent build
+    /// (`run` / `run_on`).
+    pub fn mono_warnings(&self) -> Vec<TestDiagnostic> {
+        from_codespan_diagnostics(&self.compiler.mono_warnings(), &self.source_map())
+    }
+
+    /// Compile, link, and run on the env-default backend.
     pub fn run(&self) -> Result<RunResult, String> {
+        self.run_on(runner::Backend::default_from_env())
+    }
+
+    /// Compile, link, and run on a specific backend (`// backends:` trials).
+    pub fn run_on(&self, backend: runner::Backend) -> Result<RunResult, String> {
         self.infer();
-        runner::compile_and_run(&self.compiler)
+        runner::compile_and_run(&self.compiler, backend)
     }
 
     /// Access the underlying compiler.
@@ -188,6 +225,20 @@ impl TestCompiler {
 
     /// Check that no errors occurred. Returns Err with details on failure.
     pub fn check_no_errors(&self) -> Result<(), String> {
+        // Stdlib-side errors are recorded once at cache build (their
+        // diagnostics never reach this compiler's sink) — a broken stdlib
+        // must fail HERE with the real error, not later as a mono/codegen
+        // mystery in whichever body the unresolved call survived into.
+        if self.has_stdlib {
+            let stdlib_errors = crate::stdlib_errors();
+            if !stdlib_errors.is_empty() {
+                return Err(format!(
+                    "stdlib failed to typecheck ({} error(s) — these poison every test):\n  {}",
+                    stdlib_errors.len(),
+                    stdlib_errors.join("\n  ")
+                ));
+            }
+        }
         let diags = self.all_diagnostics();
         let errors: Vec<&TestDiagnostic> = diags
             .iter()

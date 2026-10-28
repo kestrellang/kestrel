@@ -69,7 +69,7 @@ public func pageHtml() -> String {
 public func searchResultsHtml(json: Value) -> String {
     var h = String();
 
-    match json.value(forKey: "results") {
+    match json.value(for: "results") {
         .Some(resultsVal) => {
             match resultsVal.asArray() {
                 .Some(results) => {
@@ -94,7 +94,7 @@ public func searchResultsHtml(json: Value) -> String {
                         t.setInt("delay", i * 40);
 
                         var detail = String();
-                        if admin1.byteCount > 0 {
+                        if admin1.bytes.count > 0 {
                             detail.append(admin1);
                             detail.append(", ")
                         };
@@ -218,7 +218,7 @@ public func weatherPageHtml(json: Value, cityName: String) -> String {
     h.append("</div></section>");
 
     // 7-day forecast — compute global min/max for bar scaling
-    match daily.value(forKey: "time") {
+    match daily.value(for: "time") {
         .Some(timesVal) => {
             match timesVal.asArray() {
                 .Some(times) => {

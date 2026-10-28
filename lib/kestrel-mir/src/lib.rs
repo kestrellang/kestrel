@@ -18,7 +18,7 @@ pub mod ty_query;
 pub mod value;
 pub mod verify;
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use kestrel_hecs::Entity;
 
 pub use body::OssaBody;
@@ -27,10 +27,13 @@ pub use immediate::{Immediate, ImmediateKind};
 pub use item::WitnessMethodKey;
 pub use item::{CopyBehavior, DropBehavior, Layout, TargetConfig, TypeInfo, TypeParamDef};
 pub use layout::{EnumLayout, StructLayout};
-pub use op::{FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness};
+pub use op::{
+    DivGuard, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness, op_type,
+    op_type_mut,
+};
 pub use substitute::{SubstMap, substitute};
 pub use terminator::SwitchCase;
-pub use ty::{MirTy, ParamConvention, TyArena};
+pub use ty::{FnKind, MirTy, ParamConvention, TyArena, func_thick_words};
 pub use value::Ownership;
 
 use item::enum_def::EnumDef;
@@ -39,6 +42,33 @@ use item::protocol::ProtocolDef;
 use item::static_def::StaticDef;
 use item::struct_def::StructDef;
 use item::witness::WitnessDef;
+
+/// Result of `MirModule::escape_carry` — which escape-relevant components a type
+/// carries by value (deep, through nominal fields). `any_ref`/`mutating_ref`
+/// drive the ref-carrier escape modes (E494/E495); `closure` drives the
+/// capturing-closure escape mode (#174).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct EscapeCarry {
+    pub any_ref: bool,
+    pub mutating_ref: bool,
+    /// Carries ANY closure. Drives taint PROPAGATION (`carry_ref_taint`), which
+    /// must keep tracking an owning closure's root so a truncated view of a
+    /// borrowed handle is still recognizable.
+    pub closure: bool,
+    /// Carries a FRAME-BOUND closure — a view kind whose environment holds
+    /// addresses into the defining frame. Only this drives the E494 escape
+    /// MODE: a boxed handle (`escaping`'s shared box, `consuming`'s unique
+    /// box) owns its environment, so returning it or storing it in a returned
+    /// struct is legal (plan D7).
+    pub view_closure: bool,
+}
+
+impl EscapeCarry {
+    /// True when the type carries any escape-relevant component (ref or closure).
+    pub fn any(&self) -> bool {
+        self.any_ref || self.closure
+    }
+}
 
 #[derive(Debug)]
 pub struct MirModule {
@@ -51,6 +81,42 @@ pub struct MirModule {
     pub statics: IndexMap<Entity, StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
+    /// The `@builtin(.Copyable)` / `@builtin(.Cloneable)` protocol entities,
+    /// resolved once in mir-lower via `ResolveBuiltin`.
+    ///
+    /// MIR has no `World`, so it used to re-derive these with
+    /// `p.name.ends_with("Copyable")` — which also matched any user protocol
+    /// whose name happened to end that way, and silently matched nothing if the
+    /// stdlib protocol were ever renamed. Carrying the entity keeps the lang
+    /// item the single source of truth across the mir-lower → mir boundary.
+    ///
+    /// `None` for hand-built modules (unit tests) and for a build with no
+    /// stdlib — the same answer the name scan gave in those cases.
+    pub copyable_protocol: Option<Entity>,
+    pub cloneable_protocol: Option<Entity>,
+    /// The `@builtin(.BooleanConditional)` protocol and the `@builtin(.Bool)`
+    /// struct entities, resolved once in mir-lower via `ResolveBuiltin`.
+    ///
+    /// Same reasoning as `copyable_protocol` above: MIR has no `World`, so
+    /// carrying the entity keeps the lang item the single source of truth
+    /// across the mir-lower → mir boundary. These drive implicit-condition
+    /// lowering (`coerce_condition_to_i1`): the protocol names the witness to
+    /// dispatch, and `bool_struct` identifies the one nominal type that may
+    /// skip that dispatch and branch on its scalar directly.
+    ///
+    /// `bool_struct` must be matched by *entity*, never structurally: a
+    /// "single-field struct wrapping `lang.i1`" test would also swallow a
+    /// user's own `struct MyFlag { var value: lang.i1 }` whose `boolValue()`
+    /// need not be the identity.
+    ///
+    /// `None` for hand-built modules (unit tests) and for a build with no
+    /// stdlib — implicit conditions then branch raw, as they always did.
+    pub boolean_conditional_protocol: Option<Entity>,
+    pub bool_struct: Option<Entity>,
+    /// Nominal types marked `@observabledrop`: dropping one has an observable
+    /// effect (closing a connection), so copy lifetime passes must not drop
+    /// copies of it — or of anything containing it — earlier than scope end.
+    pub observable_drop: IndexSet<Entity>,
 }
 
 impl MirModule {
@@ -65,6 +131,11 @@ impl MirModule {
             statics: IndexMap::new(),
             ty_arena: TyArena::new(),
             entity_names: IndexMap::new(),
+            copyable_protocol: None,
+            cloneable_protocol: None,
+            boolean_conditional_protocol: None,
+            bool_struct: None,
+            observable_drop: IndexSet::new(),
         }
     }
 
@@ -89,6 +160,82 @@ impl MirModule {
         let entity = def.entity;
         self.structs.insert(entity, def);
         entity
+    }
+
+    /// Deep escape-carry analysis: does a value of `ty` carry a reference or a
+    /// (capturing) closure BY VALUE *anywhere*, including inside nominal STORED
+    /// FIELDS / enum payloads? Unlike `TyArena::contains_ref`/`contains_closure`
+    /// (which walk only type args — they miss a concrete `&Int64` field or a
+    /// closure field on a non-generic struct), this recurses fields too, so the
+    /// return escape check (`verify::check_escapes`) is gated correctly when a
+    /// ref or capturing closure is laundered through a struct field (#174).
+    /// Over-approximation is safe: an untainted (self-rooted) value just passes
+    /// a check it would have passed anyway. Cycle-guarded for recursive types.
+    /// `Pointer` pointees are NOT walked (a raw pointer doesn't carry its
+    /// pointee by value — mirrors `contains_ref`).
+    pub fn escape_carry(&self, ty: TyId) -> EscapeCarry {
+        let mut out = EscapeCarry::default();
+        let mut visited = std::collections::HashSet::new();
+        self.escape_carry_into(ty, &mut out, &mut visited);
+        out
+    }
+
+    fn escape_carry_into(
+        &self,
+        ty: TyId,
+        out: &mut EscapeCarry,
+        visited: &mut std::collections::HashSet<TyId>,
+    ) {
+        if out.any_ref && out.mutating_ref && out.closure {
+            return; // saturated — nothing more to learn
+        }
+        if !visited.insert(ty) {
+            return;
+        }
+        match self.ty_arena.get(ty) {
+            MirTy::Ref { mutating, pointee } => {
+                out.any_ref = true;
+                out.mutating_ref |= *mutating;
+                // A shared `&T` may wrap a `&mutating U` (mirror contains_mutating_ref).
+                let pointee = *pointee;
+                self.escape_carry_into(pointee, out, visited);
+            },
+            // A boxed (owning) value owns a heap environment, so its handle
+            // is self-contained: returning it, storing it in a returned struct
+            // and handing back a `consuming` parameter's handle are all legal
+            // (plan D7). It still PROPAGATES taint so the truncated-view check
+            // can see a borrowed handle's root.
+            MirTy::FuncThick { kind, .. } => {
+                out.closure = true;
+                out.view_closure |= !kind.is_boxed();
+            },
+            MirTy::Tuple(elems) => {
+                for e in elems.clone() {
+                    self.escape_carry_into(e, out, visited);
+                }
+            },
+            MirTy::Named { entity, type_args } => {
+                let entity = *entity;
+                for a in type_args.clone() {
+                    self.escape_carry_into(a, out, visited);
+                }
+                if let Some(def) = self.structs.get(&entity) {
+                    for fty in def.fields.iter().map(|f| f.ty).collect::<Vec<_>>() {
+                        self.escape_carry_into(fty, out, visited);
+                    }
+                } else if let Some(def) = self.enums.get(&entity) {
+                    for pty in def
+                        .cases
+                        .iter()
+                        .flat_map(|c| c.payload_fields.iter().map(|f| f.ty))
+                        .collect::<Vec<_>>()
+                    {
+                        self.escape_carry_into(pty, out, visited);
+                    }
+                }
+            },
+            _ => {},
+        }
     }
 
     pub fn add_enum(&mut self, def: EnumDef) -> Entity {

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_type_infer::InferBody;
 use kestrel_type_infer::error::InferError;
@@ -18,7 +20,9 @@ pub struct InferWithDiagnostics {
 }
 
 impl QueryFn for InferWithDiagnostics {
-    type Output = Option<TypedBody>;
+    // Mirrors InferBody's Arc-wrapped output — this wrapper re-shares the
+    // same allocation rather than re-wrapping.
+    type Output = Option<Arc<TypedBody>>;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Self::Output {
         let typed = ctx.query(InferBody {

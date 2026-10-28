@@ -13,6 +13,6 @@ func main() -> lang.i64 {
     var arr: [std.numeric.Int64] = std.collections.Array[std.numeric.Int64]();
     arr.append(1);
     arr.append(2);
-    let _ = println(countExplicit(arr));
+     println(countExplicit(arr));
     0
 }

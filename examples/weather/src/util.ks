@@ -11,8 +11,8 @@ import http.url.(percentDecode)
 public func parseFormValue(body: String, key: String) -> String {
     // Parse "city=Berlin&other=val" style form data
     let keyEq = key + "=";
-    let keyLen = keyEq.byteCount;
-    let bodyLen = body.byteCount;
+    let keyLen = keyEq.bytes.count;
+    let bodyLen = body.bytes.count;
 
     // Find key= in the body
     var pos: Int64 = 0;

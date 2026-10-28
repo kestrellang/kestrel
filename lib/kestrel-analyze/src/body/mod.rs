@@ -1,17 +1,22 @@
 //! Body-level analyzers — checks that operate on function/init bodies.
 
+// Not an analyzer: pure control-flow predicates shared by several of them.
+// See `AGENTS.md` §5 for when a fact belongs here instead of staying private.
+pub(crate) mod control_flow;
+
 pub mod assignment;
 pub mod condition_check;
+pub mod dangle_ref;
 pub mod dead_code;
 pub mod exhaustive_return;
 pub mod guard;
 pub mod param_pattern;
-pub mod type_check;
 
 // Wave 5: Complex body checks
 pub mod access_mode;
 pub mod closure;
 pub mod definite_assignment;
+pub mod exclusive_args;
 pub mod initializer;
 // HIR-level move/use-after-move checker (E500/E501). Restored from the
 // pre-MIR-rewrite (0.15) tree: it models `while-let` loops, pattern re-binding
@@ -31,3 +36,6 @@ pub mod refutable_pattern;
 
 // Literal/lexing checks (E700-E799)
 pub mod string_escape;
+
+// Integer-literal range check (E121)
+pub mod integer_literal_range;

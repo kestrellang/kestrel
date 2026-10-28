@@ -8,6 +8,6 @@ func main() -> std.numeric.Int64 {
     let name = "Result";
     let value = 42;
     let hex_val = 0xAB;
-    let _ = println("\(name): \(value:05) (hex: \(hex_val:#x), bin: \(value:b))");
+     println("\(name): \(value:05) (hex: \(hex_val:#x), bin: \(value:b))");
     0
 }

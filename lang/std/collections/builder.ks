@@ -83,8 +83,10 @@ public struct ArrayBuilder[T] {
         let result = allocator.allocate(layout);
         if let .Some(rawPtr) = result {
             let newPtr = rawPtr.cast[T]();
+            // Move (`take`), not `read()`: the old buffer is freed without
+            // dropping its elements, so a copy here leaked one per grow.
             for i in 0..<self.len {
-                newPtr.offset(by: i).write(self.ptr.offset(by: i).read())
+                newPtr.offset(by: i).write(self.ptr.offset(by: i).take())
             }
             if self.cap > 0 {
                 let oldLayout = Layout.array[T](self.cap);

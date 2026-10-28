@@ -70,6 +70,17 @@ public func free(consuming ptr: RawPointer)
 @extern(.C, mangleName: "realloc")
 public func realloc(consuming ptr: RawPointer, consuming size: Int64) -> RawPointer
 
+/// Wraps `posix_memalign(3)` — stores an allocation aligned to `alignment`
+/// in `out`. `alignment` must be a power of two and a multiple of the native
+/// pointer size. Returns zero on success and an error code otherwise.
+/// Memory returned through `out` is released with `free`.
+@extern(.C, mangleName: "posix_memalign")
+public func posixMemalign(
+    consuming out: RawPointer,
+    consuming alignment: Int64,
+    consuming size: Int64
+) -> Int32
+
 // Memory operations
 
 /// Wraps `memcpy(3)` — copies `n` bytes from `src` to `dest`.

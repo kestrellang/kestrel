@@ -1,3 +1,4 @@
+// skip: included file, not a standalone test
 // Helper: minimal Prelude module with literal protocol definitions.
 // Include this in tests that reference Prelude.ExpressibleBy* without stdlib.
 module Prelude

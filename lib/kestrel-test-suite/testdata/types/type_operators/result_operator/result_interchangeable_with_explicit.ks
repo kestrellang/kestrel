@@ -12,6 +12,6 @@ func handleExplicit(r: std.result.Result[std.numeric.Int64, MyError]) -> std.num
 
 func main() -> lang.i64 {
     let val: std.numeric.Int64 throws MyError = .Ok(42);
-    let _ = println(handleExplicit(val));
+     println(handleExplicit(val));
     0
 }

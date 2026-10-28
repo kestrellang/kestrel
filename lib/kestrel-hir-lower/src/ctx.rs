@@ -11,18 +11,18 @@ use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_hir::res::{Local, LocalId};
 use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxNode, SyntaxToken};
 
-/// Bridge from the AST's string-typed name field to `HirName`. The AST
-/// builder stores `""` for member identifiers that the parser recovered
-/// as missing (the `Missing[Identifier ""]` wrapper from the parser's
-/// recovery primitive). Translating that to `HirName::Missing` here
-/// gives inference a single, explicit signal to short-circuit instead
-/// of cascading "name not found" diagnostics.
-pub(crate) fn name_from_ast(name: String) -> HirName {
-    if name.is_empty() {
-        HirName::Missing
-    } else {
-        HirName::Name(name)
+use crate::source_map::BodySourceMap;
+
+/// A member or case name as written: `None` when the parser recovered from
+/// an absent name, which lowers to `HirName::Missing` — one explicit signal
+/// for inference to short-circuit on instead of cascading "name not found"
+/// diagnostics.
+pub(crate) fn hir_name(name: Option<String>) -> HirName {
+    match name {
+        Some(name) => HirName::Name(name),
+        None => HirName::Missing,
     }
 }
 
@@ -32,6 +32,10 @@ pub(crate) struct LowerCtx<'a> {
     pub root: Entity,
     /// The function/init/getter entity whose body we're lowering
     pub owner: Entity,
+    /// `Span::file_id` of the body's file (its file entity's index).
+    pub file_id: usize,
+    /// HIR ids ↔ syntax, filled as nodes are lowered.
+    pub source_map: BodySourceMap,
 
     // HIR arenas being built
     pub exprs: Arena<HirExpr>,
@@ -58,14 +62,42 @@ pub(crate) struct LowerCtx<'a> {
 
     /// Maps LocalId → scope depth at creation (for closure capture detection).
     local_depths: HashMap<LocalId, usize>,
+
+    /// True while lowering a user-`match` arm pattern — the one position
+    /// where `&`/`&mutating` binder patterns are legal (stage 1.5 item 2;
+    /// the place-mode lowering needs a pinnable scrutinee place).
+    pub ref_patterns_allowed: bool,
+
+    /// True while lowering the path in a call's *callee* position. A path
+    /// there names something to invoke, so it is exempt from the
+    /// "instance method used as a value" rejection in `lower_path`
+    /// (`lower_call` already diagnoses the call form). Consumed — and reset
+    /// — by the first `lower_path` that reads it, so nested paths inside a
+    /// callee expression are still checked.
+    pub in_callee_position: bool,
+
+    /// While lowering the non-first alternatives of an or-pattern, maps a
+    /// binding name to the local the FIRST alternative already created, so
+    /// every alternative — and the arm body — share ONE local per name. Each
+    /// or-alternative reaches its own match leaf and binds independently; if
+    /// the alternatives used distinct locals, the body (which resolves the
+    /// name to whichever alternative won scope insertion) would read a local
+    /// that other alternatives' leaves never populated (#187).
+    or_reuse: Option<HashMap<String, LocalId>>,
+    /// Implicit `it` closure parameters → the span of the closure's first
+    /// `it` reference. Lets a nested closure's implicit `it` tell an
+    /// enclosing closure's `it` (E142) from any other outer `it` (E143).
+    pub implicit_it_locals: HashMap<LocalId, Span>,
 }
 
 impl<'a> LowerCtx<'a> {
-    pub fn new(ctx: &'a QueryContext<'a>, root: Entity, owner: Entity) -> Self {
+    pub fn new(ctx: &'a QueryContext<'a>, root: Entity, owner: Entity, file_id: usize) -> Self {
         Self {
             ctx,
             root,
             owner,
+            file_id,
+            source_map: BodySourceMap::default(),
             exprs: Arena::new(),
             pats: Arena::new(),
             stmts: Arena::new(),
@@ -76,7 +108,27 @@ impl<'a> LowerCtx<'a> {
             while_conditions: Vec::new(),
             loop_labels: Vec::new(),
             local_depths: HashMap::new(),
+            ref_patterns_allowed: false,
+            in_callee_position: false,
+            or_reuse: None,
+            implicit_it_locals: HashMap::new(),
         }
+    }
+
+    /// Snapshot the innermost scope's name→local bindings. Used to capture
+    /// which locals an or-pattern's first alternative created.
+    pub fn current_scope_bindings(&self) -> HashMap<String, LocalId> {
+        self.scopes.last().cloned().unwrap_or_default()
+    }
+
+    /// Enter "or-alternative reuse" mode: subsequent `define_local` calls for a
+    /// name present in `reuse` return that existing local instead of allocating
+    /// a fresh one. Returns the previous mode to restore via `set_or_reuse`.
+    pub fn set_or_reuse(
+        &mut self,
+        reuse: Option<HashMap<String, LocalId>>,
+    ) -> Option<HashMap<String, LocalId>> {
+        std::mem::replace(&mut self.or_reuse, reuse)
     }
 
     // ===== Scope management =====
@@ -91,6 +143,14 @@ impl<'a> LowerCtx<'a> {
 
     /// Allocate a local variable slot and insert into current scope.
     pub fn define_local(&mut self, name: &str, is_mut: bool, span: Span) -> LocalId {
+        // Or-alternative reuse: a later alternative's binding of `name` aliases
+        // the first alternative's local instead of allocating a new one (#187).
+        if let Some(existing) = self.or_reuse.as_ref().and_then(|m| m.get(name).copied()) {
+            if let Some(scope) = self.scopes.last_mut() {
+                scope.insert(name.to_string(), existing);
+            }
+            return existing;
+        }
         let id = self.locals.alloc(Local {
             name: name.to_string(),
             is_mut,
@@ -101,6 +161,34 @@ impl<'a> LowerCtx<'a> {
             scope.insert(name.to_string(), id);
         }
         id
+    }
+
+    /// `define_local` for a binding the source spells: `name` is its
+    /// identifier token, `binding` the node that binds it. Records the
+    /// declaration in the source map.
+    pub fn define_named_local(
+        &mut self,
+        binding: &SyntaxNode,
+        name: &SyntaxToken,
+        is_mut: bool,
+        span: Span,
+    ) -> LocalId {
+        let reused = self
+            .or_reuse
+            .as_ref()
+            .is_some_and(|m| m.contains_key(name.text()));
+        let id = self.define_local(name.text(), is_mut, span);
+        // An or-pattern alternative re-binds the first alternative's local;
+        // the declaration is the first alternative's.
+        if !reused {
+            self.source_map.record_local(id, binding, name);
+        }
+        id
+    }
+
+    /// The span of `node`, from its first non-trivia token.
+    pub fn span(&self, node: &SyntaxNode) -> Span {
+        kestrel_syntax_tree::utils::get_node_span(node, self.file_id)
     }
 
     /// Current scope depth (for closure capture detection).
@@ -176,6 +264,7 @@ impl<'a> LowerCtx<'a> {
             InitEffect::Throwing => "Ok",
         };
         Some(self.alloc_expr(HirExpr::ImplicitMember {
+            owner: None,
             name: HirName::name(wrapper_name),
             args: Some(vec![HirCallArg {
                 label: None,

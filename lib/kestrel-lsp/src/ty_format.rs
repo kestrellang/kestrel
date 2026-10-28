@@ -33,6 +33,10 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
             out.push_str(&name_of(world, *entity).unwrap_or_else(|| "?".into()));
         },
         ResolvedTy::SelfType { .. } => out.push_str("Self"),
+        ResolvedTy::Ref { pointee, mutating } => {
+            out.push_str(if *mutating { "&mutating " } else { "&" });
+            write_ty(world, pointee, out);
+        },
         ResolvedTy::Tuple(elems) => {
             out.push('(');
             for (i, e) in elems.iter().enumerate() {
@@ -46,7 +50,11 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
             }
             out.push(')');
         },
-        ResolvedTy::Function { params, ret, .. } => {
+        ResolvedTy::Function {
+            kind, params, ret, ..
+        } => {
+            // `FnTypeKind::prefix()` — empty for the unmarked `Normal` kind.
+            out.push_str(kind.prefix());
             out.push('(');
             for (i, p) in params.iter().enumerate() {
                 if i > 0 {
@@ -62,7 +70,11 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
             out.push('.');
             out.push_str(&name_of(world, *assoc).unwrap_or_else(|| "?".into()));
         },
-        ResolvedTy::Opaque { bounds, .. } => {
+        ResolvedTy::Opaque {
+            bounds,
+            not_copyable,
+            ..
+        } => {
             out.push_str("some ");
             for (i, (proto, _)) in bounds.iter().enumerate() {
                 if i > 0 {
@@ -72,6 +84,9 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
             }
             if bounds.is_empty() {
                 out.push('?');
+            }
+            if *not_copyable {
+                out.push_str(" and not Copyable");
             }
         },
         ResolvedTy::Never => out.push('!'),
@@ -90,7 +105,7 @@ fn entity_path(world: &World, entity: Entity) -> String {
     let mut cur = Some(entity);
     while let Some(e) = cur {
         if let Some(n) = name_of(world, e) {
-            if n == "<root>" {
+            if n == Name::ROOT {
                 break;
             }
             parts.push(n);

@@ -98,7 +98,8 @@ fn build_symbol(
 
     let selection_range = world
         .get::<CstNode>(entity)
-        .and_then(|cst| get_name_span(&cst.0, decl_span.file_id))
+        .and(kestrel_ast_builder::syntax::cst_node(world, entity))
+        .and_then(|cst| get_name_span(&cst, decl_span.file_id))
         .map(|s| li.range_for(s.start, s.end))
         .unwrap_or(range);
 
@@ -147,11 +148,12 @@ pub(crate) fn node_kind_to_symbol_kind(kind: &NodeKind) -> Option<SymbolKind> {
         NodeKind::Field => SymbolKind::FIELD,
         NodeKind::TypeAlias => SymbolKind::CLASS,
         NodeKind::Subscript => SymbolKind::OPERATOR,
-        // Hidden from outline: imports clutter the panel; setters / deinits /
-        // param-defaults / type-parameters are sub-decls without their own
-        // identifier worth highlighting.
+        // Hidden from outline: imports clutter the panel; setters / ref
+        // accessors / deinits / param-defaults / type-parameters are
+        // sub-decls without their own identifier worth highlighting.
         NodeKind::Import
         | NodeKind::Setter
+        | NodeKind::RefAccessor
         | NodeKind::Deinit
         | NodeKind::ParamDefault
         | NodeKind::TypeParameter => return None,

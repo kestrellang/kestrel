@@ -1,6 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
+use rustc_hash::FxHashSet;
+
 use crate::accumulator::AccumulatorStore;
 use crate::change::ChangeSet;
 use crate::component::{Component, ComponentStore};
@@ -26,9 +28,14 @@ impl Revision {
 }
 
 /// Metadata for a single entity. Clone support enables `World::snapshot()`.
+///
+/// `last_changed` is the durable invalidation signal: every mutation of the
+/// entity (components, hierarchy, spawn/despawn) stamps the current revision,
+/// and a memo is stale when any entity it read was stamped after the memo was
+/// last verified (`QueryContext::deps_unchanged`).
 #[derive(Clone)]
-struct EntityRecord {
-    last_changed: Revision,
+pub(crate) struct EntityRecord {
+    pub(crate) last_changed: Revision,
     alive: bool,
 }
 
@@ -131,6 +138,14 @@ pub struct World {
     /// Counter for actual query executions (not cache hits).
     /// Incremented by QueryContext::execute_query().
     query_exec_count: Cell<u64>,
+    /// Whether a query context was handed out in the current revision. A
+    /// mutation after that must not share the revision memos were verified
+    /// at — it would look "not newer" and be missed — so the first such
+    /// mutation opens a new revision (`touch`).
+    observed: Cell<bool>,
+    /// Despawned since the last `sweep_despawned`; their readers' accumulated
+    /// values are dropped before any query runs again (audit F23).
+    despawned: RefCell<Vec<Entity>>,
 }
 
 impl World {
@@ -144,6 +159,8 @@ impl World {
             queries: RefCell::new(QueryStorage::new()),
             accumulators: RefCell::new(AccumulatorStore::new()),
             query_exec_count: Cell::new(0),
+            observed: Cell::new(false),
+            despawned: RefCell::new(Vec::new()),
         }
     }
 
@@ -152,7 +169,18 @@ impl World {
     pub fn begin_revision(&mut self) -> Revision {
         self.revision = self.revision.next();
         self.changes.advance();
+        self.observed.set(false);
         self.revision
+    }
+
+    /// Called first by every mutation: if queries already ran in this
+    /// revision, start a new one so the mutation is stamped strictly after
+    /// anything they verified. Callers may still call `begin_revision`
+    /// explicitly; this only removes the ordering hazard (audit F20).
+    fn touch(&mut self) {
+        if self.observed.get() {
+            self.begin_revision();
+        }
     }
 
     pub fn revision(&self) -> Revision {
@@ -161,6 +189,7 @@ impl World {
 
     /// Allocate a fresh entity. Returns a unique handle.
     pub fn spawn(&mut self) -> Entity {
+        self.touch();
         let entity = Entity::from_raw(self.entities.len() as u32);
         self.entities.push(EntityRecord {
             last_changed: self.revision,
@@ -185,11 +214,13 @@ impl World {
         if !self.is_alive(entity) {
             return;
         }
+        self.touch();
         self.components.despawn_all(entity);
         let former_parent = self.hierarchy.detach(entity);
         self.entities[entity.index()].alive = false;
         self.entities[entity.index()].last_changed = self.revision;
         self.changes.mark_changed(entity);
+        self.despawned.get_mut().push(entity);
         // Detaching mutated the parent's children list — mark it
         // changed so queries that walked `children_of(parent)` see
         // the despawned entity disappear from cache.
@@ -213,6 +244,7 @@ impl World {
 
     /// Attach a component to an entity. Marks the entity as changed.
     pub fn set<T: Component>(&mut self, entity: Entity, value: T) {
+        self.touch();
         self.components.insert(entity, value);
         self.entities[entity.index()].last_changed = self.revision;
         self.changes.mark_changed(entity);
@@ -225,6 +257,7 @@ impl World {
 
     /// Get a mutable component reference.
     pub fn get_mut<T: Component>(&mut self, entity: Entity) -> Option<&mut T> {
+        self.touch();
         self.entities[entity.index()].last_changed = self.revision;
         self.changes.mark_changed(entity);
         self.components.get_mut::<T>(entity)
@@ -237,6 +270,7 @@ impl World {
 
     /// Remove a component from an entity.
     pub fn remove_component<T: Component>(&mut self, entity: Entity) -> bool {
+        self.touch();
         if self.components.remove::<T>(entity) {
             self.entities[entity.index()].last_changed = self.revision;
             self.changes.mark_changed(entity);
@@ -254,6 +288,7 @@ impl World {
     // -- Hierarchy --
 
     pub fn set_parent(&mut self, child: Entity, parent: Entity) {
+        self.touch();
         // Snapshot the old parent before mutation so we can mark it
         // changed too — moving a child away from `old_parent` mutates
         // its children list, and queries that read it must re-fire.
@@ -300,10 +335,12 @@ impl World {
     /// During the query phase, the world is borrowed immutably.
     /// All reads go through the QueryContext which records dependencies.
     pub fn query_context(&self) -> QueryContext<'_> {
+        self.sweep_despawned();
+        self.observed.set(true);
         QueryContext::new(
             self.revision,
             &self.components,
-            &self.changes,
+            &self.entities,
             &self.hierarchy,
             &self.queries,
             &self.accumulators,
@@ -321,11 +358,14 @@ impl World {
 
     /// Create a structural clone of this world for reuse across compilations.
     ///
-    /// Clones entities, components, hierarchy, and change tracking. Starts
-    /// with fresh query caches and accumulators — they rebuild lazily on
-    /// first access. Keeps the same revision so `begin_revision()` works
-    /// normally on the snapshot.
+    /// Clones entities, components, hierarchy, change tracking, query memos
+    /// and accumulated values. The last two travel together: a memo that
+    /// verifies as a cache hit in the snapshot never re-files its values, so
+    /// a snapshot without them silently loses every cached query's
+    /// diagnostics (audit F21). Keeps the same revision so
+    /// `begin_revision()` works normally on the snapshot.
     pub fn snapshot(&self) -> World {
+        self.sweep_despawned();
         World {
             revision: self.revision,
             entities: self.entities.clone(),
@@ -333,18 +373,57 @@ impl World {
             hierarchy: self.hierarchy.clone(),
             changes: self.changes.clone(),
             queries: RefCell::new(self.queries.borrow().clone()),
-            accumulators: RefCell::new(AccumulatorStore::new()),
+            accumulators: RefCell::new(self.accumulators.borrow().clone()),
             query_exec_count: Cell::new(0),
+            observed: Cell::new(false),
+            despawned: RefCell::new(Vec::new()),
         }
     }
 
     // -- Accumulators --
 
     /// Collect all accumulated values of type T into a Vec.
-    pub fn accumulated<T: Clone + 'static>(&self) -> Vec<T> {
+    pub fn accumulated<T: Clone + Send + Sync + 'static>(&self) -> Vec<T> {
+        self.sweep_despawned();
         self.accumulators.borrow().all::<T>().cloned().collect()
     }
+
+    /// Drop the accumulated values of every query that read an entity
+    /// despawned since the last sweep (audit F23).
+    ///
+    /// Such a query is either demanded again — and then it re-executes,
+    /// because its dependency on the dead entity is stale, and re-files its
+    /// values — or never demanded again, typically because its key names
+    /// the dead entity, and nothing else would ever clear them. Only
+    /// *direct* readers qualify: a query that saw the entity only through a
+    /// sub-query may be backdated and never re-run, so its values must stay.
+    ///
+    /// Runs lazily, before a query can execute or values are read. Sweeping
+    /// in `despawn` would cost a scan of every memo per entity, and an LSP
+    /// edit despawns a whole file's subtree at once. Lazy is also exact: no
+    /// query runs between a despawn and the sweep, because both entry
+    /// points sweep first, so every memo it inspects predates the despawn.
+    fn sweep_despawned(&self) {
+        if self.despawned.borrow().is_empty() {
+            return;
+        }
+        let dead: FxHashSet<Entity> = self.despawned.take().into_iter().collect();
+        let readers = self.queries.borrow().readers_of(&dead);
+        let mut accumulators = self.accumulators.borrow_mut();
+        for query in &readers {
+            accumulators.remove_for_query(query);
+        }
+    }
 }
+
+// `World` must stay `Send`: the test harness shares one cached stdlib
+// compiler across threads behind a `Mutex` and snapshots it per test (audit
+// F42). This holds because every component, query output and accumulated
+// value is `Send + Sync` (see `Component`, `QueryFn`, `QueryContext::accumulate`).
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<World>();
+};
 
 impl Default for World {
     fn default() -> Self {

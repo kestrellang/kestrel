@@ -33,7 +33,7 @@ func failWith(code: lang.i64) -> Result[lang.i64, MyError] {
 }
 
 func compute() -> Result[lang.i64, MyError] {
-    let _ = try failWith(55);
+     try failWith(55);
     Result.Ok(0)
 }
 

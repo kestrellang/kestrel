@@ -17,9 +17,18 @@ Variants: `Module`, `Struct`, `Enum`, `EnumCase`, `Protocol`, `Extension`, `Func
 **Purpose**: Source span excluding leading trivia. Used for error reporting and goto-definition.
 
 ### `CstNode`
-**Data**: `SyntaxNode` (Arc-backed)
+**Data**: `SyntaxNodePtr` (kind + text range; `Send`, hashable)
 **On**: every declaration entity
-**Purpose**: Cheap reference back to the CST for later phases that need expression details.
+**Purpose**: Handle back to the declaration's CST node. Resolve it with
+`kestrel_ast_builder::syntax::cst_node(world_or_ctx, entity)`. Components never
+hold a `SyntaxNode` (`!Send`, pins the tree — audit F42).
+
+### `FileSyntax`
+**Data**: `GreenNode` (the file's immutable green tree)
+**On**: every file entity
+**Purpose**: The one place a parsed tree lives in the World; every
+`CstNode` / `Valued` / conformance / where-clause pointer resolves against
+`FileSyntax::root()`.
 
 ## Naming & Location
 
@@ -66,9 +75,14 @@ Variants: `Module`, `Struct`, `Enum`, `EnumCase`, `Protocol`, `Extension`, `Func
 **Answers**: "Can this be written to?"
 
 ### `Valued`
-**Data**: `SyntaxNode` (CST subtree)
-**On**: Function (body), Initializer (body), Deinit (body), Field (default value or getter body)
-**Answers**: "Does this have executable code?"
+**Data**: `SyntaxNodePtr` to the body subtree (resolve with `syntax::valued_node`): a
+`CodeBlock`, a function's `= expr` (`FunctionBody`), a parameter default's `= expr`
+(`DefaultValue`), or a field initializer `Expression`
+**On**: Function (body), Initializer (body), Deinit (body), Field (default value or getter
+body), Setter / RefAccessor (body), Subscript (getter body), ParamDefault (default value)
+**Answers**: "Does this have executable code?" — the one "has a body" marker; every body
+`LowerBody` can lower carries it and nothing else does. Bodies are lowered on demand
+from this pointer (`kestrel-hir-lower`); there is no stored body AST.
 
 ### `Static`
 **Marker** (no data)

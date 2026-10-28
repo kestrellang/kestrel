@@ -1,9 +1,94 @@
 # std.os
 
+## struct `ExitCode`
+
+```kestrel
+public struct ExitCode { /* private fields */ }
+```
+
+A process exit code.
+
+Conventionally `0` means success and any non-zero value means failure. Only
+the low 8 bits survive on POSIX (`WEXITSTATUS`), so the meaningful range is
+`0`–`255`. The byte is private; build one with `ExitCode(_:)` or use the
+`.success` / `.failure` constants.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+### Members
+
+#### field `failure`
+
+```kestrel
+public static var failure: ExitCode { get }
+```
+
+The conventional generic-failure code, `1`.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(UInt8)
+```
+
+Builds an exit code from a byte. `exit(-1)`-style codes are spelled
+`ExitCode(255)`.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+#### field `success`
+
+```kestrel
+public static var success: ExitCode { get }
+```
+
+The conventional success code, `0`.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
+
+## protocol `Exitable`
+
+```kestrel
+public protocol Exitable
+```
+
+A type that a `@main` function may return: it knows how to produce a process
+exit code.
+
+The compiler synthesizes C `main` as a wrapper that calls `report()` on the
+value `@main` returns. `report()` is `consuming` so move-only conformers
+(e.g. `Result`) can move out their payload.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+### Members
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+Produce the process exit code for this value.
+
+_Defined in `lang/std/os/exitable.ks`._
+
 ## function `captureOutput`
 
 ```kestrel
-public func captureOutput(String) -> String
+public func captureOutput(String) -> Result[String, IoError]
 ```
 
 Runs `command` through the system shell and returns its captured stdout.
@@ -11,13 +96,17 @@ Runs `command` through the system shell and returns its captured stdout.
 Reads from `popen(command, "r")` 1 KiB at a time until EOF, then
 trims a single run of trailing ASCII whitespace (space, tab, LF,
 CR) so callers don't have to chomp the newline themselves. Stderr
-is **not** captured — it goes to the parent's stderr. Returns the
-empty string if `popen` fails.
+is **not** captured — it goes to the parent's stderr.
+
+### Errors
+
+Returns `Err(IoError)` if `popen` fails (fork/pipe failure);
+`errno` is captured. A command producing no output is `Ok("")`.
 
 ### Examples
 
 ```
-let branch = captureOutput("git rev-parse --abbrev-ref HEAD");
+let branch = try captureOutput("git rev-parse --abbrev-ref HEAD");
 // "main"
 ```
 
@@ -97,20 +186,23 @@ _Defined in `lang/std/os/fs.ks`._
 ## function `getcwd`
 
 ```kestrel
-public func getcwd() -> String
+public func getcwd() -> Result[String, IoError]
 ```
 
 Returns the calling process's current working directory.
 
-Wraps `getcwd(2)` with a 1 KiB buffer. Returns the empty string if
-the cwd has been deleted, is longer than 1 KiB, or any other
-`getcwd` failure occurs — the function does not surface the
-error code.
+Wraps `getcwd(2)` with a 1 KiB buffer.
+
+### Errors
+
+Returns `Err(IoError)` if the cwd has been deleted, is longer than
+1 KiB (`ERANGE`), or any other `getcwd` failure occurs; `errno` is
+captured.
 
 ### Examples
 
 ```
-let here = getcwd();
+let here = try getcwd();
 ```
 
 _Defined in `lang/std/os/fs.ks`._
@@ -176,21 +268,25 @@ _Defined in `lang/std/os/fs.ks`._
 ## function `listDir`
 
 ```kestrel
-public func listDir(String) -> Array[String]
+public func listDir(String) -> Result[Array[String], IoError]
 ```
 
 Returns the names of the entries inside `path`, excluding `.` and `..`.
 
 Wraps `opendir`/`readdir`/`closedir`. The returned names are
 relative to `path`; join with `path` yourself if you need full
-paths. On failure to open the directory (missing path, permission
-denied, etc.), returns an empty array — the function does not
-distinguish "empty directory" from "open failed".
+paths.
+
+### Errors
+
+Returns `Err(IoError)` if the directory cannot be opened (missing
+path, permission denied, not a directory, etc.); `errno` is
+captured. An empty directory is `Ok` with an empty array.
 
 ### Examples
 
 ```
-for entry in listDir("/tmp") {
+for entry in try listDir("/tmp") {
     print(entry);
 }
 ```
@@ -356,7 +452,7 @@ _Defined in `lang/std/os/fs.ks`._
 ## function `spawn`
 
 ```kestrel
-public func spawn(String) -> Int32
+public func spawn(String) -> Result[Int32, IoError]
 ```
 
 Runs `command` through the system shell and returns its exit code.
@@ -368,10 +464,17 @@ normal cases). The child's stdout and stderr are inherited from
 the parent process — they go straight to the terminal. For
 captured output, use `captureOutput`.
 
+### Errors
+
+Returns `Err(IoError)` if the shell child could not be created
+(`system` returned `-1`, e.g. fork failure); `errno` is captured.
+A command that runs and exits non-zero is still `Ok` — the exit
+code is the payload.
+
 ### Examples
 
 ```
-let code = spawn("ls -la");
+let code = try spawn("ls -la");
 if code != 0 {
     print("ls failed");
 }

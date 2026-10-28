@@ -33,9 +33,9 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Body, Callable, NodeKind, Valued};
+use kestrel_ast_builder::{Callable, NodeKind, Valued};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -55,8 +55,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct SubscriptAnalyzer;
 
 impl Describe for SubscriptAnalyzer {
-    fn id(&self) -> &'static str {
-        "subscript"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::Subscript
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -99,8 +99,14 @@ impl DeclCheck for SubscriptAnalyzer {
             return diags;
         }
 
-        let has_body = cx.query.get::<Body>(cx.entity).is_some()
-            || cx.query.get::<Valued>(cx.entity).is_some();
+        // A pure-ref subscript (`{ ref {…} }`, no getter) keeps the parent
+        // entity bodyless — its bodies live on RefAccessor/Setter children.
+        let has_body = cx.query.get::<Valued>(cx.entity).is_some()
+            || cx
+                .query
+                .children_of(cx.entity)
+                .iter()
+                .any(|&c| cx.query.get::<Valued>(c).is_some());
 
         if !has_body {
             diags.push(AnalyzeDiagnostic {

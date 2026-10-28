@@ -11,19 +11,22 @@
 //!
 //! ## Diagnostics
 //!
-//! ### E436 -- `unresolved_type_in_annotation` (Error, Correctness)
+//! ### E476 -- `unresolved_type_in_annotation` (Error, Correctness)
 //! **Message:** "cannot find type '{name}' in this scope"
 
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 
-static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "E436",
+/// E476 is also emitted by `decl/generics.rs` for an unresolved where-clause
+/// bound — same fact, different position. It borrows this descriptor rather
+/// than declaring a second one (see `Describe::borrowed_descriptors`).
+pub(crate) static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
+    id: "E476",
     name: "unresolved_type_in_annotation",
     default_severity: Severity::Error,
     category: Category::Correctness,
@@ -32,8 +35,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct TypeAnnotationResolutionAnalyzer;
 
 impl Describe for TypeAnnotationResolutionAnalyzer {
-    fn id(&self) -> &'static str {
-        "type_annotation_resolution"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::TypeAnnotationResolution
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -74,6 +77,18 @@ fn walk_entity(
         // Resolve context: use the entity itself so its own type params are in scope.
         // ResolveName walks up the hierarchy, so parent/ancestor names are also found.
         check_ast_type(cx, &ann.0, entity, diags);
+
+        // Stage 0.5: reference types are rejected at HIR lowering, but
+        // nothing forces lowering for unused decls (e.g. a field of a
+        // struct no body touches). Force the (memoized) lowering query —
+        // only when a ref is actually present, so no other annotation
+        // gains a new lowering trigger.
+        if crate::util::ast_contains_ref(&ann.0) {
+            let _ = cx.query.query(kestrel_hir_lower::LowerTypeAnnotation {
+                entity,
+                root: cx.root,
+            });
+        }
     }
 
     for &child in cx.query.children_of(entity) {
@@ -156,6 +171,10 @@ fn check_ast_type(
             for b in bounds {
                 check_ast_type(cx, b, context, diags);
             }
+        },
+        // Reference types — recurse into the pointee
+        AstType::Ref { inner, .. } => {
+            check_ast_type(cx, inner, context, diags);
         },
         // Unit, Never, Inferred — no type references to check
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},

@@ -6,21 +6,21 @@ module Test
         @main
         func main() -> lang.i64 {
             var small = std.collections.Set[std.numeric.Int64]();
-            let _ = small.insert(1);
-            let _ = small.insert(2);
+             small.insert(1);
+             small.insert(2);
 
             var big = std.collections.Set[std.numeric.Int64]();
-            let _ = big.insert(1);
-            let _ = big.insert(2);
-            let _ = big.insert(3);
+             big.insert(1);
+             big.insert(2);
+             big.insert(3);
 
             var equal = std.collections.Set[std.numeric.Int64]();
-            let _ = equal.insert(1);
-            let _ = equal.insert(2);
+             equal.insert(1);
+             equal.insert(2);
 
             var disjoint = std.collections.Set[std.numeric.Int64]();
-            let _ = disjoint.insert(10);
-            let _ = disjoint.insert(20);
+             disjoint.insert(10);
+             disjoint.insert(20);
 
             // Test isSubset(of:)
             if small.isSubset(of: big) == false { return 1 }

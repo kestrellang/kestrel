@@ -77,8 +77,8 @@ public protocol Divisible[Other = Self] {
 /// Raw protocol backing the `%` operator.
 ///
 /// For integers this is the remainder of truncated division, with the sign of
-/// the dividend. Use `floorMod` (defined on integer types) when you want
-/// Euclidean / floor-style remainder semantics.
+/// the dividend. If you need Euclidean / floor-style remainder semantics
+/// (result with the sign of the divisor), compute `((a % b) + b) % b`.
 @builtin(.ModuloOperatorProtocol)
 public protocol Modulo[Other = Self] {
     type Output
@@ -92,7 +92,7 @@ public protocol Modulo[Other = Self] {
 ///
 /// On signed two's-complement integers, negating the minimum value overflows
 /// (e.g. `-Int8.minValue == Int8.minValue`); the operator wraps. Use
-/// `checkedNegate` if overflow needs to surface.
+/// `negateChecked` if overflow needs to surface.
 @builtin(.NegateOperatorProtocol)
 public protocol Negatable {
     type Output

@@ -7,7 +7,7 @@
 
 use kestrel_hir::body::{HirBlock, HirExprId};
 use kestrel_mir::value::Ownership;
-use kestrel_mir::{BlockId, Immediate, TyId, ValueId};
+use kestrel_mir::{FieldIdx, Immediate, TyId, ValueId};
 
 use super::{ArmExit, LoopInfo, OssaBodyCtx};
 
@@ -23,7 +23,33 @@ impl OssaBodyCtx<'_, '_> {
         then_body: &HirBlock,
         else_body: Option<&HirBlock>,
     ) -> ValueId {
+        let mark = self.ref_watermark();
         let cond_val = self.lower_expr(condition);
+        // `HirExpr::If` is the single shape that `if`, `else if`, desugared
+        // `while` / `guard … else`, and the non-binding link of both
+        // `if let p = e, cond` and multi-condition `while let p = e, cond` all
+        // lower into — so this one call covers six condition positions.
+        // Must run BEFORE `end_stale_refs_since`: the witness call is part of
+        // computing the condition, so any ref it borrows is still in use here.
+        let kind = if self.hir.while_conditions.contains(&condition) {
+            "while"
+        } else {
+            "if"
+        };
+        // The synthesized scalar is left scope-tracked on purpose. `consume`ing
+        // it here fails OSSA verify ("@owned value is live at block exit but
+        // never consumed" at bb0) because the branch terminator reads it but
+        // does not consume it. Leaving it tracked lets `lower_if`'s existing
+        // liveness threading carry it through both arms to the merge and
+        // destroy it there — no `extra_vals` mechanism needed. It is a trivial
+        // `lang.i1` scalar, and it only exists on the non-`Bool` path.
+        let cond_val = self.coerce_condition_to_i1(cond_val, kind);
+        // The condition is a complete expression: any ref (single-use) born
+        // inside it and still tracked was fully used — end it now, or the
+        // branch terminator reports a false E497
+        // (`if arr.at(index: i).tag != 0`). Refs born BEFORE the condition
+        // are pending uses of an enclosing expression — leave them.
+        self.end_stale_refs_since(mark);
         let result_ty = self.resolve_expr_type(expr_id);
         let result_ownership = self.ownership_for(result_ty);
 
@@ -52,7 +78,15 @@ impl OssaBodyCtx<'_, '_> {
         self.rebind_scope_values(&live_vals, &then_params);
         self.push_scope();
         let then_val = self.lower_hir_block(then_body);
+        // Arm-value decay copies in `capture_arm_exit` diagnose at the
+        // branch's value expression (a tail-less block's value is unit —
+        // never a ref/NotCopyable — so the enclosing span is fine there).
+        let prev_span = self.current_span.clone();
+        if let Some(tail) = then_body.tail_expr {
+            self.current_span = Some(super::value_expr_span(&self.hir, tail));
+        }
         let then_exit = self.capture_arm_exit(then_val);
+        self.current_span = prev_span;
         self.pop_scope();
 
         // -- Else arm --
@@ -62,7 +96,13 @@ impl OssaBodyCtx<'_, '_> {
         self.push_scope();
         let else_exit = if let Some(else_body) = else_body {
             let else_val = self.lower_hir_block(else_body);
-            self.capture_arm_exit(else_val)
+            let prev_span = self.current_span.clone();
+            if let Some(tail) = else_body.tail_expr {
+                self.current_span = Some(super::value_expr_span(&self.hir, tail));
+            }
+            let exit = self.capture_arm_exit(else_val);
+            self.current_span = prev_span;
+            exit
         } else {
             let unit = self.emit_literal(Immediate::unit());
             self.capture_arm_exit(unit)
@@ -114,6 +154,28 @@ impl OssaBodyCtx<'_, '_> {
         if result_ownership == Ownership::Owned {
             self.track_owned(result_param);
         }
+        // Stage 2b: a ref-bearing result's escape taint must survive the
+        // merge — join the per-edge result roots. Untainted (self-rooted)
+        // edges contribute nothing, so `if c { .Some(&local) } else { .None }`
+        // joins to the local taint (conservative on the .None path — the
+        // sound direction).
+        if self.ctx.module.escape_carry(result_ty).any() {
+            let convs = self.current_param_convs();
+            let mut joined: Option<kestrel_mir::value::RootProvenance> = None;
+            for exit in &reaching {
+                let d = self.body.value(exit.result);
+                if d.root != kestrel_mir::value::RootProvenance::Local(exit.result) {
+                    let r = d.root;
+                    joined = Some(match joined {
+                        None => r,
+                        Some(j) => j.join(r, &convs),
+                    });
+                }
+            }
+            if let Some(root) = joined {
+                self.stamp_root(result_param, root);
+            }
+        }
 
         // Restore outer tracker, propagating survivors and dropping the dead.
         self.tracker = saved_tracker;
@@ -137,17 +199,37 @@ impl OssaBodyCtx<'_, '_> {
     /// A var taken on some-but-not-all edges becomes `MaybeUninit`.
     pub(crate) fn fold_var_inits(&mut self, reaching: &[&ArmExit]) {
         for (local, _) in self.scope_var_inits() {
+            let joined = reaching
+                .iter()
+                .filter_map(|exit| exit.var_inits.iter().find(|(l, _)| *l == local))
+                .map(|(_, st)| st.clone())
+                .reduce(|a, b| a.join(&b));
+            if let Some(j) = joined {
+                self.set_var_state(local, &j);
+            }
+        }
+        self.fold_field_inits(reaching);
+    }
+
+    /// Join per-arm `self`-field init-states over the reaching edges (the same
+    /// `VarInit::join` lattice as vars) and write the result onto `field_inits`.
+    /// A field assigned on some-but-not-all edges becomes `MaybeUninit`, so a
+    /// later reassignment flag-guards its drop (#154). Only meaningful in an
+    /// init body; `field_inits` is empty elsewhere.
+    pub(crate) fn fold_field_inits(&mut self, reaching: &[&ArmExit]) {
+        let fields: Vec<FieldIdx> = self.field_inits.iter().map(|(f, _)| *f).collect();
+        for field in fields {
             let mut joined: Option<super::VarInit> = None;
             for exit in reaching {
-                if let Some((_, ai)) = exit.var_inits.iter().find(|(l, _)| *l == local) {
+                if let Some((_, fi)) = exit.field_inits.iter().find(|(f, _)| *f == field) {
                     joined = Some(match joined {
-                        None => *ai,
-                        Some(j) => j.join(*ai),
+                        None => *fi,
+                        Some(j) => j.join(*fi),
                     });
                 }
             }
             if let Some(j) = joined {
-                self.set_var_init(local, j);
+                self.set_field_init(field, j);
             }
         }
     }
@@ -169,18 +251,31 @@ impl OssaBodyCtx<'_, '_> {
         let (exit_block, exit_params) = self.new_block_with_params(&descs);
 
         if !self.is_terminated() {
+            // Pop EVERY threaded entry — owned values and binding borrows —
+            // and re-track them below in desc order: break/continue rely on
+            // "the loop's tracked values are the first N slots", which is
+            // positional over scope-entry order.
             for &v in &initial_args {
                 self.pop_owned_from_scope(v);
+                self.untrack_borrow(v);
             }
             self.emit_jump(header_block, initial_args.clone());
         }
 
         self.switch_to(header_block);
+        // Rebinds local_map/tracker and stamps threaded binding params
+        // (borrow_source/root + ref_binding_vals) even though the scope
+        // entries were popped above.
         self.rebind_scope_values(&initial_args, &header_params);
-        // initial_args were consumed before the jump, so rebind won't
-        // find them in scope. Track the header params fresh.
-        for &param in header_params.iter() {
-            self.track_owned(param);
+        for (i, &param) in header_params.iter().enumerate() {
+            match descs[i].1 {
+                Ownership::Owned => self.track_owned(param),
+                // A threaded ref binding continues as the header's
+                // @guaranteed param — re-add its Borrow entry here, in desc
+                // order (the loop-exit path restores the pre-loop scope, so
+                // this placement only governs in-body teardown).
+                Ownership::Guaranteed => self.track_borrow(param),
+            }
         }
 
         let scope_depth = self.scope_stack.len();
@@ -190,14 +285,32 @@ impl OssaBodyCtx<'_, '_> {
             label: label.map(|s| s.to_string()),
             scope_depth,
             tracker_len: self.tracker.len(),
+            break_var_inits: Vec::new(),
         });
+
+        // Init-body `self`-field state across the loop: a field can only become
+        // MORE initialized in the body (no field move-out), so the post-loop
+        // state is `pre.join(body_end)` — a field first-assigned inside the loop
+        // is `MaybeUninit` after (the loop may run zero times). In-body stores of
+        // a `DefUninit` field already take the flag-guarded path (see
+        // `store_init_self_field`'s loop check), sound for any trip count.
+        let pre_field_inits = self.snapshot_field_inits();
 
         self.push_scope();
         let _ = self.lower_hir_block(body);
+        // Capture body-end field states BEFORE the exit `restore_scope` resets
+        // `field_inits` to the pre-loop snapshot.
+        let post_field_inits = self.snapshot_field_inits();
 
         if !self.is_terminated() {
             let back_edge_vals = self.tracker.values();
             self.destroy_scope_except(&back_edge_vals);
+            // A guarded destroy in the scope exit renames threaded values —
+            // resolve to their current names before the back-edge jump.
+            let back_edge_vals: Vec<ValueId> = back_edge_vals
+                .iter()
+                .map(|v| self.resolve_value(*v))
+                .collect();
             self.pop_scope();
             for &v in &back_edge_vals {
                 self.pop_owned_from_scope(v);
@@ -207,14 +320,39 @@ impl OssaBodyCtx<'_, '_> {
             self.pop_scope();
         }
 
-        self.loop_stack.pop();
+        let break_var_inits = self
+            .loop_stack
+            .pop()
+            .map(|info| info.break_var_inits)
+            .unwrap_or_default();
         self.switch_to(exit_block);
         // Restore scope/local_map to the pre-loop state so that
         // rebind_scope_values can find the initial_args values.
         self.restore_scope(&saved_snapshot);
+        // Every exit is a `break`; join the vars' init-states over them (the
+        // restored pre-loop state would call a var moved in the loop Init).
+        for (local, _) in self.scope_var_inits() {
+            let joined = break_var_inits
+                .iter()
+                .filter_map(|inits| inits.iter().find(|(l, _)| *l == local))
+                .map(|(_, st)| st.clone())
+                .reduce(|a, b| a.join(&b));
+            if let Some(j) = joined {
+                self.set_var_state(local, &j);
+            }
+        }
         self.rebind_scope_values(&initial_args, &exit_params);
         self.tracker = saved_tracker;
         self.tracker.rebind(&initial_args, &exit_params);
+        // Reconcile init-body field states: join the pre-loop state with the
+        // body-end state (see `pre_field_inits`). `restore_scope` above reset
+        // `field_inits` to the pre-loop snapshot, so join against the captured
+        // `post_field_inits` rather than the current (restored) state.
+        for (field, pre) in pre_field_inits {
+            if let Some((_, post)) = post_field_inits.iter().find(|(f, _)| *f == field) {
+                self.set_field_init(field, pre.join(*post));
+            }
+        }
         self.emit_literal(Immediate::unit())
     }
 
@@ -227,6 +365,15 @@ impl OssaBodyCtx<'_, '_> {
             let exit = info.exit_block;
             let depth = info.scope_depth;
             let tracker_len = info.tracker_len;
+            let var_inits = self.scope_var_inits();
+            if let Some(info) = self
+                .loop_stack
+                .iter_mut()
+                .rev()
+                .find(|l| kestrel_hir::label_selects_loop(label, l.label.as_deref()))
+            {
+                info.break_var_inits.push(var_inits);
+            }
             // The active tracker (possibly the loop's or a nested if's)
             // starts with the loop's tracked values in its first N slots.
             // These are the values that need to be threaded to the exit block.
@@ -235,7 +382,12 @@ impl OssaBodyCtx<'_, '_> {
             // Destroy inner scopes (loop body + any nested ones),
             // keeping the values we're threading to the exit block.
             self.destroy_scopes_to_depth(depth, &exit_vals);
+            // A guarded destroy in the exit renames threaded values.
+            let exit_vals: Vec<ValueId> =
+                exit_vals.iter().map(|v| self.resolve_value(*v)).collect();
             self.emit_jump(exit, exit_vals);
+        } else {
+            self.emit_no_enclosing_loop_backstop("break", label);
         }
         self.emit_literal(Immediate::unit())
     }
@@ -248,51 +400,82 @@ impl OssaBodyCtx<'_, '_> {
         if let Some(info) = self.find_loop(label) {
             let header = info.header_block;
             let depth = info.scope_depth;
-            let header_param_vals = self.header_param_values(header);
-            self.destroy_scopes_to_depth(depth, &header_param_vals);
-            let current_vals = self.collect_current_for_values(&header_param_vals);
-            self.emit_jump(header, current_vals);
+            let tracker_len = info.tracker_len;
+            // Mirror `lower_break`: the loop's header and exit blocks share the
+            // same parameter descriptors, so the back-edge to the header takes
+            // the same values break threads to the exit — the loop's tracked
+            // values, which by the positional tracker contract are the first N
+            // slots of the (possibly nested) active tracker. Fishing the
+            // header's own param values instead (the old code) misaligns when a
+            // labeled `continue` crosses an INNER loop, whose `lower_loop`
+            // replaced the active tracker — producing an OSSA "consumed more
+            // than once" ICE (#201).
+            let all_vals = self.tracker.values();
+            let header_vals: Vec<ValueId> = all_vals[..tracker_len.min(all_vals.len())].to_vec();
+            // Destroy the crossed scopes (inner loop bodies + nested ones),
+            // keeping the values threaded back to the header.
+            self.destroy_scopes_to_depth(depth, &header_vals);
+            // A guarded destroy in the exit renames threaded values.
+            let header_vals: Vec<ValueId> =
+                header_vals.iter().map(|v| self.resolve_value(*v)).collect();
+            self.emit_jump(header, header_vals);
+        } else {
+            self.emit_no_enclosing_loop_backstop("continue", label);
         }
         self.emit_literal(Immediate::unit())
+    }
+
+    /// Backstop for a `break`/`continue` that reaches MIR with no matching
+    /// enclosing loop.
+    ///
+    /// hir-lower's `validate_break_continue` rejects this first ("'break'
+    /// outside of loop" / "undeclared label"), so this fires only for shapes it
+    /// cannot see. Without it the lowering falls through to a unit literal and
+    /// the `break` becomes a **silent no-op** — the loop runs to completion and
+    /// the program keeps going with a well-formed but wrong body. That is how
+    /// `break` inside a closure inside a loop behaved: the closure body
+    /// inherited the enclosing loop stack, so validation passed, and MIR then
+    /// found no loop to jump to.
+    fn emit_no_enclosing_loop_backstop(&mut self, keyword: &str, label: Option<&str>) {
+        let span = self
+            .current_span
+            .clone()
+            .unwrap_or_else(|| kestrel_span::Span::synthetic(0));
+        let described = match label {
+            Some(l) => format!("`{keyword} {l}`"),
+            None => format!("`{keyword}`"),
+        };
+        self.ctx.query.accumulate(
+            kestrel_reporting::Diagnostic::error()
+                .with_message(format!(
+                    "internal compiler error: {described} reached MIR lowering \
+                     with no matching enclosing loop"
+                ))
+                .with_labels(vec![
+                    kestrel_reporting::Label::primary(span.file_id, span.range())
+                        .with_message("an earlier phase should have diagnosed this"),
+                ])
+                .with_notes(vec![
+                    "this would otherwise compile to a no-op; please file a bug \
+                     with the program that triggered it"
+                        .into(),
+                ]),
+        );
     }
 
     // ================================================================
     // Helpers
     // ================================================================
 
+    /// Resolve a `break`/`continue` label against the enclosing loop stack.
+    ///
+    /// The rule itself lives in `kestrel_hir::label_selects_loop` so that
+    /// analyze and MIR share it by construction. Searching innermost-first with
+    /// an always-true predicate for `None` is exactly `last()`.
     fn find_loop(&self, label: Option<&str>) -> Option<&LoopInfo> {
-        match label {
-            Some(label) => self
-                .loop_stack
-                .iter()
-                .rev()
-                .find(|l| l.label.as_deref() == Some(label)),
-            None => self.loop_stack.last(),
-        }
-    }
-
-    fn collect_current_for_values(&self, expected: &[ValueId]) -> Vec<ValueId> {
-        let all_tracked = self.all_live_tracked();
-        if all_tracked.len() >= expected.len() {
-            all_tracked[..expected.len()]
-                .iter()
-                .map(|&(v, _, _)| v)
-                .collect()
-        } else {
-            let mut vals: Vec<_> = all_tracked.iter().map(|&(v, _, _)| v).collect();
-            while vals.len() < expected.len() {
-                vals.push(expected[vals.len()]);
-            }
-            vals
-        }
-    }
-
-    fn header_param_values(&self, header: BlockId) -> Vec<ValueId> {
-        self.body
-            .block(header)
-            .params
+        self.loop_stack
             .iter()
-            .map(|p| p.value)
-            .collect()
+            .rev()
+            .find(|l| kestrel_hir::label_selects_loop(label, l.label.as_deref()))
     }
 }

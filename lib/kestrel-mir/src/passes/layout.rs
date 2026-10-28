@@ -71,6 +71,7 @@ fn ty_contains_param(arena: &TyArena, ty: TyId) -> bool {
     match arena.get(ty) {
         MirTy::TypeParam(_) | MirTy::AssociatedProjection { .. } => true,
         MirTy::Pointer(inner) => ty_contains_param(arena, *inner),
+        MirTy::Ref { pointee, .. } => ty_contains_param(arena, *pointee),
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
             elems.iter().any(|&e| ty_contains_param(arena, e))
@@ -79,7 +80,12 @@ fn ty_contains_param(arena: &TyArena, ty: TyId) -> bool {
             let args = type_args.clone();
             args.iter().any(|&a| ty_contains_param(arena, a))
         },
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+        MirTy::FuncThin { params, ret }
+        | MirTy::FuncThick {
+            params,
+            ret,
+            kind: _,
+        } => {
             let ret = *ret;
             let params = params.clone();
             params.iter().any(|&(t, _)| ty_contains_param(arena, t))
@@ -104,8 +110,17 @@ pub fn primitive_size_and_align(ty: &MirTy, target: &TargetConfig) -> Option<(u6
         MirTy::Never => Some((0, 1)),
         MirTy::Str => Some((target.pointer_width * 2, target.pointer_width)),
         MirTy::Pointer(_) => Some((target.pointer_width, target.pointer_width)),
+        // Ref's ABI is a raw pointer to the pointee (signature-only type).
+        MirTy::Ref { .. } => Some((target.pointer_width, target.pointer_width)),
         MirTy::FuncThin { .. } => Some((target.pointer_width, target.pointer_width)),
-        MirTy::FuncThick { .. } => Some((target.pointer_width * 2, target.pointer_width)),
+        // View tier / bare: `{fn, env_ptr}`. Owning tier: `{fn, env_handle,
+        // retain_fn, release_fn}` — the two extra words carry the type-erased
+        // share/release operations (lockstep 9: layout ↔ both codegen `ty.rs`
+        // ↔ both `compile_apply_partial`).
+        MirTy::FuncThick { kind, .. } => Some((
+            target.pointer_width * crate::ty::func_thick_words(*kind),
+            target.pointer_width,
+        )),
         MirTy::Error => Some((0, 1)),
         _ => None,
     }

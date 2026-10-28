@@ -1,12 +1,7 @@
 //! High-level parser API
 //!
-//! This module provides a convenient Parser struct that handles:
-//! - Creating event sinks
-//! - Parsing with any parse function
-//! - Extracting errors from events
-//! - Building syntax trees
-//!
-//! # Example
+//! [`Parser::parse`] runs a parse function into an [`EventSink`], collects
+//! the coded syntax errors, and builds the lossless tree.
 //!
 //! ```no_run
 //! use kestrel_parser::parser::Parser;
@@ -20,225 +15,17 @@
 //!     .collect();
 //!
 //! let result = Parser::parse(source, tokens.into_iter(), parse_source_file, 0);
-//!
-//! println!("Syntax tree: {:?}", result.tree);
 //! for error in result.errors {
-//!     println!("Error: {}", error.message);
+//!     println!("{}: {}", error.code.unwrap_or(""), error.message);
 //! }
 //! ```
 
 use kestrel_lexer::Token;
 use kestrel_span::Span;
-use kestrel_syntax_tree::SyntaxNode;
+use kestrel_syntax_tree::{GreenNode, SyntaxNode};
 use std::fmt;
 
 use crate::event::{Event, EventSink, TreeBuilder};
-
-/// Format a token for user-friendly display (not debug format)
-pub fn format_token_for_display(token: &Token) -> String {
-    match token {
-        // Trivia
-        Token::Whitespace => "whitespace".to_string(),
-        Token::Newline => "newline".to_string(),
-        Token::LineComment => "comment".to_string(),
-        Token::BlockComment => "comment".to_string(),
-
-        // Literals
-        Token::Underscore => "'_'".to_string(),
-        Token::Identifier => "identifier".to_string(),
-        Token::String => "string".to_string(),
-        Token::Char => "character".to_string(),
-        Token::RawString => "raw string".to_string(),
-        Token::Integer => "integer".to_string(),
-        Token::Float => "float".to_string(),
-        Token::Boolean => "boolean".to_string(),
-        Token::Null => "'null'".to_string(),
-        Token::Some => "'some'".to_string(),
-
-        // Declaration Keywords
-        Token::Extend => "'extend'".to_string(),
-        Token::Fileprivate => "'fileprivate'".to_string(),
-        Token::Func => "'func'".to_string(),
-        Token::Import => "'import'".to_string(),
-        Token::Deinit => "'deinit'".to_string(),
-        Token::Init => "'init'".to_string(),
-        Token::Internal => "'internal'".to_string(),
-        Token::Let => "'let'".to_string(),
-        Token::Module => "'module'".to_string(),
-        Token::Mutating => "'mutating'".to_string(),
-        Token::Private => "'private'".to_string(),
-        Token::Protocol => "'protocol'".to_string(),
-        Token::Public => "'public'".to_string(),
-        Token::Static => "'static'".to_string(),
-        Token::Struct => "'struct'".to_string(),
-        Token::Type => "'type'".to_string(),
-        Token::Var => "'var'".to_string(),
-        Token::Where => "'where'".to_string(),
-
-        // Enum Keywords
-        Token::Enum => "'enum'".to_string(),
-        Token::Case => "'case'".to_string(),
-        Token::Indirect => "'indirect'".to_string(),
-
-        // Logical Keywords
-        Token::And => "'and'".to_string(),
-        Token::Not => "'not'".to_string(),
-        Token::Or => "'or'".to_string(),
-
-        // Statement Keywords
-        Token::As => "'as'".to_string(),
-        Token::Break => "'break'".to_string(),
-        Token::Consuming => "'consuming'".to_string(),
-        Token::Continue => "'continue'".to_string(),
-        Token::Else => "'else'".to_string(),
-        Token::For => "'for'".to_string(),
-        Token::If => "'if'".to_string(),
-        Token::In => "'in'".to_string(),
-        Token::Loop => "'loop'".to_string(),
-        Token::Return => "'return'".to_string(),
-        Token::Throw => "'throw'".to_string(),
-        Token::Try => "'try'".to_string(),
-        Token::Throws => "'throws'".to_string(),
-        Token::While => "'while'".to_string(),
-        Token::Match => "'match'".to_string(),
-        Token::Guard => "'guard'".to_string(),
-
-        // Property Accessor Keywords
-        Token::Get => "'get'".to_string(),
-        Token::Set => "'set'".to_string(),
-        Token::Subscript => "'subscript'".to_string(),
-
-        // Braces
-        Token::LParen => "'('".to_string(),
-        Token::RParen => "')'".to_string(),
-        Token::LBrace => "'{'".to_string(),
-        Token::RBrace => "'}'".to_string(),
-        Token::LBracket => "'['".to_string(),
-        Token::RBracket => "']'".to_string(),
-
-        // Punctuation
-        Token::Semicolon => "';'".to_string(),
-        Token::Comma => "','".to_string(),
-        Token::Dot => "'.'".to_string(),
-        Token::Colon => "':'".to_string(),
-        Token::Question => "'?'".to_string(),
-        Token::Bang => "'!'".to_string(),
-
-        // Operators
-        Token::DotDotEquals => "'..='".to_string(),
-        Token::DotDotLess => "'..<'".to_string(),
-        Token::DotDot => "'..'".to_string(),
-        Token::LessLessEquals => "'<<='".to_string(),
-        Token::GreaterGreaterEquals => "'>>='".to_string(),
-        Token::LessLess => "'<<'".to_string(),
-        Token::GreaterGreater => "'>>'".to_string(),
-        Token::LessEquals => "'<='".to_string(),
-        Token::GreaterEquals => "'>='".to_string(),
-        Token::EqualsEquals => "'=='".to_string(),
-        Token::BangEquals => "'!='".to_string(),
-        Token::QuestionQuestion => "'??'".to_string(),
-        Token::Arrow => "'->'".to_string(),
-        Token::FatArrow => "'=>'".to_string(),
-        Token::PlusEquals => "'+='".to_string(),
-        Token::MinusEquals => "'-='".to_string(),
-        Token::StarEquals => "'*='".to_string(),
-        Token::SlashEquals => "'/='".to_string(),
-        Token::PercentEquals => "'%='".to_string(),
-        Token::AmpersandEquals => "'&='".to_string(),
-        Token::PipeEquals => "'|='".to_string(),
-        Token::CaretEquals => "'^='".to_string(),
-        Token::Equals => "'='".to_string(),
-        Token::Plus => "'+'".to_string(),
-        Token::Minus => "'-'".to_string(),
-        Token::Star => "'*'".to_string(),
-        Token::Slash => "'/'".to_string(),
-        Token::Percent => "'%'".to_string(),
-        Token::Ampersand => "'&'".to_string(),
-        Token::Pipe => "'|'".to_string(),
-        Token::Caret => "'^'".to_string(),
-        Token::Less => "'<'".to_string(),
-        Token::Greater => "'>'".to_string(),
-        Token::At => "'@'".to_string(),
-    }
-}
-
-/// Generate a suggestion for common mistakes
-pub fn suggest_fix(found: Option<&str>, expected: &[String]) -> Option<String> {
-    let found = found?;
-
-    // Wrong function keyword
-    if found == "function" && expected.iter().any(|e| e.contains("func")) {
-        return Some("use 'func' instead of 'function' to declare functions".to_string());
-    }
-    if found == "fn" && expected.iter().any(|e| e.contains("func")) {
-        return Some("use 'func' instead of 'fn' to declare functions".to_string());
-    }
-
-    // Wrong variable keyword
-    if found == "const"
-        && expected
-            .iter()
-            .any(|e| e.contains("let") || e.contains("var"))
-    {
-        return Some("use 'let' for immutable bindings or 'var' for mutable bindings".to_string());
-    }
-
-    // Wrong arrow
-    if found == "=>" && expected.iter().any(|e| e.contains("->")) {
-        return Some("use '->' for return type annotations; '=>' is for match arms".to_string());
-    }
-    if found == "->" && expected.iter().any(|e| e.contains("=>")) {
-        return Some("use '=>' for match arms; '->' is for return type annotations".to_string());
-    }
-
-    // Missing semicolon hint
-    if expected.iter().any(|e| e.contains(";")) {
-        return Some("you may be missing a semicolon".to_string());
-    }
-
-    // Missing closing brace
-    if expected.iter().any(|e| e.contains("}")) {
-        return Some("you may have forgotten to close a block with '}'".to_string());
-    }
-
-    // Missing closing paren
-    if expected.iter().any(|e| e.contains(")")) {
-        return Some("you may have forgotten to close with ')'".to_string());
-    }
-
-    None
-}
-
-/// Build a human-readable error message from expected and found tokens
-fn build_error_message(expected: &[String], found: Option<&str>) -> String {
-    match (expected.len(), found) {
-        (0, Some(found)) => format!("unexpected {}", found),
-        (0, None) => "unexpected end of file".to_string(),
-        (1, Some(found)) => format!("expected {}, found {}", expected[0], found),
-        (1, None) => format!("expected {} before end of file", expected[0]),
-        (n, Some(found)) if n <= 3 => {
-            format!("expected one of {}, found {}", expected.join(", "), found)
-        },
-        (n, Some(found)) => {
-            format!(
-                "expected {}, or {} others, found {}",
-                expected[..2].join(", "),
-                n - 2,
-                found
-            )
-        },
-        (n, None) if n <= 3 => {
-            format!("expected one of {} before end of file", expected.join(", "))
-        },
-        (n, None) => {
-            format!(
-                "expected {}, or {} others before end of file",
-                expected[..2].join(", "),
-                n - 2
-            )
-        },
-    }
-}
 
 /// The kind of parse error
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -264,7 +51,7 @@ impl fmt::Display for ParseErrorKind {
     }
 }
 
-/// A parse error with detailed information
+/// A parse error with a stable `E8xx` code and a handwritten message.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParseError {
     /// The kind of error
@@ -273,10 +60,8 @@ pub struct ParseError {
     pub message: String,
     /// The span where the error occurred (if available)
     pub span: Option<Span>,
-    /// Tokens that were expected (if applicable)
-    pub expected: Vec<String>,
-    /// The token that was found (if applicable)
-    pub found: Option<String>,
+    /// The syntax-error code (`E800`…); see `syntax_error::codes`.
+    pub code: Option<&'static str>,
 }
 
 impl ParseError {
@@ -286,95 +71,7 @@ impl ParseError {
             kind,
             message: message.into(),
             span,
-            expected: Vec::new(),
-            found: None,
-        }
-    }
-
-    /// Create a parse error from a chumsky 0.12 Rich error (generic version)
-    pub fn from_rich_error<'a, T: fmt::Debug + fmt::Display>(
-        error: &chumsky::error::Rich<'a, T>,
-    ) -> Self {
-        use crate::input::to_kestrel_span;
-
-        let span = Some(to_kestrel_span(*error.span()));
-
-        // Determine error kind based on what was found
-        let kind = if error.found().is_none() {
-            ParseErrorKind::UnexpectedEof
-        } else {
-            ParseErrorKind::UnexpectedToken
-        };
-
-        // Format found token using Display
-        let found = error.found().map(|t| format!("{}", t));
-
-        // Build user-friendly message from the Rich error
-        let message = format!("{}", error.reason());
-
-        Self {
-            kind,
-            message,
-            span,
-            expected: Vec::new(),
-            found,
-        }
-    }
-
-    /// Create a parse error from a chumsky 0.12 Rich error with Token type
-    /// This version provides better formatting for Kestrel tokens
-    pub fn from_token_error<'a>(error: &chumsky::error::Rich<'a, Token>) -> Self {
-        use crate::input::to_kestrel_span;
-        use chumsky::error::{RichPattern, RichReason};
-
-        let span = Some(to_kestrel_span(*error.span()));
-
-        // `Rich::custom(...)` carries its message in the reason directly.
-        // Routing it through `build_error_message` (which only consults
-        // `expected`/`found`) discards the message and produces a generic
-        // "unexpected end of file" — masking recovery diagnostics like
-        // "expected identifier after `.`". Detect that shape and pass the
-        // custom message through.
-        if let RichReason::Custom(msg) = error.reason() {
-            return Self {
-                kind: ParseErrorKind::SyntaxError,
-                message: msg.to_string(),
-                span,
-                expected: Vec::new(),
-                found: None,
-            };
-        }
-
-        // Determine error kind based on what was found
-        let kind = if error.found().is_none() {
-            ParseErrorKind::UnexpectedEof
-        } else {
-            ParseErrorKind::UnexpectedToken
-        };
-
-        // Format found token using our display helper
-        let found = error.found().map(format_token_for_display);
-
-        // Extract expected tokens from the error
-        let expected: Vec<String> = error
-            .expected()
-            .filter_map(|pattern| match pattern {
-                RichPattern::Token(token) => Some(format_token_for_display(token)),
-                RichPattern::Label(label) => Some(label.to_string()),
-                RichPattern::EndOfInput => Some("end of input".to_string()),
-                _ => None, // Handle future RichPattern variants
-            })
-            .collect();
-
-        // Build human-readable message
-        let message = build_error_message(&expected, found.as_deref());
-
-        Self {
-            kind,
-            message,
-            span,
-            expected,
-            found,
+            code: None,
         }
     }
 }
@@ -391,91 +88,98 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// The result of parsing, containing both the syntax tree and any errors
+/// The result of parsing, containing both the syntax tree and any errors.
+///
+/// Holds the immutable green tree, not a `SyntaxNode`: green nodes are
+/// atomically reference-counted (`Send + Sync`), while a `SyntaxNode` cursor
+/// uses non-atomic refcounts. Parse results live in query memos, which
+/// `World::snapshot` shares across threads (audit F42), so the cached value
+/// must be thread-safe. [`ParseResult::tree`] builds a fresh cursor on demand.
 #[derive(Debug, Clone)]
 pub struct ParseResult {
-    /// The parsed syntax tree
-    pub tree: SyntaxNode,
-    /// Any parse errors encountered
+    /// The parsed syntax tree (green form)
+    pub green: GreenNode,
+    /// Any parse errors encountered, sorted by position
     pub errors: Vec<ParseError>,
 }
 
-/// Hash by tree structure text + errors. SyntaxNode doesn't impl Hash,
-/// so we hash its text representation which captures the full tree content.
+impl ParseResult {
+    /// The root `SyntaxNode` (a fresh cursor over the shared green tree).
+    pub fn tree(&self) -> SyntaxNode {
+        SyntaxNode::new_root(self.green.clone())
+    }
+}
+
+// Parse results are query memos shared across threads by `World::snapshot`.
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<ParseResult>();
+};
+
 impl std::hash::Hash for ParseResult {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // SyntaxText doesn't impl Hash, convert to String
-        self.tree.text().to_string().hash(state);
+        self.tree().text().to_string().hash(state);
         self.errors.hash(state);
     }
 }
 
-/// High-level parser that provides a convenient API for parsing
+/// Runs a parse function and builds its tree.
 pub struct Parser;
 
 impl Parser {
-    /// Parse source code using the provided parse function
-    ///
-    /// # Arguments
-    ///
-    /// * `source` - The source code to parse
-    /// * `tokens` - Iterator of tokens (from the lexer)
-    /// * `parse_fn` - The parse function to use (e.g., `parse_source_file`)
-    /// * `file_id` - The file ID for error span reporting
-    ///
-    /// # Returns
-    ///
-    /// A `ParseResult` containing both the syntax tree and any errors
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use kestrel_parser::parser::Parser;
-    /// use kestrel_parser::parse_source_file;
-    /// use kestrel_lexer::lex;
-    ///
-    /// let source = "module Main";
-    /// let file_id = 0;
-    /// let tokens: Vec<_> = lex(source, file_id)
-    ///     .filter_map(|t| t.ok())
-    ///     .map(|spanned| (spanned.value, spanned.span))
-    ///     .collect();
-    ///
-    /// let result = Parser::parse(source, tokens.into_iter(), parse_source_file, file_id);
-    /// assert!(result.errors.is_empty());
-    /// ```
+    /// Run `parse_fn` over `tokens` and build the tree.
     pub fn parse<I, F>(source: &str, tokens: I, parse_fn: F, file_id: usize) -> ParseResult
     where
         I: Iterator<Item = (Token, Span)> + Clone,
         F: FnOnce(&str, I, &mut EventSink),
     {
-        // Create event sink with file_id for proper error span reporting
         let mut sink = EventSink::new(file_id);
-
-        // Parse and collect events
-        // Use stacker to grow the stack if needed for deeply nested types
-        stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        // Deeply nested source recurses deeply; grow the stack on demand.
+        stacker::maybe_grow(64 * 1024, 4 * 1024 * 1024, || {
             parse_fn(source, tokens, &mut sink);
         });
 
-        // Extract errors from events
-        let events = sink.events();
-        let errors: Vec<ParseError> = events
+        let errors: Vec<ParseError> = sink
+            .events()
             .iter()
             .filter_map(|e| match e {
-                Event::Error { message, span } => Some(ParseError::new(
-                    ParseErrorKind::SyntaxError,
-                    message.clone(),
-                    span.clone(),
-                )),
+                Event::Error {
+                    message,
+                    span,
+                    code,
+                } => Some(ParseError {
+                    kind: ParseErrorKind::SyntaxError,
+                    message: message.clone(),
+                    span: span.clone(),
+                    code: *code,
+                }),
                 _ => None,
             })
             .collect();
 
-        // Build syntax tree from events
         let tree = TreeBuilder::new(source, sink.into_events()).build();
 
-        ParseResult { tree, errors }
+        // Contract: an error-free tree has the shape `kestrel.ungram` names,
+        // which is what the generated typed views read. Checked in debug
+        // builds; `tests/conformance.rs` checks the corpus in any build.
+        #[cfg(debug_assertions)]
+        if errors.is_empty() {
+            let violations = kestrel_syntax_tree::validate::validate(&tree);
+            debug_assert!(
+                violations.is_empty(),
+                "parser built a tree that does not conform to kestrel.ungram: {}",
+                violations
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+        }
+
+        ParseResult {
+            green: tree.green().into_owned(),
+            errors,
+        }
     }
 }
 
@@ -527,7 +231,7 @@ mod tests {
         let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
     }
 
     #[test]
@@ -536,9 +240,9 @@ mod tests {
         let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
         assert_eq!(
-            result.tree.children().count(),
+            result.tree().children().count(),
             2,
             "Should have 2 declaration children"
         );
@@ -559,7 +263,7 @@ public struct B {}
         let result = parse_source(valid_source, 0);
         assert_eq!(result.errors.len(), 0, "Valid code should have no errors");
         assert_eq!(
-            result.tree.children().count(),
+            result.tree().children().count(),
             3,
             "Should parse all declarations"
         );
@@ -568,11 +272,11 @@ public struct B {}
         let source_with_errors = r#"module"#; // Incomplete module
         let result = parse_source(source_with_errors, 0);
         // Parser creates a SourceFile node even when parsing fails
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
 
         println!(
             "Error recovery test: {} declarations, {} errors",
-            result.tree.children().count(),
+            result.tree().children().count(),
             result.errors.len()
         );
     }
@@ -596,7 +300,7 @@ public struct B {}
         }
 
         // This test primarily documents that span tracking infrastructure is in place
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
     }
 
     #[test]
@@ -606,7 +310,7 @@ public struct B {}
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
-            result.tree.children().count(),
+            result.tree().children().count(),
             2,
             "Should have 2 children (module + struct)"
         );
@@ -619,7 +323,7 @@ public struct B {}
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
-            result.tree.children().count(),
+            result.tree().children().count(),
             2,
             "Should have 2 children (module + struct)"
         );
@@ -654,19 +358,19 @@ public struct B {}
         let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
 
-        let line_comments = token_texts(&result.tree, &[SyntaxKind::LineComment]);
+        let line_comments = token_texts(&result.tree(), &[SyntaxKind::LineComment]);
         assert_eq!(line_comments, vec!["// keep this comment"]);
 
-        let newlines = token_texts(&result.tree, &[SyntaxKind::Newline]);
+        let newlines = token_texts(&result.tree(), &[SyntaxKind::Newline]);
         assert_eq!(
             newlines.len(),
             2,
             "two \\n separators between the three tokens"
         );
 
-        let whitespace = token_texts(&result.tree, &[SyntaxKind::Whitespace]);
+        let whitespace = token_texts(&result.tree(), &[SyntaxKind::Whitespace]);
         assert!(
             whitespace
                 .iter()
@@ -682,15 +386,15 @@ public struct B {}
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
-            result.tree.text().to_string(),
+            result.tree().text().to_string(),
             source,
             "tree text must round-trip the source verbatim"
         );
 
-        let block_comments = token_texts(&result.tree, &[SyntaxKind::BlockComment]);
+        let block_comments = token_texts(&result.tree(), &[SyntaxKind::BlockComment]);
         assert_eq!(block_comments, vec!["/* block */"]);
 
-        let line_comments = token_texts(&result.tree, &[SyntaxKind::LineComment]);
+        let line_comments = token_texts(&result.tree(), &[SyntaxKind::LineComment]);
         assert_eq!(line_comments, vec!["// trailing"]);
     }
 
@@ -701,7 +405,7 @@ public struct B {}
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
-            result.tree.text().to_string(),
+            result.tree().text().to_string(),
             source,
             "trailing trivia after the last syntax token must appear in the tree"
         );
@@ -713,10 +417,13 @@ public struct B {}
         let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::StructDeclaration), 2);
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::EnumDeclaration), 1);
         assert_eq!(
-            count_nodes(&result.tree, SyntaxKind::EnumCaseDeclaration),
+            count_nodes(&result.tree(), SyntaxKind::StructDeclaration),
+            2
+        );
+        assert_eq!(count_nodes(&result.tree(), SyntaxKind::EnumDeclaration), 1);
+        assert_eq!(
+            count_nodes(&result.tree(), SyntaxKind::EnumCaseDeclaration),
             1
         );
     }
@@ -729,18 +436,24 @@ public struct B {}
         let result = parse_source(source, 0);
 
         assert_eq!(
-            result.tree.text().to_string(),
+            result.tree().text().to_string(),
             source,
             "tree must still round-trip even when recovering"
         );
         assert!(!result.errors.is_empty(), "recovery should report an error");
 
         // Both the module and import declarations should be in the tree.
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::ModuleDeclaration), 1);
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::ImportDeclaration), 1);
+        assert_eq!(
+            count_nodes(&result.tree(), SyntaxKind::ModuleDeclaration),
+            1
+        );
+        assert_eq!(
+            count_nodes(&result.tree(), SyntaxKind::ImportDeclaration),
+            1
+        );
         // The recovered garbage is wrapped in an Error node.
         assert!(
-            count_nodes(&result.tree, SyntaxKind::Error) >= 1,
+            count_nodes(&result.tree(), SyntaxKind::Error) >= 1,
             "recovered region should become an Error node"
         );
     }
@@ -773,7 +486,7 @@ public struct B {}
             "trailing trivia should not trigger recovery, got {:?}",
             result.errors
         );
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     #[test]
@@ -784,7 +497,7 @@ public struct B {}
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
             token_texts(
-                &result.tree,
+                &result.tree(),
                 &[
                     SyntaxKind::Plus,
                     SyntaxKind::Star,
@@ -796,15 +509,18 @@ public struct B {}
     }
 
     #[test]
-    fn missing_member_after_dot_recovers_with_missing_node() {
-        // Cursor mid-edit: `foo.` with nothing after. The parser should
-        // recover by emitting a Missing wrapper around a zero-width
-        // Identifier token AND record exactly one parse error.
+    fn missing_member_after_dot_recovers_without_a_node() {
+        // Cursor mid-edit: `foo.` with nothing after. The member name is
+        // simply absent from the tree (no synthesized token) and exactly
+        // one parse error is recorded.
         let source = "func f() { foo. }";
         let result = parse_source(source, 0);
 
-        let missing_count = count_nodes(&result.tree, SyntaxKind::Missing);
-        assert_eq!(missing_count, 1, "expected one Missing wrapper");
+        let missing_count = count_nodes(&result.tree(), SyntaxKind::Missing);
+        assert_eq!(
+            missing_count, 0,
+            "missing tokens are absent, not synthesized"
+        );
 
         let recovery_errors: Vec<_> = result
             .errors
@@ -820,7 +536,7 @@ public struct B {}
 
         // The synthesized identifier inside Missing should have empty text,
         // so the source round-trips without garbage.
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     #[test]
@@ -831,7 +547,7 @@ public struct B {}
         let source = "func f() { foo.bar }";
         let result = parse_source(source, 0);
 
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::Missing), 0);
+        assert_eq!(count_nodes(&result.tree(), SyntaxKind::Missing), 0);
         let recovery_errors: Vec<_> = result
             .errors
             .iter()
@@ -850,21 +566,22 @@ public struct B {}
 
         // The body should contain at least one Error wrapper from recovery
         // plus two Let statements (one before, one after the garbage).
-        let error_nodes = count_nodes(&result.tree, SyntaxKind::Error);
+        let error_nodes = count_nodes(&result.tree(), SyntaxKind::Error);
         assert!(
             error_nodes >= 1,
             "expected at least one recovered Error node, tree:\n{:#?}",
-            result.tree
+            result.tree()
         );
-        let lets = count_nodes(&result.tree, SyntaxKind::VariableDeclaration);
+        let lets = count_nodes(&result.tree(), SyntaxKind::VariableDeclaration);
         assert_eq!(
-            lets, 2,
+            lets,
+            2,
             "both `let` statements must still parse around the garbage; tree:\n{:#?}",
-            result.tree
+            result.tree()
         );
 
         // Source text must round-trip.
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     #[test]
@@ -882,29 +599,30 @@ public struct B {}
         let source = "func f() { let x = 1; ?? let y = 7; }";
         let result = parse_source(source, 0);
 
-        let lets = count_nodes(&result.tree, SyntaxKind::VariableDeclaration);
+        let lets = count_nodes(&result.tree(), SyntaxKind::VariableDeclaration);
         assert_eq!(
-            lets, 2,
+            lets,
+            2,
             "both `let` statements must survive the stray `??`; tree:\n{:#?}",
-            result.tree
+            result.tree()
         );
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     #[test]
-    fn missing_close_paren_recovers_with_missing_node() {
+    fn missing_close_paren_recovers_as_a_call() {
         // Phase-4 recovery: cursor mid-edit `foo(1, 2` (no closing paren).
         // The call should still parse (so inference can type the args and
         // completion works on the receiver / next dot) and the source
-        // text must round-trip.
+        // text must round-trip. The `)` is absent from the tree.
         let source = "func f() { foo(1, 2 }";
         let result = parse_source(source, 0);
 
-        let missing_count = count_nodes(&result.tree, SyntaxKind::Missing);
-        assert!(
-            missing_count >= 1,
-            "expected a Missing wrapper for the absent `)`, tree:\n{:#?}",
-            result.tree
+        assert_eq!(
+            count_nodes(&result.tree(), SyntaxKind::ExprCall),
+            1,
+            "the call survives without its `)`, tree:\n{:#?}",
+            result.tree()
         );
         let recovery_errors: Vec<_> = result
             .errors
@@ -916,7 +634,7 @@ public struct B {}
             "expected an `expected \\`)\\`` diagnostic, got {:?}",
             result.errors
         );
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     #[test]
@@ -926,13 +644,79 @@ public struct B {}
         let source = "func f() { foo.; }";
         let result = parse_source(source, 0);
 
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::Missing), 1);
+        assert_eq!(count_nodes(&result.tree(), SyntaxKind::Missing), 0);
         let recovery_errors: Vec<_> = result
             .errors
             .iter()
             .filter(|e| e.message.contains("expected identifier after `.`"))
             .collect();
         assert_eq!(recovery_errors.len(), 1);
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
+    }
+
+    /// Count the `expected `;`` diagnostics in a parse result.
+    fn missing_semi_errors(result: &ParseResult) -> usize {
+        result
+            .errors
+            .iter()
+            .filter(|e| e.message.contains("expected `;`"))
+            .count()
+    }
+
+    #[test]
+    fn missing_semicolon_on_expression_statement_is_reported() {
+        // F13: a non-statement-like expression statement without its `;` used
+        // to parse to a zero-width `Semicolon` token with no `Missing` node and
+        // no diagnostic — the whole body compiled silently. It must now behave
+        // exactly like the sibling var-decl path.
+        let source = "func f() { foo() bar(); }";
+        let result = parse_source(source, 0);
+
+        assert_eq!(
+            missing_semi_errors(&result),
+            1,
+            "expected exactly one `expected `;`` diagnostic, got {:?}",
+            result.errors
+        );
+        assert_eq!(
+            count_nodes(&result.tree(), SyntaxKind::ExpressionStatement),
+            2,
+            "both calls are statements; the absent `;` is not synthesized, tree:\n{:#?}",
+            result.tree()
+        );
+        assert_eq!(result.tree().text().to_string(), source);
+    }
+
+    #[test]
+    fn mid_block_statement_like_expr_needs_no_semicolon() {
+        // The other half of F13: `if` / `while` / `for` / `match` / `loop`
+        // never need a `;`, mid-block included. The block-end lookahead only
+        // fires at block end, so mid-block forms reach the synth branch — they
+        // must be routed to `BlockItem::StatementExpr`, not reported. `lang/`
+        // has ~1439 of these; a false positive here breaks the whole stdlib.
+        for body in [
+            "if a { b(); } c();",
+            "while a { b(); } c();",
+            "for x in a { b(); } c();",
+            "loop { b(); } c();",
+            "match a { _ => { b(); } } c();",
+        ] {
+            let source = format!("func f() {{ {body} }}");
+            let result = parse_source(&source, 0);
+
+            assert_eq!(
+                missing_semi_errors(&result),
+                0,
+                "statement-like `{body}` must not require a `;`, got {:?}",
+                result.errors
+            );
+            assert_eq!(
+                count_nodes(&result.tree(), SyntaxKind::Missing),
+                0,
+                "no Missing node expected for `{body}`, tree:\n{:#?}",
+                result.tree()
+            );
+            assert_eq!(result.tree().text().to_string(), source);
+        }
     }
 }

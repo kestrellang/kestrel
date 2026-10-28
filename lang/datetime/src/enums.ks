@@ -37,7 +37,7 @@ public enum Weekday: Equatable, Comparable, Hashable, Formattable, Matchable {
         self.isEqual(to: other)
     }
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         let name = match self {
             .Monday => "Monday",
             .Tuesday => "Tuesday",

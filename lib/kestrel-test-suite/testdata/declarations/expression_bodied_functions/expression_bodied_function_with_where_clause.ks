@@ -16,6 +16,6 @@ func doubleIt[T](x: T) -> T where T: Doubler = x.double()
 
 @main
 func main() -> lang.i64 {
-    let _ = println(doubleIt(21));
+     println(doubleIt(21));
     0
 }

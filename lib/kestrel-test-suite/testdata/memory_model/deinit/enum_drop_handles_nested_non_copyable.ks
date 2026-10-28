@@ -2,7 +2,6 @@
 // stdlib: false
 
 module Test
-import Prelude
 
 struct Inner: not Copyable {
     var id: lang.i64

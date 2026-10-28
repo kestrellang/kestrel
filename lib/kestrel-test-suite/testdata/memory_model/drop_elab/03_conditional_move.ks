@@ -8,7 +8,6 @@
 // did move it doesn't double-free.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

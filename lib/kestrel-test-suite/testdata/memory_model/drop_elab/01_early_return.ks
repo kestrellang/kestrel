@@ -8,7 +8,6 @@
 // after. DropElab should emit one unconditional `drop %h` before `return`.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

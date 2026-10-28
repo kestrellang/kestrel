@@ -1,7 +1,9 @@
 pub mod audit;
 pub mod collect;
+mod entail;
 pub mod expand;
 pub mod mangle;
+mod ty_sites;
 pub mod types;
 pub mod verify;
 pub mod witness;
@@ -14,17 +16,19 @@ pub use types::{
 pub use verify::{MonoVerifyError, MonoVerifyResult};
 pub use witness::MonoError;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
+use kestrel_copy_fold::{CopyLayer, CopySemantics, instance_semantics};
 use kestrel_hecs::Entity;
 
 use crate::body::OssaBody;
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
-use crate::inst::InstKind;
+use crate::inst::{InstKind, Instruction};
 use crate::item::enum_def::EnumDef;
-use crate::item::function::{FunctionDef, FunctionKind};
+use crate::item::function::{FunctionDef, FunctionKind, WhereConstraint};
 use crate::item::protocol::ProtocolDef;
 use crate::item::struct_def::StructDef;
 use crate::item::witness::WitnessDef;
@@ -53,6 +57,14 @@ pub fn monomorphize(
         statics,
         mut ty_arena,
         entity_names,
+        copyable_protocol,
+        cloneable_protocol,
+        // Condition lowering is complete before mono: mir-lower has already
+        // decided raw-branch vs `boolValue()` witness call, and the resulting
+        // `Callee::Witness` is resolved by the ordinary witness machinery.
+        boolean_conditional_protocol: _,
+        bool_struct: _,
+        observable_drop,
     } = module;
 
     // Phase 1: Instantiation discovery
@@ -81,18 +93,12 @@ pub fn monomorphize(
             &witnesses,
             &entity_names,
             key,
+            cloneable_protocol,
         );
         mono_bodies.push(result);
     }
 
-    // Phase 3a: Resolve Witness -> Direct.
-    // resolved_witnesses is keyed by (block_idx, inst_idx), so it must be
-    // consumed before any pass that could shift instruction indices.
-    for body_result in &mut mono_bodies {
-        resolve_witnesses_to_direct(body_result);
-    }
-
-    // Phase 3b: ID assignment + callee rewriting
+    // Phase 3: ID assignment + callee rewriting
     let func_id_map: HashMap<InstantiationKey, MonoFuncId> = instantiations
         .iter()
         .enumerate()
@@ -111,6 +117,11 @@ pub fn monomorphize(
         &witnesses,
         &mono_bodies,
         target,
+        // Inert `Clone(_)` payload for escaping-closure values — matches the
+        // pre-mono `ty_query` answer so the two sides of the mono boundary
+        // agree (lockstep 1). Same lang item `ty_query::find_cloneable_protocol`
+        // reads, so the two cannot drift.
+        cloneable_protocol,
     );
 
     // Phase 5: Assembly
@@ -118,6 +129,39 @@ pub fn monomorphize(
 
     for (i, key) in instantiations.iter().enumerate() {
         let body_result = &mono_bodies[i];
+
+        // #127 backstop: an instantiation that violates an explicit
+        // `T: Copyable` where-bound with a non-Copyable concrete type slipped
+        // through the frontend (the Copyable-default substitution hole) — its
+        // body bit-copies a move-only value, a double-free. Poison the body
+        // with a Panic instead of hard-failing the build: such instantiations
+        // are often statically reachable yet never executed (Array[T]'s clone
+        // shim reaches `Pointer.read[T]`), so only actually running one traps.
+        let poisoned_body = functions.get(&key.func_entity).and_then(|func| {
+            let violation = violated_copyable_bound(
+                func,
+                key,
+                &mut mono_module.ty_arena,
+                &protocols,
+                copyable_protocol,
+                &witnesses,
+                &mono_structs,
+                &mono_enums,
+            )?;
+            let ty = describe_ty(&mono_module.ty_arena, &entity_names, violation);
+            let fname = entity_names
+                .get(&key.func_entity)
+                .map(|s| s.as_str())
+                .unwrap_or("<unknown>");
+            Some(poison_body(
+                body_result.body.as_ref()?,
+                format!(
+                    "cannot copy non-Copyable type '{ty}': '{fname}' requires \
+                     'Copyable' (bound not satisfied by this instantiation)"
+                ),
+            ))
+        });
+
         let func_name = entity_names
             .get(&key.func_entity)
             .map(|s| s.as_str())
@@ -164,6 +208,22 @@ pub fn monomorphize(
             receiver,
         );
 
+        // ret_borrow is an ABI property of the DECLARED signature, so derive
+        // it from the generic `FunctionDef.ret` (same arena — mono extends
+        // it). Deriving from the substituted mono ret would wrongly flip a
+        // `-> T` instance at `T = &U` to the borrow ABI (stage 2b mints such
+        // instances): the body produces an owned pointer scalar there, while
+        // a declared `-> &T` keeps `MirTy::Ref` through substitution either
+        // way. Synthesized functions absent from `functions` (shims) can't
+        // be ret_borrow; fall back to the substituted ret for them.
+        let declared_ret = functions
+            .get(&key.func_entity)
+            .map(|f| f.ret)
+            .unwrap_or(body_result.ret);
+        let ret_borrow = matches!(
+            crate::item::function::ret_convention(&mono_module.ty_arena, declared_ret),
+            crate::item::function::RetConvention::RefBorrow { .. }
+        );
         mono_module.add_function(MonoFunction {
             name: mangled_name,
             source: key.func_entity,
@@ -171,13 +231,15 @@ pub fn monomorphize(
             self_type: resolved_self,
             params: body_result.params.clone(),
             ret: body_result.ret,
-            body: body_result.body.clone(),
+            body: poisoned_body.or_else(|| body_result.body.clone()),
             extern_info: body_result.extern_info.clone(),
             is_main: body_result.is_main,
+            ret_borrow,
         });
     }
 
     mono_module.entity_names = entity_names;
+    mono_module.observable_drop = observable_drop;
     mono_module.structs = mono_structs;
     mono_module.enums = mono_enums;
 
@@ -189,6 +251,137 @@ pub fn monomorphize(
     Ok(mono_module)
 }
 
+// -- #127 Copyable-bound backstop -------------------------------------------
+
+/// Concrete type violating one of `func`'s explicit `T: Copyable` where-bounds
+/// in this instantiation, if any. Copy class is read from the post-mono
+/// `type_info` (the per-instantiation authority, same as `mono::audit`).
+#[allow(clippy::too_many_arguments)]
+fn violated_copyable_bound(
+    func: &FunctionDef,
+    key: &InstantiationKey,
+    arena: &mut TyArena,
+    protocols: &IndexMap<Entity, ProtocolDef>,
+    copyable_protocol: Option<Entity>,
+    witnesses: &[WitnessDef],
+    mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
+    mono_enums: &IndexMap<MonoTypeKey, MonoEnum>,
+) -> Option<TyId> {
+    let wc = func.where_clause.as_ref()?;
+    let copyable_bounds: Vec<Entity> = wc
+        .constraints
+        .iter()
+        .filter_map(|c| match c {
+            WhereConstraint::Implements {
+                type_param,
+                protocol,
+                ..
+            } if copyable_protocol == Some(*protocol) => Some(*type_param),
+            _ => None,
+        })
+        .collect();
+    if copyable_bounds.is_empty() {
+        return None;
+    }
+    let subst = collect::build_subst(
+        func,
+        &key.type_args,
+        key.self_type,
+        arena,
+        protocols,
+        witnesses,
+    );
+    for tp in copyable_bounds {
+        let Some(&concrete) = subst.type_params.get(&tp) else {
+            continue;
+        };
+        if mono_copy_is_none(arena, mono_structs, mono_enums, concrete) {
+            return Some(concrete);
+        }
+    }
+    None
+}
+
+/// True when `ty`'s resolved per-instantiation copy class is `None`
+/// (move-only). Unknown/never-instantiated types conservatively read as
+/// copyable — the backstop only fires on a certain violation.
+fn mono_copy_is_none(
+    arena: &TyArena,
+    mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
+    mono_enums: &IndexMap<MonoTypeKey, MonoEnum>,
+    ty: TyId,
+) -> bool {
+    match arena.get(ty) {
+        MirTy::Tuple(elems) => {
+            let elems = elems.clone();
+            elems
+                .iter()
+                .any(|&e| mono_copy_is_none(arena, mono_structs, mono_enums, e))
+        },
+        MirTy::Named { entity, type_args } => {
+            let key = (*entity, type_args.clone());
+            mono_structs
+                .get(&key)
+                .map(|s| s.type_info.copy == CopyBehavior::None)
+                .or_else(|| {
+                    mono_enums
+                        .get(&key)
+                        .map(|e| e.type_info.copy == CopyBehavior::None)
+                })
+                .unwrap_or(false)
+        },
+        _ => false,
+    }
+}
+
+/// Replace a poisoned instantiation's body with a single Panic block, keeping
+/// the parameter value slots (codegen binds arguments to values
+/// `0..param_count`) so the signature stays ABI-valid.
+fn poison_body(original: &OssaBody, message: String) -> OssaBody {
+    let mut block = crate::block::BasicBlock::new();
+    block.terminator =
+        crate::terminator::Terminator::new(crate::terminator::TerminatorKind::Panic(message));
+    OssaBody {
+        values: original.values[..original.param_count].to_vec(),
+        blocks: vec![block],
+        entry: crate::BlockId::new(0),
+        param_count: original.param_count,
+        value_names: Default::default(),
+    }
+}
+
+/// Minimal type rendering for the poison message (phase 5 has no assembled
+/// MonoModule yet, so `verify::describe_mono_ty` isn't usable here).
+fn describe_ty(arena: &TyArena, entity_names: &IndexMap<Entity, String>, ty: TyId) -> String {
+    match arena.get(ty) {
+        MirTy::Named { entity, type_args } => {
+            let name = entity_names
+                .get(entity)
+                .cloned()
+                .unwrap_or_else(|| format!("{entity:?}"));
+            if type_args.is_empty() {
+                name
+            } else {
+                let args: Vec<String> = type_args
+                    .clone()
+                    .iter()
+                    .map(|&a| describe_ty(arena, entity_names, a))
+                    .collect();
+                format!("{}[{}]", name, args.join(", "))
+            }
+        },
+        MirTy::Tuple(elems) => {
+            let parts: Vec<String> = elems
+                .clone()
+                .iter()
+                .map(|&e| describe_ty(arena, entity_names, e))
+                .collect();
+            format!("({})", parts.join(", "))
+        },
+        other => format!("{other:?}"),
+    }
+}
+
 // -- Phase 2: Body monomorphization --
 
 struct MonoBodyResult {
@@ -197,8 +390,6 @@ struct MonoBodyResult {
     ret: TyId,
     extern_info: Option<crate::item::function::ExternInfo>,
     is_main: bool,
-    /// Resolved witness callees: (block_idx, inst_idx) -> target key
-    resolved_witnesses: HashMap<(usize, usize), InstantiationKey>,
 }
 
 fn monomorphize_body(
@@ -208,6 +399,7 @@ fn monomorphize_body(
     witnesses: &[WitnessDef],
     entity_names: &IndexMap<Entity, String>,
     key: &InstantiationKey,
+    cloneable_protocol: Option<Entity>,
 ) -> MonoBodyResult {
     let func = functions
         .get(&key.func_entity)
@@ -247,14 +439,11 @@ fn monomorphize_body(
             ret,
             extern_info,
             is_main,
-            resolved_witnesses: HashMap::new(),
         };
     };
 
     // Clone and substitute the body
     let mut mono_body = body.clone();
-    let mut resolved_witnesses = HashMap::new();
-
     // Substitute value types
     for value in &mut mono_body.values {
         value.ty = substitute(arena, value.ty, &subst);
@@ -268,8 +457,28 @@ fn monomorphize_body(
     }
 
     // Walk instructions and substitute types
-    for (bi, block) in mono_body.blocks.iter_mut().enumerate() {
-        for (ii, inst) in block.insts.iter_mut().enumerate() {
+    for bi in 0..mono_body.blocks.len() {
+        let insts = std::mem::take(&mut mono_body.blocks[bi].insts);
+        let mut adapted = Vec::with_capacity(insts.len());
+        for mut inst in insts {
+            let was_witness = matches!(
+                &inst.kind,
+                InstKind::Call {
+                    callee: Callee::Witness { .. },
+                    ..
+                }
+            );
+            // `Cloneable.clone()` on an escaping closure: the closure is a
+            // shared handle with no witness function; cloning it is a retain.
+            if let Some(copy) =
+                closure_clone_as_copy(arena, &inst.kind, &subst, witnesses, cloneable_protocol)
+            {
+                adapted.push(Instruction {
+                    kind: copy,
+                    span: inst.span.clone(),
+                });
+                continue;
+            }
             substitute_inst(
                 arena,
                 witnesses,
@@ -279,11 +488,24 @@ fn monomorphize_body(
                 &mut inst.kind,
                 &subst,
                 key.self_type,
-                bi,
-                ii,
-                &mut resolved_witnesses,
             );
+            // Conformance requires exact receiver (E477) and parameter (E469)
+            // conventions, and setter values follow one rule
+            // (`SETTER_NEW_VALUE_MODE`), so a resolved witness takes every
+            // argument exactly the way the call site passes it. A mismatch
+            // would leak or double-drop the argument (a borrowed value stored
+            // by a consuming setter was freed twice) — fail loudly instead.
+            if was_witness && let Some(idx) = witness_convention_mismatch(&inst.kind, functions) {
+                panic!(
+                    "ICE: witness call in {:?} passes arg {idx} with a convention its witness \
+                     doesn't take — the requirement and witness disagree",
+                    func.name
+                );
+            }
+            adapted.push(inst);
         }
+        let block = &mut mono_body.blocks[bi];
+        block.insts = adapted;
         // No terminator substitution needed — MIR terminators carry ValueId only
     }
 
@@ -331,8 +553,66 @@ fn monomorphize_body(
         ret,
         extern_info,
         is_main,
-        resolved_witnesses,
     }
+}
+
+/// `x.clone()` dispatched through `Cloneable` at an `escaping` closure type
+/// becomes `copy_value x` (a refcount retain of the shared environment):
+/// closure types conform to `Cloneable` structurally, without a witness.
+fn closure_clone_as_copy(
+    arena: &mut TyArena,
+    kind: &InstKind,
+    subst: &SubstMap,
+    witnesses: &[WitnessDef],
+    cloneable_protocol: Option<Entity>,
+) -> Option<InstKind> {
+    let InstKind::Call {
+        result: Some(result),
+        callee:
+            Callee::Witness {
+                protocol,
+                method,
+                self_type,
+                ..
+            },
+        args,
+    } = kind
+    else {
+        return None;
+    };
+    if Some(*protocol) != cloneable_protocol || method.name != "clone" {
+        return None;
+    }
+    let concrete = collect::substitute_and_resolve(arena, witnesses, *self_type, subst);
+    let is_shared_closure = matches!(
+        arena.get(concrete),
+        MirTy::FuncThick { kind, .. } if kind.is_shared()
+    );
+    let receiver = args.first()?;
+    is_shared_closure.then_some(InstKind::CopyValue {
+        result: *result,
+        operand: receiver.value,
+    })
+}
+
+/// The first argument of a resolved witness call whose passing convention
+/// differs from the witness's parameter (`None` when they all agree).
+fn witness_convention_mismatch(
+    kind: &InstKind,
+    functions: &IndexMap<Entity, FunctionDef>,
+) -> Option<usize> {
+    let InstKind::Call {
+        callee: Callee::Direct { func, .. },
+        args,
+        ..
+    } = kind
+    else {
+        return None;
+    };
+    let target = functions.get(func)?;
+    args.iter()
+        .zip(&target.params)
+        .position(|(arg, param)| arg.convention != param.convention)
 }
 
 /// Substitute types in a single instruction (the OSSA analogue of the
@@ -347,9 +627,6 @@ fn substitute_inst(
     kind: &mut InstKind,
     subst: &SubstMap,
     parent_self: Option<TyId>,
-    block_idx: usize,
-    inst_idx: usize,
-    resolved_witnesses: &mut HashMap<(usize, usize), InstantiationKey>,
 ) {
     // Embedded types must be `substitute_and_resolve`d, not just `substitute`d:
     // substitution replaces a projection's TypeParam base with a concrete type
@@ -363,6 +640,19 @@ fn substitute_inst(
     let resolve = |arena: &mut TyArena, ty: TyId| {
         collect::substitute_and_resolve(arena, witnesses, ty, subst)
     };
+    for (_, callee) in kind.callees_mut() {
+        substitute_callee_and_resolve(
+            arena,
+            witnesses,
+            protocols,
+            functions,
+            entity_names,
+            callee,
+            subst,
+            parent_self,
+        );
+    }
+
     match kind {
         // Memory access instructions with embedded type
         InstKind::CopyAddr { ty, .. }
@@ -400,25 +690,6 @@ fn substitute_inst(
         // Constants
         InstKind::Literal { value, .. } => {
             substitute_immediate(arena, witnesses, &mut value.kind, subst);
-        },
-
-        // Calls and partial applications both reference a callable through a
-        // `Callee` — substitute its type args / self_type identically so the
-        // instantiation key matches what `rewrite_callee` later looks up.
-        InstKind::Call { callee, .. } | InstKind::ApplyPartial { callee, .. } => {
-            substitute_callee_and_resolve(
-                arena,
-                witnesses,
-                protocols,
-                functions,
-                entity_names,
-                callee,
-                subst,
-                parent_self,
-                block_idx,
-                inst_idx,
-                resolved_witnesses,
-            );
         },
 
         // All other InstKinds carry only ValueId — no substitution needed
@@ -461,25 +732,13 @@ fn substitute_op_type(
     op: &mut crate::op::Op,
     subst: &SubstMap,
 ) {
-    use crate::op::Op;
-    let resolve = |arena: &mut TyArena, ty: TyId| {
-        collect::substitute_and_resolve(arena, witnesses, ty, subst)
+    // The variant list lives once, in `op::op_ty_variants!` — see the comment
+    // there. Hand-rolling it here is what let `collect_named_types` drift out of
+    // lockstep with this function (G2).
+    let Some(ty) = crate::op::op_type_mut(op) else {
+        return;
     };
-    match op {
-        Op::PtrFromAddress(ty)
-        | Op::PtrRead(ty)
-        | Op::PtrWrite(ty)
-        | Op::PtrNull(ty)
-        | Op::PtrTo(ty)
-        | Op::PtrCast(ty)
-        | Op::PtrBitcast(ty)
-        | Op::SizeOf(ty)
-        | Op::AlignOf(ty)
-        | Op::StackAlloc(ty) => {
-            *ty = resolve(arena, *ty);
-        },
-        _ => {},
-    }
+    *ty = collect::substitute_and_resolve(arena, witnesses, *ty, subst);
 }
 
 fn substitute_callee_and_resolve(
@@ -491,11 +750,8 @@ fn substitute_callee_and_resolve(
     callee: &mut Callee,
     subst: &SubstMap,
     parent_self: Option<TyId>,
-    block_idx: usize,
-    inst_idx: usize,
-    resolved_witnesses: &mut HashMap<(usize, usize), InstantiationKey>,
 ) {
-    match callee {
+    let resolved_witness = match callee {
         Callee::Direct {
             func,
             type_args,
@@ -521,6 +777,7 @@ fn substitute_callee_and_resolve(
             {
                 *self_type = parent_self;
             }
+            None
         },
         Callee::Witness {
             protocol,
@@ -544,49 +801,23 @@ fn substitute_callee_and_resolve(
                 *self_type,
                 method_type_args,
             );
-            if let Ok(resolved) = witness_result {
-                resolved_witnesses.insert(
-                    (block_idx, inst_idx),
-                    InstantiationKey::new(
-                        resolved.func_entity,
-                        resolved.type_args,
-                        resolved.self_type,
-                    ),
-                );
-            }
+            witness_result.ok().map(|resolved| {
+                InstantiationKey::new(resolved.func_entity, resolved.type_args, resolved.self_type)
+            })
         },
-        _ => {},
-    }
-}
-
-// -- Phase 3a: Witness resolution --
-
-/// Resolve Callee::Witness -> Callee::Direct using the resolved_witnesses
-/// map (keyed by pre-expansion block/inst indices). Must run before any
-/// pass that could shift instruction indices.
-fn resolve_witnesses_to_direct(body_result: &mut MonoBodyResult) {
-    let Some(body) = &mut body_result.body else {
-        return;
+        _ => None,
     };
-    for (bi, block) in body.blocks.iter_mut().enumerate() {
-        for (ii, inst) in block.insts.iter_mut().enumerate() {
-            if let InstKind::Call {
-                callee: callee @ Callee::Witness { .. },
-                ..
-            } = &mut inst.kind
-                && let Some(target_key) = body_result.resolved_witnesses.get(&(bi, ii))
-            {
-                *callee = Callee::Direct {
-                    func: target_key.func_entity,
-                    type_args: target_key.type_args.clone(),
-                    self_type: target_key.self_type,
-                };
-            }
-        }
+
+    if let Some(target) = resolved_witness {
+        *callee = Callee::Direct {
+            func: target.func_entity,
+            type_args: target.type_args,
+            self_type: target.self_type,
+        };
     }
 }
 
-// -- Phase 3b: Callee rewriting --
+// -- Phase 3: Callee rewriting --
 
 fn rewrite_callees(
     body_result: &mut MonoBodyResult,
@@ -597,33 +828,22 @@ fn rewrite_callees(
         return;
     };
 
-    for (bi, block) in body.blocks.iter_mut().enumerate() {
-        for (ii, inst) in block.insts.iter_mut().enumerate() {
-            match &mut inst.kind {
-                InstKind::Call { callee, .. } | InstKind::ApplyPartial { callee, .. } => {
-                    rewrite_callee(
-                        callee,
-                        bi,
-                        ii,
-                        &body_result.resolved_witnesses,
-                        func_id_map,
-                        functions,
-                    );
-                },
-                InstKind::Literal { value, .. } => {
-                    if let ImmediateKind::FunctionRef {
-                        func,
-                        type_args,
-                        self_type,
-                    } = &value.kind
-                    {
-                        let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
-                        if let Some(&mono_id) = func_id_map.get(&key) {
-                            value.kind = ImmediateKind::MonoFunctionRef(mono_id);
-                        }
-                    }
-                },
-                _ => {},
+    for block in &mut body.blocks {
+        for inst in &mut block.insts {
+            for (_, callee) in inst.kind.callees_mut() {
+                rewrite_callee(callee, func_id_map, functions);
+            }
+            if let InstKind::Literal { value, .. } = &mut inst.kind
+                && let ImmediateKind::FunctionRef {
+                    func,
+                    type_args,
+                    self_type,
+                } = &value.kind
+            {
+                let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                if let Some(&mono_id) = func_id_map.get(&key) {
+                    value.kind = ImmediateKind::MonoFunctionRef(mono_id);
+                }
             }
         }
     }
@@ -631,37 +851,25 @@ fn rewrite_callees(
 
 fn rewrite_callee(
     callee: &mut Callee,
-    block_idx: usize,
-    inst_idx: usize,
-    resolved_witnesses: &HashMap<(usize, usize), InstantiationKey>,
     func_id_map: &HashMap<InstantiationKey, MonoFuncId>,
     functions: &IndexMap<Entity, FunctionDef>,
 ) {
-    match callee {
-        Callee::Direct {
-            func,
-            type_args,
-            self_type,
-        } => {
-            // Mirror collection's arity normalization (collect::scan_callee) so
-            // the lookup key matches the key the instance was enqueued under.
-            let mut targs = type_args.clone();
-            if let Some(f) = functions.get(&*func) {
-                collect::normalize_direct_arity(&mut targs, f.type_params.len());
-            }
-            let key = InstantiationKey::new(*func, targs, *self_type);
-            if let Some(&mono_id) = func_id_map.get(&key) {
-                *callee = Callee::Resolved(mono_id);
-            }
-        },
-        Callee::Witness { .. } => {
-            if let Some(target_key) = resolved_witnesses.get(&(block_idx, inst_idx))
-                && let Some(&mono_id) = func_id_map.get(target_key)
-            {
-                *callee = Callee::Resolved(mono_id);
-            }
-        },
-        _ => {},
+    if let Callee::Direct {
+        func,
+        type_args,
+        self_type,
+    } = callee
+    {
+        // Mirror collection's arity normalization (collect::scan_callee) so
+        // the lookup key matches the key the instance was enqueued under.
+        let mut targs = type_args.clone();
+        if let Some(f) = functions.get(&*func) {
+            collect::normalize_direct_arity(&mut targs, f.type_params.len());
+        }
+        let key = InstantiationKey::new(*func, targs, *self_type);
+        if let Some(&mono_id) = func_id_map.get(&key) {
+            *callee = Callee::Resolved(mono_id);
+        }
     }
 }
 
@@ -674,17 +882,23 @@ fn resolve_types_and_layouts(
     witnesses: &[WitnessDef],
     mono_bodies: &[MonoBodyResult],
     target: &TargetConfig,
+    cloneable_proto: Option<Entity>,
 ) -> (
     IndexMap<MonoTypeKey, MonoStruct>,
     IndexMap<MonoTypeKey, MonoEnum>,
 ) {
-    // Collect all concrete Named types from monomorphized bodies
+    // Collect every concrete Named type each function mentions — signature
+    // included, so a bodyless `@extern` still seeds `Pointer[Tm]`. Same site
+    // list `verify_mono` checks (`ty_sites`), so anything it can flag is seeded.
     let mut concrete_types: IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind> = IndexMap::new();
 
     for body_result in mono_bodies {
-        if let Some(body) = &body_result.body {
-            collect_named_types(arena, body, &mut concrete_types, structs, enums);
-        }
+        ty_sites::for_each_fn_ty(
+            &body_result.params,
+            body_result.ret,
+            body_result.body.as_ref(),
+            |ty, _| collect_named_type_from_ty(arena, ty, &mut concrete_types, structs, enums),
+        );
     }
 
     // Compute layouts for concrete types (fixed-point loop)
@@ -692,9 +906,27 @@ fn resolve_types_and_layouts(
     let mut mono_enums: IndexMap<MonoTypeKey, MonoEnum> = IndexMap::new();
     let mut layout_cache: HashMap<(Entity, Vec<TyId>), (u64, u64)> = HashMap::new();
 
-    // Fixed-point: loop until no progress (handles dependency chains)
+    // Fixed-point: loop until no progress (handles dependency chains).
+    //
+    // Two things can advance a pass: a layout gets resolved (`progress`), or a
+    // *field* type is discovered that no body ever mentioned (`discovered`).
+    // The latter must be staged in a separate map because the `for` below holds
+    // a shared borrow of `concrete_types` — before G2 that borrow made the loop
+    // structurally unable to grow its own worklist, so a struct whose field
+    // type was never seeded got `all_resolved = false` and was dropped from
+    // `mono_structs` entirely, with no diagnostic and a pointer-sized fallback
+    // layout at both backends.
+    //
+    // Termination: every pass either resolves a layout (finite: one per key) or
+    // inserts a key that was not already in `concrete_types`. The key universe
+    // is finite for any program mono can compile at all — unbounded field-type
+    // growth needs polymorphic recursion, which is impossible by value and
+    // already diverges in function collection when hidden behind a `Pointer`.
     loop {
         let mut progress = false;
+        // Field types found this pass. Populated unconditionally — a field
+        // whose own layout is still unknown is exactly the one we must seed.
+        let mut discovered: IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind> = IndexMap::new();
 
         for ((entity, type_args), kind) in &concrete_types {
             let cache_key = (*entity, type_args.clone());
@@ -716,6 +948,13 @@ fn resolve_types_and_layouts(
                         let concrete_ty =
                             collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
                         fields.push(MonoField::new(&field.name, concrete_ty));
+                        collect_named_type_from_ty(
+                            arena,
+                            concrete_ty,
+                            &mut discovered,
+                            structs,
+                            enums,
+                        );
 
                         if let Some((size, align)) =
                             mono_size_and_align(arena, concrete_ty, target, &layout_cache)
@@ -754,6 +993,13 @@ fn resolve_types_and_layouts(
                             let concrete_ty =
                                 collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
                             mono_fields.push(MonoField::new(&field.name, concrete_ty));
+                            collect_named_type_from_ty(
+                                arena,
+                                concrete_ty,
+                                &mut discovered,
+                                structs,
+                                enums,
+                            );
                             if let Some((size, align)) =
                                 mono_size_and_align(arena, concrete_ty, target, &layout_cache)
                             {
@@ -791,12 +1037,28 @@ fn resolve_types_and_layouts(
             }
         }
 
-        if !progress {
+        // Legal only outside the shared-borrow iteration above.
+        let mut added_new = false;
+        for (key, kind) in discovered {
+            if !concrete_types.contains_key(&key) {
+                concrete_types.insert(key, kind);
+                added_new = true;
+            }
+        }
+
+        if !progress && !added_new {
             break;
         }
     }
 
-    refine_mono_copy_behavior(arena, structs, enums, &mut mono_structs, &mut mono_enums);
+    refine_mono_copy_behavior(
+        arena,
+        structs,
+        enums,
+        &mut mono_structs,
+        &mut mono_enums,
+        cloneable_proto,
+    );
 
     (mono_structs, mono_enums)
 }
@@ -809,8 +1071,9 @@ fn resolve_types_and_layouts(
 /// Copyable iff every gating arg (the positions in
 /// `StructDef::conditionally_copyable`) is itself Copyable — so `Result[Int64,
 /// Error]` becomes `Bitwise` while `Result[Array[Int64], E]` stays `None`.
-/// Mirrors `ty_query::instantiated_copy_behavior` but over already-mono types
-/// (args are concrete, so no `where_clause`).
+/// The fold is the shared decision tree (`kestrel_copy_fold::instance_semantics`
+/// via `MonoCopyLayer`) over already-mono types (args are concrete, so member
+/// lookups hit the mono maps instead of threading a `where_clause`).
 ///
 /// Inert for types with no gating positions. A fixed point handles nesting
 /// (`Result[Optional[Int], E]`): each round refines types whose gating children
@@ -821,40 +1084,34 @@ fn refine_mono_copy_behavior(
     enums: &IndexMap<Entity, EnumDef>,
     mono_structs: &mut IndexMap<MonoTypeKey, MonoStruct>,
     mono_enums: &mut IndexMap<MonoTypeKey, MonoEnum>,
+    cloneable_proto: Option<Entity>,
 ) {
     loop {
+        let layer = MonoCopyLayer {
+            arena,
+            structs,
+            enums,
+            mono_structs,
+            mono_enums,
+            cloneable_proto,
+        };
         // (key, is_struct, new copy) — collected read-only, applied after.
         let mut updates: Vec<(MonoTypeKey, bool, CopyBehavior)> = Vec::new();
         for (key, ms) in mono_structs.iter() {
-            let gating = &structs[&ms.source].conditionally_copyable;
-            if gating.is_empty() {
+            // Cheap filter: only conditional containers can change.
+            if structs[&ms.source].conditionally_copyable.is_empty() {
                 continue;
             }
-            let want = conditional_copy(
-                arena,
-                ms.source,
-                gating,
-                &ms.type_args,
-                mono_structs,
-                mono_enums,
-            );
+            let want = instance_semantics(&layer, ms.source, &ms.type_args);
             if want != ms.type_info.copy {
                 updates.push((key.clone(), true, want));
             }
         }
         for (key, me) in mono_enums.iter() {
-            let gating = &enums[&me.source].conditionally_copyable;
-            if gating.is_empty() {
+            if enums[&me.source].conditionally_copyable.is_empty() {
                 continue;
             }
-            let want = conditional_copy(
-                arena,
-                me.source,
-                gating,
-                &me.type_args,
-                mono_structs,
-                mono_enums,
-            );
+            let want = instance_semantics(&layer, me.source, &me.type_args);
             if want != me.type_info.copy {
                 updates.push((key.clone(), false, want));
             }
@@ -874,44 +1131,92 @@ fn refine_mono_copy_behavior(
     }
 }
 
-/// Copyability of a conditional container, mirroring `ty_query`: any gating arg
-/// `None` → `None`; all `Bitwise` → `Bitwise`; all Copyable with ≥1 `Clone` →
-/// `Clone(entity)` (copyable element-wise via the container's clone shim).
-fn conditional_copy(
-    arena: &TyArena,
-    entity: Entity,
-    gating: &[usize],
-    type_args: &[TyId],
-    mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
-    mono_enums: &IndexMap<MonoTypeKey, MonoEnum>,
-) -> CopyBehavior {
-    let mut saw_clone = false;
-    for &pos in gating {
-        let Some(&arg) = type_args.get(pos) else {
-            return CopyBehavior::None;
-        };
-        match concrete_copy(arena, arg, mono_structs, mono_enums) {
-            CopyBehavior::Bitwise => {},
-            CopyBehavior::Clone(_) => saw_clone = true,
-            CopyBehavior::None => return CopyBehavior::None,
-        }
+/// `CopyLayer` over already-monomorphized `TyId`s — the mono refine pass's
+/// hooks into the shared decision tree (`kestrel_copy_fold::instance_semantics`,
+/// the single source of truth for per-instantiation copy semantics across
+/// semantics / solver / analyze / MIR). Layer-specific plumbing: base + gating
+/// come from the *generic* defs, member lookups hit the mono maps (no
+/// `where_clause` — args are concrete).
+struct MonoCopyLayer<'a> {
+    arena: &'a TyArena,
+    structs: &'a IndexMap<Entity, StructDef>,
+    enums: &'a IndexMap<Entity, EnumDef>,
+    mono_structs: &'a IndexMap<MonoTypeKey, MonoStruct>,
+    mono_enums: &'a IndexMap<MonoTypeKey, MonoEnum>,
+    /// Inert `Clone(_)` payload for escaping-closure values (the same protocol
+    /// entity `ty_query`/`clone_shim` stamp). Never destructured.
+    cloneable_proto: Option<Entity>,
+}
+
+impl CopyLayer for MonoCopyLayer<'_> {
+    type Ty = TyId;
+    type Sem = CopyBehavior;
+
+    fn base_semantics(&self, entity: Entity) -> CopyBehavior {
+        // Generic def `type_info.copy`; `None` by the ConditionalCopyableParams
+        // invariant whenever gating is non-empty (the only case the refine
+        // loop reaches), so the kernel always falls through to the gating fold
+        // — exactly the former `conditional_copy` behavior.
+        let copy = self
+            .structs
+            .get(&entity)
+            .map(|s| s.type_info.copy.clone())
+            .or_else(|| self.enums.get(&entity).map(|e| e.type_info.copy.clone()))
+            .unwrap_or(CopyBehavior::Bitwise);
+        // Checked form of the invariant above: a pass that flips a conditional
+        // container's base away from None would silently skip the gating fold.
+        debug_assert!(
+            self.gating_positions(entity).is_empty() || matches!(copy, CopyBehavior::None),
+            "conditional container's generic def must keep CopyBehavior::None"
+        );
+        copy
     }
-    if saw_clone {
-        CopyBehavior::Clone(entity)
-    } else {
-        CopyBehavior::Bitwise
+
+    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+        Cow::Borrowed(
+            self.structs
+                .get(&entity)
+                .map(|s| s.conditionally_copyable.as_slice())
+                .or_else(|| {
+                    self.enums
+                        .get(&entity)
+                        .map(|e| e.conditionally_copyable.as_slice())
+                })
+                .unwrap_or(&[]),
+        )
+    }
+
+    fn member_semantics(&self, &ty: &TyId) -> CopyBehavior {
+        // Stays per-layer: mono-map lookups, no where_clause.
+        concrete_copy(
+            self.arena,
+            ty,
+            self.mono_structs,
+            self.mono_enums,
+            self.cloneable_proto,
+        )
+    }
+
+    fn sem_from_class(&self, entity: Entity, class: CopySemantics) -> CopyBehavior {
+        match class {
+            CopySemantics::Copyable => CopyBehavior::Bitwise,
+            // Container entity payload — matches `ty_query`'s `MirCopyLayer`.
+            CopySemantics::Cloneable => CopyBehavior::Clone(entity),
+            CopySemantics::NotCopyable => CopyBehavior::None,
+        }
     }
 }
 
 /// Copy behavior of an already-monomorphized concrete type. Named types are
 /// looked up in the mono maps (their `copy` is correct, or being refined this
-/// round); primitives/pointers/functions are bit-copyable; a tuple is Bitwise
-/// iff every element is.
+/// round); primitives/pointers/functions are bit-copyable; tuples use the
+/// canonical fold (move-only dominates, else Clone if any element clones).
 fn concrete_copy(
     arena: &TyArena,
     ty: TyId,
     mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
     mono_enums: &IndexMap<MonoTypeKey, MonoEnum>,
+    cloneable_proto: Option<Entity>,
 ) -> CopyBehavior {
     match arena.get(ty) {
         MirTy::Named { entity, type_args } => {
@@ -922,16 +1227,30 @@ fn concrete_copy(
                 .or_else(|| mono_enums.get(&key).map(|e| e.type_info.copy.clone()))
                 .unwrap_or(CopyBehavior::Bitwise)
         },
+        // Canonical fold (copy-drift #4 resolved 2026-06-10): matches
+        // ty_query's tuple rule — move-only element dominates, else first
+        // Clone element decides (payload inert), else Bitwise. Previously any
+        // non-Bitwise element classified the tuple move-only here, making the
+        // two MIR passes disagree.
         MirTy::Tuple(elems) => {
+            let mut first_clone = None;
             for &e in elems {
-                if !matches!(
-                    concrete_copy(arena, e, mono_structs, mono_enums),
-                    CopyBehavior::Bitwise
-                ) {
-                    return CopyBehavior::None;
+                match concrete_copy(arena, e, mono_structs, mono_enums, cloneable_proto) {
+                    CopyBehavior::None => return CopyBehavior::None,
+                    b @ CopyBehavior::Clone(_) if first_clone.is_none() => first_clone = Some(b),
+                    _ => {},
                 }
             }
-            CopyBehavior::Bitwise
+            first_clone.unwrap_or(CopyBehavior::Bitwise)
+        },
+        // Explicit arm — the pre-mono `ty_query::copy_behavior` FuncThick arm's
+        // post-mono twin (lockstep 1). Falling into the `_` catch-all below
+        // would silently answer Bitwise for an owning closure and make the two
+        // sides of the mono boundary disagree.
+        MirTy::FuncThick { kind, .. } => match (kind, cloneable_proto) {
+            (crate::ty::FnKind::Consuming, _) => CopyBehavior::None,
+            (crate::ty::FnKind::Escaping, Some(p)) => CopyBehavior::Clone(p),
+            _ => CopyBehavior::Bitwise,
         },
         _ => CopyBehavior::Bitwise,
     }
@@ -942,53 +1261,9 @@ enum ConcreteTypeKind {
     Enum(Entity),
 }
 
-/// Walk an OssaBody and collect all concrete Named types.
-fn collect_named_types(
-    arena: &TyArena,
-    body: &OssaBody,
-    out: &mut IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind>,
-    structs: &IndexMap<Entity, StructDef>,
-    enums: &IndexMap<Entity, EnumDef>,
-) {
-    // Walk value types
-    for value in &body.values {
-        collect_named_type_from_ty(arena, value.ty, out, structs, enums);
-    }
-    // Walk block param types
-    for block in &body.blocks {
-        for param in &block.params {
-            collect_named_type_from_ty(arena, param.ty, out, structs, enums);
-        }
-    }
-    // Walk instruction types (Struct.ty, Enum.enum_ty, Array.element_ty, Literal immediates)
-    for block in &body.blocks {
-        for inst in &block.insts {
-            match &inst.kind {
-                InstKind::Struct { ty, .. } => {
-                    collect_named_type_from_ty(arena, *ty, out, structs, enums);
-                },
-                InstKind::Enum { enum_ty, .. } => {
-                    collect_named_type_from_ty(arena, *enum_ty, out, structs, enums);
-                },
-                InstKind::Array { element_ty, .. } => {
-                    collect_named_type_from_ty(arena, *element_ty, out, structs, enums);
-                },
-                InstKind::Literal { value, .. } => match &value.kind {
-                    ImmediateKind::SizeOf(ty)
-                    | ImmediateKind::AlignOf(ty)
-                    | ImmediateKind::NullPtr(ty) => {
-                        collect_named_type_from_ty(arena, *ty, out, structs, enums);
-                    },
-                    _ => {},
-                },
-                // CopyAddr/Take/BeginBorrowAddr/BeginMutBorrowAddr/DestroyAddr/FieldAddr/Uninit
-                // carry ty but those are address types (Pointer), not Named
-                _ => {},
-            }
-        }
-    }
-}
-
+/// Seeds every struct/enum instantiation nested anywhere in `ty` (type args,
+/// pointees, tuple elements, function-type params/ret) — the same nodes
+/// `verify_mono` checks, via `ty_sites::for_each_ty_node`.
 fn collect_named_type_from_ty(
     arena: &TyArena,
     ty: TyId,
@@ -996,33 +1271,20 @@ fn collect_named_type_from_ty(
     structs: &IndexMap<Entity, StructDef>,
     enums: &IndexMap<Entity, EnumDef>,
 ) {
-    match arena.get(ty) {
-        MirTy::Named { entity, type_args } => {
-            let entity = *entity;
-            let type_args = type_args.clone();
-            let key = (entity, type_args.clone());
-            if !out.contains_key(&key) {
-                if structs.contains_key(&entity) {
-                    out.insert(key, ConcreteTypeKind::Struct(entity));
-                } else if enums.contains_key(&entity) {
-                    out.insert(key, ConcreteTypeKind::Enum(entity));
-                }
-            }
-            // Recurse into type args
-            for &arg in &type_args {
-                collect_named_type_from_ty(arena, arg, out, structs, enums);
-            }
-        },
-        MirTy::Pointer(inner) => {
-            collect_named_type_from_ty(arena, *inner, out, structs, enums);
-        },
-        MirTy::Tuple(elems) => {
-            for &elem in elems {
-                collect_named_type_from_ty(arena, elem, out, structs, enums);
-            }
-        },
-        _ => {},
-    }
+    ty_sites::for_each_ty_node(arena, ty, &mut |_, node| {
+        let MirTy::Named { entity, type_args } = node else {
+            return;
+        };
+        let key = (*entity, type_args.clone());
+        if out.contains_key(&key) {
+            return;
+        }
+        if structs.contains_key(entity) {
+            out.insert(key, ConcreteTypeKind::Struct(*entity));
+        } else if enums.contains_key(entity) {
+            out.insert(key, ConcreteTypeKind::Enum(*entity));
+        }
+    });
 }
 
 fn build_type_subst(
@@ -1082,10 +1344,13 @@ mod tests {
     use crate::inst::{CallArg, InstKind, Instruction};
     use crate::item::TypeParamDef;
     use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
+    use crate::item::protocol::ProtocolDef;
+    use crate::item::witness::{WitnessDef, WitnessMethodBinding};
+    use crate::op::Op;
     use crate::terminator::{Terminator, TerminatorKind};
     use crate::ty::ParamConvention;
     use crate::value::ValueDef;
-    use crate::{BlockId, ValueId};
+    use crate::{BlockId, ValueId, WitnessMethodKey};
 
     fn entity(id: u32) -> Entity {
         Entity::from_raw(id)
@@ -1101,6 +1366,7 @@ mod tests {
             blocks: vec![block],
             entry: BlockId::new(0),
             param_count: 0,
+            value_names: Default::default(),
         }
     }
 
@@ -1121,6 +1387,7 @@ mod tests {
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
         module.add_function(func);
         module.register_name(entity(1), "main");
@@ -1131,6 +1398,157 @@ mod tests {
         assert_eq!(mono.functions.len(), 1);
         assert!(mono.functions[0].body.is_some());
         assert!(mono.functions[0].name.starts_with("_K0"));
+    }
+
+    /// `struct Name[T] { a: T, b: T, c: T }` — three words wide at `T = i64`.
+    fn three_word_generic(module: &mut MirModule, ent: u32, tp: u32, name: &str) -> Entity {
+        let tp_ty = module.ty_arena.intern(MirTy::TypeParam(entity(tp)));
+        let mut sdef = StructDef::new(entity(ent), name);
+        sdef.type_params = vec![TypeParamDef::new(entity(tp), "T")];
+        for f in ["a", "b", "c"] {
+            sdef.add_field(crate::item::struct_def::FieldDef::new(f, tp_ty));
+        }
+        module.add_struct(sdef);
+        module.register_name(entity(ent), name);
+        entity(ent)
+    }
+
+    fn mono_struct_size(mono: &MonoModule, key: (Entity, Vec<TyId>)) -> Option<u64> {
+        match &mono.structs.get(&key)?.type_info.layout {
+            Some(Layout::Struct(sl)) => Some(sl.size),
+            _ => None,
+        }
+    }
+
+    /// G2, Op half — correlation-free. `collect_named_types` walked value types,
+    /// block params, `Struct`/`Enum`/`Array` type fields and `Literal`
+    /// immediates, but ZERO `Op` type operands, while `substitute_op_type`
+    /// handled all ten. Only `SizeOf`/`AlignOf` genuinely escape; the other
+    /// eight normally produce a `Pointer[T]` value that the `Pointer` recursion
+    /// re-seeds — an incidental correlation, not an invariant.
+    ///
+    /// This test breaks the correlation on purpose: the `PtrCast` result value
+    /// is typed `i64`, not `Pointer[Ghost[i64]]`, so the ONLY mention of
+    /// `Ghost[i64]` anywhere in the body is the op operand.
+    #[test]
+    fn op_type_operand_seeds_named_type() {
+        for op_of in [
+            Op::SizeOf as fn(TyId) -> Op,
+            Op::AlignOf as fn(TyId) -> Op,
+            Op::PtrCast as fn(TyId) -> Op,
+            Op::PtrTo as fn(TyId) -> Op,
+        ] {
+            let mut module = MirModule::new("test");
+            let unit = module.ty_arena.unit();
+            let i64_ty = module.ty_arena.i64();
+            let ghost = three_word_generic(&mut module, 10, 11, "Ghost");
+            let ghost_i64 = module.ty_arena.intern(MirTy::Named {
+                entity: ghost,
+                type_args: vec![i64_ty],
+            });
+
+            // main() { %1 = op[Ghost[i64]] %0; return %0 }
+            // Note the deliberately non-`Pointer` result type on %1.
+            let arg = ValueId::new(0);
+            let result = ValueId::new(1);
+            let body = make_body(
+                vec![Instruction::new(InstKind::Op1 {
+                    result,
+                    op: op_of(ghost_i64),
+                    arg,
+                })],
+                arg,
+                vec![ValueDef::owned(unit), ValueDef::owned(i64_ty)],
+            );
+            module.add_function(FunctionDef {
+                entity: entity(1),
+                name: "main".into(),
+                kind: FunctionKind::Free,
+                type_params: vec![],
+                params: vec![],
+                ret: unit,
+                where_clause: None,
+                body: Some(body),
+                extern_info: None,
+                is_main: true,
+                provides_protocol_default: false,
+            });
+            module.register_name(entity(1), "main");
+
+            let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+            assert_eq!(
+                mono_struct_size(&mono, (ghost, vec![i64_ty])),
+                Some(24),
+                "op operand did not seed Ghost[i64]",
+            );
+        }
+    }
+
+    /// G2, field half. `Inner[i64]` is reachable ONLY as a field type of
+    /// `Outer[i64]`; `collect_named_type_from_ty` never descends into fields,
+    /// and the layout fixed-point loop iterated its worklist by shared borrow so
+    /// it could not add what it found there. `mono_size_and_align` then returned
+    /// `None`, `all_resolved` went false, and the CONTAINING `Outer[i64]` was
+    /// dropped from `mono_structs` too — silently.
+    #[test]
+    fn field_type_seeds_nested_generic() {
+        let mut module = MirModule::new("test");
+        let unit = module.ty_arena.unit();
+        let i64_ty = module.ty_arena.i64();
+
+        let inner = three_word_generic(&mut module, 20, 21, "Inner");
+        let u_ty = module.ty_arena.intern(MirTy::TypeParam(entity(23)));
+        let inner_u = module.ty_arena.intern(MirTy::Named {
+            entity: inner,
+            type_args: vec![u_ty],
+        });
+
+        // struct Outer[U] { i: Inner[U], x: U }
+        let mut outer_def = StructDef::new(entity(22), "Outer");
+        outer_def.type_params = vec![TypeParamDef::new(entity(23), "U")];
+        outer_def.add_field(crate::item::struct_def::FieldDef::new("i", inner_u));
+        outer_def.add_field(crate::item::struct_def::FieldDef::new("x", u_ty));
+        let outer = module.add_struct(outer_def);
+        module.register_name(entity(22), "Outer");
+
+        let outer_i64 = module.ty_arena.intern(MirTy::Named {
+            entity: outer,
+            type_args: vec![i64_ty],
+        });
+
+        // A concrete function is an unconditional mono root, so its value seeds
+        // `Outer[i64]` — and nothing else ever mentions `Inner[i64]`.
+        let ret_val = ValueId::new(0);
+        module.add_function(FunctionDef {
+            entity: entity(1),
+            name: "main".into(),
+            kind: FunctionKind::Free,
+            type_params: vec![],
+            params: vec![],
+            ret: unit,
+            where_clause: None,
+            body: Some(make_body(
+                vec![],
+                ret_val,
+                vec![ValueDef::owned(unit), ValueDef::owned(outer_i64)],
+            )),
+            extern_info: None,
+            is_main: true,
+            provides_protocol_default: false,
+        });
+        module.register_name(entity(1), "main");
+
+        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        assert_eq!(
+            mono_struct_size(&mono, (inner, vec![i64_ty])),
+            Some(24),
+            "field type Inner[i64] was never seeded",
+        );
+        assert_eq!(
+            mono_struct_size(&mono, (outer, vec![i64_ty])),
+            Some(32),
+            "Outer[i64] was dropped because its field type was unresolved",
+        );
     }
 
     #[test]
@@ -1168,6 +1586,7 @@ mod tests {
             }),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         // main() calls identity[Int64]
@@ -1206,6 +1625,7 @@ mod tests {
             )),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         module.add_function(main_fn);
@@ -1246,6 +1666,214 @@ mod tests {
     }
 
     #[test]
+    fn monomorphize_apply_partial_rewrites_every_callee() {
+        let mut module = MirModule::new("test");
+        let unit = module.ty_arena.unit();
+        let i64_ty = module.ty_arena.i64();
+        let maker_param = entity(20);
+        let maker_param_ty = module.ty_arena.intern(MirTy::TypeParam(maker_param));
+
+        let generic_stub = |entity, param, name: &str| {
+            let mut body = OssaBody::new();
+            let ret = body.alloc_value(ValueDef::owned(unit));
+            let entry = body.alloc_block();
+            body.entry = entry;
+            body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(ret));
+            FunctionDef {
+                entity,
+                name: name.into(),
+                kind: FunctionKind::Free,
+                type_params: vec![TypeParamDef::new(param, "T")],
+                params: vec![],
+                ret: unit,
+                where_clause: None,
+                body: Some(body),
+                extern_info: None,
+                is_main: false,
+                provides_protocol_default: false,
+            }
+        };
+
+        let target_entity = entity(2);
+        let retain_entity = entity(3);
+        let release_entity = entity(4);
+        module.add_function(generic_stub(target_entity, entity(21), "target"));
+        module.add_function(generic_stub(retain_entity, entity(22), "retain"));
+        module.add_function(generic_stub(release_entity, entity(23), "release"));
+
+        let result = ValueId::new(0);
+        let maker = FunctionDef {
+            entity: entity(5),
+            name: "maker".into(),
+            kind: FunctionKind::Free,
+            type_params: vec![TypeParamDef::new(maker_param, "T")],
+            params: vec![],
+            ret: unit,
+            where_clause: None,
+            body: Some(make_body(
+                vec![Instruction::new(InstKind::ApplyPartial {
+                    result,
+                    callee: Callee::direct_with_args(target_entity, vec![maker_param_ty], None),
+                    captures: vec![],
+                    retain: Some(Callee::direct_with_args(
+                        retain_entity,
+                        vec![maker_param_ty],
+                        None,
+                    )),
+                    release: Some(Callee::direct_with_args(
+                        release_entity,
+                        vec![maker_param_ty],
+                        None,
+                    )),
+                })],
+                result,
+                vec![ValueDef::owned(unit)],
+            )),
+            extern_info: None,
+            is_main: false,
+            provides_protocol_default: false,
+        };
+        module.add_function(maker);
+
+        let main_ret = ValueId::new(0);
+        module.add_function(FunctionDef {
+            entity: entity(1),
+            name: "main".into(),
+            kind: FunctionKind::Free,
+            type_params: vec![],
+            params: vec![],
+            ret: unit,
+            where_clause: None,
+            body: Some(make_body(
+                vec![Instruction::new(InstKind::Call {
+                    result: None,
+                    callee: Callee::direct_with_args(entity(5), vec![i64_ty], None),
+                    args: vec![],
+                })],
+                main_ret,
+                vec![ValueDef::owned(unit)],
+            )),
+            extern_info: None,
+            is_main: false,
+            provides_protocol_default: false,
+        });
+
+        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let maker = mono
+            .functions
+            .iter()
+            .find(|f| f.source == entity(5))
+            .unwrap();
+        let InstKind::ApplyPartial {
+            callee,
+            retain,
+            release,
+            ..
+        } = &maker.body.as_ref().unwrap().blocks[0].insts[0].kind
+        else {
+            panic!("expected ApplyPartial");
+        };
+        assert!(matches!(callee, Callee::Resolved(_)));
+        assert!(matches!(retain, Some(Callee::Resolved(_))));
+        assert!(matches!(release, Some(Callee::Resolved(_))));
+        for source in [target_entity, retain_entity, release_entity] {
+            assert!(
+                mono.functions
+                    .iter()
+                    .any(|f| f.source == source && f.type_args == vec![i64_ty])
+            );
+        }
+    }
+
+    #[test]
+    fn monomorphize_apply_partial_resolves_every_witness_callee() {
+        let mut module = MirModule::new("test");
+        let unit = module.ty_arena.unit();
+        let i64_ty = module.ty_arena.i64();
+        let protocol_entity = entity(10);
+        module.add_protocol(ProtocolDef::new(protocol_entity, "ClosureLifecycle"));
+
+        let target_key = WitnessMethodKey::new("target", vec![]);
+        let retain_key = WitnessMethodKey::new("retain", vec![]);
+        let release_key = WitnessMethodKey::new("release", vec![]);
+        let mut witness = WitnessDef::new(protocol_entity, i64_ty);
+        for (key, function) in [
+            (target_key.clone(), entity(2)),
+            (retain_key.clone(), entity(3)),
+            (release_key.clone(), entity(4)),
+        ] {
+            witness.add_method(WitnessMethodBinding::new(key, function, vec![]));
+        }
+        module.add_witness(witness);
+
+        for (function, name) in [
+            (entity(2), "target"),
+            (entity(3), "retain"),
+            (entity(4), "release"),
+        ] {
+            let ret = ValueId::new(0);
+            module.add_function(FunctionDef {
+                entity: function,
+                name: name.into(),
+                kind: FunctionKind::Free,
+                type_params: vec![],
+                params: vec![],
+                ret: unit,
+                where_clause: None,
+                body: Some(make_body(vec![], ret, vec![ValueDef::owned(unit)])),
+                extern_info: None,
+                is_main: false,
+                provides_protocol_default: false,
+            });
+        }
+
+        let witness_callee = |method| Callee::Witness {
+            protocol: protocol_entity,
+            method,
+            self_type: i64_ty,
+            method_type_args: vec![],
+        };
+        let result = ValueId::new(0);
+        module.add_function(FunctionDef {
+            entity: entity(1),
+            name: "main".into(),
+            kind: FunctionKind::Free,
+            type_params: vec![],
+            params: vec![],
+            ret: unit,
+            where_clause: None,
+            body: Some(make_body(
+                vec![Instruction::new(InstKind::ApplyPartial {
+                    result,
+                    callee: witness_callee(target_key),
+                    captures: vec![],
+                    retain: Some(witness_callee(retain_key)),
+                    release: Some(witness_callee(release_key)),
+                })],
+                result,
+                vec![ValueDef::owned(unit)],
+            )),
+            extern_info: None,
+            is_main: false,
+            provides_protocol_default: false,
+        });
+        module.register_name(protocol_entity, "ClosureLifecycle");
+
+        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let main = mono
+            .functions
+            .iter()
+            .find(|f| f.source == entity(1))
+            .unwrap();
+        for (_, callee) in main.body.as_ref().unwrap().blocks[0].insts[0]
+            .kind
+            .callees()
+        {
+            assert!(matches!(callee, Callee::Resolved(_)));
+        }
+    }
+
+    #[test]
     fn monomorphize_extern_function() {
         let mut module = MirModule::new("test");
         let i64_ty = module.ty_arena.i64();
@@ -1271,6 +1899,7 @@ mod tests {
                 symbol_name: "malloc".into(),
             }),
             is_main: false,
+            provides_protocol_default: false,
         };
         module.add_function(func);
         module.register_name(entity(1), "malloc");

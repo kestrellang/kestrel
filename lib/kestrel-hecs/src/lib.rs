@@ -12,7 +12,7 @@
 //! ```
 //! use kestrel_hecs::{World, QueryFn, QueryContext};
 //!
-//! // Define components (any Clone + 'static type)
+//! // Define components (any Clone + Send + Sync + 'static type)
 //! #[derive(Clone)]
 //! struct Name(String);
 //!
@@ -42,6 +42,7 @@ pub mod change;
 pub mod component;
 pub mod entity;
 pub mod fingerprint;
+pub mod guard;
 pub mod query;
 pub mod world;
 

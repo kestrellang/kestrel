@@ -8,7 +8,7 @@ use kestrel_ast_builder::{ConformanceItem, Conformances, Name, NodeKind, TypePar
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use std::collections::HashSet;
 
-use crate::extensions::ExtensionTargetEntity;
+use crate::extensions::{ExtensionLhsParams, ExtensionTargetEntity};
 use crate::scope::ScopeFor;
 use crate::visibility::VisibleChildrenByName;
 
@@ -167,6 +167,10 @@ fn check_ambiguity(ctx: &QueryContext<'_>, mut entities: Vec<Entity>) -> NameRes
 /// we find Array's type parameter `T`. For `extend Int64: ArrayIndex[T]`,
 /// `T` is introduced by the extension itself (free RHS param) — we check
 /// the extension entity's own TypeParams component too.
+///
+/// Only the target parameters the LHS actually bound are in scope, which is
+/// what `ExtensionLhsParams` answers — inside `extend Box[Int64]`, the name
+/// `T` must not resolve to Box's parameter.
 fn resolve_extension_type_param(
     ctx: &QueryContext<'_>,
     extension: Entity,
@@ -182,14 +186,10 @@ fn resolve_extension_type_param(
         }
     }
 
-    // Then check the target type's type parameters.
-    let target_entity = ctx.query(ExtensionTargetEntity { extension, root })?;
-    let type_params = ctx.get::<TypeParams>(target_entity)?;
-    type_params
-        .0
-        .iter()
-        .find(|&&tp| ctx.get::<Name>(tp).is_some_and(|n| n.0 == name))
-        .copied()
+    // Then the target parameters bound by the LHS.
+    ctx.query(ExtensionLhsParams { extension, root })
+        .into_iter()
+        .find(|&tp| ctx.get::<Name>(tp).is_some_and(|n| n.0 == name))
 }
 
 /// Check if an extension targets a protocol, and if so, look up the
@@ -223,7 +223,7 @@ fn resolve_protocol_extension_assoc(
 /// it, `protocol Foo: Foo` (or longer cycles) would stack-overflow here. The
 /// dedicated cycle analyzer in `kestrel-analyze` reports the cycle as a
 /// diagnostic; this function just refuses to recurse through it.
-fn resolve_inherited_protocol_member(
+pub(crate) fn resolve_inherited_protocol_member(
     ctx: &QueryContext<'_>,
     protocol: Entity,
     name: &str,
@@ -312,7 +312,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         // std.core
         let std = world.spawn();

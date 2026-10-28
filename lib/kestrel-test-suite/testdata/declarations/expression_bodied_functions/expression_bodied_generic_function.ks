@@ -8,6 +8,6 @@ func identity[T](x: T) -> T = x
 
 @main
 func main() -> lang.i64 {
-    let _ = println(identity(42));
+     println(identity(42));
     0
 }

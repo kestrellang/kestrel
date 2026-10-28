@@ -39,6 +39,7 @@ impl QueryFn for ParseFile {
                 ctx.throw(diagnostic::ParseError {
                     message: error.message.clone(),
                     span: span.clone(),
+                    code: error.code,
                 });
             }
         }

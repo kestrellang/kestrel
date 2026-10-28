@@ -2,7 +2,7 @@
 
 module std.memory
 
-import std.core.(Bool, Cloneable)
+import std.core.(Bool, Cloneable, Indirection, MutableIndirection)
 import std.memory.(RcBox)
 
 /// Copy-on-write wrapper around `RcBox[T]`.
@@ -29,7 +29,9 @@ import std.memory.(RcBox)
 /// Same as `RcBox`: non-atomic refcount. Cloning bumps the count;
 /// `write` splits off a private copy when shared.
 public struct CowBox[T]: Cloneable where T: Cloneable {
-    private var inner: RcBox[T]
+    // `fileprivate` (not `private`) so the same-file `extend CowBox:
+    // MutableIndirection` below can run the COW barrier on `inner`.
+    fileprivate var inner: RcBox[T]
 
     /// @name From Value
     /// Allocates fresh storage holding `value` with refcount 1.
@@ -50,12 +52,21 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
         self.inner.getValue().clone()
     }
 
+    /// COW barrier — makes the storage uniquely owned, cloning it if shared.
+    ///
+    /// The clone reads through a reference to the heap value, so a shared
+    /// box is deep-copied exactly once. Every mutating entry point (`write`,
+    /// `modify`, `pointeeMutRef`) goes through here.
+    public mutating func ensureUnique() {
+        if self.inner.isUnique() == false {
+            self.inner = RcBox(self.inner.valuePtr().value.clone())
+        }
+    }
+
     /// Write access — clones storage if shared, then returns the
     /// (now unique) value. Caller modifies and calls `setValue`.
     public mutating func write() -> T {
-        if self.inner.isUnique() == false {
-            self.inner = RcBox(self.inner.getValue().clone())
-        }
+        self.ensureUnique();
         self.inner.getValue()
     }
 
@@ -72,9 +83,7 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
     /// to mutate directly — no per-call clone or write-back. This is the O(1)
     /// replacement for the `read()` → modify → `setValue()` dance.
     public mutating func modify[R](body: (mutating T) -> R) -> R {
-        if self.inner.isUnique() == false {
-            self.inner = RcBox(self.inner.getValue().clone())
-        }
+        self.ensureUnique();
         self.inner.modify(body)
     }
 
@@ -100,5 +109,18 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
     /// Shares storage with the returned clone (refcount bump).
     public func clone() -> CowBox[T] {
         CowBox(inner: self.inner.clone())
+    }
+}
+
+// Transparent member access with copy-on-write: a READ peels through
+// `pointeeRef()` (no fork), while any WRITE / mutating-method peels through
+// `pointeeMutRef()`, which runs the COW barrier first — so `cow.field = v`
+// forks a shared box exactly like `cow.modify { … }` does.
+extend CowBox[T]: MutableIndirection where T: Cloneable {
+    type Target = T
+    public func pointeeRef() -> &T { self.valuePtr().value }
+    public mutating func pointeeMutRef() -> &mutating T {
+        self.ensureUnique();
+        self.valuePtr().mutatingValue
     }
 }

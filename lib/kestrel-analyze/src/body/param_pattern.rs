@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{AstType, Callable, ParamPattern};
 use kestrel_hir::body::{HirBody, HirExpr, HirPat, HirPatId};
@@ -45,8 +45,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct ParamPatternAnalyzer;
 
 impl Describe for ParamPatternAnalyzer {
-    fn id(&self) -> &'static str {
-        "param_pattern"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ParamPattern
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

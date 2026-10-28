@@ -13,7 +13,7 @@ fn build_from_source(source: &str) -> (World, Entity) {
     world.begin_revision();
     let root = world.spawn();
     world.set(root, NodeKind::Module);
-    world.set(root, Name("<root>".to_string()));
+    world.set(root, Name(Name::ROOT.to_string()));
     seed_lang_module(&mut world, root);
 
     let file_entity = world.spawn();
@@ -22,7 +22,7 @@ fn build_from_source(source: &str) -> (World, Entity) {
         .collect();
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
     let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
-    build_declarations(&mut world, file_entity, &result.tree, root, None);
+    build_declarations(&mut world, file_entity, &result.tree(), root, None);
     (world, root)
 }
 
@@ -63,7 +63,11 @@ fn method_under_kind(
     panic!("method {method} not found under any {container_kind:?}");
 }
 
-fn infer(ctx: &kestrel_hecs::QueryContext<'_>, root: Entity, m: Entity) -> TypedBody {
+fn infer(
+    ctx: &kestrel_hecs::QueryContext<'_>,
+    root: Entity,
+    m: Entity,
+) -> std::sync::Arc<TypedBody> {
     ctx.query(InferBody { entity: m, root })
         .expect("InferBody None")
 }

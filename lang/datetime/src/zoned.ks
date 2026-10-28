@@ -209,7 +209,7 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable, Clone
         self.inst.hash(into: hasher);
     }
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         // RFC 9557: "2024-07-04T15:30:05-04:00[America/New_York]"
         let dt = self.dateTime;
         dt.dateVal.format(into: writer);

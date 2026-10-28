@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use kestrel_hecs::Entity;
 
@@ -9,15 +9,21 @@ use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
 use crate::terminator::{Terminator, TerminatorKind};
 use crate::ty::{MirTy, ParamConvention};
-use crate::value::{Ownership, ValueDef};
+use crate::value::{Ownership, RootProvenance, ValueDef};
 use crate::{Immediate, MirModule, TyId};
 
 /// Scan for ApplyPartial references and generate thunk wrappers.
 pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
     let mut targets: Vec<Entity> = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
+    // Targets that already have a thunk from a previous run — collected in
+    // the same scan so we don't rescan all functions per target below.
+    let mut has_thunk: FxHashSet<Entity> = FxHashSet::default();
 
     for func in module.functions.values() {
+        if let FunctionKind::Thunk { original } = &func.kind {
+            has_thunk.insert(*original);
+        }
         let Some(body) = &func.body else { continue };
         for block in &body.blocks {
             for inst in &block.insts {
@@ -33,12 +39,13 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         }
     }
 
+    // Map of target -> freshly created thunk, applied in ONE rewrite pass at
+    // the end. Rewriting inside the per-target loop rescans every instruction
+    // in the module per target — quadratic on whole-program builds.
+    let mut thunk_for: FxHashMap<Entity, Entity> = FxHashMap::default();
+
     for target in &targets {
-        let already_has_thunk = module
-            .functions
-            .values()
-            .any(|f| matches!(&f.kind, FunctionKind::Thunk { original } if *original == *target));
-        if already_has_thunk {
+        if has_thunk.contains(target) {
             continue;
         }
 
@@ -50,16 +57,36 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         let ret_ty = target_func.ret;
         let type_params = target_func.type_params.clone();
 
-        let needs_env = target_func
-            .params
-            .first()
-            .is_some_and(|p| p.name == "env" || p.name == "_env");
+        // Whether params[0] is a synthesized env pointer is a property of the
+        // function KIND, never of the parameter's spelling — a user function
+        // may legally name its first parameter `env`, `_env` or `self`, and
+        // matching on the name silently forwarded the environment pointer into
+        // it while dropping the last real argument (G3).
+        let needs_env = target_func.kind.takes_env_param();
+        // Hard `assert!`, not `debug_assert!`: nothing in CI builds a debug
+        // compiler and compiles Kestrel with it, so a `debug_assert` in the
+        // pipeline is effectively dead code that only bites whoever next runs
+        // `cargo build` without `--release`. These are O(params) once per
+        // thunk — cheap enough to always be live.
+        assert!(
+            !needs_env
+                || target_func
+                    .params
+                    .first()
+                    .is_some_and(|p| p.name == "env" || p.name == "_env"),
+            "{}: kind {:?} promises a leading env param but params[0] is {:?} — \
+             the env param must stay at index 0 in mir-lower `closure.rs` / this pass",
+            target_func.name,
+            target_func.kind,
+            target_func.params.first().map(|p| &p.name),
+        );
 
-        // Non-self, non-env params from the target
+        // Every param after the (optional) env pointer is a real parameter and
+        // is forwarded positionally. Structural — no name filtering.
         let target_params: Vec<_> = target_func
             .params
             .iter()
-            .filter(|p| p.name != "self" && p.name != "env" && p.name != "_env")
+            .skip(usize::from(needs_env))
             .cloned()
             .collect();
 
@@ -118,6 +145,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                     ty: param.ty,
                     ownership: Ownership::Guaranteed,
                     borrow_source: None,
+                    root: RootProvenance::derived(),
                     span: None,
                 });
                 body.block_mut(entry).params.push(BlockParam {
@@ -143,6 +171,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 ty: param.ty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                root: RootProvenance::derived(),
                 span: None,
             });
             body.block_mut(entry).params.push(BlockParam {
@@ -165,6 +194,76 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 value: val,
                 convention: ParamConvention::Consuming,
             });
+        }
+
+        // Fail-loud backstop. The forwarded arg list is built positionally from
+        // the target's own params, so it must match it exactly in count, and in
+        // per-position type for every REAL parameter. The type check is the
+        // load-bearing half: G3's miscompile had a COINCIDENTALLY CORRECT count
+        // (the env pointer was pushed and the same param was filtered out), and
+        // only the types disagreed.
+        //
+        // Index 0 under `needs_env` is the one position where the two types
+        // legitimately differ, and comparing `TyId`s there was a regression that
+        // panicked on every stdlib program in a debug compiler. The thunk's env
+        // param is deliberately TYPE-ERASED — `Pointer[()]` — because the thunk
+        // is what an indirect closure call lands on and its signature must be
+        // uniform across every closure; the target closure declares the concrete
+        // env it wants (`Pointer[<synthesized env struct>]`, or the box binding's
+        // raw pointer for a boxed closure — see mir-lower `closure.rs` `env_ty`
+        // and `closure_box.rs::unwrap_handle_to_pointer`, both of which always
+        // bottom out in `MirTy::Pointer`). Two different pointees, one machine
+        // word; codegen reinterprets. So the strongest check that is still
+        // correct at index 0 is "the target's env param is pointer-shaped".
+        //
+        // That is still enough to catch G3: its repro was `combine(env: Int, ...)`
+        // mistaken for a closure, and `Int` is not a pointer, so this fires. What
+        // it cannot distinguish is a wrong-slot forward into a param that is
+        // itself a pointer — the arity check plus the kind-derived `needs_env`
+        // (rather than the old name sniff) covers that shape.
+        //
+        // Every position after the env is an exact `TyId` cloned off
+        // `target_func.params` pre-monomorphization, so equality there is exact —
+        // no substitution or ref-decay gap to reason about.
+        if let Some(target_params_full) = module.functions.get(target).map(|f| &f.params) {
+            assert_eq!(
+                forward_args.len(),
+                target_params_full.len(),
+                "{thunk_name}: forwards {} args to a {}-param target",
+                forward_args.len(),
+                target_params_full.len(),
+            );
+            let env_positions = usize::from(needs_env);
+            if let Some(env_param) = target_params_full.first().filter(|_| needs_env) {
+                assert!(
+                    matches!(module.ty_arena.get(env_param.ty), MirTy::Pointer(_)),
+                    "{thunk_name}: target's kind {:?} promises a leading env pointer but \
+                     params[0] `{}` is {:?} — the thunk forwards a type-erased `Pointer[()]` \
+                     into that slot, so a non-pointer there is a miscompile",
+                    module.functions.get(target).map(|f| &f.kind),
+                    env_param.name,
+                    module.ty_arena.get(env_param.ty),
+                );
+            }
+            assert!(
+                forward_args
+                    .iter()
+                    .zip(target_params_full.iter())
+                    .skip(env_positions)
+                    .all(|(a, p)| body.value(a.value).ty == p.ty),
+                "{thunk_name}: forwarded arg types do not match the target's params \
+                 (forwarded {:?}, expected {:?})",
+                forward_args
+                    .iter()
+                    .skip(env_positions)
+                    .map(|a| module.ty_arena.get(body.value(a.value).ty))
+                    .collect::<Vec<_>>(),
+                target_params_full
+                    .iter()
+                    .skip(env_positions)
+                    .map(|p| (&p.name, module.ty_arena.get(p.ty)))
+                    .collect::<Vec<_>>(),
+            );
         }
 
         let callee = Callee::direct_with_args(*target, forward_type_args, None);
@@ -197,6 +296,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 ty: ret_ty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                root: RootProvenance::derived(),
                 span: None,
             });
             insts.push(Instruction::new(InstKind::Call {
@@ -210,20 +310,25 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
 
         thunk_def.body = Some(body);
         module.add_function(thunk_def);
+        thunk_for.insert(*target, thunk_entity);
+    }
 
-        // Rewrite ApplyPartial references to use the thunk entity
-        for func in module.functions.values_mut() {
-            let Some(body) = &mut func.body else { continue };
-            for block in &mut body.blocks {
-                for inst in &mut block.insts {
-                    if let InstKind::ApplyPartial {
-                        callee: Callee::Direct { func: f, .. },
-                        ..
-                    } = &mut inst.kind
-                        && *f == *target
-                    {
-                        *f = thunk_entity;
-                    }
+    if thunk_for.is_empty() {
+        return;
+    }
+
+    // Rewrite all ApplyPartial references to their thunk entities in one pass.
+    for func in module.functions.values_mut() {
+        let Some(body) = &mut func.body else { continue };
+        for block in &mut body.blocks {
+            for inst in &mut block.insts {
+                if let InstKind::ApplyPartial {
+                    callee: Callee::Direct { func: f, .. },
+                    ..
+                } = &mut inst.kind
+                    && let Some(thunk) = thunk_for.get(f)
+                {
+                    *f = *thunk;
                 }
             }
         }
@@ -235,7 +340,7 @@ mod tests {
     use super::*;
     use crate::block::BlockParam;
     use crate::body::OssaBody;
-    use crate::value::ValueDef;
+    use crate::value::{RootProvenance, ValueDef};
 
     /// Build a minimal function with an OSSA body (just returns unit).
     fn add_stub_function(
@@ -256,6 +361,7 @@ mod tests {
                 ty: *pty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                root: RootProvenance::derived(),
                 span: None,
             });
             body.block_mut(entry).params.push(BlockParam {
@@ -305,6 +411,7 @@ mod tests {
 
         // ApplyPartial result — simplified as @owned i64 for test purposes
         let thick_ty = module.ty_arena.intern(MirTy::FuncThick {
+            kind: crate::ty::FnKind::Normal,
             params: vec![],
             ret: i64_ty,
         });
@@ -315,6 +422,8 @@ mod tests {
                 result: result_val,
                 callee: Callee::direct(target),
                 captures: vec![],
+                retain: None,
+                release: None,
             }));
 
         let unit_val = body.alloc_value(ValueDef::owned(unit_ty));
@@ -389,6 +498,7 @@ mod tests {
         {
             let unit_ty = module.ty_arena.unit();
             let thick_ty = module.ty_arena.intern(MirTy::FuncThick {
+                kind: crate::ty::FnKind::Normal,
                 params: vec![],
                 ret: i64_ty,
             });
@@ -404,6 +514,8 @@ mod tests {
                     result: r1,
                     callee: Callee::direct(target),
                     captures: vec![],
+                    retain: None,
+                    release: None,
                 }));
             let r2 = body.alloc_value(ValueDef::owned(thick_ty));
             body.block_mut(entry)
@@ -412,6 +524,8 @@ mod tests {
                     result: r2,
                     callee: Callee::direct(target),
                     captures: vec![],
+                    retain: None,
+                    release: None,
                 }));
 
             let uv = body.alloc_value(ValueDef::owned(unit_ty));
@@ -529,5 +643,77 @@ mod tests {
             )
         });
         assert!(has_call, "thunk should forward call to target");
+    }
+
+    /// G3: whether params[0] is an env pointer is decided by `FunctionKind`,
+    /// not by the parameter's spelling. A plain `FunctionKind::Free` function
+    /// whose first parameter happens to be named `env` must have BOTH of its
+    /// parameters forwarded, with the env pointer forwarded to neither.
+    /// Under the old name-based rule this thunk forwarded (env_ptr, x) into
+    /// (env: Int64, x: Int64) — a same-count, wrong-type miscompile.
+    #[test]
+    fn env_named_user_param_is_not_an_env_pointer() {
+        let mut module = MirModule::new("test");
+        let i64_ty = module.ty_arena.i64();
+
+        let target = Entity::from_raw(1);
+        module.register_name(target, "combine");
+        add_stub_function(
+            &mut module,
+            target,
+            "combine",
+            i64_ty,
+            vec![
+                ("env".into(), i64_ty, ParamConvention::Consuming),
+                ("x".into(), i64_ty, ParamConvention::Consuming),
+            ],
+        );
+        assert_eq!(module.functions[&target].kind, FunctionKind::Free);
+
+        let caller = Entity::from_raw(2);
+        add_caller_with_apply(&mut module, caller, target);
+
+        let mut next_entity = 100;
+        run_thunk_pass(&mut module, &mut next_entity);
+
+        let thunk = module
+            .functions
+            .values()
+            .find(|f| matches!(&f.kind, FunctionKind::Thunk { .. }))
+            .expect("thunk should be generated");
+        let body = thunk.body.as_ref().unwrap();
+
+        let args = body.blocks[0]
+            .insts
+            .iter()
+            .find_map(|i| match &i.kind {
+                InstKind::Call {
+                    callee: Callee::Direct { func, .. },
+                    args,
+                    ..
+                } if *func == target => Some(args),
+                _ => None,
+            })
+            .expect("thunk should forward a call to the target");
+
+        assert_eq!(
+            args.len(),
+            2,
+            "both user params must be forwarded, not just `x`"
+        );
+        assert_eq!(
+            body.value(args[0].value).ty,
+            i64_ty,
+            "first forwarded arg must be the user's `env: Int64` param, not the env pointer"
+        );
+        assert_eq!(body.value(args[1].value).ty, i64_ty);
+
+        // The env pointer the thunk itself receives is destroyed, not forwarded.
+        let env_param = &thunk.params[0];
+        assert_eq!(env_param.name, "_env");
+        assert!(
+            args.iter().all(|a| a.value != env_param.value),
+            "the thunk's own env pointer must not be forwarded to a Free target"
+        );
     }
 }

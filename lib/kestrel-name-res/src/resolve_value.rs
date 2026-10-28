@@ -3,15 +3,17 @@
 //! Resolves value names (variables, functions, enum cases, etc.) to
 //! entities. Used by HIR lowering for expression paths.
 
+use std::collections::HashSet;
+
 use kestrel_ast_builder::{
     Callable, ConformanceItem, Conformances, Gettable, Name, NodeKind, Static, Typed, WhereClause,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
-use crate::conformances::ConformingProtocols;
-use crate::extensions::ExtensionsFor;
+use crate::helpers::find_in_extensions;
 use crate::resolve_name::{NameResolution, ResolveName};
 use crate::resolve_type::{ResolveTypePath, TypeResolution};
+use crate::type_members::{TypeMemberSource, TypeMembersByName};
 use crate::visibility::VisibleChildrenByName;
 
 // ===== ValueResolution =====
@@ -202,6 +204,26 @@ fn resolve_multi_segment(
             Some(target) => target,
             None => return ValueResolution::SelfNotInScope,
         };
+        // `Self.Item` inside a protocol (or its extension) is the same
+        // implicit-Self associated type as a bare `Item`, not a plain `Def`
+        // of the alias — so it lowers as a projection on Self.
+        if let [_, name] = segments
+            && ctx.get::<NodeKind>(first_entity) == Some(&NodeKind::Protocol)
+            && let Some(assoc) = ctx
+                .query(VisibleChildrenByName {
+                    parent: first_entity,
+                    name: name.clone(),
+                    context,
+                })
+                .iter()
+                .copied()
+                .find(|&e| ctx.get::<NodeKind>(e) == Some(&NodeKind::TypeAlias))
+        {
+            return ValueResolution::AssociatedType {
+                entity: assoc,
+                container: None,
+            };
+        }
         return walk_path_from(ctx, first_entity, segments, context, root);
     }
 
@@ -273,22 +295,19 @@ fn walk_path_from(
     root: Entity,
 ) -> ValueResolution {
     let mut current = first_entity;
+    // Set once a segment walked into an associated type off a param or
+    // projection (`B.Item`): from there on the base matters, and only the
+    // type checker's base-aware lookup can judge a member.
+    let mut via_assoc = false;
     for (i, segment) in segments[1..].iter().enumerate() {
         let is_last = i == segments.len() - 2;
 
-        // Check if current is a type alias → resolve through
-        if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias)
-            && let Some(resolved) = resolve_type_alias_target(ctx, current, context, root)
-        {
-            current = resolved;
-        }
+        // Resolve through type aliases so the lookups below see the target.
+        current = resolve_through_type_alias(ctx, current, context, root);
 
-        // If current is a TypeParameter, look up the segment in its protocol
-        // bounds' associated types. Handles `T.Item`, `T.Next`, etc.
-        if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeParameter)
-            && let Some(found) =
-                crate::resolve_type::resolve_type_param_assoc(ctx, current, segment, context, root)
-        {
+        // Associated types reachable from a type parameter or an abstract
+        // associated type (`T.Item`, `T.Iter.Item`).
+        if let Some(found) = lookup_assoc_type_segment(ctx, current, segment, context, root) {
             if is_last {
                 // Associated type referenced as a value (e.g. `T.Item` as
                 // the receiver of a method call). Handled downstream as a
@@ -299,23 +318,7 @@ fn walk_path_from(
                 };
             }
             current = found;
-            continue;
-        }
-
-        // If current is an abstract associated type (TypeAlias inside a
-        // protocol) with its own protocol bounds, walk through to a nested
-        // associated type. Handles `T.Iter.Item`, `T.Next.Next`, etc.
-        if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias)
-            && let Some(found) =
-                crate::resolve_type::resolve_assoc_type_nested(ctx, current, segment, context, root)
-        {
-            if is_last {
-                return ValueResolution::AssociatedType {
-                    entity: found,
-                    container: Some(current),
-                };
-            }
-            current = found;
+            via_assoc = true;
             continue;
         }
 
@@ -339,65 +342,21 @@ fn walk_path_from(
             continue;
         }
 
-        // No direct children — try extension static methods (only for last segment)
-        if is_last && ctx.has::<Typed>(current) {
-            let extensions = ctx.query(ExtensionsFor {
-                target: current,
-                root,
-            });
-            for &ext in &extensions {
-                let ext_children = ctx.query(VisibleChildrenByName {
-                    parent: ext,
-                    name: segment.clone(),
-                    context,
-                });
-                // Filter to static methods only
-                let static_methods: Vec<Entity> = ext_children
-                    .into_iter()
-                    .filter(|&e| {
-                        ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
-                            && (ctx.has::<Static>(e)
-                                || ctx.get::<Callable>(e).is_some_and(|c| c.receiver.is_none()))
-                    })
-                    .collect();
-                if !static_methods.is_empty() {
-                    return classify_value_results(ctx, static_methods);
-                }
+        // No direct children — try static members declared in extensions.
+        // A static property mid-path (`Meters.zero.v`) is walked into like a
+        // direct field: the next segment reports it as an intermediate value.
+        if ctx.has::<Typed>(current)
+            && let Some(result) =
+                resolve_extension_static_member(ctx, current, segment, context, root)
+        {
+            if is_last {
+                return result;
             }
-
-            // Static methods declared on extensions of protocols `current`
-            // conforms to. Mirrors how instance-method dispatch already walks
-            // conforming protocols (see `try_resolve_through_protocol` in
-            // kestrel-type-infer). Without this, `A.staticMethod()` fails
-            // when `staticMethod` lives in `extend SomeProtocol { ... }` and
-            // `A: SomeProtocol`.
-            let protocols = ctx.query(ConformingProtocols {
-                entity: current,
-                root,
-            });
-            for &proto in &protocols {
-                let proto_extensions = ctx.query(ExtensionsFor {
-                    target: proto,
-                    root,
-                });
-                for &ext in &proto_extensions {
-                    let ext_children = ctx.query(VisibleChildrenByName {
-                        parent: ext,
-                        name: segment.clone(),
-                        context,
-                    });
-                    let static_methods: Vec<Entity> = ext_children
-                        .into_iter()
-                        .filter(|&e| {
-                            ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
-                                && (ctx.has::<Static>(e)
-                                    || ctx.get::<Callable>(e).is_some_and(|c| c.receiver.is_none()))
-                        })
-                        .collect();
-                    if !static_methods.is_empty() {
-                        return classify_value_results(ctx, static_methods);
-                    }
-                }
+            if let ValueResolution::Def(member) = result
+                && ctx.get::<NodeKind>(member) == Some(&NodeKind::Field)
+            {
+                current = member;
+                continue;
             }
         }
 
@@ -419,23 +378,23 @@ fn walk_path_from(
             continue;
         }
 
-        // Check for enum case or field/getter used as intermediate value
-        // (e.g. MyEnum.caseA where caseA has no children to walk into)
-        let segment_index = i + 1; // index in original segments
-        match ctx.get::<NodeKind>(current) {
-            Some(&NodeKind::EnumCase) => {
-                return ValueResolution::EnumCaseValue {
-                    entity: current,
-                    resolved_index: segment_index - 1,
-                };
-            },
-            Some(&NodeKind::Field) if ctx.has::<Gettable>(current) => {
-                return ValueResolution::FieldValue {
-                    entity: current,
-                    resolved_index: segment_index - 1,
-                };
-            },
-            _ => {},
+        // A static member off a projection (`B.Item.zero`) that the
+        // declaration-level search above cannot see — its bound may come
+        // from a where clause (`where B.Item: Zero`). Keep the projection
+        // and let the type checker's base-aware lookup accept or reject it
+        // (G26); falling through here turned the path into a field chain on
+        // `B` ("no member 'Item' on type 'B'").
+        if is_last && via_assoc && ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias) {
+            return ValueResolution::AssociatedTypeStaticMember {
+                entity: current,
+                assoc_type: current,
+            };
+        }
+
+        // Check for enum case or field/getter used as intermediate value;
+        // `i` is the index of the last successfully resolved segment.
+        if let Some(result) = resolve_intermediate_value(ctx, current, i) {
+            return result;
         }
 
         return ValueResolution::NotFound(segment.clone());
@@ -443,6 +402,145 @@ fn walk_path_from(
 
     // Reached the end with a non-terminal entity
     ValueResolution::Def(current)
+}
+
+/// Resolve through a type alias so member lookups see the aliased type.
+/// Non-aliases (and aliases whose target can't be resolved, e.g. abstract
+/// associated types) pass through unchanged.
+fn resolve_through_type_alias(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    context: Entity,
+    root: Entity,
+) -> Entity {
+    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::TypeAlias)
+        && let Some(resolved) = resolve_type_alias_target(ctx, entity, context, root)
+    {
+        return resolved;
+    }
+    entity
+}
+
+/// Look up `segment` as an associated type reachable from `current`: through
+/// a type parameter's protocol bounds (`T.Item`, `T.Next`) or nested through
+/// an abstract associated type — a TypeAlias inside a protocol with its own
+/// bounds (`T.Iter.Item`, `T.Next.Next`). The cases are disjoint on NodeKind.
+fn lookup_assoc_type_segment(
+    ctx: &QueryContext<'_>,
+    current: Entity,
+    segment: &str,
+    context: Entity,
+    root: Entity,
+) -> Option<Entity> {
+    match ctx.get::<NodeKind>(current) {
+        Some(&NodeKind::TypeParameter) => {
+            crate::resolve_type::resolve_type_param_assoc(ctx, current, segment, context, root)
+        },
+        Some(&NodeKind::TypeAlias) => {
+            crate::resolve_type::resolve_assoc_type_nested(ctx, current, segment, context, root)
+        },
+        _ => None,
+    }
+}
+
+/// Is `e` a static member — a static property, or a static callable
+/// (explicitly `static`, or a receiver-less function)?
+fn is_static_member(ctx: &QueryContext<'_>, e: Entity) -> bool {
+    match ctx.get::<NodeKind>(e) {
+        Some(NodeKind::Field) => ctx.has::<Static>(e),
+        Some(NodeKind::Function) => {
+            ctx.has::<Static>(e) || ctx.get::<Callable>(e).is_some_and(|c| c.receiver.is_none())
+        },
+        _ => false,
+    }
+}
+
+/// Static members (methods and properties) on `current`, sourced from `TypeMembersByName` — the one
+/// query that answers "what members does this type have?" It already merges
+/// every extension of the type and every extension of every protocol it
+/// transitively conforms to, so `A.staticMethod()` finds a method living in
+/// `extend SomeProtocol { ... }` where `A: SomeProtocol`, mirroring how
+/// instance-method dispatch walks conforming protocols
+/// (`try_resolve_through_protocol` in kestrel-type-infer).
+///
+/// The result is the **complete** overload set: `HirExpr::OverloadSet` is
+/// built straight from it and inference never re-widens a single `Def`, so
+/// anything dropped here is unrecoverable — splitting one `extend` block in
+/// two used to silently break a call (F10).
+///
+/// Precedence follows the instance-member rule already shipped in
+/// `kestrel_type_infer::resolve_member`: direct and own-extension candidates
+/// compete equally, and a protocol-extension default joins them only when its
+/// **label signature** is not already taken. So a type's own `tag()` wins over
+/// `extend SomeProtocol { static func tag() }` without making the pair
+/// ambiguous, while a protocol default with different labels stays reachable
+/// as an overload. Dropping it wholesale would repeat F10's mistake in the
+/// other direction — name resolution is the last place the set can be widened.
+fn resolve_extension_static_member(
+    ctx: &QueryContext<'_>,
+    current: Entity,
+    segment: &str,
+    context: Entity,
+    root: Entity,
+) -> Option<ValueResolution> {
+    let members = ctx.query(TypeMembersByName {
+        type_entity: current,
+        name: segment.to_string(),
+        context,
+        root,
+    });
+
+    let (own, via_protocol): (Vec<_>, Vec<_>) = members
+        .into_iter()
+        .filter(|m| is_static_member(ctx, m.entity))
+        .partition(|m| !matches!(m.source, TypeMemberSource::ProtocolExtension { .. }));
+
+    let mut seen: HashSet<Vec<Option<String>>> =
+        own.iter().map(|m| label_signature(ctx, m.entity)).collect();
+    let mut candidates: Vec<Entity> = own.iter().map(|m| m.entity).collect();
+    for m in via_protocol {
+        if seen.insert(label_signature(ctx, m.entity)) {
+            candidates.push(m.entity);
+        }
+    }
+
+    if candidates.is_empty() {
+        return None;
+    }
+    Some(classify_value_results(ctx, candidates))
+}
+
+/// A callable's argument labels, the key overload resolution disambiguates on.
+/// Mirrors `label_signature` in kestrel-type-infer; non-callables collapse to
+/// the empty signature so two of them count as the same member.
+fn label_signature(ctx: &QueryContext<'_>, entity: Entity) -> Vec<Option<String>> {
+    ctx.get::<Callable>(entity)
+        .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// Enum case or gettable field used as an intermediate value (e.g.
+/// `MyEnum.caseA.method()` where `caseA` has no children to walk into):
+/// stop the walk and report how far we got; the remaining segments are
+/// resolved against the value's type downstream.
+fn resolve_intermediate_value(
+    ctx: &QueryContext<'_>,
+    current: Entity,
+    resolved_index: usize,
+) -> Option<ValueResolution> {
+    match ctx.get::<NodeKind>(current) {
+        Some(&NodeKind::EnumCase) => Some(ValueResolution::EnumCaseValue {
+            entity: current,
+            resolved_index,
+        }),
+        Some(&NodeKind::Field) if ctx.has::<Gettable>(current) => {
+            Some(ValueResolution::FieldValue {
+                entity: current,
+                resolved_index,
+            })
+        },
+        _ => None,
+    }
 }
 
 /// Classify resolved entities as Def or Overloaded.
@@ -561,20 +659,10 @@ fn resolve_assoc_type_static_member(
             return Some(children[0]);
         }
 
-        // Also check extensions of the protocol
-        let extensions = ctx.query(ExtensionsFor {
-            target: *proto,
-            root,
-        });
-        for &ext in &extensions {
-            let ext_children = ctx.query(VisibleChildrenByName {
-                parent: ext,
-                name: member_name.to_string(),
-                context,
-            });
-            if !ext_children.is_empty() {
-                return Some(ext_children[0]);
-            }
+        // Also check extensions of the protocol (any member kind)
+        let ext_members = find_in_extensions(ctx, *proto, member_name, context, root, |_, _| true);
+        if !ext_members.is_empty() {
+            return Some(ext_members[0]);
         }
     }
 
@@ -623,7 +711,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         // std.core
         let std = world.spawn();

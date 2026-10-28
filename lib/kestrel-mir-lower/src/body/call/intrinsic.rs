@@ -3,7 +3,7 @@ use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExprId};
 use kestrel_mir::inst::InstKind;
 use kestrel_mir::{
-    FloatBits, FloatMathKind, FloatPredicateKind, Immediate, ImmediateKind, IntBits, Op,
+    DivGuard, FloatBits, FloatMathKind, FloatPredicateKind, Immediate, ImmediateKind, IntBits, Op,
     Signedness, ValueId,
 };
 
@@ -52,23 +52,53 @@ static TABLE: &[IntrinsicEntry] = &[
         arity: 2,
     },
     IntrinsicEntry {
+        name: "i8_signed_add_overflows",
+        op: Op::AddOverflows(IntBits::I8, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_unsigned_add_overflows",
+        op: Op::AddOverflows(IntBits::I8, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_signed_sub_overflows",
+        op: Op::SubOverflows(IntBits::I8, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_unsigned_sub_overflows",
+        op: Op::SubOverflows(IntBits::I8, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_signed_mul_overflows",
+        op: Op::MulOverflows(IntBits::I8, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_unsigned_mul_overflows",
+        op: Op::MulOverflows(IntBits::I8, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
         name: "i8_signed_div",
-        op: Op::Div(IntBits::I8, Signedness::Signed),
+        op: Op::Div(IntBits::I8, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i8_signed_rem",
-        op: Op::Rem(IntBits::I8, Signedness::Signed),
+        op: Op::Rem(IntBits::I8, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i8_unsigned_div",
-        op: Op::Div(IntBits::I8, Signedness::Unsigned),
+        op: Op::Div(IntBits::I8, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i8_unsigned_rem",
-        op: Op::Rem(IntBits::I8, Signedness::Unsigned),
+        op: Op::Rem(IntBits::I8, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
@@ -192,23 +222,53 @@ static TABLE: &[IntrinsicEntry] = &[
         arity: 2,
     },
     IntrinsicEntry {
+        name: "i16_signed_add_overflows",
+        op: Op::AddOverflows(IntBits::I16, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_unsigned_add_overflows",
+        op: Op::AddOverflows(IntBits::I16, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_signed_sub_overflows",
+        op: Op::SubOverflows(IntBits::I16, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_unsigned_sub_overflows",
+        op: Op::SubOverflows(IntBits::I16, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_signed_mul_overflows",
+        op: Op::MulOverflows(IntBits::I16, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_unsigned_mul_overflows",
+        op: Op::MulOverflows(IntBits::I16, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
         name: "i16_signed_div",
-        op: Op::Div(IntBits::I16, Signedness::Signed),
+        op: Op::Div(IntBits::I16, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i16_signed_rem",
-        op: Op::Rem(IntBits::I16, Signedness::Signed),
+        op: Op::Rem(IntBits::I16, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i16_unsigned_div",
-        op: Op::Div(IntBits::I16, Signedness::Unsigned),
+        op: Op::Div(IntBits::I16, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i16_unsigned_rem",
-        op: Op::Rem(IntBits::I16, Signedness::Unsigned),
+        op: Op::Rem(IntBits::I16, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
@@ -337,23 +397,53 @@ static TABLE: &[IntrinsicEntry] = &[
         arity: 2,
     },
     IntrinsicEntry {
+        name: "i32_signed_add_overflows",
+        op: Op::AddOverflows(IntBits::I32, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_unsigned_add_overflows",
+        op: Op::AddOverflows(IntBits::I32, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_signed_sub_overflows",
+        op: Op::SubOverflows(IntBits::I32, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_unsigned_sub_overflows",
+        op: Op::SubOverflows(IntBits::I32, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_signed_mul_overflows",
+        op: Op::MulOverflows(IntBits::I32, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_unsigned_mul_overflows",
+        op: Op::MulOverflows(IntBits::I32, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
         name: "i32_signed_div",
-        op: Op::Div(IntBits::I32, Signedness::Signed),
+        op: Op::Div(IntBits::I32, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i32_signed_rem",
-        op: Op::Rem(IntBits::I32, Signedness::Signed),
+        op: Op::Rem(IntBits::I32, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i32_unsigned_div",
-        op: Op::Div(IntBits::I32, Signedness::Unsigned),
+        op: Op::Div(IntBits::I32, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i32_unsigned_rem",
-        op: Op::Rem(IntBits::I32, Signedness::Unsigned),
+        op: Op::Rem(IntBits::I32, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
@@ -482,23 +572,53 @@ static TABLE: &[IntrinsicEntry] = &[
         arity: 2,
     },
     IntrinsicEntry {
+        name: "i64_signed_add_overflows",
+        op: Op::AddOverflows(IntBits::I64, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_unsigned_add_overflows",
+        op: Op::AddOverflows(IntBits::I64, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_signed_sub_overflows",
+        op: Op::SubOverflows(IntBits::I64, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_unsigned_sub_overflows",
+        op: Op::SubOverflows(IntBits::I64, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_signed_mul_overflows",
+        op: Op::MulOverflows(IntBits::I64, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_unsigned_mul_overflows",
+        op: Op::MulOverflows(IntBits::I64, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
         name: "i64_signed_div",
-        op: Op::Div(IntBits::I64, Signedness::Signed),
+        op: Op::Div(IntBits::I64, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i64_signed_rem",
-        op: Op::Rem(IntBits::I64, Signedness::Signed),
+        op: Op::Rem(IntBits::I64, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i64_unsigned_div",
-        op: Op::Div(IntBits::I64, Signedness::Unsigned),
+        op: Op::Div(IntBits::I64, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i64_unsigned_rem",
-        op: Op::Rem(IntBits::I64, Signedness::Unsigned),
+        op: Op::Rem(IntBits::I64, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
@@ -881,6 +1001,175 @@ static TABLE: &[IntrinsicEntry] = &[
         op: Op::FloatWiden(FloatBits::F32, FloatBits::F64),
         arity: 1,
     },
+    // Casts between every integer width/signedness pair and between signed
+    // integers and floats (the seeder's `cast_<from>_<to>` cross product;
+    // `seed_cast_ops` skips the pairs no `Op` can express). The SOURCE's
+    // signedness picks sign- vs zero-extension, as in the rows above.
+    IntrinsicEntry {
+        name: "cast_f32_i16",
+        op: Op::FloatToInt(FloatBits::F32, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f32_i8",
+        op: Op::FloatToInt(FloatBits::F32, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f64_i16",
+        op: Op::FloatToInt(FloatBits::F64, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f64_i32",
+        op: Op::FloatToInt(FloatBits::F64, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f64_i8",
+        op: Op::FloatToInt(FloatBits::F64, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_f32",
+        op: Op::IntToFloat(IntBits::I16, FloatBits::F32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_f64",
+        op: Op::IntToFloat(IntBits::I16, FloatBits::F64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_u32",
+        op: Op::IntWiden(IntBits::I16, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_u64",
+        op: Op::IntWiden(IntBits::I16, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_u8",
+        op: Op::IntTruncate(IntBits::I16, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i32_u16",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i32_u64",
+        op: Op::IntWiden(IntBits::I32, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i32_u8",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i64_u16",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i64_u32",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i64_u8",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_f32",
+        op: Op::IntToFloat(IntBits::I8, FloatBits::F32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_f64",
+        op: Op::IntToFloat(IntBits::I8, FloatBits::F64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_u16",
+        op: Op::IntWiden(IntBits::I8, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_u32",
+        op: Op::IntWiden(IntBits::I8, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_u64",
+        op: Op::IntWiden(IntBits::I8, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u16_u32",
+        op: Op::IntUnsignedWiden(IntBits::I16, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u16_u64",
+        op: Op::IntUnsignedWiden(IntBits::I16, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u16_u8",
+        op: Op::IntTruncate(IntBits::I16, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u32_u16",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u32_u64",
+        op: Op::IntUnsignedWiden(IntBits::I32, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u32_u8",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u64_u16",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u64_u32",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u64_u8",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u8_u16",
+        op: Op::IntUnsignedWiden(IntBits::I8, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u8_u32",
+        op: Op::IntUnsignedWiden(IntBits::I8, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u8_u64",
+        op: Op::IntUnsignedWiden(IntBits::I8, IntBits::I64),
+        arity: 1,
+    },
     IntrinsicEntry {
         name: "cast_f64_f32",
         op: Op::FloatTruncate(FloatBits::F64, FloatBits::F32),
@@ -957,6 +1246,26 @@ static TABLE: &[IntrinsicEntry] = &[
         arity: 2,
     },
     IntrinsicEntry {
+        name: "f32_to_bits",
+        op: Op::FloatToBits(FloatBits::F32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "f64_to_bits",
+        op: Op::FloatToBits(FloatBits::F64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "f32_from_bits",
+        op: Op::BitsToFloat(FloatBits::F32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "f64_from_bits",
+        op: Op::BitsToFloat(FloatBits::F64),
+        arity: 1,
+    },
+    IntrinsicEntry {
         name: "f32_is_nan",
         op: Op::FloatPred(FloatBits::F32, FloatPredicateKind::IsNan),
         arity: 1,
@@ -1017,6 +1326,112 @@ static TABLE: &[IntrinsicEntry] = &[
         arity: 2,
     },
 ];
+
+/// Split a `<base>_unchecked` intrinsic name into its base entry name and the
+/// guard flag. `<base>_unchecked` reuses the base div/rem `TABLE` entry with its
+/// guards dropped, rather than 16 near-duplicate rows, so it stays in lockstep
+/// with the checked entries.
+///
+/// A function rather than an inline `strip_suffix` because the coverage test
+/// below must resolve names exactly the way `try_intrinsic` does — reading the
+/// rule off the source text instead reported all 16 `_unchecked` names as
+/// unlowerable when every one of them works.
+fn split_unchecked(name: &str) -> (&str, bool) {
+    match name.strip_suffix("_unchecked") {
+        Some(base) => (base, true),
+        None => (name, false),
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::split_unchecked;
+    use kestrel_ast_builder::{Name, NodeKind, seed_lang_module};
+    use kestrel_hecs::{Entity, World};
+
+    /// Every name `seed_lang_module` declares under `lang.`, collected by
+    /// actually running the seeder — the seeder builds names with cross-product
+    /// loops, so there is no static list to read.
+    fn seeded_intrinsic_names() -> Vec<String> {
+        let mut world = World::new();
+        let root = world.spawn();
+        let lang = seed_lang_module(&mut world, root);
+
+        let mut names = Vec::new();
+        let mut stack: Vec<Entity> = world.children_of(lang).to_vec();
+        while let Some(e) = stack.pop() {
+            stack.extend_from_slice(world.children_of(e));
+            if world.get::<NodeKind>(e) != Some(&NodeKind::Function) {
+                continue;
+            }
+            if let Some(Name(n)) = world.get::<Name>(e) {
+                names.push(n.clone());
+            }
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// Every `lang.*` intrinsic the AST builder declares must be reachable by
+    /// `try_intrinsic`, which dispatches on the name through several `match`
+    /// blocks plus the `TABLE` fallback.
+    ///
+    /// The check is "does this name appear as a string literal in this file",
+    /// deliberately: the two sides are a cross-product loop in
+    /// `kestrel-ast-builder/src/lang_module.rs` and hand-written arms here, and
+    /// nothing else relates them. A name absent from this source cannot
+    /// possibly be lowered, so the test cannot fail spuriously.
+    ///
+    /// A seeded name that reaches no arm makes `try_intrinsic` return `None`;
+    /// the call stays a `Callee::Direct` to a bodyless `Intrinsic` entity and
+    /// dies at post-mono verification. Verified against `lang.cast_i64_u8`:
+    ///
+    /// ```text
+    /// bug: internal compiler error: post-mono verify failed in
+    /// '_K0N4_Test4_mainERi8' at bb0[4]: Call Callee::Direct not resolved to
+    /// Callee::Resolved (callee='lang.cast_i64_u8' ...)
+    /// ```
+    ///
+    /// So this fails loudly rather than miscompiling — but it is an ICE where
+    /// a diagnostic belongs, and the seeder advertises 121 intrinsics that
+    /// cannot be called. Either lower them or stop seeding them.
+    #[test]
+    fn every_seeded_intrinsic_has_a_lowering() {
+        let source = include_str!("intrinsic.rs");
+        let seeded = seeded_intrinsic_names();
+        assert!(
+            seeded.len() > 50,
+            "seeder produced only {} names — the walk is broken",
+            seeded.len()
+        );
+
+        let missing: Vec<&String> = seeded
+            .iter()
+            .filter(|n| {
+                // Resolve the name the way `try_intrinsic` does before looking
+                // for it, or every `_unchecked` name reads as unlowerable.
+                let (base, _) = split_unchecked(n);
+                !source.contains(&format!("\"{base}\""))
+            })
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "{} of {} seeded `lang.*` intrinsics have no lowering arm in \
+             kestrel-mir-lower/src/body/call/intrinsic.rs — calling any of \
+             these ICEs at post-mono verify (Callee::Direct not resolved). \
+             Either add a lowering arm or stop seeding the name:\n  {}",
+            missing.len(),
+            seeded.len(),
+            missing
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+    }
+}
 
 pub(crate) fn try_intrinsic(
     bctx: &mut OssaBodyCtx,
@@ -1111,6 +1526,14 @@ pub(crate) fn try_intrinsic(
             bctx.track_borrow(view);
             return Some(view);
         },
+        "ptr_take" => {
+            // Consuming move-out of the pointee → a MIR `Take` (owned, memcpy
+            // into a fresh slot). Emitted at lowering, after the move checker,
+            // so producing an @owned non-Copyable value here is legal (no E503).
+            let ty_arg = *type_args.first()?;
+            let arg = bctx.lower_expr(args.first()?.value);
+            return Some(bctx.emit_take(arg, ty_arg));
+        },
         "ptr_mut_borrow" => {
             // Mutable by-reference view of the pointee. Lowered exactly like
             // `ptr_read`: a @guaranteed `Op1(PtrRead)` whose result "represents
@@ -1132,12 +1555,41 @@ pub(crate) fn try_intrinsic(
             bctx.track_borrow(view);
             return Some(view);
         },
+        "ptr_ref" | "ptr_mut_ref" => {
+            // Stage-1 reference bridge: a borrow view of the pointee, shaped
+            // exactly like `ptr_mut_borrow` above, plus THE provenance stamp —
+            // PointerDerived is the escape-checker root that may escape
+            // returns ("inherits the pointer's contract", gaps §10.3). The
+            // result type is already the PEELED pointee (expression types
+            // never carry MirTy::Ref).
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let arg = bctx.lower_expr(args.first()?.value);
+            let view = bctx.alloc_guaranteed(result_ty, arg);
+            bctx.stamp_root(
+                view,
+                kestrel_mir::value::RootProvenance::PointerDerived {
+                    mutable: name == "ptr_mut_ref",
+                },
+            );
+            bctx.push_inst(InstKind::Op1 {
+                result: view,
+                op: Op::PtrRead(ty_arg),
+                arg,
+            });
+            bctx.track_borrow(view);
+            // Direct `lang.ptr_ref(..)` calls get the same single-use ref
+            // lifetime machinery as ret_borrow call results.
+            bctx.ref_results.insert(view);
+            return Some(view);
+        },
         "drop_in_place" => {
             let ty_arg = *type_args.first()?;
             let arg = bctx.lower_expr(args.first()?.value);
             bctx.push_inst(kestrel_mir::inst::InstKind::DestroyAddr {
                 address: arg,
                 ty: ty_arg,
+                user_deinit: false,
             });
             return Some(bctx.emit_literal(Immediate::unit()));
         },
@@ -1165,24 +1617,34 @@ pub(crate) fn try_intrinsic(
         _ => {},
     }
 
-    let entry = TABLE.iter().find(|e| e.name == name)?;
+    let (lookup_name, unchecked) = split_unchecked(name.as_str());
+    let entry = TABLE.iter().find(|e| e.name == lookup_name)?;
+    let op = if unchecked {
+        match entry.op {
+            Op::Div(b, s, _) => Op::Div(b, s, DivGuard::Unchecked),
+            Op::Rem(b, s, _) => Op::Rem(b, s, DivGuard::Unchecked),
+            other => other,
+        }
+    } else {
+        entry.op
+    };
     let result_ty = bctx.resolve_expr_type(expr_id);
 
     match entry.arity {
         1 => {
             let arg = bctx.lower_expr(args.first()?.value);
-            Some(bctx.emit_op1(entry.op, arg, result_ty))
+            Some(bctx.emit_op1(op, arg, result_ty))
         },
         2 => {
             let lhs = bctx.lower_expr(args.first()?.value);
             let rhs = bctx.lower_expr(args.get(1)?.value);
-            Some(bctx.emit_op2(entry.op, lhs, rhs, result_ty))
+            Some(bctx.emit_op2(op, lhs, rhs, result_ty))
         },
         3 => {
             let a = bctx.lower_expr(args.first()?.value);
             let b = bctx.lower_expr(args.get(1)?.value);
             let c = bctx.lower_expr(args.get(2)?.value);
-            Some(bctx.emit_op3(entry.op, a, b, c, result_ty))
+            Some(bctx.emit_op3(op, a, b, c, result_ty))
         },
         _ => None,
     }

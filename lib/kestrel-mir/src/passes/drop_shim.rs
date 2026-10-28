@@ -9,8 +9,8 @@ use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
 use crate::terminator::{SwitchArm, Terminator, TerminatorKind};
 use crate::ty::{MirTy, ParamConvention};
-use crate::value::{Ownership, ValueDef};
-use crate::{DropBehavior, FieldIdx, Immediate, MirModule, TyId};
+use crate::value::{Ownership, RootProvenance, ValueDef};
+use crate::{DropBehavior, FieldIdx, Immediate, MirModule, TyId, ValueId};
 
 /// Synthesize `__drop$T` functions for all types that need cleanup.
 /// Adds the generated functions to `module.functions`.
@@ -117,6 +117,18 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
         }
     }
 
+    // Store the decision: nominal → its `__drop$T`. Mono collection reads this
+    // instead of scanning every function for a matching `FunctionKind::DropShim`
+    // (F7). Distinct from `type_info.drop`, which is the field-by-field recipe
+    // this function runs.
+    for (&type_entity, &shim_entity) in &shim_map {
+        if let Some(s) = module.structs.get_mut(&type_entity) {
+            s.type_info.drop_impl = Some(shim_entity);
+        } else if let Some(e) = module.enums.get_mut(&type_entity) {
+            e.type_info.drop_impl = Some(shim_entity);
+        }
+    }
+
     patch_shim_callees(module, &shim_map);
 }
 
@@ -174,7 +186,7 @@ fn generate_struct_shim(
     let mut field_type_entities = Vec::new();
 
     // %self = entry block param, @owned
-    let self_val = body.alloc_value(ValueDef::owned(self_ty));
+    let mut self_val = body.alloc_value(ValueDef::owned(self_ty));
     body.param_count = 1;
 
     let entry = body.alloc_block();
@@ -202,22 +214,14 @@ fn generate_struct_shim(
                 // have &MirModule. We'll need to intern it before calling.
                 panic!("Pointer({self_ty:?}) not interned; pre-intern pointer types before shim synthesis");
             });
-        let borrow_val = body.alloc_value(ValueDef::guaranteed(ptr_ty, self_val));
-        insts.push(Instruction::new(InstKind::BeginMutBorrow {
-            result: borrow_val,
-            operand: self_val,
-        }));
-        insts.push(Instruction::new(InstKind::Call {
-            result: None,
-            callee: Callee::direct_with_args(*deinit_entity, tp_ty_ids.clone(), None),
-            args: vec![CallArg {
-                value: borrow_val,
-                convention: ParamConvention::MutBorrow,
-            }],
-        }));
-        insts.push(Instruction::new(InstKind::EndMutBorrow {
-            operand: borrow_val,
-        }));
+        self_val = emit_deinit_call(
+            &mut body,
+            &mut insts,
+            self_val,
+            self_ty,
+            ptr_ty,
+            Callee::direct_with_args(*deinit_entity, tp_ty_ids.clone(), None),
+        );
     }
 
     // 2. Destructure struct — consumes self, produces per-field values.
@@ -234,6 +238,7 @@ fn generate_struct_shim(
             ty: field_def.ty,
             ownership,
             borrow_source: None,
+            root: RootProvenance::derived(),
             span: None,
         }));
     }
@@ -244,8 +249,11 @@ fn generate_struct_shim(
 
     // 3. Destroy all fields — droppable fields trigger transitive drop shims,
     //    non-droppable fields must still be consumed since all values are @owned.
+    //    Fields drop in REVERSE declaration order (docs/memory-model/drop-semantics.md);
+    //    DestructureStruct results stay positional, only the destroy order reverses.
+    //    This matches the init-failure partial-drop path (mir-lower emit_init_partial_drops).
     let droppable_set: std::collections::HashSet<FieldIdx> = fields.iter().copied().collect();
-    for (i, fv) in field_vals.iter().enumerate() {
+    for (i, fv) in field_vals.iter().enumerate().rev() {
         let fi = FieldIdx::new(i);
         let field_ty = struct_def.fields[i].ty;
         insts.push(Instruction::new(InstKind::DestroyValue { operand: *fv }));
@@ -321,7 +329,7 @@ fn generate_enum_shim(
     let mut field_type_entities = Vec::new();
 
     // %self = entry block param, @owned
-    let self_val = body.alloc_value(ValueDef::owned(self_ty));
+    let mut self_val = body.alloc_value(ValueDef::owned(self_ty));
     body.param_count = 1;
 
     let entry = body.alloc_block();
@@ -340,22 +348,14 @@ fn generate_enum_shim(
             .ty_arena
             .find(|t| matches!(t, MirTy::Pointer(p) if *p == self_ty))
             .expect("Pointer type should be interned");
-        let borrow_val = body.alloc_value(ValueDef::guaranteed(ptr_ty, self_val));
-        entry_insts.push(Instruction::new(InstKind::BeginMutBorrow {
-            result: borrow_val,
-            operand: self_val,
-        }));
-        entry_insts.push(Instruction::new(InstKind::Call {
-            result: None,
-            callee: Callee::direct_with_args(*deinit_entity, tp_ty_ids.clone(), None),
-            args: vec![CallArg {
-                value: borrow_val,
-                convention: ParamConvention::MutBorrow,
-            }],
-        }));
-        entry_insts.push(Instruction::new(InstKind::EndMutBorrow {
-            operand: borrow_val,
-        }));
+        self_val = emit_deinit_call(
+            &mut body,
+            &mut entry_insts,
+            self_val,
+            self_ty,
+            ptr_ty,
+            Callee::direct_with_args(*deinit_entity, tp_ty_ids.clone(), None),
+        );
     }
 
     // Discriminant — non-consuming read of the tag
@@ -427,6 +427,7 @@ fn generate_enum_shim(
                 ty: pf.ty,
                 ownership,
                 borrow_source: None,
+                root: RootProvenance::derived(),
                 span: None,
             }));
         }
@@ -438,7 +439,8 @@ fn generate_enum_shim(
 
         // Destroy all payload fields — droppable fields trigger transitive shims,
         // non-droppable fields must still be consumed since all values are @owned.
-        for (i, pv) in payload_vals.iter().enumerate() {
+        // Reverse declaration order, matching struct fields (drop-semantics.md).
+        for (i, pv) in payload_vals.iter().enumerate().rev() {
             let fi = FieldIdx::new(i);
             let field_ty = case_def.payload_fields[i].ty;
             variant_insts.push(Instruction::new(InstKind::DestroyValue { operand: *pv }));
@@ -555,6 +557,55 @@ pub fn find_drop_shim(module: &MirModule, type_entity: Entity) -> Option<Entity>
         .map(|f| f.entity)
 }
 
+/// Call `deinit` on `self_val` and return the value to drop afterwards.
+/// `deinit` takes `mutating self`, so self is stored to a frame slot and
+/// borrowed by address: writes the deinit makes (e.g. reassigning a field)
+/// land in that slot and are taken back out. Borrowing the SSA value directly
+/// let a backend spill a scalar-sized self to a temporary it never reloaded,
+/// so the field drops saw the stale value (a double drop plus a leak).
+fn emit_deinit_call(
+    body: &mut OssaBody,
+    insts: &mut Vec<Instruction>,
+    self_val: ValueId,
+    self_ty: TyId,
+    ptr_ty: TyId,
+    deinit: Callee,
+) -> ValueId {
+    let slot = body.alloc_value(ValueDef::owned(ptr_ty));
+    insts.push(Instruction::new(InstKind::Uninit {
+        result: slot,
+        ty: self_ty,
+    }));
+    insts.push(Instruction::new(InstKind::StoreInit {
+        address: slot,
+        value: self_val,
+    }));
+    let borrow = body.alloc_value(ValueDef::guaranteed(self_ty, slot));
+    insts.push(Instruction::new(InstKind::BeginMutBorrowAddr {
+        result: borrow,
+        address: slot,
+        ty: self_ty,
+    }));
+    insts.push(Instruction::new(InstKind::Call {
+        result: None,
+        callee: deinit,
+        args: vec![CallArg {
+            value: borrow,
+            convention: ParamConvention::MutBorrow,
+        }],
+    }));
+    insts.push(Instruction::new(InstKind::EndBorrow { operand: borrow }));
+    let after = body.alloc_value(ValueDef::owned(self_ty));
+    insts.push(Instruction::new(InstKind::Take {
+        result: after,
+        address: slot,
+        ty: self_ty,
+        independent: true,
+    }));
+    insts.push(Instruction::new(InstKind::DestroyValue { operand: slot }));
+    after
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,6 +652,7 @@ mod tests {
                 fields: vec![],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(inner_def);
 
@@ -617,6 +669,7 @@ mod tests {
                 fields: vec![FieldIdx::new(0)],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(outer_def);
 
@@ -669,6 +722,7 @@ mod tests {
                 fields: vec![],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(inner_def);
 
@@ -689,16 +743,23 @@ mod tests {
                 fields: vec![FieldIdx::new(0)],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(my_def);
 
-        // Add a stub FunctionDef for the deinit so the module is consistent
+        // Add a stub FunctionDef for the deinit so the module is consistent.
+        // A real deinit declares `mutating self` (mir-lower `function_sig.rs`)
+        // and the shim forwards a mut borrow to it — declaring it here keeps
+        // the stub's arity honest for `verify_ossa`'s call-arity check.
         let deinit_unit = module.ty_arena.unit();
-        module.add_function(FunctionDef::new(
-            deinit_entity,
-            "MyType.deinit",
-            deinit_unit,
+        let mut deinit = FunctionDef::new(deinit_entity, "MyType.deinit", deinit_unit);
+        deinit.params.push(crate::item::function::ParamDef::new(
+            "self",
+            crate::ValueId::new(0),
+            my_ty,
+            crate::ty::ParamConvention::MutBorrow,
         ));
+        module.add_function(deinit);
 
         let mut next_entity = 100;
         synthesize_drop_shims(&mut module, &mut next_entity);
@@ -706,20 +767,22 @@ mod tests {
         let shim = find_shim_by_name(&module, "__drop$MyType");
         let body = shim.body.as_ref().unwrap();
 
-        // Should have: BeginMutBorrow, Call(deinit), EndMutBorrow, DestructureStruct, DestroyValue, Literal
+        // Should have: Uninit/StoreInit slot, BeginMutBorrowAddr, Call(deinit),
+        // EndBorrow, Take, then the field drops. `deinit` mutates the slot so
+        // its field writes reach the drops.
         let has_borrow = body.blocks[0]
             .insts
             .iter()
-            .any(|i| matches!(&i.kind, InstKind::BeginMutBorrow { .. }));
+            .any(|i| matches!(&i.kind, InstKind::BeginMutBorrowAddr { .. }));
         let has_call = body.blocks[0].insts.iter()
             .any(|i| matches!(&i.kind, InstKind::Call { callee: Callee::Direct { func, .. }, .. } if *func == deinit_entity));
         let has_end_borrow = body.blocks[0]
             .insts
             .iter()
-            .any(|i| matches!(&i.kind, InstKind::EndMutBorrow { .. }));
-        assert!(has_borrow, "should have BeginMutBorrow");
+            .any(|i| matches!(&i.kind, InstKind::EndBorrow { .. }));
+        assert!(has_borrow, "should have BeginMutBorrowAddr");
         assert!(has_call, "should have deinit Call");
-        assert!(has_end_borrow, "should have EndMutBorrow");
+        assert!(has_end_borrow, "should have EndBorrow");
 
         verify_shim(&module, shim);
     }
@@ -745,6 +808,7 @@ mod tests {
                 fields: vec![],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(inner_def);
 
@@ -765,6 +829,7 @@ mod tests {
                 variants: vec![(VariantIdx::new(0), vec![FieldIdx::new(0)])],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_enum(enum_def);
 
@@ -803,6 +868,7 @@ mod tests {
                 fields: vec![],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(c_def);
 
@@ -818,6 +884,7 @@ mod tests {
                 fields: vec![FieldIdx::new(0)],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(b_def);
 
@@ -833,6 +900,7 @@ mod tests {
                 fields: vec![FieldIdx::new(0)],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(a_def);
 
@@ -893,12 +961,23 @@ mod tests {
                 fields: vec![],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(s_def);
 
-        // Stub deinit function
+        // Stub deinit function. A real deinit declares `mutating self` (see
+        // mir-lower `function_sig.rs`) and the shim forwards a mut borrow to
+        // it, so the stub must declare it too or the module is inconsistent
+        // and `verify_ossa`'s call-arity check rightly rejects the shim.
         let unit_ty = module.ty_arena.unit();
-        module.add_function(FunctionDef::new(deinit_entity, "Handle.deinit", unit_ty));
+        let mut deinit = FunctionDef::new(deinit_entity, "Handle.deinit", unit_ty);
+        deinit.params.push(crate::item::function::ParamDef::new(
+            "self",
+            crate::ValueId::new(0),
+            s_ty,
+            crate::ty::ParamConvention::MutBorrow,
+        ));
+        module.add_function(deinit);
 
         let mut next_entity = 100;
         synthesize_drop_shims(&mut module, &mut next_entity);

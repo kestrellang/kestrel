@@ -2,7 +2,7 @@
 //!
 //! Tracks non-copyable value moves through control flow and reports
 //! use-after-move / maybe-moved errors. Mirrors lib1's `move_tracker` design
-//! on top of lib's HIR/TypedBody: per-local move state, CFG-join on
+//! on top of lib's HIR/TypedBody: place-keyed move state, CFG-join on
 //! if/else/match/loop, `consuming` parameter arguments and `consuming self`
 //! receivers as move triggers.
 //!
@@ -36,6 +36,7 @@
 //!
 //! **Notes:** "value was moved in one branch but not another"
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use kestrel_ast::AstType;
@@ -43,6 +44,7 @@ use kestrel_ast_builder::{
     Callable, ConformanceItem, Conformances, NodeKind, ReceiverKind, WhereClause as AstWhereClause,
     WhereConstraint,
 };
+use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
@@ -52,11 +54,15 @@ use kestrel_semantics::{
     ConditionalCopyableParams, CopyRequirement, CopySemantics, ExplicitlyNegatesProtocol,
     NominalCopySemantics, TypeParamCopyRequirement,
 };
+use kestrel_type_infer::captures::{ProjElem, place_key_of};
 use kestrel_type_infer::result::ResolvedTy;
+use kestrel_type_infer::{CaptureKind, ClosureCaptureMap, ClosureCaptures, PlaceKey};
+use std::sync::Arc;
 
+use crate::body::control_flow;
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -78,13 +84,53 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E506",
+        name: "move_captured_out_of_closure",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    // The FREEZE RULE (docs/design/closures.md §"The freeze rule"; plan D8).
+    // While a live view-kind closure carries a view of a place, that place is
+    // frozen against DESTRUCTION — the closure analogue of E498 ("cannot
+    // consume a value while a reference into it is live").
+    DiagnosticDescriptor {
+        id: "E507",
+        name: "freeze_violation",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    // A reference (`&x`, possibly inside a struct or enum value) stored into a
+    // binding that outlives `x`: the reference analogue of E507's
+    // `Outlives` reason. Returns are checked by the MIR escape check (E494).
+    DiagnosticDescriptor {
+        id: "E509",
+        name: "reference_outlives_referent",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    // One call both borrows and consumes the same non-Copyable value.
+    DiagnosticDescriptor {
+        id: "E510",
+        name: "consumed_while_lent_to_call",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    // A field moved out of a value whose type has a `deinit`: taking the
+    // value apart would skip the deinit.
+    DiagnosticDescriptor {
+        id: "E511",
+        name: "field_move_out_of_deinit_type",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct MoveTrackingAnalyzer;
 
 impl Describe for MoveTrackingAnalyzer {
-    fn id(&self) -> &'static str {
-        "move_tracking"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::MoveTracking
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -102,20 +148,47 @@ impl BodyCheck for MoveTrackingAnalyzer {
             root: cx.root,
         });
 
+        // Place-based capture plan (single source of truth, post-inference).
+        // The move checker uses it to model a non-Copyable value captured BY
+        // VALUE into a closure as a move of its effective MIR place.
+        let captures = cx.query.query(ClosureCaptures {
+            entity: cx.entity,
+            root: cx.root,
+        });
+
         let mcx = MoveCtx {
             cx,
             copyable: copyable_entity,
             borrow_bound: compute_borrow_bound(cx),
+            captures,
+            captured_borrow: HashSet::new(),
         };
         let mut diags = Vec::new();
         let state = State::empty();
-        let _ = analyze_block(
+        let mut end = analyze_block(
             &mcx,
             &cx.hir.statements,
             cx.hir.tail_expr,
             state,
             &mut diags,
         );
+        // The body's tail is returned by value.
+        if let Some(tail) = cx.hir.tail_expr {
+            check_field_move_out(&mcx, &mut end, &mut diags, tail);
+        }
+        // Falling off the end is an exit too (`return` checks its own).
+        let end_span = cx
+            .hir
+            .tail_expr
+            .map(|t| util::expr_span(cx.hir, t))
+            .or_else(|| {
+                cx.query
+                    .get::<kestrel_ast_builder::DeclSpan>(cx.entity)
+                    .map(|d| d.0.clone())
+            });
+        if let Some(span) = end_span {
+            check_mutating_params_restored(&mcx, &mut end, &mut diags, span);
+        }
         diags
     }
 }
@@ -137,14 +210,68 @@ struct MoveInfo {
     site: HirExprId,
 }
 
+/// What a live view-kind closure records about one frozen place.
+#[derive(Clone, Debug)]
+struct FreezeInfo {
+    /// The frozen place rendered for the message (`r`, `r.v`, `p.a`).
+    name: String,
+    /// Lexical depth of the scope the captured place's ROOT was declared in.
+    /// Storing a value that carries this view into a binding declared at a
+    /// SHALLOWER depth would let the view outlive its referent (plan D8's
+    /// scope-depth rule — the review's silent use-after-free counterexample).
+    captured_scope_depth: usize,
+    /// The closure literal that created the view — the secondary label.
+    closure_span: kestrel_span::Span,
+}
+
+/// Why a place is being destroyed at a freeze-violation site — selects the
+/// E507 wording (plan D8: "variants for move / consuming-arg / deinit /
+/// outlives-scope").
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FreezeReason {
+    /// `let moved = r;` / `return r;` / stored into an aggregate.
+    Move,
+    /// Passed to a `consuming` parameter or a `consuming self` receiver.
+    Consume,
+    /// `deinit r;`
+    Deinit,
+    /// The view was stored into a binding that outlives the viewed place.
+    Outlives,
+}
+
 #[derive(Clone, Debug)]
 struct State {
-    moves: HashMap<LocalId, MoveInfo>,
+    moves: HashMap<PlaceKey, MoveInfo>,
     /// Locals already reported once in this body. Subsequent reads don't
     /// re-emit — matches the "one error per offending variable" convention
     /// the tests expect.
     reported: HashSet<LocalId>,
     diverged: bool,
+    /// Lexical block nesting depth. Function/closure params sit at 0, the
+    /// body's own block at 1, each nested block one deeper. Threaded through
+    /// `State` rather than as a parameter because every walker function
+    /// already takes `State` by value.
+    depth: usize,
+    /// Declaration depth per local (`let`/`var` statements). Absent = 0, the
+    /// outermost scope: params and pattern bindings read as long-lived, which
+    /// makes the outlives rule *under*-strict rather than false-positive.
+    local_depth: HashMap<LocalId, usize>,
+    /// Places frozen against destruction by a live view-kind closure. Keyed by
+    /// the captured PLACE, not its root: `{ self.data }` freezes `self.data`,
+    /// not all of `self`. Lexically scoped — `analyze_block` snapshots and
+    /// restores it (see `restore_frozen`).
+    frozen: HashMap<PlaceKey, FreezeInfo>,
+    /// Which locals may CARRY a view. Copying a view closure, or storing it
+    /// into an aggregate, unions the source's frozen places onto the
+    /// destination binding, so the freeze survives as long as any carrier does
+    /// (design: "every binding or temporary that may carry the view extends
+    /// the freeze to the end of its own lexical extent").
+    carriers: HashMap<LocalId, Vec<PlaceKey>>,
+    /// Freeze violations already reported, keyed by the FROZEN place's root.
+    /// Deliberately separate from `reported`: that set is shared across
+    /// E500/E501/E503/E506, so reusing it would let an unrelated move
+    /// diagnostic swallow the freeze error (or vice versa).
+    freeze_reported: HashSet<LocalId>,
 }
 
 impl State {
@@ -153,6 +280,11 @@ impl State {
             moves: HashMap::new(),
             reported: HashSet::new(),
             diverged: false,
+            depth: 0,
+            local_depth: HashMap::new(),
+            frozen: HashMap::new(),
+            carriers: HashMap::new(),
+            freeze_reported: HashSet::new(),
         }
     }
 }
@@ -170,6 +302,14 @@ struct MoveCtx<'a> {
     /// function of the binding's pattern, not the dataflow), so it's computed
     /// once up front rather than threaded through `State`.
     borrow_bound: HashSet<LocalId>,
+    /// Per-closure place-based capture plan. A non-Copyable Read capture moves
+    /// its effective MIR place into the closure environment.
+    captures: Arc<ClosureCaptureMap>,
+    /// Captured non-Copyable roots being analyzed *inside the current closure
+    /// body*. Moving one OUT of the body (return/consume/rebind-and-escape) is
+    /// E506 — a closure may be called more than once but owns a single
+    /// non-Copyable value. Empty for the top-level (non-closure) analysis.
+    captured_borrow: HashSet<LocalId>,
 }
 
 // ===== Walker (shape modelled on definite_assignment.rs) =====
@@ -181,18 +321,60 @@ fn analyze_block(
     mut state: State,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) -> State {
+    // A block is THE lexical endpoint of the freeze rule: the design's freeze
+    // "runs to the end of the extent of every binding that may carry the
+    // view". This is the single snapshot/restore point — every one of the
+    // walker's block entries (top level, if/else arms, loop body + back edge,
+    // block expressions, closure bodies) routes through here.
+    let outer_depth = state.depth;
+    let entry_frozen = state.frozen.clone();
+    state.depth = outer_depth + 1;
+
     for &stmt_id in stmts {
         if state.diverged {
             break;
         }
+        // A statement is the extent of its temporaries: a freeze it created
+        // that no binding carries (`let n = { r.v }();`) ends here, not at
+        // the end of the block.
+        let stmt_entry_frozen = state.frozen.clone();
         state = analyze_stmt(mcx, stmt_id, state, diags);
+        state.frozen = restore_frozen(stmt_entry_frozen, &state, usize::MAX);
     }
     if !state.diverged
         && let Some(tail) = tail
     {
         state = analyze_expr(mcx, tail, state, false, diags);
     }
+
+    state.depth = outer_depth;
+    state.frozen = restore_frozen(entry_frozen, &state, outer_depth + 1);
     state
+}
+
+/// Freeze endpoints at block exit: everything frozen on entry stays frozen,
+/// plus any freeze the block introduced that a binding declared OUTSIDE the
+/// block may still carry (`var g` assigned a view inside an `if`). Freezes
+/// carried only by bindings that just died are dropped — that is what makes
+/// `memory_model/closure_kinds/view/freeze_ends_at_scope_exit.ks` legal.
+fn restore_frozen(
+    mut entry: HashMap<PlaceKey, FreezeInfo>,
+    state: &State,
+    exited_depth: usize,
+) -> HashMap<PlaceKey, FreezeInfo> {
+    for (place, info) in &state.frozen {
+        if entry.contains_key(place) {
+            continue;
+        }
+        let carried_outside = state.carriers.iter().any(|(local, places)| {
+            state.local_depth.get(local).copied().unwrap_or(0) < exited_depth
+                && places.contains(place)
+        });
+        if carried_outside {
+            entry.insert(place.clone(), info.clone());
+        }
+    }
+    entry
 }
 
 fn analyze_stmt(
@@ -205,18 +387,25 @@ fn analyze_stmt(
         HirStmt::Let { local, value, .. } => {
             if let Some(val) = value {
                 state = analyze_expr(mcx, *val, state, false, diags);
-                // A `let b = x` on a non-Copyable `x` moves `x` into `b`.
-                // Only simple Local-on-RHS triggers a move — field/method/call
-                // RHS is never a partial move (matches lib1).
-                if let Some(src) = rhs_local(mcx.cx.hir, *val)
-                    && local_is_non_copyable(mcx, src)
-                {
-                    record_move(mcx, &mut state, diags, src, *val);
+                // Freeze propagation: a `let` binding that may carry a view
+                // extends the freeze through its own extent. A `let` is always
+                // the DEEPEST scope in play, so the outlives check here can
+                // never fire — it is stated anyway so the propagation points
+                // read uniformly (plan D8 lists Let among them).
+                let carried = carried_places(mcx, &state, *val);
+                if !carried.is_empty() {
+                    let depth = state.depth;
+                    check_outlives(mcx, &mut state, diags, &carried, depth, *val);
+                    state.carriers.insert(*local, carried);
                 }
+                // `let b = x` / `let b = p.a` moves a non-Copyable place
+                // (the whole local, or just that field — a partial move).
+                record_operand_move(mcx, &mut state, diags, *val, FreezeReason::Move);
                 // Freshly bound local is valid — remove any stale move state
                 // under the same id (shouldn't happen, but defensive).
-                state.moves.remove(local);
+                state.moves.retain(|place, _| place.root != *local);
             }
+            state.local_depth.insert(*local, state.depth);
         },
         HirStmt::Expr { expr, .. } => {
             state = analyze_expr(mcx, *expr, state, false, diags);
@@ -227,7 +416,26 @@ fn analyze_stmt(
             // lowering time, `local` is None and the lowering already emitted
             // `deinit_undeclared` — nothing to do here.
             if let Some(local_id) = local {
-                if let Some(existing) = state.moves.get(local_id).copied() {
+                // The freeze rule's third destruction spelling. `deinit` does
+                // NOT route through `record_move` (it inserts into `moves`
+                // directly), so it needs its own consult — and unlike a move
+                // it destroys even a Copyable place, so there is no
+                // copyability gate here.
+                let place = PlaceKey::whole(*local_id);
+                check_freeze(
+                    &mut state,
+                    diags,
+                    &place,
+                    span.clone(),
+                    FreezeReason::Deinit,
+                );
+                let existing = state
+                    .moves
+                    .iter()
+                    .filter(|(m, _)| m.root == *local_id)
+                    .min_by_key(|(m, _)| m.path.len())
+                    .map(|(_, info)| *info);
+                if let Some(existing) = existing {
                     emit_use_after_move(
                         mcx.cx,
                         diags,
@@ -246,13 +454,25 @@ fn analyze_stmt(
                 // Pragmatic approach: use the first HirExprId that contains
                 // this local read. In practice tests only check _that_ the
                 // diagnostic fires, so any valid site works.
-                state.moves.insert(
-                    *local_id,
-                    MoveInfo {
-                        kind: MoveKind::Definite,
-                        site: deinit_site(mcx.cx.hir, *local_id),
-                    },
-                );
+                if is_unowned_param(mcx.cx, *local_id) && state.reported.insert(*local_id) {
+                    diags.push(unowned_param_move(
+                        mcx.cx,
+                        *local_id,
+                        span.clone(),
+                        "destroy",
+                    ));
+                }
+                // A body with no expressions has no later use to anchor a
+                // move site to (and nothing to report one against).
+                if let Some(site) = deinit_site(mcx.cx.hir, *local_id) {
+                    state.moves.insert(
+                        place,
+                        MoveInfo {
+                            kind: MoveKind::Definite,
+                            site,
+                        },
+                    );
+                }
             }
         },
     }
@@ -269,31 +489,46 @@ fn analyze_expr(
     let hir = mcx.cx.hir;
     match &hir.exprs[id] {
         // ===== Read of a local =====
-        HirExpr::Local(local_id, span) => {
-            if !is_assign_target
-                && let Some(info) = state.moves.get(local_id).copied()
-                && state.reported.insert(*local_id)
-            {
-                let name = hir.locals[*local_id].name.clone();
-                emit_move_diagnostic(mcx.cx, diags, info, id, span.clone(), &name);
-            }
+        HirExpr::Local(..) => {
+            check_place_use(mcx, &mut state, diags, id, is_assign_target);
+        },
+
+        // `&inner` borrows the place — not a move, but reading a moved
+        // local through a borrow is still a use-after-move.
+        HirExpr::Borrow { inner, .. } => {
+            state = analyze_expr(mcx, *inner, state, false, diags);
         },
 
         // ===== Assignment =====
         HirExpr::Assign { target, value, .. } => {
             state = analyze_expr(mcx, *value, state, false, diags);
             state = analyze_expr(mcx, *target, state, true, diags);
-            // If target is a bare Local and value is a Local on a non-Copyable,
-            // the value local is moved.
-            if let Some(src) = rhs_local(hir, *value) {
-                let targeting_self = rhs_local(hir, *target) == Some(src);
-                if !targeting_self && local_is_non_copyable(mcx, src) {
-                    record_move(mcx, &mut state, diags, src, *value);
-                }
+            // THE SCOPE-DEPTH RULE (plan D8). Assignment is the one
+            // propagation point that can widen a view's extent: storing a
+            // view-carrying value into an OUTER binding lets it outlive the
+            // place it views, with no move and no `deinit` anywhere.
+            // The destination is the target's place ROOT: `h.f = { r.v }`
+            // widens `r`'s view to `h`'s extent just as `h = ...` would.
+            let carried = carried_places(mcx, &state, *value);
+            if !carried.is_empty()
+                && let Some(tid) = place_root(hir, *target)
+            {
+                let dest_depth = state.local_depth.get(&tid).copied().unwrap_or(0);
+                check_outlives(mcx, &mut state, diags, &carried, dest_depth, *value);
+                state.carriers.entry(tid).or_default().extend(carried);
             }
-            // A Local being written to is refreshed (new value lands there).
-            if let HirExpr::Local(tid, _) = &hir.exprs[*target] {
-                state.moves.remove(tid);
+            // The value is moved into the target (`x = y`, `x = p.a`), except
+            // a self-assignment `x = x`, which moves nothing.
+            let value_place = place_key_of(mcx.cx.query, mcx.cx.typed, hir, *value);
+            let target_place = place_key_of(mcx.cx.query, mcx.cx.typed, hir, *target);
+            if value_place.is_none() || value_place != target_place {
+                record_operand_move(mcx, &mut state, diags, *value, FreezeReason::Move);
+            }
+            // The written place is refreshed (a new value lands there), and so
+            // is everything under it: `p = …` reinitializes all of `p`,
+            // `p.a = …` reinitializes a moved `p.a`.
+            if let Some(written) = target_place {
+                state.moves.retain(|place, _| !written.is_prefix_of(place));
             }
         },
 
@@ -307,21 +542,24 @@ fn analyze_expr(
             state = analyze_expr(mcx, *condition, state, false, diags);
             let pre = state.clone();
 
-            let then_state = analyze_block(
+            let mut then_state = analyze_block(
                 mcx,
                 &then_body.stmts,
                 then_body.tail_expr,
                 pre.clone(),
                 diags,
             );
+            record_tail_move(mcx, &mut then_state, diags, then_body.tail_expr);
             let else_state = if let Some(else_block) = else_body {
-                analyze_block(
+                let mut s = analyze_block(
                     mcx,
                     &else_block.stmts,
                     else_block.tail_expr,
                     pre.clone(),
                     diags,
-                )
+                );
+                record_tail_move(mcx, &mut s, diags, else_block.tail_expr);
+                s
             } else {
                 pre.clone()
             };
@@ -330,9 +568,22 @@ fn analyze_expr(
 
         // ===== Match =====
         HirExpr::Match {
-            scrutinee, arms, ..
+            scrutinee,
+            arms,
+            source,
+            ..
         } => {
             state = analyze_expr(mcx, *scrutinee, state, false, diags);
+            // A match that only destructures structs/tuples moves just the
+            // bound places (the rule MIR's match lowering shares).
+            let bound_places = kestrel_type_infer::captures::match_bound_places(
+                mcx.cx.query,
+                mcx.cx.typed,
+                hir,
+                *scrutinee,
+                arms,
+                *source,
+            );
             if arms.is_empty() {
                 return state;
             }
@@ -340,25 +591,151 @@ fn analyze_expr(
             let mut arm_states = Vec::with_capacity(arms.len());
             for arm in arms {
                 let mut s = pre.clone();
+                // A pattern binding's extent is its ARM, one scope in from the
+                // match — register it so the freeze rule's scope-depth
+                // comparison sees the real lifetime. Without this the binding
+                // defaults to depth 0 (outermost) and NOTHING can outlive it.
+                //
+                // This is the `for`/`while let` iteration binding: both desugar
+                // to `loop { match next() { .Some(pat) => body, … } }`
+                // (hir-lower `desugar_for_loop`), so `i` in `for i in …` is a
+                // match-arm binding whose storage dies at the end of the
+                // iteration. docs/design/closures.md §"Pinned Edge Cases": a
+                // view closure over an iteration binding cannot outlive that
+                // iteration.
+                let mut bound = HashSet::new();
+                collect_pattern_bindings(mcx.cx.hir, arm.pattern, &mut bound);
+                let arm_depth = s.depth + 1;
+                for local in bound {
+                    s.local_depth.insert(local, arm_depth);
+                }
                 if let Some(guard) = arm.guard {
                     s = analyze_expr(mcx, guard, s, false, diags);
                 }
+                // An arm that binds a non-copyable part by value moves it out
+                // of the scrutinee (MIR consumes the scrutinee to do so), so a
+                // later use of the scrutinee is a use after move.
+                // (A borrowed scrutinee is reported per binding, E503 below.)
+                if let Some(places) = &bound_places
+                    && scrutinee_is_owned(mcx, *scrutinee)
+                {
+                    let mut in_arm = HashSet::new();
+                    collect_pattern_bindings(hir, arm.pattern, &mut in_arm);
+                    for (local, place) in places {
+                        if !in_arm.contains(local) || !local_is_non_copyable(mcx, *local) {
+                            continue;
+                        }
+                        let site = *scrutinee;
+                        if let Some(owner) = deinit_owner_on_path(mcx, place)
+                            && s.reported.insert(place.root)
+                        {
+                            let span = util::expr_span(hir, site);
+                            diags.push(field_move_out_of_deinit_type(mcx, owner, span));
+                        }
+                        record_move(mcx, &mut s, diags, place.clone(), site, FreezeReason::Move);
+                    }
+                } else if pattern_binds_non_copyable_by_value(mcx, arm.pattern)
+                    && scrutinee_is_owned(mcx, *scrutinee)
+                {
+                    record_operand_move_at(
+                        mcx,
+                        &mut s,
+                        diags,
+                        *scrutinee,
+                        FreezeReason::Move,
+                        true,
+                    );
+                }
                 s = analyze_expr(mcx, arm.body, s, false, diags);
+                record_tail_move(mcx, &mut s, diags, Some(arm.body));
                 arm_states.push(s);
             }
             state = merge_match(pre, arm_states);
         },
 
         // ===== Loop =====
-        HirExpr::Loop { body, .. } => {
+        HirExpr::Loop { label, body, .. } => {
+            let target = label.as_deref();
             let pre = state.clone();
             let body_state = analyze_block(mcx, &body.stmts, body.tail_expr, pre.clone(), diags);
 
-            // Propagate reported-set so diagnostics aren't duplicated post-loop.
-            state.reported.extend(body_state.reported.iter().copied());
+            let conditional = loop_is_conditional(hir, body, target);
 
-            // Loops that always run to completion without break diverge.
-            if body_state.diverged && !block_contains_break(hir, body) {
+            // Back-edge re-use (#163): a value moved in the body and carried in
+            // from outside the loop is (maybe-)moved on the next iteration. If
+            // the body can complete without diverging (`!body_state.diverged`,
+            // so the back edge is actually taken — unlike `loop { …; break }`,
+            // which exits on iteration 1), re-analyze the body with those moves
+            // seeded so an in-body read of such a local is flagged at its real
+            // site. Carry `reported` so first-pass in-body diagnostics aren't
+            // doubled; the seeded re-read is then the single diagnostic for that
+            // local (one error per variable), so a later post-loop read stays
+            // silent.
+            let mut reported_after = body_state.reported.clone();
+            // The freeze-reported set threads the SAME way, and must: the
+            // second pass re-walks every closure literal and every move site,
+            // so without it the loop body double-emits E507 (plan D8's
+            // "loop back-edge re-analysis threads a SEPARATE freeze-reported
+            // set").
+            let mut freeze_reported_after = body_state.freeze_reported.clone();
+            if !body_state.diverged {
+                // Locals bound *inside* the body (let statements, while-let /
+                // match-arm patterns) are fresh each iteration — not carried
+                // across the back edge — so they must not be seeded as moved.
+                let mut body_bound = HashSet::new();
+                collect_block_bound_locals(hir, body, &mut body_bound);
+
+                let mut back_edge = pre.clone();
+                back_edge.reported = body_state.reported.clone();
+                back_edge.freeze_reported = body_state.freeze_reported.clone();
+                let mut seeded = false;
+                for (place, info) in body_state.moves.iter() {
+                    if pre.moves.contains_key(place) || body_bound.contains(&place.root) {
+                        continue;
+                    }
+                    let kind = if conditional {
+                        MoveKind::Maybe
+                    } else {
+                        MoveKind::Definite
+                    };
+                    back_edge.moves.insert(
+                        place.clone(),
+                        MoveInfo {
+                            kind,
+                            site: info.site,
+                        },
+                    );
+                    seeded = true;
+                }
+                if seeded {
+                    let s2 = analyze_block(mcx, &body.stmts, body.tail_expr, back_edge, diags);
+                    reported_after = s2.reported;
+                    freeze_reported_after = s2.freeze_reported;
+                }
+            }
+
+            // Propagate reported-set so diagnostics aren't duplicated post-loop.
+            state.reported.extend(reported_after.iter().copied());
+            state
+                .freeze_reported
+                .extend(freeze_reported_after.iter().copied());
+            // A freeze created inside the loop body survives it exactly when
+            // some outer binding carries it — `analyze_block` already applied
+            // that endpoint rule to `body_state`, so a union is right here.
+            join_freeze_state(&mut state, std::iter::once(&body_state));
+
+            // A loop diverges exactly when no `break` targeting *this* loop can
+            // exit it.
+            //
+            // The `body_state.diverged &&` conjunct this used to carry was
+            // wrong, and here it was not masked: for `loop { doWork(); }` the
+            // body completes normally, so `diverged` was false and an infinite
+            // loop was called non-diverging. Every other analyzer's copy of the
+            // same broken formula got accidentally rescued by a trailing
+            // Never-type check; this one excluded `Loop` from that check, so a
+            // value consumed after a breakless loop reported a false E500 on a
+            // line `dead_code` simultaneously called unreachable (G12).
+            if !control_flow::block_contains_break_for(hir, body, target) {
                 state.diverged = true;
             }
 
@@ -369,9 +746,8 @@ fn analyze_expr(
             // - Unconditional `loop { … }`: body runs at least once, and if
             //   the move site is reachable before any `break`, a second
             //   iteration would re-read the moved value. Mark Definite.
-            let conditional = loop_is_conditional(hir, body);
-            for (local, info) in body_state.moves.iter() {
-                if pre.moves.contains_key(local) {
+            for (place, info) in body_state.moves.iter() {
+                if pre.moves.contains_key(place) {
                     continue;
                 }
                 let kind = if conditional {
@@ -380,44 +756,189 @@ fn analyze_expr(
                     MoveKind::Definite
                 };
                 state.moves.insert(
-                    *local,
+                    place.clone(),
                     MoveInfo {
                         kind,
                         site: info.site,
                     },
                 );
             }
+            // The structural verdict above is final — inference must not
+            // overrule it, so skip the Never-type fallback entirely rather than
+            // carve `Loop` out of it (G12).
+            return state;
         },
 
         // ===== Block expression =====
         HirExpr::Block { body, .. } => {
             state = analyze_block(mcx, &body.stmts, body.tail_expr, state, diags);
+            record_tail_move(mcx, &mut state, diags, body.tail_expr);
         },
 
         // ===== Return =====
         HirExpr::Return { value, span: _ } => {
             if let Some(val) = value {
                 state = analyze_expr(mcx, *val, state, false, diags);
-                if let Some(src) = rhs_local(hir, *val)
-                    && local_is_non_copyable(mcx, src)
-                {
-                    record_move(mcx, &mut state, diags, src, *val);
-                }
+                record_operand_move(mcx, &mut state, diags, *val, FreezeReason::Move);
+                // NOTE: returning a view-carrying value is the OTHER escape
+                // route, and it already has a single source of truth — the MIR
+                // escape check (E494, frame provenance). Adding an E507 here
+                // would double-report every
+                // `memory_model/closure_kinds/view/returning_view_closure_*`
+                // shape.
             }
+            check_mutating_params_restored(mcx, &mut state, diags, util::expr_span(hir, id));
         },
 
         // ===== Break / Continue (divergence handled below via Never) =====
         HirExpr::Break { .. } | HirExpr::Continue { .. } => {},
 
-        // ===== Closures: analyze body in isolation; don't leak moves =====
+        // ===== Closures =====
         HirExpr::Closure { body, .. } => {
-            let inner = State::empty();
-            let _ = analyze_block(mcx, &body.stmts, body.tail_expr, inner, diags);
+            // Read captures of a non-Copyable type move into an owning closure
+            // environment. MIR currently realizes a projected move by taking
+            // the whole root, while Copyable/Cloneable projections snapshot
+            // only themselves. Write captures remain by-reference.
+            // An owning closure moves just the captured field when the root
+            // is only read through projections (the same rule MIR's
+            // `plan_slots` applies); otherwise it takes the whole root.
+            let field_roots =
+                kestrel_type_infer::captures::field_capturable_roots(mcx.captures.get(id));
+            let captured_moves: Vec<PlaceKey> = mcx
+                .captures
+                .get(id)
+                .iter()
+                .filter(|cap| cap.kind == CaptureKind::Read && expr_is_non_copyable(mcx, cap.repr))
+                .map(|cap| {
+                    if field_roots.contains(&cap.key.root) {
+                        cap.key.clone()
+                    } else {
+                        PlaceKey::whole(cap.key.root)
+                    }
+                })
+                .collect();
+            let captured_roots: HashSet<LocalId> =
+                captured_moves.iter().map(|place| place.root).collect();
+
+            // Analyze the body with those roots marked `captured_borrow`, so any
+            // move-OUT of one (return/consume/rebind) is rejected as E506: the
+            // closure may be called more than once but owns a single value
+            // (#177 capture-dup double-deinit). Borrowing a captured value
+            // across calls stays legal (a borrow records no move).
+            //
+            // E506 IS LIFTED INSIDE A `consuming` BODY (docs/design/closures.md,
+            // Diagnostics table): a one-shot closure runs at most once, so its
+            // body is the one place allowed to move captures out. The plan's
+            // REPLACEMENT GUARD keeps the roots the frame does not OWN — a
+            // borrowing parameter is aliased into the environment, never moved
+            // into it, so moving it out would still duplicate an owner. That
+            // must be an error, not an OSSA ICE.
+            let kind = closure_kind_of(mcx, id);
+            let captured_borrow: HashSet<LocalId> = if kind == kestrel_ast::FnTypeKind::Consuming {
+                captured_roots
+                    .iter()
+                    .copied()
+                    .filter(|&root| !local_is_owned_place(mcx.cx, root))
+                    .collect()
+            } else {
+                captured_roots.clone()
+            };
+            let inner_mcx = MoveCtx {
+                cx: mcx.cx,
+                copyable: mcx.copyable,
+                borrow_bound: mcx.borrow_bound.clone(),
+                captures: Arc::clone(&mcx.captures),
+                captured_borrow,
+            };
+            let mut inner = analyze_block(
+                &inner_mcx,
+                &body.stmts,
+                body.tail_expr,
+                State::empty(),
+                diags,
+            );
+            // A place tail (`{ () in r }` / `{ () in r.field }`) is the
+            // closure's return value but is not otherwise a `record_move` site,
+            // so flag it explicitly.
+            if let Some(tail) = body.tail_expr
+                && place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, tail)
+                    .is_some_and(|place| captured_roots.contains(&place.root))
+            {
+                record_operand_move(&inner_mcx, &mut inner, diags, tail, FreezeReason::Move);
+            }
+
+            // THE FREEZE (docs/design/closures.md §"The freeze rule"): a VIEW
+            // env holds addresses into this frame, so every place it captures
+            // is frozen against destruction for the rest of its lexical
+            // extent. Owning kinds freeze nothing — their captures are theirs.
+            if kind.is_view() {
+                let closure_span = util::expr_span(hir, id);
+                for cap in mcx.captures.get(id) {
+                    let captured_scope_depth =
+                        state.local_depth.get(&cap.key.root).copied().unwrap_or(0);
+                    let name = place_display(mcx.cx, &cap.key);
+                    state.frozen.entry(cap.key.clone()).or_insert(FreezeInfo {
+                        name,
+                        captured_scope_depth,
+                        closure_span: closure_span.clone(),
+                    });
+                }
+            }
+
+            // Record the capture moves in the ENCLOSING scope so a later use of
+            // a moved-into-closure root is a clean use-after-move (E500) instead
+            // of slipping past the checker and ICEing in OSSA.
+            //
+            // VIEW KINDS CAPTURE NOTHING BY VALUE (#177 lockstep, plan D4/D8):
+            // a normal/`mutating` closure's env holds ADDRESSES into the frame,
+            // so no root is moved and later use stays legal — the place is
+            // merely frozen against DESTRUCTION (the freeze rule, Phase F).
+            // This must stay in lockstep with the MIR view-tier lowering, which
+            // emits no `Take` for a view capture: removing one without the
+            // other reopens the "consumed more than once" OSSA ICE.
+            if !kind.is_view() {
+                for place in captured_moves {
+                    // An owning capture moves the place INTO the closure, so it
+                    // must still be live here (a capture in a loop body sees the
+                    // previous iteration's move through the back-edge state).
+                    let prior = state
+                        .moves
+                        .get(&place)
+                        .or_else(|| state.moves.get(&PlaceKey::whole(place.root)))
+                        .copied();
+                    if let Some(info) = prior
+                        && state.reported.insert(place.root)
+                    {
+                        let name = hir.locals[place.root].name.clone();
+                        let span = util::expr_span(hir, id);
+                        emit_move_diagnostic(mcx.cx, diags, info, id, span, &name);
+                    }
+                    record_move(mcx, &mut state, diags, place, id, FreezeReason::Move);
+                }
+            }
         },
 
         // ===== Calls — consuming args and consuming receivers move =====
         HirExpr::Call { callee, args, .. } => {
             state = analyze_expr(mcx, *callee, state, false, diags);
+            // CALLING a `consuming`-kind closure CONSUMES it (plan D8, E500
+            // extension site 1): "the call consumes it, and a second call is an
+            // ordinary use-after-move". Recording the move here is what turns
+            // the second call into a clean E500 instead of an OSSA
+            // "consumed twice" ICE in MIR — the lockstep twin of
+            // `lower_indirect_call`'s consuming-callee take.
+            if callee_kind_is_consuming(mcx, *callee) {
+                // MIR consumes the whole holder to call a projected
+                // `consuming` closure (`(h.f)()`), so the move stays rooted.
+                record_operand_move_at(
+                    mcx,
+                    &mut state,
+                    diags,
+                    *callee,
+                    FreezeReason::Consume,
+                    true,
+                );
+            }
             for arg in args {
                 state = analyze_expr(mcx, arg.value, state, false, diags);
             }
@@ -425,18 +946,73 @@ fn analyze_expr(
                 HirExpr::Def(entity, _, _) => Some(*entity),
                 _ => mcx.cx.typed.resolutions.get(callee).copied(),
             };
-            if let Some(entity) = callee_entity {
+            // An *explicit* initializer call (`Pointer(to: r)`) resolves the
+            // call id to its Initializer entity, whose params carry real
+            // conventions — a plain param borrows (`init(to value: T)` stores
+            // `ptr_to(value)`, not `value`), a `consuming` one moves. Route it
+            // through the normal consuming-param path so a borrowed operand is
+            // not falsely seen as moved.
+            let explicit_init = mcx.cx.typed.resolutions.get(&id).copied().filter(|&e| {
+                matches!(mcx.cx.query.get::<NodeKind>(e), Some(NodeKind::Initializer))
+            });
+            if let Some(init) = explicit_init {
+                apply_call_moves(mcx, init, args, None, &mut state, diags);
+            } else if stores_operands_by_value(mcx, callee_entity, id) {
+                // Memberwise struct construction (bare `Struct` callee, no
+                // explicit init) or an enum-case payload: each operand is stored
+                // by value into the new aggregate, so a non-Copyable place is
+                // moved into it (#162). The synthesized constructor's params
+                // are always `is_consuming: false`, so the param path can't see
+                // this — record the operand moves directly.
+                for arg in args {
+                    record_operand_move(mcx, &mut state, diags, arg.value, FreezeReason::Move);
+                }
+            } else if let Some(entity) = callee_entity {
                 apply_call_moves(mcx, entity, args, None, &mut state, diags);
             }
+            check_call_arg_outlives(
+                mcx,
+                &mut state,
+                diags,
+                explicit_init.or(callee_entity),
+                args,
+                None,
+            );
         },
         HirExpr::MethodCall { receiver, args, .. } => {
             state = analyze_expr(mcx, *receiver, state, false, diags);
+            // A function-typed RECEIVER is an indirect call through the value
+            // (mir-lower's "function-typed receiver" arm), so the same
+            // consumption rule as the `Call` arm applies: calling a
+            // `consuming`-kind value consumes it. There is no other member on
+            // a one-shot closure — it is `not Copyable` and has no `clone()` —
+            // so this can only be that path.
+            if callee_kind_is_consuming(mcx, *receiver) {
+                // MIR consumes the whole holder to call a projected
+                // `consuming` closure (`(h.f)()`), so the move stays rooted.
+                record_operand_move_at(
+                    mcx,
+                    &mut state,
+                    diags,
+                    *receiver,
+                    FreezeReason::Consume,
+                    true,
+                );
+            }
             for arg in args {
                 state = analyze_expr(mcx, arg.value, state, false, diags);
             }
             if let Some(&entity) = mcx.cx.typed.resolutions.get(&id) {
                 apply_call_moves(mcx, entity, args, Some(*receiver), &mut state, diags);
             }
+            check_call_arg_outlives(
+                mcx,
+                &mut state,
+                diags,
+                mcx.cx.typed.resolutions.get(&id).copied(),
+                args,
+                Some(*receiver),
+            );
         },
         HirExpr::ProtocolCall {
             receiver,
@@ -446,23 +1022,40 @@ fn analyze_expr(
             ..
         } => {
             state = analyze_expr(mcx, *receiver, state, false, diags);
-            for arg in args {
-                state = analyze_expr(mcx, arg.value, state, false, diags);
-            }
-            if let Some(method_entity) =
-                find_protocol_method(mcx.cx, *protocol, method.as_str_or_empty())
-            {
-                apply_call_moves(mcx, method_entity, args, Some(*receiver), &mut state, diags);
+            // A `for` loop over an Iterator consumes the iterable itself as
+            // its iterator — no `iter()` call (mirrors MIR lowering).
+            if mcx.cx.typed.direct_iterators.contains(&id) {
+                record_operand_move(mcx, &mut state, diags, *receiver, FreezeReason::Move);
+            } else {
+                for arg in args {
+                    state = analyze_expr(mcx, arg.value, state, false, diags);
+                }
+                if let Some(method_entity) =
+                    find_protocol_method(mcx.cx, *protocol, method.as_str_or_empty())
+                {
+                    apply_call_moves(mcx, method_entity, args, Some(*receiver), &mut state, diags);
+                }
             }
         },
 
         // ===== Pass-throughs =====
+        // A stored-field chain is checked as ONE place (`p.b` is usable
+        // after `p.a` moved); anything else (`f().a`) analyzes its base.
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
-            state = analyze_expr(mcx, *base, state, false, diags);
+            if place_key_of(mcx.cx.query, mcx.cx.typed, hir, id).is_some() {
+                check_place_use(mcx, &mut state, diags, id, is_assign_target);
+            } else {
+                state = analyze_expr(mcx, *base, state, false, diags);
+            }
         },
+        // A tuple/array literal stores each element by value — a non-Copyable
+        // bare-local element is moved into the aggregate (#162). Record the move
+        // right after the read-check so a repeated element (`[r, r]`) still
+        // flags the second use.
         HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
             for &e in elements {
                 state = analyze_expr(mcx, e, state, false, diags);
+                record_operand_move(mcx, &mut state, diags, e, FreezeReason::Move);
             }
         },
         HirExpr::Dict { entries, .. } => {
@@ -476,12 +1069,39 @@ fn analyze_expr(
                 for arg in args {
                     state = analyze_expr(mcx, arg.value, state, false, diags);
                 }
+                match mcx
+                    .cx
+                    .typed
+                    .resolutions
+                    .get(&id)
+                    .map(|&e| (e, mcx.cx.query.get::<NodeKind>(e)))
+                {
+                    // `.Full(r)` enum case: payload stored by value → operands
+                    // move (#162).
+                    Some((_, Some(NodeKind::EnumCase))) => {
+                        for arg in args {
+                            record_operand_move(
+                                mcx,
+                                &mut state,
+                                diags,
+                                arg.value,
+                                FreezeReason::Move,
+                            );
+                        }
+                    },
+                    // `.init(…)` explicit initializer: respect param conventions.
+                    Some((init, Some(NodeKind::Initializer))) => {
+                        apply_call_moves(mcx, init, args, None, &mut state, diags);
+                    },
+                    _ => {},
+                }
             }
         },
 
         // Leaves
         HirExpr::Literal { .. }
         | HirExpr::Def(..)
+        | HirExpr::TypeRef { .. }
         | HirExpr::OverloadSet { .. }
         | HirExpr::Error { .. } => {},
 
@@ -491,15 +1111,10 @@ fn analyze_expr(
         },
     }
 
-    // Unified divergence: any Never-typed expr diverges, with one exception:
-    // a Loop expression with a reachable `break` has its type inferred to
-    // Never in some cases even though post-loop code is reachable. Rely on
-    // the Loop arm above (which only sets `diverged` when the body actually
-    // runs to completion without break) — don't let the Never-type shortcut
-    // override that.
-    if let Some(ResolvedTy::Never) = mcx.cx.typed.expr_types.get(&id)
-        && !matches!(&hir.exprs[id], HirExpr::Loop { .. })
-    {
+    // Leaf divergence: any Never-typed expr diverges. The `Loop` carve-out that
+    // used to guard this is gone — the `Loop` arm returns early, so a loop can
+    // no longer reach here at all (G12).
+    if let Some(ResolvedTy::Never) = mcx.cx.typed.expr_types.get(&id) {
         state.diverged = true;
     }
 
@@ -508,8 +1123,8 @@ fn analyze_expr(
 
 // ===== Move-trigger helpers =====
 
-/// Apply the move effects of a call: consuming receiver (if any) moves its
-/// base local; each consuming arg moves its base local.
+/// Apply the move effects of a call: the consuming receiver (if any) and each
+/// consuming argument move their effective MIR places.
 fn apply_call_moves(
     mcx: &MoveCtx<'_>,
     callee: Entity,
@@ -522,13 +1137,14 @@ fn apply_call_moves(
         return;
     };
 
-    if let (Some(recv_id), Some(ReceiverKind::Consuming)) = (receiver, callable.receiver.as_ref())
-        && let Some(src) = rhs_local(mcx.cx.hir, recv_id)
-        && local_is_non_copyable(mcx, src)
-    {
-        record_move(mcx, state, diags, src, recv_id);
+    // A `consuming self` receiver takes ownership exactly like a `consuming`
+    // argument — same funnel, so `r.take()` and `sink(r)` agree (including the
+    // freeze consult for a PROJECTED receiver, which `rhs_local` cannot see).
+    if let (Some(recv_id), Some(ReceiverKind::Consuming)) = (receiver, callable.receiver.as_ref()) {
+        record_operand_move(mcx, state, diags, recv_id, FreezeReason::Consume);
     }
 
+    check_consumed_while_lent(mcx, callable, args, receiver, diags);
     for (i, arg) in args.iter().enumerate() {
         let Some(param) = callable.params.get(i) else {
             continue;
@@ -536,22 +1152,300 @@ fn apply_call_moves(
         if !param.is_consuming {
             continue;
         }
-        if let Some(src) = rhs_local(mcx.cx.hir, arg.value)
-            && local_is_non_copyable(mcx, src)
-        {
-            record_move(mcx, state, diags, src, arg.value);
-        }
+        record_operand_move(mcx, state, diags, arg.value, FreezeReason::Consume);
     }
 }
 
-/// Extract the base local of an expression if it is a bare `HirExpr::Local`.
-/// Returns None for anything else (Field/Tuple/Call/etc.) — matches lib1's
-/// "no partial moves" behavior.
-fn rhs_local(hir: &HirBody, expr: HirExprId) -> Option<LocalId> {
-    if let HirExpr::Local(id, _) = &hir.exprs[expr] {
-        Some(*id)
+/// The first struct along `place`'s field path that declares a `deinit`.
+/// Moving a field out of such a struct would take the struct apart without
+/// running its `deinit`.
+fn deinit_owner_on_path(mcx: &MoveCtx<'_>, place: &PlaceKey) -> Option<Entity> {
+    place.path.iter().find_map(|elem| {
+        let ProjElem::Field(field) = elem else {
+            return None;
+        };
+        let owner = mcx.cx.query.parent_of(*field)?;
+        // The type's own deinit takes `self` apart; that is its job.
+        let in_own_deinit = mcx.cx.query.get::<NodeKind>(mcx.cx.entity) == Some(&NodeKind::Deinit)
+            && mcx.cx.query.parent_of(mcx.cx.entity) == Some(owner);
+        (!in_own_deinit
+            && !util::children_of_kind(mcx.cx.query, owner, NodeKind::Deinit).is_empty())
+        .then_some(owner)
+    })
+}
+
+/// E511 check for an expression consumed by value (returned, bound,
+/// assigned, or passed `consuming`): a non-Copyable field projection out of
+/// a struct with a `deinit`. Checked on the expression's own place, since
+/// the move itself is recorded on the whole root (`effective_move_place`).
+fn check_field_move_out(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    expr: HirExprId,
+) {
+    let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, expr) else {
+        return;
+    };
+    if place.is_whole() || !expr_is_non_copyable(mcx, expr) {
+        return;
+    }
+    if let Some(owner) = deinit_owner_on_path(mcx, &place)
+        && state.reported.insert(place.root)
+    {
+        let span = util::expr_span(mcx.cx.hir, expr);
+        diags.push(field_move_out_of_deinit_type(mcx, owner, span));
+    }
+}
+
+/// E511: moving a field out of a value whose type has a `deinit`.
+fn field_move_out_of_deinit_type(
+    mcx: &MoveCtx<'_>,
+    owner: Entity,
+    span: kestrel_span::Span,
+) -> AnalyzeDiagnostic {
+    let ty = util::entity_name(mcx.cx.query, owner);
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[7].id,
+        severity: DESCRIPTORS[7].default_severity,
+        message: format!("cannot move a field out of '{ty}', which has a deinit"),
+        labels: vec![DiagLabel {
+            span,
+            message: "field moved out here".into(),
+            is_primary: true,
+        }],
+        notes: vec![format!(
+            "moving a field out would skip '{ty}'s deinit; borrow or copy the field instead"
+        )],
+    }
+}
+
+/// E510: one call both borrows a non-Copyable value (a borrowing or
+/// `mutating` argument, or a non-consuming receiver) and consumes it
+/// (`f(x, x)` with `f(mutating a: R, consuming b: R)`). The borrow is live for
+/// the whole call, so the move would leave it dangling.
+fn check_consumed_while_lent(
+    mcx: &MoveCtx<'_>,
+    callable: &Callable,
+    args: &[HirCallArg],
+    receiver: Option<HirExprId>,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let hir = mcx.cx.hir;
+    let consuming = |i: usize| callable.params.get(i).is_some_and(|p| p.is_consuming);
+    let mut lent: Vec<LocalId> = args
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| !consuming(i))
+        .filter_map(|(_, a)| place_root(hir, a.value))
+        .collect();
+    if !matches!(callable.receiver, Some(ReceiverKind::Consuming)) {
+        lent.extend(receiver.and_then(|r| place_root(hir, r)));
+    }
+    for (i, arg) in args.iter().enumerate() {
+        if !consuming(i) || !expr_is_non_copyable(mcx, arg.value) {
+            continue;
+        }
+        let Some(root) = place_root(hir, arg.value).filter(|r| lent.contains(r)) else {
+            continue;
+        };
+        let name = hir.locals[root].name.clone();
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[6].id,
+            severity: DESCRIPTORS[6].default_severity,
+            message: format!("cannot consume '{name}' while the same call borrows it"),
+            labels: vec![DiagLabel {
+                span: util::expr_span(hir, arg.value),
+                message: "consumed here".into(),
+                is_primary: true,
+            }],
+            notes: vec![format!(
+                "another argument of this call borrows '{name}' for the whole call"
+            )],
+        });
+    }
+}
+
+/// Whether a `Call` constructs an aggregate that stores each operand BY VALUE —
+/// memberwise struct construction or an enum-case payload — so a non-Copyable
+/// bare-local operand is moved into the result (#162). Explicit initializers are
+/// handled separately (their params carry real borrow/consuming conventions);
+/// they are excluded here. The two shapes that reach this:
+///   - memberwise construction: the callee names the bare `Struct`, with no
+///     resolution on the call id (the synthesized init isn't recorded);
+///   - an enum case: the callee (or call id) resolves to the `EnumCase` entity,
+///     whose synthesized payload params are always non-consuming.
+fn stores_operands_by_value(
+    mcx: &MoveCtx<'_>,
+    callee_entity: Option<Entity>,
+    call_id: HirExprId,
+) -> bool {
+    if mcx
+        .cx
+        .typed
+        .resolutions
+        .get(&call_id)
+        .is_some_and(|&e| matches!(mcx.cx.query.get::<NodeKind>(e), Some(NodeKind::EnumCase)))
+    {
+        return true;
+    }
+    matches!(
+        callee_entity.and_then(|e| mcx.cx.query.get::<NodeKind>(e)),
+        Some(NodeKind::Struct | NodeKind::EnumCase)
+    )
+}
+
+/// Record the move of an aggregate/consuming operand when it resolves to a
+/// non-Copyable place.
+fn record_operand_move(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    operand: HirExprId,
+    reason: FreezeReason,
+) {
+    record_operand_move_at(mcx, state, diags, operand, reason, false);
+}
+
+/// An if/match/block result is an owned value: a projection tail (`if c
+/// { p.a } else { … }`) moves out of its root, as MIR lowers it. A bare
+/// local tail keeps its historical treatment (moved by the consumer).
+fn record_tail_move(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    tail: Option<HirExprId>,
+) {
+    let Some(tail) = tail else {
+        return;
+    };
+    if place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, tail).is_some_and(|p| !p.is_whole()) {
+        record_operand_move(mcx, state, diags, tail, FreezeReason::Move);
+    }
+}
+
+/// `record_operand_move`, optionally widening the move to the operand's
+/// whole root. A field move is a partial move (docs/design/partial-moves.md):
+/// MIR takes just that field. `widen_to_root` is for the sites MIR still
+/// realizes by consuming the whole root — a by-value `match` scrutinee and an
+/// owning closure's projected capture — kept in lockstep with MIR.
+fn record_operand_move_at(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    operand: HirExprId,
+    reason: FreezeReason,
+    widen_to_root: bool,
+) {
+    check_field_move_out(mcx, state, diags, operand);
+    let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, operand) else {
+        return;
+    };
+    if !expr_is_non_copyable(mcx, operand) {
+        return;
+    }
+    let place = if widen_to_root {
+        PlaceKey::whole(place.root)
     } else {
-        None
+        place
+    };
+    record_move(mcx, state, diags, place, operand, reason);
+}
+
+/// A read (or, with `is_assign_target`, a write) of the place `expr` names,
+/// against every recorded move of the same root:
+/// - a moved place containing it (`p` moved, read `p.a`; or `p.a` itself):
+///   use after move;
+/// - a moved place inside it (`p.a` moved, read `p`): use of a partially
+///   moved value.
+///
+/// Writing a moved place is reinitialization (fine), but writing INTO a moved
+/// place (`p.a.x = …` after moving `p.a`) has no storage to land in.
+fn check_place_use(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    expr: HirExprId,
+    is_assign_target: bool,
+) {
+    let Some(used) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, expr) else {
+        return;
+    };
+    let span = util::expr_span(mcx.cx.hir, expr);
+    // Containing (or equal) moves first: that is the plain use-after-move.
+    let containing = state
+        .moves
+        .iter()
+        .filter(|(m, _)| {
+            m.is_prefix_of(&used) && (!is_assign_target || m.path.len() < used.path.len())
+        })
+        .min_by_key(|(m, _)| m.path.len())
+        .map(|(m, info)| (m.clone(), *info));
+    if let Some((moved, info)) = containing {
+        if state.reported.insert(used.root) {
+            let name = place_display(mcx.cx, &moved);
+            emit_move_diagnostic(mcx.cx, diags, info, expr, span, &name);
+        }
+        return;
+    }
+    if is_assign_target {
+        return;
+    }
+    let inside = state
+        .moves
+        .iter()
+        .filter(|(m, _)| used.is_prefix_of(m) && m.path.len() > used.path.len())
+        .min_by_key(|(m, _)| m.path.len())
+        .map(|(m, info)| (m.clone(), *info));
+    if let Some((moved, info)) = inside
+        && state.reported.insert(used.root)
+    {
+        diags.push(partially_moved_use(mcx.cx, &used, &moved, info, span));
+    }
+}
+
+/// E500/E501 for a use of a place one of whose parts was moved out.
+fn partially_moved_use(
+    cx: &BodyContext<'_>,
+    used: &PlaceKey,
+    moved: &PlaceKey,
+    info: MoveInfo,
+    use_span: kestrel_span::Span,
+) -> AnalyzeDiagnostic {
+    let used_name = place_display(cx, used);
+    let moved_name = place_display(cx, moved);
+    let (d, message, moved_label) = match info.kind {
+        MoveKind::Definite => (
+            &DESCRIPTORS[0],
+            format!("use of partially moved value '{used_name}'"),
+            format!("'{moved_name}' moved here"),
+        ),
+        MoveKind::Maybe => (
+            &DESCRIPTORS[1],
+            format!("value '{used_name}' may have been partially moved"),
+            format!("'{moved_name}' potentially moved here"),
+        ),
+    };
+    AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message,
+        labels: vec![
+            DiagLabel {
+                span: use_span,
+                message: "used here as a whole".into(),
+                is_primary: true,
+            },
+            DiagLabel {
+                span: util::expr_span(cx.hir, info.site),
+                message: moved_label,
+                is_primary: false,
+            },
+        ],
+        notes: vec![format!(
+            "'{moved_name}' was moved out; use the remaining fields individually, or \
+             reassign '{moved_name}' first"
+        )],
     }
 }
 
@@ -604,6 +1498,10 @@ fn local_is_owned_place(cx: &BodyContext<'_>, local: LocalId) -> bool {
     };
     let name = cx.hir.locals[local].name.as_str();
     if name == "self" {
+        // Only a written `consuming` receiver owns `self`. A plain method that
+        // witnesses a `consuming` requirement still BORROWS (a weaker demand):
+        // mono borrows the caller's value for the call and releases it after
+        // (`witness_borrowed_args`), so moving a payload out would alias it.
         return matches!(callable.receiver, Some(ReceiverKind::Consuming));
     }
     match callable.params.iter().find(|p| p.name == name) {
@@ -612,8 +1510,158 @@ fn local_is_owned_place(cx: &BodyContext<'_>, local: LocalId) -> bool {
     }
 }
 
+/// Collect every local introduced *within* `block` — `let` bindings and pattern
+/// bindings (match arms, desugared while-let / for) — recursing through nested
+/// control flow but stopping at closures (their own scope). Used to exclude
+/// per-iteration fresh bindings from loop back-edge re-use seeding (#163).
+fn collect_block_bound_locals(hir: &HirBody, block: &HirBlock, out: &mut HashSet<LocalId>) {
+    for &sid in &block.stmts {
+        match &hir.stmts[sid] {
+            HirStmt::Let { local, value, .. } => {
+                out.insert(*local);
+                if let Some(v) = value {
+                    collect_expr_bound_locals(hir, *v, out);
+                }
+            },
+            HirStmt::Expr { expr, .. } => collect_expr_bound_locals(hir, *expr, out),
+            HirStmt::Deinit { .. } => {},
+        }
+    }
+    if let Some(t) = block.tail_expr {
+        collect_expr_bound_locals(hir, t, out);
+    }
+}
+
+/// Recurse through an expression collecting bindings introduced under it (see
+/// [`collect_block_bound_locals`]). Walks every sub-expression so a `match`
+/// nested in any position (e.g. a call argument) still contributes its arm
+/// bindings; stops at closure boundaries.
+fn collect_expr_bound_locals(hir: &HirBody, id: HirExprId, out: &mut HashSet<LocalId>) {
+    match &hir.exprs[id] {
+        HirExpr::If {
+            condition,
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_expr_bound_locals(hir, *condition, out);
+            collect_block_bound_locals(hir, then_body, out);
+            if let Some(e) = else_body {
+                collect_block_bound_locals(hir, e, out);
+            }
+        },
+        HirExpr::Match {
+            scrutinee, arms, ..
+        } => {
+            collect_expr_bound_locals(hir, *scrutinee, out);
+            for arm in arms {
+                collect_pattern_bindings(hir, arm.pattern, out);
+                if let Some(g) = arm.guard {
+                    collect_expr_bound_locals(hir, g, out);
+                }
+                collect_expr_bound_locals(hir, arm.body, out);
+            }
+        },
+        HirExpr::Loop { body, .. } | HirExpr::Block { body, .. } => {
+            collect_block_bound_locals(hir, body, out)
+        },
+        HirExpr::Sugar { inner, .. } | HirExpr::Borrow { inner, .. } => {
+            collect_expr_bound_locals(hir, *inner, out)
+        },
+        HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
+            collect_expr_bound_locals(hir, *base, out)
+        },
+        HirExpr::Assign { target, value, .. } => {
+            collect_expr_bound_locals(hir, *target, out);
+            collect_expr_bound_locals(hir, *value, out);
+        },
+        HirExpr::Return { value, .. } => {
+            if let Some(v) = value {
+                collect_expr_bound_locals(hir, *v, out);
+            }
+        },
+        HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
+            for &e in elements {
+                collect_expr_bound_locals(hir, e, out);
+            }
+        },
+        HirExpr::Dict { entries, .. } => {
+            for entry in entries {
+                collect_expr_bound_locals(hir, entry.key, out);
+                collect_expr_bound_locals(hir, entry.value, out);
+            }
+        },
+        HirExpr::Call { callee, args, .. } => {
+            collect_expr_bound_locals(hir, *callee, out);
+            for arg in args {
+                collect_expr_bound_locals(hir, arg.value, out);
+            }
+        },
+        HirExpr::MethodCall { receiver, args, .. } => {
+            collect_expr_bound_locals(hir, *receiver, out);
+            for arg in args {
+                collect_expr_bound_locals(hir, arg.value, out);
+            }
+        },
+        HirExpr::ProtocolCall { receiver, args, .. } => {
+            collect_expr_bound_locals(hir, *receiver, out);
+            for arg in args {
+                collect_expr_bound_locals(hir, arg.value, out);
+            }
+        },
+        HirExpr::ImplicitMember { args, .. } => {
+            if let Some(args) = args {
+                for arg in args {
+                    collect_expr_bound_locals(hir, arg.value, out);
+                }
+            }
+        },
+        // Closures introduce a separate scope; leaves bind nothing.
+        HirExpr::Closure { .. }
+        | HirExpr::Local(..)
+        | HirExpr::Literal { .. }
+        | HirExpr::Def(..)
+        | HirExpr::TypeRef { .. }
+        | HirExpr::OverloadSet { .. }
+        | HirExpr::Break { .. }
+        | HirExpr::Continue { .. }
+        | HirExpr::Error { .. } => {},
+    }
+}
+
 /// Collect every binding local introduced by a pattern (recursing through
 /// tuple/variant/struct/array/or/at sub-patterns) into `out`.
+/// Whether `pat` binds a non-copyable value by value (not `&`), which moves it
+/// out of the matched value.
+fn pattern_binds_non_copyable_by_value(mcx: &MoveCtx<'_>, pat: HirPatId) -> bool {
+    let mut bound = HashSet::new();
+    collect_pattern_bindings(mcx.cx.hir, pat, &mut bound);
+    let by_ref = by_ref_bindings(mcx.cx.hir, pat);
+    bound
+        .into_iter()
+        .any(|local| !by_ref.contains(&local) && local_is_non_copyable(mcx, local))
+}
+
+/// Whether a match scrutinee is a place this body owns (not a borrowed or
+/// `mutating` parameter, whose bindings are borrow-bound instead).
+fn scrutinee_is_owned(mcx: &MoveCtx<'_>, scrutinee: HirExprId) -> bool {
+    place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, scrutinee)
+        .is_some_and(|place| local_is_owned_place(mcx.cx, place.root))
+}
+
+/// The bindings in `pat` written `&name` (borrowing, never moving).
+fn by_ref_bindings(hir: &HirBody, pat: HirPatId) -> HashSet<LocalId> {
+    let mut all = HashSet::new();
+    collect_pattern_bindings(hir, pat, &mut all);
+    all.into_iter()
+        .filter(|&local| {
+            hir.pats.iter().any(|(_, p)| {
+                matches!(p, HirPat::Binding { local: l, by_ref: Some(_), .. } if *l == local)
+            })
+        })
+        .collect()
+}
+
 fn collect_pattern_bindings(hir: &HirBody, pat: HirPatId, out: &mut HashSet<LocalId>) {
     match &hir.pats[pat] {
         HirPat::Binding { local, .. } => {
@@ -669,18 +1717,73 @@ fn collect_pattern_bindings(hir: &HirBody, pat: HirPatId, out: &mut HashSet<Loca
     }
 }
 
-/// Record that `src` is moved at `site`. If `src` is a pattern binding rooted in
+/// Record that `place` is moved at `site`. If its root is a pattern binding in
 /// a borrowed scrutinee, the move is illegal — emit E503 (move-out-of-borrow)
 /// rather than just tracking it.
+///
+/// THE FREEZE RULE'S single move-side consult lives at the top: destroying a
+/// place a live view-kind closure captures is E507, and it pre-empts the
+/// E506/E503 wordings (which would blame the wrong thing).
 fn record_move(
     mcx: &MoveCtx<'_>,
     state: &mut State,
     diags: &mut Vec<AnalyzeDiagnostic>,
-    src: LocalId,
+    place: PlaceKey,
     site: HirExprId,
+    reason: FreezeReason,
 ) {
-    if mcx.borrow_bound.contains(&src) && state.reported.insert(src) {
-        let name = mcx.cx.hir.locals[src].name.clone();
+    let root = place.root;
+    let span = util::expr_span(mcx.cx.hir, site);
+    if check_freeze(state, diags, &place, span, reason) {
+        // Still record the move so downstream reads stay consistent; the
+        // freeze diagnostic is the one this site earns.
+        state.moves.insert(
+            place,
+            MoveInfo {
+                kind: MoveKind::Definite,
+                site,
+            },
+        );
+        return;
+    }
+    if mcx.captured_borrow.contains(&root) {
+        // Moving a captured non-Copyable value OUT of a closure body (#177):
+        // the closure owns the single value and may be called more than once,
+        // so returning/consuming it would duplicate it (double-deinit). Borrow
+        // it instead. Distinct from E503 (move-out-of-borrowed-scrutinee).
+        if state.reported.insert(root) {
+            let name = mcx.cx.hir.locals[root].name.clone();
+            let span = util::expr_span(mcx.cx.hir, site);
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[3].id,
+                severity: DESCRIPTORS[3].default_severity,
+                message: format!("cannot move captured value '{name}' out of a closure"),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "non-copyable captured value moved out here".into(),
+                    is_primary: true,
+                }],
+                notes: vec![
+                    "a closure may be called more than once but owns a single \
+                     non-copyable value; borrow the captured value instead of \
+                     returning or consuming it"
+                        .into(),
+                ],
+            });
+        }
+    } else if is_unowned_param(mcx.cx, root)
+        && !is_mutating_param(mcx.cx, root)
+        && !is_consuming_closure_local(mcx, root)
+        && state.reported.insert(root)
+    {
+        diags.push(unowned_param_move(
+            mcx.cx,
+            root,
+            util::expr_span(mcx.cx.hir, site),
+            "move",
+        ));
+    } else if mcx.borrow_bound.contains(&root) && state.reported.insert(root) {
+        let name = mcx.cx.hir.locals[root].name.clone();
         let span = util::expr_span(mcx.cx.hir, site);
         diags.push(AnalyzeDiagnostic {
             descriptor_id: DESCRIPTORS[2].id,
@@ -699,12 +1802,380 @@ fn record_move(
         });
     }
     state.moves.insert(
-        src,
+        place,
         MoveInfo {
             kind: MoveKind::Definite,
             site,
         },
     );
+}
+
+// ===== The freeze rule (E507) =====
+
+/// Render a captured place for a diagnostic: `r`, `r.v`, `p.a`, `t.0`.
+fn place_display(cx: &BodyContext<'_>, place: &PlaceKey) -> String {
+    use kestrel_ast_builder::Name;
+    let mut out = cx.hir.locals[place.root].name.to_string();
+    for elem in &place.path {
+        out.push('.');
+        match elem {
+            ProjElem::Field(entity) => match cx.query.get::<Name>(*entity) {
+                Some(name) => out.push_str(&name.0),
+                None => out.push('_'),
+            },
+            ProjElem::TupleIndex(index) => out.push_str(&index.to_string()),
+        }
+    }
+    out
+}
+
+/// The frozen entry OVERLAPPING `place`, if any. Overlap is prefix-containment
+/// in either direction: destroying the whole of `p` kills a view of `p.a`, and
+/// destroying `p.b` kills a view of `p` (the nested-closure `force_whole`
+/// collapse is exactly this case).
+fn frozen_overlap(state: &State, place: &PlaceKey) -> Option<(PlaceKey, FreezeInfo)> {
+    state
+        .frozen
+        .iter()
+        .find(|(frozen, _)| frozen.is_prefix_of(place) || place.is_prefix_of(frozen))
+        .map(|(k, v)| (k.clone(), v.clone()))
+}
+
+/// Consult the freeze set for a place about to be destroyed. Returns true when
+/// a violation was found (whether or not this call emitted it — one diagnostic
+/// per viewed root per body).
+fn check_freeze(
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    place: &PlaceKey,
+    span: kestrel_span::Span,
+    reason: FreezeReason,
+) -> bool {
+    let Some((frozen, info)) = frozen_overlap(state, place) else {
+        return false;
+    };
+    if state.freeze_reported.insert(frozen.root) {
+        diags.push(freeze_diagnostic(&info, span, reason));
+    }
+    true
+}
+
+/// The outlives half of the rule: storing a value that CARRIES a view into a
+/// binding whose scope is shallower than the viewed place's is rejected even
+/// though nothing is moved or destroyed — the binding simply outlives the
+/// storage it points at.
+fn check_outlives(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    carried: &[PlaceKey],
+    dest_depth: usize,
+    site: HirExprId,
+) {
+    let span = util::expr_span(mcx.cx.hir, site);
+    for place in carried {
+        let Some(info) = state.frozen.get(place).cloned() else {
+            // Not a view-closure freeze: a reference to `place`. It dangles
+            // once `place`'s binding goes out of scope.
+            let referent_depth = state.local_depth.get(&place.root).copied().unwrap_or(0);
+            if referent_depth > dest_depth && state.freeze_reported.insert(place.root) {
+                let name = mcx.cx.hir.locals[place.root].name.clone();
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[5].id,
+                    severity: DESCRIPTORS[5].default_severity,
+                    message: format!(
+                        "a reference to '{name}' is stored somewhere that outlives '{name}'"
+                    ),
+                    labels: vec![DiagLabel {
+                        span: span.clone(),
+                        message: format!("this value carries a reference to '{name}'"),
+                        is_primary: true,
+                    }],
+                    notes: vec![format!(
+                        "'{name}' goes out of scope before the destination does, so the \
+                         reference would dangle"
+                    )],
+                });
+            }
+            continue;
+        };
+        if info.captured_scope_depth <= dest_depth {
+            continue;
+        }
+        if state.freeze_reported.insert(place.root) {
+            diags.push(freeze_diagnostic(
+                &info,
+                span.clone(),
+                FreezeReason::Outlives,
+            ));
+        }
+    }
+}
+
+/// CALL-ARG propagation point (plan D8 lists it alongside Let/Assign). A call
+/// exposes exactly one lexical destination the caller can name: a place the
+/// callee may WRITE. Storing a view-carrying argument into one that outlives
+/// the viewed place is the same dangle as `g = { r.v }`, only spelled through
+/// a method — `fns.append({ i * 10 })` inside a loop is the design's own
+/// Array-accumulation edge case.
+///
+/// Destinations are the `mutating` receiver and every `mutating` (non-
+/// `consuming`) argument. EXEMPT: an argument whose PARAMETER TYPE is spelled
+/// as a function type. A signature that names a function type takes the
+/// closure to CALL it (`forEach(_ f: (T) -> ())`, `sort(by:)`) and the callee
+/// frame is strictly deeper, so nothing can outlive anything; a slot typed by
+/// anything else — a generic `T`, an opaque type, a field type — is a
+/// CONTAINER the value comes to rest in. That split is what keeps
+/// `iter.forEach { local }` legal while `array.append({ local })` is not, and
+/// it is the reason this check needs the callee's declared signature rather
+/// than the argument's settled type (both are function types).
+fn check_call_arg_outlives(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    callee: Option<Entity>,
+    args: &[HirCallArg],
+    receiver: Option<HirExprId>,
+) {
+    let Some(callable) = callee.and_then(|e| mcx.cx.query.get::<Callable>(e)) else {
+        return;
+    };
+    let mut dests: Vec<HirExprId> = Vec::new();
+    if matches!(callable.receiver, Some(ReceiverKind::Mutating))
+        && let Some(recv) = receiver
+    {
+        dests.push(recv);
+    }
+    for (i, arg) in args.iter().enumerate() {
+        if callable
+            .params
+            .get(i)
+            .is_some_and(|p| p.is_mut && !p.is_consuming)
+        {
+            dests.push(arg.value);
+        }
+    }
+    // The shallowest writable destination bounds them all.
+    let Some(dest_depth) = dests
+        .iter()
+        .filter_map(|&d| place_root(mcx.cx.hir, d))
+        .map(|local| state.local_depth.get(&local).copied().unwrap_or(0))
+        .min()
+    else {
+        return;
+    };
+    for (i, arg) in args.iter().enumerate() {
+        if callable
+            .params
+            .get(i)
+            .is_some_and(|p| matches!(p.ty, Some(AstType::Function { .. })))
+        {
+            continue;
+        }
+        let carried = carried_places(mcx, state, arg.value);
+        if carried.is_empty() {
+            continue;
+        }
+        check_outlives(mcx, state, diags, &carried, dest_depth, arg.value);
+    }
+}
+
+/// The root local of a place chain (`x`, `x.f`, `x.f.0`), or `None` for
+/// anything that is not a place. The freeze rule's cheap twin of
+/// `place_key_of`, which additionally needs field resolutions.
+fn place_root(hir: &HirBody, expr: HirExprId) -> Option<LocalId> {
+    match &hir.exprs[expr] {
+        HirExpr::Local(local, _) => Some(*local),
+        HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => place_root(hir, *base),
+        HirExpr::Sugar { inner, .. } | HirExpr::Borrow { inner, .. } => place_root(hir, *inner),
+        _ => None,
+    }
+}
+
+/// E507's four wordings. Modeled on E498 ("cannot consume `x` while a
+/// reference into it is live") — this is its closure analogue.
+fn freeze_diagnostic(
+    info: &FreezeInfo,
+    span: kestrel_span::Span,
+    reason: FreezeReason,
+) -> AnalyzeDiagnostic {
+    let name = &info.name;
+    let (message, primary) = match reason {
+        FreezeReason::Move => (
+            format!("cannot move '{name}' while a closure capturing it is live"),
+            "moved here",
+        ),
+        FreezeReason::Consume => (
+            format!("cannot consume '{name}' while a closure capturing it is live"),
+            "consumed here",
+        ),
+        FreezeReason::Deinit => (
+            format!("cannot destroy '{name}' while a closure capturing it is live"),
+            "destroyed here",
+        ),
+        FreezeReason::Outlives => (
+            format!("a closure viewing '{name}' cannot outlive '{name}'"),
+            "the view is stored into a longer-lived binding here",
+        ),
+    };
+    let note = match reason {
+        FreezeReason::Outlives => format!(
+            "'{name}' is destroyed when its scope ends, but this binding lives longer; \
+             give the closure an owning type (`escaping`/`consuming`) or move the \
+             binding inside"
+        ),
+        _ => format!(
+            "a normal or `mutating` closure captures a VIEW of '{name}'; destroying it \
+             here would leave that view dangling. Reassignment stays legal — only \
+             destruction is frozen"
+        ),
+    };
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[4].id,
+        severity: DESCRIPTORS[4].default_severity,
+        message,
+        labels: vec![
+            DiagLabel {
+                span,
+                message: primary.into(),
+                is_primary: true,
+            },
+            DiagLabel {
+                span: info.closure_span.clone(),
+                message: "the closure capturing it is created here".into(),
+                is_primary: false,
+            },
+        ],
+        notes: vec![note],
+    }
+}
+
+/// The frozen places an expression may CARRY. Propagation follows the design's
+/// list — closure literals, copies of a carrier, aggregate construction — and
+/// stops there deliberately: a general call result is NOT treated as a carrier
+/// (a view closure can never be returned; E494 sees to that), so `let n =
+/// sink(f)` cannot manufacture a false outlives error.
+fn carried_places(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId) -> Vec<PlaceKey> {
+    let mut out = Vec::new();
+    collect_carried(mcx, state, expr, &mut out);
+    out.sort_by_key(|p| (p.root.raw(), p.path.len()));
+    out.dedup();
+    out
+}
+
+fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut Vec<PlaceKey>) {
+    let hir = mcx.cx.hir;
+    match &hir.exprs[expr] {
+        HirExpr::Closure { .. } => {
+            if closure_kind_of(mcx, expr).is_view() {
+                out.extend(mcx.captures.get(expr).iter().map(|cap| cap.key.clone()));
+            }
+        },
+        HirExpr::Local(local, _) => {
+            if let Some(places) = state.carriers.get(local) {
+                out.extend(places.iter().cloned());
+            }
+        },
+        // `&x` carries the place it refers to (checked against the
+        // destination's lifetime by `check_outlives`).
+        HirExpr::Borrow { inner, .. } => {
+            if let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, hir, *inner) {
+                out.push(place);
+            }
+            collect_carried(mcx, state, *inner, out)
+        },
+        HirExpr::Sugar { inner, .. } => collect_carried(mcx, state, *inner, out),
+        HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
+            collect_carried(mcx, state, *base, out)
+        },
+        HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
+            for &e in elements {
+                collect_carried(mcx, state, e, out);
+            }
+        },
+        // Aggregate construction stores its operands BY VALUE, so the struct /
+        // enum case carries whatever its fields carry (the design's "capture
+        // provenance propagates through ... aggregate construction").
+        HirExpr::Call { callee, args, .. } => {
+            let callee_entity = match &hir.exprs[*callee] {
+                HirExpr::Def(entity, _, _) => Some(*entity),
+                _ => mcx.cx.typed.resolutions.get(callee).copied(),
+            };
+            let is_init = mcx.cx.typed.resolutions.get(&expr).is_some_and(|&e| {
+                matches!(mcx.cx.query.get::<NodeKind>(e), Some(NodeKind::Initializer))
+            });
+            if is_init || stores_operands_by_value(mcx, callee_entity, expr) {
+                for arg in args {
+                    collect_carried(mcx, state, arg.value, out);
+                }
+            }
+        },
+        HirExpr::ImplicitMember {
+            args: Some(args), ..
+        } => {
+            for arg in args {
+                collect_carried(mcx, state, arg.value, out);
+            }
+        },
+        HirExpr::Block { body, .. } => {
+            if let Some(tail) = body.tail_expr {
+                collect_carried(mcx, state, tail, out);
+            }
+        },
+        HirExpr::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            if let Some(tail) = then_body.tail_expr {
+                collect_carried(mcx, state, tail, out);
+            }
+            if let Some(eb) = else_body
+                && let Some(tail) = eb.tail_expr
+            {
+                collect_carried(mcx, state, tail, out);
+            }
+        },
+        _ => {},
+    }
+}
+
+/// Per-instantiation copyability of an EXPRESSION's settled type — the
+/// projection-aware twin of `local_is_non_copyable` (which only knows locals).
+fn expr_is_non_copyable(mcx: &MoveCtx<'_>, expr: HirExprId) -> bool {
+    let Some(ty) = mcx.cx.typed.expr_types.get(&expr) else {
+        return false;
+    };
+    if mcx.copyable.is_some() {
+        return resolved_ty_copy_semantics(mcx, ty) == CopySemantics::NotCopyable;
+    }
+    !ty_is_copyable(mcx, ty)
+}
+
+// ===== Closure kind =====
+
+/// True when a call's CALLEE expression has a `consuming`-kind function type —
+/// the value the call consumes. Reads the settled type, so it covers a callee
+/// held in a binding, a parameter, or any other one-shot value.
+fn callee_kind_is_consuming(mcx: &MoveCtx<'_>, callee: HirExprId) -> bool {
+    matches!(
+        mcx.cx.typed.expr_types.get(&callee),
+        Some(ResolvedTy::Function {
+            kind: kestrel_ast::FnTypeKind::Consuming,
+            ..
+        })
+    )
+}
+
+/// The closure tier of a `HirExpr::Closure`, read from the type inference
+/// assigned it (a literal is built at `Normal` and retrofitted by the expected
+/// type). An unsettled/absent type falls back to `Normal` — the view tier and
+/// the default kind.
+fn closure_kind_of(mcx: &MoveCtx<'_>, closure: HirExprId) -> kestrel_ast::FnTypeKind {
+    match mcx.cx.typed.expr_types.get(&closure) {
+        Some(ResolvedTy::Function { kind, .. }) => *kind,
+        _ => kestrel_ast::FnTypeKind::Normal,
+    }
 }
 
 // ===== Copyable query =====
@@ -725,101 +2196,101 @@ fn local_is_non_copyable(mcx: &MoveCtx<'_>, local: LocalId) -> bool {
     !ty_is_copyable(mcx, ty)
 }
 
-/// Per-instantiation copy semantics of a resolved type, mirroring
-/// `kestrel_semantics::hir_type_copy_semantics` on `ResolvedTy`. Both Copyable
-/// and Cloneable are duplicable (a use copies/clones, never moves); only
-/// `NotCopyable` forces a move.
-fn resolved_ty_copy_semantics(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> CopySemantics {
-    match ty {
-        ResolvedTy::Named { entity, args } => nominal_instance_copy_semantics(mcx, *entity, args),
-        ResolvedTy::SelfType { entity } => {
-            mcx.cx
-                .query
-                .query(NominalCopySemantics {
-                    entity: *entity,
-                    root: mcx.cx.root,
-                })
-                .semantics
-        },
-        ResolvedTy::Param { entity } => match mcx.cx.query.query(TypeParamCopyRequirement {
-            param: *entity,
-            context: mcx.cx.entity,
-            root: mcx.cx.root,
-        }) {
-            CopyRequirement::RequiresCloneable => CopySemantics::Cloneable,
-            CopyRequirement::RequiresCopyable => CopySemantics::Copyable,
-            CopyRequirement::MayBeNonCopyable => CopySemantics::NotCopyable,
-        },
-        ResolvedTy::Tuple(elems) => fold_elem_copy_semantics(mcx, elems),
-        // Assoc projections are Copyable-by-default (matches
-        // `hir_type_copy_semantics`); functions/never/error are pointer-like.
-        _ => CopySemantics::Copyable,
-    }
+/// `CopyLayer` over `ResolvedTy` — the move checker's hooks into the shared
+/// decision tree (`kestrel_copy_fold::instance_semantics`, the single source
+/// of truth for per-instantiation copy semantics across semantics / solver /
+/// analyze / MIR). Layer-specific plumbing: the body owner (`mcx.cx.entity`)
+/// scopes type-param bound lookups.
+struct MoveCopyLayer<'a, 'b> {
+    mcx: &'a MoveCtx<'b>,
 }
 
-/// Copy semantics of a concrete nominal instance `entity[args]`, folding a
-/// conditional `Copyable where …` conformance over the gating arg positions.
-/// Mirrors `kestrel_semantics::nominal_instance_copy_semantics`.
-fn nominal_instance_copy_semantics(
-    mcx: &MoveCtx<'_>,
-    entity: Entity,
-    args: &[ResolvedTy],
-) -> CopySemantics {
-    let base = mcx
-        .cx
-        .query
-        .query(NominalCopySemantics {
+impl CopyLayer for MoveCopyLayer<'_, '_> {
+    type Ty = ResolvedTy;
+    type Sem = CopySemantics;
+
+    fn base_semantics(&self, entity: Entity) -> CopySemantics {
+        self.mcx
+            .cx
+            .query
+            .query(NominalCopySemantics {
+                entity,
+                root: self.mcx.cx.root,
+            })
+            .semantics
+    }
+
+    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+        Cow::Owned(self.mcx.cx.query.query(ConditionalCopyableParams {
             entity,
-            root: mcx.cx.root,
-        })
-        .semantics;
-    if base != CopySemantics::NotCopyable {
-        return base;
+            root: self.mcx.cx.root,
+        }))
     }
-    // A `not Copyable` base may still be conditionally Copyable per-instantiation.
-    let positions = mcx.cx.query.query(ConditionalCopyableParams {
-        entity,
-        root: mcx.cx.root,
-    });
-    if positions.is_empty() {
-        return CopySemantics::NotCopyable;
+
+    fn sem_from_class(&self, _: Entity, class: CopySemantics) -> CopySemantics {
+        class
     }
-    let mut saw_cloneable = false;
-    for pos in positions {
-        // A missing gating arg means the instance can't be proven Copyable.
-        let Some(arg) = args.get(pos) else {
-            return CopySemantics::NotCopyable;
-        };
-        match resolved_ty_copy_semantics(mcx, arg) {
-            CopySemantics::NotCopyable => return CopySemantics::NotCopyable,
-            CopySemantics::Cloneable => saw_cloneable = true,
-            CopySemantics::Copyable => {},
+
+    fn member_semantics(&self, ty: &ResolvedTy) -> CopySemantics {
+        match ty {
+            ResolvedTy::Named { entity, args } => instance_semantics(self, *entity, args),
+            // A protocol's abstract `Self` is only as copyable as the protocol
+            // (or a `where Self:` bound) guarantees; a concrete `Self` is its nominal.
+            ResolvedTy::SelfType { entity } => kestrel_semantics::self_type_copy_semantics(
+                self.mcx.cx.query,
+                *entity,
+                self.mcx.cx.entity,
+                self.mcx.cx.root,
+            ),
+            // HOOK: body-owner context scopes the bound lookup.
+            ResolvedTy::Param { entity } => self
+                .mcx
+                .cx
+                .query
+                .query(TypeParamCopyRequirement {
+                    param: *entity,
+                    context: self.mcx.cx.entity,
+                    root: self.mcx.cx.root,
+                })
+                .into(),
+            ResolvedTy::Tuple(elems) => {
+                fold_members(elems.iter().map(|e| self.member_semantics(e)))
+            },
+            // `some P and not Copyable` hides a possibly move-only underlier —
+            // uses must move. A plain `some P` guarantees a duplicable
+            // underlier (enforced on the defining body post-solve).
+            ResolvedTy::Opaque { not_copyable, .. } => {
+                if *not_copyable {
+                    CopySemantics::NotCopyable
+                } else {
+                    CopySemantics::Copyable
+                }
+            },
+            // A closure value's copy class is fixed by its KIND (plan D6):
+            // binding a `mutating`/`consuming` closure to a second name is a
+            // MOVE, and an `escaping` one clones (shares) its environment.
+            ResolvedTy::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),
+            // Assoc projections are Copyable-by-default (matches
+            // `hir_type_copy_semantics`); never/error are recovery — all
+            // Copyable. Explicit so a future ResolvedTy variant forces a
+            // decision here.
+            // A ref (stage 1) is a borrow: copying it duplicates the pointer,
+            // never the pointee — Copyable, the same answer nightly's old
+            // catch-all gave.
+            ResolvedTy::AssocProjection { .. }
+            | ResolvedTy::Never
+            | ResolvedTy::Ref { .. }
+            | ResolvedTy::Error => CopySemantics::Copyable,
         }
-    }
-    if saw_cloneable {
-        CopySemantics::Cloneable
-    } else {
-        CopySemantics::Copyable
     }
 }
 
-/// Fold copy semantics across aggregate members / gating args: any
-/// `NotCopyable` → `NotCopyable`, else any `Cloneable` → `Cloneable`, else
-/// `Copyable`.
-fn fold_elem_copy_semantics(mcx: &MoveCtx<'_>, elems: &[ResolvedTy]) -> CopySemantics {
-    let mut saw_cloneable = false;
-    for elem in elems {
-        match resolved_ty_copy_semantics(mcx, elem) {
-            CopySemantics::NotCopyable => return CopySemantics::NotCopyable,
-            CopySemantics::Cloneable => saw_cloneable = true,
-            CopySemantics::Copyable => {},
-        }
-    }
-    if saw_cloneable {
-        CopySemantics::Cloneable
-    } else {
-        CopySemantics::Copyable
-    }
+/// Per-instantiation copy semantics of a resolved type, the analyze face of
+/// `kestrel_copy_fold::instance_semantics`. Both Copyable and Cloneable are
+/// duplicable (a use copies/clones, never moves); only `NotCopyable` forces a
+/// move.
+fn resolved_ty_copy_semantics(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> CopySemantics {
+    MoveCopyLayer { mcx }.member_semantics(ty)
 }
 
 fn ty_is_copyable(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> bool {
@@ -827,7 +2298,15 @@ fn ty_is_copyable(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> bool {
         ResolvedTy::Named { entity, .. } => !entity_negates_copyable(mcx, *entity),
         ResolvedTy::Param { entity } => !param_negates_copyable(mcx, *entity),
         ResolvedTy::Tuple(elems) => elems.iter().all(|t| ty_is_copyable(mcx, t)),
-        // Functions, Never, Error, SelfType — treat as copyable (pointer-like).
+        // `some P and not Copyable` — treat like an explicit negation.
+        ResolvedTy::Opaque { not_copyable, .. } => !not_copyable,
+        // The stdlib-less twin of the `MoveCopyLayer` arm: a closure's copy
+        // class is its kind's, and the kind is spelled in the type — no
+        // `Copyable` builtin needed to read it (plan D6).
+        ResolvedTy::Function { kind, .. } => {
+            kestrel_copy_fold::fn_kind_semantics(*kind) != CopySemantics::NotCopyable
+        },
+        // Never, Error, SelfType — treat as copyable (pointer-like).
         _ => true,
     }
 }
@@ -916,34 +2395,42 @@ fn resolves_to_entity(cx: &BodyContext<'_>, ast_ty: &AstType, context: Entity) -
 
 // ===== CFG join =====
 
+/// Fold the freeze-rule bookkeeping of every branch into `out`. Freezes,
+/// carriers and declaration depths are may-facts, so a JOIN is a plain union
+/// (the design's "capture provenance propagates through ... control-flow
+/// joins"); `freeze_reported` unions so a join never re-reports.
+fn join_freeze_state<'a>(out: &mut State, branches: impl Iterator<Item = &'a State>) {
+    for b in branches {
+        out.frozen
+            .extend(b.frozen.iter().map(|(k, v)| (k.clone(), v.clone())));
+        for (local, places) in &b.carriers {
+            out.carriers
+                .entry(*local)
+                .or_default()
+                .extend(places.iter().cloned());
+        }
+        out.local_depth.extend(b.local_depth.iter());
+        out.freeze_reported
+            .extend(b.freeze_reported.iter().copied());
+    }
+}
+
 fn merge_if_else(pre: State, then: State, els: State) -> State {
     let mut reported = pre.reported.clone();
     reported.extend(then.reported.iter().copied());
     reported.extend(els.reported.iter().copied());
-    match (then.diverged, els.diverged) {
-        (true, true) => State {
-            moves: pre.moves,
-            reported,
-            diverged: true,
-        },
-        (true, false) => State {
-            moves: els.moves,
-            reported,
-            diverged: false,
-        },
-        (false, true) => State {
-            moves: then.moves,
-            reported,
-            diverged: false,
-        },
+    let (moves, diverged) = match (then.diverged, els.diverged) {
+        (true, true) => (pre.moves.clone(), true),
+        (true, false) => (els.moves.clone(), false),
+        (false, true) => (then.moves.clone(), false),
         (false, false) => {
             let mut merged = HashMap::new();
-            let mut all: HashSet<LocalId> = HashSet::new();
-            all.extend(then.moves.keys().copied());
-            all.extend(els.moves.keys().copied());
-            for local in all {
-                let t = then.moves.get(&local).copied();
-                let e = els.moves.get(&local).copied();
+            let mut all: HashSet<PlaceKey> = HashSet::new();
+            all.extend(then.moves.keys().cloned());
+            all.extend(els.moves.keys().cloned());
+            for place in all {
+                let t = then.moves.get(&place).copied();
+                let e = els.moves.get(&place).copied();
                 let info = match (t, e) {
                     (Some(a), Some(b)) => {
                         let kind = match (a.kind, b.kind) {
@@ -958,15 +2445,19 @@ fn merge_if_else(pre: State, then: State, els: State) -> State {
                     },
                     (None, None) => unreachable!(),
                 };
-                merged.insert(local, info);
+                merged.insert(place, info);
             }
-            State {
-                moves: merged,
-                reported,
-                diverged: false,
-            }
+            (merged, false)
         },
-    }
+    };
+    let mut out = State {
+        moves,
+        reported,
+        diverged,
+        ..pre
+    };
+    join_freeze_state(&mut out, [&then, &els].into_iter());
+    out
 }
 
 fn merge_match(pre: State, arms: Vec<State>) -> State {
@@ -975,24 +2466,26 @@ fn merge_match(pre: State, arms: Vec<State>) -> State {
         reported.extend(s.reported.iter().copied());
     }
     if arms.iter().all(|s| s.diverged) {
-        return State {
-            moves: pre.moves,
+        let mut out = State {
             reported,
             diverged: true,
+            ..pre
         };
+        join_freeze_state(&mut out, arms.iter());
+        return out;
     }
     let live: Vec<&State> = arms.iter().filter(|s| !s.diverged).collect();
-    let mut all: HashSet<LocalId> = HashSet::new();
+    let mut all: HashSet<PlaceKey> = HashSet::new();
     for s in &live {
-        all.extend(s.moves.keys().copied());
+        all.extend(s.moves.keys().cloned());
     }
     let mut merged = HashMap::new();
-    for local in all {
+    for place in all {
         let mut all_definite = true;
         let mut any_info: Option<MoveInfo> = None;
         let mut present_in_all_live = true;
         for s in &live {
-            match s.moves.get(&local) {
+            match s.moves.get(&place) {
                 Some(info) => {
                     if any_info.is_none() {
                         any_info = Some(*info);
@@ -1014,18 +2507,21 @@ fn merge_match(pre: State, arms: Vec<State>) -> State {
             MoveKind::Maybe
         };
         merged.insert(
-            local,
+            place,
             MoveInfo {
                 kind,
                 site: info.site,
             },
         );
     }
-    State {
+    let mut out = State {
         moves: merged,
         reported,
         diverged: false,
-    }
+        ..pre
+    };
+    join_freeze_state(&mut out, arms.iter());
+    out
 }
 
 // ===== Loop shape detection =====
@@ -1033,7 +2529,10 @@ fn merge_match(pre: State, arms: Vec<State>) -> State {
 /// Does this loop body start with a conditional `break`? `while` and
 /// `while-let` desugar to `loop { if !cond { break }; body }`; their HIR
 /// body therefore begins with an `if`-stmt whose then-branch breaks.
-fn loop_is_conditional(hir: &HirBody, body: &HirBlock) -> bool {
+///
+/// `target` is the enclosing loop's own label, threaded through so the break
+/// is attributed to *this* loop and not a nested one (G9).
+fn loop_is_conditional(hir: &HirBody, body: &HirBlock, target: Option<&str>) -> bool {
     let Some(&first) = body.stmts.first() else {
         return false;
     };
@@ -1050,50 +2549,10 @@ fn loop_is_conditional(hir: &HirBody, body: &HirBlock) -> bool {
     };
     // Either branch containing a break makes the loop body conditional
     // (it can exit on iteration 1 before the rest of the body runs).
-    block_contains_break(hir, then_body)
+    control_flow::block_contains_break_for(hir, then_body, target)
         || else_body
             .as_ref()
-            .is_some_and(|b| block_contains_break(hir, b))
-}
-
-fn block_contains_break(hir: &HirBody, block: &HirBlock) -> bool {
-    for &stmt_id in &block.stmts {
-        if stmt_contains_break(hir, stmt_id) {
-            return true;
-        }
-    }
-    if let Some(tail) = block.tail_expr {
-        return expr_contains_break(hir, tail);
-    }
-    false
-}
-
-fn stmt_contains_break(hir: &HirBody, id: HirStmtId) -> bool {
-    match &hir.stmts[id] {
-        HirStmt::Expr { expr, .. } => expr_contains_break(hir, *expr),
-        HirStmt::Let { value: Some(v), .. } => expr_contains_break(hir, *v),
-        _ => false,
-    }
-}
-
-fn expr_contains_break(hir: &HirBody, id: HirExprId) -> bool {
-    match &hir.exprs[id] {
-        HirExpr::Break { .. } => true,
-        HirExpr::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            block_contains_break(hir, then_body)
-                || else_body
-                    .as_ref()
-                    .is_some_and(|b| block_contains_break(hir, b))
-        },
-        HirExpr::Match { arms, .. } => arms.iter().any(|a| expr_contains_break(hir, a.body)),
-        HirExpr::Block { body, .. } => block_contains_break(hir, body),
-        HirExpr::Loop { .. } | HirExpr::Closure { .. } => false,
-        _ => false,
-    }
+            .is_some_and(|b| control_flow::block_contains_break_for(hir, b, target))
 }
 
 // ===== Protocol-method lookup =====
@@ -1103,16 +2562,8 @@ fn find_protocol_method(
     protocol: Entity,
     method_name: &str,
 ) -> Option<Entity> {
-    cx.query
-        .children_of(protocol)
-        .iter()
-        .find(|&&child| {
-            cx.query.get::<NodeKind>(child) == Some(&NodeKind::Function)
-                && cx
-                    .query
-                    .get::<kestrel_ast_builder::Name>(child)
-                    .is_some_and(|n| n.0 == method_name)
-        })
+    util::children_named_of_kind(cx.query, protocol, method_name, NodeKind::Function)
+        .first()
         .copied()
 }
 
@@ -1190,20 +2641,125 @@ fn emit_use_after_move(
 /// for a `deinit` statement. The HIR arena's deinit-stmt doesn't have its
 /// own expression, so we use the first expression whose span contains the
 /// deinit token. Falls back to the first local-read of this name.
-fn deinit_site(hir: &HirBody, local: LocalId) -> HirExprId {
+fn deinit_site(hir: &HirBody, local: LocalId) -> Option<HirExprId> {
     // Scan for any expression that reads this local — good enough as a span
     // anchor for downstream secondary labels.
     for (id, expr) in hir.exprs.iter() {
         if let HirExpr::Local(l, _) = expr
             && *l == local
         {
-            return id;
+            return Some(id);
         }
     }
-    // Fallback: the first expression in the arena.
-    hir.exprs
+    // Fallback: the first expression in the arena, if the body has any.
+    hir.exprs.iter().next().map(|(id, _)| id)
+}
+
+/// A parameter the body does not own: borrowed (the default) or `mutating`.
+/// Moving or destroying it would release a value the caller still owns.
+fn is_unowned_param(cx: &BodyContext<'_>, local: LocalId) -> bool {
+    cx.hir.params.contains(&local) && !local_is_owned_place(cx, local)
+}
+
+/// A local of `consuming` closure type. Calling it consumes it; a borrowed
+/// parameter of that type is already rejected at the signature (E625), so its
+/// call is not reported again as a move out of a borrow.
+fn is_consuming_closure_local(mcx: &MoveCtx<'_>, local: LocalId) -> bool {
+    matches!(
+        mcx.cx.typed.local_types.get(&local),
+        Some(ResolvedTy::Function {
+            kind: kestrel_ast::FnTypeKind::Consuming,
+            ..
+        })
+    )
+}
+
+/// A `mutating` parameter (or `mutating self`): the body may move its value
+/// out, as long as it puts one back before returning (the caller still owns
+/// the slot). Checked at each exit by `check_mutating_params_restored`.
+fn is_mutating_param(cx: &BodyContext<'_>, local: LocalId) -> bool {
+    if !cx.hir.params.contains(&local) {
+        return false;
+    }
+    let Some(callable) = cx.query.get::<Callable>(cx.entity) else {
+        return false;
+    };
+    let name = cx.hir.locals[local].name.as_str();
+    if name == "self" {
+        return matches!(callable.receiver, Some(ReceiverKind::Mutating));
+    }
+    callable
+        .params
         .iter()
-        .next()
-        .map(|(id, _)| id)
-        .expect("body has at least one expression")
+        .find(|p| p.name == name)
+        .is_some_and(|p| p.is_mut && !p.is_consuming)
+}
+
+/// At a function exit, every `mutating` parameter must hold a value again: a
+/// value moved out and never replaced would leave the caller's slot empty
+/// (and the caller would drop it a second time).
+fn check_mutating_params_restored(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    exit_span: kestrel_span::Span,
+) {
+    let cx = mcx.cx;
+    for &local in &cx.hir.params {
+        if !is_mutating_param(cx, local) {
+            continue;
+        }
+        let Some(info) = state.moves.get(&PlaceKey::whole(local)).copied() else {
+            continue;
+        };
+        if !state.reported.insert(local) {
+            continue;
+        }
+        let name = cx.hir.locals[local].name.clone();
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[2].id,
+            severity: DESCRIPTORS[2].default_severity,
+            message: format!(
+                "mutating parameter '{name}' is moved out and not replaced before returning"
+            ),
+            labels: vec![
+                DiagLabel {
+                    span: exit_span.clone(),
+                    message: format!("returns while '{name}' holds no value"),
+                    is_primary: true,
+                },
+                DiagLabel {
+                    span: util::expr_span(cx.hir, info.site),
+                    message: "moved out here".into(),
+                    is_primary: false,
+                },
+            ],
+            notes: vec![format!(
+                "assign a new value to '{name}' before returning; the caller still owns it"
+            )],
+        });
+    }
+}
+
+/// E503 for moving (`verb` = "move") or destroying a non-owned parameter.
+fn unowned_param_move(
+    cx: &BodyContext<'_>,
+    local: LocalId,
+    span: kestrel_span::Span,
+    verb: &str,
+) -> AnalyzeDiagnostic {
+    let name = cx.hir.locals[local].name.clone();
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[2].id,
+        severity: DESCRIPTORS[2].default_severity,
+        message: format!("cannot {verb} parameter '{name}': it is borrowed, not owned"),
+        labels: vec![DiagLabel {
+            span,
+            message: format!("'{name}' still belongs to the caller"),
+            is_primary: true,
+        }],
+        notes: vec![format!(
+            "mark the parameter `consuming` to take ownership of '{name}'"
+        )],
+    }
 }

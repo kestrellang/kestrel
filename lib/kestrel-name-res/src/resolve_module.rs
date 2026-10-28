@@ -59,7 +59,11 @@ fn find_module_by_name(ctx: &QueryContext<'_>, root: Entity, name: &str) -> Opti
 }
 
 /// Find a direct child module with the given name.
-fn find_child_module(ctx: &QueryContext<'_>, parent: Entity, name: &str) -> Option<Entity> {
+pub(crate) fn find_child_module(
+    ctx: &QueryContext<'_>,
+    parent: Entity,
+    name: &str,
+) -> Option<Entity> {
     ctx.children_of(parent)
         .iter()
         .find(|&&child| {
@@ -122,7 +126,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let std = world.spawn();
         world.set(std, NodeKind::Module);
@@ -221,7 +225,7 @@ mod tests {
         world.begin_revision();
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let ctx = world.query_context();
         let modules = ctx.query(StdModules { root });

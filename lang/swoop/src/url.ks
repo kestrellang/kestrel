@@ -41,7 +41,7 @@ public struct ClientUrl: Cloneable {
 
     /// Returns the full request path including query string (e.g. "/users?page=1").
     public func requestPath() -> String {
-        if self.queryString.byteCount > 0 {
+        if self.queryString.bytes.count > 0 {
             var full = String();
             full.append(self.path);
             full.append("?");
@@ -76,8 +76,8 @@ public struct ClientUrl: Cloneable {
 /// Parses a URL string into a ClientUrl.
 ///
 /// Supports: http://host/path, https://host/path, with optional :port and ?query
-public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
-    let len = raw.byteCount;
+public func parseClientUrl(raw: String) -> ClientUrl throws SwoopError {
+    let len = raw.bytes.count;
 
     // Determine scheme
     var scheme = String();
@@ -93,7 +93,7 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
         afterScheme = 7;
         defaultPort = 80
     } else {
-        return .Err(SwoopError.invalidUrl("only http:// and https:// URLs are supported"))
+        throw SwoopError.invalidUrl("only http:// and https:// URLs are supported")
     }
 
     // Find end of host:port (first '/' after scheme, or end of string)
@@ -110,8 +110,8 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
     // Extract host:port portion
     let rawSlice = raw.asSlice();
     let hostPort = rawSlice.subslice(from: afterScheme, to: pathStart).toOwned();
-    if hostPort.byteCount == 0 {
-        return .Err(SwoopError.invalidUrl("missing host"))
+    if hostPort.bytes.count == 0 {
+        throw SwoopError.invalidUrl("missing host")
     }
 
     var host = hostPort;
@@ -124,7 +124,7 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
         if port64 > 0 and port64 <= 65535 {
             port = UInt16(from: port64)
         } else {
-            return .Err(SwoopError.invalidUrl("invalid port"))
+            throw SwoopError.invalidUrl("invalid port")
         }
     }
 

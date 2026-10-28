@@ -96,28 +96,28 @@ public struct Swoop: Cloneable {
     // ====================================================================
 
     /// Performs an HTTP GET request.
-    public func fetch(url: String) -> Result[Response, SwoopError] = self.execute(HttpMethod.Get, url)
+    public func fetch(url: String) -> Response throws SwoopError = self.execute(HttpMethod.Get, url)
 
     /// Performs an HTTP DELETE request.
-    public func delete(url: String) -> Result[Response, SwoopError] = self.execute(HttpMethod.Delete, url)
+    public func delete(url: String) -> Response throws SwoopError = self.execute(HttpMethod.Delete, url)
 
     /// Performs an HTTP HEAD request.
-    public func head(url: String) -> Result[Response, SwoopError] = self.execute(HttpMethod.Head, url)
+    public func head(url: String) -> Response throws SwoopError = self.execute(HttpMethod.Head, url)
 
     /// Performs an HTTP POST request with content.
-    public func post[C](url: String, content: C) -> Result[Response, SwoopError] where C: Content = self.executeWith(HttpMethod.Post, url, content)
+    public func post[C](url: String, content: C) -> Response throws SwoopError where C: Content = self.executeWith(HttpMethod.Post, url, content)
 
     /// Performs an HTTP PUT request with content.
-    public func put[C](url: String, content: C) -> Result[Response, SwoopError] where C: Content = self.executeWith(HttpMethod.Put, url, content)
+    public func put[C](url: String, content: C) -> Response throws SwoopError where C: Content = self.executeWith(HttpMethod.Put, url, content)
 
     /// Performs an HTTP PATCH request with content.
-    public func patch[C](url: String, content: C) -> Result[Response, SwoopError] where C: Content = self.executeWith(HttpMethod.Patch, url, content)
+    public func patch[C](url: String, content: C) -> Response throws SwoopError where C: Content = self.executeWith(HttpMethod.Patch, url, content)
 
     // ====================================================================
     // EXECUTION (no content)
     // ====================================================================
 
-    func execute(method: HttpMethod, url: String) -> Result[Response, SwoopError] {
+    func execute(method: HttpMethod, url: String) -> Response throws SwoopError {
         let fullUrl = if url.starts(with: "http://") or url.starts(with: "https://") {
             url
         } else {
@@ -129,13 +129,13 @@ public struct Swoop: Cloneable {
         if parsed.scheme == "https" {
             let tlsStream = match TlsStream.connect(parsed.host, parsed.port) {
                 .Ok(s) => s,
-                .Err(e) => return .Err(SwoopError.connectionFailed("TLS connection failed to " + parsed.host))
+                .Err(e) => throw SwoopError.connectionFailed("TLS connection failed to " + parsed.host)
             };
             sendRequest(tlsStream, method, parsed, self._headers)
         } else {
             let stream = match TcpStream.connect(parsed.host, parsed.port) {
                 .Ok(s) => s,
-                .Err(e) => return .Err(SwoopError.connectionFailed("could not connect to " + parsed.host))
+                .Err(e) => throw SwoopError.connectionFailed("could not connect to " + parsed.host)
             };
             sendRequest(stream, method, parsed, self._headers)
         }
@@ -145,7 +145,7 @@ public struct Swoop: Cloneable {
     // EXECUTION (with content)
     // ====================================================================
 
-    func executeWith[C](method: HttpMethod, url: String, content: C) -> Result[Response, SwoopError] where C: Content {
+    func executeWith[C](method: HttpMethod, url: String, content: C) -> Response throws SwoopError where C: Content {
         let fullUrl = if url.starts(with: "http://") or url.starts(with: "https://") {
             url
         } else {
@@ -157,13 +157,13 @@ public struct Swoop: Cloneable {
         if parsed.scheme == "https" {
             let tlsStream = match TlsStream.connect(parsed.host, parsed.port) {
                 .Ok(s) => s,
-                .Err(e) => return .Err(SwoopError.connectionFailed("TLS connection failed to " + parsed.host))
+                .Err(e) => throw SwoopError.connectionFailed("TLS connection failed to " + parsed.host)
             };
             sendRequest(tlsStream, method, parsed, self._headers, content)
         } else {
             let stream = match TcpStream.connect(parsed.host, parsed.port) {
                 .Ok(s) => s,
-                .Err(e) => return .Err(SwoopError.connectionFailed("could not connect to " + parsed.host))
+                .Err(e) => throw SwoopError.connectionFailed("could not connect to " + parsed.host)
             };
             sendRequest(stream, method, parsed, self._headers, content)
         }

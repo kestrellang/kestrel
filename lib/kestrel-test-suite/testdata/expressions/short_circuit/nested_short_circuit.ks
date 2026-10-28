@@ -4,12 +4,12 @@ module Main
 import std.io.stdio.println
 
 func effect() -> Bool {
-    let _ = println("EFFECT");
+     println("EFFECT");
     true
 }
 
 func main() -> lang.i64 {
     let result = (false and (effect() and effect())) or true;
-    let _ = println(result);
+     println(result);
     0
 }

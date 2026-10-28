@@ -6,9 +6,9 @@ module Test
         @main
         func main() -> lang.i64 {
             var s = std.collections.Set[std.numeric.Int64]();
-            let _ = s.insert(1);
-            let _ = s.insert(2);
-            let _ = s.insert(3);
+             s.insert(1);
+             s.insert(2);
+             s.insert(3);
 
             let total = s.sum();
             if total != 6 { return 1 }
@@ -20,7 +20,7 @@ module Test
 
             // Single element
             var single = std.collections.Set[std.numeric.Int64]();
-            let _ = single.insert(42);
+             single.insert(42);
             if single.sum() != 42 { return 3 }
 
             0

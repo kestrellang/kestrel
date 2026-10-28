@@ -10,7 +10,7 @@ struct MyError {}
 func main() -> lang.i64 {
     let someOk: std.numeric.Int64 throws MyError? = .Some(.Ok(42));
     let none: std.numeric.Int64 throws MyError? = .None;
-    let _ = println(someOk.unwrap().unwrap());
-    let _ = println(none.isNone());
+     println(someOk.unwrap().unwrap());
+     println(none.isNone());
     0
 }

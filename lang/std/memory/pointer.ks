@@ -3,7 +3,7 @@
 module std.memory
 
 import std.ffi.(FFISafe)
-import std.core.(Equatable, Bool, Hashable, Hasher, ArrayMatchable, Range, ClosedRange, fatalError)
+import std.core.(Equatable, Bool, Hashable, Hasher, ArrayMatchable, Range, ClosedRange, fatalError, Indirection, MutableIndirection)
 import std.numeric.(Int64, UInt64, UInt8)
 import std.memory.(ArraySlice)
 import std.result.(Optional)
@@ -133,7 +133,10 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
 /// Non-owning. The pointee's lifetime is the caller's responsibility; the
 /// pointer does not increment any refcount, register with any GC, or
 /// trigger a deinit.
-public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
+// `T: not Static` (references 2a): the pointee may be reference-bearing —
+// Pointer is the unsafe escape hatch, and Pointer[T] itself stores only a
+// raw address (no T), so it stays Static regardless of T.
+public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Static {
     // `fileprivate`, not `private`: the conditional `pointee` accessor lives in
     // `extend Pointer[T] where T: Copyable` (a conditional member can't sit in
     // the struct body), and an extension can only reach file-scoped members.
@@ -150,8 +153,19 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
 
     /// @name To Value
     /// Takes the address of `value`. Equivalent to `&value` in C — the
-    /// caller must ensure `value` outlives any use of the resulting
-    /// pointer.
+    /// borrowed place itself is captured; no copy is made.
+    ///
+    /// # Safety
+    ///
+    /// The pointer does not keep `value` alive: the caller must ensure the
+    /// place outlives every use of the resulting pointer, or any read is
+    /// undefined behavior.
+    ///
+    /// This is the sole capture init and it accepts any place — `var` or
+    /// `let` — yielding the same write-capable `Pointer[T]`. Writing
+    /// through a pointer captured from an immutable place is the C
+    /// const-cast footgun: it compiles, and it is on the caller to know the
+    /// storage is actually mutable.
     public init(to value: T) {
         self._raw = lang.ptr_to(value)
     }
@@ -187,6 +201,24 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
         lang.ptr_read(self._raw)
     }
 
+    /// Moves `T` out of the address bitwise — a *consuming* read-out. Unlike
+    /// `read()` there is no `Copyable` requirement: ownership of the value
+    /// transfers to the caller, and the pointee is left logically
+    /// uninitialised. `T.deinit` does not run here.
+    ///
+    /// This is the dual of `write(consuming:)` and the building block for
+    /// relocating non-Copyable values (e.g. `swap`).
+    ///
+    /// # Safety
+    ///
+    /// Same validity preconditions as `read()`, and additionally: after the
+    /// take the pointee must not be read or dropped until the slot is
+    /// re-initialised (e.g. via `write`). Taking the same slot twice without
+    /// an intervening write double-owns the value and will double-free.
+    public func take() -> T {
+        lang.ptr_take(self._raw)
+    }
+
     /// Borrows the pointee in place and passes it to `body`. The pointee
     /// is never copied or cloned — `T.deinit` does not run. Use this
     /// to extract fields from heap-allocated structs without triggering
@@ -203,9 +235,61 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
         body(lang.ptr_mut_borrow(self._raw))
     }
 
+    /// Borrowed view of the pointee — no copy, no clone, no `T: Copyable`
+    /// requirement. Member access, operators, and borrow-convention calls
+    /// go through it in place; binding it (`let x = p.value;`) stores an
+    /// owned copy instead (binding decay).
+    ///
+    /// # Safety
+    ///
+    /// - The pointer must be non-null and the storage must hold a valid,
+    ///   initialized `T` for as long as the reference is used.
+    /// - The reference inherits this pointer's contract: the compiler does
+    ///   not verify the pointee's lifetime. Using it after the storage is
+    ///   freed is undefined behavior — the same trust point as `read()`,
+    ///   returning a view instead of a copy.
+    public var value: &T {
+        lang.ptr_ref(self._raw)
+    }
+
+    /// Mutable borrowed view of the pointee. Mutating methods and
+    /// `mutating`-convention arguments through the result write the storage
+    /// in place — no clone, no write-back.
+    ///
+    /// # Safety
+    ///
+    /// - Same validity preconditions as `value`.
+    /// - This is the const-cast escape hatch: `Pointer(to: x).mutatingValue`
+    ///   on a `let`/shared place compiles and writes through it — the
+    ///   compiler does not stop it (same class as `write()` after
+    ///   `Pointer(to:)` on a `let`).
+    /// - Writing through a pointer into storage shared by a COW container
+    ///   (`Array`, `String`, `Dictionary`) is visible through every copy,
+    ///   breaking value semantics. Make the storage unique first.
+    public var mutatingValue: &mutating T {
+        lang.ptr_mut_ref(self._raw)
+    }
+
     /// Writes `value` through the pointer. Same safety preconditions as
     /// `pointee.set`.
+    ///
+    /// # Safety
+    ///
+    /// The pointer must be non-null and the storage valid for writes of
+    /// `T`. The previous pointee is overwritten without running its
+    /// `deinit`. If the pointer was captured with `Pointer(to:)` from a
+    /// `let` place, writing is the documented const-cast footgun — the
+    /// compiler does not stop it.
     public func write(consuming value: T) {
+        lang.ptr_write(self._raw, value)
+    }
+
+    /// Replaces an INITIALIZED pointee: runs the old value's destructor in
+    /// place, then writes `value`. Use this — not `write` — to overwrite a
+    /// live slot; `write` is for uninitialized (or moved-out) storage and
+    /// drops nothing, so overwriting a live heap value with it leaks.
+    public func assign(consuming value: T) {
+        lang.drop_in_place(self._raw);
         lang.ptr_write(self._raw, value)
     }
 
@@ -445,4 +529,130 @@ public struct ArraySliceIterator[T]: Iterator {
     }
 }
 
+/// Forward iterator yielding SHARED REFERENCES (`&T`) to contiguous
+/// elements in place — no copies, no clones. The by-reference sibling of
+/// `ArraySliceIterator`; surfaced as `Array.refs()`.
+///
+/// # Invalidation
+///
+/// Holds a raw pointer into the underlying buffer. Mutating the source
+/// collection's STRUCTURE while iterating (append/realloc, removal)
+/// invalidates the cursor and any yielded reference — the same contract
+/// as every pointer-backed iterator, met through references here.
+///
+/// # Representation
+///
+/// A `Pointer[T]` cursor and an `Int64` countdown.
+public struct RefSliceIterator[T]: Iterator {
+    type Item = &T
 
+    private var ptr: Pointer[T]
+    private var remaining: Int64
+
+    /// @name From Storage
+    /// Builds an iterator from a starting pointer and remaining count.
+    public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
+        self.ptr = ptr;
+        self.remaining = remaining;
+    }
+
+    /// Yields a reference to the next element in place, or `.None` when
+    /// the count reaches zero.
+    public mutating func next() -> Optional[&T] {
+        if self.remaining > 0 {
+            let r = &self.ptr.value;
+            self.ptr = self.ptr.offset(by: 1);
+            self.remaining = self.remaining - 1;
+            let o: Optional[&T] = .Some(r);
+            o
+        } else {
+            .None
+        }
+    }
+}
+
+/// Forward iterator yielding MUTABLE REFERENCES (`&mutating T`) to
+/// contiguous elements — in-place mutation without writeback
+/// (`for x in arr.mutableRefs() { x += 1 }`). Surfaced as
+/// `Array.mutableRefs()`, which runs the COW barrier before handing out
+/// the buffer.
+///
+/// # Invalidation
+///
+/// Same contract as `RefSliceIterator`: mutating the source collection's
+/// STRUCTURE while iterating invalidates the cursor and any yielded
+/// reference. Element writes through the yielded references are the
+/// intended use.
+///
+/// # Representation
+///
+/// A `Pointer[T]` cursor and an `Int64` countdown.
+public struct MutRefSliceIterator[T]: Iterator {
+    type Item = &mutating T
+
+    private var ptr: Pointer[T]
+    private var remaining: Int64
+
+    /// @name From Storage
+    /// Builds an iterator from a starting pointer and remaining count.
+    public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
+        self.ptr = ptr;
+        self.remaining = remaining;
+    }
+
+    /// Yields a mutable reference to the next element in place, or
+    /// `.None` when the count reaches zero.
+    public mutating func next() -> Optional[&mutating T] {
+        if self.remaining > 0 {
+            let r = &mutating self.ptr.mutatingValue;
+            self.ptr = self.ptr.offset(by: 1);
+            self.remaining = self.remaining - 1;
+            let o: Optional[&mutating T] = .Some(r);
+            o
+        } else {
+            .None
+        }
+    }
+}
+
+// A raw `Pointer[T]` is a smart pointer: `ptr.field` reaches the pointee.
+// `pointeeRef`/`pointeeMutRef` are the existing `value`/`mutatingValue` views
+// under the protocol's names. Works for any `T` (Copyable or not), unlike the
+// by-value `pointee` accessor.
+extend Pointer[T]: MutableIndirection {
+    type Target = T
+    public func pointeeRef() -> &T { self.value }
+    public mutating func pointeeMutRef() -> &mutating T { self.mutatingValue }
+}
+
+
+
+/// Exchanges the contents of two mutable locations without cloning or
+/// dropping either — three bitwise moves, like Rust's `mem::swap`. For a
+/// COW value (`Array`, `String`, `Dictionary`) this swaps the *handles*, so
+/// it never touches the heap buffers: an `O(1)` pointer exchange regardless
+/// of contents.
+///
+/// This is the idiomatic way to rotate double buffers (`swap(a, b)` instead
+/// of the `let tmp = a; a = b; b = tmp` dance, which clones for non-`Copyable`
+/// types).
+///
+/// # Examples
+///
+/// ```
+/// var a = [1, 2, 3];
+/// var b = [9, 8];
+/// swap(a, b);          // a == [9, 8], b == [1, 2, 3] — no element copies
+/// ```
+public func swap[T](mutating a: T, mutating b: T) where T: not Copyable, T: not Static {
+    let pa = Pointer(to: a);
+    let pb = Pointer(to: b);
+    // Self-swap would take the same slot twice (double-owning the value and
+    // leaking the second copy), so short-circuit aliasing locations.
+    if pa.address == pb.address {
+        return
+    }
+    let tmp = pa.take();
+    pa.write(pb.take());
+    pb.write(tmp)
+}

@@ -17,7 +17,7 @@ struct Container[T] {
                 self.value = v;
             },
             .Err(_) => {
-                self.value = lang.panic("failed");
+                self.value = lang.panic();
             }
         }
     }

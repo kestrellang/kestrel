@@ -50,6 +50,15 @@ pub enum UnifyError {
     LiteralGuard,
     /// Occurs check: TyVar appears in its own type (infinite type).
     OccursCheck,
+    /// Two function types agree structurally but disagree on their closure
+    /// KIND, at the top level or nested inside a param/return. Reported as
+    /// E624 rather than a generic "type mismatch": the shapes match and the
+    /// only defect is the tier. `actual` is the LHS of the failing `unify`
+    /// (the value side on a coercion), `expected` the RHS.
+    KindMismatch {
+        expected: kestrel_ast::FnTypeKind,
+        actual: kestrel_ast::FnTypeKind,
+    },
 }
 
 /// Unify two type variables, making them equivalent.
@@ -89,14 +98,30 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         (TySlot::Resolved(TyKind::Never), _) | (_, TySlot::Resolved(TyKind::Never)) => Ok(()),
 
         // Both unresolved: link them, merge literal markers.
-        // If both have different literal kinds, that's a mismatch
-        // (e.g., integer literal vs string literal in if/else branches).
         (TySlot::Unresolved { literal: lit_a }, TySlot::Unresolved { literal: lit_b }) => {
-            if let (Some(a_kind), Some(b_kind)) = (lit_a, lit_b)
-                && a_kind != b_kind
-            {
-                return Err(UnifyError::Mismatch);
-            }
+            // Merge the two literal markers. Two *different* literal kinds are
+            // normally a mismatch (e.g. integer vs string in
+            // `if c {1} else {"x"}`), EXCEPT the integer/float pair: an integer
+            // literal adapts to a float type, so the pair unifies to a Float
+            // literal. Applying this int→float relaxation here — rather than
+            // only on the Coerce path that call arguments take — makes array
+            // elements and if/else branches behave identically to call args:
+            // `[1, 2.5]` and `if c {1} else {2.5}` both unify to Float, just
+            // like `pick(1, 2.5)` already did.
+            let merged = match (lit_a, lit_b) {
+                (Some(x), Some(y)) if x != y => {
+                    if matches!(
+                        (x, y),
+                        (LiteralKind::Integer, LiteralKind::Float)
+                            | (LiteralKind::Float, LiteralKind::Integer)
+                    ) {
+                        Some(LiteralKind::Float)
+                    } else {
+                        return Err(UnifyError::Mismatch);
+                    }
+                },
+                _ => lit_a.or(*lit_b),
+            };
             // Propagate wildcard status: if either side is a wildcard, the root
             // (b, since a redirects to b) must also be a wildcard so that
             // report_unresolved_slots skips it.
@@ -104,7 +129,6 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
                 ctx.wildcard_tvars.insert(a);
                 ctx.wildcard_tvars.insert(b);
             }
-            let merged = lit_a.or(*lit_b);
             ctx.types[a.0 as usize] = TySlot::Redirect(b);
             if merged.is_some() {
                 ctx.types[b.0 as usize] = TySlot::Unresolved { literal: merged };
@@ -147,15 +171,25 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         },
 
         // Both concrete: structural unification
-        (TySlot::Resolved(kind_a), TySlot::Resolved(kind_b)) => unify_concrete(ctx, kind_a, kind_b),
+        (TySlot::Resolved(kind_a), TySlot::Resolved(kind_b)) => {
+            unify_concrete(ctx, kind_a, kind_b, a, b)
+        },
 
         // Redirect should be resolved by resolve()
         _ => unreachable!("resolve() should have followed redirects"),
     }
 }
 
-/// Structural unification of two concrete types.
-fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), UnifyError> {
+/// Structural unification of two concrete types. `a_tv` / `b_tv` are the
+/// resolved ROOTS the two kinds live in — needed by the `Function` arm, which
+/// consults (and rewrites) the `kind_flex` slots keyed on those roots.
+fn unify_concrete(
+    ctx: &mut InferCtx<'_>,
+    a: &TyKind,
+    b: &TyKind,
+    a_tv: TyVar,
+    b_tv: TyVar,
+) -> Result<(), UnifyError> {
     match (a, b) {
         // Nominal types: same entity + unify type args pairwise. Each nominal
         // category only unifies with itself (Struct with Struct, Enum with Enum, etc.).
@@ -237,14 +271,26 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
             Ok(())
         },
 
-        // Functions: same arity + unify params + unify return
+        // Functions: same arity + EQUAL kind + unify params + unify return.
+        //
+        // Kind equality mirrors the `Ref` mutability rule below: unify is
+        // symmetric, so admitting `normal → mutating` here would also admit
+        // `mutating → normal`. The one-way passing table (closures.md
+        // "Passing: What Fits Where") lives in `solve_coerce`.
+        //
+        // The single exception is a BARE callable value (`kind_flex`): it has
+        // no environment and satisfies every kind, so when exactly one side is
+        // flex it ADOPTS the other side's kind in place. Each `Def` use gets a
+        // fresh instantiation TyVar, so adoption never re-kinds another site.
         (
             TyKind::Function {
+                kind: ka,
                 params: pa,
                 ret: ra,
                 ..
             },
             TyKind::Function {
+                kind: kb,
                 params: pb,
                 ret: rb,
                 ..
@@ -253,11 +299,46 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
             if pa.len() != pb.len() {
                 return Err(UnifyError::Mismatch);
             }
+            if ka != kb {
+                match (ctx.kind_flex.contains(&a_tv), ctx.kind_flex.contains(&b_tv)) {
+                    // Exactly one side is bare — it adopts.
+                    (true, false) => ctx.set_function_kind(a_tv, *kb),
+                    (false, true) => ctx.set_function_kind(b_tv, *ka),
+                    // Both bare (both built at Normal, so unreachable today) or
+                    // neither: kinds must already agree.
+                    (true, true) => {},
+                    (false, false) => {
+                        return Err(UnifyError::KindMismatch {
+                            expected: *kb,
+                            actual: *ka,
+                        });
+                    },
+                }
+            }
             let pairs: Vec<(TyVar, TyVar)> = pa.iter().copied().zip(pb.iter().copied()).collect();
             for (a, b) in pairs {
                 unify(ctx, a, b)?;
             }
             unify(ctx, *ra, *rb)
+        },
+
+        // References: equal mutability + unify pointees. The one-way
+        // `&mutating T → &T` coercion lives in `solve_coerce`, NOT here —
+        // unify is symmetric, so admitting it would also admit `& → &mutating`.
+        (
+            TyKind::Ref {
+                pointee: pa,
+                mutating: ma,
+            },
+            TyKind::Ref {
+                pointee: pb,
+                mutating: mb,
+            },
+        ) => {
+            if ma != mb {
+                return Err(UnifyError::Mismatch);
+            }
+            unify(ctx, *pa, *pb)
         },
 
         // Type params: must be the same entity
@@ -398,6 +479,7 @@ fn occurs_check(ctx: &InferCtx<'_>, tv: TyVar, target: TyVar) -> Result<(), Unif
             }
             occurs_check(ctx, tv, *ret)
         },
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => occurs_check(ctx, tv, *pointee),
         TySlot::Resolved(TyKind::AssocProjection { base, .. }) => occurs_check(ctx, tv, *base),
         TySlot::Resolved(TyKind::Opaque {
             bounds,

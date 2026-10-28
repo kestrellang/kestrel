@@ -10,6 +10,6 @@ func takeExplicit(x: std.result.Optional[std.numeric.Int64]) -> std.numeric.Int6
 
 func main() -> lang.i64 {
     let val: std.numeric.Int64? = .Some(42);
-    let _ = println(takeExplicit(val));
+     println(takeExplicit(val));
     0
 }

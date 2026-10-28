@@ -1,9 +1,95 @@
+use std::borrow::Cow;
+
+use kestrel_copy_fold::{CopyLayer, CopySem, CopySemantics, instance_semantics};
 use kestrel_hecs::Entity;
 
 use crate::item::function::{WhereClause, WhereConstraint};
 use crate::ty::{MirTy, TyArena};
 use crate::{CopyBehavior, DropBehavior, MirModule, TyId};
 
+/// Projection to the shared tri-state. `Clone` payloads are heterogeneous
+/// (type entity from lowering, Cloneable proto from the clone-shim pass) and
+/// must survive `instance_semantics`'s base-passthrough path untouched —
+/// which is exactly what `CopySem` guarantees.
+impl CopySem for CopyBehavior {
+    fn class(&self) -> CopySemantics {
+        match self {
+            CopyBehavior::Bitwise => CopySemantics::Copyable,
+            CopyBehavior::Clone(_) => CopySemantics::Cloneable,
+            CopyBehavior::None => CopySemantics::NotCopyable,
+        }
+    }
+}
+
+/// `CopyLayer` over `TyId` — pre-mono MIR's hooks into the shared decision
+/// tree (`kestrel_copy_fold::instance_semantics`, the single source of truth
+/// for per-instantiation copy semantics across semantics / solver / analyze /
+/// MIR). Layer-specific plumbing: precomputed `type_info.copy` /
+/// `conditionally_copyable` instead of QueryContext, and the `where_clause`
+/// threading for `TypeParam` bounds.
+struct MirCopyLayer<'a> {
+    arena: &'a TyArena,
+    module: &'a MirModule,
+    where_clause: Option<&'a WhereClause>,
+}
+
+impl CopyLayer for MirCopyLayer<'_> {
+    type Ty = TyId;
+    type Sem = CopyBehavior;
+
+    fn base_semantics(&self, entity: Entity) -> CopyBehavior {
+        self.module
+            .structs
+            .get(&entity)
+            .map(|s| s.type_info.copy.clone())
+            .or_else(|| {
+                self.module
+                    .enums
+                    .get(&entity)
+                    .map(|e| e.type_info.copy.clone())
+            })
+            // Unknown entity -> Bitwise (current Named fallback).
+            .unwrap_or(CopyBehavior::Bitwise)
+    }
+
+    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+        Cow::Borrowed(
+            self.module
+                .structs
+                .get(&entity)
+                .map(|s| s.conditionally_copyable.as_slice())
+                .or_else(|| {
+                    self.module
+                        .enums
+                        .get(&entity)
+                        .map(|e| e.conditionally_copyable.as_slice())
+                })
+                .unwrap_or(&[]),
+        )
+    }
+
+    fn member_semantics(&self, &ty: &TyId) -> CopyBehavior {
+        // Re-enters the public classifier (where_clause threading included).
+        copy_behavior(self.arena, self.module, ty, self.where_clause)
+    }
+
+    fn sem_from_class(&self, entity: Entity, class: CopySemantics) -> CopyBehavior {
+        match class {
+            CopySemantics::Copyable => CopyBehavior::Bitwise,
+            // Container entity payload — its clone shim recurses into the
+            // Cloneable gating field.
+            CopySemantics::Cloneable => CopyBehavior::Clone(entity),
+            CopySemantics::NotCopyable => CopyBehavior::None,
+        }
+    }
+}
+
+/// Copy behavior of a pre-mono MIR type. Nominal instances go through the
+/// shared decision tree (`kestrel_copy_fold::instance_semantics` via
+/// `MirCopyLayer`): an unconditional base (`type_info.copy`) wins; a `not
+/// Copyable` base with `conditionally_copyable` gating positions folds the
+/// gating args — any `None` → `None`, all `Bitwise` → `Bitwise`, else
+/// `Clone(entity)` (copyable element-wise via the container's clone shim).
 pub fn copy_behavior(
     arena: &TyArena,
     module: &MirModule,
@@ -23,58 +109,86 @@ pub fn copy_behavior(
         | MirTy::Str
         | MirTy::Pointer(_)
         | MirTy::FuncThin { .. }
-        // INTERIM: closures are treated as POD — a 2-word `{code, env}` value
-        // bit-copied like a raw pointer, never owning its captured env (which
-        // today holds only Copyable captures). This lets a borrowed `self`
-        // hand out copies of a stored closure field (e.g. `SplitWhereView.iter`,
-        // `IntersperseIterator` separator). Must stay in lockstep with the
-        // `needs_drop` arm below — Bitwise + droppable would double-free the env.
-        // NEXT VERSION: closures become Rc-boxed reference types; copy → retain.
-        | MirTy::FuncThick { .. }
+        // Ref never appears as a value type (signature-only; results register
+        // as @guaranteed pointee values), so copy/drop on it is vacuous — a
+        // pointer-scalar bit-copy keeps any defensive path harmless.
+        | MirTy::Ref { .. }
         | MirTy::Error => CopyBehavior::Bitwise,
 
+        // The closure kind, not the environment payload's fold, decides the
+        // closure value's copy class (docs/design/closures.md §"Copy and
+        // Drop"). MUST stay in lockstep with the `needs_drop` arm below —
+        // Bitwise + droppable double-frees the environment, Clone without drop
+        // leaks it (lockstep 1: `expand.rs ty_needs_drop`,
+        // `audit.rs mono_needs_drop`, `clone_shim.rs ty_needs_clone_shim`,
+        // `mono/mod.rs concrete_copy`).
+        //
+        // - view kinds: the env holds addresses into the frame and owns
+        //   nothing — a 2-word POD value, bit-copied like a raw pointer.
+        // - escaping: a shared, heap-boxed env. Duplication is the box's share
+        //   operation, never a bit-copy; the payload is the Cloneable protocol
+        //   (the same inert payload `clone_shim.rs` stamps).
+        // - consuming: a UNIQUE heap env. There is no duplication operation at
+        //   all — handing one around is a move — so it is `None`, NOT `Clone`.
+        MirTy::FuncThick { kind, .. } => match kind {
+            crate::ty::FnKind::Consuming => CopyBehavior::None,
+            crate::ty::FnKind::Escaping => match find_cloneable_protocol(module) {
+                Some(p) => CopyBehavior::Clone(p),
+                // No stdlib (`Cloneable` absent): nothing can clone anyway, so
+                // the POD reading is the only self-consistent answer.
+                None => CopyBehavior::Bitwise,
+            },
+            _ => CopyBehavior::Bitwise,
+        },
+
+        // Canonical fold (copy-drift #3 resolved 2026-06-10): any move-only
+        // element makes the tuple move-only regardless of position; else any
+        // Clone element makes it Clone; else Bitwise. The Clone payload is the
+        // first Cloneable element's (inert — never destructured; clone
+        // elaboration recurses tuple elements structurally).
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
+            let mut first_clone = None;
             for &elem in &elems {
                 match copy_behavior(arena, module, elem, where_clause) {
-                    CopyBehavior::Bitwise => {},
-                    other => return other,
+                    CopyBehavior::None => return CopyBehavior::None,
+                    b @ CopyBehavior::Clone(_) if first_clone.is_none() => first_clone = Some(b),
+                    _ => {},
                 }
             }
-            CopyBehavior::Bitwise
+            first_clone.unwrap_or(CopyBehavior::Bitwise)
         },
 
         MirTy::Named { entity, type_args } => {
             let entity = *entity;
             let type_args = type_args.clone();
-            if let Some(s) = module.structs.get(&entity) {
-                return instantiated_copy_behavior(
+            instance_semantics(
+                &MirCopyLayer {
                     arena,
                     module,
-                    entity,
-                    &s.type_info.copy,
-                    &s.conditionally_copyable,
-                    &type_args,
                     where_clause,
-                );
-            }
-            if let Some(e) = module.enums.get(&entity) {
-                return instantiated_copy_behavior(
-                    arena,
-                    module,
-                    entity,
-                    &e.type_info.copy,
-                    &e.conditionally_copyable,
-                    &type_args,
-                    where_clause,
-                );
-            }
-            CopyBehavior::Bitwise
+                },
+                entity,
+                &type_args,
+            )
         },
 
+        // A positive `Copyable`/`Cloneable` bound WINS over a `not Copyable`
+        // relaxation on the same param (copy-drift #5, revised 2026-06-16):
+        // `where T: not Copyable` on a struct means "T NEED NOT be Copyable",
+        // while a method's `where T: Copyable` NARROWS that — when both are
+        // present the param is Copyable in this context. So positive bounds
+        // return immediately and the negative is honored only if no positive
+        // appears, making the positive-vs-negative case order-independent.
+        // (This was previously first-match-wins + a debug assert that the two
+        // never coexist; they legitimately do — e.g. `Pointer.read() -> T
+        // where T: Copyable` on `struct Pointer[T] where T: not Copyable`.)
+        // This scan is the MIR form of the per-layer Param hook — precomputed
+        // where_clause instead of TypeParamCopyRequirement.
         MirTy::TypeParam(entity) => {
             let entity = *entity;
             if let Some(wc) = where_clause {
+                let mut not_copyable = false;
                 for constraint in &wc.constraints {
                     match constraint {
                         WhereConstraint::Implements {
@@ -94,61 +208,29 @@ pub fn copy_behavior(
                             protocol,
                         } if *type_param == entity => {
                             if is_copyable_protocol(module, *protocol) {
-                                return CopyBehavior::None;
+                                // Defer: a positive bound later in the list
+                                // overrides this relaxation (positive wins).
+                                not_copyable = true;
                             }
                         },
                         _ => {},
                     }
                 }
+                if not_copyable {
+                    return CopyBehavior::None;
+                }
+            }
+            // A protocol's abstract `Self` (lowered as `TypeParam(protocol)`):
+            // move-only types may conform, so it is only as copyable as the
+            // protocol's refinements guarantee (mirrors
+            // `kestrel_semantics::ProtocolSelfCopySemantics`).
+            if module.protocols.contains_key(&entity) {
+                return protocol_self_copy_behavior(module, entity);
             }
             CopyBehavior::Bitwise
         },
 
         MirTy::AssociatedProjection { .. } => CopyBehavior::Bitwise,
-    }
-}
-
-/// Refine a type's `copy` behavior for a concrete instantiation. A type whose
-/// base is `not Copyable` (`None`) but which is *conditionally* Copyable
-/// (`struct X: not Copyable` + `extend X: Copyable where T: Copyable`, captured
-/// as `conditionally_copyable` gating positions) gets its behavior from the
-/// gating args, matching the inference solver's per-instantiation conformance:
-/// - any gating arg `None` (move-only) → the container is `None`;
-/// - all gating args `Bitwise` → the container is `Bitwise` (bit-copyable);
-/// - all gating args Copyable but at least one `Clone` (Cloneable) → the
-///   container is `Clone(entity)` (copyable, but element-wise via clone — its
-///   clone shim recurses into the Cloneable field).
-///
-/// For unconditional types (empty gating list) the base behavior is returned
-/// unchanged, so this is inert until a type adopts the conditional pattern.
-fn instantiated_copy_behavior(
-    arena: &TyArena,
-    module: &MirModule,
-    entity: Entity,
-    base: &CopyBehavior,
-    conditionally_copyable: &[usize],
-    type_args: &[TyId],
-    where_clause: Option<&WhereClause>,
-) -> CopyBehavior {
-    if !matches!(base, CopyBehavior::None) || conditionally_copyable.is_empty() {
-        return base.clone();
-    }
-    let mut saw_clone = false;
-    for &pos in conditionally_copyable {
-        match type_args
-            .get(pos)
-            .map(|&arg| copy_behavior(arena, module, arg, where_clause))
-        {
-            Some(CopyBehavior::Bitwise) => {},
-            Some(CopyBehavior::Clone(_)) => saw_clone = true,
-            // Move-only arg, or a missing/out-of-range position: not copyable.
-            _ => return CopyBehavior::None,
-        }
-    }
-    if saw_clone {
-        CopyBehavior::Clone(entity)
-    } else {
-        CopyBehavior::Bitwise
     }
 }
 
@@ -161,9 +243,36 @@ fn instantiated_copy_behavior(
 ///
 /// Distinct from `copy_behavior == None`: a *conditionally* Copyable container
 /// gated on an unconstrained type param reports `Bitwise` here (its gating args
-/// default to `Bitwise`), yet is unsound to copy. Moving is always correct — the
-/// frontend forbids reusing a value that isn't *guaranteed* Copyable, so a
-/// mono-dependent value is necessarily single-use.
+/// default to `Bitwise`), yet is unsound to copy.
+///
+/// A bare type param reports `true` here even though `copy_behavior` above
+/// answers `Bitwise` for it (type params are Copyable BY DEFAULT). The two are
+/// deliberately different questions: `copy_behavior` is what the LANGUAGE says
+/// about `T`; this query is what is SAFE to emit given that "invariant 1" — a
+/// Copyable-default param is never instantiated with a non-Copyable argument —
+/// is assumed everywhere and **enforced nowhere**.
+///
+/// MEASURED (2026-08-11): making this arm return `false` to match the language
+/// rule fixes `readTwice` (`let a = elem; let b = elem;` on an unbounded `T`)
+/// and breaks 7 tests, every one a double-free / double-deinit / double-drop:
+/// `try_err_noncopyable_no_double_deinit`,
+/// `try_unwrap_noncopyable_payload_no_double_free`,
+/// `aggregate_try_field_no_double_drop`, `forin_cloneable_single_clone`,
+/// `consuming_self_field_moveout_execution` (+ llvm twins). Generic bodies like
+/// `Result.tryExtract[T,E]` ARE instantiated with concrete `not Copyable`
+/// payloads during `try` propagation, so copying a bare `T` duplicates a value
+/// that is then released twice. `mono::expand::InstantiationFinding` detects
+/// exactly that moment (0 findings healthy, 8 findings when this arm is
+/// flipped). The conservatism is load-bearing until invariant 1 is enforced at
+/// INSTANTIATION.
+///
+/// The justification this comment used to carry — "the frontend forbids reusing
+/// a value that isn't *guaranteed* Copyable, so a mono-dependent value is
+/// necessarily single-use" — is FALSE: `readTwice` passes the frontend and
+/// fails only in MIR verify. The right fix is per-USE, not per-type: take on
+/// the LAST use, copy on earlier ones, decided at the one call site that can
+/// see a repeated read (`expr.rs`'s `HirExpr::Local` consuming-read arm). The
+/// other call sites are single-read by construction and must keep moving.
 ///
 /// - bare type param / associated projection: mono-dependent unless a
 ///   `Copyable`/`Cloneable` bound guarantees duplicability;
@@ -175,6 +284,34 @@ pub fn copy_is_mono_dependent(
     module: &MirModule,
     ty: TyId,
     where_clause: Option<&WhereClause>,
+) -> bool {
+    let gating = |entity: Entity| {
+        module
+            .structs
+            .get(&entity)
+            .map(|s| s.conditionally_copyable.clone())
+            .or_else(|| {
+                module
+                    .enums
+                    .get(&entity)
+                    .map(|e| e.conditionally_copyable.clone())
+            })
+    };
+    copy_is_mono_dependent_by(arena, module, ty, where_clause, &gating)
+}
+
+/// [`copy_is_mono_dependent`] with the gating positions of a nominal supplied
+/// by the caller. Body lowering passes the front-end query
+/// (`ConditionalCopyableParams`): a body can lower before its container's
+/// `StructDef`/`EnumDef` exists in the module, and reading the module there
+/// answered "not mono-dependent" by lowering order (`Optional.take` copied a
+/// non-Copyable payload).
+pub fn copy_is_mono_dependent_by(
+    arena: &TyArena,
+    module: &MirModule,
+    ty: TyId,
+    where_clause: Option<&WhereClause>,
+    gating_of: &dyn Fn(Entity) -> Option<Vec<usize>>,
 ) -> bool {
     match arena.get(ty) {
         MirTy::TypeParam(entity) => {
@@ -201,29 +338,19 @@ pub fn copy_is_mono_dependent(
             let elems = elems.clone();
             elems
                 .iter()
-                .any(|&e| copy_is_mono_dependent(arena, module, e, where_clause))
+                .any(|&e| copy_is_mono_dependent_by(arena, module, e, where_clause, gating_of))
         },
         MirTy::Named { entity, type_args } => {
             let entity = *entity;
             let type_args = type_args.clone();
-            let gating = module
-                .structs
-                .get(&entity)
-                .map(|s| s.conditionally_copyable.clone())
-                .or_else(|| {
-                    module
-                        .enums
-                        .get(&entity)
-                        .map(|e| e.conditionally_copyable.clone())
-                });
-            let Some(gating) = gating else {
+            let Some(gating) = gating_of(entity) else {
                 return false;
             };
             // Only gating positions affect the container's copyability.
             gating.iter().any(|&pos| {
-                type_args
-                    .get(pos)
-                    .is_some_and(|&arg| copy_is_mono_dependent(arena, module, arg, where_clause))
+                type_args.get(pos).is_some_and(|&arg| {
+                    copy_is_mono_dependent_by(arena, module, arg, where_clause, gating_of)
+                })
             })
         },
         _ => false,
@@ -244,12 +371,16 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
         | MirTy::Str
         | MirTy::Pointer(_)
         | MirTy::FuncThin { .. }
-        // INTERIM: closures are POD — see `copy_behavior`. A FuncThick never
-        // owns its captured env (Copyable captures only, today), so it needs no
-        // drop. Must match the Bitwise arm in `copy_behavior`. NEXT VERSION:
-        // Rc-boxed closures need drop → release.
-        | MirTy::FuncThick { .. }
+        // Ref: a borrow view (signature or stage-2b payload/field slot) —
+        // never owns its pointee, never drops.
+        | MirTy::Ref { .. }
         | MirTy::Error => false,
+
+        // Lockstep twin of the `copy_behavior` FuncThick arm. A view env owns
+        // nothing; an escaping env is a shared heap box whose last release
+        // destroys the captures (drop → release); a consuming env is a unique
+        // heap box whose release drops every slot not already moved out.
+        MirTy::FuncThick { kind, .. } => kind.is_boxed(),
 
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
@@ -272,24 +403,51 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
     }
 }
 
+// These three answer "is this the lang `Copyable`/`Cloneable` protocol?" from
+// the `@builtin` lang item recorded on the module (see `MirModule`), not from
+// the protocol's name. A name-suffix test also matched user protocols like
+// `MyCopyable` and would silently match nothing if the stdlib renamed either.
+
+/// Copy behavior of protocol `Self` from its (transitive) parents alone.
+fn protocol_self_copy_behavior(module: &MirModule, protocol: Entity) -> CopyBehavior {
+    let mut stack = vec![protocol];
+    let mut seen = std::collections::HashSet::new();
+    let mut copyable = false;
+    while let Some(p) = stack.pop() {
+        if !seen.insert(p) {
+            continue;
+        }
+        if is_cloneable_protocol(module, p) {
+            return CopyBehavior::Clone(p);
+        }
+        copyable |= is_copyable_protocol(module, p);
+        if let Some(def) = module.protocols.get(&p) {
+            stack.extend(def.parent_protocols.iter().copied());
+        }
+    }
+    if copyable {
+        CopyBehavior::Bitwise
+    } else {
+        CopyBehavior::None
+    }
+}
+
 pub fn is_cloneable_protocol(module: &MirModule, entity: Entity) -> bool {
-    module
-        .protocols
-        .get(&entity)
-        .is_some_and(|p| p.name.ends_with("Cloneable"))
+    module.cloneable_protocol == Some(entity)
 }
 
 pub fn is_copyable_protocol(module: &MirModule, entity: Entity) -> bool {
-    module
-        .protocols
-        .get(&entity)
-        .is_some_and(|p| p.name.ends_with("Copyable"))
+    module.copyable_protocol == Some(entity)
 }
 
 pub fn find_cloneable_protocol(module: &MirModule) -> Option<Entity> {
-    module
-        .protocols
-        .values()
-        .find(|p| p.name.ends_with("Cloneable"))
-        .map(|p| p.entity)
+    module.cloneable_protocol
+}
+
+/// Is this entity the stdlib `Bool` struct (`@builtin(.Bool)`)?
+///
+/// Identity, not structure: see `MirModule::bool_struct` for why a structural
+/// "wraps one `lang.i1`" test is not an acceptable substitute.
+pub fn is_bool_struct(module: &MirModule, entity: Entity) -> bool {
+    module.bool_struct == Some(entity)
 }

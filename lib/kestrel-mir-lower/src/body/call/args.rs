@@ -10,9 +10,11 @@ use kestrel_reporting::{Diagnostic, Label};
 use kestrel_span::Span;
 use kestrel_type_infer::InferBody;
 
-use crate::body::{HirRef, OssaBodyCtx, TypedRef};
+use crate::body::{HirRef, LocalBinding, OssaBodyCtx, TypedRef};
 use crate::items::function_sig::receiver_convention;
-use crate::ty::{lower_type, resolve_type_annotation};
+use crate::ty::resolve_type_annotation;
+use kestrel_hir::res::LocalId as HirLocalId;
+use kestrel_type_infer::captures::CaptureKind;
 
 fn conventions_from_callable(callable: &Callable, is_extern: bool) -> Vec<ParamConvention> {
     if is_extern {
@@ -36,6 +38,13 @@ fn conventions_from_callable(callable: &Callable, is_extern: bool) -> Vec<ParamC
     convs
 }
 
+thread_local! {
+    /// Default-argument entities whose bodies are being inlined right now; a
+    /// re-entry is a self-referential default.
+    static INLINING_DEFAULTS: std::cell::RefCell<Vec<Entity>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 impl OssaBodyCtx<'_, '_> {
     /// Lower call args with the callee's resolved conventions.
     /// `offset` skips receiver slots in `conventions` (e.g. 1 if
@@ -46,6 +55,15 @@ impl OssaBodyCtx<'_, '_> {
         conventions: &[ParamConvention],
         offset: usize,
     ) -> Vec<CallArg> {
+        let convs: Vec<ParamConvention> = (0..args.len())
+            .map(|i| {
+                conventions
+                    .get(offset + i)
+                    .copied()
+                    .unwrap_or(ParamConvention::Borrow)
+            })
+            .collect();
+        self.prepare_closure_arg_snapshots(None, args, &convs);
         args.iter()
             .enumerate()
             .map(|(i, arg)| {
@@ -76,6 +94,7 @@ impl OssaBodyCtx<'_, '_> {
         callee_entity: Entity,
         conventions: &[ParamConvention],
         conv_offset: usize,
+        callee_type_args: &[TyId],
     ) -> Vec<CallArg> {
         // Snapshot the parameter shape (owned) so the world borrow is released
         // before we lower any argument expressions.
@@ -108,6 +127,7 @@ impl OssaBodyCtx<'_, '_> {
                     args.len(),
                     conventions,
                     conv_offset,
+                    callee_type_args,
                 );
                 return ca;
             },
@@ -123,13 +143,13 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
 
+        let arg_convs =
+            self.explicit_arg_conventions(args, Some(callee_entity), conventions, conv_offset);
+        self.prepare_closure_arg_snapshots(None, args, &arg_convs);
+
         // Lower explicit args in source order, each with its bound param's convention.
         let mut prepared = Vec::with_capacity(args.len());
-        for (ai, arg) in args.iter().enumerate() {
-            let conv = conventions
-                .get(conv_offset + arg_slot[ai])
-                .copied()
-                .unwrap_or(ParamConvention::Borrow);
+        for (arg, &conv) in args.iter().zip(&arg_convs) {
             prepared.push(self.prepare_call_arg_for_expr(arg.value, conv));
         }
 
@@ -149,7 +169,8 @@ impl OssaBodyCtx<'_, '_> {
                         continue; // required-but-missing: impossible post-typecheck
                     };
                     let param_ty = resolve_type_annotation(self.ctx, default_entity);
-                    let default_val = self.lower_default_arg_inline(default_entity, param_ty);
+                    let default_val =
+                        self.lower_default_arg_inline(default_entity, param_ty, callee_type_args);
                     let conv = conventions
                         .get(conv_offset + pi)
                         .copied()
@@ -161,15 +182,147 @@ impl OssaBodyCtx<'_, '_> {
         result
     }
 
+    /// The convention each EXPLICIT argument binds to, in source order —
+    /// the same label binding `lower_call_args_bound` uses (defaults may be
+    /// skipped anywhere); positional when the callee has no parameter shape.
+    pub(crate) fn explicit_arg_conventions(
+        &self,
+        args: &[HirCallArg],
+        callee_entity: Option<Entity>,
+        conventions: &[ParamConvention],
+        conv_offset: usize,
+    ) -> Vec<ParamConvention> {
+        let conv_at = |slot: usize| {
+            conventions
+                .get(conv_offset + slot)
+                .copied()
+                .unwrap_or(ParamConvention::Borrow)
+        };
+        let plan = callee_entity
+            .and_then(|e| self.ctx.world.get::<Callable>(e))
+            .and_then(|c| {
+                let params: Vec<BindParam> = c
+                    .params
+                    .iter()
+                    .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
+                    .collect();
+                let labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+                bind_arguments(&params, &labels).ok()
+            });
+        let Some(plan) = plan else {
+            return (0..args.len()).map(conv_at).collect();
+        };
+        let mut convs = vec![ParamConvention::Borrow; args.len()];
+        for (pi, binding) in plan.iter().enumerate() {
+            if let Binding::Arg(ai) = binding {
+                convs[*ai] = conv_at(pi);
+            }
+        }
+        convs
+    }
+
+    /// Call-time value semantics for a closure literal argument that reads a
+    /// local which a `mutating` argument (or receiver) of the SAME call
+    /// borrows: `two(x, { x })`. The plain-argument rule
+    /// (`snapshot_overlapping_borrows`) gives a borrowed argument the value
+    /// at the call; a view closure reads later, inside the callee, so it gets
+    /// a copy of the local taken now — BEFORE any argument opens its mutable
+    /// borrow (reading the slot after that is the exclusivity violation that
+    /// used to ICE, fuzz H12). The copy lives in a scope-tracked slot like a
+    /// `let`; `lower_closure_expr` captures it in place of the local.
+    ///
+    /// Same exemptions as plain arguments: a `not Copyable` or mono-dependent
+    /// type keeps the alias. Idempotent per closure, so a site that already
+    /// ran it with the receiver can call the arg lowerers afterwards.
+    pub(crate) fn prepare_closure_arg_snapshots(
+        &mut self,
+        receiver: Option<(HirExprId, ParamConvention)>,
+        args: &[HirCallArg],
+        arg_convs: &[ParamConvention],
+    ) {
+        let items: Vec<(HirExprId, ParamConvention)> = receiver
+            .into_iter()
+            .chain(args.iter().map(|a| a.value).zip(arg_convs.iter().copied()))
+            .collect();
+        let mut_roots: Vec<HirLocalId> = items
+            .iter()
+            .filter(|(_, c)| *c == ParamConvention::MutBorrow)
+            .filter_map(|&(e, _)| self.hir_place_root(e))
+            .collect();
+        if mut_roots.is_empty() {
+            return;
+        }
+        for &(expr, conv) in &items {
+            if conv == ParamConvention::MutBorrow
+                || self.closure_arg_snapshots.contains_key(&expr)
+                || !matches!(self.hir.exprs[expr], HirExpr::Closure { .. })
+            {
+                continue;
+            }
+            let mut locals: Vec<HirLocalId> = self
+                .captures
+                .get(expr)
+                .iter()
+                .filter(|cp| cp.kind == CaptureKind::Read && mut_roots.contains(&cp.key.root))
+                .map(|cp| cp.key.root)
+                .collect();
+            locals.dedup();
+            let snaps: Vec<(HirLocalId, ValueId)> = locals
+                .into_iter()
+                .filter_map(|local| self.snapshot_local(local).map(|copy| (local, copy)))
+                .collect();
+            if !snaps.is_empty() {
+                self.closure_arg_snapshots.insert(expr, snaps);
+            }
+        }
+    }
+
+    /// The local a place expression (`x`, `x.a.b`, `x.0`, `&x`) is rooted at.
+    fn hir_place_root(&self, mut expr: HirExprId) -> Option<HirLocalId> {
+        loop {
+            match &self.hir.exprs[expr] {
+                HirExpr::Local(local, _) => return Some(*local),
+                HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => expr = *base,
+                HirExpr::Borrow { inner, .. } => expr = *inner,
+                _ => return None,
+            }
+        }
+    }
+
+    /// Copy an address-bound local into a fresh scope-tracked slot; `None`
+    /// when the local has no slot or its type must not be duplicated here.
+    fn snapshot_local(&mut self, local: HirLocalId) -> Option<ValueId> {
+        let Some(LocalBinding::Var(addr)) = self.local_map.get(&local).copied() else {
+            return None;
+        };
+        let ty = self.resolve_local_type(local);
+        if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
+            return None;
+        }
+        let src = self.whole_slot_addr(addr);
+        let value = self.emit_load(src, ty);
+        let copy = self.emit_uninit(ty);
+        self.emit_store_init(copy, value);
+        let flag = self.maybe_alloc_var_flag(ty);
+        self.track_var(copy, ty, None, flag);
+        Some(copy)
+    }
+
     /// Lower call args with Borrow convention for all params.
     /// Used for indirect/closure calls where the callee's conventions
     /// aren't known at the call site.
+    ///
+    /// Goes through `prepare_call_arg_for_expr` like every other arg path.
+    /// Lowering the expression to a VALUE first and borrowing the result is
+    /// wrong for a local held in an address slot: the value read is a
+    /// *consuming* read, so it takes the local out of its slot and leaves it
+    /// uninit, and the call then borrows the temporary rather than the slot.
+    /// Any later use of that local reads vacated storage — the shape behind
+    /// `Slice.first(where:)`'s `predicate(elem)` followed by `.Some(elem)`.
+    /// The place path borrows the slot in place and never vacates it.
     pub(crate) fn lower_call_args_default(&mut self, args: &[HirCallArg]) -> Vec<CallArg> {
         args.iter()
-            .map(|arg| {
-                let val = self.lower_expr(arg.value);
-                self.prepare_call_arg(val, ParamConvention::Borrow)
-            })
+            .map(|arg| self.prepare_call_arg_for_expr(arg.value, ParamConvention::Borrow))
             .collect()
     }
 
@@ -184,6 +337,7 @@ impl OssaBodyCtx<'_, '_> {
         explicit_count: usize,
         conventions: &[ParamConvention],
         conv_offset: usize,
+        callee_type_args: &[TyId],
     ) {
         let Some(callable) = self.ctx.world.get::<Callable>(callee_entity) else {
             return;
@@ -199,7 +353,8 @@ impl OssaBodyCtx<'_, '_> {
 
         for (di, default_entity) in defaults.into_iter().enumerate() {
             let param_ty = resolve_type_annotation(self.ctx, default_entity);
-            let default_val = self.lower_default_arg_inline(default_entity, param_ty);
+            let default_val =
+                self.lower_default_arg_inline(default_entity, param_ty, callee_type_args);
             let conv = conventions
                 .get(conv_offset + explicit_count + di)
                 .copied()
@@ -209,7 +364,38 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
-    fn lower_default_arg_inline(&mut self, default_entity: Entity, _param_ty: TyId) -> ValueId {
+    /// Build the type substitution (#148) mapping the callee's type params to a
+    /// call site's concrete type args, for inline-lowering a default-argument
+    /// expression. `default_entity` is the defaulted PARAM; its parent is the
+    /// callee, whose `TypeParams` are zipped positionally with `callee_type_args`.
+    /// Returns `None` (no substitution) when the callee is non-generic or no
+    /// args were supplied.
+    fn default_arg_subst_map(
+        &self,
+        default_entity: Entity,
+        callee_type_args: &[TyId],
+    ) -> Option<kestrel_mir::SubstMap> {
+        if callee_type_args.is_empty() {
+            return None;
+        }
+        let callee = self.ctx.world.parent_of(default_entity)?;
+        let tps = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::TypeParams>(callee)?;
+        let mut subst = kestrel_mir::SubstMap::new();
+        for (&tp, &arg) in tps.0.iter().zip(callee_type_args.iter()) {
+            subst.type_params.insert(tp, arg);
+        }
+        (!subst.type_params.is_empty()).then_some(subst)
+    }
+
+    fn lower_default_arg_inline(
+        &mut self,
+        default_entity: Entity,
+        _param_ty: TyId,
+        callee_type_args: &[TyId],
+    ) -> ValueId {
         let Some(default_hir) = self.ctx.query.query(LowerBody {
             entity: default_entity,
             root: self.ctx.root,
@@ -234,6 +420,35 @@ impl OssaBodyCtx<'_, '_> {
             );
             return self.emit_literal(Immediate::error());
         };
+        // A default whose expression calls its own function relying on that
+        // same default (`func f(x: Int64 = f()) -> Int64`) would inline
+        // forever. Report the cycle once and substitute an error value.
+        if INLINING_DEFAULTS.with(|s| s.borrow().contains(&default_entity)) {
+            let span = default_hir
+                .tail_expr
+                .map(|e| crate::body::expr_span(&default_hir, e))
+                .unwrap_or_else(|| Span::synthetic(0));
+            self.ctx.query.accumulate(
+                Diagnostic::error()
+                    .with_code("E631")
+                    .with_message("default argument value depends on itself")
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range()).with_message(
+                            "evaluating this default calls the function with the same default",
+                        ),
+                    ])
+                    .with_notes(vec![
+                        "pass the argument explicitly in the recursive call".into(),
+                    ]),
+            );
+            return self.emit_literal(Immediate::error());
+        }
+        INLINING_DEFAULTS.with(|s| s.borrow_mut().push(default_entity));
+        let _inlining = kestrel_hecs::guard::OnDrop::new(|| {
+            INLINING_DEFAULTS.with(|s| {
+                s.borrow_mut().pop();
+            });
+        });
         let default_typed = self.ctx.query.query(InferBody {
             entity: default_entity,
             root: self.ctx.root,
@@ -244,6 +459,16 @@ impl OssaBodyCtx<'_, '_> {
         let saved_hir = std::mem::replace(&mut self.hir, HirRef::Owned(default_hir));
         let saved_typed = std::mem::replace(&mut self.typed, default_typed.map(TypedRef::Owned));
         let saved_local_map = std::mem::take(&mut self.local_map);
+        // The default body was inferred against the callee's generic type params;
+        // substitute them to this call's concrete args so the callee's TypeParam
+        // doesn't leak into the caller's body (#148). Nested default lowering is
+        // not possible (a default expr can't itself call with defaults mid-lower
+        // in a way that re-enters here before restore), so a plain save/restore
+        // of the scalar field is sufficient.
+        let saved_subst = self.default_arg_subst.replace(
+            self.default_arg_subst_map(default_entity, callee_type_args)
+                .unwrap_or_default(),
+        );
 
         // Create values for the default body's HIR locals
         let default_locals: Vec<_> = self
@@ -268,6 +493,7 @@ impl OssaBodyCtx<'_, '_> {
         self.hir = saved_hir;
         self.typed = saved_typed;
         self.local_map = saved_local_map;
+        self.default_arg_subst = saved_subst;
 
         result
     }
@@ -357,42 +583,15 @@ impl OssaBodyCtx<'_, '_> {
             type_args = self.resolve_type_args(callee_expr);
         }
 
-        let has_error = type_args
-            .iter()
-            .any(|&a| matches!(self.ctx.module.ty_arena.get(a), MirTy::Error));
-        if has_error || (type_args.is_empty() && !is_init) {
-            if let Some(fallback) = self.extract_explicit_type_args(callee_expr) {
-                type_args = fallback;
-            } else if has_error {
-                type_args.retain(|&a| !matches!(self.ctx.module.ty_arena.get(a), MirTy::Error));
-            }
-        }
+        // Inference records every call's type args (owner's then own); an
+        // `Error` arg is a failed inference already diagnosed — drop it.
+        type_args.retain(|&a| !matches!(self.ctx.module.ty_arena.get(a), MirTy::Error));
 
         if type_args.is_empty() {
             type_args = self.infer_parent_type_args(callee_entity, expr_id, callee_expr);
         }
 
         type_args
-    }
-
-    fn extract_explicit_type_args(&mut self, expr_id: HirExprId) -> Option<Vec<TyId>> {
-        let expr = &self.hir.exprs[expr_id];
-        match expr {
-            HirExpr::Def(_, args, _) if !args.is_empty() => {
-                Some(args.iter().map(|ty| lower_type(self.ctx, ty)).collect())
-            },
-            HirExpr::OverloadSet { type_args, .. } if !type_args.is_empty() => Some(
-                type_args
-                    .iter()
-                    .map(|ty| lower_type(self.ctx, ty))
-                    .collect(),
-            ),
-            HirExpr::MethodCall {
-                type_args: Some(args),
-                ..
-            } if !args.is_empty() => Some(args.iter().map(|ty| lower_type(self.ctx, ty)).collect()),
-            _ => None,
-        }
     }
 
     fn infer_parent_type_args(

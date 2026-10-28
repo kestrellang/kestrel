@@ -31,7 +31,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
@@ -99,8 +99,8 @@ fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
 pub struct ExhaustivenessAnalyzer;
 
 impl Describe for ExhaustivenessAnalyzer {
-    fn id(&self) -> &'static str {
-        "exhaustiveness"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::Exhaustiveness
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -161,6 +161,12 @@ fn check_user_match(
     let Some(scrutinee_ty) = cx.typed.expr_types.get(&scrutinee) else {
         return;
     };
+    // A ref-binding scrutinee (`match r` where r: &T) matches its POINTEE —
+    // patterns never see a ref (stage-1.5 transparent place).
+    let scrutinee_ty = match scrutinee_ty {
+        ResolvedTy::Ref { pointee, .. } => pointee.as_ref(),
+        other => other,
+    };
 
     // Skip analysis when the scrutinee type couldn't be inferred — a
     // type-inference error will already be reported and any exhaustiveness
@@ -185,7 +191,7 @@ fn check_user_match(
 
     // E304: empty match on inhabited type.
     if arms.is_empty() {
-        if !matches!(scrutinee_ty, ResolvedTy::Never) {
+        if !kestrel_pattern_matching::usefulness::is_uninhabited(cx.query, cx.root, scrutinee_ty) {
             let d = descriptor("E304");
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: d.id,

@@ -52,10 +52,10 @@ public struct Command: Cloneable {
     public var name: String
 
     /// Short description shown below the name in help output.
-    var _about: Optional[String]
+    var _about: String?
 
     /// Version string shown in the help header (e.g., `"1.0.0"`).
-    var _version: Optional[String]
+    var _version: String?
 
     /// Argument definitions registered with this command.
     var arguments: Array[Argument]
@@ -81,8 +81,8 @@ public struct Command: Cloneable {
         self.name = name;
         self._about = .None;
         self._version = .None;
-        self.arguments = Array[Argument]();
-        self.subcommands = Array[Command]();
+        self.arguments = [];
+        self.subcommands = [];
     }
 
     /// @name With Description
@@ -97,8 +97,8 @@ public struct Command: Cloneable {
         self.name = name;
         self._about = .Some(about);
         self._version = .None;
-        self.arguments = Array[Argument]();
-        self.subcommands = Array[Command]();
+        self.arguments = [];
+        self.subcommands = [];
     }
 
     /// @name With Description and Version
@@ -113,8 +113,8 @@ public struct Command: Cloneable {
         self.name = name;
         self._about = .Some(about);
         self._version = .Some(version);
-        self.arguments = Array[Argument]();
-        self.subcommands = Array[Command]();
+        self.arguments = [];
+        self.subcommands = [];
     }
 
     /// Creates a deep copy of the command and all its contents.
@@ -346,9 +346,9 @@ public struct Command: Cloneable {
     ///     .Err(e) => eprintln(e.description())
     /// }
     /// ```
-    public func parse(from tokens: Array[String]) -> Result[ArgumentMatches, ParseError] {
+    public func parse(from tokens: Array[String]) -> ArgumentMatches throws ParseError {
         if containsHelp(tokens) {
-            return .Err(ParseError.Message(self.helpText()))
+            throw ParseError.Message(self.helpText())
         }
 
         parseCommand(
@@ -387,8 +387,8 @@ public struct Command: Cloneable {
     /// //     -h, --help       Print help
     /// ```
     public func helpText() -> String {
-        var subNames = Array[String]();
-        var subAbouts = Array[String]();
+        var subNames = [];
+        var subAbouts = [];
 
         for sub in self.subcommands {
             subNames.append(sub.name);
@@ -413,7 +413,7 @@ public struct Command: Cloneable {
     /// Flattens subcommands into `CommandDefinition` records for the
     /// recursive parser.
     func buildSubcommandDefinitions() -> Array[CommandDefinition] {
-        var defs = Array[CommandDefinition]();
+        var defs = [];
         for sub in self.subcommands {
             defs.append(CommandDefinition(
                 name: sub.name,

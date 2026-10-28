@@ -13,6 +13,6 @@ func main() -> lang.i64 {
         b = b - 1;
         count = count + 1;
     }
-    let _ = println(count);  // 3: after 3 iterations, a=3 (not <3) and b=7 (not >8)
+     println(count);  // 3: after 3 iterations, a=3 (not <3) and b=7 (not >8)
     0
 }

@@ -1,0 +1,11 @@
+[package]
+name = "kestrel-copy-fold"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-ast = { path = "../kestrel-ast" }
+kestrel-hecs = { path = "../kestrel-hecs" }

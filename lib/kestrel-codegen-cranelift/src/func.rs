@@ -20,7 +20,6 @@ pub struct FuncCompiler<'a, 'm> {
     pub body: &'m OssaBody,
     pub block_map: Vec<ir::Block>,
     pub value_map: HashMap<ValueId, Value>,
-    pub is_main: bool,
     pub sret_ptr: Option<Value>,
 }
 
@@ -42,6 +41,15 @@ impl<'a, 'm> FuncCompiler<'a, 'm> {
 
     /// Get the scalar value for a MIR ValueId. If the value is @guaranteed
     /// and the type is a scalar, loads from the ByRef pointer first.
+    ///
+    /// Representation contract for `MirTy::Ref`-typed values (stage 2b —
+    /// mono substitution and shim destructures mint them): an @owned Ref
+    /// value IS the pointer scalar; a @guaranteed Ref value is the address
+    /// OF the ref slot (one load recovers the pointer). `repr(Ref)` is
+    /// `Scalar(ptr)`, so both fall out of the ordinary scalar handling
+    /// below — ref-SLOT stores/loads must instead use the slot-aware
+    /// helpers (see `inst.rs`), never this function on a pointee-typed
+    /// @guaranteed value.
     pub fn resolve_scalar(&mut self, builder: &mut FunctionBuilder, id: ValueId) -> Value {
         let val = self.get_value(builder, id);
         let vd = &self.body.values[id.index()];
@@ -72,17 +80,42 @@ impl<'a, 'm> FuncCompiler<'a, 'm> {
     /// Debug-only check: the Cranelift value type must match the MIR ownership.
     ///
     /// @guaranteed scalars are pointers (ptr_ty). @owned scalars are the scalar
-    /// type itself. A mismatch means a pointer leaked through without deref
-    /// (or a deref happened where a pointer was expected).
+    /// type itself. Aggregates are always carried by address, so their IR type is
+    /// ptr_ty regardless of ownership. A mismatch means a pointer leaked through
+    /// without deref (or a deref happened where a pointer was expected).
+    ///
+    /// LIMITATION — self-consistency only. This checks a value against
+    /// `classify_named`'s own answer, so it inherits any error that function
+    /// makes: if classification says a type is `Scalar(I64)` when it should be
+    /// `Aggregate`, an address smuggled as an I64 satisfies every test here. On a
+    /// 64-bit target `expected_scalar != ptr_ty` cannot distinguish a real I64
+    /// from a pointer at all. Do NOT extend this into a general pointer-leak
+    /// detector — classification bugs (F40) are out of its reach by construction;
+    /// they are caught by cross-backend execution tests instead.
     fn verify_value_repr(&self, builder: &FunctionBuilder, id: ValueId, val: Value) {
         let vd = &self.body.values[id.index()];
         let repr = self.ctx.tc.cached_repr(vd.ty);
+        let ptr_ty = self.ctx.ptr_ty;
+
+        // The one honest check available: an aggregate is carried by address.
+        if let Some(TypeRepr::Aggregate { .. }) = repr {
+            let cl_ty = builder.func.dfg.value_type(val);
+            if cl_ty != ptr_ty {
+                eprintln!(
+                    "VERIFY: aggregate value {} mapped to {:?} (expected ptr_ty) in {}",
+                    id.index(),
+                    cl_ty,
+                    self.func.name,
+                );
+            }
+            return;
+        }
+
         let Some(TypeRepr::Scalar(expected_scalar)) = repr else {
             return;
         };
 
         let cl_ty = builder.func.dfg.value_type(val);
-        let ptr_ty = self.ctx.ptr_ty;
 
         match vd.ownership {
             kestrel_mir::value::Ownership::Owned => {
@@ -120,7 +153,6 @@ pub fn compile_function(
         None => return Ok(()),
     };
 
-    let is_main = ctx.is_main_function(func);
     let call_conv = ctx.isa.default_call_conv();
 
     let sig = if func.extern_info.is_some() {
@@ -134,7 +166,6 @@ pub fn compile_function(
     } else {
         crate::abi::build_signature(
             func,
-            is_main,
             &mut ctx.tc,
             &ctx.module.ty_arena,
             ctx.module,
@@ -185,7 +216,7 @@ pub fn compile_function(
     builder.switch_to_block(entry);
 
     let ret_repr = ctx.tc.repr(func.ret, &ctx.module.ty_arena, ctx.module);
-    let ret_mode = abi::return_mode(ret_repr, is_main);
+    let ret_mode = abi::return_mode(ret_repr);
 
     let block_params_entry = builder.block_params(entry).to_vec();
     let mut param_idx = 0;
@@ -229,7 +260,6 @@ pub fn compile_function(
         body,
         block_map,
         value_map,
-        is_main,
         sret_ptr,
     };
 

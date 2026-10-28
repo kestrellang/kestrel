@@ -107,7 +107,10 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
 /// Reference-counted shared ownership of the fd. Cloning is a refcount
 /// bump (the same socket), and `close(2)` runs exactly once — when the
 /// last handle drops. This is a shared handle, not a `dup(2)`; use
-/// `dup(2)` explicitly if you need an independent fd.
+/// `dup(2)` explicitly if you need an independent fd. Marked
+/// `@observabledrop`: since the last drop closes the socket, the compiler
+/// keeps every copy alive until the end of its scope.
+@observabledrop
 public struct TcpStream: Readable, Writable, Cloneable {
     // The fd lives in a reference-counted box so the socket is `close(2)`d
     // exactly once — by whichever handle drops last. A plain `var fd: Int32`
@@ -212,7 +215,7 @@ public struct TcpStream: Readable, Writable, Cloneable {
         if self.conn.isUnique() {
             let fd = self.conn.getValue();
             if fd >= 0 {
-                let _ = libc.close(fd);
+                 libc.close(fd);
             }
         }
     }
@@ -267,16 +270,18 @@ extend TcpStream {
 
         // Null-terminate host and port strings for C
         var hostBuf = Array[UInt8]();
+        let hostLen = host.bytes.count;
         var hci: Int64 = 0;
-        while hci < host.byteCount {
+        while hci < hostLen {
             hostBuf.append(host.bytes(unchecked: hci));
             hci = hci + 1
         }
         hostBuf.append(0);
 
         var portBuf = Array[UInt8]();
+        let portLen = portStr.bytes.count;
         var pci: Int64 = 0;
-        while pci < portStr.byteCount {
+        while pci < portLen {
             portBuf.append(portStr.bytes(unchecked: pci));
             pci = pci + 1
         }
@@ -316,7 +321,7 @@ extend TcpStream {
         libc.freeaddrinfo(resultPtr);
 
         if connResult < 0 {
-            let _ = libc.close(fd);
+             libc.close(fd);
             return .Err(IoError.last())
         }
 
@@ -352,8 +357,9 @@ extend TcpStream {
 ///
 /// # Memory Model
 ///
-/// Owns its fd; closed on drop.
-public struct TcpListener {
+/// Owns its fd; closed on drop. `not Copyable`: a copy would close the
+/// same fd twice. Move it, or borrow it to call `accept()`.
+public struct TcpListener: not Copyable {
     var fd: Int32
 
     /// @name From Fd
@@ -389,7 +395,7 @@ public struct TcpListener {
         let optPtr = Pointer(to: optval).cast[UInt8]();
         let optResult = libc.setsockopt(fd, libc.SOL_SOCKET(), libc.SO_REUSEADDR(), optPtr, 4);
         if optResult < 0 {
-            let _ = libc.close(fd);
+             libc.close(fd);
             return .Err(IoError.last())
         }
 
@@ -398,13 +404,13 @@ public struct TcpListener {
 
         let bindResult = libc.bind(fd, addr.asPointer(), libc.SOCKADDR_IN_SIZE());
         if bindResult < 0 {
-            let _ = libc.close(fd);
+             libc.close(fd);
             return .Err(IoError.last())
         }
 
         let listenResult = libc.listen(fd, 128);
         if listenResult < 0 {
-            let _ = libc.close(fd);
+             libc.close(fd);
             return .Err(IoError.last())
         }
 
@@ -434,7 +440,7 @@ public struct TcpListener {
         // Best-effort: a failure here doesn't make the connection unusable.
         var nodelay: Int32 = 1;
         let optPtr = Pointer(to: nodelay).cast[UInt8]();
-        let _ = libc.setsockopt(clientFd, libc.IPPROTO_TCP(), libc.TCP_NODELAY(), optPtr, 4);
+         libc.setsockopt(clientFd, libc.IPPROTO_TCP(), libc.TCP_NODELAY(), optPtr, 4);
         .Ok(TcpStream(clientFd))
     }
 
@@ -446,7 +452,7 @@ public struct TcpListener {
     /// Closes the listening fd if any.
     deinit {
         if self.fd >= 0 {
-            let _ = libc.close(self.fd);
+             libc.close(self.fd);
         }
     }
 }

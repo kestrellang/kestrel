@@ -19,7 +19,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{NodeKind, Static};
 
@@ -33,8 +33,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct StaticContextAnalyzer;
 
 impl Describe for StaticContextAnalyzer {
-    fn id(&self) -> &'static str {
-        "static_context"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::StaticContext
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -54,10 +54,10 @@ impl DeclCheck for StaticContextAnalyzer {
 
         // Check parent: static is valid inside Struct, Enum, Protocol, Extension
         if let Some(parent) = cx.query.parent_of(cx.entity)
-            && matches!(
-                cx.query.get::<NodeKind>(parent),
-                Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
-            )
+            && cx
+                .query
+                .get::<NodeKind>(parent)
+                .is_some_and(NodeKind::is_type_scope)
         {
             return vec![];
         }

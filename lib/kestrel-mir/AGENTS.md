@@ -29,8 +29,9 @@ stages, in order:
   `Layout` `Verify` — run by `run_pipeline_until` here.
 - post-mono (→ `mono::MonoModule`): `Mono` `CopyProp` `Expand` — orchestrated by
   `Compiler::monomorphize_mir_until` in **kestrel-compiler** (the post-mono
-  passes `eliminate_redundant_copies` + `mono::expand` + `verify_mono` live
-  there, not here).
+  passes `eliminate_redundant_copies` + `passes::copy_lifetime::run` +
+  `mono::expand` + `verify_mono` live there, not here). `copy_lifetime` runs
+  inside the `CopyProp` stage.
 
 `run_pipeline` is now a thin wrapper = `run_pipeline_until(.., Stage::Verify)`;
 keep it that way so codegen/`lower_to_mir` callers are unaffected.
@@ -60,9 +61,15 @@ witness's protocol type args against the expected args from the call site's
 `method_type_args`. Without this filter, the first matching witness wins
 regardless of which generic instantiation it represents.
 
-`witness_proto_args_match` treats `TypeParam` entries as wildcards (they
-come from `extend T: Proto[FreeParam]` where the free param has no
-concrete value at witness-construction time).
+`witness_proto_args_match` substitutes `TypeParam` entries that were BOUND
+by the implementing-type pattern match before comparing (`extend
+ClosedRange[T]: RandomBounds[T]` at self `ClosedRange[Int64]` contributes
+proto arg `Int64`, and must NOT satisfy a `RandomBounds[Int16]` call site —
+treating bound params as wildcards was a silent wrong-layout miscompile).
+Only a genuinely free param (`extend T: Proto[FreeParam]`, never mentioned
+in the implementing type) still matches anything. This requires
+`match_pattern` to run BEFORE the proto-args filter in
+`find_witness_with_method` — keep that ordering.
 
 ## Per-type lookups in mono passes: key by `(Entity, type_args)`, never nominal alone
 
@@ -81,6 +88,36 @@ this — it degraded a real `CopyValue` on `Optional[Int64]` into a move-alias, 
 returned the overwritten value. See [[expand_not_copyable_nominal_collapse]].
 This is the MIR face of the same per-instantiation invariant the solver / MIR
 ty_query / semantics enforce ([[per_instantiation_copy_semantics]]).
+
+## Per-nominal facts go on `TypeInfo`; the pass that decides one stores it
+
+The complement of the rule above. Some facts are genuinely **per-nominal** —
+`Optional` has exactly one `__clone$Optional` shared by `Optional[String]`,
+`Optional[Int64]`, and `Optional[File]`. Those belong in a `TypeInfo` field
+(`clone_impl`, `drop_impl`, `layout`), *not* nested inside `CopyBehavior` /
+`DropBehavior`, which `refine_mono_copy_behavior` rewrites per instantiation.
+Nesting a per-nominal fact in a per-instance enum drops it on every instance the
+refinement moves off that variant.
+
+`MonoStruct`/`MonoEnum` clone `TypeInfo` wholesale from the generic def, so a
+field set pre-mono survives into mono untouched. Read it there rather than
+re-deriving.
+
+**The general rule: the pass that can compute a fact computes it once and stores
+it; every later pass reads the stored value.** "Which function is `T`'s clone?"
+used to be reconstructed in four places — by Cloneable witness, by
+`name.ends_with(".clone")`, by `FunctionKind::Method`'s `parent`, and by the
+self-param nominal — each with a different fallback, so they could disagree and
+the loser was chosen by `module.functions` order (fragility audit F7). The
+deciding pass (`passes/clone_shim.rs`) had the answer in a local `shim_map` and
+dropped it on return. Now it writes `type_info.clone_impl` and the derivations
+are gone. Same shape as `FieldClass` (F3) and the `copyable_protocol` /
+`cloneable_protocol` lang items on `MirModule` (F6).
+
+Corollary — assert the direction that actually holds. `verify_clone_impl_present`
+checks `copy == Clone(_)` ⇒ `clone_impl.is_some()`, never the converse: a
+conditionally-Copyable container and a primitive-only struct both get a shim
+while keeping a `None`/`Bitwise` base.
 
 ## Copy and destroy elaboration must stay symmetric (`mono/expand.rs`)
 
@@ -104,3 +141,50 @@ double-freed any heap member (crashed bootstrapped `flock` on
 `Optional[(String, Int64)]`). Tests stayed green because they used string
 *literals* — only **heap** strings corrupt malloc, so a correctness suite that
 doesn't allocate won't catch this class. See [[tuple_drop_copy_elaboration_gap]].
+
+## Copy semantics: never re-implement the fold
+
+The copy-semantics decision tree lives in `kestrel-copy-fold`
+(`instance_semantics` / `fold_members`); this crate's `MirCopyLayer`
+(ty_query.rs) and `MonoCopyLayer` (mono/mod.rs) are adapters. Never
+re-implement the gating fold in a pass; tuple folds inline the canonical rule
+only to keep their native `Clone` payload. Any deliberate divergence must
+carry a `TODO(copy-drift #n)` comment at its classifier arm — never converge
+or introduce one silently.
+
+## Copy lifetimes: only copies move, never past an observable drop (`passes/copy_lifetime/`)
+
+`copy_lifetime` stops implicit copies from keeping COW storage shared (a copy
+alive across a mutation of its original makes `append` deep-copy the buffer).
+Three sub-passes: copy → move at a call's last use (`owned_params`), drop each
+copy at its last read (`drop_at_last_use`), and copy → borrow for read-only
+copies of a `var` (`borrow_copies`). Invariants every change here must keep:
+
+- **Originals never change drop position.** Only values produced by an
+  implicit `CopyValue` are shortened or removed. Explicit `.clone()` calls are
+  ordinary calls and are never touched. RAII guards, files and locks keep
+  their scope-end drops (and are `not Copyable`, so never copied anyway).
+- **Early drops skip observable types** (`TypeFacts::observable`): a type
+  marked `@observabledrop`, or containing one through fields, payloads, type
+  arguments or pointer pointees (`RcBox[TcpStream]`). Mark a `Cloneable` type
+  `@observabledrop` when its drop does something visible (closes an fd,
+  deletes a file); E508 (post-mono, `observable_lint.rs`) warns when that looks likely. Design:
+  `docs/plans/observable_drop/observable_drop-design.md`.
+- **Never shorten a copy a raw pointer or view was derived from**
+  (`TypeFacts::holds_raw_pointer`). A pointer stored in a type with a `deinit`
+  is that type's managed storage and doesn't count; a view has no deinit.
+  Writes through raw pointers created elsewhere are *not* tracked — that is
+  `unsafe` code's responsibility.
+- **Safe aliases ARE tracked; never key a storage check on one `ValueId`.** A
+  slot has many names: the struct it is a field of, every `field_addr` taken
+  from it (each a fresh value — `self.x` read and `self.x = ..` write use
+  different ones), and every block param the address is threaded through.
+  Use `copy_lifetime::storage_names` and treat a write to *any* name as a
+  write to the slot. Also refuse while a `&mutating` binding (an open
+  `begin_mut_borrow_addr`) of the slot is live — it writes through its own
+  name. Both were real bugs (`binding_store_through`, `LinesIterator.next`).
+- **Rewrites that delete instructions rescan** (one rewrite per scan) instead of
+  batching index-based edits; batched sites in one block hold stale indices.
+- `owned_params` variants are keyed by (original function, sorted owned
+  params) so one call can move several args; a call to a variant can be
+  specialized further.
