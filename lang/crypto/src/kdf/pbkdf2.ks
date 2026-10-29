@@ -2,6 +2,7 @@ module crypto.kdf
 
 import crypto.digest.(Digest)
 import crypto.key.(SymmetricKey)
+import crypto.error.(CryptoError)
 import crypto.mac.(HMAC)
 
 /// PBKDF2: Password-based key derivation function 2 (RFC 8018).
@@ -11,8 +12,8 @@ import crypto.mac.(HMAC)
 /// # Examples
 ///
 /// ```
-/// let key = PBKDF2[SHA256].deriveKey(
-///     password: passwordBytes,
+/// let key = try PBKDF2[SHA256].deriveKey(
+///     password.asByteSlice(),
 ///     salt: salt,
 ///     iterations: 100000,
 ///     length: 32
@@ -24,22 +25,31 @@ public struct PBKDF2[H] where H: Digest {
     ///
     /// Higher iteration counts are slower but more resistant to brute-force.
     /// OWASP recommends at least 600,000 for SHA-256 as of 2023.
+    ///
+    /// Throws `.InvalidIterationCount` if `iterations` is less than 1, and
+    /// `.InvalidLength` if `length` is negative or exceeds
+    /// (2³² − 1) × digest size (RFC 8018 §5.2) — past that the 32-bit
+    /// block index would wrap.
     public static func deriveKey(
-        password password: Array[UInt8],
-        salt salt: Array[UInt8],
+        password: some Slice[UInt8],
+        salt salt: some Slice[UInt8],
         iterations iterations: Int64,
         length length: Int64
-    ) -> SymmetricKey {
+    ) -> SymmetricKey throws CryptoError {
         let hashLen = H.digestSize;
+        if iterations < 1 { throw CryptoError.InvalidIterationCount; }
+        if length < 0 or length > 4294967295 * hashLen { throw CryptoError.InvalidLength; }
         let blocks = (length + hashLen - 1) / hashLen;
-        let passwordKey = SymmetricKey(bytes: password);
+        var passwordBytes: [UInt8] = [];
+        passwordBytes.append(contentsOf: password.asSlice());
+        let passwordKey = SymmetricKey(bytes: passwordBytes);
 
         var okm: [UInt8] = [];
 
         for blockIndex in 1..=blocks {
             // U_1 = HMAC(password, salt || INT_32_BE(blockIndex))
             var mac = HMAC[H](key: passwordKey);
-            mac.update(salt);
+            mac.update(salt.asSlice());
             let be = UInt32(from: blockIndex).toBytesBigEndian();
             mac.update(be);
             var u = mac.finalize().bytes;
@@ -63,6 +73,6 @@ public struct PBKDF2[H] where H: Digest {
         for i in 0..<length {
             truncated.append(okm(i));
         }
-        return SymmetricKey(bytes: truncated);
+        return .Ok(SymmetricKey(bytes: truncated));
     }
 }

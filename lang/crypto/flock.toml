@@ -1,7 +1,7 @@
 [package]
 name = "crypto"
 version = "0.1.0"
-description = "Cryptographic hash functions for Kestrel"
+description = "Hashes, HMAC, KDFs, password hashing and AEAD for Kestrel"
 author = "jkpdino"
 license = "MIT"
 repository = "https://github.com/kestrellang/kestrel"

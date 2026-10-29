@@ -1,7 +1,11 @@
 module crypto.digest
 
+import crypto.bytes.(ByteValue)
+
 /// The output of a cryptographic hash function.
-public struct DigestOutput: Equatable, Hashable {
+///
+/// `hexString`, `init(hex:)?` and a constant-time `==` come from `ByteValue`.
+public struct DigestOutput: ByteValue, Equatable, Hashable {
     private var storage: Array[UInt8];
 
     public init(bytes bytes: Array[UInt8]) {
@@ -11,33 +15,6 @@ public struct DigestOutput: Equatable, Hashable {
     /// The raw digest bytes.
     public var bytes: Array[UInt8] { self.storage }
 
-    /// The digest as a lowercase hexadecimal string.
-    public var hexString: String {
-        var result = String();
-        for b in self.storage {
-            result.append(hexNibble(Int64(from: b) >> 4));
-            result.append(hexNibble(Int64(from: b) & 0x0f));
-        }
-        return result;
-    }
-
-    /// Constant-time comparison to prevent timing side-channel attacks.
-    public func equals(other: DigestOutput) -> Bool {
-        if self.storage.count != other.storage.count {
-            return false;
-        }
-        var diff: UInt8 = 0;
-        for i in 0..<self.storage.count {
-            diff = diff | (self.storage(i) ^ other.storage(i));
-        }
-        return diff == 0;
-    }
-
-    /// `Equatable` conformance. Delegates to `equals` so `==` stays
-    /// constant-time and timing-safe.
-    public func isEqual(to other: DigestOutput) -> Bool {
-        self.equals(other)
-    }
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
         hasher.write(self.storage.asSlice());
@@ -65,23 +42,12 @@ public protocol Digest {
     func finalize() -> DigestOutput
 }
 
-func hexNibble(n: Int64) -> String {
-    match n {
-        0 => "0",
-        1 => "1",
-        2 => "2",
-        3 => "3",
-        4 => "4",
-        5 => "5",
-        6 => "6",
-        7 => "7",
-        8 => "8",
-        9 => "9",
-        10 => "a",
-        11 => "b",
-        12 => "c",
-        13 => "d",
-        14 => "e",
-        _ => "f"
+extend Digest {
+    /// One-shot hash: a fresh hasher, one `update`, `finalize`. Defined
+    /// once here, so it also works in generic code (`H.hash(data)`).
+    public static func hash(bytes: some Slice[UInt8]) -> DigestOutput {
+        var hasher = Self();
+        hasher.update(bytes);
+        hasher.finalize()
     }
 }

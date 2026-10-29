@@ -1,46 +1,114 @@
 module crypto.digest
 
-/// BLAKE2b cryptographic hash function (RFC 7693).
-///
-/// Produces a configurable-length digest up to 64 bytes. Defaults to 32 bytes.
+/// BLAKE2b-512: BLAKE2b (RFC 7693) with its full 64-byte output.
 ///
 /// # Examples
 ///
 /// ```
-/// let digest = BLAKE2b.hash(data.asSlice());
+/// let digest = BLAKE2b512.hash(data);
+/// let tag = HMAC[BLAKE2b512].authenticate(data, using: key);
+/// ```
+public struct BLAKE2b512: Digest {
+    var core: BLAKE2b;
+
+    public static var digestSize: Int64 { 64 }
+    public static var blockSize: Int64 { 128 }
+
+    public init() {
+        self.core = BLAKE2b(validLength: 64);
+    }
+
+    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
+        self.core.update(bytes);
+    }
+
+    public func finalize() -> DigestOutput {
+        self.core.finalize()
+    }
+}
+
+/// BLAKE2b-256: BLAKE2b (RFC 7693) with a 32-byte output, for when you
+/// want SHA-256-sized digests. Not a truncated BLAKE2b-512 — the output
+/// length is part of BLAKE2b's parameter block, so the two differ.
+public struct BLAKE2b256: Digest {
+    var core: BLAKE2b;
+
+    public static var digestSize: Int64 { 32 }
+    public static var blockSize: Int64 { 128 }
+
+    public init() {
+        self.core = BLAKE2b(validLength: 32);
+    }
+
+    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
+        self.core.update(bytes);
+    }
+
+    public func finalize() -> DigestOutput {
+        self.core.finalize()
+    }
+}
+
+/// BLAKE2b (RFC 7693) with any output length from 1 to 64 bytes.
 ///
-/// var hasher = BLAKE2b(outputLength: 64);
-/// hasher.update(data.asSlice());
+/// Not a `Digest`: `Digest.digestSize` is fixed per type, and this one's
+/// output length is chosen per instance. Use `BLAKE2b512` or `BLAKE2b256`
+/// wherever a `Digest` is needed (HMAC, HKDF, PBKDF2).
+///
+/// # Examples
+///
+/// ```
+/// let digest = BLAKE2b.hash(data, outputLength: 48);
+///
+/// var hasher = BLAKE2b(outputLength: 48).expect("48 is within 1...64");
+/// hasher.update(data);
 /// let digest = hasher.finalize();
 /// ```
-public struct BLAKE2b: Digest {
+public struct BLAKE2b {
     var state: Array[UInt64];
     var buffer: Array[UInt8];
     var t0: UInt64;
     var t1: UInt64;
     var outputLen: Int64;
 
-    public static var digestSize: Int64 { 32 }
-    public static var blockSize: Int64 { 128 }
+    /// The longest output BLAKE2b can produce, in bytes.
+    public static var maximumOutputLength: Int64 { 64 }
 
-    public init() {
-        self.outputLen = 32;
-        var h = BLAKE2b.IV;
-        h(0) = h(0) ^ 0x01010000 ^ 32;
-        self.state = h;
+    /// Creates a hasher producing `outputLength` bytes. Returns null unless
+    /// `outputLength` is between 1 and 64.
+    public init(outputLength outputLength: Int64)? {
+        if outputLength < 1 or outputLength > BLAKE2b.maximumOutputLength { return null; }
+        self.outputLen = outputLength;
+        self.state = BLAKE2b.initialState(outputLength);
         self.buffer = Array[UInt8]();
         self.t0 = 0;
         self.t1 = 0;
     }
 
-    public init(outputLength outputLength: Int64) {
+    /// One-shot hash with a chosen output length, or null unless
+    /// `outputLength` is between 1 and 64.
+    public static func hash(bytes: some Slice[UInt8], outputLength outputLength: Int64) -> DigestOutput? {
+        guard let some hasher = BLAKE2b(outputLength: outputLength) else { return null; }
+        var h = hasher;
+        h.update(bytes);
+        h.finalize()
+    }
+
+    /// For lengths the caller has already checked (the fixed-size types).
+    init(validLength outputLength: Int64) {
         self.outputLen = outputLength;
-        var h = BLAKE2b.IV;
-        h(0) = h(0) ^ 0x01010000 ^ UInt64(from: outputLength);
-        self.state = h;
+        self.state = BLAKE2b.initialState(outputLength);
         self.buffer = Array[UInt8]();
         self.t0 = 0;
         self.t1 = 0;
+    }
+
+    /// The IV with the parameter block's first word mixed in: digest
+    /// length, no key, fanout 1, depth 1 (RFC 7693 §2.5).
+    static func initialState(outputLength: Int64) -> Array[UInt64] {
+        var h = BLAKE2b.IV;
+        h(0) = h(0) ^ 0x01010000 ^ UInt64(from: outputLength);
+        h
     }
 
     public mutating func update[S](bytes: S) where S: Slice[UInt8] {
@@ -111,12 +179,6 @@ public struct BLAKE2b: Digest {
             idx = idx + 1;
         }
         return DigestOutput(bytes: result);
-    }
-
-    public static func hash[S](bytes: S) -> DigestOutput where S: Slice[UInt8] {
-        var h = BLAKE2b();
-        h.update(bytes);
-        return h.finalize();
     }
 
     // --- internals ---

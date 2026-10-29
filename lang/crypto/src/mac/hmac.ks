@@ -1,12 +1,14 @@
 module crypto.mac
 
+import crypto.bytes.(ByteValue)
 import crypto.digest.(Digest)
 import crypto.key.(SymmetricKey)
 
 /// The output of a message authentication code.
 ///
-/// Constant-time equality comparison prevents timing side-channel attacks.
-public struct AuthenticationCode: Equatable, Hashable {
+/// `hexString`, `init(hex:)?` and a constant-time `==` come from `ByteValue`,
+/// so `tag == expected` is the right way to verify.
+public struct AuthenticationCode: ByteValue, Equatable, Hashable {
     private var storage: Array[UInt8];
 
     public init(bytes bytes: Array[UInt8]) {
@@ -16,33 +18,6 @@ public struct AuthenticationCode: Equatable, Hashable {
     /// The raw tag bytes.
     public var bytes: Array[UInt8] { self.storage }
 
-    /// The tag as a lowercase hexadecimal string.
-    public var hexString: String {
-        var result = String();
-        for b in self.storage {
-            result.append(macHexNibble(Int64(from: b) >> 4));
-            result.append(macHexNibble(Int64(from: b) & 0x0f));
-        }
-        return result;
-    }
-
-    /// Constant-time comparison to prevent timing side-channel attacks.
-    public func equals(other: AuthenticationCode) -> Bool {
-        if self.storage.count != other.storage.count {
-            return false;
-        }
-        var diff: UInt8 = 0;
-        for i in 0..<self.storage.count {
-            diff = diff | (self.storage(i) ^ other.storage(i));
-        }
-        return diff == 0;
-    }
-
-    /// `Equatable` conformance. Delegates to `equals` so `==` stays
-    /// constant-time and timing-safe.
-    public func isEqual(to other: AuthenticationCode) -> Bool {
-        self.equals(other)
-    }
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
         hasher.write(self.storage.asSlice());
@@ -57,7 +32,7 @@ public struct AuthenticationCode: Equatable, Hashable {
 ///
 /// ```
 /// // One-shot
-/// let tag = HMAC[SHA256].authenticate(key: key, message: data);
+/// let tag = HMAC[SHA256].authenticate(data, using: key);
 ///
 /// // Incremental
 /// var mac = HMAC[SHA256](key: key);
@@ -104,7 +79,7 @@ public struct HMAC[H] where H: Digest {
     }
 
     /// One-shot authentication.
-    public static func authenticate[S](key key: SymmetricKey, message message: S) -> AuthenticationCode where S: Slice[UInt8] {
+    public static func authenticate(message: some Slice[UInt8], using key: SymmetricKey) -> AuthenticationCode {
         var mac = HMAC[H](key: key);
         mac.update(message);
         return mac.finalize();
@@ -144,26 +119,5 @@ public struct HMAC[H] where H: Digest {
         inner = hasher;
         inner.update(ipad);
         base = hasher;
-    }
-}
-
-func macHexNibble(n: Int64) -> String {
-    match n {
-        0 => "0",
-        1 => "1",
-        2 => "2",
-        3 => "3",
-        4 => "4",
-        5 => "5",
-        6 => "6",
-        7 => "7",
-        8 => "8",
-        9 => "9",
-        10 => "a",
-        11 => "b",
-        12 => "c",
-        13 => "d",
-        14 => "e",
-        _ => "f"
     }
 }

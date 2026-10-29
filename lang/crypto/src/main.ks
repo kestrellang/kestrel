@@ -1,12 +1,12 @@
 /// Cryptographic hash functions.
 ///
-/// Provides pure Kestrel implementations of SHA-256, SHA-512, MD5, and BLAKE2b.
+/// Pure Kestrel hashes (SHA-1, SHA-2, SHA-3, BLAKE2b, BLAKE3, MD5), HMAC,
+/// HKDF, PBKDF2, password hashing and ChaCha20-Poly1305.
 ///
 /// # Examples
 ///
 /// ```
-/// import crypto.digest.(Digest, DigestOutput)
-/// import crypto.(SHA256)
+/// import crypto.digest.(Digest, DigestOutput, SHA256)
 ///
 /// let hex = SHA256.hash(data).hexString;
 ///

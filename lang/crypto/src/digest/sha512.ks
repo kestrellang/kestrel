@@ -7,89 +7,42 @@ module crypto.digest
 /// # Examples
 ///
 /// ```
-/// let digest = SHA512.hash(data.asSlice());
-/// let hex = hexString(from: digest);
+/// let digest = SHA512.hash(data);
+/// let hex = digest.hexString;
 /// ```
 public struct SHA512: Digest {
-    var state: Array[UInt64];
-    var buffer: Array[UInt8];
-    var totalLen: UInt64;
+    var blocks: BlockBuffer[SHA512State];
 
     public static var digestSize: Int64 { 64 }
     public static var blockSize: Int64 { 128 }
 
     public init() {
-        self.state = [
+        let initial: [UInt64] = [
             0x6a09e667f3bcc908, 0xbb67ae8584caa73b,
             0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1,
             0x510e527fade682d1, 0x9b05688c2b3e6c1f,
             0x1f83d9abfb41bd6b, 0x5be0cd19137e2179
         ];
-        self.buffer = Array[UInt8]();
-        self.totalLen = 0;
+        self.blocks = BlockBuffer(function: SHA512State(words: initial), blockLength: 128);
+    }
+
+    /// The SHA512 machinery with another initial hash value: SHA-384 and SHA-512/256 run on
+    /// this and truncate the output.
+    init(initialState initialState: Array[UInt64]) {
+        self.blocks = BlockBuffer(function: SHA512State(words: initialState), blockLength: 128);
     }
 
     public mutating func update[S](bytes: S) where S: Slice[UInt8] {
-        let sl = bytes.asSlice();
-        self.totalLen = self.totalLen + UInt64(from: sl.count);
-        var offset: Int64 = 0;
-
-        if self.buffer.count > 0 {
-            let needed = 128 - self.buffer.count;
-            if sl.count < needed {
-                self.buffer.append(contentsOf: sl);
-                return;
-            }
-            self.buffer.append(contentsOf: sl.prefix(needed));
-            var block = self.buffer;
-            self.buffer = Array[UInt8]();
-            SHA512.compress(block.asSlice(), self.state);
-            offset = needed;
-        }
-
-        while offset + 128 <= sl.count {
-            SHA512.compress(sl.drop(first: offset).prefix(128), self.state);
-            offset = offset + 128;
-        }
-
-        if offset < sl.count {
-            self.buffer.append(contentsOf: sl.drop(first: offset));
-        }
+        self.blocks.update(bytes.asSlice());
     }
 
     public func finalize() -> DigestOutput {
-        var st = self.state;
-        var buf: [UInt8] = [];
-        buf.append(contentsOf: self.buffer.asSlice());
-
-        buf.append(0x80);
-        while buf.count % 128 != 112 {
-            buf.append(0);
-        }
-
-        // SHA-512 uses 128-bit length; upper 64 bits are zero for practical messages
-        let zeroPad: UInt64 = 0;
-        buf.append(contentsOf: zeroPad.toBytesBigEndian().asSlice());
-        let bitLen = self.totalLen * 8;
-        buf.append(contentsOf: bitLen.toBytesBigEndian().asSlice());
-
-        var offset: Int64 = 0;
-        while offset < buf.count {
-            SHA512.compress(buf.asSlice().drop(first: offset).prefix(128), st);
-            offset = offset + 128;
-        }
-
+        let words = self.blocks.finishedWithLengthPadding(.BigEndian128).words;
         var result: [UInt8] = [];
         for i in 0..<8 {
-            result.append(contentsOf: st(i).toBytesBigEndian().asSlice());
+            result.append(contentsOf: words(i).toBytesBigEndian().asSlice());
         }
-        return DigestOutput(bytes: result);
-    }
-
-    public static func hash[S](bytes: S) -> DigestOutput where S: Slice[UInt8] {
-        var h = SHA512();
-        h.update(bytes);
-        return h.finalize();
+        DigestOutput(bytes: result)
     }
 
     // --- internals ---
@@ -174,5 +127,18 @@ public struct SHA512: Digest {
         state(5) = state(5) + f;
         state(6) = state(6) + g;
         state(7) = state(7) + h;
+    }
+}
+
+/// SHA512's chaining state, compressed one block at a time by `BlockBuffer`.
+struct SHA512State: BlockFunction {
+    var words: Array[UInt64];
+
+    init(words words: Array[UInt64]) {
+        self.words = words;
+    }
+
+    mutating func compress(block: ArraySlice[UInt8]) {
+        SHA512.compress(block, self.words);
     }
 }

@@ -1,48 +1,46 @@
 module crypto.aead
 
+import crypto.bytes.(ByteValue)
 import crypto.key.(SymmetricKey)
-import crypto.random.(randomBytes)
+import crypto.error.(CryptoError)
+import crypto.random.(RandomByteValue)
 
 /// A 12-byte nonce (number used once) for AEAD ciphers.
-public struct Nonce {
+///
+/// `hexString`, `init(hex:)?` and a constant-time `==` come from `ByteValue`.
+public struct Nonce: ByteValue, RandomByteValue, Equatable {
     private var storage: Array[UInt8];
 
-    /// Creates a random nonce using the OS cryptographic random source.
-    public init() {
-        self.storage = randomBytes(count: 12);
-    }
-
     /// Creates a nonce from exactly 12 bytes. Returns null if wrong length.
-    public init(from bytes: Array[UInt8])? {
+    public init(bytes bytes: Array[UInt8])? {
         if bytes.count != 12 { return null; }
         self.storage = bytes;
     }
 
+    /// `Nonce.random()` makes the required 12 bytes.
+    public static var randomCount: Int64 { 12 }
+
     /// The raw nonce bytes.
     public var bytes: Array[UInt8] { self.storage }
+
 }
 
 /// The output of an AEAD seal operation.
 ///
-/// Contains the nonce, ciphertext, and authentication tag.
+/// Contains the nonce, ciphertext, and authentication tag. The tag is
+/// always exactly 16 bytes: the fields are read-only and every
+/// initializer checks the length, so `open` can rely on it.
 public struct SealedBox {
-    public var nonce: Nonce;
-    public var ciphertext: Array[UInt8];
-    public var tag: Array[UInt8];
+    private var nonceStorage: Nonce;
+    private var ciphertextStorage: Array[UInt8];
+    private var tagStorage: Array[UInt8];
 
-    public init(nonce nonce: Nonce, ciphertext ciphertext: Array[UInt8], tag tag: Array[UInt8]) {
-        self.nonce = nonce;
-        self.ciphertext = ciphertext;
-        self.tag = tag;
-    }
-
-    /// Serialized form: nonce (12) || ciphertext || tag (16).
-    public var combined: Array[UInt8] {
-        var result: [UInt8] = [];
-        result.append(contentsOf: self.nonce.bytes.asSlice());
-        result.append(contentsOf: self.ciphertext.asSlice());
-        result.append(contentsOf: self.tag.asSlice());
-        return result;
+    /// Creates a box from its parts. Returns null if `tag` is not 16 bytes.
+    public init(nonce nonce: Nonce, ciphertext ciphertext: Array[UInt8], tag tag: Array[UInt8])? {
+        if tag.count != 16 { return null; }
+        self.nonceStorage = nonce;
+        self.ciphertextStorage = ciphertext;
+        self.tagStorage = tag;
     }
 
     /// Reconstructs from combined bytes (nonce || ciphertext || tag).
@@ -54,25 +52,46 @@ public struct SealedBox {
         for i in 0..<12 {
             nonceBytes.append(combined(i));
         }
-        guard let .Some(n) = Nonce(from: nonceBytes) else { return null; }
-        self.nonce = n;
+        guard let some n = Nonce(bytes: nonceBytes) else { return null; }
+        self.nonceStorage = n;
 
-        self.ciphertext = Array[UInt8]();
+        self.ciphertextStorage = Array[UInt8]();
         let ctEnd = combined.count - 16;
         for i in 12..<ctEnd {
-            self.ciphertext.append(combined(i));
+            self.ciphertextStorage.append(combined(i));
         }
 
-        self.tag = Array[UInt8]();
+        self.tagStorage = Array[UInt8]();
         for i in ctEnd..<combined.count {
-            self.tag.append(combined(i));
+            self.tagStorage.append(combined(i));
         }
     }
-}
 
-/// Errors from cryptographic operations.
-public enum CryptoError {
-    case AuthenticationFailure
+    /// Builds a box from a tag `seal` just computed, which is 16 bytes
+    /// by construction.
+    fileprivate init(sealed nonce: Nonce, ciphertext ciphertext: Array[UInt8], tag tag: Array[UInt8]) {
+        self.nonceStorage = nonce;
+        self.ciphertextStorage = ciphertext;
+        self.tagStorage = tag;
+    }
+
+    /// The nonce the message was sealed with.
+    public var nonce: Nonce { self.nonceStorage }
+
+    /// The encrypted message.
+    public var ciphertext: Array[UInt8] { self.ciphertextStorage }
+
+    /// The 16-byte Poly1305 authentication tag.
+    public var tag: Array[UInt8] { self.tagStorage }
+
+    /// Serialized form: nonce (12) || ciphertext || tag (16).
+    public var combined: Array[UInt8] {
+        var result: [UInt8] = [];
+        result.append(contentsOf: self.nonceStorage.bytes.asSlice());
+        result.append(contentsOf: self.ciphertextStorage.asSlice());
+        result.append(contentsOf: self.tagStorage.asSlice());
+        return result;
+    }
 }
 
 /// ChaCha20-Poly1305 authenticated encryption (RFC 8439).
@@ -80,43 +99,34 @@ public enum CryptoError {
 /// # Examples
 ///
 /// ```
-/// let sealed = ChaCha20Poly1305.seal(plaintext, using: key);
+/// let sealed = try ChaCha20Poly1305.seal(plaintext, using: key);
 /// let plaintext = try ChaCha20Poly1305.open(sealed, using: key);
 /// ```
 public struct ChaCha20Poly1305 {
+    /// The required key length in bytes.
+    public static var keySize: Int64 { 32 }
 
-    /// Encrypts with a random nonce.
-    public static func seal(message: some Slice[UInt8], using key: SymmetricKey) -> SealedBox {
-        let nonce = Nonce();
-        let empty: [UInt8] = [];
-        return ChaCha20Poly1305.sealWith(message.asSlice(), key, nonce, empty.asSlice());
-    }
-
-    /// Encrypts with an explicit nonce.
-    public static func seal(message: some Slice[UInt8], using key: SymmetricKey, nonce nonce: Nonce) -> SealedBox {
-        let empty: [UInt8] = [];
-        return ChaCha20Poly1305.sealWith(message.asSlice(), key, nonce, empty.asSlice());
-    }
-
-    /// Encrypts with AAD and a random nonce.
-    public static func seal(message: some Slice[UInt8], using key: SymmetricKey, authenticating aad: some Slice[UInt8]) -> SealedBox {
-        let nonce = Nonce();
+    /// Encrypts `message`, and authenticates (without encrypting) `aad`
+    /// when given. `nonce` defaults to a fresh random one, which is what you
+    /// want unless a protocol dictates the nonce. Throws `.InvalidKeySize`
+    /// unless the key is 32 bytes.
+    public static func seal(
+        message: some Slice[UInt8],
+        using key: SymmetricKey,
+        authenticating aad: some Slice[UInt8] = Array[UInt8](),
+        nonce nonce: Nonce = Nonce.random()
+    ) -> SealedBox throws CryptoError {
         return ChaCha20Poly1305.sealWith(message.asSlice(), key, nonce, aad.asSlice());
     }
 
-    /// Encrypts with AAD and an explicit nonce.
-    public static func seal(message: some Slice[UInt8], using key: SymmetricKey, nonce nonce: Nonce, authenticating aad: some Slice[UInt8]) -> SealedBox {
-        return ChaCha20Poly1305.sealWith(message.asSlice(), key, nonce, aad.asSlice());
-    }
-
-    /// Decrypts and verifies. Throws on authentication failure.
-    public static func open(box: SealedBox, using key: SymmetricKey) -> Array[UInt8] throws CryptoError {
-        let empty: [UInt8] = [];
-        return ChaCha20Poly1305.openWith(box, key, empty.asSlice());
-    }
-
-    /// Decrypts and verifies with AAD. Throws on authentication failure.
-    public static func open(box: SealedBox, using key: SymmetricKey, authenticating aad: some Slice[UInt8]) -> Array[UInt8] throws CryptoError {
+    /// Decrypts and verifies `box` and `aad` (empty unless given). Throws
+    /// `.InvalidKeySize` unless the key is 32 bytes, and
+    /// `.AuthenticationFailure` if the tag doesn't match.
+    public static func open(
+        box: SealedBox,
+        using key: SymmetricKey,
+        authenticating aad: some Slice[UInt8] = Array[UInt8]()
+    ) -> Array[UInt8] throws CryptoError {
         return ChaCha20Poly1305.openWith(box, key, aad.asSlice());
     }
 
@@ -127,7 +137,8 @@ public struct ChaCha20Poly1305 {
         key: SymmetricKey,
         nonce: Nonce,
         aad: ArraySlice[UInt8]
-    ) -> SealedBox {
+    ) -> SealedBox throws CryptoError {
+        if key.count != ChaCha20Poly1305.keySize { throw CryptoError.InvalidKeySize; }
         let keyBytes = key.bytes;
         let nonceBytes = nonce.bytes;
 
@@ -145,7 +156,7 @@ public struct ChaCha20Poly1305 {
         // Compute tag
         let tag = ChaCha20Poly1305.computeTag(polyKey, aad, ct.asSlice());
 
-        return SealedBox(nonce: nonce, ciphertext: ct, tag: tag);
+        return .Ok(SealedBox(sealed: nonce, ciphertext: ct, tag: tag));
     }
 
     static func openWith(
@@ -153,6 +164,7 @@ public struct ChaCha20Poly1305 {
         key: SymmetricKey,
         aad: ArraySlice[UInt8]
     ) -> Array[UInt8] throws CryptoError {
+        if key.count != ChaCha20Poly1305.keySize { throw CryptoError.InvalidKeySize; }
         let keyBytes = key.bytes;
         let nonceBytes = box.nonce.bytes;
 
@@ -165,17 +177,19 @@ public struct ChaCha20Poly1305 {
         }
 
         // Verify tag (constant-time)
-        let expectedTag = ChaCha20Poly1305.computeTag(polyKey, aad, box.ciphertext.asSlice());
+        let ciphertext = box.ciphertext;
+        let expectedTag = ChaCha20Poly1305.computeTag(polyKey, aad, ciphertext.asSlice());
+        let tag = box.tag;  // 16 bytes: SealedBox enforces it
         var diff: UInt8 = 0;
         for i in 0..<16 {
-            diff = diff | (box.tag(i) ^ expectedTag(i));
+            diff = diff | (tag(i) ^ expectedTag(i));
         }
         if diff != 0 {
             throw CryptoError.AuthenticationFailure;
         }
 
         // Decrypt
-        let plaintext = ChaCha20Poly1305.chachaEncrypt(keyBytes, nonceBytes, 1, box.ciphertext.asSlice());
+        let plaintext = ChaCha20Poly1305.chachaEncrypt(keyBytes, nonceBytes, 1, ciphertext.asSlice());
         return .Ok(plaintext);
     }
 

@@ -7,84 +7,40 @@ module crypto.digest
 /// # Examples
 ///
 /// ```
-/// let digest = SHA256.hash(data.asSlice());
-/// let hex = hexString(from: digest);
+/// let digest = SHA256.hash(data);
+/// let hex = digest.hexString;
 /// ```
 public struct SHA256: Digest {
-    var state: Array[UInt32];
-    var buffer: Array[UInt8];
-    var totalLen: UInt64;
+    var blocks: BlockBuffer[SHA256State];
 
     public static var digestSize: Int64 { 32 }
     public static var blockSize: Int64 { 64 }
 
     public init() {
-        self.state = [
+        let initial: [UInt32] = [
             0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
             0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
         ];
-        self.buffer = Array[UInt8]();
-        self.totalLen = 0;
+        self.blocks = BlockBuffer(function: SHA256State(words: initial), blockLength: 64);
+    }
+
+    /// The SHA256 machinery with another initial hash value: SHA-224 runs on
+    /// this and truncate the output.
+    init(initialState initialState: Array[UInt32]) {
+        self.blocks = BlockBuffer(function: SHA256State(words: initialState), blockLength: 64);
     }
 
     public mutating func update[S](bytes: S) where S: Slice[UInt8] {
-        let sl = bytes.asSlice();
-        self.totalLen = self.totalLen + UInt64(from: sl.count);
-        var offset: Int64 = 0;
-
-        if self.buffer.count > 0 {
-            let needed = 64 - self.buffer.count;
-            if sl.count < needed {
-                self.buffer.append(contentsOf: sl);
-                return;
-            }
-            self.buffer.append(contentsOf: sl.prefix(needed));
-            var block = self.buffer;
-            self.buffer = Array[UInt8]();
-            SHA256.compress(block.asSlice(), self.state);
-            offset = needed;
-        }
-
-        while offset + 64 <= sl.count {
-            SHA256.compress(sl.drop(first: offset).prefix(64), self.state);
-            offset = offset + 64;
-        }
-
-        if offset < sl.count {
-            self.buffer.append(contentsOf: sl.drop(first: offset));
-        }
+        self.blocks.update(bytes.asSlice());
     }
 
     public func finalize() -> DigestOutput {
-        var st = self.state;
-        var buf: [UInt8] = [];
-        buf.append(contentsOf: self.buffer.asSlice());
-
-        buf.append(0x80);
-        while buf.count % 64 != 56 {
-            buf.append(0);
-        }
-
-        let bitLen = self.totalLen * 8;
-        buf.append(contentsOf: bitLen.toBytesBigEndian().asSlice());
-
-        var offset: Int64 = 0;
-        while offset < buf.count {
-            SHA256.compress(buf.asSlice().drop(first: offset).prefix(64), st);
-            offset = offset + 64;
-        }
-
+        let words = self.blocks.finishedWithLengthPadding(.BigEndian64).words;
         var result: [UInt8] = [];
         for i in 0..<8 {
-            result.append(contentsOf: st(i).toBytesBigEndian().asSlice());
+            result.append(contentsOf: words(i).toBytesBigEndian().asSlice());
         }
-        return DigestOutput(bytes: result);
-    }
-
-    public static func hash[S](bytes: S) -> DigestOutput where S: Slice[UInt8] {
-        var h = SHA256();
-        h.update(bytes);
-        return h.finalize();
+        DigestOutput(bytes: result)
     }
 
     // --- internals ---
@@ -161,5 +117,18 @@ public struct SHA256: Digest {
         state(5) = state(5) + f;
         state(6) = state(6) + g;
         state(7) = state(7) + h;
+    }
+}
+
+/// SHA256's chaining state, compressed one block at a time by `BlockBuffer`.
+struct SHA256State: BlockFunction {
+    var words: Array[UInt32];
+
+    init(words words: Array[UInt32]) {
+        self.words = words;
+    }
+
+    mutating func compress(block: ArraySlice[UInt8]) {
+        SHA256.compress(block, self.words);
     }
 }
