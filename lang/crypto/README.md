@@ -140,3 +140,13 @@ if stored.needsRehash() { save(PasswordHash.hash(attempt).encoded); }
 - **SecureRandom** - `RandomNumberGenerator` backed by the OS (`arc4random_buf`); `nextUInt64()`
 - **Token** - random token for sessions, API keys, reset links; `init(bytes:)`, plus `ByteValue`; `Hashable`
 - **randomBytes(count: Int64) -> Array[UInt8]**
+
+## Testing
+
+`lang/crypto/tests/run.sh [path/to/kestrel] [opt-level]` builds and runs three check programs against the in-repo compiler (`-O 1` by default) and fails if any check fails:
+
+- `core.ks`: the core API (SHA-2, MD5, BLAKE2b, HMAC, HKDF, PBKDF2, ChaCha20-Poly1305, hex/base64, defaults)
+- `digests.ks`: every digest across lengths that straddle block boundaries
+- `passwords.ks`: Argon2id, scrypt, bcrypt and `PasswordHash` encoding
+
+Expected values come from the RFCs, Python `hashlib`/`hmac`, OpenSSL, `htpasswd` and the BLAKE3 C reference.
