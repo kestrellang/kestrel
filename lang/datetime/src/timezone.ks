@@ -3,7 +3,7 @@ module datetime
 import std.memory.(Pointer)
 import std.ffi.(CString)
 
-// IANA timezone backed by TZif data in a C-side global registry.
+// IANA or fixed-offset timezone backed by a C-side global registry.
 // Interned as a small integer ID — fully copyable.
 // Reads /usr/share/zoneinfo/ for timezone data.
 public struct TimeZone: Equatable, Hashable, Formattable {
@@ -33,14 +33,36 @@ public struct TimeZone: Equatable, Hashable, Formattable {
         TimeZone.utc
     }
 
-    // Look up an IANA timezone by name (e.g. "America/New_York"). Fails with
-    // `nil` if the name isn't a registrable zone.
+    // Look up a zone by IANA name ("America/New_York") or fixed offset
+    // ("+05:30"). Fails with `nil` if the name isn't a registrable zone.
     public init(name: String)? {
+        let tzId = TimeZone.registeredId(name);
+        if tzId < 0 { return null; }
+        self.id = tzId;
+    }
+
+    // A fixed-offset zone (no DST), named like "+05:30". The offset must be a
+    // whole number of minutes within ±23:59; zero is `TimeZone.utc`.
+    public init(offsetSeconds offset: Int64)? {
+        if offset % 60 != 0 or offset.abs() >= 86400 { return null; }
+        // appendOffset spells zero "Z", which is not a zone name
+        if offset == 0 {
+            self.id = TimeZone.utc.id;
+            return;
+        }
+        var b = StringBuilder();
+        appendOffset(into: b, offset);
+        let tzId = TimeZone.registeredId(b.build());
+        if tzId < 0 { return null; }
+        self.id = tzId;
+    }
+
+    // Find or register `name` in the C-side registry; -1 if it can't be loaded.
+    static func registeredId(name: String) -> Int64 {
         let cstr = name.toCString();
         let tzId = kestrel_tz_find_or_register(cstr);
         cstr.free();
-        if tzId < 0 { return null; }
-        self.id = tzId;
+        tzId
     }
 
     // --- Properties ---
@@ -49,6 +71,54 @@ public struct TimeZone: Equatable, Hashable, Formattable {
         var buf = Array[UInt8](repeating: 0, count: 128);
         kestrel_tz_name(self.id, buf.asPointer(), 128);
         String(from: CString(raw: buf.asPointer()))
+    }
+
+    // --- Queries ---
+
+    // UTC offset in effect at `instant`, in seconds east of UTC.
+    public func offset(at instant: Instant) -> Int64 {
+        self.offsetAt(instant.secs)
+    }
+
+    // Abbreviation in effect at `instant` ("EDT"), for display only.
+    public func abbreviation(at instant: Instant) -> String {
+        self.abbreviationAt(instant.secs)
+    }
+
+    // Whether daylight saving time is in effect at `instant`.
+    public func isDaylightSavingTime(at instant: Instant) -> Bool {
+        kestrel_tz_is_dst(self.id, instant.secs) != 0
+    }
+
+    // Every IANA zone name installed under /usr/share/zoneinfo, sorted.
+    public static func availableIdentifiers() -> Array[String] {
+        var probe = Array[UInt8](repeating: 0, count: 1);
+        let needed = kestrel_tz_list_identifiers(probe.asPointer(), 0);
+        var buf = Array[UInt8](repeating: 0, count: needed);
+        kestrel_tz_list_identifiers(buf.asPointer(), needed);
+        // Split the newline-separated list; the final byte is the NUL.
+        var names: Array[String] = [];
+        var start: Int64 = 0;
+        var i: Int64 = 0;
+        while i < needed - 1 {
+            if buf(i) == 10 {
+                names.append(stringFromBytes(buf, start, i - start));
+                start = i + 1;
+            }
+            i = i + 1;
+        }
+        if i > start { names.append(stringFromBytes(buf, start, i - start)); }
+        names
+    }
+
+    // --- Parsing ---
+
+    // Parse a zone name: IANA ("America/New_York") or fixed offset ("+05:30").
+    public static func parse(from input: String) -> TimeZone throws ParseError {
+        guard let .Some(zone) = TimeZone(input) else {
+            throw ParseError.InvalidValue("unknown time zone '\(input)'");
+        }
+        .Ok(zone)
     }
 
     // Get the UTC offset in seconds at a given instant
@@ -63,43 +133,43 @@ public struct TimeZone: Equatable, Hashable, Formattable {
         String(from: CString(raw: buf.asPointer()))
     }
 
-    // Find the DST transition whose gap/fold window contains `dt`, returning
-    // the (offsetBefore, offsetAfter) pair in seconds, or `.None` if the wall
-    // time sits in no transition window. Scans the IANA transition table
-    // directly: an offset-guessing heuristic cannot detect a fold, because a
-    // fold's first candidate instant is self-consistent (it round-trips to the
-    // same civil time), so there is nothing for a round-trip check to catch.
+    // The (offsetBefore, offsetAfter) pair of the DST transition whose gap or
+    // fold window contains `dt`, or `.None` outside every window. The C side
+    // binary-searches the zone's transition table (footer rules included).
     func findBracketingTransitions(dateTime dt: DateTime) -> (Int64, Int64)? {
         let (naiveSecs, _) = dt.toEpochSecs();
-        let count = kestrel_tz_transition_count(self.id);
-        var i: Int64 = 0;
-        while i < count {
-            var transEpoch: Int64 = 0;
-            var offBefore: Int32 = 0;
-            var offAfter: Int32 = 0;
-            kestrel_tz_transition_at(self.id, i,
-                                     Pointer(to: transEpoch),
-                                     Pointer(to: offBefore),
-                                     Pointer(to: offAfter));
-            let before = Int64(from: offBefore);
-            let after = Int64(from: offAfter);
-            // Civil (wall-clock) time on each side of the transition instant.
-            let civilBefore = transEpoch + before;
-            let civilAfter = transEpoch + after;
-            if after > before {
-                // Spring forward (gap): wall times in [civilBefore, civilAfter) never occur.
-                if naiveSecs >= civilBefore and naiveSecs < civilAfter {
-                    return .Some((before, after));
-                }
-            } else if after < before {
-                // Fall back (fold): wall times in [civilAfter, civilBefore) occur twice.
-                if naiveSecs >= civilAfter and naiveSecs < civilBefore {
-                    return .Some((before, after));
-                }
-            }
-            i = i + 1;
+        var before: Int32 = 0;
+        var after: Int32 = 0;
+        if kestrel_tz_bracketing_transition(self.id, naiveSecs, Pointer(to: before), Pointer(to: after)) == 0 {
+            return .None;
         }
-        .None
+        .Some((Int64(from: before), Int64(from: after)))
+    }
+
+    // Map a wall-clock time to epoch seconds in this zone — the one place DST
+    // gaps and folds are resolved. Inside a transition window the candidates
+    // are the wall time read with the offset on either side: in a fold both are
+    // real instants; in a gap neither is, and they bracket the skipped span
+    // (`.Earlier` = shifted back, `.Later` = shifted forward, as in Temporal).
+    func resolveEpochSecs(dateTime dt: DateTime, naiveSecs naiveSecs: Int64,
+                          disambiguation d: Disambiguation) -> Int64 {
+        if let .Some((before, after)) = self.findBracketingTransitions(dateTime: dt) {
+            let a = naiveSecs - before;
+            let b = naiveSecs - after;
+            let earlier = if a < b { a } else { b };
+            let later = if a < b { b } else { a };
+            let isFold = after < before;
+            return match d {
+                .Earlier => earlier,
+                .Later => later,
+                // RFC 5545: fold -> earlier, gap -> later
+                .Compatible => if isFold { earlier } else { later }
+            };
+        }
+        // Outside every transition window the wall time has exactly one
+        // instant; a single refinement step lands on its offset.
+        let guess = naiveSecs - self.offsetAt(naiveSecs);
+        naiveSecs - self.offsetAt(guess)
     }
 
     // Whether a civil datetime is ambiguous — a DST fall-back fold, where the

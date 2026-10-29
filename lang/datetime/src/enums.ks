@@ -9,6 +9,24 @@ public enum Weekday: Equatable, Comparable, Hashable, Formattable, Matchable {
     case Saturday
     case Sunday
 
+    // ISO 8601 day number: Monday = 1 … Sunday = 7.
+    public var number: Int64 { self.ordinal() + 1 }
+
+    // The weekday with ISO 8601 number `number` (Monday = 1 … Sunday = 7).
+    public init(number number: Int64)? {
+        match number {
+            1 => { self = .Monday; },
+            2 => { self = .Tuesday; },
+            3 => { self = .Wednesday; },
+            4 => { self = .Thursday; },
+            5 => { self = .Friday; },
+            6 => { self = .Saturday; },
+            7 => { self = .Sunday; },
+            _ => { return null; }
+        };
+    }
+
+    // 0-based (Monday = 0); indexes the name tables in format.ks.
     func ordinal() -> Int64 {
         match self {
             .Monday => 0,
@@ -122,7 +140,7 @@ public enum TimeUnit: Equatable, Matchable {
     case Day
 
     // Nanoseconds per unit
-    public func nanoseconds() -> Int64 {
+    public var nanoseconds: Int64 {
         match self {
             .Nanosecond => 1,
             .Microsecond => 1000,
@@ -135,7 +153,7 @@ public enum TimeUnit: Equatable, Matchable {
     }
 
     public func isEqual(to other: TimeUnit) -> Bool {
-        self.nanoseconds() == other.nanoseconds()
+        self.nanoseconds == other.nanoseconds
     }
 
     public func matches(other: TimeUnit) -> Bool {

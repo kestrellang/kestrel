@@ -1,7 +1,5 @@
 module datetime
 
-import std.memory.(Pointer)
-
 // Calendar date without time or timezone.
 // Default Formattable output: ISO 8601 ("2024-07-04").
 public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
@@ -30,27 +28,21 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
         self.d = d;
     }
 
-    // No validation — traps on truly insane values but trusts the caller
-    public static func unchecked(year year: Int64, month month: Int64, day day: Int64) -> Date {
-        Date(rawYear: year, rawMonth: month, rawDay: day)
+    // The date `day` days after 1970-01-01 (negative for earlier dates).
+    public init(epochDay day: Int64) {
+        let d = dateFromEpochDay(day);
+        self.y = d.y;
+        self.m = d.m;
+        self.d = d.d;
     }
 
+    // Local date from the system clock in the system zone.
     public static func today() -> Date {
-        var secs: Int64 = 0;
-        var nanos: Int64 = 0;
-        kestrel_clock_gettime(Pointer(to: secs), Pointer(to: nanos));
-        let offset = kestrel_localtime_gmtoff(secs);
-        let localSecs = secs + offset;
-        dateFromEpochDay(localSecs / 86400)
+        Date.today(from: SystemClock())
     }
 
     public static func today(in zone: TimeZone) -> Date {
-        var secs: Int64 = 0;
-        var nanos: Int64 = 0;
-        kestrel_clock_gettime(Pointer(to: secs), Pointer(to: nanos));
-        let offset = Int64(from: kestrel_tz_offset(zone.id, secs));
-        let localSecs = secs + offset;
-        dateFromEpochDay(localSecs / 86400)
+        Date.today(from: SystemClock(), in: zone)
     }
 
     // --- Validation ---
@@ -83,6 +75,39 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
 
     public var daysInYear: Int64 {
         if self.isLeapYear { 366 } else { 365 }
+    }
+
+    // Days since 1970-01-01 (negative before it). Inverse of init(epochDay:).
+    public var epochDay: Int64 {
+        daysToCivil(self.y, self.m, self.d)
+    }
+
+    // Calendar quarter, 1-4.
+    public var quarter: Int64 {
+        (self.m - 1) / 3 + 1
+    }
+
+    // ISO 8601 week number, 1-53. Weeks start Monday; week 1 holds the year's
+    // first Thursday, so early-January days can belong to the previous year's
+    // last week and late-December days to next year's week 1 (see isoWeekYear).
+    public var isoWeek: Int64 {
+        let (_, week) = isoWeekOf(self);
+        week
+    }
+
+    // The year that isoWeek belongs to (differs from `year` near January 1).
+    public var isoWeekYear: Int64 {
+        let (year, _) = isoWeekOf(self);
+        year
+    }
+
+    // --- Field replacement ---
+
+    // A copy with the given fields replaced; fails if the result is invalid
+    // (`Jan 31.with(month: 2)` throws rather than clipping).
+    public func with(year year: Int64? = .None, month month: Int64? = .None,
+                     day day: Int64? = .None) -> Date throws DateTimeError {
+        Date(year: year.unwrap(or: self.y), month: month.unwrap(or: self.m), day: day.unwrap(or: self.d))
     }
 
     // --- Calendar Arithmetic ---
@@ -123,7 +148,7 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
             return dateFromEpochDay(dayNum);
         }
 
-        Date.unchecked(year: newYear, month: newMonth, day: newDay)
+        Date(rawYear: newYear, rawMonth: newMonth, rawDay: newDay)
     }
 
     public func adding(period p: Period, overflow o: Overflow = .Clip) -> Date {
@@ -140,20 +165,32 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
         dateFromEpochDay(daysToCivil(self.y, self.m, self.d) - 1)
     }
 
+    // The first `weekday` strictly after this date (a week later if today is `weekday`).
+    public func next(weekday: Weekday) -> Date {
+        let ahead = floorMod(weekday.ordinal() - self.weekday.ordinal(), 7);
+        Date(epochDay: self.epochDay + (if ahead == 0 { 7 } else { ahead }))
+    }
+
+    // The last `weekday` strictly before this date (a week earlier if today is `weekday`).
+    public func previous(weekday: Weekday) -> Date {
+        let behind = floorMod(self.weekday.ordinal() - weekday.ordinal(), 7);
+        Date(epochDay: self.epochDay - (if behind == 0 { 7 } else { behind }))
+    }
+
     public func startOfMonth() -> Date {
-        Date.unchecked(year: self.y, month: self.m, day: 1)
+        Date(rawYear: self.y, rawMonth: self.m, rawDay: 1)
     }
 
     public func endOfMonth() -> Date {
-        Date.unchecked(year: self.y, month: self.m, day: self.daysInMonth)
+        Date(rawYear: self.y, rawMonth: self.m, rawDay: self.daysInMonth)
     }
 
     public func startOfYear() -> Date {
-        Date.unchecked(year: self.y, month: 1, day: 1)
+        Date(rawYear: self.y, rawMonth: 1, rawDay: 1)
     }
 
     public func endOfYear() -> Date {
-        Date.unchecked(year: self.y, month: 12, day: 31)
+        Date(rawYear: self.y, rawMonth: 12, rawDay: 31)
     }
 
     // --- Difference ---
@@ -194,9 +231,10 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
     // --- Parsing ---
 
     public static func parse(from input: String) -> Date throws ParseError {
-        // Parse ISO 8601: YYYY-MM-DD
+        // Parse ISO 8601: exactly YYYY-MM-DD
         let bytes: Array[UInt8] = Array(from: input.bytes);
         guard bytes.count >= 10 else { throw ParseError.UnexpectedEnd; }
+        guard bytes.count == 10 else { throw ParseError.InvalidFormat("unexpected trailing input at position 10"); }
         let year = try parseDigits(bytes, 0, 4);
         guard bytes(4) == 45 else { throw ParseError.InvalidFormat("expected '-' at position 4"); } // '-' = 45
         let month = try parseDigits(bytes, 5, 2);
@@ -205,7 +243,7 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
         guard isValidDate(year, month, day) else {
             throw ParseError.InvalidValue("invalid date: \(year)-\(month)-\(day)");
         }
-        .Ok(Date.unchecked(year: year, month: month, day: day))
+        .Ok(Date(rawYear: year, rawMonth: month, rawDay: day))
     }
 
     // --- Protocol conformances ---
@@ -236,7 +274,7 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
     }
 
     public func clone() -> Date {
-        Date.unchecked(year: self.y, month: self.m, day: self.d)
+        Date(rawYear: self.y, rawMonth: self.m, rawDay: self.d)
     }
 }
 
@@ -274,6 +312,25 @@ func isValidDate(year: Int64, month: Int64, day: Int64) -> Bool {
     true
 }
 
+// ISO 8601 (week-year, week) for a date. Week = (ordinal - isoWeekday + 10) / 7,
+// then pulled back into the previous year or pushed into the next one.
+func isoWeekOf(date: Date) -> (Int64, Int64) {
+    let week = (date.dayOfYear - date.weekday.number + 10) / 7;
+    if week < 1 {
+        return (date.y - 1, isoWeeksInYear(date.y - 1));
+    }
+    if week > isoWeeksInYear(date.y) {
+        return (date.y + 1, 1);
+    }
+    (date.y, week)
+}
+
+// 53 when the year starts on a Thursday, or on a Wednesday in a leap year.
+func isoWeeksInYear(year: Int64) -> Int64 {
+    let jan1 = weekdayOf(year, 1, 1);
+    if jan1 == Weekday.Thursday or (isLeapYearCheck(year) and jan1 == Weekday.Wednesday) { 53 } else { 52 }
+}
+
 // Tomohiko Sakamoto's day-of-week algorithm
 // Returns 0=Sunday, 1=Monday, ..., 6=Saturday, then maps to Weekday enum
 func weekdayOf(year: Int64, month: Int64, day: Int64) -> Weekday {
@@ -308,7 +365,7 @@ func dateFromEpochDay(dayNumber: Int64) -> Date {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = mp + (if mp < 10 { 3 } else { -9 });
     let yr = y + (if m <= 2 { 1 } else { 0 });
-    Date.unchecked(year: yr, month: m, day: d)
+    Date(rawYear: yr, rawMonth: m, rawDay: d)
 }
 
 // Inverse: civil date to day number since 1970-01-01
@@ -338,6 +395,7 @@ func floorMod(a: Int64, b: Int64) -> Int64 {
 func parseDigits(bytes: Array[UInt8], offset: Int64, count: Int64) -> Int64 throws ParseError {
     var result: Int64 = 0;
     var i: Int64 = 0;
+    guard offset + count <= bytes.count else { throw ParseError.UnexpectedEnd; }
     while i < count {
         let b = Int64(from: bytes(offset + i));
         if b < 48 or b > 57 {
@@ -371,4 +429,27 @@ func appendPadded(mutating into writer: some Formatter, value: Int64, width: Int
         pad = pad - 1;
     }
     writer.append("\(v)");
+}
+
+// ============================================================================
+// Ranges: `a..<b` and `a..=b` iterate one calendar day at a time
+// ============================================================================
+
+extend Date: Steppable {
+    public func successor() -> Date { self.tomorrow() }
+    public func predecessor() -> Date { self.yesterday() }
+    public func distance(to other: Date) -> Int64 { self.days(to: other) }
+}
+
+extend Date: RangeConstructible, ClosedRangeConstructible {
+    type RangeConstructible.Output = Range[Date]
+    type ClosedRangeConstructible.Output = ClosedRange[Date]
+
+    public func exclusiveRange(to end: Date) -> Range[Date] {
+        Range[Date](self, end)
+    }
+
+    public func inclusiveRange(to end: Date) -> ClosedRange[Date] {
+        ClosedRange[Date](self, end)
+    }
 }

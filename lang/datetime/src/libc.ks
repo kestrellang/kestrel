@@ -9,12 +9,6 @@ func kestrel_clock_gettime(sec: Pointer[Int64], nsec: Pointer[Int64])
 
 // System timezone helpers
 @extern(.C)
-func kestrel_localtime_gmtoff(epochSec: Int64) -> Int64
-
-@extern(.C)
-func kestrel_localtime_zone(epochSec: Int64, buf: Pointer[UInt8], bufLen: Int64)
-
-@extern(.C)
 func kestrel_system_timezone_name(buf: Pointer[UInt8], bufLen: Int64)
 
 // Timezone registry
@@ -22,10 +16,10 @@ func kestrel_system_timezone_name(buf: Pointer[UInt8], bufLen: Int64)
 func kestrel_tz_find_or_register(name: CString) -> Int64
 
 @extern(.C)
-func kestrel_tz_find(name: CString) -> Int64
+func kestrel_tz_offset(tzId: Int64, epochSec: Int64) -> Int32
 
 @extern(.C)
-func kestrel_tz_offset(tzId: Int64, epochSec: Int64) -> Int32
+func kestrel_tz_list_identifiers(buf: Pointer[UInt8], bufLen: Int64) -> Int64
 
 @extern(.C)
 func kestrel_tz_is_dst(tzId: Int64, epochSec: Int64) -> Int32
@@ -36,14 +30,12 @@ func kestrel_tz_name(tzId: Int64, buf: Pointer[UInt8], bufLen: Int64)
 @extern(.C)
 func kestrel_tz_abbr(tzId: Int64, epochSec: Int64, buf: Pointer[UInt8], bufLen: Int64)
 
+// 1 if the naive wall-clock seconds fall in a DST gap/fold; writes the offsets
+// on either side of that transition.
 @extern(.C)
-func kestrel_tz_transition_count(tzId: Int64) -> Int64
-
-@extern(.C)
-func kestrel_tz_transition_at(tzId: Int64, index: Int64,
-                               epochOut: Pointer[Int64],
-                               offsetBeforeOut: Pointer[Int32],
-                               offsetAfterOut: Pointer[Int32])
+func kestrel_tz_bracketing_transition(tzId: Int64, naiveSecs: Int64,
+                                      offsetBeforeOut: Pointer[Int32],
+                                      offsetAfterOut: Pointer[Int32]) -> Int32
 
 // libc time functions
 @extern(.C)

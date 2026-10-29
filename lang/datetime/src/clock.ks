@@ -1,6 +1,6 @@
 module datetime
 
-import std.memory.(Pointer)
+import std.memory.(Pointer, RcBox)
 
 public protocol Clock {
     func now() -> Instant
@@ -16,24 +16,35 @@ public struct SystemClock: Clock {
     }
 }
 
-// For testing — manually control the clock.
-public struct FakeClock: Clock {
-    var current: Instant
+// For testing — manually control the clock. Clones share one time source,
+// so handing `clock.clone()` to the code under test and then calling
+// `clock.advance(by:)` moves the time that code sees too.
+public struct FakeClock: Clock, Cloneable {
+    var current: RcBox[Instant]
 
     public init(at instant: Instant) {
-        self.current = instant;
+        self.current = RcBox(instant);
     }
 
-    public mutating func advance(by duration: Duration) {
-        self.current = self.current.advanced(by: duration);
+    init(sharing current: RcBox[Instant]) {
+        self.current = current;
     }
 
-    public mutating func setTo(instant: Instant) {
-        self.current = instant;
+    public func advance(by duration: Duration) {
+        self.current.setValue(self.current.getValue().advanced(by: duration));
+    }
+
+    public func setTo(instant: Instant) {
+        self.current.setValue(instant);
     }
 
     public func now() -> Instant {
-        self.current
+        self.current.getValue()
+    }
+
+    // A handle on the same time source (not a snapshot).
+    public func clone() -> FakeClock {
+        FakeClock(sharing: self.current.clone())
     }
 }
 
@@ -47,10 +58,7 @@ extend Instant {
 // Clock-parameterized today() for Date
 extend Date {
     public static func today(from clock: some Clock) -> Date {
-        let inst = clock.now();
-        let offset = kestrel_localtime_gmtoff(inst.secs);
-        let localSecs = inst.secs + offset;
-        dateFromEpochDay(floorDiv(localSecs, 86400))
+        clock.now().toDate(in: TimeZone.system())
     }
 
     public static func today(from clock: some Clock, in zone: TimeZone) -> Date {

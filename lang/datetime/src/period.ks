@@ -26,13 +26,15 @@ public struct Period: Equatable, Hashable, Formattable, Cloneable {
     public var years: Int64 { self.yrs }
     public var months: Int64 { self.mos }
     public var days: Int64 { self.d }
+    // Whole weeks in `days`, truncated toward zero; remainingDays keeps the
+    // sign (-10 days = -1 week and -3 days), matching Duration's accessors.
     public var weeks: Int64 { self.d / 7 }
     public var remainingDays: Int64 { self.d % 7 }
 
+    // True when no field is positive and at least one is negative. A
+    // mixed-sign period (P1M-3D) is neither negative nor positive.
     public var isNegative: Bool {
-        if self.yrs != 0 { return self.yrs < 0 }
-        if self.mos != 0 { return self.mos < 0 }
-        self.d < 0
+        self.yrs <= 0 and self.mos <= 0 and self.d <= 0 and not self.isZero
     }
 
     public var isZero: Bool {
@@ -105,38 +107,89 @@ public struct Period: Equatable, Hashable, Formattable, Cloneable {
 
     // --- String representations ---
 
+    // ISO 8601 form. Mixed-sign periods (which ISO can't express) sign each
+    // field instead, as java.time.Period does: P1M-3D.
     public func isoString() -> String {
         var b = StringBuilder();
-        if self.isNegative { b.append("-"); }
+        let uniform = self.isNegative;
+        let sign: Int64 = if uniform { -1 } else { 1 };
+        if uniform { b.append("-"); }
         b.append("P");
-        let ay = self.yrs.abs();
-        let am = self.mos.abs();
-        let ad = self.d.abs();
-        if ay > 0 { b.append("\(ay)Y"); }
-        if am > 0 { b.append("\(am)M"); }
-        if ad > 0 { b.append("\(ad)D"); }
-        if ay == 0 and am == 0 and ad == 0 { b.append("0D"); }
+        if self.yrs != 0 { b.append("\(self.yrs * sign)Y"); }
+        if self.mos != 0 { b.append("\(self.mos * sign)M"); }
+        if self.d != 0 { b.append("\(self.d * sign)D"); }
+        if self.isZero { b.append("0D"); }
         b.build()
     }
 
+    // Compact human form: "1y 2mo 3d", "-3d"; mixed signs per field: "1mo -3d".
     public func humanString() -> String {
         var b = StringBuilder();
-        if self.isNegative { b.append("-"); }
-        let ay = self.yrs.abs();
-        let am = self.mos.abs();
-        let ad = self.d.abs();
+        let uniform = self.isNegative;
+        let sign: Int64 = if uniform { -1 } else { 1 };
+        if uniform { b.append("-"); }
         var wrote = false;
-        if ay > 0 { b.append("\(ay)y"); wrote = true; }
-        if am > 0 {
+        if self.yrs != 0 { b.append("\(self.yrs * sign)y"); wrote = true; }
+        if self.mos != 0 {
             if wrote { b.append(" "); }
-            b.append("\(am)mo");
+            b.append("\(self.mos * sign)mo");
             wrote = true;
         }
-        if ad > 0 or not wrote {
+        if self.d != 0 or not wrote {
             if wrote { b.append(" "); }
-            b.append("\(ad)d");
+            b.append("\(self.d * sign)d");
         }
         b.build()
+    }
+
+    // --- Parsing ---
+
+    // Parse an ISO 8601 calendar duration: "P1Y2M3W4D", "-P1M", "P0D", and the
+    // mixed-sign "P1M-3D" form isoString() emits. Units
+    // must appear in Y, M, W, D order; weeks fold into days. Time parts
+    // ("T...") belong to Duration and are rejected.
+    public static func parse(from input: String) -> Period throws ParseError {
+        let bytes: Array[UInt8] = Array(from: input.bytes);
+        var pos: Int64 = 0;
+        let negative = pos < bytes.count and bytes(pos) == 45;
+        if negative { pos = pos + 1; }
+        guard pos < bytes.count and (bytes(pos) == 80 or bytes(pos) == 112) else {
+            throw ParseError.InvalidFormat("expected 'P'");
+        }
+        pos = pos + 1;
+        guard pos < bytes.count else { throw ParseError.InvalidFormat("empty period"); }
+
+        // Designators in required order; `rank` rejects repeats and reordering.
+        let designators: Array[UInt8] = [89, 77, 87, 68]; // Y M W D
+        var values: Array[Int64] = [0, 0, 0, 0];
+        var rank: Int64 = 0;
+        while pos < bytes.count {
+            // A per-field '-' is the mixed-sign form isoString() emits.
+            let fieldNegative = pos < bytes.count and bytes(pos) == 45;
+            if fieldNegative { pos = pos + 1; }
+            let numStart = pos;
+            var n: Int64 = 0;
+            while pos < bytes.count and bytes(pos) >= 48 and bytes(pos) <= 57 {
+                n = n * 10 + Int64(from: bytes(pos) - 48);
+                pos = pos + 1;
+            }
+            guard pos > numStart else { throw ParseError.InvalidFormat("expected a number at position \(pos)"); }
+            if fieldNegative { n = 0 - n; }
+            guard pos < bytes.count else { throw ParseError.UnexpectedEnd; }
+            // Upper-case the designator byte
+            let unit = if bytes(pos) >= 97 { bytes(pos) - 32 } else { bytes(pos) };
+            var slot = rank;
+            while slot < 4 and designators(slot) != unit { slot = slot + 1; }
+            guard slot < 4 else {
+                throw ParseError.InvalidFormat("expected Y, M, W or D in that order at position \(pos)");
+            }
+            values(slot) = n;
+            rank = slot + 1;
+            pos = pos + 1;
+        }
+
+        let p = Period(years: values(0), months: values(1), weeks: values(2), days: values(3));
+        .Ok(if negative { p.negated() } else { p })
     }
 
     // --- Protocol conformances ---

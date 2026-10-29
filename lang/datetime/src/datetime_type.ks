@@ -65,6 +65,17 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable, Cloneable 
     public var weekday: Weekday { self.dateVal.weekday }
     public var dayOfYear: Int64 { self.dateVal.dayOfYear }
 
+    // --- Field replacement ---
+
+    // A copy with the given fields replaced; fails if the result is invalid.
+    public func with(year year: Int64? = .None, month month: Int64? = .None, day day: Int64? = .None,
+                     hour hour: Int64? = .None, minute minute: Int64? = .None,
+                     second second: Int64? = .None, nanosecond nanosecond: Int64? = .None) -> DateTime throws DateTimeError {
+        DateTime(year: year.unwrap(or: self.year), month: month.unwrap(or: self.month), day: day.unwrap(or: self.day),
+                 hour: hour.unwrap(or: self.hour), minute: minute.unwrap(or: self.minute),
+                 second: second.unwrap(or: self.second), nanosecond: nanosecond.unwrap(or: self.nanosecond))
+    }
+
     // --- Exact Arithmetic ---
 
     public func advanced(by duration: Duration) -> DateTime {
@@ -101,23 +112,25 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable, Cloneable 
     }
 
     public func endOfDay() -> DateTime {
-        DateTime(date: self.dateVal, time: Time.fromNanos(Time.NANOS_PER_DAY - 1))
+        DateTime(date: self.dateVal, time: Time.endOfDay)
     }
 
+    // Month/year boundaries are real boundaries, like startOfDay/endOfDay:
+    // start = first day at 00:00, end = last day at 23:59:59.999999999.
     public func startOfMonth() -> DateTime {
-        DateTime(date: self.dateVal.startOfMonth(), time: self.timeVal)
+        DateTime(date: self.dateVal.startOfMonth(), time: Time.midnight)
     }
 
     public func endOfMonth() -> DateTime {
-        DateTime(date: self.dateVal.endOfMonth(), time: self.timeVal)
+        DateTime(date: self.dateVal.endOfMonth(), time: Time.endOfDay)
     }
 
     public func startOfYear() -> DateTime {
-        DateTime(date: self.dateVal.startOfYear(), time: self.timeVal)
+        DateTime(date: self.dateVal.startOfYear(), time: Time.midnight)
     }
 
     public func endOfYear() -> DateTime {
-        DateTime(date: self.dateVal.endOfYear(), time: self.timeVal)
+        DateTime(date: self.dateVal.endOfYear(), time: Time.endOfDay)
     }
 
     // --- Difference ---
@@ -128,6 +141,7 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable, Cloneable 
         Duration(seconds: otherSecs - selfSecs, nanoseconds: otherNanos - selfNanos)
     }
 
+    // Calendar difference between the dates; the time of day is ignored.
     public func period(to other: DateTime) -> Period {
         self.dateVal.period(to: other.dateVal)
     }
@@ -159,16 +173,16 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable, Cloneable 
     // --- Parsing ---
 
     public static func parse(from input: String) -> DateTime throws ParseError {
-        // Parse ISO 8601: YYYY-MM-DDTHH:MM:SS
+        // Parse ISO 8601: YYYY-MM-DDTHH:MM:SS[.fraction]
         let bytes: Array[UInt8] = Array(from: input.bytes);
         guard bytes.count >= 19 else { throw ParseError.UnexpectedEnd; }
-        let date = try Date.parse(from: input.bytes.substring(0..<10));
+        let date = try Date.parse(from: stringFromBytes(bytes, 0, 10));
         // Expect 'T' or ' ' separator
         let sep = bytes(10);
         guard sep == 84 or sep == 32 else {
             throw ParseError.InvalidFormat("expected 'T' or space at position 10");
         }
-        let time = try Time.parse(from: input.bytes.substring(11..<bytes.count));
+        let time = try Time.parse(from: stringFromBytes(bytes, 11, bytes.count - 11));
         DateTime(date: date, time: time)
     }
 
@@ -188,6 +202,7 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable, Cloneable 
     }
 
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        // Time.format supplies the optional fraction
         self.dateVal.format(into: writer);
         writer.append("T");
         self.timeVal.format(into: writer);
