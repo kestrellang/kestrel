@@ -773,12 +773,16 @@ fn forwarder(
 ) -> Option<Entity> {
     use kestrel_hir::body::HirBody;
     use kestrel_type_infer::captures::ClosureCaptureMap;
-    let callable = ctx.world.get::<Callable>(requirement).cloned()?;
+    // A property requirement (`var base: Int64 { get }`) has no `Callable`:
+    // it forwards as a borrowing getter with no params, as its table thunk
+    // in `requirement_thunk` does.
+    let callable = ctx.world.get::<Callable>(requirement).cloned();
     let receiver = callable
-        .receiver
         .as_ref()
+        .and_then(|c| c.receiver.as_ref())
         .map(receiver_convention)
         .unwrap_or(ParamConvention::Borrow);
+    let callable_params = callable.map(|c| c.params).unwrap_or_default();
     // A consuming requirement goes through `ConsumingIndirection`
     // (existentials plan Phase 10), not a borrow of the payload.
     if receiver == ParamConvention::Consuming {
@@ -834,7 +838,7 @@ fn forwarder(
     func.params
         .push(ParamDef::new("self", ValueId::new(0), box_ty, receiver));
     let mut convs = vec![receiver];
-    for (i, p) in callable.params.iter().enumerate() {
+    for (i, p) in callable_params.iter().enumerate() {
         let conv = param_convention(p, false);
         convs.push(conv);
         func.params.push(ParamDef::with_label(

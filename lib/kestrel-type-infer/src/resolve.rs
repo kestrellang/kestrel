@@ -932,9 +932,11 @@ impl TypeResolver for WorldResolver<'_> {
             .filter(|&c| self.matches_labels(c, &arg_labels))
             .collect();
 
-        if std::env::var("DEBUG_STATIC_MEMBER").is_ok() {
-            eprintln!("  arg_labels={:?} matches={}", arg_labels, matches.len());
-        }
+        kestrel_debug::ktrace!(
+            "infer",
+            "static member {name}: arg_labels={arg_labels:?} matches={}",
+            matches.len()
+        );
 
         let member = match matches.len() {
             0 => {
@@ -1765,29 +1767,13 @@ impl WorldResolver<'_> {
         let mut found: Option<(Entity, Entity)> = None; // (protocol, method)
 
         for &proto in &protocols {
-            // Search protocol's direct children for a matching member
-            let candidates = if name == "init" {
-                // Inits have no Name — search by NodeKind
-                self.ctx
-                    .children_of(proto)
-                    .iter()
-                    .filter(|&&c| self.ctx.get::<NodeKind>(c) == Some(&NodeKind::Initializer))
-                    .copied()
-                    .collect::<Vec<_>>()
-            } else if name == "subscript" {
-                self.ctx
-                    .children_of(proto)
-                    .iter()
-                    .filter(|&&c| self.ctx.get::<NodeKind>(c) == Some(&NodeKind::Subscript))
-                    .copied()
-                    .collect::<Vec<_>>()
-            } else {
-                self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-                    parent: proto,
-                    name: name.to_string(),
-                    context: self.body_owner,
-                })
-            };
+            // The protocol's own requirements (`protocols` already holds its
+            // parents); `"init"` / `"subscript"` match nameless members.
+            let candidates = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
+                parent: proto,
+                name: name.to_string(),
+                context: self.body_owner,
+            });
 
             // Filter by label match
             let matched: Vec<Entity> = candidates

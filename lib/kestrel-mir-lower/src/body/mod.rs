@@ -3006,14 +3006,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// so the GlobalRef resolves. Checking `module.statics` here silently
     /// missed forward refs (a lost write); the `Static` component alone is too
     /// broad (static methods carry it).
+    ///
+    /// A property REQUIREMENT (`static var size: Int64 { get }` in a protocol)
+    /// is also bodyless, but it has no storage: `Self.size` dispatches its
+    /// getter through the witness (`lower_def`), in every position.
     pub fn is_stored_global_def(&self, entity: Entity) -> bool {
-        self.ctx.world.get::<kestrel_ast_builder::NodeKind>(entity)
-            == Some(&kestrel_ast_builder::NodeKind::Field)
-            && self
-                .ctx
-                .world
-                .get::<kestrel_ast_builder::Callable>(entity)
-                .is_none()
+        use kestrel_ast_builder::NodeKind;
+        let world = self.ctx.world;
+        world.get::<NodeKind>(entity) == Some(&NodeKind::Field)
+            && world.get::<kestrel_ast_builder::Callable>(entity).is_none()
+            && !world
+                .parent_of(entity)
+                .is_some_and(|p| world.get::<NodeKind>(p) == Some(&NodeKind::Protocol))
     }
 
     pub fn emit_global_ref(&mut self, entity: Entity) -> ValueId {
@@ -4935,6 +4939,66 @@ pub(crate) fn synthesize_instance_var_setter(
     bctx.emit_ret(unit);
     let body = bctx.body;
     if let Some(f) = ctx.module.functions.get_mut(&setter_entity) {
+        f.body = Some(body);
+    }
+}
+
+/// Synthesize the body of a plain init's effect adapter (see
+/// `witness_lower::init_effect_adapter`): forward every param to `init`, then
+/// wrap its `()` in the requirement's success case. The FunctionDef must
+/// already exist with `init`'s params and `ret` as its return type.
+pub(crate) fn synthesize_init_effect_adapter(
+    ctx: &mut LowerCtx,
+    adapter: Entity,
+    init: &kestrel_mir::item::function::FunctionDef,
+    ret: TyId,
+    success: VariantIdx,
+) {
+    let empty = HirBody::empty();
+    let captures = Arc::new(ClosureCaptureMap::default());
+    let mut bctx = OssaBodyCtx::new(ctx, &empty, None, captures, adapter, false);
+    let entry = bctx.new_block();
+    bctx.body.entry = entry;
+    bctx.current_block = Some(entry);
+    bctx.push_scope();
+    bctx.body.param_count = init.params.len();
+    let args: Vec<CallArg> = init
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let ownership = match p.convention {
+                ParamConvention::Consuming => Ownership::Owned,
+                _ => Ownership::Guaranteed,
+            };
+            let value = bctx.body.alloc_value(ValueDef {
+                ty: p.ty,
+                ownership,
+                borrow_source: None,
+                root: RootProvenance::Param(i as u32),
+                span: None,
+            });
+            CallArg {
+                value,
+                convention: p.convention,
+            }
+        })
+        .collect();
+    let type_args: Vec<TyId> = init
+        .type_params
+        .iter()
+        .map(|tp| bctx.ctx.module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
+        .collect();
+    let unit_ty = bctx.ctx.module.ty_arena.unit();
+    let done = bctx.emit_call_returning(
+        kestrel_mir::callee::Callee::direct_with_args(init.entity, type_args, None),
+        args,
+        unit_ty,
+    );
+    let wrapped = bctx.emit_enum_variant(ret, success, vec![done]);
+    bctx.emit_ret(wrapped);
+    let body = bctx.body;
+    if let Some(f) = ctx.module.functions.get_mut(&adapter) {
         f.body = Some(body);
     }
 }

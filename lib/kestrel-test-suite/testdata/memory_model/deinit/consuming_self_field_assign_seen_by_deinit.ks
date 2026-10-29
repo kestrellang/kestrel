@@ -4,9 +4,10 @@
 //
 // A field assigned on a `consuming self` must be the value `deinit` sees: the
 // method owns `self`, so the write lands on the value that is dropped at the
-// end of the call. MIR lowering currently writes to a copy of `self`, so the
-// original drops with the old field (`live=1`). Found building `OwnedBox`,
-// which clears a liveness flag this way in `consumePointee`.
+// end of the call. MIR lowering used to write to a copy of `self`, so the
+// original dropped with the old field (`live=1`); an assigned-through owned
+// param now gets a stack slot. Found building `OwnedBox`, which clears a
+// liveness flag this way in `consumePointee`.
 
 module Test
 

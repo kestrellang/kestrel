@@ -438,11 +438,28 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
-    /// Give each owned SSA param with planned partial moves a var slot.
+    /// Give a var slot to each owned SSA param that needs real storage: one
+    /// with planned partial moves, or one whose fields the body assigns
+    /// (`consuming func finish() { self.live = 0 }`). An SSA value has no
+    /// address to store into — the write landed on a throwaway copy, and the
+    /// value that drops (and runs `deinit`) kept the old field.
     pub(crate) fn spill_partially_moved_params(&mut self, params_len: usize) {
         let params: Vec<HirLocalId> = self.hir.params.iter().take(params_len).copied().collect();
+        let assigned_through: Vec<HirLocalId> = self
+            .hir
+            .exprs
+            .iter()
+            .filter_map(|(_, e)| match e {
+                HirExpr::Assign { target, .. }
+                    if !matches!(self.hir.exprs[*target], HirExpr::Local(..)) =>
+                {
+                    self.hir.place_root(*target)
+                },
+                _ => None,
+            })
+            .collect();
         for local in params {
-            if self.partial.paths_of(local).is_empty() {
+            if self.partial.paths_of(local).is_empty() && !assigned_through.contains(&local) {
                 continue;
             }
             let Some(super::LocalBinding::Ssa(value)) = self.local_map.get(&local).copied() else {

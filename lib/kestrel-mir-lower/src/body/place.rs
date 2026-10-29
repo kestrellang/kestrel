@@ -110,14 +110,6 @@ impl OssaBodyCtx<'_, '_> {
             HirExpr::TupleIndex { base, index, .. } => {
                 self.lower_tuple_place(expr_id, base, index, views)
             },
-            // Module-level global / `static var`: the GlobalRef IS the
-            // storage address (same shape `lower_assign`'s Def arm stores
-            // through). Resolving it as an Addr place lets a `&mutating`
-            // borrow — and so the `g += 1` compound-assign receiver — write
-            // through the real global instead of `lower_expr`'s loaded
-            // snapshot, which stranded the mutation on a throwaway copy
-            // (#140). Non-global Defs (functions, enum cases) aren't storage
-            // → None, falling back to value lowering.
             // Module-level global / `static var`: the GlobalRef IS the storage
             // address (same shape `lower_assign`'s Def arm stores through).
             // Resolving it as an Addr place lets a `&mutating` borrow — and so

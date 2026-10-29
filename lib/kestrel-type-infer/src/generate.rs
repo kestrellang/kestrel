@@ -418,7 +418,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let callee_tv = gen_expr(ctx, hir, *callee);
             // Consuming a Def(TypeParameter) as a Call callee is valid (T() = init)
             ctx.type_param_defs.remove(callee);
+            if callee_names_type(ctx, hir, *callee) {
+                ctx.type_callee_calls.insert(id);
+            }
             let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
+            bind_skipped_default_type_params(ctx, hir, *callee, &arg_tvs, span);
 
             // If the callee is a known function returning Never (e.g., lang.panic),
             // use Never directly so divergence propagates through control flow.
@@ -1613,6 +1617,57 @@ fn gen_pat(
     }
 }
 
+/// A free-function call that omits a defaulted argument whose type is one
+/// of the function's type parameters (`extra: some Slice[UInt8] = …`): pin
+/// that parameter to the default's type, which nothing else would. Method and
+/// overloaded calls do the same in the solver (`skipped_default_types`).
+fn bind_skipped_default_type_params(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    callee: HirExprId,
+    args: &[CallArg],
+    span: &Span,
+) {
+    let HirExpr::Def(entity, _, _) = &hir.exprs[callee] else {
+        return;
+    };
+    let entity = *entity;
+    let qctx = ctx.query_ctx;
+    if qctx.get::<NodeKind>(entity) != Some(&NodeKind::Function) {
+        return;
+    }
+    let (Some(plan), Some(param_tys), Some(type_args)) = (
+        crate::solver::call::binding_plan_for(qctx, entity, args),
+        qctx.query(LowerCallableTypes { entity, root: ctx.root }),
+        ctx.type_args.get(&callee).cloned(),
+    ) else {
+        return;
+    };
+    let type_params: Vec<Entity> =
+        qctx.get::<TypeParams>(entity).map(|tp| tp.0.clone()).unwrap_or_default();
+    let subs: Vec<(Entity, TyVar)> = type_params.into_iter().zip(type_args).collect();
+    for (param_ty, default_ty) in crate::solver::call::skipped_default_types(ctx, entity, &plan, &param_tys) {
+        let param_tv = lower_hir_ty_with_subs(ctx, &param_ty, &subs);
+        let default_tv = lower_hir_ty_with_subs(ctx, &default_ty, &subs);
+        ctx.equal(param_tv, default_tv, span.clone());
+    }
+}
+
+/// Whether a call's callee NAMES a type (`T(...)`, `Self(...)` — which
+/// lowers to a `Def` of the enclosing type or protocol — or `B.Item(...)`)
+/// instead of producing a value, so the call is an init rather than a
+/// subscript. Syntactic on purpose: the callee's *type* can't answer it.
+fn callee_names_type(ctx: &InferCtx<'_>, hir: &HirBody, callee: HirExprId) -> bool {
+    match &hir.exprs[callee] {
+        HirExpr::TypeRef { .. } => true,
+        HirExpr::Def(entity, _, _) => matches!(
+            ctx.query_ctx.get::<NodeKind>(*entity),
+            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::TypeParameter | NodeKind::TypeAlias)
+        ),
+        _ => false,
+    }
+}
+
 // ===== Struct construction =====
 
 /// Generate constraints for a struct constructor call.
@@ -1679,25 +1734,27 @@ fn gen_struct_init(
     // Collect arg labels for init matching
     let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
 
-    // Find initializer children (direct + from extensions)
-    let children = qctx.children_of(struct_entity).to_vec();
-    let mut inits: Vec<Entity> = children
-        .iter()
-        .filter(|&&c| qctx.get::<NodeKind>(c) == Some(&NodeKind::Initializer))
-        .copied()
-        .collect();
-
-    // Also search extensions for init functions
-    let extensions = qctx.query(kestrel_name_res::ExtensionsFor {
-        target: struct_entity,
+    // Initializers come from the one member query every other lookup uses:
+    // the type's own, its extensions', and its protocols' extension defaults.
+    // Like methods, a protocol-extension init is a fallback that joins only
+    // when no init of the type's own matches the labels — and only if its own
+    // labels match, so a protocol's convenience init never takes away a
+    // struct's memberwise init.
+    let members = qctx.query(kestrel_name_res::TypeMembersByName {
+        type_entity: struct_entity,
+        name: "init".to_string(),
+        context: ctx.owner,
         root,
     });
-    for ext in &extensions {
-        for &child in qctx.children_of(*ext) {
-            if qctx.get::<NodeKind>(child) == Some(&NodeKind::Initializer) {
-                inits.push(child);
-            }
-        }
+    let is_default = |m: &kestrel_name_res::TypeMember| {
+        matches!(m.source, kestrel_name_res::TypeMemberSource::ProtocolExtension { .. })
+    };
+    let mut inits: Vec<Entity> = members.iter().filter(|m| !is_default(m)).map(|m| m.entity).collect();
+    let matches_call = |init: &Entity| {
+        qctx.get::<Callable>(*init).is_some_and(|c| labels_match(&c.params, &arg_labels))
+    };
+    if !inits.iter().any(matches_call) {
+        inits.extend(members.iter().filter(|m| is_default(m)).map(|m| m.entity).filter(matches_call));
     }
 
     // A derived `Defaultable` adds `init()`, but deriving must not take the
@@ -1828,7 +1885,8 @@ fn gen_struct_init(
         // struct_lower.rs, because struct construction maps argument position
         // straight to FieldIdx. Both sides read `FieldClass` so they cannot
         // drift; do not re-derive the predicate here.
-        let fields: Vec<Entity> = children
+        let fields: Vec<Entity> = qctx
+            .children_of(struct_entity)
             .iter()
             .filter(|&&c| {
                 qctx.get::<kestrel_ast_builder::FieldClass>(c)
@@ -2599,27 +2657,7 @@ fn finish_postponed(ctx: &mut InferCtx<'_>, hir: &HirBody, postponed: Vec<(TyVar
 /// so MIR sees `MirTy::SelfType` and monomorphization substitutes the
 /// concrete conforming type at the call site.
 fn is_enclosing_self_protocol(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
-    let qctx = ctx.query_ctx;
-    let mut current = Some(ctx.owner);
-    while let Some(entity) = current {
-        match qctx.get::<NodeKind>(entity) {
-            Some(&NodeKind::Protocol) if entity == protocol => return true,
-            Some(&NodeKind::Extension) => {
-                if qctx.query(kestrel_name_res::ExtensionTargetEntity {
-                    extension: entity,
-                    root: ctx.root,
-                }) == Some(protocol)
-                {
-                    return true;
-                }
-            },
-            // Struct/Enum/Module/etc. — Self refers to those, not the protocol.
-            Some(&NodeKind::Struct | &NodeKind::Enum) => return false,
-            _ => {},
-        }
-        current = qctx.parent_of(entity);
-    }
-    false
+    ctx.owning_self_protocol() == Some(protocol)
 }
 
 fn instantiate_entity_with_args(
@@ -2762,6 +2800,20 @@ fn instantiate_entity_inner(
                 }
             }
         }
+    }
+
+    // A member an ancestor protocol declares, named from a sub-protocol's
+    // body or extension (`Self.make()` in `extend Q`, `make` being `P`'s):
+    // its signature's `Self` is P's, and here that is Q's `Self`.
+    if let Some(current) = ctx.owning_self_protocol()
+        && let Some(declaring) = ctx.declaring_protocol(entity)
+        && declaring != current
+        && qctx
+            .query(kestrel_name_res::conformances::ConformingProtocols { entity: current, root })
+            .contains(&declaring)
+    {
+        let self_tv = ctx.self_type_ty(current);
+        subs.push((declaring, self_tv));
     }
 
     emit_where_clause_constraints_with_subs(ctx, entity, &subs, site_span);

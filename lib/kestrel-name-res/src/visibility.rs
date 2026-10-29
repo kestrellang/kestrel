@@ -125,7 +125,9 @@ fn top_level_module(ctx: &QueryContext<'_>, module: Entity) -> Entity {
 // ===== VisibleChildrenByName =====
 
 /// Query: find children of `parent` with the given `name` that are
-/// visible from `context`.
+/// visible from `context`. Names match by `member_lookup_name`, so the
+/// keyword sentinels `"init"` / `"subscript"` find nameless initializers and
+/// subscripts like any other member.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct VisibleChildrenByName {
     pub parent: Entity,
@@ -140,7 +142,7 @@ impl QueryFn for VisibleChildrenByName {
         ctx.children_of(self.parent)
             .iter()
             .filter(|&&child| {
-                ctx.get::<Name>(child).is_some_and(|n| n.0 == self.name)
+                crate::helpers::member_name_matches(ctx, child, &self.name)
                     && ctx.query(IsVisibleFrom {
                         target: child,
                         context: self.context,

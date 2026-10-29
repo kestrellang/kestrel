@@ -334,9 +334,10 @@ fn existential_payload(ctx: &InferCtx<'_>, receiver: TyVar) -> TySlot {
 }
 
 fn entity_name(ctx: &InferCtx<'_>, entity: Entity) -> String {
-    ctx.query_ctx
-        .get::<kestrel_ast_builder::Name>(entity)
-        .map_or_else(|| "?".to_string(), |n| n.0.clone())
+    // Nameless requirements (inits, subscripts) answer to their keyword.
+    kestrel_name_res::helpers::member_lookup_name(ctx.query_ctx, entity)
+        .unwrap_or("?")
+        .to_string()
 }
 
 // ===== Self-conformance (existentials design §6) =====

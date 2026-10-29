@@ -124,6 +124,12 @@ pub struct InferCtx<'a> {
     /// the E491 function-as-value check in `validate_ref_placement`.
     pub(crate) direct_callee_exprs: HashSet<HirExprId>,
 
+    /// Call expressions whose callee NAMES a type (`T(...)`, `Self(...)`,
+    /// `B.Item(...)`) rather than holding a value. The callee's type can't
+    /// tell them apart — `T` and a `t: T` are both `Param` — so `solve_call`
+    /// reads this to dispatch an init versus an instance subscript.
+    pub(crate) type_callee_calls: HashSet<HirExprId>,
+
     /// HirExprIds that initialize a `let`/`var` binding. Bindings are VALUE
     /// contexts (decay): a ref-returning call here binds its result to the
     /// POINTEE in `bind_call_result` — order-independently (the binding's
@@ -456,6 +462,7 @@ impl<'a> InferCtx<'a> {
             assign_target_exprs: HashSet::default(),
             always_decay_exprs: HashSet::default(),
             direct_callee_exprs: HashSet::default(),
+            type_callee_calls: HashSet::default(),
             binding_init_exprs: HashSet::default(),
             synth_pending_exprs: HashSet::default(),
             optional_chain_leaves: HashSet::default(),
@@ -544,6 +551,22 @@ impl<'a> InferCtx<'a> {
             }
         }
         None
+    }
+
+    /// The protocol `member` belongs to: declared in its body (a requirement)
+    /// or in an extension of it (a default). `None` for any other member.
+    pub fn declaring_protocol(&self, member: Entity) -> Option<Entity> {
+        use kestrel_ast_builder::NodeKind;
+        let parent = self.query_ctx.parent_of(member)?;
+        let protocol = match self.query_ctx.get::<NodeKind>(parent) {
+            Some(NodeKind::Protocol) => parent,
+            Some(NodeKind::Extension) => self.query_ctx.query(kestrel_name_res::ExtensionTargetEntity {
+                extension: parent,
+                root: self.root,
+            })?,
+            _ => return None,
+        };
+        (self.query_ctx.get::<NodeKind>(protocol) == Some(&NodeKind::Protocol)).then_some(protocol)
     }
 
     // ===== TyVar creation =====

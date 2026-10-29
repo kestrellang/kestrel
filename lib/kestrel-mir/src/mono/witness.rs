@@ -591,33 +591,28 @@ pub fn resolve_associated_type(
     self_type: TyId,
     assoc_entity: Entity,
 ) -> Option<TyId> {
-    let verbose = std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok();
-    if verbose {
-        eprintln!(
-            "  resolve_assoc_type: proto={:?} self={:?} ({:?}) assoc={:?}",
-            protocol,
-            self_type,
-            arena.get(self_type).clone(),
-            assoc_entity
-        );
-    }
+    kestrel_debug::ktrace!(
+        "vtable",
+        "resolve_assoc_type: proto={:?} self={:?} ({:?}) assoc={:?}",
+        protocol,
+        self_type,
+        arena.get(self_type),
+        assoc_entity
+    );
     for witness in witnesses {
         if witness.protocol != protocol {
             continue;
         }
-        if verbose {
-            eprintln!(
-                "    witness: impl={:?} ({:?}) bindings={:?}",
-                witness.implementing_type,
-                arena.get(witness.implementing_type).clone(),
-                witness.type_bindings
-            );
-        }
+        kestrel_debug::ktrace!(
+            "vtable",
+            "  witness: impl={:?} ({:?}) bindings={:?}",
+            witness.implementing_type,
+            arena.get(witness.implementing_type),
+            witness.type_bindings
+        );
         let mut bindings = HashMap::new();
         if !match_pattern(arena, witness.implementing_type, self_type, &mut bindings) {
-            if verbose {
-                eprintln!("    -> no match");
-            }
+            kestrel_debug::ktrace!("vtable", "    -> no match");
             continue;
         }
         for &(entity, bound_ty) in &witness.type_bindings {

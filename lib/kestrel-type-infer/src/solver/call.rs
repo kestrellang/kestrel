@@ -1,6 +1,7 @@
 //! Calls: `Call`, `OverloadedCall`, and binding a resolved callee's signature.
 
 use super::*;
+use kestrel_hir::HirTy;
 
 pub(super) fn solve_call(
     ctx: &mut InferCtx<'_>,
@@ -100,7 +101,9 @@ pub(super) fn solve_call(
             }
             SolveResult::Solved
         },
-        TyKind::Param { .. } | TyKind::SelfType { .. } => {
+        TyKind::Param { .. } | TyKind::SelfType { .. } | TyKind::AssocProjection { .. }
+            if ctx.type_callee_calls.contains(&expr) =>
+        {
             // `T(...)` where T is a generic param, or `Self()` whose callee
             // already resolved to SelfType — dispatch as init on the bound.
             // The init's declared return is () but the actual result is an
@@ -165,8 +168,10 @@ pub(super) fn solve_call(
         TyKind::Struct { .. }
         | TyKind::Enum { .. }
         | TyKind::TypeAlias { .. }
-        | TyKind::AssocProjection { .. } => {
-            // Instance subscript call (e.g. dict(key)).
+        | TyKind::AssocProjection { .. }
+        | TyKind::Param { .. }
+        | TyKind::SelfType { .. } => {
+            // Instance subscript call (e.g. dict(key), or t(key) on a `t: T`).
             solve_member(
                 ctx,
                 callee,
@@ -190,6 +195,45 @@ pub(super) fn solve_call(
             })
         },
     }
+}
+
+/// Skipped (defaulted) slots whose parameter type is one of the callee's type
+/// parameters — `extra: some Slice[UInt8] = Array[UInt8]()`, or `x: T = …` —
+/// paired with the default expression's own type. An omitted argument takes
+/// its type from its default (Swift's SE-0347); otherwise nothing pins that
+/// parameter and its bounds fail on an unresolved `_`. Each call site lowers
+/// both types in its own substitution and equates them.
+pub(crate) fn skipped_default_types(
+    ctx: &InferCtx<'_>,
+    entity: Entity,
+    plan: &[Binding],
+    param_hir_tys: &[Option<HirTy>],
+) -> Vec<(HirTy, HirTy)> {
+    let qctx = ctx.query_ctx;
+    let Some(callable) = qctx.get::<Callable>(entity) else {
+        return Vec::new();
+    };
+    plan.iter()
+        .enumerate()
+        .filter(|(_, b)| matches!(b, Binding::Default))
+        .filter_map(|(slot, _)| {
+            let param_ty = param_hir_tys.get(slot)?.as_ref()?;
+            if !matches!(param_ty, HirTy::Param(..)) {
+                return None;
+            }
+            let default = callable.params.get(slot)?.default_entity?;
+            let hir = qctx.query(kestrel_hir_lower::LowerBody { entity: default, root: ctx.root })?;
+            let typed = qctx.query(crate::InferBody { entity: default, root: ctx.root })?;
+            let ty = typed.expr_types.get(&hir.tail_expr?)?;
+            let default_ty = crate::conformance::resolved_ty_to_hir(ty);
+            kestrel_debug::ktrace!(
+                "infer",
+                "omitted default of {} slot {slot}: {param_ty:?} := {default_ty:?}",
+                kestrel_ast_builder::qualified_name(qctx, entity)
+            );
+            (!matches!(default_ty, HirTy::Infer(_))).then(|| (param_ty.clone(), default_ty))
+        })
+        .collect()
 }
 
 /// Resolve an overloaded call by label/arity filtering, then type disambiguation.
@@ -277,7 +321,7 @@ pub(super) fn solve_overloaded_call(
 /// Compute the argument→parameter binding plan for callable `entity` and call
 /// `args`, using `arg_binding`. `None` if the entity has no `Callable` or the
 /// arguments don't bind (wrong labels / arity). Indexed by parameter slot.
-pub(super) fn binding_plan_for(
+pub(crate) fn binding_plan_for(
     qctx: &kestrel_hecs::QueryContext<'_>,
     entity: Entity,
     args: &[CallArg],
@@ -482,6 +526,11 @@ pub(super) fn emit_resolved_call(
                         let param_tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
                         ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
                     }
+                }
+                for (param_ty, default_ty) in skipped_default_types(ctx, entity, &plan, &param_hir_tys) {
+                    let param_tv = lower_hir_ty_sub(ctx, &param_ty, None, TyVar(0), &subs);
+                    let default_tv = lower_hir_ty_sub(ctx, &default_ty, None, TyVar(0), &subs);
+                    ctx.equal(param_tv, default_tv, span.clone());
                 }
             },
             // No bindable plan (e.g. no Callable): fall back to positional coercion.

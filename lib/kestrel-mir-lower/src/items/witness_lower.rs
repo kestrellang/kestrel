@@ -2,7 +2,7 @@
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, Computed, Name, NodeKind, Settable, Static, Subscript as SubscriptMarker, TypeParams,
+    Callable, Computed, Name, NodeKind, Settable, Static, TypeParams,
 };
 use kestrel_hecs::Entity;
 use kestrel_hir::ty::HirTy;
@@ -14,6 +14,7 @@ use kestrel_mir::{
 };
 use kestrel_name_res::conformances::ConformingProtocolInstantiations;
 use kestrel_name_res::extensions::ExtensionsFor;
+use kestrel_name_res::helpers::member_lookup_name;
 use kestrel_name_res::{
     ExtensionTargetEntity, ProtocolAssociatedTypes, ProtocolMember, ProtocolMembers,
     TypeMemberSource, TypeMembersByName,
@@ -350,6 +351,8 @@ fn bind_witness_methods(
 
         if let Some(impl_func) = impl_func {
             ctx.register_name(impl_func);
+            let impl_func = init_effect_adapter(ctx, member.entity, impl_func, expected.ret)
+                .unwrap_or(impl_func);
             witness.add_method(WitnessMethodBinding::new(
                 method_key.clone(),
                 impl_func,
@@ -528,6 +531,50 @@ fn bind_witness_methods(
     }
 }
 
+/// A plain init witnessing a failable or throwing requirement (`init(...)?`
+/// met by `init(...)`, as Swift allows): callers through the requirement
+/// expect `Optional[()]` / `Result[(), E]` back, so bind an adapter that runs
+/// the init and returns `.Some(())` / `.Ok(())`. `None` when no adapter is
+/// needed. The adapter copies the init's MIR signature (type params included),
+/// so it binds with the same witness type args.
+fn init_effect_adapter(
+    ctx: &mut LowerCtx,
+    requirement: Entity,
+    init: Entity,
+    requirement_ret: Option<TyId>,
+) -> Option<Entity> {
+    use kestrel_ast_builder::InitEffect;
+    let effect = ctx.world.get::<InitEffect>(requirement).cloned()?;
+    if ctx.world.get::<NodeKind>(init) != Some(&NodeKind::Initializer)
+        || ctx.world.get::<InitEffect>(init).is_some()
+    {
+        return None;
+    }
+    let ret = requirement_ret?;
+    let MirTy::Named { entity: wrapper, .. } = ctx.module.ty_arena.get(ret).clone() else {
+        return None;
+    };
+    let def = ctx.module.functions.get(&init)?.clone();
+    let success = ctx.resolve_variant_idx(
+        wrapper,
+        match effect {
+            InitEffect::Failable => "Some",
+            InitEffect::Throwing => "Ok",
+        },
+    )?;
+
+    let entity = ctx.next_synthetic_entity();
+    let name = format!("{}.__effect", ctx.register_name(init));
+    ctx.module.register_name(entity, name.clone());
+    let mut adapter = FunctionDef::new(entity, &name, ret);
+    adapter.kind = def.kind.clone();
+    adapter.type_params = def.type_params.clone();
+    adapter.params = def.params.clone();
+    ctx.module.add_function(adapter);
+    crate::body::synthesize_init_effect_adapter(ctx, entity, &def, ret, success);
+    Some(entity)
+}
+
 /// If `source` is an extension whose target type has ≥1 concrete (non-param)
 /// type arg (e.g. `extend Box[lang.i64]`), lower those args to `TyId`s. Returns
 /// `None` for fully-generic extensions (`extend Box[T]`) and arg-less targets.
@@ -676,17 +723,10 @@ fn expected_signature_for(
     ExpectedSignature { params, ret }
 }
 
+/// The name a requirement answers to — name resolution's one rule, which
+/// gives nameless inits and subscripts their keyword sentinels.
 fn protocol_member_name(ctx: &LowerCtx, member: &ProtocolMember) -> String {
-    ctx.world
-        .get::<Name>(member.entity)
-        .map(|n| n.0.clone())
-        .unwrap_or_else(|| {
-            if ctx.world.get::<SubscriptMarker>(member.entity).is_some() {
-                "subscript".to_string()
-            } else {
-                "init".to_string()
-            }
-        })
+    member_lookup_name(&ctx.query, member.entity).unwrap_or_default().to_string()
 }
 
 fn find_impl_among(
@@ -804,24 +844,14 @@ fn matches_candidate(
     };
     match kind {
         NodeKind::Function | NodeKind::Subscript => {
-            let name = ctx
-                .world
-                .get::<Name>(child)
-                .map(|n| n.0.clone())
-                .unwrap_or_default();
-            name == method_name
+            member_lookup_name(&ctx.query, child) == Some(method_name)
                 && candidate_labels_match(ctx, child, required_labels)
                 && expected_param_types
                     .map(|expected| candidate_param_types_match(ctx, child, expected))
                     .unwrap_or(true)
         },
         NodeKind::Field if ctx.world.get::<Callable>(child).is_some() => {
-            let name = ctx
-                .world
-                .get::<Name>(child)
-                .map(|n| n.0.clone())
-                .unwrap_or_default();
-            name == method_name
+            member_lookup_name(&ctx.query, child) == Some(method_name)
                 && candidate_labels_match(ctx, child, required_labels)
                 && expected_param_types
                     .map(|expected| candidate_param_types_match(ctx, child, expected))

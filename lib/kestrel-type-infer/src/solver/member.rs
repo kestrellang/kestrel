@@ -606,7 +606,16 @@ pub(super) fn solve_member(
         &args,
         ctx.protocol_dispatch_members.contains(&expr),
     ) {
-        Some(res) => Ok(res),
+        // The box stands in for `Self`, so it must self-conform to the
+        // member's protocol — or the extension body could reach a static or
+        // init requirement no payload-less box can answer. The obligation
+        // goes to the solver, which reports E146 if `any P: P` fails.
+        Some(res) => {
+            if let Some(protocol) = ctx.declaring_protocol(res.entity) {
+                ctx.conforms(receiver, protocol, span.clone());
+            }
+            Ok(res)
+        },
         None => ctx
             .resolver
             .resolve_member_with_base(&recv_kind, spine.as_deref(), name, &args),
@@ -1273,6 +1282,15 @@ pub(super) fn solve_member(
             let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, receiver, &subs);
             ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
         }
+    }
+    let param_hir_tys: Vec<Option<kestrel_hir::HirTy>> =
+        resolution.param_types.iter().map(|p| Some(p.ty.clone())).collect();
+    for (param_ty, default_ty) in
+        super::call::skipped_default_types(ctx, resolution.entity, &plan, &param_hir_tys)
+    {
+        let param_tv = lower_hir_ty_sub(ctx, &param_ty, self_entity, receiver, &subs);
+        let default_tv = lower_hir_ty_sub(ctx, &default_ty, self_entity, receiver, &subs);
+        ctx.equal(param_tv, default_tv, span.clone());
     }
 
     // An UNAPPLIED static method (`let f = T.zero`) is a function value:

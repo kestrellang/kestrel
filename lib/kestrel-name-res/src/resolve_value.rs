@@ -11,6 +11,7 @@ use kestrel_ast_builder::{
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::helpers::find_in_extensions;
+use crate::protocol_members::ProtocolMembersByName;
 use crate::resolve_name::{NameResolution, ResolveName};
 use crate::resolve_type::{ResolveTypePath, TypeResolution};
 use crate::type_members::{TypeMemberSource, TypeMembersByName};
@@ -340,6 +341,25 @@ fn walk_path_from(
                 .copied()
                 .unwrap_or(children[0]);
             continue;
+        }
+
+        // A protocol (`Self.seed()` in `extend Q`, or `Q.seed`) also answers
+        // with its parents' requirements and every extension default along
+        // the way — the protocol-side member query, not just its own children.
+        if ctx.get::<NodeKind>(current) == Some(&NodeKind::Protocol) {
+            let members: Vec<Entity> = ctx
+                .query(ProtocolMembersByName {
+                    protocol: current,
+                    name: segment.clone(),
+                    context,
+                    root,
+                })
+                .into_iter()
+                .map(|m| m.entity)
+                .collect();
+            if is_last && !members.is_empty() {
+                return classify_value_results(ctx, members);
+            }
         }
 
         // No direct children — try static members declared in extensions.

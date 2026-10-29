@@ -961,6 +961,30 @@ impl LowerCtx<'_> {
         if self.is_self_init_call(segments) {
             return self.emit_init_outside_initializer(span);
         }
+        // `B.Item(args)`: the whole path names an associated type, so the
+        // call constructs it — the callee is the projection (a type, which
+        // the solver dispatches as an init), not a static method `Item` on
+        // `B`.
+        if segments.len() >= 2
+            && matches!(
+                self.ctx.query(ResolveValuePath {
+                    segments: segments.iter().map(|s| s.name.clone()).collect(),
+                    context: self.owner,
+                    root: self.root,
+                }),
+                ValueResolution::AssociatedType {
+                    container: Some(_),
+                    ..
+                }
+            )
+        {
+            let callee = self.lower_type_receiver_path(segments);
+            return self.alloc_expr(HirExpr::Call {
+                callee,
+                args: lowered_args,
+                span: span.clone(),
+            });
+        }
         let first = &segments[0];
         if first.type_args.is_none() && self.lookup_local(&first.name).is_some() {
             // Lower all segments except the last as nested Field accesses
