@@ -85,6 +85,7 @@ public protocol ExpressibleByNullLiteral {
 /// `ExpressibleByArrayLiteral` (which extends this with a friendlier API).
 @builtin(._ExpressibleByArrayLiteral)
 public protocol _ExpressibleByArrayLiteral {
+    @builtin(.ArrayLiteralElement)
     type Element
 
     /// @name Literal Bridge
@@ -123,7 +124,9 @@ public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
 /// prefer `ExpressibleByDictionaryLiteral`.
 @builtin(._ExpressibleByDictionaryLiteral)
 public protocol _ExpressibleByDictionaryLiteral {
+    @builtin(.DictionaryLiteralKey)
     type Key
+    @builtin(.DictionaryLiteralValue)
     type Value
 
     /// @name Literal Bridge

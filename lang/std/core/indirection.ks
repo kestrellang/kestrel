@@ -18,9 +18,11 @@ import std.memory.(Pointer)
 public protocol Indirection {
     /// The pointee type that member access forwards to. May be unsized: an
     /// existential box's `Target` is the raw existential it holds.
+    @builtin(.IndirectionTarget)
     type Target: not Sized
 
     /// A shared reference to the pointee. Member READS peel through this.
+    @builtin(.IndirectionPointeeRef)
     func pointeeRef() -> &Target
 }
 
@@ -36,6 +38,7 @@ public protocol Indirection {
 public protocol MutableIndirection: Indirection {
     /// A mutating reference to the pointee. Member WRITES / RMW / mutating
     /// methods peel through this.
+    @builtin(.MutableIndirectionPointeeMutRef)
     mutating func pointeeMutRef() -> &mutating Target
 }
 

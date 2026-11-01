@@ -364,6 +364,22 @@ pub enum Builtin {
     UniqueBoxTakeValue,
     /// `UniqueBox.destroy()` — the box's single reclamation point.
     UniqueBoxDestroy,
+    /// `Indirection.pointeeRef()` — the member peel's read accessor.
+    IndirectionPointeeRef,
+    /// `MutableIndirection.pointeeMutRef()` — the member peel's write accessor.
+    MutableIndirectionPointeeMutRef,
+
+    // ===== Associated types the compiler projects by tag =====
+    /// `Indirection.Target` — the type a member peel reaches.
+    IndirectionTarget,
+    /// `_ExpressibleByArrayLiteral.Element` — an array literal's element type.
+    ArrayLiteralElement,
+    /// `_ExpressibleByDictionaryLiteral.Key`.
+    DictionaryLiteralKey,
+    /// `_ExpressibleByDictionaryLiteral.Value`.
+    DictionaryLiteralValue,
+    /// `ArrayMatchable.Element` — an array pattern's element type.
+    ArrayMatchableElement,
 }
 
 impl Builtin {
@@ -589,6 +605,13 @@ impl Builtin {
             Self::UniqueBoxInit => "UniqueBoxInit",
             Self::UniqueBoxTakeValue => "UniqueBoxTakeValue",
             Self::UniqueBoxDestroy => "UniqueBoxDestroy",
+            Self::IndirectionPointeeRef => "IndirectionPointeeRef",
+            Self::MutableIndirectionPointeeMutRef => "MutableIndirectionPointeeMutRef",
+            Self::IndirectionTarget => "IndirectionTarget",
+            Self::ArrayLiteralElement => "ArrayLiteralElement",
+            Self::DictionaryLiteralKey => "DictionaryLiteralKey",
+            Self::DictionaryLiteralValue => "DictionaryLiteralValue",
+            Self::ArrayMatchableElement => "ArrayMatchableElement",
             Self::ExitCode => "ExitCode",
 
             // Indirection — resolves by source name (auto-imported from std.core).
@@ -845,6 +868,13 @@ impl Builtin {
             "UniqueBoxInit" => Some(Self::UniqueBoxInit),
             "UniqueBoxTakeValue" => Some(Self::UniqueBoxTakeValue),
             "UniqueBoxDestroy" => Some(Self::UniqueBoxDestroy),
+            "IndirectionPointeeRef" => Some(Self::IndirectionPointeeRef),
+            "MutableIndirectionPointeeMutRef" => Some(Self::MutableIndirectionPointeeMutRef),
+            "IndirectionTarget" => Some(Self::IndirectionTarget),
+            "ArrayLiteralElement" => Some(Self::ArrayLiteralElement),
+            "DictionaryLiteralKey" => Some(Self::DictionaryLiteralKey),
+            "DictionaryLiteralValue" => Some(Self::DictionaryLiteralValue),
+            "ArrayMatchableElement" => Some(Self::ArrayMatchableElement),
             "ExitCode" => Some(Self::ExitCode),
 
             // Indirection / smart-pointer member peel
@@ -1098,7 +1128,14 @@ impl Builtin {
             Self::BooleanConditionalBoolValue
             | Self::ConsumingIndirectionConsumePointee
             | Self::ExistentialBoxInit
-            | Self::SharedBoxSharedMutRef => BuiltinKind::ProtocolMethod,
+            | Self::SharedBoxSharedMutRef
+            | Self::IndirectionPointeeRef
+            | Self::MutableIndirectionPointeeMutRef => BuiltinKind::ProtocolMethod,
+            Self::IndirectionTarget
+            | Self::ArrayLiteralElement
+            | Self::DictionaryLiteralKey
+            | Self::DictionaryLiteralValue
+            | Self::ArrayMatchableElement => BuiltinKind::TypeAlias,
             Self::UniqueBoxInit | Self::UniqueBoxTakeValue | Self::UniqueBoxDestroy => {
                 BuiltinKind::Function
             },

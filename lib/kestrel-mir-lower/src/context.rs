@@ -165,6 +165,28 @@ impl<'w> LowerCtx<'w> {
         Some(self.witness_method_key(requirement))
     }
 
+    /// Every member of `type_entity` (its own body and its extensions) that
+    /// can witness `requirement`: same node kind, same witness key. Callers
+    /// that need one answer must reject zero or several matches themselves —
+    /// "first hit wins" is what made selection depend on declaration order.
+    pub fn witness_candidates(&self, type_entity: Entity, requirement: Entity) -> Vec<Entity> {
+        let key = self.witness_method_key(requirement);
+        let kind = self.query.get::<NodeKind>(requirement).cloned();
+        let mut parents = vec![type_entity];
+        parents.extend(self.query.query(kestrel_name_res::extensions::ExtensionsFor {
+            target: type_entity,
+            root: self.root,
+        }));
+        parents
+            .into_iter()
+            .flat_map(|parent| self.query.children_of(parent).iter().copied().collect::<Vec<_>>())
+            .filter(|&child| {
+                self.query.get::<NodeKind>(child) == kind.as_ref()
+                    && self.witness_method_key(child) == key
+            })
+            .collect()
+    }
+
     /// Build a WitnessMethodKey for a Setter entity by deriving
     /// `"{parent_name}.set"` from the parent Field/Subscript.
     /// Uses the parent's labels (not the setter's own Callable params)

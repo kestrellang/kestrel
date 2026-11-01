@@ -61,16 +61,18 @@ impl BodyCheck for IntegerLiteralRangeAnalyzer {
         // as their negated value, so the bare-literal pass must skip them.
         let mut negated: HashSet<HirExprId> = HashSet::new();
 
-        // Pass 1: `negate` over an integer literal → check the negated value.
-        // The `-literal` operator and its receiver share the same resolved type.
+        // Pass 1: `Negatable.negate` over an integer literal → check the
+        // negated value. The `-literal` operator and its receiver share the
+        // same resolved type. Matched by the tagged requirement, not a name.
+        let negate = cx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::NegateOperatorMethod,
+            root: cx.root,
+        });
         for (call_id, expr) in cx.hir.exprs.iter() {
-            let HirExpr::ProtocolCall {
-                receiver, method, ..
-            } = expr
-            else {
+            let HirExpr::ProtocolCall { receiver, .. } = expr else {
                 continue;
             };
-            if method.as_str() != Some("negate") {
+            if negate.is_none() || crate::util::protocol_call_method(cx, call_id) != negate {
                 continue;
             }
             let HirExpr::Literal {

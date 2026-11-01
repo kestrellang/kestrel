@@ -1029,7 +1029,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             ctx.literal_spans.insert(arr_tv, span.clone());
             let conformer = adopt_conformer_expectation(ctx, arr_tv, &expect, LiteralKind::Array, span);
             let elem_tv = ctx.fresh();
-            ctx.associated(arr_tv, "Element", elem_tv, span.clone());
+            associated_builtin(ctx, arr_tv, Builtin::ArrayLiteralElement, elem_tv, span);
             // Bidirectional hint: if the enclosing `let` annotated this array
             // with `Array[E]`, pre-seed `elem_tv` with `E` before element
             // constraints run — or, for a conformer target (`let v: J = [...]`),
@@ -1084,8 +1084,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 adopt_conformer_expectation(ctx, dict_tv, &expect, LiteralKind::Dictionary, span);
             let key_tv = ctx.fresh();
             let val_tv = ctx.fresh();
-            ctx.associated(dict_tv, "Key", key_tv, span.clone());
-            ctx.associated(dict_tv, "Value", val_tv, span.clone());
+            associated_builtin(ctx, dict_tv, Builtin::DictionaryLiteralKey, key_tv, span);
+            associated_builtin(ctx, dict_tv, Builtin::DictionaryLiteralValue, val_tv, span);
             let expected_entry = expect
                 .as_ref()
                 .and_then(|(expected, _)| extract_dict_entry_hint(ctx, *expected));
@@ -1602,7 +1602,7 @@ fn gen_pat(
             let elem_tv = ctx.fresh();
             if let Some(proto) = ctx.resolver.builtin(kestrel_hir::Builtin::ArrayMatchable) {
                 ctx.conforms(scrutinee_tv, proto, span.clone());
-                ctx.associated(scrutinee_tv, "Element", elem_tv, span.clone());
+                associated_builtin(ctx, scrutinee_tv, Builtin::ArrayMatchableElement, elem_tv, span);
             }
 
             // Equate each prefix/suffix element pattern against elem_tv
@@ -3232,6 +3232,16 @@ fn extract_array_elem_hint(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
 /// `Element`/`Key`/`Value` constraints are emitted, so they resolve on the spot
 /// and the elements are checked against them instead of unifying with each
 /// other (`[1, "two", true]`). Returns whether it adopted the expectation.
+/// `container.<tag>` keyed by the TAGGED associated type's entity, never its
+/// spelling: a conformer that also binds another protocol's same-named
+/// `Element` must not hand that one to a literal or pattern. Without the
+/// stdlib tag there is no such protocol, so nothing is constrained.
+fn associated_builtin(ctx: &mut InferCtx<'_>, container: TyVar, tag: Builtin, result: TyVar, span: &Span) {
+    if let Some(assoc) = ctx.resolver.builtin(tag) {
+        ctx.associated_entity(container, assoc, result, span.clone());
+    }
+}
+
 fn adopt_conformer_expectation(
     ctx: &mut InferCtx<'_>,
     literal_tv: TyVar,

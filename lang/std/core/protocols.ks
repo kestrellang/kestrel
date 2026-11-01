@@ -83,6 +83,7 @@ public protocol RangeMatchable[Bound = Self] {
 /// conformers.
 @builtin(.ArrayMatchable)
 public protocol ArrayMatchable {
+    @builtin(.ArrayMatchableElement)
     type Element
 
     /// Total number of elements available to match.

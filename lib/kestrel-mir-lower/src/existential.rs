@@ -785,20 +785,19 @@ fn forwarder(
         return None;
     }
     let accessor = if receiver == ParamConvention::MutBorrow {
-        "pointeeMutRef"
+        kestrel_hir::Builtin::MutableIndirectionPointeeMutRef
     } else {
-        "pointeeRef"
+        kestrel_hir::Builtin::IndirectionPointeeRef
     };
-    let peel = ctx
-        .query
-        .query(kestrel_name_res::TypeMembersByName {
-            type_entity: boxed,
-            name: accessor.to_string(),
-            context: boxed,
-            root: ctx.root,
-        })
-        .first()?
-        .entity;
+    // The box's witness of the tagged accessor — exactly one, never the first
+    // member spelled alike.
+    let accessor = ctx.query.query(kestrel_name_res::ResolveBuiltin {
+        builtin: accessor,
+        root: ctx.root,
+    })?;
+    let [peel] = ctx.witness_candidates(boxed, accessor)[..] else {
+        return None;
+    };
     let raw = match ctx.module.ty_arena.get(box_ty) {
         MirTy::Named { type_args, .. } => *type_args.first()?,
         _ => return None,

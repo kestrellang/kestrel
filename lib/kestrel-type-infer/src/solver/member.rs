@@ -72,7 +72,18 @@ pub(super) fn solve_for_loop_iterator(
         return SolveResult::Solved;
     }
     ctx.conforms_poisoning(iterable, protocol, span.clone());
-    ctx.member(iterable, "iter", Vec::new(), result, expr, true, span);
+    // `expr` is the desugared `Iterable.iter()` call: its tagged requirement is
+    // recorded, so the member resolves through it; the name is its spelling.
+    let Some(name) = ctx
+        .protocol_call_requirements
+        .get(&expr)
+        .and_then(|&r| ctx.query_ctx.get::<kestrel_ast_builder::Name>(r))
+        .map(|n| n.0.clone())
+    else {
+        ctx.poison(result);
+        return SolveResult::Solved;
+    };
+    ctx.member(iterable, &name, Vec::new(), result, expr, true, span);
     SolveResult::Solved
 }
 
@@ -316,24 +327,24 @@ pub(crate) fn try_indirection_peel(
         return None;
     }
 
-    // Resolve the concrete pointee accessors on the wrapper (for MIR replay).
-    // `pointeeRef` is required by `Indirection`; `pointeeMutRef` only exists on
-    // `MutableIndirection` conformers (None ⇒ read-only ⇒ writes are D2).
-    let read_method = ctx
-        .resolver
-        .resolve_member(recv_kind, "pointeeRef", &[])
-        .ok()?
-        .entity;
-    let mut_method = ctx
-        .resolver
-        .resolve_member(recv_kind, "pointeeMutRef", &[])
-        .ok()
-        .map(|r| r.entity);
+    // Resolve the concrete pointee accessors on the wrapper (for MIR replay):
+    // the witnesses of the TAGGED requirements, matched by the requirement's
+    // own name (its witness key) — never a spelling written here.
+    // `pointeeMutRef` only exists on `MutableIndirection` conformers (None ⇒
+    // read-only ⇒ writes are D2).
+    let witness_of = |tag: Builtin| {
+        let requirement = ctx.resolver.builtin(tag)?;
+        let name = ctx.query_ctx.get::<kestrel_ast_builder::Name>(requirement)?.0.clone();
+        ctx.resolver.resolve_member(recv_kind, &name, &[]).ok().map(|r| r.entity)
+    };
+    let read_method = witness_of(Builtin::IndirectionPointeeRef)?;
+    let mut_method = witness_of(Builtin::MutableIndirectionPointeeMutRef);
 
-    // Pointee type = wrapper's `Indirection.Target`. Reuse the assoc-type
-    // machinery via an `Associated` constraint on a fresh TyVar.
+    // Pointee type = wrapper's `Indirection.Target`, keyed by the tagged
+    // associated type so another conformance's `Target` can't answer.
+    let target = ctx.resolver.builtin(Builtin::IndirectionTarget)?;
     let pointee_tv = ctx.fresh();
-    ctx.associated(receiver, "Target", pointee_tv, span.clone());
+    ctx.associated_entity(receiver, target, pointee_tv, span.clone());
 
     // Record the peel for MIR — append so nested wrappers build a chain.
     // `target_tv` is resolved in `build_result`.

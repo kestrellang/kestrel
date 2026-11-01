@@ -28,7 +28,7 @@
 //! (post-mono block splitting is not available in `expand`). The plan's
 //! "null/nop shims" wording covers this — see the E2a report.
 
-use kestrel_ast_builder::{Callable, NodeKind};
+use kestrel_ast_builder::Callable;
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_mir::body::OssaBody;
@@ -240,36 +240,12 @@ impl OssaBodyCtx<'_, '_> {
         }) else {
             return exactly_one_box_member::<Entity>(&[], what);
         };
-        let mut parents = vec![entity];
-        parents.extend(
-            self.ctx
-                .query
-                .query(kestrel_name_res::extensions::ExtensionsFor {
-                    target: entity,
-                    root: self.ctx.root,
-                }),
-        );
-        if self
-            .ctx
-            .query
-            .parent_of(requirement)
-            .is_some_and(|p| parents.contains(&p))
-        {
-            return requirement;
-        }
         // Collect ALL matches rather than taking the first: "first hit wins"
-        // is what made the selection depend on declaration order (F4).
-        let key = self.ctx.witness_method_key(requirement);
-        let kind = self.ctx.query.get::<NodeKind>(requirement).cloned();
-        let mut matches = Vec::new();
-        for parent in parents {
-            for &child in self.ctx.query.children_of(parent).iter() {
-                if self.ctx.query.get::<NodeKind>(child) == kind.as_ref()
-                    && self.ctx.witness_method_key(child) == key
-                {
-                    matches.push(child);
-                }
-            }
+        // is what made the selection depend on declaration order (F4). The
+        // tag sitting on the binding itself is its own (sole) witness.
+        let matches = self.ctx.witness_candidates(entity, requirement);
+        if matches.contains(&requirement) {
+            return requirement;
         }
         exactly_one_box_member(&matches, what)
     }

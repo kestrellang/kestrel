@@ -10,7 +10,6 @@ use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirExpr, HirExprId, HirMatchArm, MatchSource};
 use kestrel_hir::res::LocalId;
 use kestrel_mir::callee::Callee;
-use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::terminator::{SwitchArm, SwitchCase};
 use kestrel_mir::{
     FieldIdx, Immediate, IntBits, MirTy, Op, Ownership, ParamConvention, Signedness, TyId, ValueId,
@@ -1879,7 +1878,9 @@ impl OssaBodyCtx<'_, '_> {
                 root: self.ctx.root,
             })
             .map(|e| self.ctx.witness_method_key(e))
-            .unwrap_or_else(|| WitnessMethodKey::simple("matchLength"));
+            // The protocol resolved (the caller found `ArrayMatchable`), so a
+            // missing method tag is a broken stdlib — never guess a name.
+            .unwrap_or_else(|| panic!("ICE: `ArrayMatchable` requirement {method_builtin:?} is not tagged"));
         let callee = Callee::Witness {
             protocol: proto,
             method,
@@ -1988,26 +1989,10 @@ impl OssaBodyCtx<'_, '_> {
     /// (the type body, or the conforming extension) — the owner provides the
     /// type params for substitution.
     fn resolve_array_element_binding(&mut self, type_entity: Entity) -> Option<(TyId, Entity)> {
-        let proto = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-            builtin: kestrel_hir::Builtin::ArrayMatchable,
+        let elem_member = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ArrayMatchableElement,
             root: self.ctx.root,
         })?;
-        let elem_member = self
-            .ctx
-            .query
-            .query(kestrel_name_res::ProtocolAssociatedTypes {
-                protocol: proto,
-                root: self.ctx.root,
-            })
-            .into_iter()
-            .find(|m| {
-                self.ctx
-                    .world
-                    .get::<kestrel_ast_builder::Name>(m.entity)
-                    .map(|n| n.0.as_str())
-                    == Some("Element")
-            })?
-            .entity;
         let (alias, owner) = self.ctx.query.query(kestrel_name_res::AssociatedTypeBinding {
             type_entity,
             assoc: elem_member,

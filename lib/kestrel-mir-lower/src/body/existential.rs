@@ -427,7 +427,10 @@ impl OssaBodyCtx<'_, '_> {
             builtin: kestrel_hir::Builtin::Indirection,
             root: self.ctx.root,
         })?;
-        let requirement = self.protocol_requirement(protocol, "pointeeRef")?;
+        let requirement = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::IndirectionPointeeRef,
+            root: self.ctx.root,
+        })?;
         self.ctx.register_name(protocol);
         let method = self.ctx.witness_method_key(requirement);
         let view = self.emit_call_returning(
@@ -452,22 +455,6 @@ impl OssaBodyCtx<'_, '_> {
         if self.ref_results.contains(&view) && !self.ref_binding_vals.contains_key(&view) {
             self.emit_end_borrow(view);
         }
-    }
-
-    /// `protocol`'s requirement named `name`.
-    fn protocol_requirement(&self, protocol: Entity, name: &str) -> Option<Entity> {
-        self.ctx
-            .world
-            .children_of(protocol)
-            .iter()
-            .copied()
-            .find(|&c| {
-                self.ctx
-                    .world
-                    .get::<kestrel_ast_builder::Name>(c)
-                    .map(|n| n.0.as_str())
-                    == Some(name)
-            })
     }
 
     /// Bool: is the payload of `boxed` a `target`? Payloads are told apart by
@@ -558,7 +545,10 @@ impl OssaBodyCtx<'_, '_> {
             builtin: kestrel_hir::Builtin::ConsumingIndirection,
             root: self.ctx.root,
         });
-        let requirement = protocol.and_then(|p| self.protocol_requirement(p, "consumePointee"));
+        let requirement = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ConsumingIndirectionConsumePointee,
+            root: self.ctx.root,
+        });
         let (Some(raw), Some(protocol), Some(requirement)) = (raw, protocol, requirement) else {
             return self.emit_literal(kestrel_mir::immediate::Immediate::unit());
         };
