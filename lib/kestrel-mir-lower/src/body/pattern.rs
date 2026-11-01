@@ -1285,6 +1285,13 @@ impl OssaBodyCtx<'_, '_> {
                     }
                     current_ty = field_ty;
                 },
+                // An array prefix element is a runtime `matchGet` (see
+                // `apply_access_path`), not a field of the array struct.
+                PathElement::Index(_)
+                    if pending_downcast.is_none() && self.is_array_matchable_ty(current_ty) =>
+                {
+                    return false;
+                },
                 PathElement::Index(i) => {
                     let field_ty = if let Some(variant_idx) = pending_downcast.take() {
                         self.resolve_enum_payload_field_by_index(
@@ -1341,6 +1348,11 @@ impl OssaBodyCtx<'_, '_> {
                         return true;
                     }
                     current_ty = field_ty;
+                },
+                PathElement::Index(_)
+                    if pending_downcast.is_none() && self.is_array_matchable_ty(current_ty) =>
+                {
+                    return false;
                 },
                 PathElement::Index(i) => {
                     let field_ty = if let Some(variant_idx) = pending_downcast.take() {

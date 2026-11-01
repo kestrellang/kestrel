@@ -2,13 +2,10 @@
 // stdlib: true
 // expect-exit: 0
 //
-// An array pattern over a LOCAL array literal. Matching a parameter works
-// (`head(xs:)` in the other array_matchable tests); a local `let xs = [...]`
-// does not:
-// - as a function's tail `match`: OSSA verify ICE ("block arg 0 ... type
-//   mismatch"), found 2026-11-01;
-// - as `main`'s tail `match`: compiles but exits 15 instead of 0 (Cranelift
-//   and LLVM).
+// An array pattern over a LOCAL array literal. The scrutinee is an @owned
+// copy, and the owned path used to read `[a, ..]`'s `Index(0)` as the Array
+// struct's first field (its CowBox) instead of a runtime `matchGet(0)`:
+// an OSSA verify ICE as a function's tail `match`, and exit 15 as `main`'s.
 
 module Test
 
