@@ -198,6 +198,7 @@ impl LowerCtx<'_> {
                         owner: None,
                         name: hir_name(name.clone()),
                         args,
+                        requirement: None,
                         span: span.clone(),
                     })
                 };
@@ -1434,6 +1435,7 @@ impl LowerCtx<'_> {
             owner: Some(owner),
             name: HirName::Name(case.name.clone()),
             args,
+            requirement: None,
             span: span.clone(),
         });
         self.record_segments(std::slice::from_ref(case), id);

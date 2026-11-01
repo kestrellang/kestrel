@@ -474,6 +474,13 @@ fn try_lang_primitive(ctx: &mut LowerCtx, entity: Entity, type_args: &[TyId]) ->
             let inner = type_args.first().copied()?;
             Some(ctx.module.ty_arena.ref_ty(inner, true))
         },
+        // Synthetic tuple-extension targets (`lang.(,)`, …): the elements
+        // are the type args.
+        n if type_args.len() >= 2
+            && n == kestrel_ast_builder::lang_module::lang_tuple_name(type_args.len()) =>
+        {
+            Some(ctx.module.ty_arena.tuple(type_args.to_vec()))
+        },
         _ => None,
     }
 }

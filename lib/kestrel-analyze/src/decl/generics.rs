@@ -504,11 +504,14 @@ fn check_type_param_shadowing(
         // binds Box's own parameter entity. Without this the shadowing check
         // is blind to every generic extension (fragility audit F12).
         if cx.query.get::<NodeKind>(ancestor) == Some(&NodeKind::Extension) {
-            for p in cx.query.query(ExtensionLhsParams {
+            // Keyed by the name the extension wrote: a structural target's
+            // (`(X, Y)`) synthetic parameters carry invented names.
+            for (written, p) in cx.query.query(ExtensionLhsParams {
                 extension: ancestor,
                 root: cx.root,
             }) {
-                record(p, &mut outer_params);
+                let span = util::entity_span(cx.query, p);
+                outer_params.entry(written).or_insert(span);
             }
         }
         current = cx.query.parent_of(ancestor);

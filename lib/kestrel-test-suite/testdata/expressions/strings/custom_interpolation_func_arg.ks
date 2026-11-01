@@ -47,7 +47,7 @@ struct TagString: ExpressibleByStringInterpolation, Cloneable {
         self.inner = String(stringLiteral: ptr, length);
     }
 
-    init(interpolation: TagAccumulator) {
+    init(consuming interpolation: TagAccumulator) {
         var acc = interpolation;
         self.inner = acc.build().inner;
     }

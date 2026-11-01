@@ -284,6 +284,7 @@ impl<'a> LowerCtx<'a> {
                 label: None,
                 value: unit_expr,
             }]),
+            requirement: None,
             span,
         }))
     }

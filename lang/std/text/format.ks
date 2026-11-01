@@ -484,13 +484,16 @@ public func _writePadded(mutating into writer: some Formatter, content: String, 
 
 /// Protocol for the accumulator type that string interpolation builds into.
 ///
-/// The compiler lowers `"hello, \{name}!"` to a sequence of
-/// `appendLiteral` and `appendInterpolation` calls on a fresh value of
-/// the implementor's type, then reads the final string out (typically
-/// via a `build()` method on the concrete accumulator). `String` ships
-/// `DefaultStringInterpolation` as its accumulator; custom string-like
-/// types can supply their own to intercept literal pieces or coerce
-/// formatted parts.
+/// The compiler lowers `"hello, \(name)!"` to a fresh accumulator, an
+/// `appendLiteral` call per static segment and an `appendInterpolation` call
+/// per hole, then hands the accumulator to the result type's
+/// `init(interpolation:)`. `String` ships `DefaultStringInterpolation` as its
+/// accumulator; custom string-like types supply their own.
+///
+/// `appendInterpolation` is deliberately NOT a requirement: each accumulator
+/// declares its own overloads, choosing which values a hole accepts (`some
+/// Formattable`, only `Bindable` values for SQL, …) and whether it takes
+/// format options. Holes are ordinary method calls on the accumulator.
 public protocol Interpolatable {
     /// @name With Capacity
     /// Constructs an empty accumulator with capacity hints derived from the literal at compile time.
@@ -498,6 +501,7 @@ public protocol Interpolatable {
     /// `literalCapacity` is the total byte count of the static segments;
     /// `interpolationCount` is the number of `\{...}` holes. Implementors
     /// can use these to preallocate.
+    @builtin(.InterpolatableInit)
     init(literalCapacity literalCapacity: Int64, interpolationCount interpolationCount: Int64)
 
     /// Appends a static literal segment.
@@ -505,6 +509,7 @@ public protocol Interpolatable {
     /// Called once per run of literal text between `\{...}` holes. May be
     /// called with the empty string; implementors should be cheap in
     /// that case.
+    @builtin(.InterpolatableAppendLiteral)
     mutating func appendLiteral(literal: String)
 
 }
@@ -512,16 +517,21 @@ public protocol Interpolatable {
 /// Marker protocol for types constructible from a completed string interpolation.
 ///
 /// Refines `ExpressibleByStringLiteral` so a single conformance covers
-/// both pure-literal `"abc"` and interpolated `"a\{x}b"` forms. The
+/// both pure-literal `"abc"` and interpolated `"a\(x)b"` forms. The
 /// compiler picks `Interpolation` as the accumulator type, drives it via
 /// `Interpolatable`, then hands it to `init(interpolation:)`.
+@builtin(.ExpressibleByStringInterpolation)
 public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
     /// The accumulator type used to build interpolated values of `Self`.
     type Interpolation: Interpolatable
 
     /// @name From Interpolation
     /// Constructs `Self` from a fully built interpolation accumulator.
-    init(interpolation: Interpolation)
+    ///
+    /// Takes the accumulator by value, so an implementation can move its
+    /// buffer out without copying (accumulators need not be `Cloneable`).
+    @builtin(.StringInterpolationInit)
+    init(consuming interpolation: Interpolation)
 }
 
 // ============================================================================
@@ -548,7 +558,6 @@ public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
 ///
 /// A single `StringBuilder` that accumulates all literal and formatted
 /// bytes in one buffer. Pre-sized using the compiler's capacity hints.
-@builtin(.DefaultStringInterpolation)
 public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     private var builder: StringBuilder
 
@@ -564,7 +573,6 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     /// var acc = DefaultStringInterpolation(literalCapacity: 0, interpolationCount: 0);
     /// acc.build();  // ""
     /// ```
-    @builtin(.DefaultStringInterpolationInit)
     public init(literalCapacity literalCapacity: Int64, interpolationCount interpolationCount: Int64) {
         self.builder = StringBuilder(capacity: literalCapacity + interpolationCount * 16);
     }
@@ -577,7 +585,6 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     }
 
     /// Appends a static literal segment directly into the buffer.
-    @builtin(.DefaultStringInterpolationAppendLiteral)
     public mutating func appendLiteral(literal: String) {
         if literal.isEmpty == false {
             self.builder.append(literal);
@@ -585,7 +592,6 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     }
 
     /// Formats one interpolation hole directly into the buffer.
-    @builtin(.DefaultStringInterpolationAppendInterpolation)
     public mutating func appendInterpolation(value: some Formattable, options: FormatOptions = FormatOptions.default()) {
         value.format(into: self.builder, options);
     }
@@ -600,8 +606,20 @@ public struct DefaultStringInterpolation: Interpolatable, Cloneable {
     /// acc.appendLiteral("b");
     /// acc.build();  // "ab"
     /// ```
-    @builtin(.DefaultStringInterpolationBuild)
     public mutating func build() -> String {
         self.builder.build()
+    }
+}
+
+/// `String` interpolates through `DefaultStringInterpolation`.
+extend String: ExpressibleByStringInterpolation {
+    /// The accumulator `String` interpolation builds into.
+    public type Interpolation = DefaultStringInterpolation
+
+    /// @name From Interpolation
+    /// Takes over the accumulator's buffer without copying.
+    public init(consuming interpolation: DefaultStringInterpolation) {
+        var accumulator = interpolation;
+        self = accumulator.build()
     }
 }

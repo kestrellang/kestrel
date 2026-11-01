@@ -273,3 +273,111 @@ pub fn body_close_brace_span(ctx: &QueryContext<'_>, entity: Entity) -> Option<S
     }
     None
 }
+
+/// THE exception to label-only overloading: same-name, same-label callables
+/// may coexist only when each witnesses a DIFFERENT requirement slot — a
+/// different protocol's requirement, or the same requirement of a different
+/// instantiation of one parameterized protocol (`Int64: Convertible[Int8],
+/// Convertible[Int16]` — one `init(from:)` each). `owners` lists the
+/// declaration (type body or extension) holding each callable, one entry per
+/// callable. Allowed when every owner writes a conformance whose protocol
+/// declares a `name(labels)` requirement, and those conformances give at least
+/// `owners.len()` distinct slots (protocol + args, defaults applied). A
+/// same-label overload beside a single witness is a duplicate.
+pub fn same_label_witnesses_allowed(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    type_entity: Entity,
+    owners: &[Entity],
+    name: &str,
+    labels: &[Option<String>],
+) -> bool {
+    let insts = ctx.query(kestrel_name_res::ConformingProtocolInstantiations {
+        entity: type_entity,
+        root,
+    });
+    let slots: Vec<(Entity, Entity, Vec<kestrel_hir::ty::HirTy>)> = insts
+        .iter()
+        .filter(|(protocol, source, _)| {
+            owners.contains(source) && declares_requirement(ctx, *protocol, name, labels)
+        })
+        .map(|(protocol, source, ast_args)| {
+            let args =
+                kestrel_hir_lower::conformance_protocol_args(ctx, root, *protocol, *source, ast_args);
+            (*protocol, *source, args)
+        })
+        .collect();
+    let every_owner = owners.iter().all(|o| slots.iter().any(|(_, s, _)| s == o));
+    let mut distinct: Vec<(Entity, &Vec<kestrel_hir::ty::HirTy>)> = Vec::new();
+    for (protocol, _, args) in &slots {
+        let same = |(p, seen): &(Entity, &Vec<kestrel_hir::ty::HirTy>)| {
+            p == protocol
+                && seen.len() == args.len()
+                && seen.iter().zip(args).all(|(a, b)| a.same_type(b))
+        };
+        if !distinct.iter().any(same) {
+            distinct.push((*protocol, args));
+        }
+    }
+    every_owner && distinct.len() >= owners.len().max(2)
+}
+
+/// Does `protocol` declare a function (or, for `"init"`, an initializer)
+/// requirement named `name` with exactly these `labels`?
+fn declares_requirement(
+    ctx: &QueryContext<'_>,
+    protocol: Entity,
+    name: &str,
+    labels: &[Option<String>],
+) -> bool {
+    let is_init = name == "init";
+    let kind = if is_init { NodeKind::Initializer } else { NodeKind::Function };
+    children_of_kind(ctx, protocol, kind)
+        .into_iter()
+        // entity_name (not the Name component) — keys for anonymous
+        // functions carry the "<anonymous>" fallback and must still match.
+        .filter(|&c| is_init || entity_name(ctx, c) == name)
+        .any(|c| {
+            ctx.get::<kestrel_ast_builder::Callable>(c).is_some_and(|callable| {
+                callable
+                    .params
+                    .iter()
+                    .map(|p| p.label.clone())
+                    .eq(labels.iter().cloned())
+            })
+        })
+}
+
+/// The requirement a `ProtocolCall` (`expr`) dispatches through — what every
+/// body analyzer asks of a desugared call. A `?.` bind's is the mode
+/// inference settled on; a tagged desugaring names its own; only an untagged
+/// call (no stdlib tag) is matched by written name AND call-site labels.
+pub fn protocol_call_method(cx: &BodyContext<'_>, expr: HirExprId) -> Option<Entity> {
+    let HirExpr::ProtocolCall {
+        protocol,
+        method,
+        requirement,
+        args,
+        ..
+    } = &cx.hir.exprs[expr]
+    else {
+        return None;
+    };
+    if let Some(builtin) = cx.typed.chain_requirement(expr) {
+        return cx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin,
+            root: cx.root,
+        });
+    }
+    if let Some(requirement) = requirement {
+        return Some(*requirement);
+    }
+    let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
+    children_named_of_kind(cx.query, *protocol, method.as_str_or_empty(), NodeKind::Function)
+        .into_iter()
+        .find(|&c| {
+            cx.query
+                .get::<kestrel_ast_builder::Callable>(c)
+                .is_some_and(|callable| callable.params.iter().map(|p| p.label.clone()).eq(labels.iter().cloned()))
+        })
+}

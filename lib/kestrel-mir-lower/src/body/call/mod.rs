@@ -7,7 +7,6 @@ use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_hir::ty::HirTy;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
-use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::terminator::{SwitchArm, SwitchCase};
 use kestrel_mir::{
     FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId, VariantIdx,
@@ -64,8 +63,17 @@ impl OssaBodyCtx<'_, '_> {
         // `is_shared`, not `is_boxed`: only a shared environment has a share
         // operation. A `consuming` closure is `not Copyable` and exposes no
         // `clone()` at all.
-        if method_name == "clone"
-            && args.is_empty()
+        let resolved_entity = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&expr_id))
+            .copied();
+        let clone_requirement = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::CloneMethod,
+            root: self.ctx.root,
+        });
+        if resolved_entity.is_some()
+            && resolved_entity == clone_requirement
             && matches!(
                 self.ctx.module.ty_arena.get(receiver_ty),
                 MirTy::FuncThick { kind, .. } if kind.is_shared()
@@ -74,12 +82,6 @@ impl OssaBodyCtx<'_, '_> {
             let recv = self.lower_expr_for_borrow(receiver_expr);
             return self.emit_copy_value(recv);
         }
-
-        let resolved_entity = self
-            .typed
-            .as_ref()
-            .and_then(|t| t.resolutions.get(&expr_id))
-            .copied();
 
         let is_static = resolved_entity.is_some_and(|e| self.ctx.world.get::<Static>(e).is_some());
 
@@ -533,6 +535,7 @@ impl OssaBodyCtx<'_, '_> {
         expr_id: HirExprId,
         receiver_expr: HirExprId,
         protocol: Entity,
+        requirement: Option<Entity>,
         method_name: &str,
         _hir_type_args: Option<&[HirTy]>,
         args: &[HirCallArg],
@@ -552,8 +555,8 @@ impl OssaBodyCtx<'_, '_> {
 
         self.ctx.register_name(protocol);
         let method_type_args = self.resolve_type_args(expr_id);
-        let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
-        let method_key = WitnessMethodKey::new(method_name, labels);
+        let (method_key, method_entity) =
+            self.protocol_call_target(requirement, protocol, method_name, args);
 
         let conventions = self.collect_witness_conventions(protocol, &method_key);
 
@@ -566,7 +569,6 @@ impl OssaBodyCtx<'_, '_> {
             .copied()
             .unwrap_or(ParamConvention::Borrow);
         // Before the receiver opens its borrow (H12: `x.mutate({ x })`).
-        let method_entity = self.find_protocol_method_entity(protocol, &method_key);
         let arg_convs = self.explicit_arg_conventions(args, method_entity, &conventions, 1);
         self.prepare_closure_arg_snapshots(Some((receiver_expr, recv_conv)), args, &arg_convs);
         let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
@@ -847,7 +849,7 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_struct(result_ty, fields)
     }
 
-    fn emit_init_call(
+    pub(crate) fn emit_init_call(
         &mut self,
         entity: Entity,
         type_args: Vec<TyId>,

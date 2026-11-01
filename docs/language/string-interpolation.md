@@ -134,7 +134,11 @@ println("point: \(p)");   // point: (3, 4)
 
 ## Custom Interpolation Targets
 
-Interpolated literals aren't hard-wired to `String`. A literal like `"a\(b)c"` desugars to: create an accumulator, `appendLiteral(...)` / `appendInterpolation(...)` for each segment, then build the result. Any type conforming to `ExpressibleByStringInterpolation` (which refines `ExpressibleByStringLiteral`) can be the result type:
+Interpolated literals aren't hard-wired to `String`. The literal's type `R` is taken from context (an annotation, a parameter type), defaulting to `String`, and must conform to `ExpressibleByStringInterpolation` (which refines `ExpressibleByStringLiteral`). `"a\(b)c"` desugars to:
+
+1. create an `R.Interpolation` accumulator with `init(literalCapacity:interpolationCount:)`,
+2. call `appendLiteral(...)` for each static segment and `appendInterpolation(...)` for each hole,
+3. hand the accumulator to `R.init(interpolation:)`.
 
 ```kestrel
 public protocol Interpolatable {
@@ -144,11 +148,13 @@ public protocol Interpolatable {
 
 public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
     type Interpolation: Interpolatable
-    init(interpolation: Interpolation)
+    init(consuming interpolation: Interpolation)
 }
 ```
 
-Your accumulator supplies its own `appendInterpolation(...)` overloads, which may constrain hole values to any protocol you like (an SQL builder might require `Bindable` instead of `Formattable`, making `"WHERE id = \(userInput)"` safe by construction):
+`init(interpolation:)` takes the accumulator by value, so it can move the accumulator's buffers out without copying. An accumulator needs no `build()` method and need not be `Cloneable`, or even `Copyable`.
+
+`appendInterpolation` is deliberately **not** a requirement. Your accumulator supplies its own `appendInterpolation(...)` overloads, which may constrain hole values to any protocol you like (an SQL builder might require `Bindable` instead of `Formattable`, making `"WHERE id = \(userInput)"` safe by construction) and may or may not accept a format spec:
 
 ```kestrel
 let tagged: BracketString = "Hello, \(name)!";   // builds via BracketString's accumulator

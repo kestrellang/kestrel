@@ -98,11 +98,22 @@ impl OssaBodyCtx<'_, '_> {
         let Some(promotion) = typed.promotions.get(&expr_id).cloned() else {
             return value;
         };
-        let method = promotion.method;
+        // The `FromValue.from` requirement, dispatched through the target's
+        // `FromValue[Source]` witness (protocol arg first) — mono picks the
+        // conformance, never a by-name `from` search.
+        let requirement = promotion.method;
         let target_ty = lower_resolved_ty(self.ctx, &promotion.target);
-        self.ctx.register_name(method);
-        let type_args = self.prepend_receiver_type_args(target_ty, vec![]);
-        let callee = Callee::direct_with_args(method, type_args, None);
+        let Some(protocol) = self.ctx.world.parent_of(requirement) else {
+            return value;
+        };
+        self.ctx.register_name(protocol);
+        let source_ty = self.body.value(value).ty;
+        let callee = Callee::Witness {
+            protocol,
+            method: self.ctx.witness_method_key(requirement),
+            self_type: target_ty,
+            method_type_args: vec![source_ty],
+        };
         // `FromValue.from(value: T)` takes its argument **by value** — its body
         // moves `value` into `.Ok(value)` / `.Some(value)`. Passing a borrow
         // strands the payload: an @owned aggregate would be wrapped from a
@@ -430,21 +441,19 @@ impl OssaBodyCtx<'_, '_> {
                 receiver,
                 protocol,
                 method,
+                requirement,
                 type_args: hir_type_args,
                 args,
                 ..
             } => {
-                // A `?.` bind calls the method inference settled on.
-                let written = method.as_str_or_empty();
-                let method = match self.typed.as_ref() {
-                    Some(typed) => typed.protocol_method_name(expr_id, written),
-                    None => written,
-                };
+                // A `?.` bind calls the requirement inference settled on.
+                let requirement = self.chain_requirement(expr_id).or(*requirement);
                 self.lower_protocol_call_expr(
                     expr_id,
                     *receiver,
                     *protocol,
-                    method,
+                    requirement,
+                    method.as_str_or_empty(),
                     hir_type_args.as_deref(),
                     args,
                 )
@@ -683,7 +692,7 @@ impl OssaBodyCtx<'_, '_> {
                 let self_type = self.type_from_type_ref(base);
                 let callee = Callee::Witness {
                     protocol,
-                    method: WitnessMethodKey::simple(field_name),
+                    method: self.ctx.witness_method_key(property_entity),
                     self_type,
                     method_type_args,
                 };
@@ -692,7 +701,7 @@ impl OssaBodyCtx<'_, '_> {
                 let receiver_ty = self.resolve_expr_type(base);
                 let callee = Callee::Witness {
                     protocol,
-                    method: WitnessMethodKey::simple(field_name),
+                    method: self.ctx.witness_method_key(property_entity),
                     self_type: receiver_ty,
                     method_type_args,
                 };
@@ -915,19 +924,13 @@ impl OssaBodyCtx<'_, '_> {
                 if let Some(protocol) = self.ctx.world.parent_of(entity)
                     && self.ctx.world.get::<NodeKind>(protocol) == Some(&NodeKind::Protocol)
                 {
-                    let field_name = self
-                        .ctx
-                        .world
-                        .get::<kestrel_ast_builder::Name>(entity)
-                        .map(|n| n.0.clone())
-                        .unwrap_or_default();
                     self.ctx.register_name(protocol);
                     let self_type = crate::ty::build_self_type(self.ctx, protocol);
                     let result_ty = self.resolve_expr_type(expr_id);
                     let method_type_args = self.resolve_type_args(expr_id);
                     let callee = Callee::Witness {
                         protocol,
-                        method: WitnessMethodKey::simple(field_name),
+                        method: self.ctx.witness_method_key(entity),
                         self_type,
                         method_type_args,
                     };
@@ -1006,6 +1009,19 @@ impl OssaBodyCtx<'_, '_> {
             // then drop the original, giving a double-deinit for non-Copyable payloads.
             let resolved_entity = resolved.unwrap();
             self.ctx.register_name(resolved_entity);
+
+            // An init requirement (`.init(interpolation:)`, the accumulator's
+            // `.init(literalCapacity:…)`) builds `Self` in place: the init
+            // calling convention, dispatched through the witness table.
+            if self.ctx.world.get::<NodeKind>(resolved_entity) == Some(&NodeKind::Initializer) {
+                let type_args = self.resolve_type_args(expr_id);
+                return self.emit_init_call(
+                    resolved_entity,
+                    type_args,
+                    args.unwrap_or(&[]),
+                    result_ty,
+                );
+            }
 
             let (callee, conventions) =
                 if let Some(protocol) = self.ctx.is_protocol_method(resolved_entity) {

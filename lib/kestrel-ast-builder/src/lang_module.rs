@@ -53,6 +53,13 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     // `HirTy::Ref` / `TyKind::Ref` / `MirTy::Ref` (see `try_lang_primitive`).
     seed_ref(world, lang, "&");
     seed_ref(world, lang, "&mutating");
+    // Tuples `(A, B, …)` likewise: one generic synthetic entity per arity
+    // (args = the elements) makes `extend (X, Y): P where …` a target. The
+    // type layer maps them back to `HirTy::Tuple` / `TyKind::Tuple` /
+    // `MirTy::Tuple`; `lang_tuple_arity` is the reverse detector.
+    for arity in 2..=MAX_EXTENDABLE_TUPLE_ARITY {
+        seed_tuple(world, lang, arity);
+    }
 
     // Intrinsic functions
     seed_integer_ops(world, lang);
@@ -100,6 +107,39 @@ fn seed_ptr(world: &mut World, lang: Entity) {
 /// reference types, pointee type param named `T`. Extension LHS args bind by
 /// NAME against the target's declared params (resolve_extension_type_param),
 /// so ref extensions spell the pointee `T`: `extend &T: P where T: P`.
+/// The largest tuple arity an extension can target (`extend (A, …, L)`).
+pub const MAX_EXTENDABLE_TUPLE_ARITY: usize = 12;
+
+/// The name of the synthetic `lang` entity for tuples of `arity` (≥ 2):
+/// `(,)`, `(,,)`, …. THE naming — seeding and every lookup use it.
+pub fn lang_tuple_name(arity: usize) -> String {
+    format!("({})", ",".repeat(arity.saturating_sub(1)))
+}
+
+/// Create the generic synthetic entity for `arity`-tuples, with one type
+/// parameter per element. An extension binds the names it writes to these
+/// positionally (`ExtensionLhsParams`); the parameter names never surface.
+fn seed_tuple(world: &mut World, lang: Entity, arity: usize) {
+    let tuple = world.spawn();
+    world.set(tuple, NodeKind::Struct);
+    world.set(tuple, Name(lang_tuple_name(arity)));
+    world.set(tuple, Vis::Public);
+    world.set(tuple, Typed);
+    world.set(tuple, Intrinsic);
+    world.set_parent(tuple, lang);
+
+    let params = (0..arity)
+        .map(|i| {
+            let p = world.spawn();
+            world.set(p, NodeKind::TypeParameter);
+            world.set(p, Name(format!("T{i}")));
+            world.set_parent(p, tuple);
+            p
+        })
+        .collect();
+    world.set(tuple, TypeParams(params));
+}
+
 fn seed_ref(world: &mut World, lang: Entity, name: &str) {
     let r = world.spawn();
     world.set(r, NodeKind::Struct);

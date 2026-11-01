@@ -82,8 +82,13 @@ impl LowerCtx<'_> {
             return self.alloc_expr(HirExpr::Error { span: span.clone() });
         };
         let take = !base_src.inner().is_some_and(|n| is_place_syntax(&n));
-        let method = if take { "chainTake" } else { "chainBorrow" };
+        let (method, requirement) = if take {
+            ("chainTake", Builtin::OptionalChainTakeMethod)
+        } else {
+            ("chainBorrow", Builtin::OptionalChainBorrowMethod)
+        };
         let scrutinee = self.alloc_expr(HirExpr::ProtocolCall {
+            requirement: self.protocol_requirement(protocol, requirement),
             from_operator: false,
             receiver: base,
             protocol,
@@ -129,6 +134,7 @@ impl LowerCtx<'_> {
                 owner: None,
                 name: HirName::name("None"),
                 args: None,
+                requirement: None,
                 span: span.clone(),
             });
             body = self.alloc_expr(HirExpr::Match {

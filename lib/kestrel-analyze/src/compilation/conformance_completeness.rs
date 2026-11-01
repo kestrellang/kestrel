@@ -1343,13 +1343,16 @@ fn type_compare_env_for_conformance(
         .into_iter()
         .filter_map(|member| {
             let name = member_lookup_name(cx, member.entity)?;
-            let ty = if let Some(binding) = find_associated_type_binding_entity(
-                cx,
-                type_entity,
-                decl,
-                &name,
-                member.declaring_protocol,
-            ) {
+            let binding = cx
+                .query
+                .query(kestrel_name_res::AssociatedTypeBinding {
+                    type_entity,
+                    assoc: member.entity,
+                    conformance_source: decl,
+                    root: cx.root,
+                })
+                .map(|(alias, _)| alias);
+            let ty = if let Some(binding) = binding {
                 cx.query.query(LowerTypeAnnotation {
                     entity: binding,
                     root: cx.root,
@@ -1403,7 +1406,7 @@ fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> Re
             mutating,
         };
     }
-    let args = cx
+    let args: Vec<ResolvedTy> = cx
         .query
         .get::<TypeParams>(type_entity)
         .map(|params| {
@@ -1414,6 +1417,11 @@ fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> Re
                 .collect()
         })
         .unwrap_or_default();
+    // `extend (X, Y): P`: `Self` is the tuple `(X, Y)` of the synthetic
+    // `lang.(,)`'s params — the params the extension's names bind to.
+    if kestrel_name_res::extensions::lang_tuple_arity(cx.query, type_entity).is_some() {
+        return ResolvedTy::Tuple(args);
+    }
     ResolvedTy::Named {
         entity: type_entity,
         args,
@@ -1605,131 +1613,6 @@ fn resolve_conformance_type_arg(
         AstType::Never(_) => Some(ResolvedTy::Never),
         _ => None,
     }
-}
-
-/// Find the impl's binding for `assoc_name` on `type_entity`, searching the
-/// type itself, its extensions, and — when the associated type is inherited
-/// from a parent protocol — any extensions on the parent protocols that
-/// bind `<Proto>.<assoc_name> = …`. Qualified bindings must match
-/// `protocol`; unqualified bindings are accepted.
-///
-/// Example: `Optional` conforms to `Equatable`, and
-/// `extend Equatable: Equal[Self] { type Equal.Output = Bool }` supplies
-/// the `Equal.Output = Bool` binding for every Equatable type.
-/// `decl`, the block declaring the conformance being checked, is searched
-/// first so its own bindings win ties: a type conforming to one protocol
-/// twice (`Instant: Subtractable[Duration]`, `Subtractable[Instant]`) binds a
-/// different unqualified `Output` in each sibling extension, and only the
-/// declaring block knows which applies. A qualified binding elsewhere
-/// (`type Less.Output = Bool`) still beats an unqualified one in `decl`.
-fn find_associated_type_binding_entity(
-    cx: &CompilationContext<'_>,
-    type_entity: Entity,
-    decl: Option<Entity>,
-    assoc_name: &str,
-    protocol: Entity,
-) -> Option<Entity> {
-    let mut search: Vec<Entity> = decl.into_iter().collect();
-    search.push(type_entity);
-    let extensions = cx.query.query(ExtensionsFor {
-        target: type_entity,
-        root: cx.root,
-    });
-    search.extend(extensions.iter());
-
-    // Also walk the conforming type's protocol closure: a binding on an
-    // extension of any parent protocol (e.g. Equatable) counts for impls
-    // that reach the method through that parent.
-    let conformed_protocols = cx.query.query(ConformingProtocols {
-        entity: type_entity,
-        root: cx.root,
-    });
-    for proto in &conformed_protocols {
-        let proto_exts = cx.query.query(ExtensionsFor {
-            target: *proto,
-            root: cx.root,
-        });
-        search.extend(proto_exts.iter());
-    }
-
-    // First pass: prefer bindings qualified to this exact protocol —
-    // `type Equal.Output = Bool` trumps a sibling `type Output = String`
-    // that would otherwise apply to any conformed protocol.
-    let mut fallback: Option<Entity> = None;
-    for &entity in &search {
-        for child in util::children_named_of_kind(cx.query, entity, assoc_name, NodeKind::TypeAlias)
-        {
-            if cx.query.get::<TypeAnnotation>(child).is_none() {
-                continue;
-            }
-
-            match cx.query.get::<QualifiedTarget>(child) {
-                Some(target) => {
-                    let AstType::Named { segments, .. } = &target.0 else {
-                        continue;
-                    };
-                    let path: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-                    let context = cx.query.parent_of(child).unwrap_or(cx.root);
-                    let matches = matches!(
-                        cx.query.query(ResolveTypePath {
-                            segments: path,
-                            context,
-                            root: cx.root,
-                        }),
-                        TypeResolution::Found(e) if e == protocol,
-                    );
-                    if matches {
-                        return Some(child);
-                    }
-                },
-                None => {
-                    // Unqualified alias. The binding is scoped to whatever
-                    // protocol the enclosing scope declares conformance to —
-                    // `type Output = T` inside `enum Result: Tryable { … }`
-                    // or `extend Optional[T]: Tryable { … }` is
-                    // `Tryable.Output`, not `Equal.Output`. Save as a
-                    // fallback; a later qualified match wins.
-                    if fallback.is_none() && entity_conforms_to(cx, entity, protocol) {
-                        fallback = Some(child);
-                    }
-                },
-            }
-        }
-    }
-    fallback
-}
-
-/// True if `entity` declares conformance to `protocol` (directly or
-/// transitively via refinement). Used to decide whether an unqualified
-/// `type Output = …` inside the entity's scope is the binding for
-/// `protocol.Output`.
-fn entity_conforms_to(cx: &CompilationContext<'_>, entity: Entity, protocol: Entity) -> bool {
-    let Some(conformances) = cx.query.get::<Conformances>(entity) else {
-        return false;
-    };
-    let context = cx.query.parent_of(entity).unwrap_or(cx.root);
-    let mut seeds: Vec<Entity> = Vec::new();
-    for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
-            continue;
-        };
-        let AstType::Named { segments, .. } = ast_ty else {
-            continue;
-        };
-        let path: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-        if let TypeResolution::Found(e) = cx.query.query(ResolveTypePath {
-            segments: path,
-            context,
-            root: cx.root,
-        }) {
-            if e == protocol {
-                return true;
-            }
-            seeds.push(e);
-        }
-    }
-    let closure = kestrel_name_res::expand_protocol_closure(cx.query, cx.root, seeds);
-    closure.contains(&protocol)
 }
 
 /// Resolve an AstType to an entity for type comparison.
@@ -2403,6 +2286,18 @@ fn check_ambiguous_method_satisfaction(
                         && receivers_match(proto_call, impl_call)
                         && first_param_convention_mismatch(proto_call, impl_call).is_none()
                         && param_types_match(cx, type_entity, proto, child, impl_method)
+                        // A different return type is a different requirement:
+                        // `iter() -> Int64` (Walk) never satisfies Iterable's
+                        // `iter() -> TargetIterator`.
+                        && method_return_type_matches(
+                            cx,
+                            child,
+                            impl_method,
+                            type_entity,
+                            proto,
+                            &[],
+                            None,
+                        )
                     {
                         matching_protocols.push(proto);
                     }

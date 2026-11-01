@@ -50,7 +50,7 @@ pub(crate) use conformance::*;
 pub(crate) use defaults::*;
 pub(crate) use equality::*;
 use lower::*;
-pub(crate) use member::try_indirection_peel;
+pub(crate) use member::{extension_applies, requirement_call, try_indirection_peel};
 use member::*;
 
 /// Diagnose type parameters at generic call sites that inference couldn't
@@ -818,9 +818,6 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 ctx.poison(result);
                 continue;
             },
-            // Unresolved InterpolationLink: the accumulator was resolved by
-            // literal defaults. Absorb silently.
-            Constraint::InterpolationLink { .. } => continue,
             // The iterable never resolved — its own "could not infer"
             // diagnostic covers it; poison the iterator so the loop body
             // doesn't cascade.
@@ -1047,7 +1044,14 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
             span,
         } => {
             let r = solve_implicit(ctx, expected, &name, args, result, expr, span);
-            if matches!(r, SolveResult::Error(_)) {
+            // `result` is the expected type's var (`.name` is typed as its
+            // home), and an error is only reported once that is concrete —
+            // poisoning it would overwrite a known type shared with the
+            // context (a `return .x`'s function return type), cascading
+            // `_` into every later use. Only an unresolved result is poisoned.
+            if matches!(r, SolveResult::Error(_))
+                && matches!(ctx.slot(ctx.resolve(result)), TySlot::Unresolved { .. })
+            {
                 ctx.poison(result);
             }
             r
@@ -1082,12 +1086,6 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
             }
             r
         },
-
-        Constraint::InterpolationLink {
-            result_tv,
-            acc_tv,
-            span,
-        } => solve_interpolation_link(ctx, result_tv, acc_tv, span),
 
         Constraint::ForLoopIterator {
             iterable,

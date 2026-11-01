@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet};
 use kestrel_ast_builder::{Callable, ReceiverKind};
 use kestrel_hir::body::{HirBlock, HirCallArg, HirExpr, HirExprId, HirStmt};
 use kestrel_hir::res::LocalId as HirLocalId;
-use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::{FieldIdx, MirTy, TyId};
 use kestrel_type_infer::captures::{PlaceKey, ProjElem};
 
@@ -286,12 +285,17 @@ impl OssaBodyCtx<'_, '_> {
                     receiver,
                     protocol,
                     method,
+                    requirement,
                     args,
                     ..
                 } => {
-                    let labels = args.iter().map(|a| a.label.clone()).collect();
-                    let key = WitnessMethodKey::new(method.as_str_or_empty(), labels);
-                    let entity = self.find_protocol_method_entity(*protocol, &key);
+                    let requirement = self.chain_requirement(id).or(*requirement);
+                    let (_, entity) = self.protocol_call_target(
+                        requirement,
+                        *protocol,
+                        method.as_str_or_empty(),
+                        args,
+                    );
                     self.consuming_args(entity, Some(*receiver), args, &mut out);
                 },
                 _ => {},

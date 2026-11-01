@@ -2,9 +2,9 @@
 bb0:
     %v0 = literal i64 1  // @owned Int64
     %v1 = literal i64 1  // @owned Int64
-    %v2 = op1 StackAlloc(TyId(2)) %v1  // @owned Pointer[std.numeric.Int64]
+    %v2 = op1 StackAlloc(TyId(6)) %v1  // @owned Pointer[std.numeric.Int64]
     %v3 = begin_borrow %v0  // @guaranteed Int64
-    call std.numeric.Int64.init(@mut_borrow %v2, @borrow %v3)
+    call @witness std.core.ExpressibleByIntLiteral.init(intLiteral:) for std.numeric.Int64(@mut_borrow %v2, @borrow %v3)
     end_borrow %v3
     %v4 = take %v2, std.numeric.Int64  // @owned std.numeric.Int64
     %v5 = struct Test.Counter { .0: %v4 }  // @owned Test.Counter
@@ -27,7 +27,7 @@ bb1(%v11: @owned Int64, %v12: @owned Int64, %v13: @owned Pointer[std.numeric.Int
     end_borrow %v23
     %v25 = struct_extract %v24, .0  // @guaranteed std.numeric.Int64
     %v26 = copy_value %v25  // @owned std.numeric.Int64
-    %v27 = call std.result.Optional.from[std.numeric.Int64](%v26)  // @owned std.result.Optional[std.numeric.Int64]
+    %v27 = call @witness std.core.FromValue.from(_:) for std.result.Optional[std.numeric.Int64][std.numeric.Int64](%v26)  // @owned std.result.Optional[std.numeric.Int64]
     end_borrow %v24
     jump bb3(%v27, %v11, %v12, %v13, %v14, %v15)
 
@@ -55,7 +55,7 @@ bb4(%v39: @owned Int64, %v40: @owned Int64, %v41: @owned Pointer[std.numeric.Int
     end_borrow %v55
     %v57 = call Test.Counter.bump(@mut_borrow %v56)  // @owned ()
     end_borrow %v56
-    %v58 = call std.result.Optional.from[()](%v57)  // @owned std.result.Optional[()]
+    %v58 = call @witness std.core.FromValue.from(_:) for std.result.Optional[()][()](%v57)  // @owned std.result.Optional[()]
     jump bb6(%v58, %v39, %v40, %v41, %v42, %v43, %v44, %v45)
 
 bb5(%v47: @owned Int64, %v48: @owned Int64, %v49: @owned Pointer[std.numeric.Int64], %v50: @owned Pointer[std.result.Optional[Test.Counter]], %v51: @owned std.result.Optional[&Test.Counter], %v52: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v53: @owned std.result.Optional[&mutating Test.Counter], %v54: @owned Int32):
@@ -64,51 +64,55 @@ bb5(%v47: @owned Int64, %v48: @owned Int64, %v49: @owned Pointer[std.numeric.Int
     jump bb6(%v59, %v47, %v48, %v49, %v50, %v51, %v52, %v53)
 
 bb6(%v60: @owned std.result.Optional[()], %v61: @owned Int64, %v62: @owned Int64, %v63: @owned Pointer[std.numeric.Int64], %v64: @owned Pointer[std.result.Optional[Test.Counter]], %v65: @owned std.result.Optional[&Test.Counter], %v66: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v67: @owned std.result.Optional[&mutating Test.Counter]):
+    destroy_value %v60
     %v68 = call Test.make()  // @owned std.result.Optional[Test.Counter]
     %v69 = call @witness std.core.OptionalChain.chainTake for std.result.Optional[Test.Counter](%v68)  // @owned std.result.Optional[Test.Counter]
     %v70 = discriminant %v69  // @owned Int32
     switch %v70 {
-        variant 0 => bb7(%v61, %v62, %v63, %v64, %v65, %v66, %v67, %v60, %v69, %v70)
-        variant 1 => bb8(%v61, %v62, %v63, %v64, %v65, %v66, %v67, %v60, %v69, %v70)
+        variant 0 => bb7(%v61, %v62, %v63, %v64, %v65, %v66, %v67, %v69, %v70)
+        variant 1 => bb8(%v61, %v62, %v63, %v64, %v65, %v66, %v67, %v69, %v70)
     }
 
-bb7(%v71: @owned Int64, %v72: @owned Int64, %v73: @owned Pointer[std.numeric.Int64], %v74: @owned Pointer[std.result.Optional[Test.Counter]], %v75: @owned std.result.Optional[&Test.Counter], %v76: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v77: @owned std.result.Optional[&mutating Test.Counter], %v78: @owned std.result.Optional[()], %v79: @owned std.result.Optional[Test.Counter], %v80: @owned Int32):
-    destroy_value %v80
-    %v91 = begin_borrow %v79  // @guaranteed std.result.Optional[Test.Counter]
-    %v92 = enum_payload %v91, variant 0, .0  // @guaranteed Test.Counter
-    %v93 = copy_value %v92  // @owned Test.Counter
-    end_borrow %v91
-    %v94 = copy_value %v93  // @owned Test.Counter
-    %v95 = begin_borrow %v94  // @guaranteed Test.Counter
-    %v96 = struct_extract %v95, .0  // @guaranteed std.numeric.Int64
-    %v97 = copy_value %v96  // @owned std.numeric.Int64
+bb7(%v71: @owned Int64, %v72: @owned Int64, %v73: @owned Pointer[std.numeric.Int64], %v74: @owned Pointer[std.result.Optional[Test.Counter]], %v75: @owned std.result.Optional[&Test.Counter], %v76: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v77: @owned std.result.Optional[&mutating Test.Counter], %v78: @owned std.result.Optional[Test.Counter], %v79: @owned Int32):
+    destroy_value %v79
+    %v89 = begin_borrow %v78  // @guaranteed std.result.Optional[Test.Counter]
+    %v90 = enum_payload %v89, variant 0, .0  // @guaranteed Test.Counter
+    %v91 = copy_value %v90  // @owned Test.Counter
+    end_borrow %v89
+    %v92 = copy_value %v91  // @owned Test.Counter
+    %v93 = uninit Test.Counter  // @owned Pointer[Test.Counter]
+    store_init %v93, %v92
+    %v94 = field_addr %v93, Test.Counter, .0  // @owned Pointer[std.numeric.Int64]
+    %v95 = begin_borrow_addr %v94, std.numeric.Int64  // @guaranteed std.numeric.Int64
+    %v96 = copy_value %v95  // @owned std.numeric.Int64
     end_borrow %v95
-    %v98 = call std.result.Optional.from[std.numeric.Int64](%v97)  // @owned std.result.Optional[std.numeric.Int64]
+    %v97 = call @witness std.core.FromValue.from(_:) for std.result.Optional[std.numeric.Int64][std.numeric.Int64](%v96)  // @owned std.result.Optional[std.numeric.Int64]
     destroy_value %v94
+    destroy_addr %v93, Test.Counter
     destroy_value %v93
-    jump bb9(%v98, %v71, %v72, %v73, %v74, %v75, %v76, %v77, %v78, %v79)
+    destroy_value %v91
+    jump bb9(%v97, %v71, %v72, %v73, %v74, %v75, %v76, %v77, %v78)
 
-bb8(%v81: @owned Int64, %v82: @owned Int64, %v83: @owned Pointer[std.numeric.Int64], %v84: @owned Pointer[std.result.Optional[Test.Counter]], %v85: @owned std.result.Optional[&Test.Counter], %v86: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v87: @owned std.result.Optional[&mutating Test.Counter], %v88: @owned std.result.Optional[()], %v89: @owned std.result.Optional[Test.Counter], %v90: @owned Int32):
-    destroy_value %v90
-    %v99 = enum std.result.Optional[std.numeric.Int64].1  // @owned std.result.Optional[std.numeric.Int64]
-    jump bb9(%v99, %v81, %v82, %v83, %v84, %v85, %v86, %v87, %v88, %v89)
+bb8(%v80: @owned Int64, %v81: @owned Int64, %v82: @owned Pointer[std.numeric.Int64], %v83: @owned Pointer[std.result.Optional[Test.Counter]], %v84: @owned std.result.Optional[&Test.Counter], %v85: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v86: @owned std.result.Optional[&mutating Test.Counter], %v87: @owned std.result.Optional[Test.Counter], %v88: @owned Int32):
+    destroy_value %v88
+    %v98 = enum std.result.Optional[std.numeric.Int64].1  // @owned std.result.Optional[std.numeric.Int64]
+    jump bb9(%v98, %v80, %v81, %v82, %v83, %v84, %v85, %v86, %v87)
 
-bb9(%v100: @owned std.result.Optional[std.numeric.Int64], %v101: @owned Int64, %v102: @owned Int64, %v103: @owned Pointer[std.numeric.Int64], %v104: @owned Pointer[std.result.Optional[Test.Counter]], %v105: @owned std.result.Optional[&Test.Counter], %v106: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v107: @owned std.result.Optional[&mutating Test.Counter], %v108: @owned std.result.Optional[()], %v109: @owned std.result.Optional[Test.Counter]):
-    %v110 = uninit std.result.Optional[std.numeric.Int64]  // @owned Pointer[std.result.Optional[std.numeric.Int64]]
-    store_init %v110, %v100
-    %v111 = literal ()  // @owned ()
-    destroy_addr %v110, std.result.Optional[std.numeric.Int64]
-    destroy_value %v110
-    destroy_value %v109
+bb9(%v99: @owned std.result.Optional[std.numeric.Int64], %v100: @owned Int64, %v101: @owned Int64, %v102: @owned Pointer[std.numeric.Int64], %v103: @owned Pointer[std.result.Optional[Test.Counter]], %v104: @owned std.result.Optional[&Test.Counter], %v105: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v106: @owned std.result.Optional[&mutating Test.Counter], %v107: @owned std.result.Optional[Test.Counter]):
+    %v108 = uninit std.result.Optional[std.numeric.Int64]  // @owned Pointer[std.result.Optional[std.numeric.Int64]]
+    store_init %v108, %v99
+    %v109 = literal ()  // @owned ()
+    destroy_addr %v108, std.result.Optional[std.numeric.Int64]
     destroy_value %v108
     destroy_value %v107
-    destroy_addr %v35, std.result.Optional[std.numeric.Int64]
     destroy_value %v106
+    destroy_addr %v35, std.result.Optional[std.numeric.Int64]
     destroy_value %v105
-    destroy_addr %v7, std.result.Optional[Test.Counter]
     destroy_value %v104
+    destroy_addr %v7, std.result.Optional[Test.Counter]
     destroy_value %v103
     destroy_value %v102
     destroy_value %v101
-    return %v111
+    destroy_value %v100
+    return %v109
 

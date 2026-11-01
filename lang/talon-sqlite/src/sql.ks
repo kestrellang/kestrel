@@ -64,7 +64,7 @@ public struct SQL: ExpressibleByStringInterpolation, Cloneable {
         self.template = String(stringLiteral: ptr, length);
     }
 
-    public init(interpolation: SqlAccumulator) {
+    public init(consuming interpolation: SqlAccumulator) {
         var acc = interpolation;
         self.template = acc.template.build();
         self.bindings = acc.bindings;

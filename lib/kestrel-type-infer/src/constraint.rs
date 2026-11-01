@@ -294,15 +294,6 @@ pub enum Constraint {
         span: Span,
     },
 
-    /// Links a string interpolation's result type to its accumulator type.
-    /// Deferred until result_tv is concrete, then resolves the accumulator
-    /// via `ExpressibleByStringInterpolation::Interpolation`.
-    InterpolationLink {
-        result_tv: TyVar,
-        acc_tv: TyVar,
-        span: Span,
-    },
-
     /// A member was committed while its applicability was still `Unknown`
     /// (bidi design §5.1 step 6): the receiver had an open var, so the
     /// extension's where clauses (or the protocol conformance it was reached

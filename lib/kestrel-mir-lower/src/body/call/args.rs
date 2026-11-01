@@ -535,6 +535,40 @@ impl OssaBodyCtx<'_, '_> {
         conventions_from_callable(callable, false)
     }
 
+    /// The witness key and requirement entity a `ProtocolCall` dispatches
+    /// through — the ONE derivation shared by call lowering and the move
+    /// checker. A desugaring that names its `requirement` is keyed by that
+    /// requirement; only an untagged call (no stdlib tag) falls back to its
+    /// written name and call-site labels.
+    /// The requirement entity of a `?.` bind's settled mode, if `expr` is one.
+    pub(crate) fn chain_requirement(&self, expr: HirExprId) -> Option<Entity> {
+        let builtin = self.typed.as_ref()?.chain_requirement(expr)?;
+        self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin,
+            root: self.ctx.root,
+        })
+    }
+
+    pub(crate) fn protocol_call_target(
+        &self,
+        requirement: Option<Entity>,
+        protocol: Entity,
+        method_name: &str,
+        args: &[HirCallArg],
+    ) -> (WitnessMethodKey, Option<Entity>) {
+        if let Some(requirement) = requirement {
+            return (self.ctx.witness_method_key(requirement), Some(requirement));
+        }
+        kestrel_debug::ktrace!(
+            "witness-bind",
+            "untagged protocol call `{method_name}`: keyed by written name + labels"
+        );
+        let labels = args.iter().map(|a| a.label.clone()).collect();
+        let key = WitnessMethodKey::new(method_name, labels);
+        let entity = self.find_protocol_method_entity(protocol, &key);
+        (key, entity)
+    }
+
     pub(crate) fn find_protocol_method_entity(
         &self,
         protocol: Entity,

@@ -50,7 +50,7 @@ struct BracketString: ExpressibleByStringInterpolation, Cloneable {
         self.inner = String(stringLiteral: ptr, length);
     }
 
-    init(interpolation: BracketAccumulator) {
+    init(consuming interpolation: BracketAccumulator) {
         var acc = interpolation;
         self.inner = acc.build().inner;
     }

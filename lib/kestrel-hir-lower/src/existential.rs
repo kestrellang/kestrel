@@ -174,6 +174,7 @@ impl LowerCtx<'_> {
             owner: None,
             name: HirName::name(name),
             args: arg.map(|value| vec![HirCallArg { label: None, value }]),
+            requirement: None,
             span: span.clone(),
         })
     }

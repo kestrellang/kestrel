@@ -428,12 +428,24 @@ fn conformance_binding(
         return ConformancePick::Wait;
     }
 
+    // Each conformance's args WITH defaults: `Int64: Multipliable` is
+    // `Multipliable[Int64]`, so `Int64 * Int64` selects it over a sibling
+    // `Multipliable[Meters]` (a written-args-only compare never could).
     let mut selected = conformances.into_iter().filter(|(source, ast_ty)| {
         let written = kestrel_name_res::extract_ast_type_args(ast_ty);
-        written.len() == protocol_args.len()
-            && written.iter().zip(protocol_args).all(|(arg, &tv)| {
-                let hir = kestrel_hir_lower::lower_ast_type(ctx.query_ctx, *source, ctx.root, arg);
-                written_arg_matches(ctx, &hir, tv)
+        let args = kestrel_hir_lower::conformance_protocol_args(
+            ctx.query_ctx,
+            ctx.root,
+            protocol,
+            *source,
+            &written,
+        );
+        args.len() == protocol_args.len()
+            && args.iter().zip(protocol_args).all(|(arg, &tv)| match arg {
+                kestrel_hir::ty::HirTy::SelfType(..) => {
+                    matches!(ctx.slot(ctx.resolve(tv)), TySlot::Resolved(k) if k.entity() == Some(recv))
+                },
+                _ => written_arg_matches(ctx, arg, tv),
             })
     });
     let (Some((source, _)), None) = (selected.next(), selected.next()) else {

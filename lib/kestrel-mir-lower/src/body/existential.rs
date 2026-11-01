@@ -358,17 +358,12 @@ impl OssaBodyCtx<'_, '_> {
         };
         let Some(requirement) = self
             .ctx
-            .world
-            .children_of(protocol)
-            .iter()
-            .copied()
-            .find(|&c| {
-                self.ctx
-                    .world
-                    .get::<kestrel_ast_builder::Name>(c)
-                    .map(|n| n.0.as_str())
-                    == Some("consumePointee")
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::ConsumingIndirectionConsumePointee,
+                root: self.ctx.root,
             })
+            .filter(|&r| self.ctx.world.parent_of(r) == Some(protocol))
         else {
             return;
         };

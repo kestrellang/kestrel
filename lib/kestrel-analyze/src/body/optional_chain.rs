@@ -26,8 +26,7 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Callable, NodeKind, ReceiverKind};
-use kestrel_hecs::Entity;
+use kestrel_ast_builder::{Callable, ReceiverKind};
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
 use kestrel_semantics::CopySemantics;
@@ -77,22 +76,11 @@ impl BodyCheck for OptionalChainAnalyzer {
                     Some(*receiver),
                     args,
                 ),
-                HirExpr::ProtocolCall {
-                    receiver,
-                    protocol,
-                    method,
+                HirExpr::ProtocolCall { receiver, args, .. } => (
+                    crate::util::protocol_call_method(cx, expr_id),
+                    Some(*receiver),
                     args,
-                    ..
-                } => {
-                    let method = cx
-                        .typed
-                        .protocol_method_name(expr_id, method.as_str_or_empty());
-                    (
-                        protocol_method(cx, *protocol, method),
-                        Some(*receiver),
-                        args,
-                    )
-                },
+                ),
                 HirExpr::Call { callee, args, .. } => {
                     let entity = match &cx.hir.exprs[*callee] {
                         HirExpr::Def(entity, _, _) => Some(*entity),
@@ -147,9 +135,4 @@ fn moves(cx: &BodyContext<'_>, expr: HirExprId) -> bool {
     ty_copy_semantics(cx, ty) == CopySemantics::NotCopyable
 }
 
-/// The protocol's requirement named `name`.
-fn protocol_method(cx: &BodyContext<'_>, protocol: Entity, name: &str) -> Option<Entity> {
-    util::children_named_of_kind(cx.query, protocol, name, NodeKind::Function)
-        .first()
-        .copied()
-}
+

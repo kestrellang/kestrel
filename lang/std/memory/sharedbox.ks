@@ -25,6 +25,7 @@ public protocol ExistentialBox: Indirection {
     ///
     /// `value` is a single-name parameter, so call sites are positional:
     /// `B(payload)`, never `B(value: payload)`.
+    @builtin(.ExistentialBoxInit)
     init(consuming value: Target)
 }
 
@@ -95,6 +96,7 @@ public protocol SharedBox: ExistentialBox, Cloneable, MutableIndirection {
     /// aliases storage that other handles can read at the same time. Writing
     /// through it while a copy-on-write client assumes value semantics breaks
     /// those semantics for every sharer.
+    @builtin(.SharedBoxSharedMutRef)
     func sharedMutRef() -> &mutating Target
 
     /// Do the two handles refer to the same managed storage? Backs class

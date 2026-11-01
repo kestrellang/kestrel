@@ -1810,34 +1810,26 @@ impl OssaBodyCtx<'_, '_> {
         literal: &str,
     ) -> ValueId {
         // Materialize the string literal
-        let lit_val = if let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(string_ty) {
-            let entity = *entity;
-            if let Some(init) = self.find_string_literal_init(entity) {
-                let ptr = self.emit_literal(Immediate::string_pointer(literal.to_string()));
-                let len = self.emit_literal(Immediate::i64(literal.len() as i128));
-                self.ctx.register_name(init);
-                let callee = Callee::direct_with_args(init, vec![], None);
-                self.emit_init_literal_call(callee, vec![ptr, len], string_ty)
-            } else {
-                self.emit_literal(Immediate::string(literal.to_string()))
-            }
-        } else {
-            self.emit_literal(Immediate::string(literal.to_string()))
+        let lit_val = match self.emit_string_literal_value(literal, string_ty) {
+            Some(value) => value,
+            None => self.emit_literal(Immediate::string(literal.to_string())),
         };
 
-        // Resolve Matchable protocol
-        let proto_entity = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-            builtin: kestrel_hir::Builtin::Matchable,
+        // Call the tagged `Matchable.matches(other:)` requirement via witness
+        // dispatch; its key comes from the requirement, not a spelled-out name.
+        let requirement = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::MatchableMatches,
             root: self.ctx.root,
         });
-        let Some(proto) = proto_entity else {
+        let Some((proto, method_key)) = requirement.and_then(|r| {
+            let proto = self.ctx.is_protocol_method(r)?;
+            Some((proto, self.ctx.witness_method_key(r)))
+        }) else {
             return self.emit_literal(Immediate::bool(false));
         };
         self.ctx.register_name(proto);
 
-        // Call Matchable.matches(other:) via witness dispatch
         let bool_ty = self.ctx.module.ty_arena.bool();
-        let method_key = WitnessMethodKey::new("matches", vec![None]);
         let callee = Callee::Witness {
             protocol: proto,
             method: method_key,
@@ -2016,27 +2008,14 @@ impl OssaBodyCtx<'_, '_> {
                     == Some("Element")
             })?
             .entity;
-        // Binding in the type body, then in a conforming extension.
-        if let Some(ty) =
-            crate::items::witness_lower::find_associated_type(self.ctx, type_entity, elem_member)
-        {
-            return Some((ty, type_entity));
-        }
-        let extensions = self
-            .ctx
-            .query
-            .query(kestrel_name_res::extensions::ExtensionsFor {
-                target: type_entity,
-                root: self.ctx.root,
-            });
-        for ext in extensions {
-            if let Some(ty) =
-                crate::items::witness_lower::find_associated_type(self.ctx, ext, elem_member)
-            {
-                return Some((ty, ext));
-            }
-        }
-        None
+        let (alias, owner) = self.ctx.query.query(kestrel_name_res::AssociatedTypeBinding {
+            type_entity,
+            assoc: elem_member,
+            conformance_source: None,
+            root: self.ctx.root,
+        })?;
+        let ty = crate::ty::resolve_type_annotation(self.ctx, alias);
+        Some((ty, owner))
     }
 
     /// The stdlib `Int64` type — the index/length type of `ArrayMatchable`,
@@ -2052,23 +2031,10 @@ impl OssaBodyCtx<'_, '_> {
             .unwrap_or_else(|| self.ctx.module.ty_arena.i64())
     }
 
-    /// Wrap a raw `lang.i64` value into a stdlib `Int64` via its `intLiteral`
+    /// Wrap a raw `lang.i64` value into a stdlib `Int64` via its integer-literal
     /// init (the `matchGet`/`matchSlice` bounds are `Int64`-typed).
     fn emit_int64_wrap(&mut self, raw: ValueId, int64_ty: TyId) -> ValueId {
-        let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(int64_ty) else {
-            return raw;
-        };
-        let entity = *entity;
-        if let Some(init) = self.find_literal_init(
-            entity,
-            kestrel_hir::Builtin::ExpressibleByIntegerLiteral,
-            "intLiteral",
-        ) {
-            self.ctx.register_name(init);
-            let callee = Callee::direct_with_args(init, vec![], None);
-            return self.emit_init_literal_call(callee, vec![raw], int64_ty);
-        }
-        raw
+        self.emit_integer_literal_value(raw, int64_ty).unwrap_or(raw)
     }
 
     /// Emit `array.matchGet(index)` where `raw_index` is a raw `lang.i64`.

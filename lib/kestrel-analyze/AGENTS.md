@@ -496,3 +496,22 @@ The pattern to follow is `builtin_marker_protocol.rs` and `conformance_rules.rs`
 query `EntityBuiltin`, pattern-match the flag you care about, and let the answer
 come from the table. A flag with no reader is not documentation — it is a lie
 that compiles.
+
+## Same-name, same-label callables: one rule, `util::same_label_witnesses_allowed`
+
+Overloads are keyed by **labels**. The only exception: same-label callables
+may coexist when each witnesses a different requirement slot — a different
+protocol, or a different instantiation of one parameterized protocol
+(`Int64: Convertible[Int8], Convertible[Int16]`), compared with protocol-arg
+defaults applied (`kestrel_hir_lower::conformance_protocol_args`). A
+same-label overload beside a single conformance's witness is a duplicate.
+
+E426 (one declaration), E411 (type vs extension) and E412 (extension vs
+extension) all ask `same_label_witnesses_allowed` with the declaration
+owning each callable. Any new duplicate/overload check must call it too —
+never a local "is some protocol requirement named this" test (that was
+E426's old loophole) or AST-string comparison of protocol args (E412's).
+
+Associated-type bindings for a conformance come from the name-res query
+`AssociatedTypeBinding` (pass `conformance_source` when judging one
+conformance) — never a local alias walk.

@@ -601,7 +601,6 @@ fn closure_clone_as_copy(
         callee:
             Callee::Witness {
                 protocol,
-                method,
                 self_type,
                 ..
             },
@@ -610,7 +609,9 @@ fn closure_clone_as_copy(
     else {
         return None;
     };
-    if Some(*protocol) != cloneable_protocol || method.name != "clone" {
+    // `Cloneable` has exactly one requirement (`clone_shim::clone_witness_key`
+    // relies on the same invariant), so the protocol alone names it.
+    if Some(*protocol) != cloneable_protocol {
         return None;
     }
     let concrete = collect::substitute_and_resolve(arena, witnesses, *self_type, subst);

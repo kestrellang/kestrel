@@ -76,6 +76,7 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     /// # Errors
     ///
     /// Panics with `"UniqueBox allocation failed"` on allocation failure.
+    @builtin(.UniqueBoxInit)
     public init(consuming value: T) {
         let layout: Layout = Layout.of[UniqueBoxStorage[T]]();
         var allocator: SystemAllocator = SystemAllocator();
@@ -110,6 +111,7 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     /// # Safety
     ///
     /// Must be called at most once per box, and never after `destroy()`.
+    @builtin(.UniqueBoxTakeValue)
     public func takeValue() -> T {
         let livePtr = self.ptr.asRaw().cast[Int64]();
         livePtr.write(0);
@@ -123,6 +125,7 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     /// # Safety
     ///
     /// Must be called exactly once per box, after any `takeValue()`.
+    @builtin(.UniqueBoxDestroy)
     public func destroy() {
         let livePtr = self.ptr.asRaw().cast[Int64]();
         if livePtr.read() == 1 {

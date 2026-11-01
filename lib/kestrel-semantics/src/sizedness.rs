@@ -75,10 +75,12 @@ impl QueryFn for TypeParamSizeRequirement {
         // A compiler intrinsic's params (`lang.ptr[T]`, `lang.&`, `lang.*`
         // functions) work at the ABI level and accept an unsized argument —
         // the same reason the implicit-bound injection skips intrinsics.
-        if ctx
-            .parent_of(self.param)
-            .is_some_and(|owner| ctx.get::<Intrinsic>(owner).is_some())
-        {
+        // Tuples (`lang.(,)`) are the exception: they store their elements
+        // by value, so every element is sized.
+        if ctx.parent_of(self.param).is_some_and(|owner| {
+            ctx.get::<Intrinsic>(owner).is_some()
+                && kestrel_name_res::extensions::lang_tuple_arity(ctx, owner).is_none()
+        }) {
             return SizeRequirement::MayBeUnsized;
         }
         let mut relaxed = false;

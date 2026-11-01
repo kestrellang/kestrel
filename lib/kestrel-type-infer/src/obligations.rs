@@ -36,17 +36,12 @@ const DEFAULT_RULES: &[(&str, DefaultRule)] = &[
     // operator.
     ("rule L", solver::apply_operator_literal_adoption),
     // Rule C, then literal defaults, holding back arguments of calls still
-    // waiting on their receiver and interpolation accumulators.
-    ("literal defaults (strict)", |ctx| {
-        solver::apply_literal_defaults(ctx, 0)
-    }),
+    // waiting on their receiver.
+    ("literal defaults", solver::apply_literal_defaults),
     // A ref-initialized binding nothing else pinned takes its copy-out
-    // decay; it can gate the literals the next rule would default.
+    // decay; it can gate the literals the literal-defaults rule (re-run
+    // after any progress) would default.
     ("ref decay", solver::apply_ref_decay_defaults),
-    // Interpolation accumulators default too (so `"\(n)".bytes` resolves).
-    ("literal defaults (relaxed)", |ctx| {
-        solver::apply_literal_defaults(ctx, 1)
-    }),
 ];
 
 /// Finish inference for a body: flush, default, report.

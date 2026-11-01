@@ -58,5 +58,6 @@ public protocol Not {
 @builtin(.BooleanConditional)
 public protocol BooleanConditional {
     /// Returns the underlying truth value as a primitive `i1`.
+    @builtin(.BooleanConditionalBoolValue)
     func boolValue() -> lang.i1
 }

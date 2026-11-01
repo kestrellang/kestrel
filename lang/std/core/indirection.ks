@@ -54,5 +54,6 @@ public protocol ConsumingIndirection: MutableIndirection {
     /// A closure rather than a returned value because the payload's size may
     /// only be known at runtime; keeping "move out, then free" in one call
     /// means no caller can free the storage twice or forget to.
+    @builtin(.ConsumingIndirectionConsumePointee)
     consuming func consumePointee[R](body: (Pointer[Target]) -> R) -> R where R: not Copyable, R: not Static
 }

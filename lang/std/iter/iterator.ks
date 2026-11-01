@@ -888,6 +888,49 @@ extend Iterator where Item: Comparable {
         arr
     }
 
+    /// True if elements come out in ascending order. True for empty or
+    /// single-element iterators (vacuous). Short-circuits on the first
+    /// out-of-order pair.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// [1, 2, 3, 4, 5].iter().isSorted();   // true
+    /// [1, 3, 2, 4, 5].iter().isSorted();   // false
+    /// [1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+    /// ```
+    public consuming func isSorted() -> Bool {
+        if let .Some(first) = self.next() {
+            var prev = first;
+            while let .Some(item) = self.next() {
+                if item.compare(prev) == Ordering.Less {
+                    return false
+                }
+                prev = item;
+            }
+        }
+        true
+    }
+
+    /// True if elements come out in descending order. Mirror of
+    /// `isSorted`.
+    public consuming func isSortedDescending() -> Bool {
+        if let .Some(first) = self.next() {
+            var prev = first;
+            while let .Some(item) = self.next() {
+                if item.compare(prev) == Ordering.Greater {
+                    return false
+                }
+                prev = item;
+            }
+        }
+        true
+    }
+}
+
+/// Ordering helpers that don't require `Item: Comparable`: keyed
+/// `min`/`max` compare the key, and the sort checks take a comparator.
+extend Iterator {
     /// The element with the smallest `key(element)`. Ties go to the
     /// first occurrence.
     ///
@@ -931,49 +974,6 @@ extend Iterator where Item: Comparable {
             .None
         }
     }
-
-    /// True if elements come out in ascending order. True for empty or
-    /// single-element iterators (vacuous). Short-circuits on the first
-    /// out-of-order pair.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// [1, 2, 3, 4, 5].iter().isSorted();   // true
-    /// [1, 3, 2, 4, 5].iter().isSorted();   // false
-    /// [1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
-    /// ```
-    public consuming func isSorted() -> Bool {
-        if let .Some(first) = self.next() {
-            var prev = first;
-            while let .Some(item) = self.next() {
-                if item.compare(prev) == Ordering.Less {
-                    return false
-                }
-                prev = item;
-            }
-        }
-        true
-    }
-
-    /// True if elements come out in descending order. Mirror of
-    /// `isSorted`.
-    public consuming func isSortedDescending() -> Bool {
-        if let .Some(first) = self.next() {
-            var prev = first;
-            while let .Some(item) = self.next() {
-                if item.compare(prev) == Ordering.Greater {
-                    return false
-                }
-                prev = item;
-            }
-        }
-        true
-    }
-}
-
-/// Sort-check variants that don't require `Item: Comparable`.
-extend Iterator {
 
     /// True if every adjacent pair satisfies `comparator(prev, next)` —
     /// i.e. they are already in the order `comparator` defines.

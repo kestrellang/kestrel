@@ -38,7 +38,8 @@ pub use source_map::{BodySourceMap, LocalSource};
 pub use ty::{
     CallableRefReturn, LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs,
     LowerTypeAnnotation, PlaceAccessorInfo, PlaceAccessors, RefPolicy, RefPosition, RefReturn,
-    lower_ast_type, reject_ref_types, reject_ref_types_allowing_top_ref,
+    conformance_protocol_args, lower_ast_type, reject_ref_types,
+    reject_ref_types_allowing_top_ref,
 };
 
 use ctx::LowerCtx;

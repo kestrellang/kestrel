@@ -216,16 +216,12 @@ pub(crate) fn clone_thunk(ctx: &mut LowerCtx) -> Option<Entity> {
     }
     let cloneable = ctx.module.cloneable_protocol?;
     let requirement = ctx
-        .world
-        .children_of(cloneable)
-        .iter()
-        .copied()
-        .find(|&c| {
-            ctx.world
-                .get::<kestrel_ast_builder::Name>(c)
-                .map(|n| n.0.as_str())
-                == Some("clone")
-        })?;
+        .query
+        .query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::CloneMethod,
+            root: ctx.root,
+        })
+        .filter(|&r| ctx.world.parent_of(r) == Some(cloneable))?;
     ctx.register_name(cloneable);
     let key = ctx.witness_method_key(requirement);
     let entity = ctx.next_synthetic_entity();

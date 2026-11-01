@@ -343,21 +343,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 return result_tv;
             }
 
-            // String interpolation accumulator init: replace the concrete
-            // DefaultStringInterpolation struct init with a deferred Implicit
-            // constraint. The literal kind defaults to DefaultStringInterpolation
-            // if nothing else constrains it. solve_implicit handles init
-            // resolution on the concrete type once resolved.
-            if Some(id) == ctx.interpolation_init_expr.take() {
-                let acc_tv = ctx.fresh_literal(LiteralKind::StringInterpolation);
-                ctx.interpolation_acc_tv = Some(acc_tv);
-                let arg_tvs = gen_call_args(ctx, hir, args);
-                let result_tv = ctx.fresh();
-                ctx.implicit(acc_tv, "init", arg_tvs, result_tv, id, span.clone());
-                ctx.expr_types.insert(id, result_tv);
-                return result_tv;
-            }
-
             // Struct construction: Def(struct) used as callee. Free-standing
             // type aliases are already dereferenced by name resolution, so
             // `type C = Counter; C(42)` reaches here with Def(Counter).
@@ -540,11 +525,15 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             receiver,
             protocol,
             method,
+            requirement,
             args,
             from_operator,
             span,
             ..
         } => {
+            if let Some(requirement) = requirement {
+                ctx.protocol_call_requirements.insert(id, *requirement);
+            }
             let recv_tv = gen_expr(ctx, hir, *receiver);
             let arg_tvs = gen_call_args(ctx, hir, args);
             let result_tv = ctx.fresh();
@@ -679,6 +668,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             owner,
             name,
             args,
+            requirement,
             span,
         } => {
             // A written owner (`Opt[Int64].Some(1)`, `Opt.None`, `Self.Some`)
@@ -693,29 +683,52 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 .as_ref()
                 .map(|a| gen_call_args(ctx, hir, a))
                 .unwrap_or_default();
-            let result_tv = ctx.fresh();
-
-            let Some(name_str) = name.as_str() else {
-                ctx.poison(result_tv);
-                return result_tv;
+            // An interpolation's `init(interpolation:)` is the literal itself:
+            // its type comes from context, else the default (`String`).
+            let result_tv = if ctx.interpolation_results.remove(&id) {
+                ctx.fresh_literal(LiteralKind::StringInterpolation)
+            } else {
+                ctx.fresh()
             };
-            // Check mode (bidi §2.1): look `.Case` up on the expected type,
-            // or on its promotion target (`.Red` against `Color?` is a
-            // `Color`, then promoted by the caller's coercion).
-            // With a written owner, that type is the home — the context only
-            // checks the result afterwards.
-            let home = owner_tv.or_else(|| {
-                expect
-                    .as_ref()
-                    .and_then(|(e, _)| implicit_case_home(ctx, *e, name_str))
-            });
-            if let Some(home) = home {
-                ctx.equal(result_tv, home, span.clone());
+
+            // A desugaring's requirement call (`try`'s `fromResidual`): `Self`
+            // is the expected type, i.e. the value's own type. (No early
+            // `return`: the value must reach the `expr_types` record at the
+            // end of `gen_expr`, which MIR lowering reads as the call's Self.)
+            if let Some(requirement) = requirement {
+                crate::solver::requirement_call(
+                    ctx,
+                    *requirement,
+                    result_tv,
+                    &arg_tvs,
+                    result_tv,
+                    id,
+                    span.clone(),
+                );
+                result_tv
+            } else {
+                let Some(name_str) = name.as_str() else {
+                    ctx.poison(result_tv);
+                    return result_tv;
+                };
+                // Check mode (bidi §2.1): look `.Case` up on the expected type,
+                // or on its promotion target (`.Red` against `Color?` is a
+                // `Color`, then promoted by the caller's coercion).
+                // With a written owner, that type is the home — the context only
+                // checks the result afterwards.
+                let home = owner_tv.or_else(|| {
+                    expect
+                        .as_ref()
+                        .and_then(|(e, _)| implicit_case_home(ctx, *e, name_str))
+                });
+                if let Some(home) = home {
+                    ctx.equal(result_tv, home, span.clone());
+                }
+                // Implicit constraint: decided here against the home just
+                // equated (or queued while the expected type is still open).
+                ctx.implicit(result_tv, name_str, arg_tvs, result_tv, id, span.clone());
+                result_tv
             }
-            // Implicit constraint: decided here against the home just
-            // equated (or queued while the expected type is still open).
-            ctx.implicit(result_tv, name_str, arg_tvs, result_tv, id, span.clone());
-            result_tv
         },
 
         // === Control flow ===
@@ -1014,19 +1027,24 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // to each literal element. Falls back to fresh on the default path.
             let arr_tv = ctx.fresh_literal(LiteralKind::Array);
             ctx.literal_spans.insert(arr_tv, span.clone());
+            let conformer = adopt_conformer_expectation(ctx, arr_tv, &expect, LiteralKind::Array, span);
             let elem_tv = ctx.fresh();
             ctx.associated(arr_tv, "Element", elem_tv, span.clone());
             // Bidirectional hint: if the enclosing `let` annotated this array
             // with `Array[E]`, pre-seed `elem_tv` with `E` before element
-            // constraints run. This way each element is compared against the
-            // target element type, not against whatever literal kind the first
-            // element happens to have.
+            // constraints run — or, for a conformer target (`let v: J = [...]`),
+            // `elem_tv` is already `J.Element`. This way each element is
+            // compared against the target element type, not against whatever
+            // literal kind the first element happens to have.
             let hint = expect
                 .as_ref()
-                .and_then(|(expected, _)| extract_array_elem_hint(ctx, *expected));
+                .and_then(|(expected, _)| extract_array_elem_hint(ctx, *expected))
+                .or_else(|| (conformer && expectation_known(ctx, elem_tv)).then_some(elem_tv));
             let hinted = match hint {
                 Some(hint_elem) => {
-                    ctx.equal(elem_tv, hint_elem, span.clone());
+                    if hint_elem != elem_tv {
+                        ctx.equal(elem_tv, hint_elem, span.clone());
+                    }
                     true
                 },
                 None => false,
@@ -1062,6 +1080,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Dict { entries, span } => {
             let dict_tv = ctx.fresh_literal(LiteralKind::Dictionary);
             ctx.literal_spans.insert(dict_tv, span.clone());
+            let conformer =
+                adopt_conformer_expectation(ctx, dict_tv, &expect, LiteralKind::Dictionary, span);
             let key_tv = ctx.fresh();
             let val_tv = ctx.fresh();
             ctx.associated(dict_tv, "Key", key_tv, span.clone());
@@ -1073,10 +1093,23 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.equal(key_tv, hint_key, span.clone());
                 ctx.equal(val_tv, hint_val, span.clone());
             }
+            // A conformer target (`let v: J = ["k": 1, "n": null]`) already
+            // knows its `Key`/`Value`: each entry is checked against them, so
+            // mixed values each build the target's `Value` and nested literals
+            // / implicit members (`.Str(s)`) see it as their expected type.
+            let checked_entry = (conformer
+                && expectation_known(ctx, key_tv)
+                && expectation_known(ctx, val_tv))
+            .then_some((key_tv, val_tv));
             for entry in entries {
                 // Literal entries always decay refs to owned (stage 1.5).
                 mark_arm_value(ctx, hir, entry.key);
                 mark_arm_value(ctx, hir, entry.value);
+                if let Some((key, value)) = checked_entry {
+                    check_leaf(ctx, hir, entry.key, key, Reason::Unspecified);
+                    check_leaf(ctx, hir, entry.value, value, Reason::Unspecified);
+                    continue;
+                }
                 let k = gen_expr(ctx, hir, entry.key);
                 let v = gen_expr(ctx, hir, entry.value);
                 let k = peel_ref_tv(ctx, k);
@@ -1163,7 +1196,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         // `poison_protocol_call_recv_on_failure` BEFORE recursing, so when
         // `gen_expr` reaches that ProtocolCall it emits a poisoning Conforms.
         // Type-of(Sugar) == type-of(inner) (structurally transparent).
-        HirExpr::Sugar { kind, inner, span } => {
+        HirExpr::Sugar { kind, inner, .. } => {
             mark_sugar_primary(ctx, hir, *kind, *inner);
             // An interpolation is one literal checked in place (bidi §6.1):
             // its desugared accumulator calls are not user receivers.
@@ -1176,15 +1209,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             }
             let result_tv = gen_expr(ctx, hir, *inner);
             ctx.interpolation_depth -= interp as u32;
-
-            // Link the interpolation's result type to its accumulator so that
-            // an expected type (from a let annotation or function parameter)
-            // can drive which accumulator is used.
-            if matches!(kind, kestrel_hir::body::SugarKind::StringInterpolation)
-                && let Some(acc_tv) = ctx.interpolation_acc_tv.take()
-            {
-                ctx.interpolation_link(result_tv, acc_tv, span.clone());
-            }
 
             propagate_closure_literal(ctx, *inner, id);
             result_tv
@@ -1287,21 +1311,12 @@ fn mark_sugar_primary(
             ctx.poison_protocol_call_recv_on_failure.insert(inner);
         },
         SugarKind::StringInterpolation => {
-            // inner is Block { stmts: [Let($dsi, init_call), ...], tail_expr: build_call }.
-            // If the DSI init fails (stdlib missing), poison so append/build errors absorb.
-            let HirExpr::Block { body, .. } = &hir.exprs[inner] else {
-                return;
-            };
-            if let Some(first_stmt) = body.stmts.first()
-                && let HirStmt::Let {
-                    value: Some(init_call),
-                    ..
-                } = &hir.stmts[*first_stmt]
+            // inner is Block { stmts: [Let($dsi, .init(...)), appends...],
+            // tail_expr: .init(interpolation: $dsi) }. The tail is the literal.
+            if let HirExpr::Block { body, .. } = &hir.exprs[inner]
+                && let Some(tail) = body.tail_expr
             {
-                ctx.poison_protocol_call_recv_on_failure.insert(*init_call);
-                // Tag the init call so gen_expr replaces the concrete DSI struct
-                // init with a deferred type variable (like a type parameter call).
-                ctx.interpolation_init_expr = Some(*init_call);
+                ctx.interpolation_results.insert(tail);
             }
         },
     }
@@ -2415,9 +2430,6 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
             Constraint::Associated {
                 container, result, ..
             } if produced_by(result) => inputs.push(*container),
-            Constraint::InterpolationLink {
-                result_tv, acc_tv, ..
-            } if produced_by(result_tv) => inputs.push(*acc_tv),
             Constraint::TupleIndex { tuple, result, .. } if produced_by(result) => {
                 inputs.push(*tuple)
             },
@@ -3214,6 +3226,44 @@ fn extract_array_elem_hint(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
     args.first().copied()
 }
 
+/// A collection literal whose expected type is a concrete conformer of its
+/// literal protocol other than the default (`let v: J = [...]` with
+/// `J: _ExpressibleByArrayLiteral`) IS that type: equate it now, before the
+/// `Element`/`Key`/`Value` constraints are emitted, so they resolve on the spot
+/// and the elements are checked against them instead of unifying with each
+/// other (`[1, "two", true]`). Returns whether it adopted the expectation.
+fn adopt_conformer_expectation(
+    ctx: &mut InferCtx<'_>,
+    literal_tv: TyVar,
+    expect: &Option<(TyVar, Reason)>,
+    literal: LiteralKind,
+    span: &Span,
+) -> bool {
+    let Some((expected, _)) = expect else {
+        return false;
+    };
+    let default = match literal {
+        LiteralKind::Array => kestrel_hir::Builtin::DefaultArrayLiteralType,
+        LiteralKind::Dictionary => kestrel_hir::Builtin::DefaultDictionaryLiteralType,
+        _ => return false,
+    };
+    let TySlot::Resolved(kind) = ctx.slot(ctx.resolve(*expected)) else {
+        return false;
+    };
+    let kind = kind.clone();
+    let entity = match &kind {
+        TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. } => *entity,
+        _ => return false,
+    };
+    if ctx.resolver.builtin(default) == Some(entity)
+        || !crate::unify::conforms_to_literal_protocol(ctx, &kind, literal)
+    {
+        return false;
+    }
+    ctx.equal(literal_tv, *expected, span.clone());
+    true
+}
+
 /// If `tv` resolves to `Dictionary[K, V, ...]`, return TyVars for `(K, V)`.
 /// Used by `HirStmt::Let` to feed annotated key/value types into a dictionary
 /// literal RHS before entry constraints run.
@@ -3285,8 +3335,7 @@ fn literal_protocol(ctx: &InferCtx<'_>, literal: LiteralKind) -> Option<Entity> 
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
         LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
         LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
-        // Accumulator type — resolved by InterpolationLink, no literal protocol
-        LiteralKind::StringInterpolation => return None,
+        LiteralKind::StringInterpolation => Builtin::ExpressibleByStringInterpolation,
     };
     ctx.resolver.builtin(builtin)
 }

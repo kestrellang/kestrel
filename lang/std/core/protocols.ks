@@ -45,6 +45,7 @@ public protocol Equatable {
 @builtin(.Matchable)
 public protocol Matchable {
     /// Returns `true` if `other` matches the receiver.
+    @builtin(.MatchableMatches)
     func matches(other: Self) -> Bool
 }
 

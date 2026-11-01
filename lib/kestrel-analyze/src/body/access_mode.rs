@@ -130,19 +130,8 @@ impl BodyCheck for AccessModeAnalyzer {
                         check_call_args(cx, entity, args, Some(*receiver), &mut diags);
                     }
                 },
-                HirExpr::ProtocolCall {
-                    receiver,
-                    protocol,
-                    method,
-                    args,
-                    ..
-                } => {
-                    // Find the protocol method entity (a `?.` bind's is the
-                    // one inference settled on).
-                    let method = cx
-                        .typed
-                        .protocol_method_name(expr_id, method.as_str_or_empty());
-                    if let Some(method_entity) = find_protocol_method(cx, *protocol, method) {
+                HirExpr::ProtocolCall { receiver, args, .. } => {
+                    if let Some(method_entity) = crate::util::protocol_call_method(cx, expr_id) {
                         check_call_args(cx, method_entity, args, Some(*receiver), &mut diags);
                     }
                 },
@@ -606,13 +595,4 @@ fn pat_has_mutating_ref_binder(cx: &BodyContext<'_>, pat: kestrel_hir::body::Hir
     }
 }
 
-/// Find a method entity on a protocol by name.
-fn find_protocol_method(
-    cx: &BodyContext<'_>,
-    protocol: kestrel_hecs::Entity,
-    method_name: &str,
-) -> Option<kestrel_hecs::Entity> {
-    util::children_named_of_kind(cx.query, protocol, method_name, NodeKind::Function)
-        .first()
-        .copied()
-}
+

@@ -345,22 +345,18 @@ pub(crate) fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
 /// to an Int32 field: the negate result is already Int32, so the literal should
 /// adopt Int32 instead of defaulting to Int64.
 ///
-/// Blocking is controlled by `relax_level`:
-///   0 — strict: InterpolationLink accumulators and arg-position literals
-///       in deferred Member/Call with unresolved receivers are both blocked.
-///   1 — relaxed: InterpolationLink blocking lifted (string interpolation
-///       literals default normally, unblocking downstream chains).
-///   2 — force: all blocking removed.
+/// Arg-position literals of a deferred Member/Call whose receiver is still
+/// unresolved are held back: dispatch may yet type them.
 ///
 /// Returns `true` when this call made any change.
-pub(crate) fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
+pub(crate) fn apply_literal_defaults(ctx: &mut InferCtx<'_>) -> bool {
     // Context first, and alone: a context pick can unblock arguments the
     // solver should type from it (`100 + 27` against `Int8` pins `100`, then
     // `27` must flow from `add`'s parameter, not default to Int64).
     if apply_context_literals(ctx) {
         return true;
     }
-    apply_literal_defaults_rest(ctx, relax_level)
+    apply_literal_defaults_rest(ctx)
 }
 
 /// The context-driven first pass of `apply_literal_defaults`.
@@ -422,8 +418,8 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
     progress
 }
 
-pub(crate) fn apply_literal_defaults_rest(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
-    apply_literal_defaults_from(ctx, relax_level, 0)
+pub(crate) fn apply_literal_defaults_rest(ctx: &mut InferCtx<'_>) -> bool {
+    apply_literal_defaults_from(ctx, 0)
 }
 
 /// Literal defaulting restricted to TyVars allocated at or after `start`.
@@ -444,7 +440,7 @@ pub(crate) fn default_literal_var(
         LiteralKind::Null => Builtin::DefaultNullLiteralType,
         LiteralKind::Array => Builtin::DefaultArrayLiteralType,
         LiteralKind::Dictionary => Builtin::DefaultDictionaryLiteralType,
-        LiteralKind::StringInterpolation => Builtin::DefaultStringInterpolation,
+        LiteralKind::StringInterpolation => Builtin::DefaultStringLiteralType,
     };
     let Some(entity) = ctx.resolver.builtin(feature) else {
         return false;
@@ -483,39 +479,13 @@ pub(crate) fn default_literal_var(
     true
 }
 
-pub(crate) fn apply_literal_defaults_from(
-    ctx: &mut InferCtx<'_>,
-    relax_level: u8,
-    start: usize,
-) -> bool {
+pub(crate) fn apply_literal_defaults_from(ctx: &mut InferCtx<'_>, start: usize) -> bool {
     let mut progress = false;
 
-    // Compute the set of literal TyVars that are "blocked" at this relax
-    // level. Level 2 removes all blocking; levels 0–1 block arg-position
-    // literals whose receiver is still unresolved; level 0 additionally
-    // blocks InterpolationLink accumulators.
+    // The literal TyVars held back: arg-position literals whose receiver is
+    // still unresolved.
     let blocked: crate::collections::HashSet<TyVar> = {
         let mut set = crate::collections::HashSet::default();
-
-        // InterpolationLink blocking — only at level 0. At level 1+,
-        // string interpolation accumulators default normally, unblocking
-        // downstream Member/Call chains that depend on the string type
-        // (e.g. interpolation → bytes subscript → UInt8 → == context).
-        if relax_level == 0 {
-            for constraint in &ctx.constraints {
-                if let Constraint::InterpolationLink { acc_tv, .. } = constraint {
-                    let acc_resolved = ctx.resolve(*acc_tv);
-                    if matches!(
-                        &ctx.types[acc_resolved.0 as usize],
-                        TySlot::Unresolved {
-                            literal: Some(LiteralKind::StringInterpolation)
-                        }
-                    ) {
-                        set.insert(acc_resolved);
-                    }
-                }
-            }
-        }
 
         for constraint in &ctx.constraints {
             let (receiver, args) = match constraint {

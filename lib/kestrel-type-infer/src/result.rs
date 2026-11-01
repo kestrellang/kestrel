@@ -84,10 +84,10 @@ pub struct TypedBody {
     /// existential box when well-typed; analyzers report E152 otherwise).
     pub type_tests: HashMap<kestrel_hir::body::HirPatId, ResolvedTy>,
 
-    /// The method each `?.` bind calls, keyed by its scrutinee
+    /// The mode each `?.` bind settled on, keyed by its scrutinee
     /// `ProtocolCall` (optional-chaining design §2). Overrides the
-    /// provisional name HIR lowering wrote; MIR lowering and `access_mode`
-    /// read it through `protocol_method_name`.
+    /// provisional requirement HIR lowering tagged; MIR lowering and the
+    /// analyzers read it through `chain_requirement`.
     pub chain_modes: HashMap<HirExprId, ChainMode>,
 }
 
@@ -103,24 +103,29 @@ pub enum ChainMode {
 }
 
 impl ChainMode {
-    /// The `OptionalChain` requirement this mode calls.
-    pub fn method_name(self) -> &'static str {
+    /// The `@builtin`-tagged `OptionalChain` requirement this mode calls.
+    pub fn requirement(self) -> kestrel_hir::Builtin {
         match self {
-            ChainMode::Borrow => "chainBorrow",
-            ChainMode::Mutate => "chainMutate",
-            ChainMode::Take => "chainTake",
+            ChainMode::Borrow => kestrel_hir::Builtin::OptionalChainBorrowMethod,
+            ChainMode::Mutate => kestrel_hir::Builtin::OptionalChainMutateMethod,
+            ChainMode::Take => kestrel_hir::Builtin::OptionalChainTakeMethod,
         }
+    }
+
+    /// The mode a bind's provisional requirement (HIR lowering's pick) names.
+    pub fn of_requirement(builtin: kestrel_hir::Builtin) -> Option<ChainMode> {
+        [ChainMode::Borrow, ChainMode::Mutate, ChainMode::Take]
+            .into_iter()
+            .find(|m| m.requirement() == builtin)
     }
 }
 
 impl TypedBody {
-    /// The method a `ProtocolCall` really calls: the written name, unless
-    /// it is a `?.` bind whose mode inference settled.
-    pub fn protocol_method_name<'a>(&self, expr: HirExprId, written: &'a str) -> &'a str {
-        match self.chain_modes.get(&expr) {
-            Some(mode) => mode.method_name(),
-            None => written,
-        }
+    /// The requirement a `?.` bind really calls once inference settled its
+    /// mode (`chainBorrow` may become `chainMutate`); `None` for any other
+    /// expression.
+    pub fn chain_requirement(&self, expr: HirExprId) -> Option<kestrel_hir::Builtin> {
+        self.chain_modes.get(&expr).map(|m| m.requirement())
     }
 }
 

@@ -952,11 +952,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             }
         }
 
+        let Some(method) = self
+            .ctx
+            .builtin_witness_key(kestrel_hir::Builtin::BooleanConditionalBoolValue)
+        else {
+            return cond_val;
+        };
         self.ctx.register_name(protocol);
         let bool_ty = self.ctx.module.ty_arena.bool();
         let callee = Callee::Witness {
             protocol,
-            method: kestrel_mir::WitnessMethodKey::simple("boolValue"),
+            method,
             self_type: cond_ty,
             method_type_args: vec![],
         };

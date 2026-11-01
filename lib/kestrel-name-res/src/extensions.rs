@@ -3,6 +3,7 @@
 //! Finds extensions for a given type entity and resolves extension
 //! target types from AstType to entities.
 
+use kestrel_ast_builder::lang_module::lang_tuple_name;
 use kestrel_ast_builder::{ExtensionLhsParamNames, ExtensionTarget, Name, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
@@ -54,6 +55,10 @@ impl QueryFn for ExtensionTargetEntity {
                 let name = if *mutating { "&mutating" } else { "&" };
                 return resolve_lang_child(ctx, self.root, name);
             },
+            // `(X, Y)` → the synthetic `lang.(,)` of that arity.
+            kestrel_ast::AstType::Tuple(elems, _) if elems.len() >= 2 => {
+                return resolve_lang_child(ctx, self.root, &lang_tuple_name(elems.len()));
+            },
             // Type sugar names its standard type: `extend [T]` is
             // `extend Array[T]` (and likewise `T?`, `[K: V]`).
             kestrel_ast::AstType::Array(..)
@@ -102,8 +107,16 @@ impl QueryFn for ExtensionTargetEntity {
 /// Both halves matter. Taking the target's parameters unfiltered leaks `T`
 /// into `extend Box[Payload]` bodies; ignoring them entirely (the old
 /// `TypeParams`-only view) makes E439's shadowing walk blind to every generic
-/// extension. Matching is by name, as it has always been, so `extend Box[U]`
-/// binds nothing — positional binding would be a separate behavior change.
+/// extension.
+///
+/// Each entry pairs the name the extension WROTE with the parameter it binds;
+/// consumers match on that name, never the parameter's own `Name`:
+/// - a nominal target binds by name, as it always has (`extend Box[U]` binds
+///   nothing);
+/// - a structural target (`&T`, `(X, Y)`) binds by position — its synthetic
+///   `lang` entity's parameter names are invented. An element binds only when
+///   it is a bare name that resolves to no type, so `extend (Int64, Y)` keeps
+///   `Int64` concrete and binds `Y` alone.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ExtensionLhsParams {
     pub extension: Entity,
@@ -111,9 +124,9 @@ pub struct ExtensionLhsParams {
 }
 
 impl QueryFn for ExtensionLhsParams {
-    type Output = Vec<Entity>;
+    type Output = Vec<(String, Entity)>;
 
-    fn execute(&self, ctx: &QueryContext<'_>) -> Vec<Entity> {
+    fn execute(&self, ctx: &QueryContext<'_>) -> Vec<(String, Entity)> {
         let Some(lhs) = ctx.get::<ExtensionLhsParamNames>(self.extension) else {
             return Vec::new();
         };
@@ -129,13 +142,84 @@ impl QueryFn for ExtensionLhsParams {
         let Some(params) = ctx.get::<TypeParams>(target) else {
             return Vec::new();
         };
+        if let Some(elements) = structural_target_elements(ctx, self.extension, target) {
+            return self.bind_positionally(ctx, &elements, &params.0);
+        }
         params
             .0
             .iter()
-            .copied()
-            .filter(|&tp| ctx.get::<Name>(tp).is_some_and(|n| lhs.0.contains(&n.0)))
+            .filter_map(|&tp| {
+                let name = &ctx.get::<Name>(tp)?.0;
+                lhs.0.contains(name).then(|| (name.clone(), tp))
+            })
             .collect()
     }
+}
+
+impl ExtensionLhsParams {
+    /// Pair each bare, unresolvable element name with the parameter at its
+    /// position.
+    fn bind_positionally(
+        &self,
+        ctx: &QueryContext<'_>,
+        elements: &[kestrel_ast::AstType],
+        params: &[Entity],
+    ) -> Vec<(String, Entity)> {
+        let context = ctx.parent_of(self.extension).unwrap_or(self.root);
+        elements
+            .iter()
+            .zip(params)
+            .filter_map(|(element, &param)| {
+                let kestrel_ast::AstType::Named { segments, .. } = element else {
+                    return None;
+                };
+                let [segment] = segments.as_slice() else {
+                    return None;
+                };
+                if !segment.type_args.is_empty() {
+                    return None;
+                }
+                let resolved = ctx.query(ResolveTypePath {
+                    segments: vec![segment.name.clone()],
+                    context,
+                    root: self.root,
+                });
+                matches!(resolved, TypeResolution::NotFound(..)).then(|| (segment.name.clone(), param))
+            })
+            .collect()
+    }
+}
+
+/// The written element types of a structural extension target — a ref's
+/// pointee, a tuple's elements — when `target` is its synthetic `lang` entity.
+fn structural_target_elements(
+    ctx: &QueryContext<'_>,
+    extension: Entity,
+    target: Entity,
+) -> Option<Vec<kestrel_ast::AstType>> {
+    if lang_ref_mutability(ctx, target).is_none() && lang_tuple_arity(ctx, target).is_none() {
+        return None;
+    }
+    match &ctx.get::<ExtensionTarget>(extension)?.0 {
+        kestrel_ast::AstType::Ref { inner, .. } => Some(vec![inner.as_ref().clone()]),
+        kestrel_ast::AstType::Tuple(elems, _) => Some(elems.clone()),
+        _ => None,
+    }
+}
+
+/// Reverse detector for the synthetic tuple entities: the arity of
+/// `lang.(,)`-style entities, `None` otherwise. THE check for every
+/// Entity-keyed site that must map the entity back to a tuple type.
+pub fn lang_tuple_arity(ctx: &QueryContext<'_>, entity: Entity) -> Option<usize> {
+    let name = &ctx.get::<Name>(entity)?.0;
+    let arity = name.matches(',').count() + 1;
+    if arity < 2 || *name != lang_tuple_name(arity) {
+        return None;
+    }
+    let parent = ctx.parent_of(entity)?;
+    (ctx.get::<NodeKind>(parent) == Some(&NodeKind::Module)
+        && ctx.get::<Name>(parent).is_some_and(|n| n.0 == "lang"))
+    .then_some(arity)
 }
 
 /// Reverse detector for the synthetic ref-extension entities: `Some(false)`

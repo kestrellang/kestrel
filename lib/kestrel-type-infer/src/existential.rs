@@ -208,8 +208,13 @@ pub(crate) fn peel_for_member(
         .resolver
         .resolve_member(&raw_kind, name, args)
         .or_else(|_| {
-            ctx.resolver
-                .resolve_static_member(&raw_kind, name, args, is_call)
+            ctx.resolver.resolve_static_member(
+                &raw_kind,
+                name,
+                args,
+                is_call,
+                &|ext| crate::solver::extension_applies(ctx, ext, &raw_kind),
+            )
         })
         .ok()?
         .entity;

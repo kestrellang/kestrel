@@ -198,18 +198,12 @@ fn collect_lhs_target_names(world: &World, entity: Entity) -> Vec<String> {
     let Some(target) = world.get::<ExtensionTarget>(entity) else {
         return names;
     };
-    if let AstType::Ref { inner, .. } = &target.0 {
-        if let AstType::Named { segments, .. } = inner.as_ref()
-            && segments.len() == 1
-            && segments[0].type_args.is_empty()
-        {
-            push(&segments[0].name);
-        }
-        return names;
-    }
-    // The target's type arguments: `Array[T]`, or the sugar spellings
-    // `[T]`, `T?` and `[K: V]`.
+    // The target's type arguments: `Array[T]`, the sugar spellings `[T]`,
+    // `T?` and `[K: V]`, a ref's pointee (`&T`) or a tuple's elements
+    // (`(X, Y)`).
     let args: Vec<&AstType> = match &target.0 {
+        AstType::Ref { inner, .. } => vec![inner.as_ref()],
+        AstType::Tuple(elems, _) => elems.iter().collect(),
         AstType::Named { segments, .. } => match segments.last() {
             Some(last) => last.type_args.iter().collect(),
             None => return names,

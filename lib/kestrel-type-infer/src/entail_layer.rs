@@ -371,12 +371,18 @@ impl EntailLayer for FrontEndLayer<'_, '_> {
                     None => Supply::Sources(Vec::new()),
                 }
             },
-            // `()` and `!` conform through their synthetic `lang` entities.
+            // `()`, `!` and `(A, B, …)` conform through their synthetic
+            // `lang` entities; a tuple's elements are that entity's args,
+            // which the kernel binds against the extension's `(X, Y)`.
             ETy::Tuple(elems) if elems.is_empty() => self.lang_supply("()", protocol),
+            ETy::Tuple(elems) => self.lang_supply(
+                &kestrel_ast_builder::lang_module::lang_tuple_name(elems.len()),
+                protocol,
+            ),
             ETy::Never => self.lang_supply("!", protocol),
             ETy::Param(p) => Supply::Decided(self.param_supply(*p, protocol)),
-            // Non-empty tuples, functions, opaques, unreduced aliases and
-            // projections, abstract `Self`: no declaration to evaluate here.
+            // Functions, opaques, unreduced aliases and projections,
+            // abstract `Self`: no declaration to evaluate here.
             _ => Supply::Decided(Tri::Holds),
         }
     }
@@ -552,18 +558,13 @@ impl FrontEndLayer<'_, '_> {
     /// declares `assoc` (`type Addable.Output = Int8` witnesses
     /// `Addable.Output`, not `Equal.Output`).
     fn assoc_binding_in(&self, owner: Entity, name: &str, assoc: Entity) -> Option<ETy> {
-        let declaring = self.ctx.parent_of(assoc);
+        let declaring = self.ctx.parent_of(assoc)?;
         self.ctx
             .children_of(owner)
             .iter()
             .copied()
             .find_map(|child| {
-                let named = self.ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-                    && self
-                        .ctx
-                        .get::<kestrel_ast_builder::Name>(child)
-                        .is_some_and(|n| n.0 == name);
-                if !named || !self.qualifier_matches(child, declaring) {
+                if !kestrel_name_res::alias_binds(self.ctx, self.root, child, name, declaring) {
                     return None;
                 }
                 self.ctx
@@ -575,24 +576,4 @@ impl FrontEndLayer<'_, '_> {
             })
     }
 
-    /// Does alias `child`'s qualifier (if any) name `protocol`?
-    fn qualifier_matches(&self, child: Entity, protocol: Option<Entity>) -> bool {
-        let Some(target) = self.ctx.get::<kestrel_ast_builder::QualifiedTarget>(child) else {
-            return true;
-        };
-        let kestrel_ast::AstType::Named { segments, .. } = &target.0 else {
-            return true;
-        };
-        let resolved = self
-            .ctx
-            .query(kestrel_name_res::resolve_type::ResolveTypePath {
-                segments: segments.iter().map(|s| s.name.clone()).collect(),
-                context: child,
-                root: self.root,
-            });
-        match resolved {
-            kestrel_name_res::resolve_type::TypeResolution::Found(e) => Some(e) == protocol,
-            _ => true,
-        }
-    }
 }

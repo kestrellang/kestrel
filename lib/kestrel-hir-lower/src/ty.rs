@@ -1257,6 +1257,39 @@ impl LowerCtx<'_> {
     }
 }
 
+/// A conformance's protocol arguments — the `written` ones lowered in the
+/// declaring `source`'s scope, then each remaining protocol type param's
+/// declared default (`: Addable` is `: Addable[Self]`, `: LeftShift` is
+/// `: LeftShift[Int64]`). A default's `Self` stays `HirTy::SelfType(protocol)`
+/// for the caller to read as the conformer. Stops at the first param with
+/// neither. THE one place conformance args are completed with defaults.
+pub fn conformance_protocol_args(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    protocol: Entity,
+    source: Entity,
+    written: &[AstType],
+) -> Vec<HirTy> {
+    let mut args: Vec<HirTy> = written
+        .iter()
+        .map(|ast| lower_ast_type(ctx, source, root, ast))
+        .collect();
+    let params = ctx
+        .get::<kestrel_ast_builder::TypeParams>(protocol)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    for &param in params.iter().skip(args.len()) {
+        let Some(default) = ctx.query(LowerTypeAnnotation {
+            entity: param,
+            root,
+        }) else {
+            break;
+        };
+        args.push(default);
+    }
+    args
+}
+
 // ===== Queries =====
 
 /// Query: lower a declaration entity's TypeAnnotation to HirTy.
@@ -1590,8 +1623,10 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
             return Some(vec![lowered]);
         }
         // Sugar targets (`extend [T]`, `extend T?`, `extend [K: V]`) carry
-        // their type arguments inline.
+        // their type arguments inline, and so does a tuple target
+        // (`extend (X, Y)`: the elements are `lang.(,)`'s args).
         let sugar_args: Option<Vec<&AstType>> = match &target.0 {
+            AstType::Tuple(elems, _) => Some(elems.iter().collect()),
             AstType::Array(elem, _) | AstType::Optional(elem, _) => Some(vec![elem.as_ref()]),
             AstType::Dictionary(key, val, _) => Some(vec![key.as_ref(), val.as_ref()]),
             _ => None,
@@ -1721,7 +1756,7 @@ fn nested_type_capturing_param(
             // own parameter, so the extension stands in for the binder.
             Some(NodeKind::Extension) => {
                 let lhs = ctx.query(kestrel_name_res::ExtensionLhsParams { extension: e, root });
-                if lhs.contains(&param) {
+                if lhs.iter().any(|&(_, p)| p == param) {
                     return nested;
                 }
             },

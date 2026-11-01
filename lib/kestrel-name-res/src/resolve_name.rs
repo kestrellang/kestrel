@@ -189,7 +189,7 @@ fn resolve_extension_type_param(
     // Then the target parameters bound by the LHS.
     ctx.query(ExtensionLhsParams { extension, root })
         .into_iter()
-        .find(|&tp| ctx.get::<Name>(tp).is_some_and(|n| n.0 == name))
+        .find_map(|(written, tp)| (written == name).then_some(tp))
 }
 
 /// Check if an extension targets a protocol, and if so, look up the

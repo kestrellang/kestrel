@@ -223,6 +223,14 @@ pub struct InferCtx<'a> {
     /// Rule L checks the right operand against.
     pub(crate) operator_members: HashMap<HirExprId, Entity>,
 
+    /// Protocol calls that name their requirement (HIR
+    /// `ProtocolCall.requirement`): the member IS that entity, so on a
+    /// concrete receiver `solve_member` resolves it directly instead of
+    /// looking the name up among the receiver's members (which could type
+    /// `V + 1.5` against an unrelated `add(Float64)` while codegen calls the
+    /// `Addable[V]` witness).
+    pub(crate) protocol_call_requirements: HashMap<HirExprId, Entity>,
+
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
     pub(crate) resolutions: HashMap<HirExprId, Entity>,
@@ -360,16 +368,13 @@ pub struct InferCtx<'a> {
     /// `check_expr`'s caller must not coerce the whole expression again.
     pub(crate) expectation_pushed: bool,
 
-    /// Expression ID of the accumulator init call inside a Sugar::StringInterpolation.
-    /// Set by `mark_sugar_primary`, consumed by `gen_expr` for Call. Replaces the
-    /// concrete DefaultStringInterpolation init with a deferred type variable so
-    /// the accumulator type can be resolved from context.
-    pub(crate) interpolation_init_expr: Option<kestrel_hir::body::HirExprId>,
-
-    /// The accumulator type variable for the current string interpolation.
-    /// Set during the init interception, consumed by the Sugar handler to
-    /// emit the InterpolationLink constraint.
-    pub(crate) interpolation_acc_tv: Option<TyVar>,
+    /// The `init(interpolation:)` calls that finish a string interpolation
+    /// (set by `mark_sugar_primary`). `gen_expr` types each as an open
+    /// `LiteralKind::StringInterpolation` var: the interpolated literal's
+    /// type, taken from context or defaulted to `String`. A set, not one
+    /// slot: a hole may hold another interpolation, generated before the
+    /// outer tail.
+    pub(crate) interpolation_results: HashSet<kestrel_hir::body::HirExprId>,
 
     /// TyVars created from an explicit `_` (HirTy::Infer) in a type-argument
     /// position. These intentionally stay unresolved when the caller doesn't
@@ -476,6 +481,7 @@ impl<'a> InferCtx<'a> {
             direct_iterators: HashSet::default(),
             protocol_dispatch_members: HashSet::default(),
             operator_members: HashMap::default(),
+            protocol_call_requirements: HashMap::default(),
             resolutions: HashMap::default(),
             indirection_peels: HashMap::default(),
             field_subscripts: HashMap::default(),
@@ -503,8 +509,7 @@ impl<'a> InferCtx<'a> {
             never_fallback_targets: HashSet::default(),
             expectation: None,
             expectation_pushed: false,
-            interpolation_init_expr: None,
-            interpolation_acc_tv: None,
+            interpolation_results: HashSet::default(),
             wildcard_tvars: HashSet::default(),
             witness_protocol_args: HashMap::default(),
             loop_break_tys: Vec::new(),
@@ -1440,14 +1445,6 @@ impl<'a> InferCtx<'a> {
             args,
             result,
             expr,
-            span,
-        });
-    }
-
-    pub fn interpolation_link(&mut self, result_tv: TyVar, acc_tv: TyVar, span: Span) {
-        self.emit(Constraint::InterpolationLink {
-            result_tv,
-            acc_tv,
             span,
         });
     }

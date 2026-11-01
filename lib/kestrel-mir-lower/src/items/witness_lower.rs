@@ -6,14 +6,13 @@ use kestrel_ast_builder::{
 };
 use kestrel_hecs::Entity;
 use kestrel_hir::ty::HirTy;
-use kestrel_hir_lower::LowerExtensionTargetTypeArgs;
+use kestrel_hir_lower::{LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
 use kestrel_mir::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir::item::witness::{WitnessDef, WitnessMethodBinding};
 use kestrel_mir::{
     MirTy, ParamConvention, SubstMap, TyId, TypeParamDef, ValueId, WitnessMethodKey, substitute,
 };
 use kestrel_name_res::conformances::ConformingProtocolInstantiations;
-use kestrel_name_res::extensions::ExtensionsFor;
 use kestrel_name_res::helpers::member_lookup_name;
 use kestrel_name_res::{
     ExtensionTargetEntity, ProtocolAssociatedTypes, ProtocolMember, ProtocolMembers,
@@ -64,11 +63,6 @@ fn lower_witnesses_for_type(
         root: ctx.root,
     });
 
-    let extensions = ctx.query.query(ExtensionsFor {
-        target: type_entity,
-        root: ctx.root,
-    });
-
     for (protocol, source, ast_type_args) in &instantiations {
         let owner_for_args = if matches!(
             ctx.world.get::<NodeKind>(*source),
@@ -111,6 +105,14 @@ fn lower_witnesses_for_type(
             Some(args) => ctx.module.ty_arena.named(type_entity, args.clone()),
             None => impl_ty,
         };
+        // `: Addable` is `: Addable[Self]`: the unwritten args take their
+        // declared defaults, ONCE, for both the stored witness args (mono's
+        // protocol-arg filter) and the requirement signatures methods are
+        // matched against. The binding type args below stay on the WRITTEN
+        // args — they are the impl's own params, which a default never adds.
+        let written_proto_args = proto_type_args.clone();
+        let proto_type_args =
+            with_default_protocol_args(ctx, *protocol, proto_type_args, witness_impl_ty);
 
         // Build type args for witness method bindings.
         // These are TypeParam TyIds that the monomorphizer will substitute through
@@ -129,7 +131,7 @@ fn lower_witnesses_for_type(
             };
             let impl_entities: std::collections::HashSet<kestrel_hecs::Entity> =
                 impl_type_params.iter().map(|tp| tp.entity).collect();
-            for &pta in &proto_type_args {
+            for &pta in &written_proto_args {
                 if let MirTy::TypeParam(e) = ctx.module.ty_arena.get(pta) {
                     if !impl_entities.contains(e) {
                         tys.push(pta);
@@ -215,26 +217,36 @@ fn lower_witnesses_for_type(
             })
             .collect();
 
+        // Associated types bind first: the requirement signatures methods are
+        // matched against mention them (`func next() -> Self.Item?`).
+        bind_associated_types(
+            ctx,
+            &mut witness,
+            type_entity,
+            *protocol,
+            *source,
+            witness_impl_ty,
+        );
+
+        let declaring_protocols: Vec<Entity> =
+            proto_members.iter().map(|m| m.declaring_protocol).collect();
+        let requirement_subst = requirement_subst(
+            ctx,
+            *protocol,
+            &witness.type_bindings.clone(),
+            &declaring_protocols,
+            &proto_subst,
+            witness_impl_ty,
+        );
         bind_witness_methods(
             ctx,
             &mut witness,
             &method_entries,
             type_entity,
             *source,
-            &proto_subst,
+            &requirement_subst,
             &impl_type_arg_tys,
             prefer_source,
-        );
-
-        // Bind associated types
-        bind_associated_types(
-            ctx,
-            &mut witness,
-            type_entity,
-            &extensions,
-            *protocol,
-            *source,
-            witness_impl_ty,
         );
 
         ctx.module.add_witness(witness);
@@ -256,12 +268,12 @@ fn bind_witness_methods(
     method_entries: &[(WitnessMethodKey, String, ProtocolMember)],
     type_entity: Entity,
     source: Entity,
-    proto_subst: &std::collections::HashMap<Entity, TyId>,
+    requirement_subst: &SubstMap,
     impl_type_arg_tys: &[TyId],
     prefer_source: bool,
 ) {
     for (method_key, method_name, member) in method_entries {
-        let expected = expected_signature_for(ctx, member.entity, proto_subst);
+        let expected = expected_signature_for(ctx, member.entity, requirement_subst);
 
         let lookup_name = method_name.strip_suffix(".set").unwrap_or(method_name);
 
@@ -696,10 +708,65 @@ fn protocol_type_param_entities(ctx: &LowerCtx, protocol: Entity) -> Vec<Entity>
         .unwrap_or_default()
 }
 
+/// The substitution that turns a requirement's declared signature into the one
+/// this conformance must provide: the protocol's type params → this
+/// conformance's args (defaults applied by `with_default_protocol_args`, so
+/// `: Addable` reads `Other = Self` as the implementing type), each declaring protocol's
+/// `Self` (`TypeParam(protocol)`, inherited requirements included) → the
+/// implementing type, and `Self.Assoc` → the binding `bind_associated_types`
+/// recorded. Without these a requirement like `combine(other: Self)` or
+/// `add(other: Other)` never matches its witness by type.
+fn requirement_subst(
+    ctx: &LowerCtx,
+    protocol: Entity,
+    type_bindings: &[(Entity, TyId)],
+    declaring_protocols: &[Entity],
+    proto_subst: &std::collections::HashMap<Entity, TyId>,
+    impl_ty: TyId,
+) -> SubstMap {
+    let mut subst = SubstMap::new();
+    subst.type_params.extend(proto_subst.iter().map(|(e, t)| (*e, *t)));
+    subst.type_params.insert(protocol, impl_ty);
+    for &declaring in declaring_protocols {
+        subst.type_params.insert(declaring, impl_ty);
+    }
+    for &(assoc, bound) in type_bindings {
+        if let Some(owner) = ctx.world.parent_of(assoc) {
+            subst.assoc_types.insert((impl_ty, owner, assoc), bound);
+        }
+    }
+    subst
+}
+
+/// `written` (a conformance's explicit protocol args) completed with each
+/// remaining protocol type param's declared default, its `Self` read as
+/// `impl_ty`. A param with neither stays absent, as before.
+fn with_default_protocol_args(
+    ctx: &mut LowerCtx,
+    protocol: Entity,
+    mut written: Vec<TyId>,
+    impl_ty: TyId,
+) -> Vec<TyId> {
+    let params = protocol_type_param_entities(ctx, protocol);
+    let mut self_subst = SubstMap::new();
+    self_subst.type_params.insert(protocol, impl_ty);
+    for &param in params.iter().skip(written.len()) {
+        let Some(default) = ctx.query.query(LowerTypeAnnotation {
+            entity: param,
+            root: ctx.root,
+        }) else {
+            break;
+        };
+        let default = lower_type(ctx, &default);
+        written.push(substitute(&mut ctx.module.ty_arena, default, &self_subst));
+    }
+    written
+}
+
 fn expected_signature_for(
     ctx: &mut LowerCtx,
     member_entity: Entity,
-    proto_subst: &std::collections::HashMap<Entity, TyId>,
+    subst: &SubstMap,
 ) -> ExpectedSignature {
     if ctx.world.get::<Callable>(member_entity).is_none() {
         return ExpectedSignature {
@@ -707,19 +774,15 @@ fn expected_signature_for(
             ret: None,
         };
     }
-    let mut subst = SubstMap::new();
-    for (entity, ty_id) in proto_subst {
-        subst.type_params.insert(*entity, *ty_id);
-    }
     let tys = resolve_callable_types(ctx, member_entity);
     let params: Option<Vec<TyId>> = tys.into_iter().collect();
     let params = params.map(|v| {
         v.into_iter()
-            .map(|t| substitute(&mut ctx.module.ty_arena, t, &subst))
+            .map(|t| substitute(&mut ctx.module.ty_arena, t, subst))
             .collect()
     });
     let ret = resolve_callable_return_type(ctx, member_entity);
-    let ret = Some(substitute(&mut ctx.module.ty_arena, ret, &subst));
+    let ret = Some(substitute(&mut ctx.module.ty_arena, ret, subst));
     ExpectedSignature { params, ret }
 }
 
@@ -753,17 +816,39 @@ fn find_impl_among(
     if let Some(chosen) = prefer_return_type(ctx, &matching, expected.ret) {
         return Some(chosen);
     }
-    candidates
+    // No candidate matched the requirement's param types. A lone name+label
+    // match is still the witness (its types may legitimately differ in form,
+    // e.g. a protocol-extension default spelled in terms of `Self`). Several
+    // are overloads none of which has the requirement's (Self-substituted)
+    // signature, so none is the witness: answer `None` and let the caller fall
+    // through to the next source (a protocol-extension default; with none, the
+    // requirement stays unbound and mono reports it). Picking the first in
+    // declaration order here was a silent miscompile.
+    let by_labels: Vec<Entity> = candidates
         .iter()
-        .find(|&&c| matches_candidate(ctx, c, method_name, required_labels, None))
         .copied()
+        .filter(|&c| matches_candidate(ctx, c, method_name, required_labels, None))
+        .collect();
+    match by_labels.as_slice() {
+        [only] => Some(*only),
+        [] => None,
+        many => {
+            kestrel_debug::ktrace!(
+                "witness-bind",
+                "no witness for `{}` {:?} among {} same-label overloads: none has the requirement's types",
+                method_name,
+                required_labels,
+                many.len()
+            );
+            None
+        },
+    }
 }
 
 /// Among candidates that match by name, labels and parameter types, pick the
 /// one whose return type is the requirement's (`S: Conv[Int64], Conv[String]`
-/// has two `conv()`; the `Conv[String]` witness needs `-> String`). The return
-/// type only breaks ties: a requirement mentioning `Self` or an associated
-/// type need not compare equal, so a lone candidate is kept as is.
+/// has two `conv()`; the `Conv[String]` witness needs `-> String`). A lone
+/// candidate is kept as is; among several, none matching means no witness.
 fn prefer_return_type(
     ctx: &mut LowerCtx,
     matching: &[Entity],
@@ -776,13 +861,13 @@ fn prefer_return_type(
     let Some(want) = expected_ret else {
         return Some(first);
     };
-    Some(
-        matching
-            .iter()
-            .copied()
-            .find(|&c| resolve_callable_return_type(ctx, c) == want)
-            .unwrap_or(first),
-    )
+    // Several same-signature candidates and none returns the requirement's
+    // (Self/assoc-substituted) type: none is the witness. Taking the first in
+    // declaration order bound `Tryable.tryExtract` to a namesake `-> Int64`.
+    matching
+        .iter()
+        .copied()
+        .find(|&c| resolve_callable_return_type(ctx, c) == want)
 }
 
 /// A requirement's parameter and return types, with the protocol's type
@@ -904,11 +989,14 @@ fn get_param_labels(ctx: &LowerCtx, method_entity: Entity) -> Option<Vec<Option<
     Some(callable.params.iter().map(|p| p.label.clone()).collect())
 }
 
+/// Bind each of `protocol`'s associated types for `type_entity`'s
+/// conformance declared by `source`, from the ONE binding answer
+/// (`AssociatedTypeBinding`). A binding in a blanket protocol extension speaks
+/// of that protocol's `Self`, rewritten to `impl_ty`.
 fn bind_associated_types(
     ctx: &mut LowerCtx,
     witness: &mut WitnessDef,
     type_entity: Entity,
-    extensions: &[Entity],
     protocol: Entity,
     source: Entity,
     impl_ty: TyId,
@@ -917,57 +1005,30 @@ fn bind_associated_types(
         protocol,
         root: ctx.root,
     });
-
     for member in assoc_members {
-        let Some(_name) = ctx.world.get::<Name>(member.entity).map(|n| n.0.clone()) else {
-            continue;
-        };
-        if let Some(ty) = find_associated_type(ctx, type_entity, member.entity) {
-            witness.add_type_binding(member.entity, ty);
-            continue;
-        }
-        let mut found = false;
-        for &ext in extensions {
-            if let Some(ty) = find_associated_type(ctx, ext, member.entity) {
-                witness.add_type_binding(member.entity, ty);
-                found = true;
-                break;
-            }
-        }
-        if found {
-            continue;
-        }
-        // Blanket conformances
-        if source != type_entity
-            && let Some(ty) = find_associated_type(ctx, source, member.entity)
-        {
+        if let Some(ty) = associated_type_binding(ctx, type_entity, member.entity, Some(source)) {
             let ty = replace_self_type(ctx, ty, impl_ty, protocol, source);
             witness.add_type_binding(member.entity, ty);
         }
     }
 }
 
-pub(crate) fn find_associated_type(
+/// `type_entity`'s binding of `assoc` (lowered), optionally for the
+/// conformance declared by `conformance_source` — the name-res
+/// `AssociatedTypeBinding` answer; never a local alias walk.
+pub(crate) fn associated_type_binding(
     ctx: &mut LowerCtx,
-    parent: Entity,
-    assoc_entity: Entity,
+    type_entity: Entity,
+    assoc: Entity,
+    conformance_source: Option<Entity>,
 ) -> Option<TyId> {
-    let target_name = ctx.world.get::<Name>(assoc_entity)?.0.clone();
-    for &child in ctx.world.children_of(parent) {
-        if ctx.world.get::<NodeKind>(child) != Some(&NodeKind::TypeAlias) {
-            continue;
-        }
-        let child_name = ctx.world.get::<Name>(child)?.0.clone();
-        if child_name != target_name {
-            continue;
-        }
-        let ty = resolve_type_annotation(ctx, child);
-        let is_unit = ctx.module.ty_arena.get(ty) == &MirTy::Tuple(vec![]);
-        if !is_unit {
-            return Some(ty);
-        }
-    }
-    None
+    let (alias, _) = ctx.query.query(kestrel_name_res::AssociatedTypeBinding {
+        type_entity,
+        assoc,
+        conformance_source,
+        root: ctx.root,
+    })?;
+    Some(resolve_type_annotation(ctx, alias))
 }
 
 /// Replace the protocol's Self type with the implementing type in a witness binding.

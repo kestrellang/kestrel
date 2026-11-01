@@ -469,7 +469,21 @@ pub(super) fn unify_bound_protocol_args(
         });
     let mut applicable: Vec<ApplicableConformance> = Vec::new();
     for (proto, source, ast_args) in &insts {
-        if *proto != protocol || ast_args.is_empty() {
+        if *proto != protocol {
+            continue;
+        }
+        // Declared args completed with defaults (`Int64: Multipliable` is
+        // `Multipliable[Self]`): skipping a defaulted conformance left a
+        // sibling `Multipliable[Meters]` as the ONLY applicable one, which
+        // then pinned every `Int64 * Int64`'s `Other` to `Meters`.
+        let decl_args = kestrel_hir_lower::conformance_protocol_args(
+            ctx.query_ctx,
+            ctx.root,
+            protocol,
+            *source,
+            ast_args,
+        );
+        if decl_args.is_empty() {
             continue;
         }
         // Map the source's free type params to the receiver's concrete args:
@@ -532,11 +546,6 @@ pub(super) fn unify_bound_protocol_args(
                 }
                 (subs, target_args)
             };
-        // Lower the declared protocol args (in the source's scope) to HirTy.
-        let decl_args: Vec<kestrel_hir::ty::HirTy> = ast_args
-            .iter()
-            .map(|a| kestrel_hir_lower::lower_ast_type(ctx.query_ctx, *source, ctx.root, a))
-            .collect();
         applicable.push(ApplicableConformance {
             decl_args,
             subs,
@@ -556,10 +565,14 @@ pub(super) fn unify_bound_protocol_args(
     // zero → every declared instantiation contradicts the bound: reject.
     if applicable.len() > 1 {
         applicable.retain(|c| {
-            !want_args
-                .iter()
-                .zip(c.decl_args.iter())
-                .any(|(&w, d)| tv_definitely_incompatible(ctx, w, d))
+            !want_args.iter().zip(c.decl_args.iter()).any(|(&w, d)| match d {
+                // A default's `Self` is the receiver itself.
+                kestrel_hir::ty::HirTy::SelfType(..) => matches!(
+                    ctx.slot(ctx.resolve(w)),
+                    TySlot::Resolved(k) if k.entity().is_some_and(|e| e != entity)
+                ),
+                _ => tv_definitely_incompatible(ctx, w, d),
+            })
         });
         if applicable.is_empty() {
             return Err(());
@@ -600,7 +613,8 @@ pub(super) fn unify_bound_protocol_args(
     }
 
     for (want, decl) in want_args.iter().zip(decl_args.iter()) {
-        let decl_tv = lower_hir_ty_sub(ctx, decl, None, resolved, &subs);
+        // `Some(protocol)` reads a default's `Self` as the receiver.
+        let decl_tv = lower_hir_ty_sub(ctx, decl, Some(protocol), resolved, &subs);
         if unify::unify(ctx, *want, decl_tv).is_err() {
             return Err(());
         }
@@ -647,6 +661,24 @@ pub(super) fn tv_definitely_incompatible(
     let (t_entity, t_args) = match ctx.slot(resolved) {
         TySlot::Resolved(TyKind::Struct { entity, args })
         | TySlot::Resolved(TyKind::Enum { entity, args }) => (*entity, args.clone()),
+        // An open literal can only become a type its literal protocol
+        // accepts: `256` is never `Meters`, so `Int64.multiply(256)` narrows
+        // to `Multipliable[Int64]` instead of waiting on two candidates.
+        TySlot::Unresolved {
+            literal: Some(literal),
+        } => {
+            let nominal = match hir {
+                HirTy::Enum { .. } => TyKind::Enum {
+                    entity: h_entity,
+                    args: Vec::new(),
+                },
+                _ => TyKind::Struct {
+                    entity: h_entity,
+                    args: Vec::new(),
+                },
+            };
+            return !crate::unify::conforms_to_literal_protocol(ctx, &nominal, *literal);
+        },
         _ => return false,
     };
     t_entity != h_entity

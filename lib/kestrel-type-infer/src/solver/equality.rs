@@ -159,8 +159,7 @@ pub(super) fn try_literal_mismatch(
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
         LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
         LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
-        // Accumulator type variable — not directly coerced against user types
-        LiteralKind::StringInterpolation => return None,
+        LiteralKind::StringInterpolation => Builtin::ExpressibleByStringInterpolation,
     };
     Some(match ctx.resolver.builtin(feature) {
         Some(protocol) => InferError::DoesNotConform {
@@ -545,40 +544,22 @@ pub(super) fn solve_coerce(
     }
 
     if let Some(method) = ctx.resolver.check_promotion(&from_kind, &to_kind) {
-        // Verify the source type matches the `from` method's `value: T` parameter
-        // once T is bound to the target's type args. Without this, any source
-        // type silently promotes to any FromValue-conforming target (e.g.
-        // `let x: String? = 5` would succeed).
-        let target_entity = to_kind.entity();
-        let target_args: Vec<TyVar> = to_kind.args().to_vec();
-        let qctx = ctx.query_ctx;
-        let root = ctx.root;
-        if let Some(target_e) = target_entity {
-            let target_tps: Vec<Entity> = qctx
-                .get::<TypeParams>(target_e)
-                .map(|tp| tp.0.clone())
-                .unwrap_or_default();
-            let subs: Vec<(Entity, TyVar)> = target_tps
-                .iter()
-                .copied()
-                .zip(target_args.iter().copied())
-                .collect();
-
-            if let Some(param_hir_tys) = qctx.query(LowerCallableTypes {
-                entity: method,
-                root,
-            }) && let Some(Some(value_hir_ty)) = param_hir_tys.first()
-            {
-                let param_tv = lower_hir_ty_sub(ctx, value_hir_ty, None, TyVar(0), &subs);
-                if unify::unify(ctx, from, param_tv).is_err() {
-                    ctx.errored_coerce_exprs.insert(expr);
-                    return SolveResult::Error(InferError::TypeMismatch {
-                        expected: param_tv,
-                        got: from,
-                        span,
-                        reason: Reason::Unspecified,
-                    });
-                }
+        // The source must be the target's `FromValue[Output]` arg — the
+        // conformance's protocol arg, pinned at the target (`Optional[Int64]:
+        // FromValue[Int64]`). Without this any source silently promotes to any
+        // FromValue target (`let x: String? = 5`).
+        if let Some(protocol) = ctx.query_ctx.parent_of(method) {
+            let output = ctx.fresh();
+            let pinned =
+                super::conformance::unify_bound_protocol_args(ctx, to_resolved, protocol, &[output]);
+            if pinned.is_err() || unify::unify(ctx, from, output).is_err() {
+                ctx.errored_coerce_exprs.insert(expr);
+                return SolveResult::Error(InferError::TypeMismatch {
+                    expected: output,
+                    got: from,
+                    span,
+                    reason: Reason::Unspecified,
+                });
             }
         }
 

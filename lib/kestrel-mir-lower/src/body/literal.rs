@@ -6,86 +6,93 @@
 //! - Init calls use StackAlloc (not Uninit) → `emit_call_void` → `emit_take`/`emit_load`
 //! - Stack buffer ops use `emit_op1` / `emit_op2`
 
-use kestrel_ast_builder::{Callable, Name, NodeKind};
 use kestrel_hecs::Entity;
+use kestrel_hir::Builtin;
 use kestrel_hir::body::{HirDictEntry, HirExprId, HirLiteral};
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
-use kestrel_mir::item::function::FunctionKind;
+use kestrel_mir::item::witness::WitnessMethodKey;
+use kestrel_mir::mono::collect::substitute_and_resolve;
+use kestrel_mir::substitute::SubstMap;
 use kestrel_mir::{
     Immediate, IntBits, MirTy, Op, Ownership, ParamConvention, Signedness, TyId, ValueId,
 };
-use kestrel_name_res::{ProtocolAssociatedTypes, ResolveBuiltin, extensions::ExtensionsFor};
+use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
 use kestrel_reporting::{Diagnostic, Label};
 
 use super::OssaBodyCtx;
 use crate::ty::resolve_callable_types;
+
+/// A literal protocol's requirement init, ready to call for one literal type.
+///
+/// Found through the requirement's `@builtin` tag and called as a
+/// `Callee::Witness`, so the conformer's init is whatever witness lowering
+/// bound for that conformance — the table every protocol call dispatches
+/// through. Literal lowering never picks an init by name, labels or shape.
+pub(crate) struct LiteralInit {
+    protocol: Entity,
+    key: WitnessMethodKey,
+    /// The requirement's param types with the protocol's `Self` replaced by the
+    /// literal's type and associated types resolved through the witness table
+    /// (`lang.ptr[Element]` → `lang.ptr[J]`); still projections for a generic type.
+    params: Vec<TyId>,
+}
 
 impl OssaBodyCtx<'_, '_> {
     // ================================================================
     // Scalar / named-struct literal
     // ================================================================
 
-    /// Lower a literal value. Named struct types go through protocol init
-    /// dispatch; primitive types emit directly.
+    /// Lower a literal value. A type that conforms to the literal's protocol
+    /// (or a type parameter bounded by it) builds through the requirement init;
+    /// primitive types take the literal as an immediate.
     pub fn lower_literal(&mut self, expr_id: HirExprId, lit: &HirLiteral) -> ValueId {
         let result_ty = self.resolve_expr_type(expr_id);
-
-        // Named struct → wrap via literal protocol init
-        if let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(result_ty).clone() {
-            match lit {
-                HirLiteral::String { value: content, .. } => {
-                    if let Some(init) = self.find_string_literal_init(entity) {
-                        let ptr = self.emit_literal(Immediate::string_pointer(content.clone()));
-                        let len = self.emit_literal(Immediate::i64(content.len() as i128));
-                        self.ctx.register_name(init);
-                        let callee = Callee::direct_with_args(init, vec![], None);
-                        return self.emit_init_literal_call(callee, vec![ptr, len], result_ty);
-                    }
+        let builtin = match lit {
+            HirLiteral::Bool(_) => Builtin::BoolLiteralInit,
+            HirLiteral::Integer(_) => Builtin::IntegerLiteralInit,
+            HirLiteral::Float(_) => Builtin::FloatLiteralInit,
+            HirLiteral::Char { .. } => Builtin::CharLiteralInit,
+            HirLiteral::String { .. } => Builtin::StringLiteralInit,
+            HirLiteral::Null => Builtin::NullLiteralInit,
+        };
+        let Some(init) = self.literal_init(builtin, result_ty) else {
+            return self.lower_literal_primitive(lit, result_ty);
+        };
+        let args = match lit {
+            HirLiteral::String { value, .. } => self.string_literal_args(value),
+            HirLiteral::Null => vec![],
+            _ => {
+                // Scalar requirements take one raw primitive (`lang.i64`, …).
+                let Some(&param_ty) = init.params.first() else {
                     return self.lower_literal_primitive(lit, result_ty);
-                },
-                HirLiteral::Null => {
-                    if let Some(init) = self.find_null_literal_init(entity) {
-                        self.ctx.register_name(init);
-                        let type_args = self.prepend_receiver_type_args(result_ty, vec![]);
-                        let callee = Callee::direct_with_args(init, type_args, None);
-                        return self.emit_init_literal_call(callee, vec![], result_ty);
-                    }
-                    return self.lower_literal_primitive(lit, result_ty);
-                },
-                _ => {},
-            }
+                };
+                vec![self.lower_literal_primitive(lit, param_ty)]
+            },
+        };
+        self.emit_literal_init_call(&init, args, result_ty)
+    }
 
-            let (label, protocol) = match lit {
-                HirLiteral::Bool(_) => (
-                    "boolLiteral",
-                    kestrel_hir::Builtin::ExpressibleByBoolLiteral,
-                ),
-                HirLiteral::Integer(_) => (
-                    "intLiteral",
-                    kestrel_hir::Builtin::ExpressibleByIntegerLiteral,
-                ),
-                HirLiteral::Float(_) => (
-                    "floatLiteral",
-                    kestrel_hir::Builtin::ExpressibleByFloatLiteral,
-                ),
-                HirLiteral::Char { .. } => (
-                    "charLiteral",
-                    kestrel_hir::Builtin::ExpressibleByCharLiteral,
-                ),
-                _ => return self.lower_literal_primitive(lit, result_ty),
-            };
+    /// Build a value of `ty` from the text of a string literal through
+    /// `ExpressibleByStringLiteral` — `None` when `ty` takes a raw string.
+    pub(crate) fn emit_string_literal_value(&mut self, text: &str, ty: TyId) -> Option<ValueId> {
+        let init = self.literal_init(Builtin::StringLiteralInit, ty)?;
+        let args = self.string_literal_args(text);
+        Some(self.emit_literal_init_call(&init, args, ty))
+    }
 
-            if let Some(init) = self.find_literal_init(entity, protocol, label) {
-                let param_ty = self.resolve_init_param_type(init).unwrap_or(result_ty);
-                let primitive = self.lower_literal_primitive(lit, param_ty);
-                self.ctx.register_name(init);
-                let callee = Callee::direct_with_args(init, vec![], None);
-                return self.emit_init_literal_call(callee, vec![primitive], result_ty);
-            }
-        }
+    /// Wrap a raw `lang.i64` into `ty` through `ExpressibleByIntegerLiteral` —
+    /// `None` when `ty` is itself primitive.
+    pub(crate) fn emit_integer_literal_value(&mut self, raw: ValueId, ty: TyId) -> Option<ValueId> {
+        let init = self.literal_init(Builtin::IntegerLiteralInit, ty)?;
+        Some(self.emit_literal_init_call(&init, vec![raw], ty))
+    }
 
-        self.lower_literal_primitive(lit, result_ty)
+    /// The `(pointer, byte length)` pair a string-literal init takes.
+    fn string_literal_args(&mut self, text: &str) -> Vec<ValueId> {
+        let ptr = self.emit_literal(Immediate::string_pointer(text.to_string()));
+        let len = self.emit_literal(Immediate::i64(text.len() as i128));
+        vec![ptr, len]
     }
 
     fn lower_literal_primitive(&mut self, lit: &HirLiteral, target_ty: TyId) -> ValueId {
@@ -108,14 +115,15 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_literal(imm)
     }
 
-    /// Emit an init call for a literal: allocate self via Uninit, prepend
-    /// &mut self, call the init, return the initialized value.
-    pub(crate) fn emit_init_literal_call(
+    /// Call a literal requirement init: stack-allocate `self`, pass it as
+    /// `&mut self` ahead of `args` (borrowed), and take the initialized value.
+    fn emit_literal_init_call(
         &mut self,
-        callee: Callee,
+        init: &LiteralInit,
         args: Vec<ValueId>,
         result_ty: TyId,
     ) -> ValueId {
+        let callee = self.literal_init_callee(init, result_ty);
         // Allocate stack space via StackAlloc (not Uninit — Uninit triggers
         // sub-field tracking which the opaque init call can't satisfy).
         let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
@@ -228,7 +236,11 @@ impl OssaBodyCtx<'_, '_> {
         elements: &[HirExprId],
         result_ty: TyId,
     ) -> Option<ValueId> {
-        let (init_entity, element_ty, type_args) = self.resolve_array_literal_init(result_ty)?;
+        let init = self.literal_init(Builtin::ArrayLiteralInit, result_ty)?;
+        let ptr_param = *init.params.first()?;
+        let MirTy::Pointer(element_ty) = *self.ctx.module.ty_arena.get(ptr_param) else {
+            return None;
+        };
 
         let ptr_ty = self.ctx.module.ty_arena.pointer(element_ty);
         let i64_ty = self.ctx.module.ty_arena.i64();
@@ -268,8 +280,7 @@ impl OssaBodyCtx<'_, '_> {
 
         // Call init(&mut self, ptr, count) — StackAlloc (not Uninit) since
         // the opaque init call can't satisfy Uninit's sub-field tracking.
-        self.ctx.register_name(init_entity);
-        let callee = Callee::direct_with_args(init_entity, type_args, None);
+        let callee = self.literal_init_callee(&init, result_ty);
         let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
         let one = self.emit_literal(Immediate::i64(1));
         let self_val = self.emit_op1(Op::StackAlloc(result_ty), one, ptr_ty);
@@ -322,7 +333,11 @@ impl OssaBodyCtx<'_, '_> {
         entries: &[HirDictEntry],
         result_ty: TyId,
     ) -> Option<ValueId> {
-        let (init_entity, pair_ty, type_args) = self.resolve_dict_literal_init(result_ty)?;
+        let init = self.literal_init(Builtin::DictionaryLiteralInit, result_ty)?;
+        let ptr_param = *init.params.first()?;
+        let MirTy::Pointer(pair_ty) = *self.ctx.module.ty_arena.get(ptr_param) else {
+            return None;
+        };
 
         let MirTy::Tuple(elem_tys) = self.ctx.module.ty_arena.get(pair_ty).clone() else {
             return None;
@@ -374,8 +389,7 @@ impl OssaBodyCtx<'_, '_> {
 
         // Call init(&mut self, ptr, count) — StackAlloc (not Uninit) since
         // the opaque init call can't satisfy Uninit's sub-field tracking.
-        self.ctx.register_name(init_entity);
-        let callee = Callee::direct_with_args(init_entity, type_args, None);
+        let callee = self.literal_init_callee(&init, result_ty);
         let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
         let one = self.emit_literal(Immediate::i64(1));
         let self_val = self.emit_op1(Op::StackAlloc(result_ty), one, ptr_ty);
@@ -403,228 +417,68 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     // ================================================================
-    // Init discovery helpers
+    // Literal requirement inits
     // ================================================================
 
-    fn find_literal_protocol_init(
-        &self,
-        struct_entity: Entity,
-        protocol: kestrel_hir::Builtin,
-        predicate: impl Fn(&Callable) -> bool,
-    ) -> Option<Entity> {
-        let proto_entity = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-            builtin: protocol,
+    /// The requirement init a literal of type `ty` builds through, or `None`
+    /// when `ty` takes the literal as an immediate (`lang.i64`, tuples, …).
+    ///
+    /// A named type qualifies when it conforms to the requirement's protocol.
+    /// A type parameter or projection always does — the literal type-checked,
+    /// so its bound supplies the witness at mono.
+    pub(crate) fn literal_init(&mut self, builtin: Builtin, ty: TyId) -> Option<LiteralInit> {
+        let named = match self.ctx.module.ty_arena.get(ty) {
+            MirTy::Named { entity, .. } => Some(*entity),
+            MirTy::TypeParam(_) | MirTy::AssociatedProjection { .. } => None,
+            _ => return None,
+        };
+        let requirement = self.ctx.query.query(ResolveBuiltin {
+            builtin,
             root: self.ctx.root,
         })?;
-        kestrel_name_res::find_protocol_witness_init(
-            &self.ctx.query,
-            struct_entity,
-            proto_entity,
-            self.ctx.root,
-            predicate,
-        )
-    }
+        let protocol = self.ctx.is_protocol_method(requirement)?;
+        if let Some(entity) = named {
+            let conforms = self
+                .ctx
+                .query
+                .query(ConformingProtocols {
+                    entity,
+                    root: self.ctx.root,
+                })
+                .contains(&protocol);
+            if !conforms {
+                return None;
+            }
+        }
+        let key = self.ctx.witness_method_key(requirement);
+        self.ctx.register_name(protocol);
 
-    pub(crate) fn find_literal_init(
-        &self,
-        struct_entity: Entity,
-        protocol: kestrel_hir::Builtin,
-        label: &str,
-    ) -> Option<Entity> {
-        self.find_literal_protocol_init(struct_entity, protocol, |c| {
-            c.params.len() == 1 && c.params[0].label.as_deref() == Some(label)
+        // The protocol's `Self` is `TypeParam(protocol)`.
+        let mut subst = SubstMap::new();
+        subst.type_params.insert(protocol, ty);
+        let params = resolve_callable_types(self.ctx, requirement)
+            .into_iter()
+            .map(|param| {
+                let module = &mut self.ctx.module;
+                param.map(|p| {
+                    substitute_and_resolve(&mut module.ty_arena, &module.witnesses, p, &subst)
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(LiteralInit {
+            protocol,
+            key,
+            params,
         })
     }
 
-    fn find_null_literal_init(&self, struct_entity: Entity) -> Option<Entity> {
-        self.find_literal_protocol_init(
-            struct_entity,
-            kestrel_hir::Builtin::ExpressibleByNullLiteral,
-            |c| c.params.is_empty(),
-        )
-    }
-
-    pub(crate) fn find_string_literal_init(&self, struct_entity: Entity) -> Option<Entity> {
-        self.find_literal_protocol_init(
-            struct_entity,
-            kestrel_hir::Builtin::ExpressibleByStringLiteral,
-            |c| c.params.len() == 2 && c.params[0].label.as_deref() == Some("stringLiteral"),
-        )
-    }
-
-    fn resolve_init_param_type(&mut self, init_entity: Entity) -> Option<TyId> {
-        let types = resolve_callable_types(self.ctx, init_entity);
-        types.into_iter().next().flatten()
-    }
-
-    /// Find the `init(&mut self, Pointer[T], Int64)` initializer for array
-    /// literal lowering. Returns (init entity, element type, type args).
-    fn resolve_array_literal_init(&mut self, result_ty: TyId) -> Option<(Entity, TyId, Vec<TyId>)> {
-        let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(result_ty) else {
-            return None;
-        };
-        let entity = *entity;
-        let init_entity = self
-            .ctx
-            .module
-            .functions
-            .values()
-            .find(|f| {
-                let FunctionKind::Initializer { parent } = f.kind else {
-                    return false;
-                };
-                self.init_parent_matches(parent, entity)
-                    && f.params.len() == 3
-                    && matches!(f.params[0].convention, ParamConvention::MutBorrow)
-                    && matches!(
-                        self.ctx.module.ty_arena.get(f.params[1].ty),
-                        MirTy::Pointer(_)
-                    )
-                    && self.ctx.module.ty_arena.get(f.params[2].ty) == &MirTy::I64
-            })?
-            .entity;
-
-        let type_args = self.prepend_receiver_type_args(result_ty, vec![]);
-        // The element type is the first generic arg for a generic conformer
-        // (Array[T] → T), or the `Element` associated type for a non-generic
-        // one (`struct MyList: _ExpressibleByArrayLiteral` with
-        // `type Element = Int64`). Not the init's own param, which is the
-        // unsubstituted generic param for `Array`.
-        let element_ty = match self.ctx.module.ty_arena.get(result_ty) {
-            MirTy::Named { type_args, .. } => type_args.first().copied(),
-            _ => None,
-        };
-        let element_ty = match element_ty {
-            Some(ty) => ty,
-            None => self.resolve_literal_assoc_type(
-                entity,
-                kestrel_hir::Builtin::InternalExpressibleByArrayLiteral,
-                "Element",
-            )?,
-        };
-        Some((init_entity, element_ty, type_args))
-    }
-
-    /// Find the `init(&mut self, Pointer[(K,V)], Int64)` initializer for dict
-    /// literal lowering. Returns (init entity, pair tuple type, type args).
-    fn resolve_dict_literal_init(&mut self, result_ty: TyId) -> Option<(Entity, TyId, Vec<TyId>)> {
-        let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(result_ty) else {
-            return None;
-        };
-        let entity = *entity;
-        let init_entity = self
-            .ctx
-            .module
-            .functions
-            .values()
-            .find(|f| {
-                let FunctionKind::Initializer { parent } = f.kind else {
-                    return false;
-                };
-                if !self.init_parent_matches(parent, entity) || f.params.len() != 3 {
-                    return false;
-                }
-                if !matches!(f.params[0].convention, ParamConvention::MutBorrow) {
-                    return false;
-                }
-                let MirTy::Pointer(inner) = self.ctx.module.ty_arena.get(f.params[1].ty) else {
-                    return false;
-                };
-                let MirTy::Tuple(elems) = self.ctx.module.ty_arena.get(*inner) else {
-                    return false;
-                };
-                elems.len() == 2 && self.ctx.module.ty_arena.get(f.params[2].ty) == &MirTy::I64
-            })?
-            .entity;
-
-        let type_args = self.prepend_receiver_type_args(result_ty, vec![]);
-        // The (Key, Value) pair comes from result_ty's generic args
-        // (Dict[K, V] → (K, V)) for a generic conformer, or the `Key`/`Value`
-        // associated types for a non-generic one — not the init's own param,
-        // which is the unsubstituted generic pair for `Dictionary`.
-        let kv = match self.ctx.module.ty_arena.get(result_ty) {
-            MirTy::Named { type_args, .. } if type_args.len() >= 2 => {
-                Some((type_args[0], type_args[1]))
-            },
-            _ => None,
-        };
-        let (k, v) = match kv {
-            Some(kv) => kv,
-            None => {
-                let proto = kestrel_hir::Builtin::InternalExpressibleByDictionaryLiteral;
-                let k = self.resolve_literal_assoc_type(entity, proto, "Key")?;
-                let v = self.resolve_literal_assoc_type(entity, proto, "Value")?;
-                (k, v)
-            },
-        };
-        let pair_ty = self.ctx.module.ty_arena.tuple(vec![k, v]);
-        Some((init_entity, pair_ty, type_args))
-    }
-
-    /// Resolve a literal protocol's associated type (e.g. `Element` for
-    /// `_ExpressibleByArrayLiteral`, or `Key`/`Value` for the dictionary
-    /// variant) on a non-generic conforming type, by reading its `type X = ...`
-    /// binding from the type body or one of its extensions. Returns `None` if
-    /// the protocol, the associated member, or the binding can't be found.
-    fn resolve_literal_assoc_type(
-        &mut self,
-        type_entity: Entity,
-        protocol: kestrel_hir::Builtin,
-        assoc_name: &str,
-    ) -> Option<TyId> {
-        let proto_entity = self.ctx.query.query(ResolveBuiltin {
-            builtin: protocol,
-            root: self.ctx.root,
-        })?;
-        let assoc_entity = self
-            .ctx
-            .query
-            .query(ProtocolAssociatedTypes {
-                protocol: proto_entity,
-                root: self.ctx.root,
-            })
-            .into_iter()
-            .find(|m| {
-                self.ctx.world.get::<Name>(m.entity).map(|n| n.0.as_str()) == Some(assoc_name)
-            })?
-            .entity;
-
-        // The binding lives either in the type body (`struct S { type X = ... }`)
-        // or in a conforming extension (`extend S: P { type X = ... }`).
-        if let Some(ty) =
-            crate::items::witness_lower::find_associated_type(self.ctx, type_entity, assoc_entity)
-        {
-            return Some(ty);
+    /// The witness call for `init` on a literal of type `self_type`.
+    fn literal_init_callee(&mut self, init: &LiteralInit, self_type: TyId) -> Callee {
+        Callee::Witness {
+            protocol: init.protocol,
+            method: init.key.clone(),
+            self_type,
+            method_type_args: vec![],
         }
-        let extensions = self.ctx.query.query(ExtensionsFor {
-            target: type_entity,
-            root: self.ctx.root,
-        });
-        for ext in extensions {
-            if let Some(ty) =
-                crate::items::witness_lower::find_associated_type(self.ctx, ext, assoc_entity)
-            {
-                return Some(ty);
-            }
-        }
-        None
-    }
-
-    /// Check whether an init's parent matches the target type entity, handling
-    /// extension-defined inits (where parent is the extension, not the type).
-    fn init_parent_matches(&self, init_parent: Entity, target_type: Entity) -> bool {
-        if init_parent == target_type {
-            return true;
-        }
-        if self.ctx.world.get::<NodeKind>(init_parent) != Some(&NodeKind::Extension) {
-            return false;
-        }
-        self.ctx
-            .query
-            .query(kestrel_name_res::ExtensionTargetEntity {
-                extension: init_parent,
-                root: self.ctx.root,
-            })
-            .is_some_and(|target| target == target_type)
     }
 }

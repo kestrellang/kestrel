@@ -89,6 +89,8 @@ pub enum Builtin {
 
     // ===== Pattern matching =====
     Matchable,
+    /// `Matchable.matches(other:)` — the call a value pattern lowers to.
+    MatchableMatches,
     RangeMatchable,
     RangeMatchableIsAtLeast,
     RangeMatchableIsAtMost,
@@ -111,6 +113,17 @@ pub enum Builtin {
     UnsignedInteger,
     InternalExpressibleByArrayLiteral,
     InternalExpressibleByDictionaryLiteral,
+    /// The requirement init each literal protocol declares. Literal lowering
+    /// calls these through the witness table, so the conformer's witness is
+    /// whatever conformance checking matched — never a shape or label guess.
+    IntegerLiteralInit,
+    FloatLiteralInit,
+    StringLiteralInit,
+    BoolLiteralInit,
+    CharLiteralInit,
+    NullLiteralInit,
+    ArrayLiteralInit,
+    DictionaryLiteralInit,
 
     // ===== Default literal types =====
     DefaultIntegerLiteralType,
@@ -260,11 +273,17 @@ pub enum Builtin {
     ManuallyDropStruct,
 
     // ===== String interpolation =====
-    DefaultStringInterpolation,
-    DefaultStringInterpolationInit,
-    DefaultStringInterpolationAppendLiteral,
-    DefaultStringInterpolationAppendInterpolation,
-    DefaultStringInterpolationBuild,
+    /// `ExpressibleByStringInterpolation`: the protocol an interpolated
+    /// literal's type must conform to (its literal protocol).
+    ExpressibleByStringInterpolation,
+    /// `ExpressibleByStringInterpolation.init(interpolation:)` — finishes an
+    /// interpolation, with `Self` = the literal's type.
+    StringInterpolationInit,
+    /// `Interpolatable.init(literalCapacity:interpolationCount:)` — creates
+    /// the accumulator.
+    InterpolatableInit,
+    /// `Interpolatable.appendLiteral` — appends one static segment.
+    InterpolatableAppendLiteral,
     FormatOptions,
     FormattableProtocol,
     FormattableFormatIntoMethod,
@@ -329,6 +348,22 @@ pub enum Builtin {
     /// The stdlib's single-owner box (`OwnedBox`): the box diagnostics
     /// suggest when an existential's payload must be consumed.
     OwnedBox,
+
+    // ===== Requirements / members the compiler calls by tag =====
+    /// `BooleanConditional.boolValue()` — what a non-`Bool` condition calls.
+    BooleanConditionalBoolValue,
+    /// `ConsumingIndirection.consumePointee(body:)` — hands a box's payload out.
+    ConsumingIndirectionConsumePointee,
+    /// `ExistentialBox.init(consuming value:)` — moves a payload into a new box.
+    ExistentialBoxInit,
+    /// `SharedBox.sharedMutRef()` — mutable access through a shared handle.
+    SharedBoxSharedMutRef,
+    /// `UniqueBox.init(consuming value:)`.
+    UniqueBoxInit,
+    /// `UniqueBox.takeValue()` — moves the payload out (once).
+    UniqueBoxTakeValue,
+    /// `UniqueBox.destroy()` — the box's single reclamation point.
+    UniqueBoxDestroy,
 }
 
 impl Builtin {
@@ -352,6 +387,7 @@ impl Builtin {
 
             // Pattern matching
             Self::Matchable => "Matchable",
+            Self::MatchableMatches => "MatchableMatches",
             Self::RangeMatchable => "RangeMatchable",
             Self::RangeMatchableIsAtLeast => "RangeMatchableIsAtLeast",
             Self::RangeMatchableIsAtMost => "RangeMatchableIsAtMost",
@@ -371,6 +407,14 @@ impl Builtin {
             Self::UnsignedInteger => "UnsignedInteger",
             Self::InternalExpressibleByArrayLiteral => "_ExpressibleByArrayLiteral",
             Self::InternalExpressibleByDictionaryLiteral => "_ExpressibleByDictionaryLiteral",
+            Self::IntegerLiteralInit => "IntegerLiteralInit",
+            Self::FloatLiteralInit => "FloatLiteralInit",
+            Self::StringLiteralInit => "StringLiteralInit",
+            Self::BoolLiteralInit => "BoolLiteralInit",
+            Self::CharLiteralInit => "CharLiteralInit",
+            Self::NullLiteralInit => "NullLiteralInit",
+            Self::ArrayLiteralInit => "ArrayLiteralInit",
+            Self::DictionaryLiteralInit => "DictionaryLiteralInit",
 
             // Default literal types — resolved by source name
             Self::DefaultIntegerLiteralType => "Int64",
@@ -520,15 +564,10 @@ impl Builtin {
             Self::ManuallyDropStruct => "ManuallyDrop",
 
             // String interpolation
-            Self::DefaultStringInterpolation => "DefaultStringInterpolation",
-            Self::DefaultStringInterpolationInit => "DefaultStringInterpolationInit",
-            Self::DefaultStringInterpolationAppendLiteral => {
-                "DefaultStringInterpolationAppendLiteral"
-            },
-            Self::DefaultStringInterpolationAppendInterpolation => {
-                "DefaultStringInterpolationAppendInterpolation"
-            },
-            Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
+            Self::ExpressibleByStringInterpolation => "ExpressibleByStringInterpolation",
+            Self::StringInterpolationInit => "StringInterpolationInit",
+            Self::InterpolatableInit => "InterpolatableInit",
+            Self::InterpolatableAppendLiteral => "InterpolatableAppendLiteral",
             Self::FormatOptions => "FormatOptions",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
@@ -543,6 +582,13 @@ impl Builtin {
             // by its `@builtin` attribute name.
             Self::Exitable => "Exitable",
             Self::ExitableReport => "ExitableReport",
+            Self::BooleanConditionalBoolValue => "BooleanConditionalBoolValue",
+            Self::ConsumingIndirectionConsumePointee => "ConsumingIndirectionConsumePointee",
+            Self::ExistentialBoxInit => "ExistentialBoxInit",
+            Self::SharedBoxSharedMutRef => "SharedBoxSharedMutRef",
+            Self::UniqueBoxInit => "UniqueBoxInit",
+            Self::UniqueBoxTakeValue => "UniqueBoxTakeValue",
+            Self::UniqueBoxDestroy => "UniqueBoxDestroy",
             Self::ExitCode => "ExitCode",
 
             // Indirection — resolves by source name (auto-imported from std.core).
@@ -590,6 +636,7 @@ impl Builtin {
 
             // Pattern matching
             "Matchable" => Some(Self::Matchable),
+            "MatchableMatches" => Some(Self::MatchableMatches),
             "RangeMatchable" => Some(Self::RangeMatchable),
             "RangeMatchableIsAtLeast" => Some(Self::RangeMatchableIsAtLeast),
             "RangeMatchableIsAtMost" => Some(Self::RangeMatchableIsAtMost),
@@ -609,6 +656,14 @@ impl Builtin {
             "UnsignedInteger" => Some(Self::UnsignedInteger),
             "_ExpressibleByArrayLiteral" => Some(Self::InternalExpressibleByArrayLiteral),
             "_ExpressibleByDictionaryLiteral" => Some(Self::InternalExpressibleByDictionaryLiteral),
+            "IntegerLiteralInit" => Some(Self::IntegerLiteralInit),
+            "FloatLiteralInit" => Some(Self::FloatLiteralInit),
+            "StringLiteralInit" => Some(Self::StringLiteralInit),
+            "BoolLiteralInit" => Some(Self::BoolLiteralInit),
+            "CharLiteralInit" => Some(Self::CharLiteralInit),
+            "NullLiteralInit" => Some(Self::NullLiteralInit),
+            "ArrayLiteralInit" => Some(Self::ArrayLiteralInit),
+            "DictionaryLiteralInit" => Some(Self::DictionaryLiteralInit),
 
             // FFI
             "FFISafe" => Some(Self::FFISafe),
@@ -766,15 +821,10 @@ impl Builtin {
             "ManuallyDropStruct" => Some(Self::ManuallyDropStruct),
 
             // String interpolation
-            "DefaultStringInterpolation" => Some(Self::DefaultStringInterpolation),
-            "DefaultStringInterpolationInit" => Some(Self::DefaultStringInterpolationInit),
-            "DefaultStringInterpolationAppendLiteral" => {
-                Some(Self::DefaultStringInterpolationAppendLiteral)
-            },
-            "DefaultStringInterpolationAppendInterpolation" => {
-                Some(Self::DefaultStringInterpolationAppendInterpolation)
-            },
-            "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
+            "ExpressibleByStringInterpolation" => Some(Self::ExpressibleByStringInterpolation),
+            "StringInterpolationInit" => Some(Self::StringInterpolationInit),
+            "InterpolatableInit" => Some(Self::InterpolatableInit),
+            "InterpolatableAppendLiteral" => Some(Self::InterpolatableAppendLiteral),
             "FormatOptions" => Some(Self::FormatOptions),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
@@ -788,6 +838,13 @@ impl Builtin {
             // Exitable / @main return
             "Exitable" => Some(Self::Exitable),
             "ExitableReport" => Some(Self::ExitableReport),
+            "BooleanConditionalBoolValue" => Some(Self::BooleanConditionalBoolValue),
+            "ConsumingIndirectionConsumePointee" => Some(Self::ConsumingIndirectionConsumePointee),
+            "ExistentialBoxInit" => Some(Self::ExistentialBoxInit),
+            "SharedBoxSharedMutRef" => Some(Self::SharedBoxSharedMutRef),
+            "UniqueBoxInit" => Some(Self::UniqueBoxInit),
+            "UniqueBoxTakeValue" => Some(Self::UniqueBoxTakeValue),
+            "UniqueBoxDestroy" => Some(Self::UniqueBoxDestroy),
             "ExitCode" => Some(Self::ExitCode),
 
             // Indirection / smart-pointer member peel
@@ -860,7 +917,8 @@ impl Builtin {
             Self::Matchable | Self::RangeMatchable | Self::ArrayMatchable => {
                 BuiltinKind::protocol()
             },
-            Self::RangeMatchableIsAtLeast
+            Self::MatchableMatches
+            | Self::RangeMatchableIsAtLeast
             | Self::RangeMatchableIsAtMost
             | Self::RangeMatchableIsBelow
             | Self::ArrayMatchableMatchLength
@@ -877,6 +935,14 @@ impl Builtin {
             | Self::UnsignedInteger
             | Self::InternalExpressibleByArrayLiteral
             | Self::InternalExpressibleByDictionaryLiteral => BuiltinKind::protocol(),
+            Self::IntegerLiteralInit
+            | Self::FloatLiteralInit
+            | Self::StringLiteralInit
+            | Self::BoolLiteralInit
+            | Self::CharLiteralInit
+            | Self::NullLiteralInit
+            | Self::ArrayLiteralInit
+            | Self::DictionaryLiteralInit => BuiltinKind::ProtocolMethod,
 
             // Default literal types
             Self::DefaultIntegerLiteralType
@@ -1014,11 +1080,11 @@ impl Builtin {
             Self::ArrayStruct | Self::SliceStruct | Self::ManuallyDropStruct => BuiltinKind::Struct,
 
             // String interpolation
-            Self::DefaultStringInterpolation | Self::FormatOptions => BuiltinKind::Struct,
-            Self::DefaultStringInterpolationInit
-            | Self::DefaultStringInterpolationAppendLiteral
-            | Self::DefaultStringInterpolationAppendInterpolation
-            | Self::DefaultStringInterpolationBuild => BuiltinKind::Function,
+            Self::FormatOptions => BuiltinKind::Struct,
+            Self::ExpressibleByStringInterpolation => BuiltinKind::protocol(),
+            Self::StringInterpolationInit
+            | Self::InterpolatableInit
+            | Self::InterpolatableAppendLiteral => BuiltinKind::ProtocolMethod,
             Self::FormattableProtocol => BuiltinKind::protocol(),
             Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
             Self::EquatableProtocol
@@ -1029,6 +1095,13 @@ impl Builtin {
             // Exitable: non-marker protocol with a required `report()` method.
             Self::Exitable => BuiltinKind::protocol(),
             Self::ExitableReport => BuiltinKind::ProtocolMethod,
+            Self::BooleanConditionalBoolValue
+            | Self::ConsumingIndirectionConsumePointee
+            | Self::ExistentialBoxInit
+            | Self::SharedBoxSharedMutRef => BuiltinKind::ProtocolMethod,
+            Self::UniqueBoxInit | Self::UniqueBoxTakeValue | Self::UniqueBoxDestroy => {
+                BuiltinKind::Function
+            },
             Self::ExitCode => BuiltinKind::Struct,
 
             // Indirection: non-marker protocol with a required `pointeeRef()`

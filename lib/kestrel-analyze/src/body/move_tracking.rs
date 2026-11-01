@@ -1022,8 +1022,6 @@ fn analyze_expr(
         },
         HirExpr::ProtocolCall {
             receiver,
-            protocol,
-            method,
             args,
             ..
         } => {
@@ -1036,12 +1034,7 @@ fn analyze_expr(
                 for arg in args {
                     state = analyze_expr(mcx, arg.value, state, false, diags);
                 }
-                // A `?.` bind's method is the one inference settled on.
-                let method = mcx
-                    .cx
-                    .typed
-                    .protocol_method_name(id, method.as_str_or_empty());
-                if let Some(method_entity) = find_protocol_method(mcx.cx, *protocol, method) {
+                if let Some(method_entity) = util::protocol_call_method(mcx.cx, id) {
                     apply_call_moves(mcx, method_entity, args, Some(*receiver), &mut state, diags);
                 }
             }
@@ -2578,18 +2571,6 @@ fn loop_is_conditional(hir: &HirBody, body: &HirBlock, target: Option<&str>) -> 
         || else_body
             .as_ref()
             .is_some_and(|b| control_flow::block_contains_break_for(hir, b, target))
-}
-
-// ===== Protocol-method lookup =====
-
-fn find_protocol_method(
-    cx: &BodyContext<'_>,
-    protocol: Entity,
-    method_name: &str,
-) -> Option<Entity> {
-    util::children_named_of_kind(cx.query, protocol, method_name, NodeKind::Function)
-        .first()
-        .copied()
 }
 
 // ===== Diagnostic emission =====

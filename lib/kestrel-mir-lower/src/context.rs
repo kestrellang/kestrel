@@ -153,6 +153,18 @@ impl<'w> LowerCtx<'w> {
         WitnessMethodKey::new(name, labels)
     }
 
+    /// The witness key of the `@builtin`-tagged requirement `builtin` — how
+    /// the compiler names a requirement it calls itself (`boolValue`,
+    /// `report`, `consumePointee`), never a string literal. `None` without
+    /// the stdlib tag.
+    pub fn builtin_witness_key(&self, builtin: kestrel_hir::Builtin) -> Option<WitnessMethodKey> {
+        let requirement = self.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin,
+            root: self.root,
+        })?;
+        Some(self.witness_method_key(requirement))
+    }
+
     /// Build a WitnessMethodKey for a Setter entity by deriving
     /// `"{parent_name}.set"` from the parent Field/Subscript.
     /// Uses the parent's labels (not the setter's own Callable params)
