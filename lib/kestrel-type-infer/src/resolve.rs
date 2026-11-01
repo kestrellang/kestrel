@@ -25,7 +25,7 @@ use kestrel_semantics::{
 };
 use kestrel_span::Span;
 
-use crate::ty::TyKind;
+use crate::ty::{TyKind, TyVar};
 
 /// Result of resolving a member on a type.
 #[derive(Clone, Debug)]
@@ -339,6 +339,14 @@ pub trait TypeResolver {
     /// Check if a concrete type conforms to a protocol.
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool;
 
+    /// The entity a receiver's members live on, plus the arguments for that
+    /// entity's type params — THE pair member lookup and substitution share,
+    /// so they can never disagree. Nominal types answer themselves; the
+    /// world resolver also maps structural types to their `lang` entities.
+    fn entity_and_args(&self, ty: &TyKind) -> Option<(Entity, Vec<TyVar>)> {
+        ty.entity().map(|e| (e, ty.args().to_vec()))
+    }
+
     /// G17 — the base-aware half of [`Self::conforms_to`]'s
     /// `TyKind::AssocProjection` answer.
     ///
@@ -482,6 +490,10 @@ impl TypeResolver for WorldResolver<'_> {
         self.build_member_resolution(member)
     }
 
+    fn entity_and_args(&self, ty: &TyKind) -> Option<(Entity, Vec<TyVar>)> {
+        self.structural_view(ty).or_else(|| ty.entity().map(|e| (e, ty.args().to_vec())))
+    }
+
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool {
         // Copyable / Cloneable are structural (copy-semantics), not *declared*
         // conformances — `ConformingProtocols` only materializes explicit
@@ -607,8 +619,8 @@ impl TypeResolver for WorldResolver<'_> {
             // types are opaque here; the bound-aware answer (the extension's
             // `where X: P` at the real elements) is `type_satisfies`'.
             _ => self
-                .structural_lang_entity(ty)
-                .map(|e| {
+                .structural_view(ty)
+                .map(|(e, _)| {
                     self.ctx
                         .query(kestrel_name_res::ConformingProtocols {
                             entity: e,
@@ -724,7 +736,7 @@ impl TypeResolver for WorldResolver<'_> {
             // `extend (): Marked { type Mark = … }` (#215) — mirrors the member
             // and conformance lookups in `resolve_member` / `conforms_to`.
             TyKind::Tuple(_) | TyKind::Never => {
-                let entity = self.structural_lang_entity(container)?;
+                let (entity, _) = self.structural_view(container)?;
                 self.find_associated_type_in_entity_and_extensions(entity, name)
             },
             TyKind::Protocol { .. }
@@ -1060,20 +1072,53 @@ fn extract_protocol_type_args(
     }
 }
 
+/// Reverse of [`WorldResolver::structural_view`]: the structural type a
+/// synthetic `lang` entity stands for, at `args`. A body inside
+/// `extend (X, Y)` / `extend &T` sees `self` as the tuple / ref itself —
+/// never the synthetic entity — so `self.0` and the ref receiver peel work.
+pub(crate) fn structural_ty_kind(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    args: &[TyVar],
+) -> Option<TyKind> {
+    use kestrel_name_res::extensions::{lang_ref_mutability, lang_tuple_arity};
+    if let Some(mutating) = lang_ref_mutability(ctx, entity) {
+        return Some(TyKind::Ref { pointee: *args.first()?, mutating });
+    }
+    if let Some(arity) = lang_tuple_arity(ctx, entity) {
+        return (args.len() == arity).then(|| TyKind::Tuple(args.to_vec()));
+    }
+    let in_lang = ctx
+        .parent_of(entity)
+        .and_then(|p| ctx.get::<kestrel_ast_builder::Name>(p))
+        .is_some_and(|n| n.0 == "lang");
+    match ctx.get::<kestrel_ast_builder::Name>(entity)?.0.as_str() {
+        "()" if in_lang => Some(TyKind::Tuple(Vec::new())),
+        "!" if in_lang => Some(TyKind::Never),
+        _ => None,
+    }
+}
+
 impl WorldResolver<'_> {
     /// THE map from a structural type to the synthetic `lang` entity its
-    /// extensions target: `&T` / `&mutating T`, `()`, `!` and `(A, B, …)`
-    /// (`lang.(,)` of that arity). `None` for every other type.
-    pub(crate) fn structural_lang_entity(&self, ty: &TyKind) -> Option<Entity> {
-        let name = match ty {
-            TyKind::Ref { mutating: true, .. } => "&mutating".to_string(),
-            TyKind::Ref { mutating: false, .. } => "&".to_string(),
-            TyKind::Tuple(elems) if elems.is_empty() => "()".to_string(),
-            TyKind::Tuple(elems) => kestrel_ast_builder::lang_module::lang_tuple_name(elems.len()),
-            TyKind::Never => "!".to_string(),
+    /// extensions target, plus the arguments for that entity's type params:
+    /// `&T` / `&mutating T` → (`lang.&`, `[T]`), `()` / `!` → no args, and
+    /// `(A, B, …)` → (`lang.(,)` of that arity, the elements). `None` for
+    /// every other type. The reverse is [`structural_ty_kind`].
+    pub(crate) fn structural_view(&self, ty: &TyKind) -> Option<(Entity, Vec<TyVar>)> {
+        let (name, args) = match ty {
+            TyKind::Ref { mutating: true, pointee } => ("&mutating".to_string(), vec![*pointee]),
+            TyKind::Ref { mutating: false, pointee } => ("&".to_string(), vec![*pointee]),
+            TyKind::Tuple(elems) if elems.is_empty() => ("()".to_string(), Vec::new()),
+            TyKind::Tuple(elems) => (
+                kestrel_ast_builder::lang_module::lang_tuple_name(elems.len()),
+                elems.clone(),
+            ),
+            TyKind::Never => ("!".to_string(), Vec::new()),
             _ => return None,
         };
-        kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, &name)
+        let entity = kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, &name)?;
+        Some((entity, args))
     }
 
     /// Every receiver spine the owner's same-type clauses equate with
@@ -1208,23 +1253,10 @@ impl WorldResolver<'_> {
             }
         }
 
-        let entity = match receiver_ty.entity() {
-            Some(e) => e,
-            // Structural singletons resolve members via their synthetic `lang`
-            // entities, so a direct `().foo()` / `().tag()` call finds members
-            // and conformances added by `extend ()` / `extend (): P`.
-            // Non-empty tuples are not handled here yet: their members
-            // would need the elements bound as the entity's type args.
-            None => match receiver_ty {
-                TyKind::Tuple(elems) if elems.is_empty() => self
-                    .structural_lang_entity(receiver_ty)
-                    .ok_or(MemberError::NotFound)?,
-                TyKind::Never => self
-                    .structural_lang_entity(receiver_ty)
-                    .ok_or(MemberError::NotFound)?,
-                _ => return Err(MemberError::NotFound),
-            },
-        };
+        // Structural types (`()`, `!`, `(A, B)`, `&T`) resolve members via
+        // their synthetic `lang` entities, so `(a, b).m()` finds what
+        // `extend (X, Y)` declares; the solver binds X/Y from the same view.
+        let (entity, _) = self.entity_and_args(receiver_ty).ok_or(MemberError::NotFound)?;
         let entity = &entity;
 
         // Discover every type-side candidate by name in one pass: direct

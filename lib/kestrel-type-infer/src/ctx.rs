@@ -871,6 +871,13 @@ impl<'a> InferCtx<'a> {
         }
     }
 
+    /// Allocate a TyVar already resolved to `kind`.
+    pub fn resolved(&mut self, kind: TyKind) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types.push(TySlot::Resolved(kind));
+        TyVar(idx)
+    }
+
     /// Allocate a TyVar bound to a Tuple type.
     pub fn tuple(&mut self, elements: Vec<TyVar>) -> TyVar {
         let idx = self.types.len() as u32;

@@ -4755,6 +4755,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     ) -> Vec<TyId> {
         let parent_args = match self.ctx.module.ty_arena.get(receiver_ty) {
             MirTy::Named { type_args, .. } => type_args.clone(),
+            // A tuple's elements are the args of its `lang.(,)` entity, the
+            // owner of `extend (X, Y)` methods (mirrors type-infer's
+            // `structural_view`; `try_lang_primitive` is the reverse).
+            MirTy::Tuple(elems) if elems.len() >= 2 => elems.clone(),
             _ => Vec::new(),
         };
         if parent_args.is_empty() {

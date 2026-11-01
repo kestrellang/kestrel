@@ -813,8 +813,10 @@ pub(super) fn solve_member(
         ctx.resolutions.insert(expr, resolution.entity);
         ctx.field_subscripts.insert(expr, resolution.entity);
         // Get the field's type (with struct type param substitution)
-        let recv_entity = recv_kind.entity();
-        let recv_type_args: Vec<TyVar> = recv_kind.args().to_vec();
+        let (recv_entity, recv_type_args) = match ctx.resolver.entity_and_args(&recv_kind) {
+            Some((e, args)) => (Some(e), args),
+            None => (None, Vec::new()),
+        };
         let mut field_subs: Vec<(kestrel_hecs::Entity, TyVar)> = Vec::new();
         if let Some(entity) = recv_entity {
             let struct_type_params: Vec<kestrel_hecs::Entity> = ctx
@@ -890,6 +892,10 @@ pub(super) fn solve_member(
     // SelfType has no args, so for protocol extension bodies we synthesize
     // them from the owner's parent (the extension or protocol whose type
     // params are positionally equivalent to the protocol's).
+    // Entity and args come from ONE answer (`entity_and_args`), so a
+    // structural receiver (`(A, B)` → `lang.(,)[A, B]`) binds the params of
+    // the entity its member was found on.
+    let recv_view = ctx.resolver.entity_and_args(&recv_kind);
     let recv_type_args: Vec<TyVar> =
         if matches!(&recv_kind, TyKind::SelfType { .. }) && recv_kind.args().is_empty() {
             // Walk from the owner (function) to its parent (protocol, extension,
@@ -921,9 +927,9 @@ pub(super) fn solve_member(
                 .map(|tp| tp.0.iter().map(|&p| ctx.param(p)).collect::<Vec<TyVar>>())
                 .unwrap_or_default()
         } else {
-            recv_kind.args().to_vec()
+            recv_view.as_ref().map(|(_, args)| args.clone()).unwrap_or_default()
         };
-    let recv_entity = recv_kind.entity();
+    let recv_entity = recv_view.map(|(e, _)| e);
     if let Some(entity) = recv_entity {
         let struct_type_params: Vec<kestrel_hecs::Entity> = ctx
             .query_ctx
