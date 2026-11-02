@@ -198,6 +198,14 @@ pub struct AstParam {
     pub is_consuming: bool,
 }
 
+impl AstParam {
+    /// Declared with a function type (`f: (T) -> U`), so an unlabeled
+    /// trailing closure may fill it (see `arg_binding`).
+    pub fn takes_closure(&self) -> bool {
+        matches!(self.ty, Some(AstType::Function { .. }))
+    }
+}
+
 /// A parameter destructuring pattern — lightweight tree that doesn't need arena allocation.
 /// Used to bridge build phase (AstParam) to query phase (HIR lowering).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

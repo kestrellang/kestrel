@@ -1216,9 +1216,13 @@ pub(super) fn solve_member(
     let bind_params: Vec<BindParam> = resolution
         .param_types
         .iter()
-        .map(|p| BindParam::new(p.label.as_deref(), p.has_default))
+        .map(|p| BindParam {
+            label: p.label.as_deref(),
+            has_default: p.has_default,
+            takes_closure: p.takes_closure,
+        })
         .collect();
-    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
     // An UNAPPLIED static method (`let f = Box[Int64].make`) binds nothing:
     // it becomes a function value below.
     let is_unapplied_static = !is_call
@@ -1243,6 +1247,9 @@ pub(super) fn solve_member(
                 got: args[arg_index].label.clone(),
                 span,
             });
+        },
+        Err(BindError::AmbiguousTrailingClosure { candidates, .. }) => {
+            return SolveResult::Error(InferError::AmbiguousTrailingClosure { candidates, span });
         },
         Err(BindError::MissingArgument { .. } | BindError::TooManyArguments { .. }) => {
             let required_count = bind_params.iter().filter(|p| !p.has_default).count();
@@ -1489,7 +1496,7 @@ pub(super) fn solve_implicit(
     if ctx.query_ctx.get::<NodeKind>(resolution.entity) == Some(&NodeKind::EnumCase)
         && let Some(callable) = ctx.query_ctx.get::<Callable>(resolution.entity)
     {
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         if !crate::constraint::labels_match(&callable.params, &arg_labels) {
             let case_name = ctx
                 .query_ctx

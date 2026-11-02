@@ -677,6 +677,10 @@ impl std::hash::Hash for HirLiteral {
 pub struct HirCallArg {
     pub label: Option<String>,
     pub value: HirExprId,
+    /// An unlabeled trailing closure (`f(x) { … }`, `f { … }`). It may also
+    /// fill a labeled closure-typed parameter; see
+    /// `kestrel_ast_builder::arg_binding`.
+    pub trailing_closure: bool,
 }
 
 /// A key-value entry in a dictionary literal.

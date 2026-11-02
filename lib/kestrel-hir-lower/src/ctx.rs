@@ -275,6 +275,7 @@ impl<'a> LowerCtx<'a> {
             owner: None,
             name: HirName::name(wrapper_name),
             args: Some(vec![HirCallArg {
+                trailing_closure: false,
                 label: None,
                 value: unit_expr,
             }]),

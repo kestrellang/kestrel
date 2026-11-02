@@ -61,7 +61,7 @@ the type checker, and the code is assigned in one place,
 | E107 | does not conform to protocol | A type does not satisfy a required conformance or where clause. |
 | E108 | implicit 'it' parameter requires single-parameter context | `it` was used where the closure's expected type does not take exactly one parameter. |
 | E109 | type mismatch | The value's type is not the one the context requires (also: a mutating closure where a non-mutating one is expected). |
-| E113 | wrong number of arguments / wrong label / no matching overload | The call's shape (arity, argument labels, type-argument count) fits no declaration. |
+| E113 | wrong number of arguments / wrong label / no matching overload / ambiguous trailing closure | The call's shape (arity, argument labels, type-argument count) fits no declaration, or a trailing closure could fill more than one closure-typed parameter. |
 | E114 | literal not accepted | The literal's kind cannot be written as the expected type. |
 | E115 | member '{name}' is not accessible | Visibility forbids the access from this scope. |
 | E116 | wrong kind of member use | A static member used on an instance, an instance method on a type, a type parameter as a value, or a method not called. |
@@ -310,7 +310,7 @@ protocol/extension-target arguments, where-clause types).
 | E489 | reference types cannot be used here | The catch-all position — alias RHS, where-clause types, protocol bounds. |
 | E488 | a borrow expression is only allowed as a \`let\` initializer | `&x` is not a free-standing expression; parameters already borrow by signature. |
 | E490 | a throwing function cannot return a reference | `throws` wraps the return in `Result`, and a reference can't live in an enum payload. |
-| E491 | a reference-returning function cannot be used as a value | `-> &T` is a return convention, not part of a function type; call it instead of storing it. |
+| E491 | a reference-returning function cannot be used as a value | `-> &T` is a return convention, not part of a function type; call it instead of storing it. A function type may take refs (`xs.refs().map { … }`); only returning one is rejected. |
 | E492 | a reference cannot be a generic type argument | That would store the reference; bind the value first to store an owned copy. |
 | E493 | ambiguous borrow source for the returned reference | The compiler can't tell which parameter the returned `&T` borrows from. |
 | E494 | cannot return this reference/closure: it borrows local '{name}', which does not outlive the call | A reference (or a closure/value carrying one) rooted in a local would dangle after return. |

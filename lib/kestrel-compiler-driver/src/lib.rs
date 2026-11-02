@@ -387,6 +387,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::ImplicitMemberNotFound { .. } => "ImplicitMemberNotFound",
         InferError::ArgCountMismatch { .. } => "ArgCountMismatch",
         InferError::LabelMismatch { .. } => "LabelMismatch",
+        InferError::AmbiguousTrailingClosure { .. } => "AmbiguousTrailingClosure",
         InferError::InstanceMethodAsStatic { .. } => "InstanceMethodAsStatic",
         InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
         InferError::TypeMustBeKnown { .. } => "TypeMustBeKnown",
@@ -488,6 +489,10 @@ fn format_error(err: &InferError) -> String {
                 expected, got, span.file_id, span.start
             )
         },
+        InferError::AmbiguousTrailingClosure { candidates, .. } => format!(
+            "AmbiguousTrailingClosure candidates={:?} at {}:{}",
+            candidates, span.file_id, span.start
+        ),
         InferError::InstanceMethodAsStatic { name, .. } => {
             format!(
                 "InstanceMethodAsStatic '{}' at {}:{}",

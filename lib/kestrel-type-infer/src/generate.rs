@@ -4,6 +4,7 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
+use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, bind_arguments};
 use kestrel_ast_builder::{Callable, InitEffect, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
@@ -398,18 +399,26 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 && ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Function)
                 && let Some(callable) = ctx.query_ctx.get::<Callable>(*entity)
             {
-                let arg_labels: Vec<Option<&str>> =
-                    args.iter().map(|a| a.label.as_deref()).collect();
-                if !labels_match(&callable.params, &arg_labels) {
-                    let name = ctx
-                        .query_ctx
-                        .get::<Name>(*entity)
-                        .map(|n| n.0.clone())
-                        .unwrap_or_else(|| "<fn>".into());
+                let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
+                let params: Vec<BindParam> = callable.params.iter().map(BindParam::of).collect();
+                if let Err(e) = bind_arguments(&params, &arg_labels) {
                     let span = span.clone();
+                    let err = match e {
+                        BindError::AmbiguousTrailingClosure { candidates, .. } => {
+                            InferError::AmbiguousTrailingClosure { candidates, span }
+                        },
+                        _ => InferError::NoMatchingOverload {
+                            name: ctx
+                                .query_ctx
+                                .get::<Name>(*entity)
+                                .map(|n| n.0.clone())
+                                .unwrap_or_else(|| "<fn>".into()),
+                            span,
+                        },
+                    };
                     ctx.type_param_defs.remove(callee);
                     let _ = gen_call_args(ctx, hir, args);
-                    return ctx.report_error(InferError::NoMatchingOverload { name, span });
+                    return ctx.report_error(err);
                 }
             }
 
@@ -1748,7 +1757,7 @@ fn gen_struct_init(
         .collect();
 
     // Collect arg labels for init matching
-    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
 
     // Initializers come from the one member query every other lookup uses:
     // the type's own, its extensions', and its protocols' extension defaults.
@@ -2042,6 +2051,7 @@ fn gen_call_args(ctx: &mut InferCtx<'_>, hir: &HirBody, args: &[HirCallArg]) -> 
                 label: arg.label.clone(),
                 ty,
                 value: arg.value,
+                trailing_closure: arg.trailing_closure,
             }
         })
         .collect()
@@ -2612,6 +2622,7 @@ fn gen_call_args_phased(
                 label: arg.label.clone(),
                 ty,
                 value: arg.value,
+                trailing_closure: arg.trailing_closure,
             }
         })
         .collect();

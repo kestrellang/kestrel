@@ -62,7 +62,11 @@ impl LowerCtx<'_> {
         let some = self.alloc_expr(HirExpr::ImplicitMember {
             owner: None,
             name: HirName::name("Some"),
-            args: Some(vec![HirCallArg { label: None, value }]),
+            args: Some(vec![HirCallArg {
+                trailing_closure: false,
+                label: None,
+                value,
+            }]),
             span: span.clone(),
         });
         let assign = self.alloc_expr(HirExpr::Assign {

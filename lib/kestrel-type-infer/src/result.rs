@@ -821,6 +821,13 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             let g = got.as_deref().unwrap_or("_");
             format!("wrong label: expected '{}', got '{}'", exp, g)
         },
+        InferError::AmbiguousTrailingClosure { candidates, .. } => {
+            let names: Vec<&str> = candidates
+                .iter()
+                .map(|l| l.as_deref().unwrap_or("_"))
+                .collect();
+            format!("ambiguous trailing closure: {}", names.join(", "))
+        },
         InferError::InstanceMethodAsStatic { name, .. } => {
             format!("instance method '{}' cannot be called on a type", name)
         },

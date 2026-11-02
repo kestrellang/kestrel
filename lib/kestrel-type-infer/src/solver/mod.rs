@@ -21,7 +21,7 @@ use crate::generate::SubjectRoot;
 use crate::resolve::EqualityLhs;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
-use kestrel_ast_builder::arg_binding::{BindError, BindParam, Binding, bind_arguments};
+use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, Binding, bind_arguments};
 use kestrel_ast_builder::{Callable, InitEffect, Intrinsic, Name, NodeKind, TypeParams};
 use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_hecs::Entity;
@@ -369,8 +369,8 @@ pub(super) enum RefPos {
 /// Returns the violating position, or None. Legal positions (stage 2b): the
 /// top level (a ref-returning call result) and aggregate slots (nominal
 /// type args, tuple elements — the HIR formation walk checks annotations;
-/// inference can't mint them elsewhere). Still-illegal backstops: function
-/// types (E491), protocol args / opaque bounds / assoc-projection bases
+/// inference can't mint them elsewhere), and function-type params.
+/// Still-illegal backstops: function-type returns (E491), protocol args / opaque bounds / assoc-projection bases
 /// (E492 — positions the formation walk also still rejects).
 pub(super) fn find_ref_violation(
     ctx: &InferCtx<'_>,
@@ -402,10 +402,14 @@ pub(super) fn find_ref_violation(
         TyKind::Tuple(elems) => elems
             .iter()
             .find_map(|&e| find_ref_violation(ctx, e, RefPos::Slot, seen)),
+        // A closure may TAKE a ref (`xs.refs().map { r in r.n }`): a param
+        // borrows for the call, like a borrowing param. Only a ref-returning
+        // function type is illegal (E491): the ret_borrow ABI isn't
+        // expressible in function types.
         TyKind::Function { params, ret, .. } => params
             .iter()
-            .chain(std::iter::once(&ret))
-            .find_map(|&p| find_ref_violation(ctx, p, RefPos::InFn, seen)),
+            .find_map(|&p| find_ref_violation(ctx, p, RefPos::Top, seen))
+            .or_else(|| find_ref_violation(ctx, ret, RefPos::InFn, seen)),
         TyKind::AssocProjection { base, .. } => find_ref_violation(ctx, base, RefPos::Nested, seen),
         TyKind::Opaque {
             bounds,

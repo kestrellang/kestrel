@@ -117,6 +117,13 @@ pub enum InferError {
         span: Span,
     },
 
+    /// E113: an unlabeled trailing closure could fill more than one
+    /// closure-typed parameter (labels in `candidates`, `None` = unlabeled).
+    AmbiguousTrailingClosure {
+        candidates: Vec<Option<String>>,
+        span: Span,
+    },
+
     /// Instance method called in static context (e.g., `T.instanceMethod()`).
     InstanceMethodAsStatic { name: String, span: Span },
 
@@ -478,6 +485,23 @@ impl InferError {
 
             Self::LabelMismatch { .. } => detailed("wrong argument label".into()),
 
+            Self::AmbiguousTrailingClosure { candidates, .. } => {
+                let names: Vec<String> = candidates
+                    .iter()
+                    .map(|l| match l {
+                        Some(l) => format!("`{l}:`"),
+                        None => "the unlabeled parameter".into(),
+                    })
+                    .collect();
+                labeled(
+                    format!(
+                        "ambiguous trailing closure: it could fill {}",
+                        names.join(" or ")
+                    ),
+                    "pass it inside the parentheses with its label".into(),
+                )
+            },
+
             Self::InstanceMethodAsStatic { name, .. } => {
                 detailed(format!("instance method '{name}' cannot be called on a type"))
             },
@@ -743,6 +767,7 @@ impl InferError {
             Self::TypeMismatch { .. } | Self::ConventionMismatch { .. } => "E109",
             Self::ArgCountMismatch { .. }
             | Self::LabelMismatch { .. }
+            | Self::AmbiguousTrailingClosure { .. }
             | Self::MemberwiseInitArity { .. }
             | Self::MemberwiseInitLabel { .. }
             | Self::NoMatchingOverload { .. }
@@ -796,6 +821,7 @@ impl InferError {
             | Self::ImplicitMemberNotFound { span, .. }
             | Self::ArgCountMismatch { span, .. }
             | Self::LabelMismatch { span, .. }
+            | Self::AmbiguousTrailingClosure { span, .. }
             | Self::InstanceMethodAsStatic { span, .. }
             | Self::TypeParamAsValue { span }
             | Self::TypeMustBeKnown { span, .. }

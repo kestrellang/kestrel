@@ -1,4 +1,4 @@
-use kestrel_ast_builder::arg_binding::{BindParam, Binding, bind_arguments};
+use kestrel_ast_builder::arg_binding::{BindArg, BindParam, Binding, bind_arguments};
 use kestrel_ast_builder::attrs::attrs_of;
 use kestrel_ast_builder::{Callable, DeclSpan, NodeKind};
 use kestrel_hecs::Entity;
@@ -99,23 +99,18 @@ impl OssaBodyCtx<'_, '_> {
     ) -> Vec<CallArg> {
         // Snapshot the parameter shape (owned) so the world borrow is released
         // before we lower any argument expressions.
-        let shape: Option<Vec<(Option<String>, Option<Entity>)>> =
-            self.ctx.world.get::<Callable>(callee_entity).map(|c| {
-                c.params
-                    .iter()
-                    .map(|p| (p.label.clone(), p.default_entity))
-                    .collect()
-            });
+        let shape: Option<Vec<kestrel_ast_builder::AstParam>> = self
+            .ctx
+            .world
+            .get::<Callable>(callee_entity)
+            .map(|c| c.params.clone());
         let Some(shape) = shape else {
             // No parameter metadata: lower in source order (no defaults to fill).
             return self.lower_call_args(args, conventions, conv_offset);
         };
 
-        let bind_params: Vec<BindParam> = shape
-            .iter()
-            .map(|(label, default)| BindParam::new(label.as_deref(), default.is_some()))
-            .collect();
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let bind_params: Vec<BindParam> = shape.iter().map(BindParam::of).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let plan = match bind_arguments(&bind_params, &arg_labels) {
             Ok(plan) => plan,
             // Binding was already validated during inference; if it somehow fails
@@ -166,7 +161,7 @@ impl OssaBodyCtx<'_, '_> {
                     }
                 },
                 Binding::Default => {
-                    let Some(default_entity) = shape[pi].1 else {
+                    let Some(default_entity) = shape[pi].default_entity else {
                         continue; // required-but-missing: impossible post-typecheck
                     };
                     let param_ty = resolve_type_annotation(self.ctx, default_entity);
@@ -202,12 +197,8 @@ impl OssaBodyCtx<'_, '_> {
         let plan = callee_entity
             .and_then(|e| self.ctx.world.get::<Callable>(e))
             .and_then(|c| {
-                let params: Vec<BindParam> = c
-                    .params
-                    .iter()
-                    .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
-                    .collect();
-                let labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+                let params: Vec<BindParam> = c.params.iter().map(BindParam::of).collect();
+                let labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
                 bind_arguments(&params, &labels).ok()
             });
         let Some(plan) = plan else {

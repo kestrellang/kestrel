@@ -259,7 +259,7 @@ pub(super) fn solve_overloaded_call(
         .map(|n| n.0.clone())
         .unwrap_or_else(|| "<overloaded>".into());
 
-    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
 
     // Step 1: filter candidates by label/arity
     let matched: Vec<Entity> = candidates
@@ -333,12 +333,8 @@ pub(crate) fn binding_plan_for(
     args: &[CallArg],
 ) -> Option<Vec<Binding>> {
     let callable = qctx.get::<Callable>(entity)?;
-    let bind_params: Vec<BindParam> = callable
-        .params
-        .iter()
-        .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
-        .collect();
-    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let bind_params: Vec<BindParam> = callable.params.iter().map(BindParam::of).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
     bind_arguments(&bind_params, &arg_labels).ok()
 }
 

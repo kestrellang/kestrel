@@ -100,6 +100,7 @@ impl LowerCtx<'_> {
                 HirCallArg {
                     label: arg.label.clone(),
                     value,
+                    trailing_closure: arg.trailing_closure,
                 }
             })
             .collect()
@@ -246,6 +247,7 @@ impl LowerCtx<'_> {
             Some((SyntaxKind::ExprPath, _)) => {
                 let arg = self.lower_fill(&fill, span);
                 let args = vec![HirCallArg {
+                    trailing_closure: false,
                     label: None,
                     value: arg,
                 }];
@@ -259,6 +261,7 @@ impl LowerCtx<'_> {
                 self.alloc_expr(HirExpr::Call {
                     callee,
                     args: vec![HirCallArg {
+                        trailing_closure: false,
                         label: None,
                         value: arg,
                     }],
