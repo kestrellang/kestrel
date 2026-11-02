@@ -263,7 +263,8 @@ impl LowerCtx<'_> {
         }
 
         let mut named = self.signature_param_names();
-        for param in &callable.params {
+        let pattern_spans = self.signature_param_spans();
+        for (index, param) in callable.params.iter().enumerate() {
             let local = self.define_local(&param.name, param.is_mut, Span::synthetic(0));
             self.params.push(local);
             // Record where a plainly-named parameter is spelled.
@@ -278,7 +279,12 @@ impl LowerCtx<'_> {
 
             // Desugar destructured params: match _param_0 { (a, b) => () }
             if let Some(ref pattern) = param.pattern {
-                let span = Span::synthetic(0);
+                // The pattern's own span, so diagnostics on the desugared
+                // match (E210 on a `&mutating` binder, …) point at it.
+                let span = pattern_spans
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| Span::synthetic(0));
                 let hir_pat = self.lower_param_pattern(pattern, &span, param.is_mut);
                 let param_ref = self.alloc_expr(HirExpr::Local(local, span.clone()));
                 let unit = self.alloc_expr(HirExpr::Tuple {
@@ -331,6 +337,22 @@ impl LowerCtx<'_> {
                     Some(Some((b.syntax().clone(), b.identifier_token()?)))
                 },
                 _ => None,
+            })
+            .collect()
+    }
+
+    /// The span of each written parameter's pattern, in declaration order
+    /// (empty when the owner has no parameter list in source).
+    fn signature_param_spans(&self) -> Vec<Span> {
+        let Some(list) = kestrel_ast_builder::syntax::cst_node(self.ctx, self.owner)
+            .and_then(|decl| decl.children().find_map(ast::ParameterList::cast))
+        else {
+            return Vec::new();
+        };
+        list.parameters()
+            .map(|param| match param.pattern() {
+                Some(pat) => self.span(pat.syntax()),
+                None => self.span(param.syntax()),
             })
             .collect()
     }

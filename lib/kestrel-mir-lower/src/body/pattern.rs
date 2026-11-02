@@ -381,8 +381,12 @@ impl OssaBodyCtx<'_, '_> {
                     })
                 )
             });
-        if part_moves.is_some() {
-            return self.lower_destructure_in_place(scrutinee_expr, arm, part_moves);
+        // `&` / `&mutating` binders (`let (&a, b) = pair`) borrow the
+        // scrutinee place, so they bind in place like a partial move.
+        let ref_mode = self.arms_ref_binding_mode(std::slice::from_ref(arm));
+        if part_moves.is_some() || ref_mode.is_some() {
+            let mutating = ref_mode.unwrap_or(false);
+            return self.lower_destructure_in_place(scrutinee_expr, arm, part_moves, mutating);
         }
         let scrutinee_val = self.lower_expr(scrutinee_expr);
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
@@ -404,16 +408,18 @@ impl OssaBodyCtx<'_, '_> {
         self.lower_expr(arm.body)
     }
 
-    /// `lower_irrefutable_destructure` for a partial move: bind from the
-    /// pinned scrutinee address; moving bindings take their fields out of
-    /// the slot (`emit_bindings_place`), the rest copy or borrow as usual.
+    /// `lower_irrefutable_destructure` for a partial move or `&` binders:
+    /// bind from the pinned scrutinee address; moving bindings take their
+    /// fields out of the slot (`emit_bindings_place`), `&` binders borrow
+    /// it (a mutable place when `mutating`), the rest copy as usual.
     fn lower_destructure_in_place(
         &mut self,
         scrutinee_expr: HirExprId,
         arm: &HirMatchArm,
         part_moves: Option<(LocalId, Vec<(LocalId, Vec<FieldIdx>)>)>,
+        mutating: bool,
     ) -> ValueId {
-        let addr = self.lower_match_scrutinee_place(scrutinee_expr, false);
+        let addr = self.lower_match_scrutinee_place(scrutinee_expr, mutating);
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
         let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
         let tree = kestrel_pattern_matching::compile_decision_tree(

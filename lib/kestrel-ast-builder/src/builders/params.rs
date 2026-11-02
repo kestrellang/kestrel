@@ -141,6 +141,15 @@ fn extract_param_pattern(pat: &ast::Pat) -> Option<ParamPattern> {
                 .map(|t| t.text().to_string())
                 .unwrap_or_default(),
             is_mut: b.var_token().is_some(),
+            by_ref: None,
+        },
+        ast::Pat::RefBindingPattern(b) => ParamPattern::Binding {
+            name: b
+                .identifier_token()
+                .map(|t| t.text().to_string())
+                .unwrap_or_default(),
+            is_mut: false,
+            by_ref: Some(b.mutating_token().is_some()),
         },
         ast::Pat::TuplePattern(t) => ParamPattern::Tuple {
             elements: t
@@ -165,6 +174,7 @@ fn extract_param_pattern(pat: &ast::Pat) -> Option<ParamPattern> {
                             ParamPattern::Binding {
                                 name: field_name.clone(),
                                 is_mut: false,
+                                by_ref: None,
                             },
                         );
                         fields.push(StructPatternField {

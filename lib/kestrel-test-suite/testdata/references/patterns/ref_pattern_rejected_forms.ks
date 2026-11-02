@@ -2,9 +2,7 @@
 // stdlib: false
 
 // `&mutating` pattern bindings need a MUTABLE scrutinee place (E210 —
-// the E495 predicate family): a `let` scrutinee rejects. `&` binders
-// outside match arms stay E211 (if-let here; let-destructure pinned in
-// ref_pattern_positions_rejected.ks).
+// the E495 predicate family): a `let` scrutinee rejects.
 module Test
 
 enum Slot {
@@ -20,8 +18,7 @@ func immutableScrutinee() {
     };
 }
 
-func ifLetPosition() {
-    let s = Slot.Filled(1);
-    if let .Filled(&v) = s { // ERROR(E211)
-    }
+// A borrowed parameter is not a mutable place either.
+func borrowedParam((&mutating a, b): (lang.i64, lang.i64)) { // ERROR(E210)
+    a = 3;
 }

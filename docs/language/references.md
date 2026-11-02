@@ -231,7 +231,7 @@ That's the entire model. There are no lifetime parameters, no `'a`, no borrow an
 | E208 | Plain assignment through a shared reference |
 | E209 | Ref binding declared `var` — ref bindings must be `let` |
 | E210 | `&mutating` borrow of an immutable place |
-| E211 | `&` binder pattern outside a match arm |
+| E211 | *Retired* — `&` binder patterns are allowed in every pattern position (see [Pattern Matching](pattern-matching.md#reference-binding-pattern)); a `let` destructure of a temporary is E499 |
 | E212 | *Retired* — view-kind closures may capture ref bindings; an owning (`escaping`/`consuming`) closure that tries is E624 |
 | E503 | Decay would move a non-Copyable value out of a borrow |
 | E504 | *Warning:* returning a pointer-derived reference to a local of the same function |

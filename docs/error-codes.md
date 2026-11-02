@@ -136,7 +136,7 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E208 | cannot assign through a shared reference | Writing through `&T` is not allowed; take `&mutating` instead. |
 | E209 | a ref binding must be a simple \`let\` | A borrow initializer (`let r = &x`) can't be combined with `var` or a destructuring pattern. |
 | E210 | cannot take a \`&mutating\` borrow of immutable variable '{name}' | Mutable borrows need a mutable place (`var`, mutable field, or `Pointer.mutatingValue`). |
-| E211 | \`&\` pattern bindings are not supported in this position | `&` patterns are only allowed in match-arm patterns, not in `let`/`for`/conditions/params. |
+| E211 | *(retired)* | Was "\`&\` pattern bindings are not supported in this position". `&` binders are now allowed in every pattern position; a `let` destructure of a temporary is rejected as E499 instead. |
 | E214 | cannot assign to failable place '{name}' | A failable property or subscript (`var first?: T`, `subscript(...)? -> T`) is read-only: the place may not exist. |
 | E213 | left-hand side of compound assignment is not assignable | `a op= b` needs a place (variable, field, subscript) on the left. |
 | E212 | *(retired)* | Was "closure cannot capture non-Static binding '{name}'". Retired with closure kinds (docs/design/closures.md): a view-kind closure's environment is frame-bound, so it may capture ref bindings and non-`Static` values freely. The owning tier keeps the rejection under E624. |
@@ -318,7 +318,7 @@ protocol/extension-target arguments, where-clause types).
 | E496 | cannot return a reference rooted at consuming parameter '{name}': it is destroyed when the call returns | Consuming parameters die with the call, so references into them can't escape. |
 | E497 | a reference cannot stay live across a control-flow merge in this version | A reference may not cross an `if`/`match`/loop boundary (current-version limitation). |
 | E498 | cannot consume {value} while a reference into it is live | Destroying or moving a value would leave an outstanding reference dangling. |
-| E499 | cannot borrow a temporary value | `&` needs a named place; temporaries and get/set members have no stable storage to borrow. |
+| E499 | cannot borrow a temporary value · \`&\` pattern binding would borrow a temporary | `&` needs a named place; temporaries and get/set members have no stable storage to borrow. A `let` destructure with `&` binders must destructure a named place. |
 
 ### Example — E494 (escaping reference)
 

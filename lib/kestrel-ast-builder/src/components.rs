@@ -205,6 +205,8 @@ pub enum ParamPattern {
     Binding {
         name: String,
         is_mut: bool,
+        /// `Some(mutating)` for a `&x` / `&mutating x` binder.
+        by_ref: Option<bool>,
     },
     Tuple {
         elements: Vec<ParamPattern>,
