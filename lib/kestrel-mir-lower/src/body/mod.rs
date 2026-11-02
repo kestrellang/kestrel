@@ -517,6 +517,9 @@ pub(crate) struct PendingWriteback {
     /// under a subscript, `o.items(at: 0) += 1`): it, and the refs born
     /// from it, must end before the slot is taken back.
     lent: Option<ValueId>,
+    /// The ref results of calls that took `lent` as an argument (a
+    /// `mutating ref` element place), recorded when each call is emitted.
+    lent_refs: Vec<ValueId>,
 }
 
 impl<'a, 'w> OssaBodyCtx<'a, 'w> {
@@ -3704,7 +3707,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             self.consume(v);
         }
         if ret_ref_mutating.is_none() {
-            for borrow_val in borrows {
+            for &borrow_val in &borrows {
                 let src = self.body.value(borrow_val).borrow_source;
                 self.emit_end_borrow(borrow_val);
                 // A sub-borrow of a ref (receiver/arg prep) was that ref's
@@ -3733,6 +3736,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             if ret_ref_mutating.is_some() {
                 self.track_borrow(r);
                 self.ref_results.insert(r);
+                self.note_lent_ref(&borrows, r);
             } else {
                 self.track_owned(r);
             }
@@ -4669,6 +4673,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             slot_addr,
             elem_ty: pointee_ty,
             lent: None,
+            lent_refs: Vec::new(),
         });
         Some(slot_addr)
     }
@@ -4914,7 +4919,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         while self.pending_writebacks.len() > watermark {
             let wb = self.pending_writebacks.pop().expect("len checked");
             if let Some(lent) = wb.lent {
-                self.end_lent_slot_borrow(lent);
+                self.end_lent_slot_borrow(lent, &wb.lent_refs);
             }
             let new_val = self.emit_take(wb.slot_addr, wb.elem_ty);
             let mut args: Vec<CallArg> = vec![CallArg {
@@ -4953,19 +4958,28 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         borrow
     }
 
-    /// End a lent slot borrow if the call that took it left it open — a
-    /// `mutating ref` result born from it ends first.
-    fn end_lent_slot_borrow(&mut self, lent: ValueId) {
+    /// Record ref result `r` against the pending writeback whose lent slot
+    /// borrow is among the call's borrowed `args`: the ref points into the
+    /// slot, so it must end before the slot is taken back.
+    fn note_lent_ref(&mut self, args: &[ValueId], r: ValueId) {
+        if let Some(wb) = self
+            .pending_writebacks
+            .iter_mut()
+            .find(|wb| wb.lent.is_some_and(|l| args.contains(&l)))
+        {
+            wb.lent_refs.push(r);
+        }
+    }
+
+    /// End a lent slot borrow, and the refs born from it, if the calls that
+    /// took it left them open (newest first).
+    fn end_lent_slot_borrow(&mut self, lent: ValueId, lent_refs: &[ValueId]) {
         let open: Vec<ValueId> = self
             .scope_stack
             .iter()
             .flat_map(|s| s.entries.iter())
             .filter_map(|e| match e {
-                ScopeEntry::Borrow(v)
-                    if *v == lent || (v.index() > lent.index() && self.ref_results.contains(v)) =>
-                {
-                    Some(*v)
-                },
+                ScopeEntry::Borrow(v) if *v == lent || lent_refs.contains(v) => Some(*v),
                 _ => None,
             })
             .collect();
