@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! { willSet body }           // sees `newValue`
-//! let oldValue = self.x      // only when `didSet` names `oldValue`
+//! let oldValue = self.x      // only when `didSet` reads `oldValue`
 //! self.x = newValue          // a direct store: MIR lowering never routes
 //!                            // this setter's own writes back through it
 //! { didSet body }            // sees `oldValue`
@@ -13,8 +13,8 @@
 
 use kestrel_ast_builder::Name;
 use kestrel_hir::body::{HirBlock, HirExpr, HirName, HirStmt, HirStmtId};
+use kestrel_syntax_tree::SyntaxNode;
 use kestrel_syntax_tree::ast::{self, AstNode};
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::ctx::LowerCtx;
 use crate::syntax::block_syntax;
@@ -59,16 +59,19 @@ impl LowerCtx<'_> {
             stmts.push(self.observer_block_stmt(body.syntax()));
         }
 
-        // Bound after `willSet`, so only `didSet` sees it.
-        let did_set = acc.did_set().and_then(|c| c.code_block());
-        if did_set
-            .as_ref()
-            .is_some_and(|b| names_old_value(b.syntax()))
-        {
+        // `oldValue` is in scope only for `didSet`. The block is lowered
+        // first so name resolution decides whether it reads `oldValue`:
+        // only then is the old value copied out before the store (it costs
+        // a copy, and a non-Copyable value can't be copied).
+        let old_value = self.define_local("oldValue", false, span.clone());
+        let did_set = acc
+            .did_set()
+            .and_then(|c| c.code_block())
+            .map(|body| self.observer_block_stmt(body.syntax()));
+        if self.reads_local(old_value) {
             let value = field(self);
-            let local = self.define_local("oldValue", false, span.clone());
             stmts.push(self.alloc_stmt(HirStmt::Let {
-                local,
+                local: old_value,
                 ty: None,
                 value: Some(value),
                 span: span.clone(),
@@ -86,14 +89,18 @@ impl LowerCtx<'_> {
             expr: assign,
             span: span.clone(),
         }));
-
-        if let Some(body) = did_set {
-            stmts.push(self.observer_block_stmt(body.syntax()));
-        }
+        stmts.extend(did_set);
         HirBlock {
             stmts,
             tail_expr: None,
         }
+    }
+
+    /// Does any lowered expression read `local`?
+    fn reads_local(&self, local: kestrel_hir::LocalId) -> bool {
+        self.exprs
+            .iter()
+            .any(|(_, e)| matches!(e, HirExpr::Local(l, _) if *l == local))
     }
 
     /// One observer clause's block, as a statement in its own scope.
@@ -106,13 +113,4 @@ impl LowerCtx<'_> {
         });
         self.alloc_stmt(HirStmt::Expr { expr, span })
     }
-}
-
-/// Does a `didSet` body name `oldValue`? Only then is the old value copied
-/// out before the store (it costs a copy, and a non-Copyable value can't be).
-fn names_old_value(block: &SyntaxNode) -> bool {
-    block
-        .descendants_with_tokens()
-        .filter_map(|e| e.into_token())
-        .any(|t| t.kind() == SyntaxKind::Identifier && t.text() == "oldValue")
 }

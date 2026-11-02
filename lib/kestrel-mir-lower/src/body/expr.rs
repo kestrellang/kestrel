@@ -1718,16 +1718,8 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Skip computed-property subscript-set (stored fields only)
-        let prefix_entity = receiver_entity.and_then(|recv| {
-            self.ctx.world.children_of(recv).iter().copied().find(|&c| {
-                self.ctx.world.get::<NodeKind>(c) == Some(&NodeKind::Field)
-                    && self
-                        .ctx
-                        .world
-                        .get::<kestrel_ast_builder::Name>(c)
-                        .is_some_and(|n| n.0 == method_name)
-            })
-        });
+        let prefix_entity =
+            receiver_entity.and_then(|recv| self.ctx.field_named(recv, method_name));
         let is_computed_property =
             prefix_entity.is_some_and(|e| self.ctx.world.get::<Callable>(e).is_some());
         if is_computed_property {

@@ -1539,11 +1539,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(struct_ty) else {
             return Vec::new();
         };
-        let entity = *entity;
-        let caches: Vec<String> = self
+        let caches: Vec<FieldIdx> = self
             .ctx
             .world
-            .children_of(entity)
+            .children_of(*entity)
             .iter()
             .filter(|&&c| {
                 self.ctx
@@ -1551,25 +1550,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     .get::<kestrel_ast_builder::FieldClass>(c)
                     .is_some_and(|fc| fc.lazy_cache)
             })
-            .filter_map(|&c| {
-                Some(
-                    self.ctx
-                        .world
-                        .get::<kestrel_ast_builder::Name>(c)?
-                        .0
-                        .clone(),
-                )
-            })
+            .filter_map(|&c| self.ctx.field_idx_of(c))
             .collect();
         if caches.is_empty() {
             return Vec::new();
         }
         let field_tys = self.struct_field_tys(struct_ty);
         let mut out = Vec::new();
-        for name in caches {
-            let Some(idx) = self.ctx.resolve_field_idx(entity, &name) else {
-                continue;
-            };
+        for idx in caches {
             let Some(&opt_ty) = field_tys.get(idx.index()) else {
                 continue;
             };
@@ -4484,21 +4472,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         name: &str,
         field_ty: TyId,
     ) -> Option<ValueId> {
-        let field = self
-            .ctx
-            .world
-            .children_of(owner)
-            .iter()
-            .copied()
-            .find(|&c| {
-                self.ctx.world.get::<kestrel_ast_builder::NodeKind>(c)
-                    == Some(&kestrel_ast_builder::NodeKind::Field)
-                    && self
-                        .ctx
-                        .world
-                        .get::<kestrel_ast_builder::Name>(c)
-                        .is_some_and(|n| n.0 == name)
-            })?;
+        let field = self.ctx.field_named(owner, name)?;
         let setter = self.write_setter(field, Some(base))?;
         self.ctx
             .world
@@ -4669,40 +4643,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .map(|a| self.lower_expr(a.value))
             .collect();
 
-        // GET: copy the element out.
-        let mut get_args: Vec<CallArg> = vec![CallArg {
-            value: self.emit_begin_borrow(recv_place),
-            convention: ParamConvention::Borrow,
-        }];
-        for &v in &index_vals {
-            get_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
-        }
-        // Read through the member's READ provider: the `ref` accessor child
-        // when present (a ref+set cross-mix leaves the parent bodyless;
-        // emit_store_init below copies out of the @guaranteed ref result),
-        // else the getter on the member itself.
-        let read_callee = self
-            .ctx
-            .find_ref_accessor_child(member, false)
-            .unwrap_or(member);
-        let got = if let Some(got) = self.read_observed_storage(recv_place, receiver_ty, member) {
-            // Observed stored field: read its storage, no getter to call.
-            got
-        } else if let Some(protocol) = self.ctx.is_protocol_method(read_callee) {
-            self.ctx.register_name(protocol);
-            let key = self.ctx.witness_method_key(read_callee);
-            let callee = Callee::Witness {
-                protocol,
-                method: key,
-                self_type: receiver_ty,
-                method_type_args: type_args.clone(),
-            };
-            self.emit_call_returning(callee, get_args, pointee_ty)
-        } else {
-            self.ctx.register_name(read_callee);
-            let ta = self.prepend_receiver_type_args(receiver_ty, type_args.clone());
-            let callee = Callee::direct_with_args(read_callee, ta, None);
-            self.emit_call_returning(callee, get_args, pointee_ty)
+        // GET: copy the element out. An observed stored field reads its
+        // storage directly (it has no getter to call).
+        let got = match self.read_observed_storage(recv_place, receiver_ty, member) {
+            Some(got) => got,
+            None => self.emit_read_provider_call(
+                member,
+                recv_place,
+                &index_vals,
+                receiver_ty,
+                &type_args,
+                pointee_ty,
+            ),
         };
 
         // Slot: the mutating operation runs on the slot's address.
@@ -4719,6 +4671,47 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             lent: None,
         });
         Some(slot_addr)
+    }
+
+    /// Call `member`'s READ provider on a sub-borrow of `recv_place`: the
+    /// `ref` accessor child when present (a ref+set cross-mix leaves the
+    /// parent bodyless; the caller copies out of the @guaranteed ref
+    /// result), else the getter on the member itself.
+    fn emit_read_provider_call(
+        &mut self,
+        member: kestrel_hecs::Entity,
+        recv_place: ValueId,
+        index_vals: &[ValueId],
+        receiver_ty: TyId,
+        type_args: &[TyId],
+        result_ty: TyId,
+    ) -> ValueId {
+        let mut args: Vec<CallArg> = vec![CallArg {
+            value: self.emit_begin_borrow(recv_place),
+            convention: ParamConvention::Borrow,
+        }];
+        for &v in index_vals {
+            args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+        }
+        let read_callee = self
+            .ctx
+            .find_ref_accessor_child(member, false)
+            .unwrap_or(member);
+        if let Some(protocol) = self.ctx.is_protocol_method(read_callee) {
+            self.ctx.register_name(protocol);
+            let key = self.ctx.witness_method_key(read_callee);
+            let callee = Callee::Witness {
+                protocol,
+                method: key,
+                self_type: receiver_ty,
+                method_type_args: type_args.to_vec(),
+            };
+            return self.emit_call_returning(callee, args, result_ty);
+        }
+        self.ctx.register_name(read_callee);
+        let ta = self.prepend_receiver_type_args(receiver_ty, type_args.to_vec());
+        let callee = Callee::direct_with_args(read_callee, ta, None);
+        self.emit_call_returning(callee, args, result_ty)
     }
 
     /// `o.member.field = v` where `member` is a value-returning computed

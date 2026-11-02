@@ -108,6 +108,23 @@ impl<'w> LowerCtx<'w> {
         Some(FieldIdx::new(idx))
     }
 
+    /// The `NodeKind::Field` member of nominal `owner` named `name` (stored
+    /// or computed).
+    pub fn field_named(&self, owner: Entity, name: &str) -> Option<Entity> {
+        self.world.children_of(owner).iter().copied().find(|&c| {
+            self.world.get::<NodeKind>(c) == Some(&NodeKind::Field)
+                && self.world.get::<Name>(c).is_some_and(|n| n.0 == name)
+        })
+    }
+
+    /// The `FieldIdx` of stored field entity `field` in its owner's lowered
+    /// struct.
+    pub fn field_idx_of(&self, field: Entity) -> Option<FieldIdx> {
+        let owner = self.world.parent_of(field)?;
+        let name = &self.world.get::<Name>(field)?.0;
+        self.resolve_field_idx(owner, name)
+    }
+
     pub fn resolve_field_ty(&self, struct_entity: Entity, field_idx: FieldIdx) -> Option<TyId> {
         let def = self.module.structs.get(&struct_entity)?;
         def.fields.get(field_idx.index()).map(|f| f.ty)
