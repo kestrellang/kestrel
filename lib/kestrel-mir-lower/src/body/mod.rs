@@ -486,6 +486,15 @@ pub(crate) enum AccessorReceiver {
     FieldOf { base: HirExprId, name: String },
 }
 
+impl AccessorReceiver {
+    /// The receiver expression the place is rooted in.
+    pub(crate) fn root_expr(&self) -> HirExprId {
+        match self {
+            Self::Expr(e) | Self::FieldOf { base: e, .. } => *e,
+        }
+    }
+}
+
 /// One deferred get→op→set writeback (see `pending_writebacks`).
 pub(crate) struct PendingWriteback {
     /// The member's setter child (concrete) — witness-dispatched when the
@@ -4407,13 +4416,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         })
     }
 
-    /// The setter a write to `member` from this body goes through: its `set`
-    /// child, or an observed stored field's `ObserverSetter` — except where
-    /// this body writes the observed storage directly: the observer setter
-    /// itself, and initializers (observers never fire during initialization).
+    /// The setter a write to `member` on `receiver` goes through: its `set`
+    /// child, or an observed stored field's `ObserverSetter`. `None` for an
+    /// observed field this body writes directly (see
+    /// [`Self::writes_observed_storage`]). `receiver` is the written place's
+    /// base; `None` (no receiver expression) never bypasses observers.
     pub(crate) fn write_setter(
         &self,
         member: kestrel_hecs::Entity,
+        receiver: Option<HirExprId>,
     ) -> Option<kestrel_hecs::Entity> {
         let setter = self.ctx.find_setter_child(member)?;
         let observer = self
@@ -4421,7 +4432,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .world
             .get::<kestrel_ast_builder::ObserverSetter>(setter)
             .is_some();
-        if observer && self.writes_observed_storage(setter, member) {
+        if observer && receiver.is_some_and(|r| self.writes_observed_storage(setter, member, r)) {
             return None;
         }
         Some(setter)
@@ -4488,7 +4499,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         .get::<kestrel_ast_builder::Name>(c)
                         .is_some_and(|n| n.0 == name)
             })?;
-        let setter = self.write_setter(field)?;
+        let setter = self.write_setter(field, Some(base))?;
         self.ctx
             .world
             .get::<kestrel_ast_builder::ObserverSetter>(setter)?;
@@ -4501,23 +4512,58 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         )
     }
 
-    /// Does this body store into `field`'s observed storage directly?
+    /// Does this body store into observed `field` of `receiver` directly,
+    /// without running its observers? Only for its own `self`, and only in
+    /// the observer setter itself or an initializer of the field's type
+    /// (observers never fire during initialization). Any other instance,
+    /// even one of the same type, runs them.
     fn writes_observed_storage(
         &self,
         setter: kestrel_hecs::Entity,
         field: kestrel_hecs::Entity,
+        receiver: HirExprId,
     ) -> bool {
         use kestrel_ast_builder::NodeKind;
-        let world = &self.ctx.world;
+        if !self.is_own_self_place(receiver) {
+            return false;
+        }
         if self.func_entity == setter {
             return true;
         }
-        if world.get::<NodeKind>(self.func_entity) != Some(&NodeKind::Initializer) {
-            return false;
+        let world = &self.ctx.world;
+        world.get::<NodeKind>(self.func_entity) == Some(&NodeKind::Initializer)
+            && self.self_type_entity().is_some()
+            && self.self_type_entity() == world.parent_of(field)
+    }
+
+    /// Is the place `expr` rooted at this body's own `self` receiver?
+    fn is_own_self_place(&self, expr: HirExprId) -> bool {
+        let has_receiver = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Callable>(self.func_entity)
+            .is_some_and(|c| c.receiver.is_some());
+        has_receiver
+            && self
+                .hir
+                .place_root(expr)
+                .is_some_and(|root| self.hir.params.first() == Some(&root))
+    }
+
+    /// The type this body's `self` is: the declaring type, or an
+    /// extension's target.
+    fn self_type_entity(&self) -> Option<kestrel_hecs::Entity> {
+        use kestrel_ast_builder::NodeKind;
+        let owner = self.ctx.world.parent_of(self.func_entity)?;
+        if self.ctx.world.get::<NodeKind>(owner) != Some(&NodeKind::Extension) {
+            return Some(owner);
         }
-        let init_owner = world.parent_of(self.func_entity);
-        init_owner == world.parent_of(field)
-            || init_owner.is_some_and(|o| world.get::<NodeKind>(o) == Some(&NodeKind::Extension))
+        self.ctx
+            .query
+            .query(kestrel_name_res::ExtensionTargetEntity {
+                extension: owner,
+                root: self.ctx.root,
+            })
     }
 
     /// Does writing the place `expr_id` pass through an observed stored
@@ -4536,13 +4582,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 .typed
                 .as_ref()
                 .and_then(|t| t.resolutions.get(&expr_id))
-                .and_then(|&m| self.ctx.find_setter_child(m).map(|s| (m, s)))
-                .is_some_and(|(m, s)| {
-                    self.ctx
-                        .world
-                        .get::<kestrel_ast_builder::ObserverSetter>(s)
-                        .is_some()
-                        && self.write_setter(m).is_some()
+                .is_some_and(|&m| {
+                    kestrel_type_infer::captures::is_observed_field(&self.ctx.query, m)
+                        && self.write_setter(m, Some(base)).is_some()
                 });
         observed || self.place_crosses_observer(base)
     }
@@ -4588,7 +4630,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         {
             return None;
         }
-        let setter = self.write_setter(member)?;
+        let setter = self.write_setter(member, Some(receiver.root_expr()))?;
         // NotCopyable elements can't ride a copy-out — backstop the analyzer
         // (mirrors emit_move_out_of_borrow_backstop's accumulate pattern).
         if self.is_non_copyable(pointee_ty) {
@@ -4719,7 +4761,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// nested store mutated a temporary copy and was lost.
     pub(crate) fn accessor_writeback_place(&mut self, expr_id: HirExprId) -> Option<ValueId> {
         if let Some((receiver, index_args, member, _)) = self.accessor_member_prelude(expr_id)
-            && self.write_setter(member).is_some()
+            && self
+                .write_setter(member, Some(receiver.root_expr()))
+                .is_some()
         {
             return self.fabricate_setter_writeback_slot(expr_id, &receiver, &index_args, member);
         }

@@ -1468,7 +1468,7 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Concrete computed property setter
-        let setter = self.write_setter(resolved)?;
+        let setter = self.write_setter(resolved, Some(base))?;
         self.ctx.register_name(setter);
         let is_static = self
             .ctx
@@ -1558,7 +1558,7 @@ impl OssaBodyCtx<'_, '_> {
             let pointee_ty = self.resolve_expr_type(target_id);
             return Some(self.emit_ref_accessor_store(accessor, vec![], vec![], pointee_ty, rhs));
         }
-        let setter = self.write_setter(entity)?;
+        let setter = self.write_setter(entity, None)?;
         self.ctx.register_name(setter);
         let rhs = self.lower_expr(value_id);
         let rhs_arg = self.prepare_call_arg(rhs, super::setter_value());
@@ -1624,7 +1624,7 @@ impl OssaBodyCtx<'_, '_> {
             );
         }
 
-        let setter = self.write_setter(resolved)?;
+        let setter = self.write_setter(resolved, Some(callee_expr))?;
         self.ctx.register_name(setter);
         let is_static = self
             .ctx
@@ -1736,7 +1736,7 @@ impl OssaBodyCtx<'_, '_> {
 
         let mutating_ref = self.ctx.find_ref_accessor_child(resolved, true);
         let setter = if mutating_ref.is_none() {
-            Some(self.write_setter(resolved)?)
+            Some(self.write_setter(resolved, Some(receiver))?)
         } else {
             None
         };
