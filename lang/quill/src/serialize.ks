@@ -100,6 +100,19 @@ extend Array[T]: Serialize where T: Serialize {
     }
 }
 
+/// Serializes each value under its key, producing `.Obj`.
+// `quill.value.Value` spelled out: inside `extend Dictionary`, a bare `Value`
+// names Dictionary's own associated type (the dictionary literal's `Value`).
+extend Dictionary[String, V, H]: Serialize where V: Serialize {
+    public func toValue() -> quill.value.Value throws SerializeError {
+        var result: Dictionary[String, quill.value.Value] = [:];
+        for (key, item) in self {
+            result.insert(key.clone(), try item.toValue())
+        }
+        .Ok(quill.value.Value.Obj(result))
+    }
+}
+
 /// Identity — a `Value` is already a `Value`.
 extend Value: Serialize {
     public func toValue() -> Value throws SerializeError {

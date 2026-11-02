@@ -1,0 +1,12 @@
+[package]
+name = "perch-2"
+version = "0.4.0"
+description = "Web server framework for Kestrel: typed extractors, typed middleware context, throwing handlers"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[dependencies]
+http = { path = "../http" }
+quill = { path = "../quill" }
+quill-json = { path = "../quill-json" }
