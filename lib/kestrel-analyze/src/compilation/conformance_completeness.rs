@@ -226,6 +226,36 @@ fn check_type_conformances(
     }
 }
 
+/// Every protocol instantiation `decl` (the type itself or one of its
+/// extensions) declares for `type_entity`, as `(protocol, param subs)` with
+/// defaults filled (`: Mul` is `: Mul[Self]`) and subs sorted by param, so
+/// two declarations name the same instantiation iff their pairs are equal.
+pub(crate) fn declared_instantiations(
+    cx: &CompilationContext<'_>,
+    type_entity: Entity,
+    decl: Entity,
+) -> Vec<(Entity, Vec<(Entity, ResolvedTy)>)> {
+    let Some(conformances) = cx.query.get::<Conformances>(decl) else {
+        return Vec::new();
+    };
+    conformances
+        .0
+        .iter()
+        .filter_map(|item| {
+            let ConformanceItem::Positive(ast_ty, _) = item else {
+                return None;
+            };
+            let protocol = resolve_conformance(cx, ast_ty, decl)?;
+            if cx.query.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
+                return None;
+            }
+            let mut subs = build_proto_param_subs(cx, type_entity, protocol, ast_ty, decl);
+            subs.sort_by_key(|(param, _)| param.index());
+            Some((protocol, subs))
+        })
+        .collect()
+}
+
 /// Check that an extension satisfies the protocol requirements it declares.
 fn check_extension_conformances(
     cx: &CompilationContext<'_>,
@@ -1635,8 +1665,22 @@ fn find_associated_type_binding_entity(
     assoc_name: &str,
     protocol: Entity,
 ) -> Option<Entity> {
-    let mut search: Vec<Entity> = decl.into_iter().collect();
-    search.push(type_entity);
+    // The conformance's own declaration speaks first: with two conformances
+    // to one protocol (`N: Mul` in the body, `extend N: Mul[Meters]`), the
+    // extension's `type Output = Meters` binds ITS instantiation even though
+    // the body's qualified `type Mul.Output = N` names the same protocol.
+    // An unqualified alias speaks for the declaration only when it names
+    // `protocol` itself, not a protocol it reaches by refinement.
+    if let Some(decl) = decl
+        && let Some(binding) = assoc_binding_in(cx, &[decl], assoc_name, protocol)
+        && (cx.query.get::<QualifiedTarget>(binding).is_some()
+            || declared_instantiations(cx, type_entity, decl)
+                .iter()
+                .any(|(p, _)| *p == protocol))
+    {
+        return Some(binding);
+    }
+    let mut search = vec![type_entity];
     let extensions = cx.query.query(ExtensionsFor {
         target: type_entity,
         root: cx.root,
@@ -1658,11 +1702,21 @@ fn find_associated_type_binding_entity(
         search.extend(proto_exts.iter());
     }
 
-    // First pass: prefer bindings qualified to this exact protocol —
-    // `type Equal.Output = Bool` trumps a sibling `type Output = String`
-    // that would otherwise apply to any conformed protocol.
+    assoc_binding_in(cx, &search, assoc_name, protocol)
+}
+
+/// The `assoc_name` binding for `protocol` among `search`'s children.
+/// Prefers bindings qualified to this exact protocol — `type Equal.Output =
+/// Bool` trumps a sibling `type Output = String` that would otherwise apply
+/// to any conformed protocol.
+fn assoc_binding_in(
+    cx: &CompilationContext<'_>,
+    search: &[Entity],
+    assoc_name: &str,
+    protocol: Entity,
+) -> Option<Entity> {
     let mut fallback: Option<Entity> = None;
-    for &entity in &search {
+    for &entity in search {
         for child in util::children_named_of_kind(cx.query, entity, assoc_name, NodeKind::TypeAlias)
         {
             if cx.query.get::<TypeAnnotation>(child).is_none() {
