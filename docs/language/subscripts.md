@@ -38,6 +38,25 @@ public subscript(index: Int) -> T {
 
 The setter receives an implicit `newValue` parameter of the subscript's return type.
 
+### `modifying get` / `modifying ref` and Failable Subscripts
+
+Subscripts take the same accessor forms as computed properties (see
+[Computed Properties](computed-properties.md)): `modifying get` and
+`modifying ref` read with a mutating receiver, so the subscripted value must
+be mutable. A failable subscript marks its parameter list with `?` and reads
+produce `Optional[T]`; it is read-only (assigning is E214):
+
+```kestrel
+subscript(checked index: Int64)? -> T {
+    get {
+        if index < 0 || index >= self.count { return null; }
+        .Some(self(at: index))
+    }
+}
+```
+
+Subscripts can't have `willSet` / `didSet` observers (E638).
+
 ### Labeled Parameters
 
 Subscripts support argument labels for clarity and overloading:

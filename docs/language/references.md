@@ -95,6 +95,11 @@ struct Buffer {
 
 `ref` provides reads (borrowing receiver), `mutating ref` provides writes (mutating receiver). You can also mix: a `get` for reads plus a `mutating ref` for in-place writes. A member with only `ref` is read-only — assigning through it is E201/E207. Duplicate providers are rejected (`get`+`ref` is E619, `set`+`mutating ref` is E620, a write provider without any read provider is E622), and ref accessors are not allowed in protocols (E621).
 
+`modifying ref` lends `&T` like `ref` but takes a mutating receiver, for a
+read that has to update `self` first (filling a cache, for example); reads
+through it need a mutable base. On a failable member (`var first?: T`,
+`subscript(...)? -> T`) a `ref` accessor lends `Optional[&T]`.
+
 Types that only define `get`/`set` still support `+=` and friends through an automatic get → modify → set *writeback*, so `ref` accessors are an optimization and aliasing choice, not a requirement. See [Subscripts](subscripts.md) and [Computed Properties](computed-properties.md).
 
 ## Reference Decay
@@ -232,6 +237,8 @@ That's the entire model. There are no lifetime parameters, no `'a`, no borrow an
 | E504 | *Warning:* returning a pointer-derived reference to a local of the same function |
 | E505 | Module-level/static value of a non-storable (reference-carrying) type |
 | E619–E622 | Malformed `ref` accessor combinations (duplicate read/write provider, ref accessor in a protocol, write-only member) |
+| E636 | `modifying` accessor on a static member or global (no `self` to modify) |
+| E637 | Malformed failable member (no read accessor, or a `set` / `mutating ref`) |
 
 ## See Also
 

@@ -137,6 +137,7 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E209 | a ref binding must be a simple \`let\` | A borrow initializer (`let r = &x`) can't be combined with `var` or a destructuring pattern. |
 | E210 | cannot take a \`&mutating\` borrow of immutable variable '{name}' | Mutable borrows need a mutable place (`var`, mutable field, or `Pointer.mutatingValue`). |
 | E211 | \`&\` pattern bindings are not supported in this position | `&` patterns are only allowed in match-arm patterns, not in `let`/`for`/conditions/params. |
+| E214 | cannot assign to failable place '{name}' | A failable property or subscript (`var first?: T`, `subscript(...)? -> T`) is read-only: the place may not exist. |
 | E213 | left-hand side of compound assignment is not assignable | `a op= b` needs a place (variable, field, subscript) on the left. |
 | E212 | *(retired)* | Was "closure cannot capture non-Static binding '{name}'". Retired with closure kinds (docs/design/closures.md): a view-kind closure's environment is frame-bound, so it may capture ref bindings and non-`Static` values freely. The owning tier keeps the rejection under E624. |
 
@@ -247,7 +248,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E474 | duplicate definition of {kind} '{name}' | Two declarations of the same kind share a name in the same scope. |
 | E475 | '{name}' is already defined as a {original_kind} | A name is reused by a declaration of a different kind (e.g. struct vs func). |
 | E476 | cannot find type '{name}' in this scope | A type annotation names a type that doesn't resolve. (Also emitted by HIR lowering for the same condition.) |
-| E477 | method '{name}' has wrong receiver kind for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) must match the requirement's exactly — a plain method no longer satisfies a `mutating` or `consuming` requirement. |
+| E477 | method '{name}' has wrong receiver kind for protocol '{proto}' · '{name}' satisfies a \`{ get }\` requirement with a \`modifying\` accessor for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) must match the requirement's exactly — a plain method no longer satisfies a `mutating` or `consuming` requirement, and a property whose read mutates `self` can't satisfy a `{ get }` requirement. |
 | E478 | 'static' is redundant here | Global (module-level) properties are already static. |
 | E479 | associated type '{name}' in where clause is ambiguous: '{type}' is bound by {protocols}, which each declare '{name}' | An equality clause `T.X = Y` where two or more protocols bound on `T` in the same clause each declare `X`. A where-clause path has no protocol-qualified form, so the clause is ignored. |
 
@@ -497,17 +498,22 @@ func other() -> String {  // error[E616]: String does not conform to Exitable
 // an executable build with no `@main` at all    → error[E618]
 ```
 
-## E619–E622 — Place accessors
+## E619–E622, E636–E639 — Accessors, observers and `lazy`
 
-These govern `get` / `set` / `ref` / `mutating ref` accessor blocks on
-computed members.
+These govern `get` / `modifying get` / `set` / `ref` / `modifying ref` /
+`mutating ref` accessor blocks, `willSet` / `didSet` observers, failable
+members and `lazy` properties.
 
 | Code | Message | Explanation |
 |---|---|---|
-| E619 | duplicate read provider: this member declares both \`get\` and \`ref\` | Reads need exactly one provider — keep `get` or `ref`, not both. |
+| E619 | duplicate read provider: this member declares more than one of \`get\`, \`modifying get\`, \`ref\` and \`modifying ref\` | Reads need exactly one provider. |
 | E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. |
-| E621 | \`ref\` accessors are not allowed in protocols or protocol extensions | Declare `ref` accessors on concrete types only. |
-| E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a `get` or `ref`; add a read provider. |
+| E621 | \`ref\` and \`modifying\` accessors are not allowed in protocols or protocol extensions | Declare them on concrete types only. |
+| E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a read provider; add one. |
+| E636 | \`modifying\` accessors need an instance receiver | A static member or global has no `self` to modify; use a plain `get` / `ref`. |
+| E637 | a failable member needs a read accessor · a failable place cannot have a \`set\` accessor · a failable place cannot have a \`mutating ref\` accessor yet | A failable member (`var x?: T`, `subscript(...)? -> T`) reads as `Optional` and can't be written. |
+| E638 | (varies) | `willSet` / `didSet` on anything but an instance stored `var` of a struct or enum: a `let`, static or global property, a subscript, a failable member, a protocol member, or mixed with `get`/`set`/`ref`. |
+| E639 | (varies) | `lazy` on anything but an instance `var` of a struct or enum with a type annotation and an `= expr` initializer and no accessors. |
 
 ## E624–E626 — Closure kinds
 
