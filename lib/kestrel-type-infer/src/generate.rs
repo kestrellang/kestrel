@@ -2828,10 +2828,30 @@ fn instantiate_entity_inner(
         subs.push((declaring, self_tv));
     }
 
+    // A static member of a pattern extension (`extend Box[(A, B)] { static
+    // func … }` called as `Box[(Int64, Bool)].zero(…)`): bind its pattern
+    // params from the owner's args. They lead the recorded args, after which
+    // MIR's signature expects the member's own (`ExtensionOwnTypeParams`).
+    let mut type_arg_vars = Vec::new();
+    if let Some(ext) = qctx
+        .parent_of(entity)
+        .filter(|&p| qctx.get::<NodeKind>(p) == Some(&NodeKind::Extension))
+        && let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity { extension: ext, root })
+    {
+        let owner_args: Vec<TyVar> = qctx
+            .get::<TypeParams>(target)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|p| subs.iter().find(|(e, _)| e == p).map(|&(_, tv)| tv))
+            .collect();
+        type_arg_vars = bind_extension_pattern_params(ctx, Some(ext), &owner_args, &mut subs, site_span);
+    }
+    type_arg_vars.extend(fresh_type_args.iter().copied());
+
     emit_where_clause_constraints_with_subs(ctx, entity, &subs, site_span);
 
     // Determine entity kind and build appropriate type
-    let type_arg_vars = fresh_type_args.clone();
     let kind = qctx.get::<NodeKind>(entity);
     let entity_tv = match kind {
         // Functions and initializers: build Function type from Callable + return type
@@ -2937,6 +2957,53 @@ fn instantiate_entity_inner(
         _ => ctx.named(entity, fresh_type_args),
     };
     (entity_tv, type_arg_vars)
+}
+
+/// Bind `ext`'s pattern params (`ExtensionPatternParams`) for one use: a
+/// fresh var each, pushed into `subs`, solved by equating every owner arg
+/// with the target arg written in its position (`W[X]` against `W[Int64]`).
+/// Returns the vars in `ExtensionOwnTypeParams` order, for the use's
+/// recorded type args. Empty when `ext` has no pattern params.
+pub(crate) fn bind_extension_pattern_params(
+    ctx: &mut InferCtx<'_>,
+    ext: Option<Entity>,
+    owner_args: &[TyVar],
+    subs: &mut Vec<(Entity, TyVar)>,
+    span: &Span,
+) -> Vec<TyVar> {
+    let Some(ext) = ext else {
+        return Vec::new();
+    };
+    let root = ctx.root;
+    let pattern = ctx.query_ctx.query(kestrel_name_res::ExtensionPatternParams {
+        extension: ext,
+        root,
+    });
+    if pattern.is_empty() {
+        return Vec::new();
+    }
+    kestrel_debug::ktrace!(
+        "infer",
+        "pattern params of {ext:?}: {} (owner args {owner_args:?})",
+        pattern.len()
+    );
+    let tvs: Vec<TyVar> = pattern
+        .iter()
+        .map(|&(_, param)| {
+            let tv = ctx.fresh();
+            subs.push((param, tv));
+            tv
+        })
+        .collect();
+    let written = ctx
+        .query_ctx
+        .query(kestrel_hir_lower::LowerExtensionTargetTypeArgs { extension: ext, root })
+        .unwrap_or_default();
+    for (hir_arg, &owner_arg) in written.iter().zip(owner_args) {
+        let pattern_tv = lower_hir_ty_with_subs(ctx, hir_arg, subs);
+        ctx.equal(owner_arg, pattern_tv, span.clone());
+    }
+    tvs
 }
 
 fn emit_where_clause_constraints_with_subs(

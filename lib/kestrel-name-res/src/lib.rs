@@ -29,7 +29,8 @@ pub use conformances::{
     expand_protocol_closure_in_place, extract_ast_type_args, protocol_parents,
 };
 pub use extensions::{
-    ExtensionLhsParams, ExtensionTargetEntity, ExtensionsFor, ResolvedExtensionTarget,
+    ExtensionLhsParams, ExtensionOwnTypeParams, ExtensionPatternParams, ExtensionTargetEntity,
+    ExtensionsFor, ResolvedExtensionTarget,
 };
 pub use protocol_members::{
     ProtocolAssociatedTypes, ProtocolMember, ProtocolMemberMap, ProtocolMembers,

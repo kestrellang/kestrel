@@ -257,6 +257,22 @@ pub(crate) fn solve_associated(
             let mut all_subs = container_subs;
             all_subs.extend(extension_subs);
 
+            // A pattern extension's binding (`extend Box[(A, B)]: P { type
+            // Element = A }`) names its pattern params: bind them by matching
+            // the container's args against the written target.
+            let container_args: Vec<TyVar> = ctx
+                .resolver
+                .entity_and_args(&kind)
+                .map(|(_, args)| args)
+                .unwrap_or_default();
+            crate::generate::bind_extension_pattern_params(
+                ctx,
+                assoc.source_extension,
+                &container_args,
+                &mut all_subs,
+                &span,
+            );
+
             // Check where_clause_assoc_subs first — if a where clause directly
             // equated this associated type (e.g., `where Item = Optional[T]`),
             // use that TyVar instead of creating a new one.

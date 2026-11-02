@@ -152,12 +152,16 @@ impl QueryFn for ScopeFor {
 fn member_scope_children(ctx: &QueryContext<'_>, scope: Entity, root: Entity) -> Vec<Entity> {
     // Type parameters are per part: an extension's free RHS parameters and a
     // body's `[T]` are not in scope in the other parts (extension LHS
-    // parameters resolve through `ExtensionLhsParams`).
+    // parameters resolve through `ExtensionLhsParams`). Pattern CANDIDATES
+    // are skipped: a candidate named `Int64` (`extend Box[W[Int64]]`) is no
+    // parameter, and the real ones resolve through `ExtensionLhsParams`.
+    let candidates = ctx.get::<kestrel_ast_builder::ExtensionPatternCandidates>(scope);
     let mut out: Vec<Entity> = ctx
         .children_of(scope)
         .iter()
         .copied()
         .filter(|&c| ctx.get::<NodeKind>(c) == Some(&NodeKind::TypeParameter))
+        .filter(|c| !candidates.is_some_and(|cs| cs.0.contains(c)))
         .collect();
     let nominal = if ctx.get::<NodeKind>(scope) == Some(&NodeKind::Extension) {
         ctx.query(ExtensionTargetEntity {

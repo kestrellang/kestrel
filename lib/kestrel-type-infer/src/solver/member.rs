@@ -968,6 +968,24 @@ pub(super) fn solve_member(
         }
     }
 
+    // Pattern params (`X` in `extend Box[W[X]]`) bind by matching: equate
+    // each receiver arg with the target arg written in that position, the
+    // pattern params standing for fresh vars.
+    // Static resolutions don't tag `from_extension`; the member's declaring
+    // extension is the same answer.
+    let declaring_ext = resolution.from_extension.or_else(|| {
+        ctx.query_ctx
+            .parent_of(resolution.entity)
+            .filter(|&p| ctx.query_ctx.get::<NodeKind>(p) == Some(&NodeKind::Extension))
+    });
+    let pattern_tvs = crate::generate::bind_extension_pattern_params(
+        ctx,
+        declaring_ext,
+        &recv_type_args,
+        &mut subs,
+        &span,
+    );
+
     // Map method's own type params to fresh vars
     for (&param, &fresh) in resolution.type_params.iter().zip(&fresh_params) {
         subs.push((param, fresh));
@@ -1076,7 +1094,10 @@ pub(super) fn solve_member(
     // `expected_proto_args`), then the method's own fresh params. Without
     // the proto args here, dispatch through `extend Type: Proto[FreeParams]`
     // can't recover the extension's free TypeParams from the witness.
+    // Pattern params follow: MIR's signature orders the extension's own
+    // params (`ExtensionOwnTypeParams`) after the receiver's.
     let mut recorded_type_args = proto_type_args_tvs.clone();
+    recorded_type_args.extend(pattern_tvs);
     recorded_type_args.extend(fresh_params.iter().copied());
     if !recorded_type_args.is_empty() {
         ctx.record_type_args(expr, recorded_type_args, span.clone());

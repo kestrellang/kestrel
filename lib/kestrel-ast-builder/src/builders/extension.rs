@@ -53,7 +53,12 @@ pub fn build_extension(
     let lhs_names = collect_lhs_target_names(world, entity);
     world.set(entity, ExtensionLhsParamNames(lhs_names.clone()));
 
-    introduce_rhs_free_type_params(world, entity, file_entity, file_id, lhs_names);
+    // Nested pattern names (`X` in `extend Box[W[X]]`) are claimed before the
+    // RHS scan too, so `extend Box[(A, B)]: P[A]` doesn't introduce a second `A`.
+    let pattern_names = introduce_pattern_candidates(world, entity, file_entity, &lhs_names);
+    let mut claimed = lhs_names;
+    claimed.extend(pattern_names);
+    introduce_rhs_free_type_params(world, entity, file_entity, file_id, claimed);
 
     let members = node
         .extension_body()
@@ -176,6 +181,110 @@ fn is_free_type_param_name(name: &str) -> bool {
     }
 }
 
+/// Spawn a candidate `TypeParameter` for every bare name at a NESTED position
+/// of the target (`X` in `extend Box[W[X]]`, `A`/`B` in `extend Box[(A, B)]`),
+/// recorded in `ExtensionPatternCandidates`, and return their names. Top-level
+/// arg names bind target params instead (`collect_lhs_target_names`) and are
+/// skipped; name resolution keeps only candidates that name no type.
+fn introduce_pattern_candidates(
+    world: &mut World,
+    entity: Entity,
+    file_entity: Entity,
+    lhs_names: &[String],
+) -> Vec<String> {
+    let Some(target) = world.get::<ExtensionTarget>(entity) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(String, Span)> = Vec::new();
+    for arg in target_args(&target.0) {
+        // A bare top-level arg is a target-param position, not a pattern.
+        if bare_name(arg).is_some() {
+            continue;
+        }
+        collect_bare_names(arg, &mut found);
+    }
+    found.retain(|(name, _)| !lhs_names.contains(name));
+    let mut names: Vec<String> = Vec::new();
+    found.retain(|(name, _)| {
+        let new = !names.contains(name);
+        if new {
+            names.push(name.clone());
+        }
+        new
+    });
+    if found.is_empty() {
+        return names;
+    }
+    let cst = world.get::<CstNode>(entity).map(|c| c.0);
+    let candidates: Vec<Entity> = found
+        .into_iter()
+        .map(|(name, span)| {
+            let tp = world.spawn();
+            world.set(tp, NodeKind::TypeParameter);
+            world.set(tp, Name(name));
+            world.set(tp, FileId(file_entity));
+            world.set(tp, DeclSpan(span));
+            if let Some(cst) = cst {
+                world.set(tp, CstNode(cst));
+            }
+            world.set_parent(tp, entity);
+            tp
+        })
+        .collect();
+    world.set(entity, ExtensionPatternCandidates(candidates));
+    names
+}
+
+/// The target's type-argument positions: `Box[T]`'s args, the sugar
+/// spellings' elements, a ref's pointee, a tuple's elements.
+fn target_args(target: &AstType) -> Vec<&AstType> {
+    match target {
+        AstType::Ref { inner, .. } => vec![inner.as_ref()],
+        AstType::Tuple(elems, _) => elems.iter().collect(),
+        AstType::Named { segments, .. } => match segments.last() {
+            Some(last) => last.type_args.iter().collect(),
+            None => Vec::new(),
+        },
+        AstType::Array(elem, _) | AstType::Optional(elem, _) => vec![elem.as_ref()],
+        AstType::Dictionary(key, val, _) => vec![key.as_ref(), val.as_ref()],
+        _ => Vec::new(),
+    }
+}
+
+/// `Some(name)` when `ty` is a single bare name with no type args.
+fn bare_name(ty: &AstType) -> Option<&str> {
+    let AstType::Named { segments, .. } = ty else {
+        return None;
+    };
+    match segments.as_slice() {
+        [seg] if seg.type_args.is_empty() => Some(&seg.name),
+        _ => None,
+    }
+}
+
+/// Every bare name at any depth inside `ty` (a bare `ty` itself included).
+fn collect_bare_names(ty: &AstType, out: &mut Vec<(String, Span)>) {
+    if let (Some(name), AstType::Named { span, .. }) = (bare_name(ty), ty) {
+        out.push((name.to_string(), span.clone()));
+        return;
+    }
+    let children: Vec<&AstType> = match ty {
+        AstType::Named { segments, .. } => segments.iter().flat_map(|s| s.type_args.iter()).collect(),
+        AstType::Tuple(elems, _) => elems.iter().collect(),
+        AstType::Function { params, return_type, .. } => {
+            params.iter().chain(std::iter::once(return_type.as_ref())).collect()
+        },
+        AstType::Array(elem, _) | AstType::Optional(elem, _) => vec![elem.as_ref()],
+        AstType::Dictionary(key, val, _) => vec![key.as_ref(), val.as_ref()],
+        AstType::Result { ok, err, .. } => vec![ok.as_ref(), err.as_ref()],
+        AstType::Ref { inner, .. } => vec![inner.as_ref()],
+        _ => Vec::new(),
+    };
+    for child in children {
+        collect_bare_names(child, out);
+    }
+}
+
 /// Collect single-segment names appearing as top-level type args of the
 /// extension's target, in source order. For `extend Pair[T, U]` returns
 /// `["T", "U"]`. For `extend Int64` returns `[]`. For a ref target `extend &T`
@@ -198,26 +307,9 @@ fn collect_lhs_target_names(world: &World, entity: Entity) -> Vec<String> {
     let Some(target) = world.get::<ExtensionTarget>(entity) else {
         return names;
     };
-    // The target's type arguments: `Array[T]`, the sugar spellings `[T]`,
-    // `T?` and `[K: V]`, a ref's pointee (`&T`) or a tuple's elements
-    // (`(X, Y)`).
-    let args: Vec<&AstType> = match &target.0 {
-        AstType::Ref { inner, .. } => vec![inner.as_ref()],
-        AstType::Tuple(elems, _) => elems.iter().collect(),
-        AstType::Named { segments, .. } => match segments.last() {
-            Some(last) => last.type_args.iter().collect(),
-            None => return names,
-        },
-        AstType::Array(elem, _) | AstType::Optional(elem, _) => vec![elem.as_ref()],
-        AstType::Dictionary(key, val, _) => vec![key.as_ref(), val.as_ref()],
-        _ => return names,
-    };
-    for arg in args {
-        if let AstType::Named { segments: segs, .. } = arg
-            && segs.len() == 1
-            && segs[0].type_args.is_empty()
-        {
-            push(&segs[0].name);
+    for arg in target_args(&target.0) {
+        if let Some(name) = bare_name(arg) {
+            push(name);
         }
     }
     names

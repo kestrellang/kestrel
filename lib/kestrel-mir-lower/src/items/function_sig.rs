@@ -280,13 +280,16 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
         }
     }
 
-    // Extension's own free type params (e.g. `extend Int64: ArrayIndex[T]`)
-    if matches!(parent_kind, Some(NodeKind::Extension))
-        && let Some(ext_params) = ctx.world.get::<TypeParams>(parent)
-    {
+    // The extension's own params: free RHS ones (`extend Int64:
+    // ArrayIndex[T]`), then pattern ones (`X` in `extend Box[W[X]]`).
+    if matches!(parent_kind, Some(NodeKind::Extension)) {
+        let ext_params = ctx.query.query(kestrel_name_res::ExtensionOwnTypeParams {
+            extension: parent,
+            root: ctx.root,
+        });
         let already_added: std::collections::HashSet<Entity> =
             def.type_params.iter().map(|tp| tp.entity).collect();
-        for &tp_entity in &ext_params.0 {
+        for &tp_entity in &ext_params {
             if already_added.contains(&tp_entity) {
                 continue;
             }

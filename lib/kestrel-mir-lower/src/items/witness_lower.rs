@@ -120,8 +120,9 @@ fn lower_witnesses_for_type(
         // Combine: impl type params (from the struct/enum) + protocol type args
         // (which may include extension free params like T in `extend Int64: SeqIndex[T]`).
         let impl_type_arg_tys: Vec<TyId> = {
-            // Concrete witnesses use the concrete args (no pattern bindings to
-            // substitute at mono time); generic witnesses use the struct params.
+            // Specialized witnesses use the written target args (concrete, or a
+            // pattern like `(A, B)` whose params mono binds); generic witnesses
+            // use the struct params.
             let mut tys: Vec<TyId> = match &concrete_args {
                 Some(args) => args.clone(),
                 None => impl_type_params
@@ -138,6 +139,18 @@ fn lower_witnesses_for_type(
                     }
                 } else {
                     tys.push(pta);
+                }
+            }
+            // A pattern extension's own params (`A`/`B` in `extend Box[(A,
+            // B)]: P`) follow, as in its methods' signatures. Mono binds them
+            // by matching the implementing type `Box[(A, B)]`.
+            if source_is_extension {
+                for (_, param) in ctx.query.query(kestrel_name_res::ExtensionPatternParams {
+                    extension: *source,
+                    root: ctx.root,
+                }) {
+                    ctx.register_name(param);
+                    tys.push(ctx.module.ty_arena.intern(MirTy::TypeParam(param)));
                 }
             }
             tys

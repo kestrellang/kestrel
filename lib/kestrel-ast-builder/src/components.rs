@@ -458,6 +458,19 @@ pub struct ExtensionTarget(pub AstType);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExtensionLhsParamNames(pub Vec<String>);
 
+/// Candidate type parameters a NESTED position of an extension's target
+/// introduces: `X` in `extend Box[W[X]]`, `A`/`B` in `extend Box[(A, B)]`.
+/// A pattern parameter binds by matching the receiver's arg against the
+/// written pattern, not positionally against a target parameter.
+///
+/// These are only CANDIDATES: the builder can't tell `X` (a new parameter)
+/// from `Int64` (a type) in `extend Box[W[Int64]]`. Name resolution keeps
+/// the ones that resolve to no type (`ExtensionPatternParams`), the same
+/// rule a structural target's elements use. They are `TypeParameter`
+/// children of the extension but deliberately NOT in its `TypeParams`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExtensionPatternCandidates(pub Vec<Entity>);
+
 /// On a TypeAlias declared as `type Protocol.Assoc = T` — the qualifying
 /// protocol path. Absence means the alias is unqualified (`type Assoc = T`).
 /// Captured at build time so analyzers can resolve the protocol entity via

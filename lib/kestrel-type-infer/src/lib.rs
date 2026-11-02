@@ -1065,6 +1065,13 @@ fn get_or_create_subject_tv(
         return result_tv;
     }
 
+    // An extension-owned param (a pattern param `X` in `extend Box[W[X]]`,
+    // or a free RHS one): in the body it is the abstract param itself — the
+    // same `ctx.param` its uses lower to — so the clause bounds THAT.
+    if query_ctx.get::<NodeKind>(param) == Some(&NodeKind::TypeParameter) {
+        return ctx.param(param);
+    }
+
     // Fallback: create a fresh TyVar
     ctx.fresh()
 }
