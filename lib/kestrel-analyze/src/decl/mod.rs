@@ -28,6 +28,8 @@ pub mod function_body;
 pub mod generics;
 pub mod import_target;
 pub mod indirect_enum;
+pub mod lazy;
+pub mod observer;
 pub mod parent_protocol_conformance;
 pub mod place_accessor;
 pub mod protocol_field_conformance;

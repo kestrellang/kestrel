@@ -28,25 +28,19 @@
 //!
 //! ### E637 -- `invalid_failable_member` (Error, Correctness)
 //! A failable member (`var first?: T`, `subscript(...)? -> T`) that is
-//! stored (no read accessor) or declares a write provider (`set`,
-//! `mutating ref`): a place that may not exist can't be stored into.
+//! stored (no read accessor) or declares `set`: a place that may not exist
+//! can't be assigned. It may declare a `mutating ref` (`Optional[&mutating
+//! T]`), written through with a `&mutating` payload binder.
 //!
-//! ### E638 -- `invalid_observer` (Error, Correctness)
-//! `willSet` / `didSet` anywhere but an instance stored `var` of a concrete
-//! type: mixed with `get`/`set`/`ref` accessors, on a subscript, a `let`, a
-//! static or global, a failable member, or in a protocol.
-//!
-//! ### E639 -- `invalid_lazy` (Error, Correctness)
-//! `lazy` anywhere but an instance `var` of a concrete type with a type
-//! annotation and an `= expr` initializer, and no accessors.
+//! Observers (E638) and `lazy` (E639) are their own analyzers
+//! (`observer.rs`, `lazy.rs`); this one skips members they own.
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{
-    Computed, DeclaredAccessors, Failable, FieldClass, FieldMutability, Gettable, Lazy, NodeKind,
-    Static, TypeAnnotation, Valued,
+    Computed, DeclaredAccessors, Failable, Gettable, Lazy, NodeKind, Static, Valued,
 };
 use kestrel_hir_lower::PlaceAccessors;
 use kestrel_name_res::ExtensionTargetEntity;
@@ -88,18 +82,6 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
-    DiagnosticDescriptor {
-        id: "E638",
-        name: "invalid_observer",
-        default_severity: Severity::Error,
-        category: Category::Correctness,
-    },
-    DiagnosticDescriptor {
-        id: "E639",
-        name: "invalid_lazy",
-        default_severity: Severity::Error,
-        category: Category::Correctness,
-    },
 ];
 
 /// Look a descriptor up by its E-code.
@@ -132,16 +114,15 @@ impl DeclCheck for PlaceAccessorAnalyzer {
             .get::<DeclaredAccessors>(cx.entity)
             .copied()
             .unwrap_or_default();
-        // A malformed `lazy` builds as a plain stored field; say why.
-        if let Some(lazy) = cx.query.get::<Lazy>(cx.entity)
-            && lazy.cache.is_none()
-        {
-            return check_lazy(cx).into_iter().collect();
-        }
-        // Observers are their own shape (a stored property's synthesized
-        // setter), so the provider checks below don't apply.
-        if declared.any_observer() {
-            return check_observers(cx, &declared).into_iter().collect();
+        // A malformed `lazy` (a plain stored field) and observers (a
+        // stored property's synthesized setter) are checked by their own
+        // analyzers; the provider checks below don't apply to them.
+        let malformed_lazy = cx
+            .query
+            .get::<Lazy>(cx.entity)
+            .is_some_and(|l| l.cache.is_none());
+        if malformed_lazy || declared.any_observer() {
+            return Vec::new();
         }
         let mut diags = Vec::new();
         let accessors = cx.query.query(PlaceAccessors { entity: cx.entity });
@@ -302,114 +283,8 @@ impl DeclCheck for PlaceAccessorAnalyzer {
     }
 }
 
-/// E638: observers belong on an instance stored `var` of a concrete type.
-/// The first rule broken is reported (one diagnostic per member).
-fn check_observers(
-    cx: &DeclContext<'_>,
-    declared: &DeclaredAccessors,
-) -> Option<AnalyzeDiagnostic> {
-    let q = cx.query;
-    let is_field = q.get::<NodeKind>(cx.entity) == Some(&NodeKind::Field);
-    let (message, note) = if !is_field {
-        (
-            "subscripts can't have `willSet` / `didSet` observers",
-            "observe the storage the subscript writes instead",
-        )
-    } else if q.has::<Computed>(cx.entity) || declared.set || declared.mutating_ref {
-        (
-            "`willSet` / `didSet` can't be combined with `get`, `set` or `ref` accessors",
-            "observers watch a stored property; a computed property can run code in its `set`",
-        )
-    } else if q.get::<FieldMutability>(cx.entity) == Some(&FieldMutability::Let) {
-        (
-            "a `let` property can't have `willSet` / `didSet` observers",
-            "it is never written after initialization; declare it `var` to observe writes",
-        )
-    } else if q.has::<Failable>(cx.entity) {
-        (
-            "a failable property can't have `willSet` / `didSet` observers",
-            "a failable place is read-only",
-        )
-    } else if in_protocol_scope(cx) {
-        (
-            "`willSet` / `didSet` are not allowed in protocols or protocol extensions",
-            "declare the observed property on a concrete type",
-        )
-    } else if !has_instance_receiver(cx) {
-        (
-            "`willSet` / `didSet` on static and global properties are not supported yet",
-            "observers currently need an instance stored property",
-        )
-    } else {
-        return None;
-    };
-    Some(AnalyzeDiagnostic {
-        descriptor_id: descriptor("E638").id,
-        severity: descriptor("E638").default_severity,
-        message: message.into(),
-        labels: vec![DiagLabel {
-            span: util::entity_span(q, cx.entity),
-            message: "declares observers".into(),
-            is_primary: true,
-        }],
-        notes: vec![note.into()],
-    })
-}
-
-/// E639: why a `lazy` field could not be built (its `Lazy` has no cache).
-fn check_lazy(cx: &DeclContext<'_>) -> Option<AnalyzeDiagnostic> {
-    let q = cx.query;
-    let nominal = q.get::<FieldClass>(cx.entity).is_some_and(|c| {
-        !c.is_static && matches!(c.owner, kestrel_ast_builder::FieldOwner::Nominal)
-    });
-    let (message, note) = if q.get::<FieldMutability>(cx.entity) == Some(&FieldMutability::Let) {
-        (
-            "a `lazy` property must be a `var`",
-            "its cache is written on first read",
-        )
-    } else if !nominal {
-        (
-            "`lazy` is only supported on instance properties of a struct or enum",
-            "static and global properties, protocol members and extensions can't be `lazy`",
-        )
-    } else if q.has::<DeclaredAccessors>(cx.entity) || q.has::<Computed>(cx.entity) {
-        (
-            "a `lazy` property can't have accessors",
-            "`lazy` already supplies the property's get and set",
-        )
-    } else if q.has::<Failable>(cx.entity) {
-        (
-            "a `lazy` property can't be failable",
-            "declare it `lazy var name: T? = expr` instead",
-        )
-    } else if !q.has::<TypeAnnotation>(cx.entity) {
-        (
-            "a `lazy` property needs a type annotation",
-            "write `lazy var name: T = expr`",
-        )
-    } else if !q.has::<Valued>(cx.entity) {
-        (
-            "a `lazy` property needs an initializer",
-            "the initializer runs on first read: `lazy var name: T = expr`",
-        )
-    } else {
-        return None;
-    };
-    Some(AnalyzeDiagnostic {
-        descriptor_id: descriptor("E639").id,
-        severity: descriptor("E639").default_severity,
-        message: message.into(),
-        labels: vec![DiagLabel {
-            span: util::entity_span(q, cx.entity),
-            message: "declared `lazy`".into(),
-            is_primary: true,
-        }],
-        notes: vec![note.into()],
-    })
-}
-
 /// Does this member have a `self`: an instance member of a type scope.
-fn has_instance_receiver(cx: &DeclContext<'_>) -> bool {
+pub(crate) fn has_instance_receiver(cx: &DeclContext<'_>) -> bool {
     !cx.query.has::<Static>(cx.entity)
         && cx
             .query
@@ -419,7 +294,7 @@ fn has_instance_receiver(cx: &DeclContext<'_>) -> bool {
 }
 
 /// Is this member declared in a protocol body or a protocol extension?
-fn in_protocol_scope(cx: &DeclContext<'_>) -> bool {
+pub(crate) fn in_protocol_scope(cx: &DeclContext<'_>) -> bool {
     let Some(parent) = cx.query.parent_of(cx.entity) else {
         return false;
     };

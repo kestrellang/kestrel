@@ -26,3 +26,18 @@ struct S {
 }
 
 var global: Int64 = 0 { didSet { } } // ERROR(E638): `willSet` / `didSet` on static and global properties are not supported yet
+
+// `return` would skip the store (both observers run inside the setter).
+struct Returns {
+    var a: Int64 {
+        willSet {
+            if newValue < 0 { return; } // ERROR(E638): `return` is not allowed in `willSet` / `didSet`
+        }
+    }
+    var b: Int64 {
+        didSet {
+            let f: () -> Int64 = { () in return 1; };
+            if f() == 2 { return; } // ERROR(E638): `return` is not allowed in `willSet` / `didSet`
+        }
+    }
+}

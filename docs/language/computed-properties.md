@@ -177,11 +177,14 @@ struct Thermostat {
   `t.target += 1`, mutating method calls on the property, writes to its
   fields (`t.pos.x = 1`) and subscript writes (`t.items(at: 0) = 1`), all
   through the get → modify → set writeback.
-- Initializers write the storage directly, and an observer's own writes to
-  its property don't re-run the observers.
+- An initializer writes its own `self`'s storage directly, and an
+  observer's own writes to its property don't re-run the observers. Writes
+  to any other instance, even inside an initializer, run them. A closure
+  that writes the property runs them too.
 - An observed property can't be lent as `&mutating` (E210), because its
   observers could not run.
-- `return` inside an observer leaves the whole synthesized setter.
+- `return` is not allowed in `willSet` / `didSet` (E638): both run inside
+  one synthesized setter, so it would skip the store.
 - Observers belong on an instance stored `var` of a struct or enum. They are
   rejected on `let`, static and global properties, subscripts, failable
   members, protocol members, and when mixed with `get`/`set`/`ref` (E638).
@@ -206,6 +209,8 @@ struct Document {
   starts it uncomputed.
 - `lazy` needs an instance `var` of a struct or enum, with a type
   annotation and an `= expr` initializer, and no accessors (E639).
+- Each read returns a copy of the cached value, so the type must be
+  Copyable (E639).
 
 ## Rules
 
