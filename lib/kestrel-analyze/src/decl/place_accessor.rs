@@ -30,13 +30,18 @@
 //! A failable member (`var first?: T`, `subscript(...)? -> T`) that is
 //! stored (no read accessor) or declares a write provider (`set`,
 //! `mutating ref`): a place that may not exist can't be stored into.
+//!
+//! ### E638 -- `invalid_observer` (Error, Correctness)
+//! `willSet` / `didSet` anywhere but an instance stored `var` of a concrete
+//! type: mixed with `get`/`set`/`ref` accessors, on a subscript, a `let`, a
+//! static or global, a failable member, or in a protocol.
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{
-    Computed, DeclaredAccessors, Failable, Gettable, NodeKind, Static, Valued,
+    Computed, DeclaredAccessors, Failable, FieldMutability, Gettable, NodeKind, Static, Valued,
 };
 use kestrel_hir_lower::PlaceAccessors;
 use kestrel_name_res::ExtensionTargetEntity;
@@ -78,6 +83,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E638",
+        name: "invalid_observer",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 /// Look a descriptor up by its E-code.
@@ -105,6 +116,16 @@ impl DeclCheck for PlaceAccessorAnalyzer {
     }
 
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
+        let declared = cx
+            .query
+            .get::<DeclaredAccessors>(cx.entity)
+            .copied()
+            .unwrap_or_default();
+        // Observers are their own shape (a stored property's synthesized
+        // setter), so the provider checks below don't apply.
+        if declared.any_observer() {
+            return check_observers(cx, &declared).into_iter().collect();
+        }
         let mut diags = Vec::new();
         let accessors = cx.query.query(PlaceAccessors { entity: cx.entity });
         let has_setter_child = cx
@@ -112,11 +133,6 @@ impl DeclCheck for PlaceAccessorAnalyzer {
             .children_of(cx.entity)
             .iter()
             .any(|&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::Setter));
-        let declared = cx
-            .query
-            .get::<DeclaredAccessors>(cx.entity)
-            .copied()
-            .unwrap_or_default();
         let has_ref = accessors.is_some_and(|a| a.ref_accessor.is_some());
         let has_mutating_ref = accessors.is_some_and(|a| a.mutating_ref_accessor.is_some());
         // The parent carries the getter BODY when a `get` clause (or the
@@ -271,6 +287,60 @@ impl DeclCheck for PlaceAccessorAnalyzer {
 
         diags
     }
+}
+
+/// E638: observers belong on an instance stored `var` of a concrete type.
+/// The first rule broken is reported (one diagnostic per member).
+fn check_observers(
+    cx: &DeclContext<'_>,
+    declared: &DeclaredAccessors,
+) -> Option<AnalyzeDiagnostic> {
+    let q = cx.query;
+    let is_field = q.get::<NodeKind>(cx.entity) == Some(&NodeKind::Field);
+    let (message, note) = if !is_field {
+        (
+            "subscripts can't have `willSet` / `didSet` observers",
+            "observe the storage the subscript writes instead",
+        )
+    } else if q.has::<Computed>(cx.entity) || declared.set || declared.mutating_ref {
+        (
+            "`willSet` / `didSet` can't be combined with `get`, `set` or `ref` accessors",
+            "observers watch a stored property; a computed property can run code in its `set`",
+        )
+    } else if q.get::<FieldMutability>(cx.entity) == Some(&FieldMutability::Let) {
+        (
+            "a `let` property can't have `willSet` / `didSet` observers",
+            "it is never written after initialization; declare it `var` to observe writes",
+        )
+    } else if q.has::<Failable>(cx.entity) {
+        (
+            "a failable property can't have `willSet` / `didSet` observers",
+            "a failable place is read-only",
+        )
+    } else if in_protocol_scope(cx) {
+        (
+            "`willSet` / `didSet` are not allowed in protocols or protocol extensions",
+            "declare the observed property on a concrete type",
+        )
+    } else if !has_instance_receiver(cx) {
+        (
+            "`willSet` / `didSet` on static and global properties are not supported yet",
+            "observers currently need an instance stored property",
+        )
+    } else {
+        return None;
+    };
+    Some(AnalyzeDiagnostic {
+        descriptor_id: descriptor("E638").id,
+        severity: descriptor("E638").default_severity,
+        message: message.into(),
+        labels: vec![DiagLabel {
+            span: util::entity_span(q, cx.entity),
+            message: "declares observers".into(),
+            is_primary: true,
+        }],
+        notes: vec![note.into()],
+    })
 }
 
 /// Does this member have a `self`: an instance member of a type scope.

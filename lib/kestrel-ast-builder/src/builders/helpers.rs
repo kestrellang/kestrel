@@ -405,7 +405,7 @@ pub fn spawn_setter(
     file_entity: Entity,
     file_id: usize,
     is_static: bool,
-) {
+) -> Entity {
     let setter = world.spawn();
     world.set(setter, NodeKind::Setter);
     world.set(setter, FileId(file_entity));
@@ -423,6 +423,7 @@ pub fn spawn_setter(
         world.set(setter, Static);
     }
     set_documentation(world, setter, setter_clause);
+    setter
 }
 
 /// Mark a failable member (`var first?: T`, `subscript(…)? -> T`): its
@@ -432,7 +433,10 @@ pub fn spawn_setter(
 pub fn mark_failable(world: &mut World, entity: Entity, span: kestrel_span::Span) {
     world.set(entity, Failable);
     if let Some(ty) = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone()) {
-        world.set(entity, TypeAnnotation(AstType::Optional(Box::new(ty), span)));
+        world.set(
+            entity,
+            TypeAnnotation(AstType::Optional(Box::new(ty), span)),
+        );
     }
 }
 

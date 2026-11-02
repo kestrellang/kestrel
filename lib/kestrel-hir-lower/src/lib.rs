@@ -16,6 +16,7 @@ mod existential;
 mod expr;
 pub mod format_spec;
 pub mod literal;
+mod observer;
 mod optional_chain;
 pub(crate) mod pat;
 mod placeholder;
@@ -158,7 +159,16 @@ impl QueryFn for LowerBodyWithSourceMap {
 
         // Lower all top-level statements via lower_block_stmts so that
         // guard-let CPS transformation applies at the function body level.
-        let body_block = lower.lower_block_stmts(&block.stmts, block.tail.as_ref());
+        // An observed field's setter has no written body: it is built from
+        // the `willSet` / `didSet` clauses (see `observer.rs`).
+        let body_block = if ctx
+            .get::<kestrel_ast_builder::ObserverSetter>(self.entity)
+            .is_some()
+        {
+            lower.lower_observer_body(&node)
+        } else {
+            lower.lower_block_stmts(&block.stmts, block.tail.as_ref())
+        };
         let mut statements: Vec<_> = param_desugar_stmts;
         statements.extend(body_block.stmts);
 

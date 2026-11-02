@@ -1204,7 +1204,9 @@ impl OssaBodyCtx<'_, '_> {
                         kestrel_mir::FieldIdx::new(0)
                     });
 
-                if let Some(base_addr) = self.try_field_addr_chain(base) {
+                if !self.place_crosses_observer(base)
+                    && let Some(base_addr) = self.try_field_addr_chain(base)
+                {
                     let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
                     let is_init_self = self.body_context.init_self_addr() == Some(base_addr);
                     if is_init_self {
@@ -1236,7 +1238,9 @@ impl OssaBodyCtx<'_, '_> {
                 // the RHS was computed then silently dropped (#198, #143).
                 let base_ty = self.resolve_expr_type(base);
                 let field_idx = kestrel_mir::FieldIdx::new(index as usize);
-                if let Some(base_addr) = self.try_field_addr_chain(base) {
+                if !self.place_crosses_observer(base)
+                    && let Some(base_addr) = self.try_field_addr_chain(base)
+                {
                     let elem_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
                     self.emit_store_assign(elem_addr, rhs);
                 } else if let Some(base_addr) = self.accessor_writeback_place(base) {
@@ -1464,7 +1468,7 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Concrete computed property setter
-        let setter = self.ctx.find_setter_child(resolved)?;
+        let setter = self.write_setter(resolved)?;
         self.ctx.register_name(setter);
         let is_static = self
             .ctx
@@ -1554,7 +1558,7 @@ impl OssaBodyCtx<'_, '_> {
             let pointee_ty = self.resolve_expr_type(target_id);
             return Some(self.emit_ref_accessor_store(accessor, vec![], vec![], pointee_ty, rhs));
         }
-        let setter = self.ctx.find_setter_child(entity)?;
+        let setter = self.write_setter(entity)?;
         self.ctx.register_name(setter);
         let rhs = self.lower_expr(value_id);
         let rhs_arg = self.prepare_call_arg(rhs, super::setter_value());
@@ -1620,7 +1624,7 @@ impl OssaBodyCtx<'_, '_> {
             );
         }
 
-        let setter = self.ctx.find_setter_child(resolved)?;
+        let setter = self.write_setter(resolved)?;
         self.ctx.register_name(setter);
         let is_static = self
             .ctx
@@ -1732,7 +1736,7 @@ impl OssaBodyCtx<'_, '_> {
 
         let mutating_ref = self.ctx.find_ref_accessor_child(resolved, true);
         let setter = if mutating_ref.is_none() {
-            Some(self.ctx.find_setter_child(resolved)?)
+            Some(self.write_setter(resolved)?)
         } else {
             None
         };
@@ -1766,7 +1770,16 @@ impl OssaBodyCtx<'_, '_> {
         let rhs = self.lower_expr(value_id);
         let type_args = self.resolve_type_args(target_id);
 
-        let field_arg = if let Some(recv_addr) = self.try_var_addr(receiver) {
+        // An observed field is mutated in a writeback slot; its observer
+        // setter stores the slot back when the assignment's writebacks drain.
+        let field_arg = if let Some(slot) =
+            self.observed_field_slot(receiver, recv_entity, method_name, field_ty)
+        {
+            CallArg {
+                value: self.lend_writeback_slot(slot, field_ty),
+                convention: ParamConvention::MutBorrow,
+            }
+        } else if let Some(recv_addr) = self.try_var_addr(receiver) {
             let field_addr = self.emit_field_addr(recv_addr, receiver_ty, field_idx);
             let borrow = self.emit_begin_mut_borrow_addr(field_addr, field_ty);
             CallArg {

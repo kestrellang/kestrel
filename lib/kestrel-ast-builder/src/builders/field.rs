@@ -56,7 +56,12 @@ pub fn build_field(
     );
 
     let is_static = node.is_static();
-    let accessors = node.property_accessors();
+    // An accessor block of only `willSet` / `didSet` observes a STORED
+    // property: no Computed marker, the storage and initializer stay.
+    let accessors = node
+        .property_accessors()
+        .filter(|acc| !is_observer_only(&declared_accessors(acc), acc));
+    let observers = node.property_accessors().filter(|_| accessors.is_none());
     match &accessors {
         Some(accessors) => {
             world.set(entity, Computed);
@@ -79,6 +84,22 @@ pub fn build_field(
             // `= expr` initializer
             if let Some(init) = node.expression() {
                 world.set(entity, Valued(SyntaxNodePtr::new(init.syntax())));
+            }
+            if let Some(observers) = &observers {
+                world.set(entity, declared_accessors(observers));
+                // A `let` is never written after initialization: nothing to
+                // observe (E638 reports it), so no setter.
+                if is_var {
+                    build_observers(
+                        world,
+                        entity,
+                        parent,
+                        observers,
+                        file_entity,
+                        file_id,
+                        is_static,
+                    );
+                }
             }
         },
     }
@@ -236,4 +257,48 @@ fn build_accessors(
             is_static,
         );
     }
+}
+
+/// An accessor block spelling only `willSet` / `didSet` (no read or write
+/// provider, no `{ expr }` shorthand body).
+fn is_observer_only(declared: &DeclaredAccessors, acc: &ast::PropertyAccessors) -> bool {
+    declared.any_observer()
+        && declared.read_providers() == 0
+        && !declared.set
+        && !declared.mutating_ref
+        && acc.code_block().is_none()
+}
+
+/// An observed stored `var`: spawn the synthesized [`ObserverSetter`] (`newValue` param, mutating receiver) whose
+/// HIR body hir-lower builds from the observer clauses. Observers on statics
+/// and globals are rejected by the analyzer (E638), so only instance members
+/// get a receiver.
+fn build_observers(
+    world: &mut World,
+    entity: Entity,
+    parent: Entity,
+    observers: &ast::PropertyAccessors,
+    file_entity: Entity,
+    file_id: usize,
+    is_static: bool,
+) {
+    let has_receiver = !is_static
+        && world
+            .get::<NodeKind>(parent)
+            .is_some_and(NodeKind::is_type_scope);
+    let params = vec![AstParam::new_value(
+        world.get::<TypeAnnotation>(entity).map(|t| t.0.clone()),
+    )];
+    let setter = spawn_setter(
+        world,
+        entity,
+        observers.syntax(),
+        observers.syntax(),
+        params,
+        has_receiver.then_some(ReceiverKind::Mutating),
+        file_entity,
+        file_id,
+        is_static,
+    );
+    world.set(setter, ObserverSetter);
 }

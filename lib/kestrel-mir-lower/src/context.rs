@@ -4,7 +4,9 @@ use kestrel_ast_builder::{
     Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, ReceiverKind, Subscript,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
-use kestrel_mir::{FieldIdx, MirModule, MirTy, ParamConvention, TyId, VariantIdx, WitnessMethodKey};
+use kestrel_mir::{
+    FieldIdx, MirModule, MirTy, ParamConvention, TyId, VariantIdx, WitnessMethodKey,
+};
 use kestrel_name_res::ExtensionTargetEntity;
 
 use kestrel_ast_builder::qualified_name;

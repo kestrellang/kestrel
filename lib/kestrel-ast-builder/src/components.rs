@@ -318,6 +318,15 @@ impl DeclaredAccessors {
     }
 }
 
+/// Marker on the synthesized `NodeKind::Setter` of an observed stored field
+/// (`var x: T = v { willSet { … } didSet { … } }`). The field stays stored;
+/// this setter (`Valued` = the accessor block) runs `willSet`, stores
+/// `newValue` directly, then runs `didSet`. Writes from outside route through
+/// it; its own body and the container's initializers write the storage
+/// directly (observers never fire during initialization).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ObserverSetter;
+
 /// Marker on a Field/Subscript declared failable (`var first?: T`,
 /// `subscript(i: Int64)? -> T`): the place may not exist. Reads produce
 /// `Optional` of what the read provider yields, and assignment is rejected.
