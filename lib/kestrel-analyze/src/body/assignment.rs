@@ -215,17 +215,26 @@ fn push_if_failable(
             .map(|n| n.0.clone())
             .unwrap_or_default(),
     };
+    let effect = if cx.query.has::<kestrel_ast_builder::Throwing>(member) {
+        "throwing"
+    } else {
+        "failable"
+    };
     let d = &DESCRIPTORS[4];
     diags.push(AnalyzeDiagnostic {
         descriptor_id: d.id,
         severity: d.default_severity,
-        message: format!("cannot assign to failable place '{name}'"),
+        message: format!("cannot assign to {effect} place '{name}'"),
         labels: vec![DiagLabel {
             span: util::expr_span(cx.hir, target),
             message: "this place may not exist".into(),
             is_primary: true,
         }],
-        notes: vec!["read it as an optional and write through the type's own API".into()],
+        notes: vec![
+            "write through its `mutating ref` with a `&mutating` payload binder \
+             (`if let .Some(&mutating v) = …`), or through the type's own API"
+                .into(),
+        ],
     });
     true
 }

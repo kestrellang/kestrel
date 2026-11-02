@@ -148,7 +148,28 @@ if let .Some(&mutating v) = stack.first { v += 1; }
 A match whose arms have a `&mutating` binder reads the failable member
 through its `mutating ref`, so the receiver must be mutable; every other
 read goes through `get` or `ref`. Without a `mutating ref`, a `&mutating`
-binder is E210. Throwing accessors are not supported yet.
+binder is E210.
+
+### Throwing Properties
+
+A computed property or subscript declared `T throws E` is a throwing place,
+the `Result` twin of a failable one. `get` returns `Result[T, E]`, `ref`
+lends `Result[&T, E]`, and `mutating ref` lends `Result[&mutating T, E]`:
+
+```kestrel
+var first: T throws BadIndex {
+    ref {
+        if self.items.isEmpty { throw BadIndex.Empty; }
+        let r = &self.items(at: 0);
+        .Ok(r)
+    }
+}
+
+let x = try stack.first;                          // in a throwing function
+if let .Ok(&mutating v) = stack.first { v += 1; } // with a `mutating ref`
+```
+
+Like a failable place it can't declare `set` (E637) or be assigned (E214).
 
 ### Property Observers
 

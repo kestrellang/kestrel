@@ -58,6 +58,12 @@ pub fn build_subscript(
     if let Some(marker) = node.failable_marker() {
         mark_failable(world, entity, get_decl_span(marker.syntax(), file_id));
     }
+    if world
+        .get::<NodeKind>(parent)
+        .is_none_or(|k| *k != NodeKind::Protocol)
+    {
+        mark_throwing(world, entity);
+    }
 
     if let Some(body) = node.subscript_body() {
         if let Some(acc) = body.property_accessors() {

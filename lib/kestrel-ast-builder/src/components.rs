@@ -353,6 +353,21 @@ pub struct LazySetter;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Failable;
 
+/// Marker on a computed Field/Subscript declared `T throws E` (a property
+/// with accessors, or any subscript): reads produce `Result[T, E]`, and,
+/// like a [`Failable`] place, it has no `set` and can't be assigned. Its
+/// `ref` / `mutating ref` lend `Result[&T, E]` / `Result[&mutating T, E]`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Throwing;
+
+/// A place that may not exist: [`Failable`] (`?`) or [`Throwing`]
+/// (`throws E`). Reads go through the accessor's effect-wrapped type, a
+/// `&mutating` payload binder writes through its `mutating ref`, and it
+/// can't be assigned (E214) or declare `set` (E637).
+pub fn is_effectful_place(c: &impl crate::syntax::Components, entity: Entity) -> bool {
+    c.component::<Failable>(entity).is_some() || c.component::<Throwing>(entity).is_some()
+}
+
 /// Has a body to lower — a handle to the body subtree: a `CodeBlock`, a
 /// function's `= expr` (`FunctionBody`), a parameter default's `= expr`
 /// (`DefaultValue`), or a field initializer `Expression`. Resolve it with

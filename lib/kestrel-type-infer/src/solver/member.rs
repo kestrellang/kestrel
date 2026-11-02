@@ -1342,15 +1342,14 @@ pub(super) fn solve_member(
     //
     // A FAILABLE member (`var first?: T`) is annotated `T?`, and its ref
     // accessor lends `Optional[&T]` — the accessor's own synthesized
-    // annotation is the read type, not `&` of the member's.
+    // annotation is the read type, not `&` of the member's. A THROWING one
+    // (`T throws E`) lends `Result[&T, E]` the same way.
     // Computed properties resolve as `MemberKind::Field` (the resolver
     // classifies by NodeKind), so the failable lookup keys on the entity.
     let place_accessors = ctx.query_ctx.query(kestrel_hir_lower::PlaceAccessors {
         entity: resolution.entity,
     });
-    let failable = ctx
-        .query_ctx
-        .has::<kestrel_ast_builder::Failable>(resolution.entity);
+    let failable = kestrel_ast_builder::is_effectful_place(ctx.query_ctx, resolution.entity);
     let wraps_ref = matches!(
         resolution.kind,
         crate::resolve::MemberKind::Subscript | crate::resolve::MemberKind::ComputedProperty { .. }

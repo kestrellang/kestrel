@@ -69,6 +69,10 @@ pub fn build_field(
         Some(NodeKind::Extension) => FieldOwner::Extension,
         _ => FieldOwner::Module,
     };
+    // A computed member declared `T throws E` is a throwing place.
+    if accessors.is_some() && owner != FieldOwner::Protocol {
+        mark_throwing(world, entity);
+    }
     let lazy_init = node.expression().filter(|_| {
         node.is_lazy()
             && is_var

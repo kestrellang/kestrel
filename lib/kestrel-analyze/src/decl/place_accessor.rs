@@ -39,9 +39,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{
-    Computed, DeclaredAccessors, Failable, Gettable, Lazy, NodeKind, Static, Valued,
-};
+use kestrel_ast_builder::{Computed, DeclaredAccessors, Gettable, Lazy, NodeKind, Static, Valued};
 use kestrel_hir_lower::PlaceAccessors;
 use kestrel_name_res::ExtensionTargetEntity;
 
@@ -183,18 +181,33 @@ impl DeclCheck for PlaceAccessorAnalyzer {
             });
         }
 
-        // E637: a failable member is a computed place with no `set`. Writes
-        // go through a `mutating ref` (`Optional[&mutating T]`), reached by
-        // a `&mutating` payload binder.
-        if cx.query.has::<Failable>(cx.entity) {
+        // E637: a failable (`?`) or throwing (`throws E`) member is a
+        // computed place with no `set`. Writes go through a `mutating ref`
+        // (`Optional[&mutating T]` / `Result[&mutating T, E]`), reached by a
+        // `&mutating` payload binder.
+        if kestrel_ast_builder::is_effectful_place(cx.query, cx.entity) {
+            let throwing = cx.query.has::<kestrel_ast_builder::Throwing>(cx.entity);
+            let (member, label, read_note) = if throwing {
+                (
+                    "throwing",
+                    "declared `throws`",
+                    "declare `get` (returning `Result[T, E]`) or `ref` (lending `Result[&T, E]`)",
+                )
+            } else {
+                (
+                    "failable",
+                    "declared failable with `?`",
+                    "declare `get` (returning `T?`) or `ref` (lending `Optional[&T]`)",
+                )
+            };
             let problem = if declared.read_providers() == 0 && !has_getter && !has_ref {
                 Some((
-                    "a failable member needs a read accessor",
-                    "declare `get` (returning `T?`) or `ref` (lending `Optional[&T]`)",
+                    format!("a {member} member needs a read accessor"),
+                    read_note,
                 ))
             } else if declared.set || has_setter_child {
                 Some((
-                    "a failable place cannot have a `set` accessor",
+                    format!("a {member} place cannot have a `set` accessor"),
                     "assignment to a place that may not exist is rejected (E214)",
                 ))
             } else {
@@ -204,10 +217,10 @@ impl DeclCheck for PlaceAccessorAnalyzer {
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: descriptor("E637").id,
                     severity: descriptor("E637").default_severity,
-                    message: message.into(),
+                    message,
                     labels: vec![DiagLabel {
                         span: span.clone(),
-                        message: "declared failable with `?`".into(),
+                        message: label.into(),
                         is_primary: true,
                     }],
                     notes: vec![note.into()],

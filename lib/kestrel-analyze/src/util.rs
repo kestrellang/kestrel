@@ -102,8 +102,9 @@ pub fn accessor_place_mut_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> Opti
     member_has_write_provider(cx, expr_id).then_some(base)
 }
 
-/// The failable member (`var first?: T`, `subscript(...)? -> T`) a member
-/// expression resolves to, if any.
+/// The effectful member a member expression resolves to, if any: failable
+/// (`var first?: T`, `subscript(...)? -> T`) or throwing (`-> T throws E`).
+/// Such a place may not exist (see `kestrel_ast_builder::is_effectful_place`).
 pub fn failable_member(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<kestrel_hecs::Entity> {
     if !matches!(
         cx.hir.exprs[expr_id],
@@ -112,9 +113,7 @@ pub fn failable_member(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<kestr
         return None;
     }
     let member = cx.typed.resolutions.get(&expr_id).copied()?;
-    cx.query
-        .has::<kestrel_ast_builder::Failable>(member)
-        .then_some(member)
+    kestrel_ast_builder::is_effectful_place(cx.query, member).then_some(member)
 }
 
 /// Does the member `expr_id` resolves to (a subscript or computed property)

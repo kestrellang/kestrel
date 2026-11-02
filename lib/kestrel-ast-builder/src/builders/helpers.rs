@@ -430,6 +430,18 @@ pub fn spawn_setter(
 /// annotation becomes `T?`, the type every read provider produces (a `get`
 /// body returns `T?`; ref accessors lend `Optional[&T]`, see
 /// [`spawn_ref_accessor`]). Must run before the accessors are built.
+/// Mark a computed member declared `T throws E` [`Throwing`]. Call after
+/// its `TypeAnnotation` is set and before its accessors are built (their
+/// ref types read the marker).
+pub fn mark_throwing(world: &mut World, entity: Entity) {
+    if matches!(
+        world.get::<TypeAnnotation>(entity),
+        Some(TypeAnnotation(AstType::Result { .. }))
+    ) {
+        world.set(entity, Throwing);
+    }
+}
+
 pub fn mark_failable(world: &mut World, entity: Entity, span: kestrel_span::Span) {
     world.set(entity, Failable);
     if let Some(ty) = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone()) {
@@ -494,7 +506,8 @@ pub fn spawn_ref_accessor(
     // Synthesized ref return around the parent's declared type. Spanned at
     // the clause so any ref-placement diagnostic lands on the accessor.
     // A failable member (`var first?: T`) is annotated `T?`; its accessors
-    // lend `Optional[&T]` / `Optional[&mutating T]` instead of `&T?`.
+    // lend `Optional[&T]` / `Optional[&mutating T]` instead of `&T?`. A
+    // throwing one (`T throws E`) lends `Result[&T, E]` the same way.
     if let Some(parent_ty) = world.get::<TypeAnnotation>(parent).map(|t| t.0.clone()) {
         let span = get_decl_span(clause, file_id);
         let ty = match parent_ty {
@@ -507,6 +520,19 @@ pub fn spawn_ref_accessor(
                     }),
                     opt_span,
                 )
+            },
+            AstType::Result {
+                ok,
+                err,
+                span: res_span,
+            } if world.has::<Throwing>(parent) => AstType::Result {
+                ok: Box::new(AstType::Ref {
+                    inner: ok,
+                    mutating,
+                    span,
+                }),
+                err,
+                span: res_span,
             },
             parent_ty => AstType::Ref {
                 inner: Box::new(parent_ty),

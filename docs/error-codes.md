@@ -137,7 +137,7 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E209 | a ref binding must be a simple \`let\` | A borrow initializer (`let r = &x`) can't be combined with `var` or a destructuring pattern. |
 | E210 | cannot take a \`&mutating\` borrow of immutable variable '{name}' | Mutable borrows need a mutable place (`var`, mutable field, or `Pointer.mutatingValue`). |
 | E211 | *(retired)* | Was "\`&\` pattern bindings are not supported in this position". `&` binders are now allowed in every pattern position; a `let` destructure of a temporary is rejected as E499 instead. |
-| E214 | cannot assign to failable place '{name}' | A failable property or subscript (`var first?: T`, `subscript(...)? -> T`) is read-only: the place may not exist. |
+| E214 | cannot assign to failable/throwing place '{name}' | A failable (`var first?: T`, `subscript(...)? -> T`) or throwing (`-> T throws E`) property or subscript can't be assigned: the place may not exist. Write through its `mutating ref` with a `&mutating` payload binder. |
 | E213 | left-hand side of compound assignment is not assignable | `a op= b` needs a place (variable, field, subscript) on the left. |
 | E212 | *(retired)* | Was "closure cannot capture non-Static binding '{name}'". Retired with closure kinds (docs/design/closures.md): a view-kind closure's environment is frame-bound, so it may capture ref bindings and non-`Static` values freely. The owning tier keeps the rejection under E624. |
 
@@ -511,7 +511,7 @@ members and `lazy` properties.
 | E621 | \`ref\` and \`modifying\` accessors are not allowed in protocols or protocol extensions | Declare them on concrete types only. |
 | E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a read provider; add one. |
 | E636 | \`modifying\` accessors need an instance receiver | A static member or global has no `self` to modify; use a plain `get` / `ref`. |
-| E637 | a failable member needs a read accessor · a failable place cannot have a \`set\` accessor | A failable member (`var x?: T`, `subscript(...)? -> T`) reads as `Optional` and can't be assigned. Write through it with a `mutating ref` (`Optional[&mutating T]`) and a `&mutating` payload binder. |
+| E637 | a failable/throwing member needs a read accessor · a failable/throwing place cannot have a \`set\` accessor | A failable member (`var x?: T`, `subscript(...)? -> T`) reads as `Optional`, a throwing one (`-> T throws E` with accessors) as `Result`; neither can be assigned. Write through it with a `mutating ref` (`Optional[&mutating T]` / `Result[&mutating T, E]`) and a `&mutating` payload binder. |
 | E638 | (varies) | `willSet` / `didSet` on anything but an instance stored `var` of a struct or enum: a `let`, static or global property, a subscript, a failable member, a protocol member, or mixed with `get`/`set`/`ref`. Also `return` in an observer body, which would skip the store. |
 | E639 | (varies) | `lazy` on anything but an instance `var` of a struct or enum with a type annotation and an `= expr` initializer and no accessors; also a `lazy` property whose type isn't Copyable. |
 
