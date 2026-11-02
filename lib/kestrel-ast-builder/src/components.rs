@@ -327,6 +327,24 @@ impl DeclaredAccessors {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ObserverSetter;
 
+/// A field spelled `lazy`. When well-formed (an instance `var` of a
+/// concrete type with a type and an `= expr` initializer, no accessors),
+/// `cache` is its hidden stored `Optional` sibling (named `$name`, see
+/// [`FieldClass::lazy_cache`]) and the field itself is computed: a
+/// synthesized `modifying get` (`Valued` = the initializer expression) fills
+/// the cache on first read, and a [`LazySetter`] child stores into it.
+/// `cache` is `None` for a malformed `lazy` (E639 reports it; the field
+/// builds as a plain stored field).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Lazy {
+    pub cache: Option<Entity>,
+}
+
+/// Marker on the synthesized `NodeKind::Setter` of a `lazy var`: its body
+/// stores `.Some(newValue)` into the cache.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LazySetter;
+
 /// Marker on a Field/Subscript declared failable (`var first?: T`,
 /// `subscript(i: Int64)? -> T`): the place may not exist. Reads produce
 /// `Optional` of what the read provider yields, and assignment is rejected.
@@ -430,6 +448,10 @@ pub struct FieldClass {
     pub owner: FieldOwner,
     /// The `static` modifier only. Orthogonal to `owner`.
     pub is_static: bool,
+    /// The hidden `Optional` cache of a `lazy var` (see [`Lazy`]): stored,
+    /// but never a memberwise-init parameter — every initializer starts it
+    /// empty.
+    pub lazy_cache: bool,
 }
 
 impl FieldClass {
@@ -440,6 +462,12 @@ impl FieldClass {
         self.backing == FieldBacking::Stored
             && !self.is_static
             && matches!(self.owner, FieldOwner::Nominal)
+    }
+
+    /// A labeled parameter of the memberwise init: stored instance storage
+    /// the user declared (not a `lazy var`'s cache, which starts empty).
+    pub fn is_memberwise_param(&self) -> bool {
+        self.is_stored_instance() && !self.lazy_cache
     }
 
     /// Backed by a `GlobalRef` rather than by instance storage.

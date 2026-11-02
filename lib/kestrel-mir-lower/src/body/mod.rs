@@ -751,6 +751,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // stored fields in the entry block (so they dominate every failure
         // `return`). Must run after the param loop established `self_addr`.
         self.setup_init_field_flags();
+        self.init_lazy_caches();
 
         // Consuming params stay as SSA @owned values — no var_local
         // promotion. Mutating calls use BeginMutBorrow on the SSA value
@@ -1508,6 +1509,70 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 self.field_inits.push((field_idx, VarInit::DefUninit));
             }
         }
+    }
+
+    /// Every initializer starts each `lazy var` cache of `self` empty, before
+    /// the body runs (so a body that reads the lazy property fills it).
+    fn init_lazy_caches(&mut self) {
+        let Some(self_addr) = self.body_context.init_self_addr() else {
+            return;
+        };
+        let self_ty = self.body.value(self_addr).ty;
+        for (idx, empty) in self.empty_lazy_caches(self_ty) {
+            let field_addr = self.emit_field_addr(self_addr, self_ty, idx);
+            self.store_init_self_field(idx, field_addr, empty);
+        }
+    }
+
+    /// An empty (`.None`) value for each `lazy var` cache field of struct
+    /// type `struct_ty`, with its `FieldIdx` (see `FieldClass::lazy_cache`).
+    pub(crate) fn empty_lazy_caches(&mut self, struct_ty: TyId) -> Vec<(FieldIdx, ValueId)> {
+        let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(struct_ty) else {
+            return Vec::new();
+        };
+        let entity = *entity;
+        let caches: Vec<String> = self
+            .ctx
+            .world
+            .children_of(entity)
+            .iter()
+            .filter(|&&c| {
+                self.ctx
+                    .world
+                    .get::<kestrel_ast_builder::FieldClass>(c)
+                    .is_some_and(|fc| fc.lazy_cache)
+            })
+            .filter_map(|&c| {
+                Some(
+                    self.ctx
+                        .world
+                        .get::<kestrel_ast_builder::Name>(c)?
+                        .0
+                        .clone(),
+                )
+            })
+            .collect();
+        if caches.is_empty() {
+            return Vec::new();
+        }
+        let field_tys = self.struct_field_tys(struct_ty);
+        let mut out = Vec::new();
+        for name in caches {
+            let Some(idx) = self.ctx.resolve_field_idx(entity, &name) else {
+                continue;
+            };
+            let Some(&opt_ty) = field_tys.get(idx.index()) else {
+                continue;
+            };
+            let MirTy::Named { entity: opt, .. } = self.ctx.module.ty_arena.get(opt_ty) else {
+                continue;
+            };
+            let Some(none) = self.ctx.resolve_variant_idx(*opt, "None") else {
+                continue;
+            };
+            out.push((idx, self.emit_enum_variant(opt_ty, none, Vec::new())));
+        }
+        out
     }
 
     /// Compile-time init state of a droppable `self` field in an init body, or

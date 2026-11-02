@@ -843,6 +843,11 @@ impl OssaBodyCtx<'_, '_> {
                 (idx, val)
             })
             .collect();
+        // `lazy var` caches are never arguments: they start empty.
+        let mut fields = fields;
+        if known_struct {
+            fields.extend(self.empty_lazy_caches(result_ty));
+        }
 
         self.emit_struct(result_ty, fields)
     }

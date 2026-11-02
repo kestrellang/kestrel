@@ -35,13 +35,18 @@
 //! `willSet` / `didSet` anywhere but an instance stored `var` of a concrete
 //! type: mixed with `get`/`set`/`ref` accessors, on a subscript, a `let`, a
 //! static or global, a failable member, or in a protocol.
+//!
+//! ### E639 -- `invalid_lazy` (Error, Correctness)
+//! `lazy` anywhere but an instance `var` of a concrete type with a type
+//! annotation and an `= expr` initializer, and no accessors.
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{
-    Computed, DeclaredAccessors, Failable, FieldMutability, Gettable, NodeKind, Static, Valued,
+    Computed, DeclaredAccessors, Failable, FieldClass, FieldMutability, Gettable, Lazy, NodeKind,
+    Static, TypeAnnotation, Valued,
 };
 use kestrel_hir_lower::PlaceAccessors;
 use kestrel_name_res::ExtensionTargetEntity;
@@ -89,6 +94,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E639",
+        name: "invalid_lazy",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 /// Look a descriptor up by its E-code.
@@ -121,6 +132,12 @@ impl DeclCheck for PlaceAccessorAnalyzer {
             .get::<DeclaredAccessors>(cx.entity)
             .copied()
             .unwrap_or_default();
+        // A malformed `lazy` builds as a plain stored field; say why.
+        if let Some(lazy) = cx.query.get::<Lazy>(cx.entity)
+            && lazy.cache.is_none()
+        {
+            return check_lazy(cx).into_iter().collect();
+        }
         // Observers are their own shape (a stored property's synthesized
         // setter), so the provider checks below don't apply.
         if declared.any_observer() {
@@ -337,6 +354,58 @@ fn check_observers(
         labels: vec![DiagLabel {
             span: util::entity_span(q, cx.entity),
             message: "declares observers".into(),
+            is_primary: true,
+        }],
+        notes: vec![note.into()],
+    })
+}
+
+/// E639: why a `lazy` field could not be built (its `Lazy` has no cache).
+fn check_lazy(cx: &DeclContext<'_>) -> Option<AnalyzeDiagnostic> {
+    let q = cx.query;
+    let nominal = q.get::<FieldClass>(cx.entity).is_some_and(|c| {
+        !c.is_static && matches!(c.owner, kestrel_ast_builder::FieldOwner::Nominal)
+    });
+    let (message, note) = if q.get::<FieldMutability>(cx.entity) == Some(&FieldMutability::Let) {
+        (
+            "a `lazy` property must be a `var`",
+            "its cache is written on first read",
+        )
+    } else if !nominal {
+        (
+            "`lazy` is only supported on instance properties of a struct or enum",
+            "static and global properties, protocol members and extensions can't be `lazy`",
+        )
+    } else if q.has::<DeclaredAccessors>(cx.entity) || q.has::<Computed>(cx.entity) {
+        (
+            "a `lazy` property can't have accessors",
+            "`lazy` already supplies the property's get and set",
+        )
+    } else if q.has::<Failable>(cx.entity) {
+        (
+            "a `lazy` property can't be failable",
+            "declare it `lazy var name: T? = expr` instead",
+        )
+    } else if !q.has::<TypeAnnotation>(cx.entity) {
+        (
+            "a `lazy` property needs a type annotation",
+            "write `lazy var name: T = expr`",
+        )
+    } else if !q.has::<Valued>(cx.entity) {
+        (
+            "a `lazy` property needs an initializer",
+            "the initializer runs on first read: `lazy var name: T = expr`",
+        )
+    } else {
+        return None;
+    };
+    Some(AnalyzeDiagnostic {
+        descriptor_id: descriptor("E639").id,
+        severity: descriptor("E639").default_severity,
+        message: message.into(),
+        labels: vec![DiagLabel {
+            span: util::entity_span(q, cx.entity),
+            message: "declared `lazy`".into(),
             is_primary: true,
         }],
         notes: vec![note.into()],

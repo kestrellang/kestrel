@@ -15,6 +15,7 @@ mod desugar;
 mod existential;
 mod expr;
 pub mod format_spec;
+mod lazy;
 pub mod literal;
 mod observer;
 mod optional_chain;
@@ -159,13 +160,17 @@ impl QueryFn for LowerBodyWithSourceMap {
 
         // Lower all top-level statements via lower_block_stmts so that
         // guard-let CPS transformation applies at the function body level.
-        // An observed field's setter has no written body: it is built from
-        // the `willSet` / `didSet` clauses (see `observer.rs`).
-        let body_block = if ctx
-            .get::<kestrel_ast_builder::ObserverSetter>(self.entity)
-            .is_some()
-        {
+        // Observed and lazy fields' accessors have no written body: they are
+        // built from the declaration (see `observer.rs`, `lazy.rs`).
+        let body_block = if ctx.has::<kestrel_ast_builder::ObserverSetter>(self.entity) {
             lower.lower_observer_body(&node)
+        } else if ctx.has::<kestrel_ast_builder::LazySetter>(self.entity) {
+            lower.lower_lazy_setter(&node)
+        } else if ctx
+            .get::<kestrel_ast_builder::Lazy>(self.entity)
+            .is_some_and(|l| l.cache.is_some())
+        {
+            lower.lower_lazy_getter(&node)
         } else {
             lower.lower_block_stmts(&block.stmts, block.tail.as_ref())
         };

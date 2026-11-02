@@ -6,6 +6,7 @@ use kestrel_syntax_tree::ast::{self, AstNode, HasName, HasStatic};
 use kestrel_syntax_tree::utils::get_decl_span;
 
 use super::helpers::*;
+use crate::AstType;
 use crate::ast_type::lower_opt_type;
 use crate::components::*;
 
@@ -62,7 +63,29 @@ pub fn build_field(
         .property_accessors()
         .filter(|acc| !is_observer_only(&declared_accessors(acc), acc));
     let observers = node.property_accessors().filter(|_| accessors.is_none());
+    let owner = match world.get::<NodeKind>(parent) {
+        Some(NodeKind::Struct | NodeKind::Enum) => FieldOwner::Nominal,
+        Some(NodeKind::Protocol) => FieldOwner::Protocol,
+        Some(NodeKind::Extension) => FieldOwner::Extension,
+        _ => FieldOwner::Module,
+    };
+    let lazy_init = node.expression().filter(|_| {
+        node.is_lazy()
+            && is_var
+            && !is_static
+            && owner == FieldOwner::Nominal
+            && node.property_accessors().is_none()
+            && node.failable_marker().is_none()
+            && world.has::<TypeAnnotation>(entity)
+    });
+    if node.is_lazy() {
+        let cache = lazy_init
+            .as_ref()
+            .map(|init| build_lazy(world, entity, parent, node, init, file_entity, file_id));
+        world.set(entity, Lazy { cache });
+    }
     match &accessors {
+        _ if lazy_init.is_some() => {},
         Some(accessors) => {
             world.set(entity, Computed);
             build_accessors(
@@ -111,13 +134,8 @@ pub fn build_field(
     // Storage classification. Computed here, where the accessor CST is already
     // in hand, and stored as a component so no downstream site reconstructs it
     // from the absence of Computed/Callable/Static — see `FieldClass`.
-    let owner = match world.get::<NodeKind>(parent) {
-        Some(NodeKind::Struct | NodeKind::Enum) => FieldOwner::Nominal,
-        Some(NodeKind::Protocol) => FieldOwner::Protocol,
-        Some(NodeKind::Extension) => FieldOwner::Extension,
-        _ => FieldOwner::Module,
-    };
     let backing = match &accessors {
+        _ if lazy_init.is_some() => FieldBacking::Computed,
         Some(accessors) if accessors.has_body() => FieldBacking::Computed,
         _ => FieldBacking::Stored,
     };
@@ -127,6 +145,7 @@ pub fn build_field(
             backing,
             owner,
             is_static,
+            lazy_cache: false,
         },
     );
 
@@ -301,4 +320,85 @@ fn build_observers(
         is_static,
     );
     world.set(setter, ObserverSetter);
+}
+
+/// A well-formed `lazy var x: T = init`: `x` becomes computed — a
+/// synthesized `modifying get` (body built by hir-lower from `init`) and a
+/// [`LazySetter`] — over a hidden stored `$x: T?` cache sibling, which is
+/// returned. Reading `x` mutates `self` (the first read fills the cache), so
+/// reads need a mutable base exactly like any `modifying get`.
+fn build_lazy(
+    world: &mut World,
+    entity: Entity,
+    parent: Entity,
+    node: &ast::FieldDeclaration,
+    init: &ast::Expression,
+    file_entity: Entity,
+    file_id: usize,
+) -> Entity {
+    let syntax = node.syntax();
+    let ty = world
+        .get::<TypeAnnotation>(entity)
+        .map(|t| t.0.clone())
+        .expect("lazy_init requires a type annotation");
+    world.set(entity, Computed);
+    world.set(entity, Gettable);
+    world.set(entity, Settable);
+    world.set(entity, MutatingRead);
+    world.set(
+        entity,
+        DeclaredAccessors {
+            modifying_get: true,
+            set: true,
+            ..DeclaredAccessors::default()
+        },
+    );
+    world.set(
+        entity,
+        Callable {
+            params: Vec::new(),
+            receiver: Some(ReceiverKind::Mutating),
+        },
+    );
+    world.set(entity, Valued(SyntaxNodePtr::new(init.syntax())));
+    let setter = spawn_setter(
+        world,
+        entity,
+        syntax,
+        syntax,
+        vec![AstParam::new_value(Some(ty.clone()))],
+        Some(ReceiverKind::Mutating),
+        file_entity,
+        file_id,
+        false,
+    );
+    world.set(setter, LazySetter);
+
+    let span = get_decl_span(syntax, file_id);
+    let name = world
+        .get::<Name>(entity)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    let cache = world.spawn();
+    world.set(cache, NodeKind::Field);
+    world.set(cache, Name(format!("${name}")));
+    world.set(cache, FileId(file_entity));
+    world.set(cache, DeclSpan(span.clone()));
+    world.set(cache, CstNode(SyntaxNodePtr::new(syntax)));
+    world.set_parent(cache, parent);
+    world.set(cache, TypeAnnotation(AstType::Optional(Box::new(ty), span)));
+    world.set(cache, FieldMutability::Var);
+    world.set(cache, Gettable);
+    world.set(cache, Settable);
+    world.set(cache, Vis::Private);
+    world.set(
+        cache,
+        FieldClass {
+            backing: FieldBacking::Stored,
+            owner: FieldOwner::Nominal,
+            is_static: false,
+            lazy_cache: true,
+        },
+    );
+    cache
 }
