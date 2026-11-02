@@ -17,7 +17,7 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Callable, NodeKind, ReceiverKind, Settable};
+use kestrel_ast_builder::{Callable, MutatingRead, NodeKind, ReceiverKind, Settable};
 use kestrel_hir::body::*;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -115,6 +115,7 @@ impl BodyCheck for AccessModeAnalyzer {
             match expr {
                 HirExpr::Call { callee, args, .. } => {
                     check_mutating_kind_call(cx, *callee, &mut diags);
+                    check_modifying_read(cx, expr_id, *callee, "subscript", &mut diags);
                     // Resolve callee entity from typed resolutions
                     let callee_entity = match &cx.hir.exprs[*callee] {
                         HirExpr::Def(entity, _, _) => Some(*entity),
@@ -153,6 +154,13 @@ impl BodyCheck for AccessModeAnalyzer {
                 } => {
                     check_borrow_init(cx, *inner, *mutating, span, &mut diags);
                 },
+                // A read of a `modifying` member (`c.next`, `c(i)`) mutates
+                // the receiver. Method-call-shaped reads (`x.items(i)`) are
+                // covered by `check_call_args` through the Callable receiver.
+                HirExpr::Field { base, name, .. } => {
+                    check_modifying_read(cx, expr_id, *base, name.as_str_or_empty(), &mut diags);
+                },
+
                 HirExpr::Match {
                     scrutinee,
                     arms,
@@ -451,6 +459,53 @@ fn check_mutating_receiver(
             });
         },
     }
+}
+
+/// A read of a member whose read provider is `modifying get` /
+/// `modifying ref` ([`MutatingRead`]) mutates its receiver, so the receiver
+/// must be a mutable place — the same rule as a `mutating` method call
+/// (temporaries are fine: the caller owns them).
+fn check_modifying_read(
+    cx: &BodyContext<'_>,
+    expr_id: HirExprId,
+    base: HirExprId,
+    member_name: &str,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
+        return;
+    };
+    if !cx.query.has::<MutatingRead>(member)
+        || !matches!(
+            cx.query.get::<NodeKind>(member),
+            Some(NodeKind::Field | NodeKind::Subscript)
+        )
+    {
+        return;
+    }
+    let span = util::expr_span(cx.hir, base);
+    let (code, what) = match classify_mutability(cx, base) {
+        MutClass::Mutable | MutClass::Temporary => return,
+        MutClass::SharedRef => ("E207", "a shared reference".to_string()),
+        MutClass::ImmutableLocal(name) => ("E203", format!("immutable binding '{name}'")),
+        MutClass::ImmutableField(name) => ("E204", format!("immutable field '{name}'")),
+    };
+    let d = descriptor(code);
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message: format!("cannot read 'modifying' member '{member_name}' through {what}"),
+        labels: vec![DiagLabel {
+            span,
+            message: "reading this member mutates its receiver".into(),
+            is_primary: true,
+        }],
+        notes: vec![
+            "the member's read accessor is `modifying`; read it through a `var` or a \
+             `mutating` receiver"
+                .into(),
+        ],
+    });
 }
 
 /// Check that an argument to a `mutating` parameter is a mutable lvalue.

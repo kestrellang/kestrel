@@ -41,7 +41,7 @@ use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, ExtensionTarget, InitEffect, NodeKind,
+    Callable, ConformanceItem, Conformances, ExtensionTarget, InitEffect, MutatingRead, NodeKind,
     QualifiedTarget, ReceiverKind, Settable, TypeAnnotation, TypeParams, WhereClause,
     WhereConstraint,
 };
@@ -504,6 +504,12 @@ fn check_protocol_requirements(
                     // Setter requirement: if the protocol declares `{ get set }`
                     // the impl must also be settable (either a `var` stored
                     // property or a computed property with a `set` accessor).
+                    // A `{ get }` requirement reads without changing `self`;
+                    // a `modifying` read provider needs a mutable receiver, so
+                    // a borrowed witness call could not honor it.
+                    if cx.query.has::<MutatingRead>(field_entity) {
+                        diags.push(modifying_witness_diag(&name, &proto_name, &decl_span));
+                    }
                     let proto_needs_set = cx.query.get::<Settable>(child).is_some();
                     let impl_has_set = cx.query.get::<Settable>(field_entity).is_some();
                     if proto_needs_set && !impl_has_set {
@@ -1774,6 +1780,30 @@ fn resolve_type_entity_with_self(
 /// Types are checked separately by `check_method_return_type`; param types
 /// aren't compared here because type-param / Self substitution isn't modeled
 /// by entity equality.
+/// E477 for a property/subscript witness whose read provider is `modifying`.
+fn modifying_witness_diag(
+    name: &str,
+    proto_name: &str,
+    span: &kestrel_span::Span,
+) -> AnalyzeDiagnostic {
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[5].id, // E477
+        severity: DESCRIPTORS[5].default_severity,
+        message: format!(
+            "'{name}' satisfies a `{{ get }}` requirement with a `modifying` accessor \
+             for protocol '{proto_name}'"
+        ),
+        labels: vec![DiagLabel {
+            span: span.clone(),
+            message: format!("'{name}' mutates its receiver when read"),
+            is_primary: true,
+        }],
+        notes: vec![
+            "protocol reads borrow `self`; use a plain `get` or `ref` for the witness".into(),
+        ],
+    }
+}
+
 fn signatures_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
     let (Some(proto), Some(imp)) = (proto, imp) else {
         // If either side lacks a Callable component we can't prove a mismatch —

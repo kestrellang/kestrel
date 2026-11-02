@@ -171,7 +171,50 @@ impl TypeAliasDeclaration {
     }
 }
 
+impl FieldDeclaration {
+    /// The accessor block, written before or after the initializer.
+    pub fn property_accessors(&self) -> Option<PropertyAccessors> {
+        self.property_accessorses().next()
+    }
+
+    /// The `= expr` initializer.
+    pub fn expression(&self) -> Option<Expression> {
+        self.expressions().next()
+    }
+
+    /// `lazy let|var`.
+    pub fn is_lazy(&self) -> bool {
+        self.lazy_modifier().is_some()
+    }
+
+    /// `var name?: T`: a failable place.
+    pub fn is_failable(&self) -> bool {
+        self.failable_marker().is_some()
+    }
+}
+
 impl PropertyAccessors {
+    pub fn modifying_getter(&self) -> Option<ModifyingGetterClause> {
+        support::child(self.syntax())
+    }
+
+    pub fn modifying_ref_clause(&self) -> Option<ModifyingRefClause> {
+        support::child(self.syntax())
+    }
+
+    pub fn will_set(&self) -> Option<WillSetClause> {
+        support::child(self.syntax())
+    }
+
+    pub fn did_set(&self) -> Option<DidSetClause> {
+        support::child(self.syntax())
+    }
+
+    /// Declares `willSet` and/or `didSet` observers.
+    pub fn has_observers(&self) -> bool {
+        self.will_set().is_some() || self.did_set().is_some()
+    }
+
     pub fn getter(&self) -> Option<GetterClause> {
         support::child(self.syntax())
     }
@@ -210,5 +253,7 @@ impl PropertyAccessors {
             || self.setter().is_some_and(|s| s.code_block().is_some())
             || self.ref_clause().is_some()
             || self.mutating_ref_clause().is_some()
+            || self.modifying_getter().is_some()
+            || self.modifying_ref_clause().is_some()
     }
 }

@@ -284,3 +284,9 @@ node    ExprPlaceholder                  # `_` as a whole call argument: a hole 
 node    ExprPlaceholderUse               # `_` inside a larger argument (`map(_.name)`, `map(_ * 2)`)
 node    ExprOptionalBind                 # `a?` before `.member` / `.(args)`: one bind of an optional chain
 node    ExprOptionalChain                # the whole postfix chain holding a `?.` (`a?.b.c()`)
+node    FailableMarker                   # `?` after subscript params / a property name: a failable place
+node    LazyModifier                     # contextual `lazy` before let/var
+node    ModifyingGetterClause            # modifying get { ... } (mutable receiver, yields a value)
+node    ModifyingRefClause               # modifying ref { ... } (mutable receiver, yields &T)
+node    WillSetClause                    # willSet { ... } property observer
+node    DidSetClause                     # didSet { ... } property observer

@@ -425,6 +425,21 @@ pub fn spawn_setter(
     set_documentation(world, setter, setter_clause);
 }
 
+/// The accessor clauses an accessor block spells (see [`DeclaredAccessors`]).
+/// The `{ expr }` shorthand counts as `get`.
+pub fn declared_accessors(acc: &kestrel_syntax_tree::ast::PropertyAccessors) -> DeclaredAccessors {
+    DeclaredAccessors {
+        get: acc.declares_get() || acc.code_block().is_some(),
+        modifying_get: acc.modifying_getter().is_some(),
+        set: acc.declares_set(),
+        ref_: acc.ref_clause().is_some(),
+        modifying_ref: acc.modifying_ref_clause().is_some(),
+        mutating_ref: acc.mutating_ref_clause().is_some(),
+        will_set: acc.will_set().is_some(),
+        did_set: acc.did_set().is_some(),
+    }
+}
+
 /// Spawn a `NodeKind::RefAccessor` child entity under a Field or Subscript
 /// for a `ref { … }` / `mutating ref { … }` place-accessor clause.
 ///

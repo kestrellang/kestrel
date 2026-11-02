@@ -427,6 +427,18 @@ pub enum SyntaxKind {
     ExprOptionalBind,
     /// the whole postfix chain holding a `?.` (`a?.b.c()`)
     ExprOptionalChain,
+    /// `?` after subscript params / a property name: a failable place
+    FailableMarker,
+    /// contextual `lazy` before let/var
+    LazyModifier,
+    /// modifying get { ... } (mutable receiver, yields a value)
+    ModifyingGetterClause,
+    /// modifying ref { ... } (mutable receiver, yields &T)
+    ModifyingRefClause,
+    /// willSet { ... } property observer
+    WillSetClause,
+    /// didSet { ... } property observer
+    DidSetClause,
     /// Not a syntax kind — the end-of-enum marker. Its discriminant is the
     /// variant count, which lets `syntax_kind_table_round_trips` prove `ALL`
     /// complete. Never construct it.
@@ -714,6 +726,12 @@ impl SyntaxKind {
         SyntaxKind::ExprPlaceholderUse,
         SyntaxKind::ExprOptionalBind,
         SyntaxKind::ExprOptionalChain,
+        SyntaxKind::FailableMarker,
+        SyntaxKind::LazyModifier,
+        SyntaxKind::ModifyingGetterClause,
+        SyntaxKind::ModifyingRefClause,
+        SyntaxKind::WillSetClause,
+        SyntaxKind::DidSetClause,
     ];
 }
 

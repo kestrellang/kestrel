@@ -1,10 +1,10 @@
 //! Lowering context — central state during HIR → MIR lowering.
 
 use kestrel_ast_builder::{
-    Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, Subscript,
+    Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, ReceiverKind, Subscript,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
-use kestrel_mir::{FieldIdx, MirModule, MirTy, TyId, VariantIdx, WitnessMethodKey};
+use kestrel_mir::{FieldIdx, MirModule, MirTy, ParamConvention, TyId, VariantIdx, WitnessMethodKey};
 use kestrel_name_res::ExtensionTargetEntity;
 
 use kestrel_ast_builder::qualified_name;
@@ -181,6 +181,22 @@ impl<'w> LowerCtx<'w> {
             self.world.get::<NodeKind>(e) == Some(&NodeKind::RefAccessor)
                 && self.world.get::<MutatingAccessor>(e).is_some() == mutating
         })
+    }
+
+    /// The receiver convention a member READ passes to its provider (`get`
+    /// body or `ref` accessor): `MutBorrow` for a `modifying get` /
+    /// `modifying ref` provider, whose receiver is mutable, else `Borrow`.
+    pub fn read_receiver_convention(&self, provider: Entity) -> ParamConvention {
+        let mutating = self
+            .world
+            .get::<Callable>(provider)
+            .and_then(|c| c.receiver.as_ref())
+            .is_some_and(|r| matches!(r, ReceiverKind::Mutating));
+        if mutating {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        }
     }
 
     /// Consume the context and return the built MIR module.

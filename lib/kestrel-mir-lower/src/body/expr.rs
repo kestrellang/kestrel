@@ -762,8 +762,10 @@ impl OssaBodyCtx<'_, '_> {
             let receiver_ty = self.resolve_expr_type(base);
             let method_type_args = self.resolve_type_args(expr_id);
             // Borrow the receiver place — a var-local base must not be copied
-            // (e.g. `buf.capacity` on a non-Copyable `var buf`).
-            let arg = self.prepare_call_arg_for_expr(base, ParamConvention::Borrow);
+            // (e.g. `buf.capacity` on a non-Copyable `var buf`). A
+            // `modifying` read provider takes the receiver mutably.
+            let convention = self.ctx.read_receiver_convention(getter_entity);
+            let arg = self.prepare_call_arg_for_expr(base, convention);
 
             if let Some(protocol) = self.ctx.is_protocol_method(getter_entity) {
                 self.ctx.register_name(protocol);

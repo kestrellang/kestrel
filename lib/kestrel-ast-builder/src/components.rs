@@ -271,6 +271,59 @@ pub struct Settable;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MutatingAccessor;
 
+/// Marker on a Field/Subscript whose READ provider is a `modifying get` or
+/// `modifying ref` accessor: the accessor takes a mutable receiver, so every
+/// read needs a mutable base, exactly like a `mutating` method call. The
+/// single source of truth for "reading this member mutates self" — the
+/// analyzers (receiver mutability) and MIR lowering (receiver convention)
+/// both ask this marker.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MutatingRead;
+
+/// The accessor clauses a Field/Subscript spells, as written. Provider
+/// exclusivity (E619/E620) and the observer/lazy checks read this, because
+/// two clauses of one provider role land on the same entity slot (`get` and
+/// `modifying get` both own the member's body) and would otherwise be
+/// invisible once built.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct DeclaredAccessors {
+    pub get: bool,
+    pub modifying_get: bool,
+    pub set: bool,
+    pub ref_: bool,
+    pub modifying_ref: bool,
+    pub mutating_ref: bool,
+    pub will_set: bool,
+    pub did_set: bool,
+}
+
+impl DeclaredAccessors {
+    /// How many read providers are spelled (`get`, `modifying get`, `ref`,
+    /// `modifying ref`, or the `{ expr }` shorthand counted as `get`).
+    pub fn read_providers(&self) -> usize {
+        [self.get, self.modifying_get, self.ref_, self.modifying_ref]
+            .iter()
+            .filter(|b| **b)
+            .count()
+    }
+
+    /// A `modifying` accessor is spelled.
+    pub fn any_modifying(&self) -> bool {
+        self.modifying_get || self.modifying_ref
+    }
+
+    /// `willSet` and/or `didSet` is spelled.
+    pub fn any_observer(&self) -> bool {
+        self.will_set || self.did_set
+    }
+}
+
+/// Marker on a Field/Subscript declared failable (`var first?: T`,
+/// `subscript(i: Int64)? -> T`): the place may not exist. Reads produce
+/// `Optional` of what the read provider yields, and assignment is rejected.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Failable;
+
 /// Has a body to lower — a handle to the body subtree: a `CodeBlock`, a
 /// function's `= expr` (`FunctionBody`), a parameter default's `= expr`
 /// (`DefaultValue`), or a field initializer `Expression`. Resolve it with

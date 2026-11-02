@@ -110,14 +110,24 @@ FunctionBody =
 
 SubscriptDeclaration =
   AttributeList? Visibility StaticModifier? 'subscript' TypeParameterList?
-  ParameterList ReturnType WhereClause? SubscriptBody
+  ParameterList FailableMarker? ReturnType WhereClause? SubscriptBody
+
+// `?` after a subscript's parameters or a property's name: a failable
+// place (`subscript(checked i: Int64)? -> T`, `var first?: T`).
+FailableMarker =
+  '?'
 
 SubscriptBody =
   CodeBlock | PropertyAccessors
 
 FieldDeclaration =
-  AttributeList? Visibility StaticModifier? ('let' | 'var') Name ':' Ty
-  PropertyAccessors? ('=' Expression)? ';'?
+  AttributeList? Visibility StaticModifier? LazyModifier? ('let' | 'var') Name
+  FailableMarker? ':' Ty
+  (PropertyAccessors ('=' Expression)? | '=' Expression PropertyAccessors?)? ';'?
+
+// `lazy` is a contextual keyword: an identifier token before `let`/`var`.
+LazyModifier =
+  'ident'
 
 // `{ get set }` (requirement), `{ get { } set { } }` (clauses), or a
 // `{ … }` getter shorthand (a field's only; a subscript's shorthand block
@@ -129,6 +139,7 @@ PropertyAccessors =
 
 AccessorClause =
   GetterClause | SetterClause | RefClause | MutatingRefClause
+| ModifyingGetterClause | ModifyingRefClause | WillSetClause | DidSetClause
 
 GetterClause =
   'get' CodeBlock
@@ -142,6 +153,21 @@ RefClause =
 
 MutatingRefClause =
   'mutating' 'ident' CodeBlock
+
+// `modifying` (contextual) marks an accessor whose receiver is mutable:
+// `modifying get` yields a value, `modifying ref` a shared `&T`.
+ModifyingGetterClause =
+  'ident' 'get' CodeBlock
+
+ModifyingRefClause =
+  'ident' 'ident' CodeBlock
+
+// Property observers on a stored property (contextual `willSet`/`didSet`).
+WillSetClause =
+  'ident' CodeBlock
+
+DidSetClause =
+  'ident' CodeBlock
 
 TypeAliasDeclaration =
   AttributeList? Visibility 'type' (Name | AssociatedTypeTarget)
