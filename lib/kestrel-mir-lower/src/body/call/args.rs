@@ -382,7 +382,7 @@ impl OssaBodyCtx<'_, '_> {
         (!subst.type_params.is_empty()).then_some(subst)
     }
 
-    fn lower_default_arg_inline(
+    pub(crate) fn lower_default_arg_inline(
         &mut self,
         default_entity: Entity,
         _param_ty: TyId,

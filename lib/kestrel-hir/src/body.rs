@@ -602,6 +602,22 @@ pub enum HirPat {
     },
 }
 
+impl HirPat {
+    /// Takes its scrutinee apart (or tests its value) rather than binding
+    /// it whole: such a pattern matches through a ref to the pointee.
+    pub fn destructures(&self) -> bool {
+        matches!(
+            self,
+            HirPat::Tuple { .. }
+                | HirPat::Struct { .. }
+                | HirPat::Variant { .. }
+                | HirPat::ImplicitVariant { .. }
+                | HirPat::Literal { .. }
+                | HirPat::Range { .. }
+        )
+    }
+}
+
 // ===== Supporting types =====
 
 /// Parsed literal value. Unlike `AstLiteral` which stores source text,

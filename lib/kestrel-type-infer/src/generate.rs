@@ -1414,6 +1414,16 @@ fn gen_pat(
     scrutinee_tv: TyVar,
     source: MatchSource,
 ) {
+    // A destructuring pattern matches THROUGH a ref anywhere, not only at
+    // the top of a `match`: `for (a, b) in pairs.refs()` checks `(a, b)`
+    // against the `&(Int64, Int64)` payload's pointee. Binders inside then
+    // read the pointee in place (MIR's access path peels ref slots); a
+    // binder or wildcard keeps the ref itself.
+    let scrutinee_tv = if hir.pats[pat_id].destructures() {
+        peel_ref_tv(ctx, scrutinee_tv)
+    } else {
+        scrutinee_tv
+    };
     match &hir.pats[pat_id] {
         HirPat::Wildcard { .. } => {
             // No constraint — matches anything

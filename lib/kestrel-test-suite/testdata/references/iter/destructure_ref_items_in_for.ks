@@ -5,11 +5,8 @@
 // A `for` pattern can destructure a reference item (`refs()` /
 // `mutableRefs()`) the way a `match` on a ref binding does: the pattern
 // matches the pointee, and a `&mutating` binder writes the element in
-// place.
-//
-// Known gap: nested patterns don't look through a ref-typed payload yet
-// (only the top-level `match` scrutinee is peeled), so this fails with
-// E109 "expected &(…) got (_, _)" and E301.
+// place. Nested patterns look through a ref-typed
+// payload (the loop's `.Some(item)`).
 module Test
 
 @main

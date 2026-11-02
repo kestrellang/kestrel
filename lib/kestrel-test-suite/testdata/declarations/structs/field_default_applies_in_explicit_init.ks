@@ -4,8 +4,8 @@
 
 // A stored field's `= expr` default is accepted as initializing the field
 // when an explicit `init` doesn't assign it (the initializer analyzer skips
-// defaulted fields), so the init must store the default. Today it doesn't:
-// the field is left uninitialized.
+// defaulted fields), so the init must store the default: every init stores
+// field defaults before its body runs.
 module Test
 
 import std.numeric.(Int64)

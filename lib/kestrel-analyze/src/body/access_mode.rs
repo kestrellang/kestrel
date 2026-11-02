@@ -19,6 +19,7 @@ use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Callable, MutatingRead, NodeKind, ReceiverKind, Settable};
 use kestrel_hir::body::*;
+use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -164,13 +165,14 @@ impl BodyCheck for AccessModeAnalyzer {
                 HirExpr::Match {
                     scrutinee,
                     arms,
+                    source,
                     span,
-                    ..
                 } => {
                     // `&mutating v` patterns need a MUTABLE scrutinee place
                     // (E495's predicate family) — writes through the binding
                     // must land in real storage, not a match-scoped temp.
                     if cx.hir.arms_borrow_mode(arms) == Some(true)
+                        && !for_item_is_mut_ref(cx, *scrutinee, *source)
                         && !matches!(classify_mutability(cx, *scrutinee), MutClass::Mutable)
                     {
                         diags.push(AnalyzeDiagnostic {
@@ -196,6 +198,19 @@ impl BodyCheck for AccessModeAnalyzer {
 
         diags
     }
+}
+
+/// A `for` over `&mutating T` items (`mutableRefs()`): the loop's
+/// `iter.next()` scrutinee is a temp, but each item is a ref into real
+/// storage, so `&mutating` binders inside the item pattern write through it.
+fn for_item_is_mut_ref(cx: &BodyContext<'_>, scrutinee: HirExprId, source: MatchSource) -> bool {
+    if source != MatchSource::ForLoop {
+        return false;
+    }
+    let Some(ResolvedTy::Named { args, .. }) = cx.typed.expr_types.get(&scrutinee) else {
+        return false;
+    };
+    matches!(args.first(), Some(ResolvedTy::Ref { mutating: true, .. }))
 }
 
 /// Borrow-initializer legality (`let r = &expr;`, stage 1.5 item 2): a
@@ -345,7 +360,7 @@ fn check_call_args(
 fn arg_is_closure_value(cx: &BodyContext<'_>, arg_id: HirExprId) -> bool {
     matches!(
         cx.typed.expr_types.get(&arg_id),
-        Some(kestrel_type_infer::result::ResolvedTy::Function { .. })
+        Some(ResolvedTy::Function { .. })
     )
 }
 
@@ -371,7 +386,7 @@ fn check_mutating_kind_call(
 ) {
     if !matches!(
         cx.typed.expr_types.get(&callee),
-        Some(kestrel_type_infer::result::ResolvedTy::Function {
+        Some(ResolvedTy::Function {
             kind: kestrel_ast::FnTypeKind::Mutating,
             ..
         })

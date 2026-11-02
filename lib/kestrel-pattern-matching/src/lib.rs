@@ -82,6 +82,15 @@ use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 
+/// The type a pattern matches against `ty`: refs are transparent to
+/// patterns (stage-1.5 transparent place), so a `&T` is matched as `T`.
+pub fn pattern_ty(ty: &ResolvedTy) -> &ResolvedTy {
+    match ty {
+        ResolvedTy::Ref { pointee, .. } => pattern_ty(pointee),
+        other => other,
+    }
+}
+
 /// Check exhaustiveness and redundancy for a match expression.
 pub fn check_match(
     hir: &HirBody,
@@ -107,6 +116,7 @@ pub fn is_irrefutable(
     pat_id: HirPatId,
     ty: &ResolvedTy,
 ) -> bool {
+    let ty = pattern_ty(ty);
     let flat = flat_pat::flatten(hir, query, site.root, pat_id, ty);
     check_irrefutable(&flat, query, site, ty)
 }

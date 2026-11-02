@@ -1151,11 +1151,16 @@ impl OssaBodyCtx<'_, '_> {
             self.register_ref_binding(extracted, local_id);
             return;
         }
-        let bound_val = if self.body.value(extracted).ownership == Ownership::Owned {
-            self.emit_copy_value(extracted)
-        } else {
-            extracted
-        };
+        // An @owned extraction off a path is already a fresh copy the
+        // binding can own (`emit_enum_payload` / `emit_struct_extract` copy
+        // out of an @owned operand); only the scrutinee itself (an empty
+        // path) must be copied, since the match still owns it.
+        let bound_val =
+            if self.body.value(extracted).ownership == Ownership::Owned && extracted == base {
+                self.emit_copy_value(extracted)
+            } else {
+                extracted
+            };
         self.bind_pattern_local(local_id, bound_val);
     }
 

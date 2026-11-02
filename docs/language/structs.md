@@ -162,6 +162,11 @@ struct Point {
 }
 ```
 
+A field declared with a default (`var count: Int64 = 0`) doesn't need to
+be assigned in an explicit initializer. Every initializer stores the
+field's default before its body runs; assigning the field in the body
+replaces it.
+
 ### Initializer with No Parameters
 
 ```kestrel

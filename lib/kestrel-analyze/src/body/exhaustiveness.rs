@@ -170,10 +170,7 @@ fn check_user_match(
     };
     // A ref-binding scrutinee (`match r` where r: &T) matches its POINTEE —
     // patterns never see a ref (stage-1.5 transparent place).
-    let scrutinee_ty = match scrutinee_ty {
-        ResolvedTy::Ref { pointee, .. } => pointee.as_ref(),
-        other => other,
-    };
+    let scrutinee_ty = kestrel_pattern_matching::pattern_ty(scrutinee_ty);
 
     // Skip analysis when the scrutinee type couldn't be inferred — a
     // type-inference error will already be reported and any exhaustiveness

@@ -763,7 +763,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // stored fields in the entry block (so they dominate every failure
         // `return`). Must run after the param loop established `self_addr`.
         self.setup_init_field_flags();
-        self.init_lazy_caches();
+        self.init_field_defaults();
 
         // Consuming params stay as SSA @owned values — no var_local
         // promotion. Mutating calls use BeginMutBorrow on the SSA value
@@ -1523,17 +1523,55 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
     }
 
-    /// Every initializer starts each `lazy var` cache of `self` empty, before
-    /// the body runs (so a body that reads the lazy property fills it).
-    fn init_lazy_caches(&mut self) {
+    /// Before an initializer's body runs, store what every init owes `self`
+    /// regardless of its body (Swift's rule for property initializers):
+    /// each `lazy var` cache starts empty, and each stored field with an
+    /// `= expr` default gets that default. The analyzer accepts a defaulted
+    /// field as initialized, so a body that never assigns it still leaves it
+    /// set; one that does assigns over the default.
+    fn init_field_defaults(&mut self) {
         let Some(self_addr) = self.body_context.init_self_addr() else {
             return;
         };
         let self_ty = self.body.value(self_addr).ty;
-        for (idx, empty) in self.empty_lazy_caches(self_ty) {
+        let mut stores = self.empty_lazy_caches(self_ty);
+        stores.extend(self.field_default_values(self_ty));
+        for (idx, value) in stores {
             let field_addr = self.emit_field_addr(self_addr, self_ty, idx);
-            self.store_init_self_field(idx, field_addr, empty);
+            self.store_init_self_field(idx, field_addr, value);
         }
+    }
+
+    /// The `= expr` default of each declared stored field of struct type
+    /// `struct_ty` that has one, lowered inline (the same lowering a
+    /// memberwise init's omitted argument gets), with its `FieldIdx`.
+    fn field_default_values(&mut self, struct_ty: TyId) -> Vec<(FieldIdx, ValueId)> {
+        let MirTy::Named {
+            entity, type_args, ..
+        } = self.ctx.module.ty_arena.get(struct_ty).clone()
+        else {
+            return Vec::new();
+        };
+        let world = self.ctx.world;
+        let defaulted: Vec<(Entity, FieldIdx)> = world
+            .children_of(entity)
+            .iter()
+            .filter(|&&c| {
+                world.get::<kestrel_ast_builder::Valued>(c).is_some()
+                    && world
+                        .get::<kestrel_ast_builder::FieldClass>(c)
+                        .is_some_and(|fc| fc.is_declared_storage())
+            })
+            .filter_map(|&c| Some((c, self.ctx.field_idx_of(c)?)))
+            .collect();
+        let field_tys = self.struct_field_tys(struct_ty);
+        defaulted
+            .into_iter()
+            .filter_map(|(field, idx)| {
+                let ty = *field_tys.get(idx.index())?;
+                Some((idx, self.lower_default_arg_inline(field, ty, &type_args)))
+            })
+            .collect()
     }
 
     /// An empty (`.None`) value for each `lazy var` cache field of struct
