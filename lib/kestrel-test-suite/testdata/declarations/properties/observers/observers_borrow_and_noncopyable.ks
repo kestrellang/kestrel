@@ -25,6 +25,6 @@ struct S {
 
 func f() {
     var s = S(count: 1, handle: Handle(fd: 3));
-    let r = &mutating s.count; // ERROR(E210): cannot take a `&mutating` borrow of a get/set member
+    let r = &mutating s.count; // ERROR(E210): cannot take a `&mutating` borrow of observed property 'count'
     s.handle = Handle(fd: 4);
 }

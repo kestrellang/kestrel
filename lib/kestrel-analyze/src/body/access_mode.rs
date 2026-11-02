@@ -239,6 +239,18 @@ fn check_borrow_init(
             .query(kestrel_hir_lower::PlaceAccessors { entity: member })
             .is_none_or(|info| info.mutating_ref_accessor.is_none())
     {
+        if kestrel_type_infer::captures::is_observed_field(cx.query, member) {
+            let name = util::entity_name(cx.query, member);
+            push(
+                diags,
+                "E210",
+                format!("cannot take a `&mutating` borrow of observed property '{name}'"),
+                "its `willSet` / `didSet` run on every write, and writes through a borrow \
+                 would skip them; assign to it or call a `mutating` method on it instead"
+                    .to_string(),
+            );
+            return;
+        }
         push(
             diags,
             "E210",
