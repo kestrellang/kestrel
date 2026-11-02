@@ -1336,19 +1336,39 @@ pub(super) fn solve_member(
     // unchanged. The wrap is read-only: RMW receivers are never typed
     // `&mutating T` — analyze and mir-lower route writes and RMW by ENTITY
     // (the PlaceAccessors query), not by this expression type.
-    let ret_tv = if matches!(
+    //
+    // A FAILABLE member (`var first?: T`) is annotated `T?`, and its ref
+    // accessor lends `Optional[&T]` — the accessor's own synthesized
+    // annotation is the read type, not `&` of the member's.
+    // Computed properties resolve as `MemberKind::Field` (the resolver
+    // classifies by NodeKind), so the failable lookup keys on the entity.
+    let place_accessors = ctx.query_ctx.query(kestrel_hir_lower::PlaceAccessors {
+        entity: resolution.entity,
+    });
+    let failable = ctx
+        .query_ctx
+        .has::<kestrel_ast_builder::Failable>(resolution.entity);
+    let wraps_ref = matches!(
         resolution.kind,
         crate::resolve::MemberKind::Subscript | crate::resolve::MemberKind::ComputedProperty { .. }
-    ) && ctx
-        .query_ctx
-        .query(kestrel_hir_lower::PlaceAccessors {
-            entity: resolution.entity,
-        })
-        .is_some_and(|info| info.ref_accessor.is_some())
-    {
-        ctx.ref_ty(ret_tv, false)
-    } else {
-        ret_tv
+    );
+    let ret_tv = match place_accessors.and_then(|info| info.ref_accessor) {
+        Some(accessor) if failable => {
+            let accessor_ty = ctx.query_ctx.query(kestrel_hir_lower::LowerCallableReturnType {
+                entity: accessor,
+                root: ctx.root,
+            });
+            lower_opaque_aware(
+                ctx,
+                &accessor_ty,
+                resolution.entity,
+                self_entity,
+                receiver,
+                &subs,
+            )
+        },
+        Some(_) if wraps_ref => ctx.ref_ty(ret_tv, false),
+        _ => ret_tv,
     };
     bind_call_result(ctx, result, ret_tv, expr, span.clone());
 

@@ -25,12 +25,19 @@
 //! ### E636 -- `modifying_accessor_without_receiver` (Error, Correctness)
 //! `modifying get` / `modifying ref` on a static member or a global: there
 //! is no `self` for the accessor to modify.
+//!
+//! ### E637 -- `invalid_failable_member` (Error, Correctness)
+//! A failable member (`var first?: T`, `subscript(...)? -> T`) that is
+//! stored (no read accessor) or declares a write provider (`set`,
+//! `mutating ref`): a place that may not exist can't be stored into.
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Computed, DeclaredAccessors, Gettable, NodeKind, Static, Valued};
+use kestrel_ast_builder::{
+    Computed, DeclaredAccessors, Failable, Gettable, NodeKind, Static, Valued,
+};
 use kestrel_hir_lower::PlaceAccessors;
 use kestrel_name_res::ExtensionTargetEntity;
 
@@ -62,6 +69,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E636",
         name: "modifying_accessor_without_receiver",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E637",
+        name: "invalid_failable_member",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -154,6 +167,42 @@ impl DeclCheck for PlaceAccessorAnalyzer {
                 }],
                 notes: vec![],
             });
+        }
+
+        // E637: a failable member is a computed, read-only place.
+        if cx.query.has::<Failable>(cx.entity) {
+            let problem = if declared.read_providers() == 0 && !has_getter && !has_ref {
+                Some((
+                    "a failable member needs a read accessor",
+                    "declare `get` (returning `T?`) or `ref` (lending `Optional[&T]`)",
+                ))
+            } else if declared.set || has_setter_child {
+                Some((
+                    "a failable place cannot have a `set` accessor",
+                    "assignment to a place that may not exist is rejected (E214)",
+                ))
+            } else if declared.mutating_ref || has_mutating_ref {
+                Some((
+                    "a failable place cannot have a `mutating ref` accessor yet",
+                    "lending `Optional[&mutating T]` needs `&mutating` patterns in `if let`; \
+                     use a `mutating` method returning `Optional[&mutating T]` for now",
+                ))
+            } else {
+                None
+            };
+            if let Some((message, note)) = problem {
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: descriptor("E637").id,
+                    severity: descriptor("E637").default_severity,
+                    message: message.into(),
+                    labels: vec![DiagLabel {
+                        span: span.clone(),
+                        message: "declared failable with `?`".into(),
+                        is_primary: true,
+                    }],
+                    notes: vec![note.into()],
+                });
+            }
         }
 
         // E636: `modifying` means the accessor changes `self`, so it needs a

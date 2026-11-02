@@ -425,6 +425,17 @@ pub fn spawn_setter(
     set_documentation(world, setter, setter_clause);
 }
 
+/// Mark a failable member (`var first?: T`, `subscript(…)? -> T`): its
+/// annotation becomes `T?`, the type every read provider produces (a `get`
+/// body returns `T?`; ref accessors lend `Optional[&T]`, see
+/// [`spawn_ref_accessor`]). Must run before the accessors are built.
+pub fn mark_failable(world: &mut World, entity: Entity, span: kestrel_span::Span) {
+    world.set(entity, Failable);
+    if let Some(ty) = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone()) {
+        world.set(entity, TypeAnnotation(AstType::Optional(Box::new(ty), span)));
+    }
+}
+
 /// The accessor clauses an accessor block spells (see [`DeclaredAccessors`]).
 /// The `{ expr }` shorthand counts as `get`.
 pub fn declared_accessors(acc: &kestrel_syntax_tree::ast::PropertyAccessors) -> DeclaredAccessors {
@@ -478,15 +489,28 @@ pub fn spawn_ref_accessor(
     }
     // Synthesized ref return around the parent's declared type. Spanned at
     // the clause so any ref-placement diagnostic lands on the accessor.
+    // A failable member (`var first?: T`) is annotated `T?`; its accessors
+    // lend `Optional[&T]` / `Optional[&mutating T]` instead of `&T?`.
     if let Some(parent_ty) = world.get::<TypeAnnotation>(parent).map(|t| t.0.clone()) {
-        world.set(
-            acc,
-            TypeAnnotation(AstType::Ref {
+        let span = get_decl_span(clause, file_id);
+        let ty = match parent_ty {
+            AstType::Optional(inner, opt_span) if world.has::<Failable>(parent) => {
+                AstType::Optional(
+                    Box::new(AstType::Ref {
+                        inner,
+                        mutating,
+                        span,
+                    }),
+                    opt_span,
+                )
+            },
+            parent_ty => AstType::Ref {
                 inner: Box::new(parent_ty),
                 mutating,
-                span: get_decl_span(clause, file_id),
-            }),
-        );
+                span,
+            },
+        };
+        world.set(acc, TypeAnnotation(ty));
     }
     if is_static {
         world.set(acc, Static);

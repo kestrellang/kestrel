@@ -417,6 +417,12 @@ fn check_mutating_receiver(
     recv_id: HirExprId,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
+    // A failable member is reported once, by the assignment analyzer (E214)
+    // for compound assignment; a mutating method on one mutates the
+    // optional temporary its read produced.
+    if util::failable_member(cx, recv_id).is_some() {
+        return;
+    }
     let span = util::expr_span(cx.hir, recv_id);
     match classify_mutability(cx, recv_id) {
         MutClass::Mutable | MutClass::Temporary => {}, // ok — owned or mutable place
@@ -595,6 +601,25 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
     // classify the projection as SharedRef.
     if let Some(base) = util::accessor_place_mut_base(cx, expr_id) {
         return classify_mutability(cx, base);
+    }
+    // A field-subscript (`self.items(at: i)`: a subscript on a stored field,
+    // method-call shaped) with a write provider is a projection of the
+    // field: mutable iff the field is `var` and its base is mutable. Without
+    // this arm its `&T` read type classified it SharedRef, so
+    // `&mutating self.items(at: i)` in a `mutating` method was E210.
+    if let HirExpr::MethodCall { receiver, .. } = &cx.hir.exprs[expr_id]
+        && let Some(&field) = cx.typed.field_subscripts.get(&expr_id)
+        && util::member_has_write_provider(cx, expr_id)
+    {
+        if !cx.query.has::<Settable>(field) {
+            let name = cx
+                .query
+                .get::<kestrel_ast_builder::Name>(field)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            return MutClass::ImmutableField(name);
+        }
+        return classify_mutability(cx, *receiver);
     }
     // Stage-1 refs next, before the syntactic walk: a `&mutating T` call
     // result is a mutable place (it would fall to Temporary below and

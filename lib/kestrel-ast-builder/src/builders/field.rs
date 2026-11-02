@@ -40,6 +40,9 @@ pub fn build_field(
     if let Some(ty) = lower_opt_type(node.ty(), file_id) {
         world.set(entity, TypeAnnotation(ty));
     }
+    if let Some(marker) = node.failable_marker() {
+        mark_failable(world, entity, get_decl_span(marker.syntax(), file_id));
+    }
 
     // Mutability as a component, so downstream analyzers don't re-scan tokens.
     let is_var = node.var_token().is_some();

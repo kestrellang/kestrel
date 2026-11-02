@@ -99,6 +99,30 @@ pub fn accessor_place_mut_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> Opti
     if cx.query.has::<kestrel_ast_builder::Static>(member) {
         return None;
     }
+    member_has_write_provider(cx, expr_id).then_some(base)
+}
+
+/// The failable member (`var first?: T`, `subscript(...)? -> T`) a member
+/// expression resolves to, if any.
+pub fn failable_member(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<kestrel_hecs::Entity> {
+    if !matches!(
+        cx.hir.exprs[expr_id],
+        HirExpr::Field { .. } | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+    ) {
+        return None;
+    }
+    let member = cx.typed.resolutions.get(&expr_id).copied()?;
+    cx.query
+        .has::<kestrel_ast_builder::Failable>(member)
+        .then_some(member)
+}
+
+/// Does the member `expr_id` resolves to (a subscript or computed property)
+/// have a WRITE provider: a `mutating ref` accessor or a setter.
+pub fn member_has_write_provider(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
+        return false;
+    };
     let has_mutating_ref = cx
         .query
         .query(kestrel_hir_lower::PlaceAccessors { entity: member })
@@ -108,7 +132,7 @@ pub fn accessor_place_mut_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> Opti
         .children_of(member)
         .iter()
         .any(|&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::Setter));
-    (has_mutating_ref || has_setter_child).then_some(base)
+    has_mutating_ref || has_setter_child
 }
 
 /// Syntactic pre-check: does this annotation mention a reference type

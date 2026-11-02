@@ -1377,8 +1377,13 @@ impl QueryFn for LowerTypeAnnotation {
         // stage 2b accepts aggregate positions everywhere EXCEPT alias
         // RHS / other annotations, which stay Strict).
         let (pos, policy) = match nk {
+            // A failable member's ref accessor lends `Optional[&T]`.
             Some(
-                NodeKind::Function | NodeKind::Initializer | NodeKind::Subscript | NodeKind::Deinit,
+                NodeKind::Function
+                | NodeKind::Initializer
+                | NodeKind::Subscript
+                | NodeKind::Deinit
+                | NodeKind::RefAccessor,
             ) => (RefPosition::Return, RefPolicy::AllowAggregate),
             Some(NodeKind::Field | NodeKind::EnumCase) => {
                 (RefPosition::Field, RefPolicy::AllowAggregate)
