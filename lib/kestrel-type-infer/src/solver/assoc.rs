@@ -176,26 +176,21 @@ pub(crate) fn solve_associated(
         Some(assoc) => {
             // Build substitution map from the container's type parameters → its
             // concrete type args, so e.g. `Array[i32].Element = T` resolves to
-            // `i32` rather than a bare `Param{T}`. The map is empty for tuple,
-            // function, never, etc. containers.
-            let container_subs: Vec<(Entity, TyVar)> = match &kind {
-                TyKind::Struct { entity, args }
-                | TyKind::Enum { entity, args }
-                | TyKind::Protocol { entity, args }
-                | TyKind::TypeAlias { entity, args } => {
+            // `i32` rather than a bare `Param{T}`. Entity and args come from ONE
+            // answer (`entity_and_args`), so a tuple binds `lang.(,)`'s params to
+            // its elements — the same view member lookup uses.
+            let container_subs: Vec<(Entity, TyVar)> = ctx
+                .resolver
+                .entity_and_args(&kind)
+                .map(|(entity, args)| {
                     let type_params: Vec<Entity> = ctx
                         .query_ctx
-                        .get::<TypeParams>(*entity)
+                        .get::<TypeParams>(entity)
                         .map(|tp| tp.0.clone())
                         .unwrap_or_default();
-                    type_params
-                        .iter()
-                        .zip(args.iter())
-                        .map(|(&p, &tv)| (p, tv))
-                        .collect()
-                },
-                _ => Vec::new(),
-            };
+                    type_params.into_iter().zip(args).collect()
+                })
+                .unwrap_or_default();
 
             // Extension free-param substitution: when the binding came from
             // `extend ConcreteType: Proto[FreeParams]`, the resolved HirTy may

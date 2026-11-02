@@ -763,7 +763,9 @@ impl TypeResolver for WorldResolver<'_> {
         // Less.Output = Bool }`), qualifier-aware. Name lookup alone neither
         // reaches the blanket nor tells `Less.Output` from `Equal.Output`.
         let Some(protocols) = self.abstract_container_bounds(container) else {
-            if let Some(entity) = container.entity()
+            // `entity_and_args`, not `entity()`: a tuple's bindings live on its
+            // synthetic `lang.(,)` entity's extensions.
+            if let Some((entity, _)) = self.entity_and_args(container)
                 && let Some((alias, owner)) =
                     self.ctx.query(kestrel_name_res::AssociatedTypeBinding {
                         type_entity: entity,
