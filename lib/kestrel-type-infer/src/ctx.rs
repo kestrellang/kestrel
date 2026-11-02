@@ -560,10 +560,13 @@ impl<'a> InferCtx<'a> {
         let parent = self.query_ctx.parent_of(member)?;
         let protocol = match self.query_ctx.get::<NodeKind>(parent) {
             Some(NodeKind::Protocol) => parent,
-            Some(NodeKind::Extension) => self.query_ctx.query(kestrel_name_res::ExtensionTargetEntity {
-                extension: parent,
-                root: self.root,
-            })?,
+            Some(NodeKind::Extension) => {
+                self.query_ctx
+                    .query(kestrel_name_res::ExtensionTargetEntity {
+                        extension: parent,
+                        root: self.root,
+                    })?
+            },
             _ => return None,
         };
         (self.query_ctx.get::<NodeKind>(protocol) == Some(&NodeKind::Protocol)).then_some(protocol)

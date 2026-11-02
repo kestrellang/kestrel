@@ -1638,15 +1638,22 @@ fn bind_skipped_default_type_params(
     }
     let (Some(plan), Some(param_tys), Some(type_args)) = (
         crate::solver::call::binding_plan_for(qctx, entity, args),
-        qctx.query(LowerCallableTypes { entity, root: ctx.root }),
+        qctx.query(LowerCallableTypes {
+            entity,
+            root: ctx.root,
+        }),
         ctx.type_args.get(&callee).cloned(),
     ) else {
         return;
     };
-    let type_params: Vec<Entity> =
-        qctx.get::<TypeParams>(entity).map(|tp| tp.0.clone()).unwrap_or_default();
+    let type_params: Vec<Entity> = qctx
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
     let subs: Vec<(Entity, TyVar)> = type_params.into_iter().zip(type_args).collect();
-    for (param_ty, default_ty) in crate::solver::call::skipped_default_types(ctx, entity, &plan, &param_tys) {
+    for (param_ty, default_ty) in
+        crate::solver::call::skipped_default_types(ctx, entity, &plan, &param_tys)
+    {
         let param_tv = lower_hir_ty_with_subs(ctx, &param_ty, &subs);
         let default_tv = lower_hir_ty_with_subs(ctx, &default_ty, &subs);
         ctx.equal(param_tv, default_tv, span.clone());
@@ -1662,7 +1669,13 @@ fn callee_names_type(ctx: &InferCtx<'_>, hir: &HirBody, callee: HirExprId) -> bo
         HirExpr::TypeRef { .. } => true,
         HirExpr::Def(entity, _, _) => matches!(
             ctx.query_ctx.get::<NodeKind>(*entity),
-            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::TypeParameter | NodeKind::TypeAlias)
+            Some(
+                NodeKind::Struct
+                    | NodeKind::Enum
+                    | NodeKind::Protocol
+                    | NodeKind::TypeParameter
+                    | NodeKind::TypeAlias
+            )
         ),
         _ => false,
     }
@@ -1747,14 +1760,28 @@ fn gen_struct_init(
         root,
     });
     let is_default = |m: &kestrel_name_res::TypeMember| {
-        matches!(m.source, kestrel_name_res::TypeMemberSource::ProtocolExtension { .. })
+        matches!(
+            m.source,
+            kestrel_name_res::TypeMemberSource::ProtocolExtension { .. }
+        )
     };
-    let mut inits: Vec<Entity> = members.iter().filter(|m| !is_default(m)).map(|m| m.entity).collect();
+    let mut inits: Vec<Entity> = members
+        .iter()
+        .filter(|m| !is_default(m))
+        .map(|m| m.entity)
+        .collect();
     let matches_call = |init: &Entity| {
-        qctx.get::<Callable>(*init).is_some_and(|c| labels_match(&c.params, &arg_labels))
+        qctx.get::<Callable>(*init)
+            .is_some_and(|c| labels_match(&c.params, &arg_labels))
     };
     if !inits.iter().any(matches_call) {
-        inits.extend(members.iter().filter(|m| is_default(m)).map(|m| m.entity).filter(matches_call));
+        inits.extend(
+            members
+                .iter()
+                .filter(|m| is_default(m))
+                .map(|m| m.entity)
+                .filter(matches_call),
+        );
     }
 
     // A derived `Defaultable` adds `init()`, but deriving must not take the
@@ -2809,7 +2836,10 @@ fn instantiate_entity_inner(
         && let Some(declaring) = ctx.declaring_protocol(entity)
         && declaring != current
         && qctx
-            .query(kestrel_name_res::conformances::ConformingProtocols { entity: current, root })
+            .query(kestrel_name_res::conformances::ConformingProtocols {
+                entity: current,
+                root,
+            })
             .contains(&declaring)
     {
         let self_tv = ctx.self_type_ty(current);

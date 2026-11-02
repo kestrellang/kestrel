@@ -222,8 +222,14 @@ pub(crate) fn skipped_default_types(
                 return None;
             }
             let default = callable.params.get(slot)?.default_entity?;
-            let hir = qctx.query(kestrel_hir_lower::LowerBody { entity: default, root: ctx.root })?;
-            let typed = qctx.query(crate::InferBody { entity: default, root: ctx.root })?;
+            let hir = qctx.query(kestrel_hir_lower::LowerBody {
+                entity: default,
+                root: ctx.root,
+            })?;
+            let typed = qctx.query(crate::InferBody {
+                entity: default,
+                root: ctx.root,
+            })?;
             let ty = typed.expr_types.get(&hir.tail_expr?)?;
             let default_ty = crate::conformance::resolved_ty_to_hir(ty);
             kestrel_debug::ktrace!(
@@ -527,7 +533,9 @@ pub(super) fn emit_resolved_call(
                         ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
                     }
                 }
-                for (param_ty, default_ty) in skipped_default_types(ctx, entity, &plan, &param_hir_tys) {
+                for (param_ty, default_ty) in
+                    skipped_default_types(ctx, entity, &plan, &param_hir_tys)
+                {
                     let param_tv = lower_hir_ty_sub(ctx, &param_ty, None, TyVar(0), &subs);
                     let default_tv = lower_hir_ty_sub(ctx, &default_ty, None, TyVar(0), &subs);
                     ctx.equal(param_tv, default_tv, span.clone());

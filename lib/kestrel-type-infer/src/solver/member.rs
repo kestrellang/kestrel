@@ -1283,8 +1283,11 @@ pub(super) fn solve_member(
             ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
         }
     }
-    let param_hir_tys: Vec<Option<kestrel_hir::HirTy>> =
-        resolution.param_types.iter().map(|p| Some(p.ty.clone())).collect();
+    let param_hir_tys: Vec<Option<kestrel_hir::HirTy>> = resolution
+        .param_types
+        .iter()
+        .map(|p| Some(p.ty.clone()))
+        .collect();
     for (param_ty, default_ty) in
         super::call::skipped_default_types(ctx, resolution.entity, &plan, &param_hir_tys)
     {
@@ -1354,10 +1357,12 @@ pub(super) fn solve_member(
     );
     let ret_tv = match place_accessors.and_then(|info| info.ref_accessor) {
         Some(accessor) if failable => {
-            let accessor_ty = ctx.query_ctx.query(kestrel_hir_lower::LowerCallableReturnType {
-                entity: accessor,
-                root: ctx.root,
-            });
+            let accessor_ty = ctx
+                .query_ctx
+                .query(kestrel_hir_lower::LowerCallableReturnType {
+                    entity: accessor,
+                    root: ctx.root,
+                });
             lower_opaque_aware(
                 ctx,
                 &accessor_ty,
