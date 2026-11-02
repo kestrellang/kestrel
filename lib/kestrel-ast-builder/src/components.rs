@@ -466,9 +466,13 @@ impl FieldClass {
             && matches!(self.owner, FieldOwner::Nominal)
     }
 
-    /// A labeled parameter of the memberwise init: stored instance storage
-    /// the user declared (not a `lazy var`'s cache, which starts empty).
-    pub fn is_memberwise_param(&self) -> bool {
+    /// Stored instance storage the user declared: not a `lazy var`'s hidden
+    /// cache. The roster of memberwise-init parameters, of the fields a
+    /// struct pattern names, and (syntactically,
+    /// `FieldDeclaration::is_declared_instance_storage`) of derived
+    /// conformances. Layout and pattern indices still use
+    /// [`Self::is_stored_instance`].
+    pub fn is_declared_storage(&self) -> bool {
         self.is_stored_instance() && !self.lazy_cache
     }
 

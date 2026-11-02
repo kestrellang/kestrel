@@ -168,8 +168,8 @@ struct Thermostat {
 }
 ```
 
-- The property stays stored. Its memberwise-init parameter, layout and
-  initializers are unchanged.
+- The property stays stored. Its memberwise-init parameter, layout,
+  initializers and `@derive`d conformances are unchanged.
 - `willSet` sees the incoming `newValue`; `didSet` sees `oldValue`, which is
   copied out only when the `didSet` body names it (so a `not Copyable`
   property can be observed as long as `didSet` doesn't ask for it).
@@ -206,7 +206,8 @@ struct Document {
   base (a `var`, not a `let`).
 - Assignment replaces the cached value without running the initializer.
 - The property is not a memberwise-init parameter, and every initializer
-  starts it uncomputed.
+  starts it uncomputed. Its cache is hidden state: `@derive`d conformances
+  and struct patterns ignore it.
 - `lazy` needs an instance `var` of a struct or enum, with a type
   annotation and an `= expr` initializer, and no accessors (E639).
 - Each read returns a copy of the cached value, so the type must be

@@ -61,7 +61,7 @@ pub fn build_field(
     // property: no Computed marker, the storage and initializer stay.
     let accessors = node
         .property_accessors()
-        .filter(|acc| !is_observer_only(&declared_accessors(acc), acc));
+        .filter(|acc| !acc.is_observer_only());
     let observers = node.property_accessors().filter(|_| accessors.is_none());
     let owner = match world.get::<NodeKind>(parent) {
         Some(NodeKind::Struct | NodeKind::Enum) => FieldOwner::Nominal,
@@ -276,16 +276,6 @@ fn build_accessors(
             is_static,
         );
     }
-}
-
-/// An accessor block spelling only `willSet` / `didSet` (no read or write
-/// provider, no `{ expr }` shorthand body).
-fn is_observer_only(declared: &DeclaredAccessors, acc: &ast::PropertyAccessors) -> bool {
-    declared.any_observer()
-        && declared.read_providers() == 0
-        && !declared.set
-        && !declared.mutating_ref
-        && acc.code_block().is_none()
 }
 
 /// An observed stored `var`: spawn the synthesized [`ObserverSetter`] (`newValue` param, mutating receiver) whose

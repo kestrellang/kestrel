@@ -1920,7 +1920,7 @@ fn gen_struct_init(
             .iter()
             .filter(|&&c| {
                 qctx.get::<kestrel_ast_builder::FieldClass>(c)
-                    .is_some_and(kestrel_ast_builder::FieldClass::is_memberwise_param)
+                    .is_some_and(kestrel_ast_builder::FieldClass::is_declared_storage)
             })
             .copied()
             .collect();

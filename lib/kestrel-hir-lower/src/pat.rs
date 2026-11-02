@@ -556,10 +556,10 @@ impl LowerCtx<'_> {
                     .get::<kestrel_ast_builder::Name>(entity)
                     .map(|n| n.0.clone())
                     .unwrap_or_default();
-                // Validate pattern fields against struct's actual fields
-                // Only stored instance fields are bindable: a pattern destructures
-                // storage, and this set must match the layout roster used to
-                // assign sub-pattern indices.
+                // Validate pattern fields against struct's actual fields.
+                // Only declared storage is bindable: a pattern destructures
+                // storage (sub-pattern indices come from the layout roster),
+                // and a `lazy var`'s hidden cache is never named or required.
                 use kestrel_ast_builder::{FieldClass, Name};
                 let struct_field_names: Vec<String> = self
                     .ctx
@@ -568,7 +568,7 @@ impl LowerCtx<'_> {
                     .filter(|&&c| {
                         self.ctx
                             .get::<FieldClass>(c)
-                            .is_some_and(FieldClass::is_stored_instance)
+                            .is_some_and(FieldClass::is_declared_storage)
                     })
                     .filter_map(|&c| self.ctx.get::<Name>(c).map(|n| n.0.clone()))
                     .collect();

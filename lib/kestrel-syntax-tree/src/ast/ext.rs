@@ -187,6 +187,18 @@ impl FieldDeclaration {
         self.lazy_modifier().is_some()
     }
 
+    /// Instance storage the user declared: not `static`, not `lazy` (its
+    /// storage is a hidden cache), and no accessors except observers (an
+    /// observed property stays stored). The syntactic twin of
+    /// `FieldClass::is_declared_storage`, for passes that read source (derive).
+    pub fn is_declared_instance_storage(&self) -> bool {
+        !self.is_static()
+            && !self.is_lazy()
+            && self
+                .property_accessors()
+                .is_none_or(|acc| acc.is_observer_only())
+    }
+
     /// `var name?: T`: a failable place.
     pub fn is_failable(&self) -> bool {
         self.failable_marker().is_some()
@@ -208,6 +220,20 @@ impl PropertyAccessors {
 
     pub fn did_set(&self) -> Option<DidSetClause> {
         support::child(self.syntax())
+    }
+
+    /// Only `willSet` / `didSet` clauses: no read or write provider and no
+    /// `{ expr }` shorthand body.
+    pub fn is_observer_only(&self) -> bool {
+        self.code_block().is_none()
+            && self.get_token().is_none()
+            && self.accessor_clauses().next().is_some()
+            && self.accessor_clauses().all(|c| {
+                matches!(
+                    c,
+                    AccessorClause::WillSetClause(_) | AccessorClause::DidSetClause(_)
+                )
+            })
     }
 
     /// Declares `willSet` and/or `didSet` observers.
