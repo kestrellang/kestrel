@@ -29,6 +29,8 @@ pub fn lower_module(world: &World, root: Entity) -> MirModule {
 
     // Phase 4: validate no MirTy::Error escaped
     let _error_count = validate::validate_no_error_types(&ctx, &ctx.module);
+    // Phase 5: no write skipped a property's observers
+    let _observer_skips = validate::validate_observed_writes(&ctx, &ctx.module);
 
     ctx.finish()
 }

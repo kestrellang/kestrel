@@ -22,7 +22,7 @@ use kestrel_mir::op::Op;
 use kestrel_mir::value::RootProvenance;
 use kestrel_mir::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 
-use super::place::{FieldViews, PlaceRepr};
+use super::place::{Access, FieldViews, PlaceRepr};
 use super::{OssaBodyCtx, expr_span};
 use crate::ty::lower_resolved_ty;
 use kestrel_type_infer::result::IndirectionPeel;
@@ -830,7 +830,7 @@ impl OssaBodyCtx<'_, '_> {
         //   `IntersperseIterator.next` reading `self.separator`).
         // Field-over-View bases resolve None under Forbid and take the
         // extraction fallback below.
-        if let Some(p) = self.lower_place(expr_id, FieldViews::Forbid) {
+        if let Some(p) = self.lower_place(expr_id, FieldViews::Forbid, Access::Read) {
             return match p.repr {
                 PlaceRepr::View(v) => v,
                 PlaceRepr::Addr(_) => self.read_place(&p),
@@ -1204,7 +1204,7 @@ impl OssaBodyCtx<'_, '_> {
                         kestrel_mir::FieldIdx::new(0)
                     });
 
-                if let Some(base_addr) = self.field_addr_chain_for_write(base) {
+                if let Some(base_addr) = self.field_addr_chain(base, Access::Write) {
                     let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
                     let is_init_self = self.body_context.init_self_addr() == Some(base_addr);
                     if is_init_self {
@@ -1216,7 +1216,7 @@ impl OssaBodyCtx<'_, '_> {
                 {
                     // `o.proxy.field = v` through a get/set computed property:
                     // handled by a get→modify→set rewrite (#139).
-                } else if let Some(base_addr) = self.accessor_writeback_place(base) {
+                } else if let Some(base_addr) = self.writeback_place_addr(base) {
                     // `arr(0).i.x = v`: the same rewrite through stored fields.
                     let addr = self.emit_field_addr(base_addr, base_ty, field_idx);
                     self.emit_store_assign(addr, rhs);
@@ -1236,10 +1236,10 @@ impl OssaBodyCtx<'_, '_> {
                 // the RHS was computed then silently dropped (#198, #143).
                 let base_ty = self.resolve_expr_type(base);
                 let field_idx = kestrel_mir::FieldIdx::new(index as usize);
-                if let Some(base_addr) = self.field_addr_chain_for_write(base) {
+                if let Some(base_addr) = self.field_addr_chain(base, Access::Write) {
                     let elem_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
                     self.emit_store_assign(elem_addr, rhs);
-                } else if let Some(base_addr) = self.accessor_writeback_place(base) {
+                } else if let Some(base_addr) = self.writeback_place_addr(base) {
                     // `arr(0).0 = v`: get→modify→set through the accessor.
                     let addr = self.emit_field_addr(base_addr, base_ty, field_idx);
                     self.emit_store_assign(addr, rhs);
@@ -1649,7 +1649,7 @@ impl OssaBodyCtx<'_, '_> {
             let type_args = self.resolve_type_args(target_id);
 
             // Use prepare_call_arg_for_expr to get the var address directly
-            // (via try_var_addr) instead of lower_expr which emits CopyAddr —
+            // (via the place resolver) instead of lower_expr which emits CopyAddr —
             // a shallow copy that breaks COW refcounting.
             let mut call_args =
                 vec![self.prepare_call_arg_for_expr(callee_expr, ParamConvention::MutBorrow)];
@@ -1752,7 +1752,7 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
 
-        // Get the receiver's field address directly via try_var_addr + field_addr,
+        // Get the receiver's field address directly via write_place_addr + field_addr,
         // then MutBorrow the field. Avoids shallow CopyAddr that breaks COW refcounting.
         let subscript_args: Vec<ValueId> = args.iter().map(|a| self.lower_expr(a.value)).collect();
         let rhs = self.lower_expr(value_id);
@@ -1767,9 +1767,11 @@ impl OssaBodyCtx<'_, '_> {
                 value: self.lend_writeback_slot(slot, field_ty),
                 convention: ParamConvention::MutBorrow,
             }
-        } else if let Some(recv_addr) = self.try_var_addr(receiver) {
+        } else if let wb_mark = self.pending_writebacks.len()
+            && let Some(recv_addr) = self.write_place_addr(receiver)
+        {
             let field_addr = self.emit_field_addr(recv_addr, receiver_ty, field_idx);
-            let borrow = self.emit_begin_mut_borrow_addr(field_addr, field_ty);
+            let borrow = self.mut_borrow_write_addr(field_addr, field_ty, wb_mark);
             CallArg {
                 value: borrow,
                 convention: ParamConvention::MutBorrow,

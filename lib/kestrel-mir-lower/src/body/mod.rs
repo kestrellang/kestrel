@@ -3936,7 +3936,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     // ================================================================
     // Var-local address access — the address walk lives in `place.rs`
-    // (`try_field_addr_chain` / `try_var_addr`), the place resolver.
+    // (`field_addr_chain` / `write_place_addr`), the place resolver.
     // ================================================================
 
     /// Inside a closure body: if `expr_id` is a captured *projected* place
@@ -3983,7 +3983,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// @guaranteed views); everything else falls back to the ordinary paths.
     /// Used ONLY at ret_borrow return sites.
     pub fn lower_expr_for_ref_return(&mut self, expr_id: HirExprId) -> ValueId {
-        if let Some(place) = self.lower_place(expr_id, place::FieldViews::Allow) {
+        if let Some(place) =
+            self.lower_place(expr_id, place::FieldViews::Allow, place::Access::Read)
+        {
             return match place.repr {
                 place::PlaceRepr::Addr(addr) => self.emit_begin_borrow_addr(addr, place.pointee),
                 place::PlaceRepr::View(v) => v,
@@ -4004,7 +4006,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // Field exprs deliberately fall to lower_expr: value-context reads
         // keep the Copyable-field snapshot and its clone counts.
         if !matches!(self.hir.exprs[expr_id], HirExpr::Field { .. })
-            && let Some(place) = self.lower_place(expr_id, place::FieldViews::Forbid)
+            && let Some(place) =
+                self.lower_place(expr_id, place::FieldViews::Forbid, place::Access::Read)
         {
             return match place.repr {
                 place::PlaceRepr::Addr(addr) => self.emit_begin_borrow_addr(addr, place.pointee),
@@ -4261,7 +4264,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // borrowing the value in place, never lower_expr's copy_value,
             // which would strand the mutation on a throwaway copy (the
             // Iterator.fold/reduce infinite loop).
-            if let Some(p) = self.lower_place_for_write(expr_id) {
+            if let Some(p) =
+                self.lower_place(expr_id, place::FieldViews::Forbid, place::Access::Write)
+            {
                 return match p.repr {
                     place::PlaceRepr::Addr(addr) => {
                         let borrow = self.emit_begin_mut_borrow_addr(addr, p.pointee);
@@ -4292,10 +4297,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             if matches!(
                 self.hir.exprs[expr_id],
                 HirExpr::Field { .. } | HirExpr::TupleIndex { .. }
-            ) && let Some(addr) = self.accessor_writeback_place(expr_id)
+            ) && let wb_mark = self.pending_writebacks.len()
+                && let Some(addr) = self.writeback_place_addr(expr_id)
             {
                 let pointee = self.resolve_expr_type(expr_id);
-                let borrow = self.emit_begin_mut_borrow_addr(addr, pointee);
+                let borrow = self.mut_borrow_write_addr(addr, pointee, wb_mark);
                 return CallArg {
                     value: borrow,
                     convention,
@@ -4312,7 +4318,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // it never emits the spurious copy_value lower_expr would (a
             // clone() for Cloneable receivers, corrupting @guaranteed
             // aggregates, e.g. `valuePtr().with { v in v.clone() }`).
-            if let Some(p) = self.lower_place(expr_id, place::FieldViews::Forbid) {
+            if let Some(p) =
+                self.lower_place(expr_id, place::FieldViews::Forbid, place::Access::Read)
+            {
                 return match p.repr {
                     place::PlaceRepr::Addr(addr) => {
                         let borrow = self.emit_begin_borrow_addr(addr, p.pointee);
@@ -4748,14 +4756,24 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         true
     }
 
-    /// The address to write through for a place whose root is an accessor
-    /// (`arr(0)`, `o.proxy`) reached through stored fields and tuple elements
-    /// (`arr(0).i.x`, `arr(0).0`): the accessor's value is gotten into a
-    /// writeback slot (its setter runs when pending writebacks drain) and the
-    /// stored projections are field addresses into that slot. `None` when the
-    /// chain does not bottom out on a settable accessor. Without this a
-    /// nested store mutated a temporary copy and was lost.
-    pub(crate) fn accessor_writeback_place(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+    /// THE address a write into place `expr_id` stores through: the plain
+    /// var-rooted chain when nothing on it needs a setter, else a writeback.
+    /// A computed accessor (`arr(0)`, `o.proxy`) or an observed stored field
+    /// (`o.pos` with observers) on the chain is gotten into a writeback slot
+    /// (its setter runs when pending writebacks drain), and the stored
+    /// projections below it are field addresses into that slot. `None` when
+    /// the place is neither (an rvalue, a let-bound value, ...).
+    pub(crate) fn write_place_addr(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        if let Some(addr) = self.field_addr_chain(expr_id, place::Access::Write) {
+            return Some(addr);
+        }
+        self.writeback_place_addr(expr_id)
+    }
+
+    /// [`Self::write_place_addr`] for a place with no plain address: the
+    /// writeback half. Without it a nested store mutated a temporary copy
+    /// and was lost, or skipped an observed field's observers.
+    pub(crate) fn writeback_place_addr(&mut self, expr_id: HirExprId) -> Option<ValueId> {
         if let Some((receiver, index_args, member, _)) = self.accessor_member_prelude(expr_id)
             && self
                 .write_setter(member, Some(receiver.root_expr()))
@@ -4772,13 +4790,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     MirTy::Named { entity, .. } => *entity,
                     _ => return None,
                 };
+                // An observed stored field: its own writeback slot IS the place.
+                let field_ty = self.resolve_expr_type(expr_id);
+                if let Some(slot) = self.observed_field_slot(base, entity, &name, field_ty) {
+                    return Some(slot);
+                }
                 (base, self.ctx.resolve_field_idx(entity, &name)?)
             },
             HirExpr::TupleIndex { base, index, .. } => (*base, FieldIdx::new(*index as usize)),
             _ => return None,
         };
         let base_ty = self.resolve_expr_type(base);
-        let base_addr = self.accessor_writeback_place(base)?;
+        let base_addr = self.write_place_addr(base)?;
         Some(self.emit_field_addr(base_addr, base_ty, idx))
     }
 
@@ -4895,9 +4918,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 }
                 // Field addr through the base's var address (not a shallow
                 // copy) so the writeback's setter mutates the real storage.
-                let recv_addr = self.try_var_addr(*base)?;
+                let wb_mark = self.pending_writebacks.len();
+                let recv_addr = self.write_place_addr(*base)?;
                 let field_addr = self.emit_field_addr(recv_addr, base_ty, field_idx);
-                let borrow = self.emit_begin_mut_borrow_addr(field_addr, field_ty);
+                let borrow = self.mut_borrow_write_addr(field_addr, field_ty, wb_mark);
                 Some((
                     CallArg {
                         value: borrow,
@@ -4951,6 +4975,48 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub(crate) fn lend_writeback_slot(&mut self, slot: ValueId, ty: TyId) -> ValueId {
         let borrow = self.emit_begin_mut_borrow_addr(slot, ty);
         if let Some(wb) = self.pending_writebacks.last_mut() {
+            wb.lent = Some(borrow);
+        }
+        borrow
+    }
+
+    /// If `borrow` mut-borrows a pending writeback's slot (of type
+    /// `slot_ty`), end it and lend field `field` of the slot instead, so a
+    /// call on a field of the slot's value mutates the slot in place rather
+    /// than opening a second writeback of the same place.
+    pub(crate) fn relend_lent_field(
+        &mut self,
+        borrow: ValueId,
+        slot_ty: TyId,
+        field: FieldIdx,
+        field_ty: TyId,
+    ) -> Option<ValueId> {
+        let i = self.pending_writebacks.iter().position(|wb| {
+            wb.lent == Some(borrow) || self.body.value(borrow).borrow_source == Some(wb.slot_addr)
+        })?;
+        let slot = self.pending_writebacks[i].slot_addr;
+        self.emit_end_mut_borrow(borrow);
+        let faddr = self.emit_field_addr(slot, slot_ty, field);
+        let relent = self.emit_begin_mut_borrow_addr(faddr, field_ty);
+        self.pending_writebacks[i].lent = Some(relent);
+        Some(relent)
+    }
+
+    /// Mut-borrow `addr` (from [`Self::write_place_addr`]) to pass to a call.
+    /// When resolving it opened a writeback (pending count grew past
+    /// `wb_mark`), `addr` points into the newest slot, so the borrow is lent
+    /// from it: the drain ends it before storing the slot back.
+    pub(crate) fn mut_borrow_write_addr(
+        &mut self,
+        addr: ValueId,
+        ty: TyId,
+        wb_mark: usize,
+    ) -> ValueId {
+        let borrow = self.emit_begin_mut_borrow_addr(addr, ty);
+        if self.pending_writebacks.len() > wb_mark
+            && let Some(wb) = self.pending_writebacks.last_mut()
+            && wb.lent.is_none()
+        {
             wb.lent = Some(borrow);
         }
         borrow
