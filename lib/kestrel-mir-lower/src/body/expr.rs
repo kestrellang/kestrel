@@ -1204,9 +1204,7 @@ impl OssaBodyCtx<'_, '_> {
                         kestrel_mir::FieldIdx::new(0)
                     });
 
-                if !self.place_crosses_observer(base)
-                    && let Some(base_addr) = self.try_field_addr_chain(base)
-                {
+                if let Some(base_addr) = self.field_addr_chain_for_write(base) {
                     let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
                     let is_init_self = self.body_context.init_self_addr() == Some(base_addr);
                     if is_init_self {
@@ -1238,9 +1236,7 @@ impl OssaBodyCtx<'_, '_> {
                 // the RHS was computed then silently dropped (#198, #143).
                 let base_ty = self.resolve_expr_type(base);
                 let field_idx = kestrel_mir::FieldIdx::new(index as usize);
-                if !self.place_crosses_observer(base)
-                    && let Some(base_addr) = self.try_field_addr_chain(base)
-                {
+                if let Some(base_addr) = self.field_addr_chain_for_write(base) {
                     let elem_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
                     self.emit_store_assign(elem_addr, rhs);
                 } else if let Some(base_addr) = self.accessor_writeback_place(base) {

@@ -4261,9 +4261,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // borrowing the value in place, never lower_expr's copy_value,
             // which would strand the mutation on a throwaway copy (the
             // Iterator.fold/reduce infinite loop).
-            if !self.place_crosses_observer(expr_id)
-                && let Some(p) = self.lower_place(expr_id, place::FieldViews::Forbid)
-            {
+            if let Some(p) = self.lower_place_for_write(expr_id) {
                 return match p.repr {
                     place::PlaceRepr::Addr(addr) => {
                         let borrow = self.emit_begin_mut_borrow_addr(addr, p.pointee);

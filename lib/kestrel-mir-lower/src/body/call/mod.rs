@@ -463,6 +463,23 @@ impl OssaBodyCtx<'_, '_> {
             }
 
             if !call_args.is_empty() {
+                // A mutating receiver (`modifying get`) on an observed field
+                // mutates a writeback slot; the observer setter stores it
+                // back when the call's writebacks drain.
+                if receiver_convention == ParamConvention::MutBorrow
+                    && let Some(slot) =
+                        self.observed_field_slot(receiver_expr, recv_entity, field_name, field_ty)
+                {
+                    let old_receiver = call_args[0].value;
+                    if self.body.value(old_receiver).borrow_source.is_some() {
+                        self.emit_end_borrow(old_receiver);
+                    }
+                    call_args[0] = CallArg {
+                        value: self.lend_writeback_slot(slot, field_ty),
+                        convention: receiver_convention,
+                    };
+                    return (field_ty, call_args);
+                }
                 // Borrow-like receiver (subscript get/set): borrow the field
                 // IN PLACE via its address when the base is addressable
                 // (a var / field chain). `emit_struct_extract` would yield a

@@ -357,6 +357,26 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
+    /// The place a WRITE stores through directly (a `MutBorrow` argument):
+    /// `lower_place` that refuses a path through an observed stored field,
+    /// whose writes must run its observers. Callers fall back to the
+    /// accessor writeback (get, mutate, observer setter).
+    pub(crate) fn lower_place_for_write(&mut self, expr_id: HirExprId) -> Option<Place> {
+        if self.place_crosses_observer(expr_id) {
+            return None;
+        }
+        self.lower_place(expr_id, FieldViews::Forbid)
+    }
+
+    /// The address a WRITE to a field of `base` stores through: the
+    /// [`Self::try_field_addr_chain`] twin of [`Self::lower_place_for_write`].
+    pub(crate) fn field_addr_chain_for_write(&mut self, base: HirExprId) -> Option<ValueId> {
+        if self.place_crosses_observer(base) {
+            return None;
+        }
+        self.try_field_addr_chain(base)
+    }
+
     /// Walk a `Local`/`Field` chain to a var-rooted ADDRESS (the historical
     /// `try_field_addr_chain`, now owned by the place resolver). Stops at
     /// ref slots: a `&T` field's storage is its POINTEE, not the slot — a
