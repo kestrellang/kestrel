@@ -3950,6 +3950,10 @@ fn gen_struct_pat(
         .map(|tp| tp.0.clone())
         .unwrap_or_default();
     let fresh_args: Vec<TyVar> = type_params.iter().map(|_| ctx.fresh()).collect();
+    // Field types name the struct's params; bind them to the scrutinee's
+    // args (as `gen_variant_pat` does for enum payloads), so `Wrap[Page] {
+    // value: p }` types `p` as `Page`, not `T`.
+    let subs: Vec<(Entity, TyVar)> = type_params.iter().copied().zip(fresh_args.iter().copied()).collect();
     let struct_tv = ctx.named(entity, fresh_args);
 
     // Scrutinee must be this struct type
@@ -3975,7 +3979,7 @@ fn gen_struct_pat(
                     entity: child,
                     root,
                 })
-                .map(|hir_ty| lower_hir_ty(ctx, &hir_ty))
+                .map(|hir_ty| lower_hir_ty_with_subs(ctx, &hir_ty, &subs))
             })
             .unwrap_or_else(|| {
                 let tv = ctx.fresh();
