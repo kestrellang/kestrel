@@ -1303,7 +1303,6 @@ pub(super) fn solve_member(
             .iter()
             .map(|p| lower_hir_ty_sub(ctx, &p.ty, self_entity, receiver, &subs))
             .collect();
-        let conventions = vec![kestrel_ast::ParamConvention::Consuming; params.len()];
         let ret = lower_opaque_aware(
             ctx,
             &resolution.return_type,
@@ -1312,7 +1311,9 @@ pub(super) fn solve_member(
             receiver,
             &subs,
         );
-        let fn_tv = ctx.function_conv(kestrel_ast::FnTypeKind::Normal, params, conventions, ret);
+        // A BARE callable, like a named free function: capture-free, so it
+        // adopts whatever kind it's checked against (`escaping` included).
+        let fn_tv = ctx.function(params, ret);
         ctx.equal(result, fn_tv, span);
         return SolveResult::Solved;
     }
