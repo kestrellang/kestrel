@@ -1,14 +1,11 @@
 /// HTTP request wire parsing — reads raw bytes from a socket and
 /// produces a `Request`.
 
-module perch.parse
+module perch
 
 import http.method.(HttpMethod, parseMethod)
 import http.headers.(Headers)
-import http.url.(parseUrl, ParsedUrl, parseQueryString)
 import http.wire.(findHeaderEnd, parseDecimal)
-import http.cookie.(parseCookieHeader)
-import perch.request.(Request)
 import std.io.error.(IoError)
 
 /// Reads and parses an HTTP request from a raw socket file descriptor.
@@ -70,8 +67,6 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Request throws IoError {
     guard let .Some(rawPathSlice) = requestLineParts.next() else { throw invalidInput(); }
     guard let .Some(method) = parseMethod(methodSlice.toOwned()) else { throw invalidInput(); }
 
-    let parsed = parseUrl(rawPathSlice.toOwned());
-
     let headerLines = headerSlice.subslice(from: firstLineEnd.value + 2, to: headerSlice.end).toOwned();
     let headers = Headers.parse(from: headerLines);
 
@@ -102,23 +97,6 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Request throws IoError {
         }
     }
 
-    let parsedQueryParams = parseQueryString(parsed.queryString);
-    let parsedCookies = match headers.value(forName: "Cookie") {
-        .Some(cookieHeader) => parseCookieHeader(cookieHeader),
-        .None => Array[(String, String)]()
-    };
-
-    .Ok(Request(
-        method: method,
-        path: parsed.path,
-        segments: parsed.segments,
-        queryString: parsed.queryString,
-        headers: headers,
-        body: body,
-        pathParams: [:],
-        store: [:],
-        queryParams: parsedQueryParams,
-        cookies: parsedCookies
-    ))
+    .Ok(Request(method, url: rawPathSlice.toOwned(), headers: headers, body: body))
 }
 

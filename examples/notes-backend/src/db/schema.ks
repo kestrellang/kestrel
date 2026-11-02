@@ -15,7 +15,6 @@ public func initSchema(path: String) -> () throws SqliteError {
             first_name TEXT NOT NULL,
             last_name TEXT NOT NULL,
             email TEXT NOT NULL UNIQUE,
-            salt TEXT NOT NULL,
             password_hash TEXT NOT NULL,
             created_at TEXT NOT NULL
         )

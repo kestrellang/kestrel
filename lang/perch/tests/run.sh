@@ -1,7 +1,7 @@
 #!/bin/sh
-# Build and run the perch-2 check programs against the in-repo compiler.
+# Build and run the perch check programs against the in-repo compiler.
 # Each prints one PASS/FAIL line per check; the script fails if any FAILs.
-# Usage: lang/perch-2/tests/run.sh [path/to/kestrel] [test names...]
+# Usage: lang/perch/tests/run.sh [path/to/kestrel] [test names...]
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
 pkg="$here/.."
@@ -11,7 +11,7 @@ kestrel="${1:-$repo/target/release/kestrel}"
 tests="${*:-checks}"
 # A fresh private directory (mode 0700): the script runs the binaries it
 # builds, so it must not reuse a predictable path someone else could plant.
-out="$(mktemp -d "${TMPDIR:-/tmp}/kestrel-perch2-tests.XXXXXX")"
+out="$(mktemp -d "${TMPDIR:-/tmp}/kestrel-perch-tests.XXXXXX")"
 trap 'rm -rf "$out"' EXIT
 
 sources=$(find "$pkg/src" "$pkg/../http/src" "$pkg/../quill/src" "$pkg/../quill-json/src" -name '*.ks')

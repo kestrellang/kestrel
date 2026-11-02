@@ -187,3 +187,13 @@ extend Query[T]: FromRequest where T: Deserialize {
         }
     }
 }
+
+// ============================================================================
+// RAW REQUEST
+// ============================================================================
+
+/// The whole request, for a handler that reads what no extractor covers:
+/// form bodies, cookies, several query parameters.
+extend Request: FromRequest {
+    public static func fromRequest(request: Request) -> Request throws HttpError = request.clone()
+}

@@ -1,4 +1,4 @@
-// perch-2 checks: requests run through `App.respond(to:)` — routing,
+// perch checks: requests run through `App.respond(to:)` — routing,
 // typed middleware, extractors, and response types — with no socket.
 // Prints one PASS/FAIL line per check.
 
@@ -11,6 +11,8 @@ import quill.value.(Value)
 import quill.serialize.(Serialize)
 import quill.deserialize.(Deserialize, extractString, extractInt)
 import quill.error.(SerializeError, DeserializeError)
+import http.content.(Html)
+import perch.(IntoHttpError)
 
 // ---------------------------------------------------------------------------
 // Contexts and middleware
@@ -89,6 +91,18 @@ struct Page: Deserialize {
     }
 }
 
+// A non-HTTP error: `try` converts it through `IntoHttpError`.
+struct StoreError: IntoHttpError {
+    var missing: Bool
+    consuming func intoHttpError() -> HttpError =
+        if self.missing { HttpError.notFound() } else { HttpError.serverError() }
+}
+
+func lookup(id: Int64) -> String throws StoreError {
+    if id == 0 { throw StoreError(missing: true) }
+    .Ok("item \(id)")
+}
+
 // ---------------------------------------------------------------------------
 // Handlers: `(ctx, input) -> R throws HttpError`, as static methods.
 // ---------------------------------------------------------------------------
@@ -118,6 +132,16 @@ struct Handlers {
     }
 
     static func token(ctx: AppCtx, input: ()) -> Json[Token] throws HttpError = Json(Token(token: "abc"))
+
+    static func page(ctx: AppCtx, input: ()) -> Html throws HttpError = Html("<p>hi</p>")
+
+    static func raw(ctx: AppCtx, request: Request) -> String throws HttpError {
+        "\(request.path) \(request.query("a") ?? "-")"
+    }
+
+    static func item(ctx: AppCtx, Path { value: id }: Path[Int64]) -> String throws HttpError {
+        try lookup(id)
+    }
 
     static func remove(ctx: AuthCtx, Path { value: id }: Path[Int64]) -> NoContent throws HttpError {
         if id < 0 { throw HttpError.conflict("negative id") }
@@ -165,6 +189,9 @@ func main() -> Int64 {
     app.on(Get("/"), Handlers.hello);
     app.on(Get("/token"), Handlers.token);
     app.on(Get("/pair/:id/:name"), Handlers.pair);
+    app.on(Get("/page"), Handlers.page);
+    app.on(Get("/raw"), Handlers.raw);
+    app.on(Get("/item/:id"), Handlers.item);
 
     let notes = app.group("/notes").using(Auth());
     notes.on(Get(), Handlers.list);
@@ -180,6 +207,10 @@ func main() -> Int64 {
     check("Path of a tuple", send(app, .Get, "/pair/4/kes", .None, ""), 200, "kes#4");
     check("Path tuple element that doesn't parse is 404", send(app, .Get, "/pair/x/kes", .None, ""), 404,
         "{\"error\":\"Not Found\"}");
+    check("Html response", send(app, .Get, "/page", .None, ""), 200, "<p>hi</p>");
+    check("raw Request input", send(app, .Get, "/raw?a=1", .None, ""), 200, "/raw 1");
+    check("try converts IntoHttpError", send(app, .Get, "/item/3", .None, ""), 200, "item 3");
+    check("IntoHttpError picks the status", send(app, .Get, "/item/0", .None, ""), 404, "{\"error\":\"Not Found\"}");
     check("no route is 404", send(app, .Get, "/nope", .None, ""), 404, "Not Found");
     check("middleware short-circuits", send(app, .Get, "/notes", .None, ""), 401, "Unauthorized");
     check("query extractor + upgraded ctx", send(app, .Get, "/notes?page=3", user, ""), 200, "user 7 page 3");

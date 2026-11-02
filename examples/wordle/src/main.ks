@@ -4,10 +4,7 @@
 
 module wordle.main
 
-import perch.app.(App)
-import perch.request.(Request)
-import perch.response.(Response)
-import perch.middleware.(Logger)
+import perch.(App, Logger, Get, Request, Response, HttpError, IntoResponse)
 import http.content.(Html)
 import wordle.words.(wordList, pickWord, isValidWord)
 import wordle.game.(MAX_GUESSES, WORD_LEN, outcome, Outcome)
@@ -37,45 +34,33 @@ struct Ctx: Cloneable {
 // ROUTE HANDLER
 // ============================================================================
 
-func handleRoot(req: Request, ctx: Ctx) -> Response {
-    let sParam = match req.query("s") {
-        .Some(v) => v,
-        .None => ""
-    };
-    if sParam.bytes.count == 0 {
-        // First visit — pick a default seed and redirect so the URL is shareable.
-        return Response.redirect(to: "/?s=42")
-    };
+struct Handlers {
+    /// The game page. Takes the raw request: the whole game state is four
+    /// query parameters (`s` seed, `g` guesses, `err` code, `w` new guess).
+    /// Answers with a redirect whenever the URL isn't in canonical form.
+    static func index(ctx: Ctx, request: Request) -> Response throws HttpError {
+        let sParam = request.query("s") ?? "";
+        if sParam.bytes.count == 0 {
+            // First visit — pick a default seed and redirect so the URL is shareable.
+            return Response.redirect(to: "/?s=42")
+        };
 
-    let seed = parseSeed(sParam);
-    let answer = pickWord(seed, ctx.words);
-    var guesses = splitGuesses(match req.query("g") {
-        .Some(v) => v,
-        .None => ""
-    });
+        let seed = parseSeed(sParam);
+        let answer = pickWord(seed, ctx.words);
+        let guesses = splitGuesses(request.query("g") ?? "");
+        let errFromUrl = decodeError(request.query("err") ?? "");
 
-    let errFromUrl = match req.query("err") {
-        .Some(v) => decodeError(v),
-        .None => ""
-    };
+        let raw = request.query("w") ?? "";
+        if raw.bytes.count > 0 {
+            let target = match validateAndAppend(raw, guesses, answer, ctx.words) {
+                .Ok(newGuesses) => cleanUrl(seed, newGuesses, ""),
+                .Err(msg) => cleanUrl(seed, guesses, msg)
+            };
+            return Response.redirect(to: target)
+        };
 
-    let raw = match req.query("w") {
-        .Some(v) => v,
-        .None => ""
-    };
-
-    if raw.bytes.count > 0 {
-        match validateAndAppend(raw, guesses, answer, ctx.words) {
-            .Ok(newGuesses) => {
-                return Response.redirect(to: cleanUrl(seed, newGuesses, ""))
-            },
-            .Err(msg) => {
-                return Response.redirect(to: cleanUrl(seed, guesses, msg))
-            }
-        }
-    };
-
-    Response.ok(Html(pageHtml(seed, guesses, answer, errFromUrl)))
+        Html(pageHtml(seed, guesses, answer, errFromUrl)).intoResponse()
+    }
 }
 
 // ============================================================================
@@ -148,20 +133,15 @@ func decodeError(code: String) -> String {
 
 @main
 func main() {
-    let ctx = Ctx(words: wordList());
-    var app = App[Ctx](ctx);
-    app.use(Logger[Ctx]());
-
-    app.route(get: "/", { (req: Request, ctx: Ctx) in
-        handleRoot(req, ctx)
-    });
+    let app = App(Ctx(words: wordList())).using(Logger());
+    app.on(Get("/"), Handlers.index);
 
     let port: UInt16 = 8090;
-     println("Wordle running on http://localhost:8090");
+    println("Wordle running on http://localhost:8090");
     match app.listen(port) {
         .Ok(_) => {},
         .Err(e) => {
-             println("Error: " + e.description());
+            println("Error: " + e.description());
         }
     }
 }

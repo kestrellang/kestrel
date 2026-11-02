@@ -1,7 +1,7 @@
 [package]
 name = "perch"
-version = "0.3.0"
-description = "Web server framework for Kestrel"
+version = "0.5.0"
+description = "Web server framework for Kestrel: typed extractors, typed middleware context, throwing handlers"
 author = "jkpdino"
 license = "MIT"
 repository = "https://github.com/kestrellang/kestrel"

@@ -1,40 +1,44 @@
-/// HTTP response builder with static factories for common status codes.
+/// HTTP response value and `IntoResponse`, the protocol a handler's return
+/// type conforms to.
 
-module perch.response
+module perch
 
 import http.status.(StatusCode)
 import http.headers.(Headers)
 import http.cookie.(Cookie)
-import http.content.(Content)
+import http.content.(Content, Html, Text, Bytes)
 
 /// An HTTP response with status code, headers, and body.
 ///
-/// Use the static factory methods for common responses — `Response.ok(content:)`,
-/// `Response.notFound()`, `Response.redirect(to:)`, etc. For custom status
-/// codes, use `Response.withStatus(code:, content:)`.
+/// Handlers usually return a typed value (`Json[T]`, `Created[R]`,
+/// `NoContent`) and let `IntoResponse` build this. Middleware builds one
+/// directly to short-circuit: `.Respond(Response.unauthorized())`.
 ///
 /// Responses are value types. The `withHeader` and `withCookie` methods
 /// return new copies — the original is unchanged.
-///
-/// # Examples
-///
-/// ```
-/// Response.ok(Text("Hello, world!"))
-/// Response.ok(JsonBody(payload))
-/// Response.created(JsonBody(user))
-///     .withCookie(Cookie("session", "abc123"))
-/// ```
 public struct Response: Cloneable {
     public var status: StatusCode
     public var headers: Headers
     public var bodyContent: String
 
-    /// @name Default
     /// Creates a response with the given status, headers, and body.
     public init(status: StatusCode, headers: Headers, bodyContent: String) {
         self.status = status;
         self.headers = headers;
         self.bodyContent = bodyContent
+    }
+
+    /// Creates a response with `status` and `content` as the body, setting
+    /// `Content-Type` from the content.
+    public init[C](status: StatusCode, content: C) where C: Content {
+        var headers = Headers();
+        if let .Some(contentType) = content.contentType() {
+            headers.setValue("Content-Type", contentType)
+        }
+        let bytes = content.toBytes();
+        self.status = status;
+        self.headers = headers;
+        self.bodyContent = String(fromUtf8: bytes.asSlice()) ?? String()
     }
 
     public func clone() -> Response {
@@ -43,160 +47,113 @@ public struct Response: Cloneable {
 }
 
 // ============================================================================
-// CONTENT-BASED FACTORIES
+// FACTORIES
 // ============================================================================
 
 extend Response {
-    /// Creates a 200 OK response with the given content.
-    public static func ok[C](content: C) -> Response where C: Content {
-        var hdrs = Headers();
-        if let .Some(ct) = content.contentType() {
-            hdrs.setValue("Content-Type", ct)
-        }
-        let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
-        Response(StatusCode.ok(), hdrs, body)
+    /// A response with `status` and a plain-text `message` body.
+    public static func text(status: StatusCode, message: String) -> Response {
+        var headers = Headers();
+        headers.setValue("Content-Type", "text/plain; charset=utf-8");
+        Response(status, headers, message)
     }
 
-    /// Creates a 201 Created response with the given content.
-    public static func created[C](content: C) -> Response where C: Content {
-        var hdrs = Headers();
-        if let .Some(ct) = content.contentType() {
-            hdrs.setValue("Content-Type", ct)
-        }
-        let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
-        Response(StatusCode.created(), hdrs, body)
-    }
+    /// A 401 Unauthorized response.
+    public static func unauthorized() -> Response = Response.text(StatusCode.unauthorized(), "Unauthorized")
 
-    /// Creates a 400 Bad Request response with the given content.
-    public static func badRequest[C](content: C) -> Response where C: Content {
-        var hdrs = Headers();
-        if let .Some(ct) = content.contentType() {
-            hdrs.setValue("Content-Type", ct)
-        }
-        let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
-        Response(StatusCode.badRequest(), hdrs, body)
-    }
+    /// A 403 Forbidden response.
+    public static func forbidden() -> Response = Response.text(StatusCode.forbidden(), "Forbidden")
 
-    /// Creates a 409 Conflict response with the given content.
-    public static func conflict[C](content: C) -> Response where C: Content {
-        var hdrs = Headers();
-        if let .Some(ct) = content.contentType() {
-            hdrs.setValue("Content-Type", ct)
-        }
-        let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
-        Response(StatusCode.conflict(), hdrs, body)
-    }
+    /// A 404 Not Found response.
+    public static func notFound() -> Response = Response.text(StatusCode.notFound(), "Not Found")
 
-    /// Creates a 422 Unprocessable Entity response with the given content.
-    public static func unprocessableEntity[C](content: C) -> Response where C: Content {
-        var hdrs = Headers();
-        if let .Some(ct) = content.contentType() {
-            hdrs.setValue("Content-Type", ct)
-        }
-        let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
-        Response(StatusCode.unprocessableEntity(), hdrs, body)
-    }
+    /// A 400 Bad Request response.
+    public static func badRequest() -> Response = Response.text(StatusCode.badRequest(), "Bad Request")
 
-    /// Creates a response with a custom status code and content.
-    public static func withStatus[C](code: Int64, content: C) -> Response where C: Content {
-        var hdrs = Headers();
-        if let .Some(ct) = content.contentType() {
-            hdrs.setValue("Content-Type", ct)
-        }
-        let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
-        Response(StatusCode(code), hdrs, body)
-    }
-}
+    /// A 500 Internal Server Error response.
+    public static func internalServerError() -> Response =
+        Response.text(StatusCode.internalServerError(), "Internal Server Error")
 
-// ============================================================================
-// NO-BODY FACTORIES
-// ============================================================================
-
-extend Response {
-    /// Creates a 204 No Content response.
-    public static func noContent() -> Response {
-        Response(StatusCode.noContent(), Headers(), String())
-    }
-
-    /// Creates a 401 Unauthorized response.
-    public static func unauthorized() -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/plain; charset=utf-8");
-        Response(StatusCode.unauthorized(), hdrs, "Unauthorized")
-    }
-
-    /// Creates a 403 Forbidden response.
-    public static func forbidden() -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/plain; charset=utf-8");
-        Response(StatusCode.forbidden(), hdrs, "Forbidden")
-    }
-
-    /// Creates a 404 Not Found response.
-    public static func notFound() -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/plain; charset=utf-8");
-        Response(StatusCode.notFound(), hdrs, "Not Found")
-    }
-
-    /// Creates a 405 Method Not Allowed response.
-    public static func methodNotAllowed() -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/plain; charset=utf-8");
-        Response(StatusCode.methodNotAllowed(), hdrs, "Method Not Allowed")
-    }
-
-    /// Creates a 429 Too Many Requests response.
-    public static func tooManyRequests() -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/plain; charset=utf-8");
-        Response(StatusCode.tooManyRequests(), hdrs, "Too Many Requests")
-    }
-
-    /// Creates a 500 Internal Server Error response.
-    public static func internalServerError() -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Content-Type", "text/plain; charset=utf-8");
-        Response(StatusCode.internalServerError(), hdrs, "Internal Server Error")
-    }
-
-    /// Creates a redirect response (302 Found by default).
+    /// A redirect response (302 Found).
     public static func redirect(to url: String) -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Location", url);
-        Response(StatusCode(302), hdrs, String())
+        var headers = Headers();
+        headers.setValue("Location", url);
+        Response(StatusCode(302), headers, String())
     }
 
-    /// Creates a redirect response with a specific status code.
-    public static func redirect(to url: String, code: Int64) -> Response {
-        var hdrs = Headers();
-        hdrs.setValue("Location", url);
-        Response(StatusCode(code), hdrs, String())
-    }
-}
-
-// ============================================================================
-// COOKIE & HEADER SUPPORT
-// ============================================================================
-
-extend Response {
     /// Returns a new response with a `Set-Cookie` header appended.
     public func withCookie(cookie: Cookie) -> Response {
-        var hdrs = self.headers;
-        hdrs.add("Set-Cookie", cookie.toHeaderValue());
-        Response(self.status, hdrs, self.bodyContent)
+        var headers = self.headers.clone();
+        headers.add("Set-Cookie", cookie.toHeaderValue());
+        Response(self.status.clone(), headers, self.bodyContent.clone())
     }
 
     /// Returns a new response with an additional header appended.
     public func withHeader(name: String, value: String) -> Response {
-        var hdrs = self.headers;
-        hdrs.add(name, value);
-        Response(self.status, hdrs, self.bodyContent)
+        var headers = self.headers.clone();
+        headers.add(name, value);
+        Response(self.status.clone(), headers, self.bodyContent.clone())
     }
+}
+
+// ============================================================================
+// INTO RESPONSE
+// ============================================================================
+
+/// A value a handler can return. The status code is part of the type:
+/// `Json[T]` is 200, `Created[R]` is 201, `NoContent` is 204.
+public protocol IntoResponse {
+    consuming func intoResponse() -> Response
+}
+
+extend Response: IntoResponse {
+    public consuming func intoResponse() -> Response = self
+}
+
+/// A plain-text 200 response.
+extend String: IntoResponse {
+    public consuming func intoResponse() -> Response = Response.text(StatusCode.ok(), self)
+}
+
+/// A 201 Created response wrapping another response type's body.
+///
+/// ```
+/// Created(Json(note))
+/// ```
+public struct Created[R] where R: IntoResponse {
+    public var value: R
+
+    public init(value: R) {
+        self.value = value
+    }
+}
+
+extend Created[R]: IntoResponse where R: IntoResponse {
+    public consuming func intoResponse() -> Response {
+        var response = self.value.intoResponse();
+        response.status = StatusCode.created();
+        response
+    }
+}
+
+/// A 204 No Content response.
+public struct NoContent: IntoResponse {
+    public init() {}
+
+    public consuming func intoResponse() -> Response =
+        Response(StatusCode.noContent(), Headers(), String())
+}
+
+/// `Html`, `Text`, and `Bytes` bodies from `http.content` are 200 responses
+/// with their own `Content-Type`.
+extend Html: IntoResponse {
+    public consuming func intoResponse() -> Response = Response(StatusCode.ok(), self)
+}
+
+extend Text: IntoResponse {
+    public consuming func intoResponse() -> Response = Response(StatusCode.ok(), self)
+}
+
+extend Bytes: IntoResponse {
+    public consuming func intoResponse() -> Response = Response(StatusCode.ok(), self)
 }

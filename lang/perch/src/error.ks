@@ -76,9 +76,36 @@ public struct ServerError: Cloneable {
     public func clone() -> ServerError = ServerError(self.message.clone())
 }
 
+/// Printable, so `@main func main() -> () throws ServerError` can report it.
+extend ServerError: Formattable {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        writer.append(self.message);
+    }
+}
+
 /// `try` on an `IoError` inside a `throws ServerError` function.
 extend Result[T, ServerError]: FromResidual[IoError] {
     public static func fromResidual(consuming residual: IoError) -> Result[T, ServerError] {
         .Err(ServerError(residual.description()))
+    }
+}
+
+/// An error a handler can propagate with `try`: conform it and `try` in a
+/// `throws HttpError` handler converts it, so a library's error type
+/// (`SqliteError`, an app's own enum) maps to the status it means.
+///
+/// ```
+/// extend SqliteError: IntoHttpError {
+///     public consuming func intoHttpError() -> HttpError = HttpError.serverError()
+/// }
+/// ```
+public protocol IntoHttpError {
+    consuming func intoHttpError() -> HttpError
+}
+
+/// `try` on an `IntoHttpError` error inside a `throws HttpError` handler.
+extend Result[T, HttpError]: FromResidual[E] where E: IntoHttpError {
+    public static func fromResidual(consuming residual: E) -> Result[T, HttpError] {
+        .Err(residual.intoHttpError())
     }
 }

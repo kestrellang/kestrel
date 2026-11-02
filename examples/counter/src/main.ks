@@ -8,10 +8,11 @@
 
 module counter.main
 
-import perch.app.(App)
-import perch.request.(Request)
-import perch.response.(Response)
+import perch.(App, Logger, Get, Post, HttpError, Query)
 import http.content.(Html)
+import quill.value.(Value)
+import quill.deserialize.(Deserialize)
+import quill.error.(DeserializeError)
 import plume.(Template)
 
 struct Ctx: Cloneable {
@@ -52,47 +53,41 @@ func counterHtml(count: Int64) -> String {
         + "</div>")
 }
 
-/// Gets the "n" query param as Int64.
-func getN(request: Request) -> Int64 {
-    match request.query("n") {
-        .Some(val) => {
-            match Int64(parsing: val) {
-                .Some(n) => n,
-                .None => 0
-            }
-        },
-        .None => 0
+/// The `?n=` query parameter: the count the client currently shows.
+/// Missing or unparsable is 0.
+struct Count: Deserialize {
+    var n: Int64
+
+    static func fromValue(value: Value) -> Count throws DeserializeError {
+        guard let some .Str(raw) = value.value(for: "n") else { return Count(n: 0) }
+        Count(n: Int64(parsing: raw) ?? 0)
     }
+}
+
+struct Handlers {
+    static func index(ctx: Ctx, input: ()) -> Html throws HttpError = Html(pageHtml(0))
+
+    static func increment(ctx: Ctx, Query { value: count }: Query[Count]) -> Html throws HttpError =
+        Html(counterHtml(count.n + 1))
+
+    static func decrement(ctx: Ctx, Query { value: count }: Query[Count]) -> Html throws HttpError =
+        Html(counterHtml(count.n - 1))
+
+    static func reset(ctx: Ctx, input: ()) -> Html throws HttpError = Html(counterHtml(0))
 }
 
 @main
 func main() {
-    var app = App[Ctx](Ctx(x: 0));
-
-    app.route(get: "/", { (req: Request, ctx: Ctx) in
-        Response.ok(Html(pageHtml(0)))
-    });
-
-    app.route(post: "/inc", { (req: Request, ctx: Ctx) in
-        let count = getN(req) + 1;
-        Response.ok(Html(counterHtml(count)))
-    });
-
-    app.route(post: "/dec", { (req: Request, ctx: Ctx) in
-        let count = getN(req) - 1;
-        Response.ok(Html(counterHtml(count)))
-    });
-
-    app.route(post: "/reset", { (req: Request, ctx: Ctx) in
-        Response.ok(Html(counterHtml(0)))
-    });
+    let app = App(Ctx(x: 0)).using(Logger());
+    app.on(Get("/"), Handlers.index);
+    app.on(Post("/inc"), Handlers.increment);
+    app.on(Post("/dec"), Handlers.decrement);
+    app.on(Post("/reset"), Handlers.reset);
 
     let port: UInt16 = 8080;
     println("Starting counter on http://localhost:8080");
     match app.listen(port) {
         .Ok(_) => {},
-        .Err(e) => {
-             println("Error: " + e.description());
-        }
+        .Err(e) => { println("Error: " + e.description()); }
     }
 }

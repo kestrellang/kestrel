@@ -137,7 +137,9 @@ public func noteEditorView(note: Value?, folderId: Int64) -> Document {
         .Some(n) => getStr(n, "body"),
         .None => ""
     };
-    let formAction = if isNew { "/fragments/notes" } else { "/fragments/note/\(nid)" };
+    // Annotated: without it the if/else fails to unify a plain literal
+    // branch with an interpolated one (E109, a compiler bug).
+    let formAction: String = if isNew { "/fragments/notes" } else { "/fragments/note/\(nid)" };
     let submitLabel = if isNew { "Create Note" } else { "Save Changes" };
     let submitIcon = if isNew { "plus" } else { "check" };
 

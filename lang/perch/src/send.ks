@@ -1,8 +1,7 @@
 /// HTTP response wire serialization.
 
-module perch.send
+module perch
 
-import perch.response.(Response)
 import std.io.error.(IoError)
 
 /// Serializes and sends an HTTP response over a socket file descriptor.
@@ -22,7 +21,7 @@ import std.io.error.(IoError)
 /// let response = Response.ok(Text("hello"));
 ///  sendResponse(response, to: socketFd);
 /// ```
-public func sendResponse(response: Response, to fileDescriptor: Int32) -> () throws IoError {
+func sendResponse(response: Response, to fileDescriptor: Int32) -> () throws IoError {
     var resp = String(capacity: 256 + response.bodyContent.bytes.count);
 
     resp.append("HTTP/1.1 \(response.status.code) \(response.status.text())\r\n");
