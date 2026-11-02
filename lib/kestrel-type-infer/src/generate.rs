@@ -814,6 +814,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             span,
         } => {
             ctx.scrutinee_exprs.insert(*scrutinee);
+            if hir.arms_borrow_mode(arms) == Some(true) {
+                ctx.mutating_scrutinee_exprs.insert(*scrutinee);
+            }
             let scrut_tv = gen_expr(ctx, hir, *scrutinee);
             // Stage-1 transparent place: a scrutinee is a VALUE context, so a
             // ref-returning call used as a scrutinee must bind its result var

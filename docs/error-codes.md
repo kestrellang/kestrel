@@ -511,7 +511,7 @@ members and `lazy` properties.
 | E621 | \`ref\` and \`modifying\` accessors are not allowed in protocols or protocol extensions | Declare them on concrete types only. |
 | E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a read provider; add one. |
 | E636 | \`modifying\` accessors need an instance receiver | A static member or global has no `self` to modify; use a plain `get` / `ref`. |
-| E637 | a failable member needs a read accessor · a failable place cannot have a \`set\` accessor · a failable place cannot have a \`mutating ref\` accessor yet | A failable member (`var x?: T`, `subscript(...)? -> T`) reads as `Optional` and can't be written. |
+| E637 | a failable member needs a read accessor · a failable place cannot have a \`set\` accessor | A failable member (`var x?: T`, `subscript(...)? -> T`) reads as `Optional` and can't be assigned. Write through it with a `mutating ref` (`Optional[&mutating T]`) and a `&mutating` payload binder. |
 | E638 | (varies) | `willSet` / `didSet` on anything but an instance stored `var` of a struct or enum: a `let`, static or global property, a subscript, a failable member, a protocol member, or mixed with `get`/`set`/`ref`. |
 | E639 | (varies) | `lazy` on anything but an instance `var` of a struct or enum with a type annotation and an `= expr` initializer and no accessors. |
 

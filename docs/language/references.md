@@ -238,7 +238,7 @@ That's the entire model. There are no lifetime parameters, no `'a`, no borrow an
 | E505 | Module-level/static value of a non-storable (reference-carrying) type |
 | E619–E622 | Malformed `ref` accessor combinations (duplicate read/write provider, ref accessor in a protocol, write-only member) |
 | E636 | `modifying` accessor on a static member or global (no `self` to modify) |
-| E637 | Malformed failable member (no read accessor, or a `set` / `mutating ref`) |
+| E637 | Malformed failable member (no read accessor, or a `set`) |
 
 ## See Also
 

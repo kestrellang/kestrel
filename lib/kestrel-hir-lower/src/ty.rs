@@ -1480,6 +1480,20 @@ pub struct PlaceAccessorInfo {
     pub mutating_ref_accessor: Option<Entity>,
 }
 
+impl PlaceAccessorInfo {
+    /// The accessor a FAILABLE member's read calls. A read that a
+    /// `&mutating` payload binder writes through (`if let .Some(&mutating
+    /// v) = b.first`) takes the `mutating ref` (`Optional[&mutating T]`);
+    /// every other read takes `ref`. A missing `mutating ref` falls back to
+    /// `ref`, and analyze rejects the binder (E210).
+    pub fn failable_read_accessor(&self, mutating: bool) -> Option<Entity> {
+        match (mutating, self.mutating_ref_accessor) {
+            (true, Some(accessor)) => Some(accessor),
+            _ => self.ref_accessor,
+        }
+    }
+}
+
 /// Query: the place-accessor children of a Subscript/Field member.
 ///
 /// THE single discovery source for provider routing — type inference (read

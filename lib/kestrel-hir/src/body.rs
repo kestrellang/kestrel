@@ -686,6 +686,77 @@ pub struct HirDictEntry {
     pub value: HirExprId,
 }
 
+/// A place where a pattern borrows from its scrutinee instead of copying
+/// or moving out of it.
+#[derive(Clone, Copy, Debug)]
+pub struct PatBorrow<'a> {
+    /// `&mutating name`: the borrow needs a mutable scrutinee place.
+    pub mutating: bool,
+    pub span: &'a Span,
+    /// A type test (`c is T`) reads its payload in place; every other
+    /// borrow is a written `&` / `&mutating` binder.
+    pub type_test: bool,
+}
+
+/// Every borrow in `pat`, in source order. The single walk behind "does
+/// this pattern borrow?" questions: place-mode match lowering, E210, E499,
+/// and which accessor a failable scrutinee reads through.
+pub fn pat_borrows(pats: &Arena<HirPat>, pat: HirPatId) -> Vec<PatBorrow<'_>> {
+    let mut out = Vec::new();
+    collect_pat_borrows(pats, pat, &mut out);
+    out
+}
+
+fn collect_pat_borrows<'a>(pats: &'a Arena<HirPat>, pat: HirPatId, out: &mut Vec<PatBorrow<'a>>) {
+    let children: Vec<HirPatId> = match &pats[pat] {
+        HirPat::Binding {
+            by_ref: Some(mutating),
+            span,
+            ..
+        } => {
+            out.push(PatBorrow {
+                mutating: *mutating,
+                span,
+                type_test: false,
+            });
+            Vec::new()
+        },
+        HirPat::At { subpattern, .. } => vec![*subpattern],
+        HirPat::TypeTest { sub, span, .. } => {
+            out.push(PatBorrow {
+                mutating: false,
+                span,
+                type_test: true,
+            });
+            vec![*sub]
+        },
+        HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => {
+            prefix.iter().chain(suffix).copied().collect()
+        },
+        HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
+            args.iter().map(|a| a.pattern).collect()
+        },
+        HirPat::Struct { fields, .. } => fields.iter().filter_map(|f| f.pattern).collect(),
+        HirPat::Or { alternatives, .. } => alternatives.clone(),
+        _ => Vec::new(),
+    };
+    for child in children {
+        collect_pat_borrows(pats, child, out);
+    }
+}
+
+impl HirBody {
+    /// How a match with these arms holds its scrutinee: `None` when no arm
+    /// borrows from it (value mode), `Some(mutating)` when one does (place
+    /// mode), mutable iff any borrow is `&mutating`.
+    pub fn arms_borrow_mode(&self, arms: &[HirMatchArm]) -> Option<bool> {
+        arms.iter()
+            .flat_map(|arm| pat_borrows(&self.pats, arm.pattern))
+            .map(|b| b.mutating)
+            .max()
+    }
+}
+
 /// A single arm in a match expression.
 #[derive(Clone, Debug, Hash)]
 pub struct HirMatchArm {

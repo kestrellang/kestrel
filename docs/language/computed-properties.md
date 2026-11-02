@@ -125,11 +125,30 @@ if let .Some(t) = stack.top { ... }
 
 Reads produce `Optional[T]`: a `get` body returns `T?`, and a `ref` body
 lends `Optional[&T]`. Subscripts use the same marker after their parameter
-list: `subscript(checked index: Int64)? -> T`. A failable place is
-read-only, so assigning to one is E214. A failable member needs a read
-accessor and can't declare `set` (E637). `mutating ref` on a failable member
-is rejected for now (E637) until `&mutating` patterns can unwrap
-`Optional[&mutating T]`. Throwing accessors are not supported yet.
+list: `subscript(checked index: Int64)? -> T`. Assigning to a failable
+place is E214, since it may not exist. A failable member needs a read
+accessor and can't declare `set` (E637).
+
+To write through a failable place, declare a `mutating ref` that lends
+`Optional[&mutating T]`, and unwrap it with a `&mutating` payload binder:
+
+```kestrel
+var first?: T {
+    ref { ... }                    // lends Optional[&T] for reads
+    mutating ref {                 // lends Optional[&mutating T]
+        if self.items.isEmpty { return null; }
+        let r = &mutating self.items(at: 0);
+        .Some(r)
+    }
+}
+
+if let .Some(&mutating v) = stack.first { v += 1; }
+```
+
+A match whose arms have a `&mutating` binder reads the failable member
+through its `mutating ref`, so the receiver must be mutable; every other
+read goes through `get` or `ref`. Without a `mutating ref`, a `&mutating`
+binder is E210. Throwing accessors are not supported yet.
 
 ### Property Observers
 

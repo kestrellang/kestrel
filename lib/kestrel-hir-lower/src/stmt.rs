@@ -257,7 +257,11 @@ impl LowerCtx<'_> {
         let hir_pat = self.lower_pat_forcing_mut(&pat, is_mut);
         // `&` binders would borrow `$let_tmp`, which dies with the wrapper
         // block below: the same borrow-of-a-temporary as `let r = &f();`.
-        if let Some(binder) = self.first_ref_binder(hir_pat) {
+        let first_binder = kestrel_hir::body::pat_borrows(&self.pats, hir_pat)
+            .into_iter()
+            .find(|b| !b.type_test)
+            .map(|b| b.span.clone());
+        if let Some(binder) = first_binder {
             self.ctx.accumulate(
                 kestrel_reporting::Diagnostic::error()
                     .with_code("E499")
@@ -309,32 +313,6 @@ impl LowerCtx<'_> {
     }
 
     /// A local, or a stored-field / tuple-element chain rooted at one.
-    /// The span of the first `&` / `&mutating` binder in a lowered pattern.
-    pub(crate) fn first_ref_binder(&self, pat: kestrel_hir::body::HirPatId) -> Option<Span> {
-        use kestrel_hir::body::HirPat;
-        let sub = |ids: Vec<kestrel_hir::body::HirPatId>| {
-            ids.into_iter().find_map(|p| self.first_ref_binder(p))
-        };
-        match &self.pats[pat] {
-            HirPat::Binding {
-                by_ref: Some(_),
-                span,
-                ..
-            } => Some(span.clone()),
-            HirPat::At { subpattern, .. } => self.first_ref_binder(*subpattern),
-            HirPat::TypeTest { sub: inner, .. } => self.first_ref_binder(*inner),
-            HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => {
-                sub(prefix.iter().chain(suffix).copied().collect())
-            },
-            HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
-                sub(args.iter().map(|a| a.pattern).collect())
-            },
-            HirPat::Struct { fields, .. } => sub(fields.iter().filter_map(|f| f.pattern).collect()),
-            HirPat::Or { alternatives, .. } => sub(alternatives.clone()),
-            _ => None,
-        }
-    }
-
     pub(crate) fn is_place_expr(&self, expr: HirExprId) -> bool {
         match &self.exprs[expr] {
             HirExpr::Local(..) => true,

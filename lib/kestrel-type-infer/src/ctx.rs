@@ -119,6 +119,10 @@ pub struct InferCtx<'a> {
     /// never see a ref. Patterns stay wired directly to the scrutinee var.
     pub(crate) scrutinee_exprs: HashSet<HirExprId>,
 
+    /// The scrutinees whose arms write through a `&mutating` binder: a
+    /// failable member read there goes through its `mutating ref`.
+    pub(crate) mutating_scrutinee_exprs: HashSet<HirExprId>,
+
     /// HirExprIds that are a `Call`'s direct callee. A direct callee Def
     /// legitimately carries `TyKind::Function { ret: Ref }` — exempted from
     /// the E491 function-as-value check in `validate_ref_placement`.
@@ -459,6 +463,7 @@ impl<'a> InferCtx<'a> {
             error_is_cascade: Vec::new(),
             errored_coerce_exprs: HashSet::default(),
             scrutinee_exprs: HashSet::default(),
+            mutating_scrutinee_exprs: HashSet::default(),
             assign_target_exprs: HashSet::default(),
             always_decay_exprs: HashSet::default(),
             direct_callee_exprs: HashSet::default(),

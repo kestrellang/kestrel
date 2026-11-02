@@ -170,9 +170,7 @@ impl BodyCheck for AccessModeAnalyzer {
                     // `&mutating v` patterns need a MUTABLE scrutinee place
                     // (E495's predicate family) — writes through the binding
                     // must land in real storage, not a match-scoped temp.
-                    if arms
-                        .iter()
-                        .any(|arm| pat_has_mutating_ref_binder(cx, arm.pattern))
+                    if cx.hir.arms_borrow_mode(arms) == Some(true)
                         && !matches!(classify_mutability(cx, *scrutinee), MutClass::Mutable)
                     {
                         diags.push(AnalyzeDiagnostic {
@@ -659,30 +657,6 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
         HirExpr::TupleIndex { base, .. } => classify_mutability(cx, *base),
         // Everything else is a temporary (call results, literals, if-exprs, etc.)
         _ => MutClass::Temporary,
-    }
-}
-
-/// Does this pattern (recursively) contain a `&mutating name` binder?
-fn pat_has_mutating_ref_binder(cx: &BodyContext<'_>, pat: kestrel_hir::body::HirPatId) -> bool {
-    use kestrel_hir::body::HirPat;
-    match &cx.hir.pats[pat] {
-        HirPat::Binding { by_ref, .. } => *by_ref == Some(true),
-        HirPat::At { subpattern, .. } => pat_has_mutating_ref_binder(cx, *subpattern),
-        HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => prefix
-            .iter()
-            .chain(suffix)
-            .any(|&p| pat_has_mutating_ref_binder(cx, p)),
-        HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => args
-            .iter()
-            .any(|a| pat_has_mutating_ref_binder(cx, a.pattern)),
-        HirPat::Struct { fields, .. } => fields.iter().any(|f| {
-            f.pattern
-                .is_some_and(|p| pat_has_mutating_ref_binder(cx, p))
-        }),
-        HirPat::Or { alternatives, .. } => alternatives
-            .iter()
-            .any(|&p| pat_has_mutating_ref_binder(cx, p)),
-        _ => false,
     }
 }
 

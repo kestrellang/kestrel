@@ -20,14 +20,6 @@ struct WithSet {
     }
 }
 
-struct WithMutatingRef {
-    var items: Array[Int64]
-    subscript(checked i: Int64)? -> Int64 { // ERROR(E637): a failable place cannot have a `mutating ref` accessor yet
-        get { null }
-        mutating ref { null }
-    }
-}
-
 struct Stack {
     var items: Array[Int64]
     var top?: Int64 {

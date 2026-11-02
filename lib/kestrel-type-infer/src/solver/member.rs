@@ -1355,7 +1355,14 @@ pub(super) fn solve_member(
         resolution.kind,
         crate::resolve::MemberKind::Subscript | crate::resolve::MemberKind::ComputedProperty { .. }
     );
-    let ret_tv = match place_accessors.and_then(|info| info.ref_accessor) {
+    // A failable read that a `&mutating` binder writes through lends
+    // `Optional[&mutating T]` from the `mutating ref` instead.
+    let mutating_read = ctx.mutating_scrutinee_exprs.contains(&expr);
+    let read_accessor = place_accessors.and_then(|info| match failable {
+        true => info.failable_read_accessor(mutating_read),
+        false => info.ref_accessor,
+    });
+    let ret_tv = match read_accessor {
         Some(accessor) if failable => {
             let accessor_ty = ctx
                 .query_ctx

@@ -202,7 +202,9 @@ impl DeclCheck for PlaceAccessorAnalyzer {
             });
         }
 
-        // E637: a failable member is a computed, read-only place.
+        // E637: a failable member is a computed place with no `set`. Writes
+        // go through a `mutating ref` (`Optional[&mutating T]`), reached by
+        // a `&mutating` payload binder.
         if cx.query.has::<Failable>(cx.entity) {
             let problem = if declared.read_providers() == 0 && !has_getter && !has_ref {
                 Some((
@@ -213,12 +215,6 @@ impl DeclCheck for PlaceAccessorAnalyzer {
                 Some((
                     "a failable place cannot have a `set` accessor",
                     "assignment to a place that may not exist is rejected (E214)",
-                ))
-            } else if declared.mutating_ref || has_mutating_ref {
-                Some((
-                    "a failable place cannot have a `mutating ref` accessor yet",
-                    "lending `Optional[&mutating T]` needs `&mutating` patterns in `if let`; \
-                     use a `mutating` method returning `Optional[&mutating T]` for now",
                 ))
             } else {
                 None

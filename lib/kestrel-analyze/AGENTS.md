@@ -341,9 +341,9 @@ Current allocations:
   shared-ref receiver would otherwise silently pass.
 - E209: `ref_binding_requires_let` — hir-lower codespan code (stmt.rs): a `&`/`&mutating` initializer on `var` or a destructuring pattern (named ref bindings are simple `let`s only; recovery drops the `&`)
 - E210: `mutable_borrow_of_immutable` (body/access_mode.rs `check_borrow_init`) — `&mutating expr` of a non-mutable place: let local/field, shared-`&` reach, or a get/set-only member (no `mutating ref` accessor to lend a place)
-- E211: `ref_pattern_position` — hir-lower codespan code (pat.rs): `&`/`&mutating` binder pattern outside its supported position (match-arm support = stage 1.5 item 2 place-mode lowering)
+- E211: *retired* — `&` binders are allowed in every pattern position
 - E212: **RETIRED** (closure kinds, Phase F / plan lockstep 6). Was `non_static_capture` (body/closure.rs): a closure could not capture a ref binding or any other non-`Static` value. docs/design/closures.md's Diagnostics table retires it — a VIEW-kind (`normal`/`mutating`) environment holds addresses into the frame that built it and can never escape it (E494), so those captures are sound; mir-lower's view tier captures a ref binding's TARGET address (`view_addr_of_local`). The rejection survives for the OWNING tier only, under E624 (`owning_capture_rejected`). **Do not reuse E212** — it stays retired so old diagnostics/docs keep resolving.
-- E499: `borrow_of_temporary` (body/access_mode.rs `check_borrow_init`) — `let r = &<rvalue>`; a borrow names an existing place
+- E499: `borrow_of_temporary` (body/access_mode.rs `check_borrow_init`) — `let r = &<rvalue>`; a borrow names an existing place. Also emitted by hir-lower (stmt.rs) for a `let` destructure of a temporary with `&` binders
 - E497 has a SECOND wording (mir-lower `emit_binding_across_merge_error`): a named ref binding still used after an inside-fn terminator that did NOT forward it. Since 2026-06-11 ("1.75") bindings thread through all control flow as @guaranteed block args, so this is a defensive FALLBACK for jumps emitted outside the LiveTracker pattern — no user-reachable shape is known to trigger it
 - E208: `assign_through_shared_ref` (body/assignment.rs) — plain assignment
   through a `&T`-returning call/getter (`arr.at(index: i) = v`,
