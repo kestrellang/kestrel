@@ -171,6 +171,18 @@ TRACE_RE = re.compile(r'ktrace!\s*\(\s*"([\w-]+)"')
 CHECK_RE = re.compile(r'\bimpl\s+(BodyCheck|DeclCheck|CompilationCheck)\s+for\s+([A-Z]\w*)')
 DESC_RE = re.compile(r'id:\s*"([A-Z]\d+)",\s*name:\s*"([\w]+)",\s*default_severity:\s*Severity::(\w+),\s*category:\s*Category::(\w+)')
 ANALYZER_ID_RE = re.compile(r'AnalyzerId::(\w+)')
+# Display names for each crate's non-query code in the graph.
+ACTOR_LABELS = {
+    'kestrel-mir-lower': 'MIR lowering', 'kestrel-lsp': 'LSP handlers', 'kestrel-type-infer': 'Inference internals',
+    'kestrel-analyze': 'Analyzer framework', 'kestrel-compiler': 'Compiler pipeline', 'kestrel-compiler-driver': 'Driver',
+    'kestrel-pattern-matching': 'Exhaustiveness checking', 'kestrel-doc': 'Doc generator',
+}
+
+
+def short_name(crate):
+    return crate.replace('kestrel-', '')
+
+
 AMBIGUOUS_FNS = {'new', 'execute', 'describe', 'default', 'from', 'into', 'clone', 'fmt', 'eq', 'hash', 'drop'}
 KEYWORDS = {'if', 'while', 'for', 'match', 'loop', 'return', 'fn', 'let', 'move', 'in', 'as', 'some', 'ok', 'err', 'none', 'self', 'super', 'crate', 'where', 'impl', 'mut', 'ref'}
 
@@ -272,6 +284,7 @@ def main():
 
     # ---- queries
     fn_index = defaultdict(list)  # (crate, fn name) -> fns
+    fn_crate = {f['path']: f['crate'] for f in files}
     for f in files:
         for fn in f['fns']:
             if not fn['test']:
@@ -296,7 +309,7 @@ def main():
         defs = fn_index.get((crate, name), [])
         return defs if 0 < len(defs) <= 2 and name not in AMBIGUOUS_FNS else []
 
-    def reachable_qcalls(crate, seeds, depth=4):
+    def reachable_qcalls(crate, seeds, depth=64):
         """Query calls reachable from a set of fns through same-crate helpers."""
         seen, out, frontier = set(), [], list(seeds)
         for _ in range(depth):
@@ -381,6 +394,48 @@ def main():
             })
     analyzers.sort(key=lambda a: (a['kind'], a['name']))
 
+    # ---- actors: code that calls queries without being one
+    # A plain fn counts as "inside" a query when some query's execute can
+    # reach it through same-crate helpers; those calls are already query
+    # edges. Everything else is grouped into an actor: one per analyzer, and
+    # one per crate for the rest (MIR lowering, LSP handlers, solver, ...).
+    reachable = set()
+    for f in files:
+        for im in f['impls']:
+            frontier = [fn for fn in f['fns'] if im['start'] <= fn['start'] < im['end']]
+            frontier += [h for fn in frontier for c in fn['calls'] for h in helper_defs(f['crate'], c)]
+            while frontier:
+                fn = frontier.pop()
+                key = (fn['file'], fn['start'])
+                if key in reachable:
+                    continue
+                reachable.add(key)
+                frontier.extend(h for c in fn['calls'] for h in helper_defs(fn_crate[fn['file']], c))
+    analyzer_of_file = {a['file']: a for a in analyzers}
+    actors = {}
+    for f in files:
+        for fn in f['fns']:
+            if fn['test'] or not fn['qcalls'] or (fn['file'], fn['start']) in reachable:
+                continue
+            if any(im['start'] <= fn['start'] < im['end'] for im in f['impls']):
+                continue
+            an = analyzer_of_file.get(f['path'])
+            aid = '@' + (an['name'] if an else f['crate'])
+            act = actors.setdefault(aid, {
+                'id': aid, 'crate': f['crate'], 'kind': 'analyzer' if an else 'plain',
+                'label': an['name'].replace('Analyzer', '') if an else ACTOR_LABELS.get(f['crate'], short_name(f['crate']) + ' (other code)'),
+                'analyzer_kind': an['kind'] if an else None, 'calls': {}, 'fns': set(),
+            })
+            act['fns'].add(fn['name'])
+            for q, ln in fn['qcalls']:
+                if q in queries:
+                    act['calls'].setdefault(q, []).append({'file': f['path'], 'line': ln, 'fn': fn['name']})
+    actors = [
+        {**a, 'fns': sorted(a['fns']), 'calls': [{'query': q, 'sites': v} for q, v in sorted(a['calls'].items())]}
+        for a in sorted(actors.values(), key=lambda a: (a['crate'], a['kind'], a['label']))
+        if a['calls']
+    ]
+
     # ---- MIR stages (variant order == pipeline order)
     mir_stages = []
     pf = next((f for f in files if f['path'].endswith('kestrel-mir/src/passes/mod.rs')), None)
@@ -423,6 +478,7 @@ def main():
         'queries': sorted(queries.values(), key=lambda q: (q['crate'], q['name'])),
         'components': components,
         'analyzers': analyzers,
+        'actors': actors,
         'mir_stages': mir_stages,
         'traces': traces,
         'top_docs': top_docs,

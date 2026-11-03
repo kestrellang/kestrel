@@ -110,6 +110,8 @@ h2 { font: 700 15px/1.2 var(--f-display); margin: 0 0 8px; letter-spacing: 0.01e
 .qgraph .gn.down rect { stroke: var(--call); stroke-width: 2; }
 .qgraph .gn.up rect { stroke: var(--caller); stroke-width: 2; }
 .qgraph .gn.faded { opacity: 0.28; }
+.qgraph .gn.actor rect { fill: var(--surface); stroke-width: 1.6; }
+.qgraph .gn.actor text { font-style: italic; }
 .qgraph .gc rect { fill: oklch(var(--sl-soft) var(--sc-soft) var(--h) / 0.45); stroke: oklch(var(--sl) var(--sc) var(--h)); stroke-opacity: 0.55; stroke-width: 1; }
 .qgraph .gc text { fill: oklch(var(--sl) var(--sc) var(--h)); font: 600 11.5px var(--f-mono); }
 .qgraph .glabel { fill: var(--muted); font: 600 10px var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; }
@@ -272,25 +274,56 @@ function viewPipeline() {
   });
 }
 
-// ---- Queries view
-// ---- Queries view: a layered dependency graph (default) or the per-crate board
-let qMode = 'grouped', qEdges = 'all', qFit = true;
+// ---- Queries view: a dependency graph (grouped by crate, or flat) or the per-crate lists
+let qMode = 'grouped', qEdges = 'all', qFit = true, qActors = true, qAnalyzers = 'kind';
+let GN = {}; // node id -> graph node, rebuilt on every graph render
 function viewQueries() {
+  const seg = (label, opts, cur, attr) => `<div class="seg" role="group" aria-label="${label}">${opts.map(([k, l]) => `<button data-${attr}="${k}" class="${String(cur) === String(k) ? 'on' : ''}">${l}</button>`).join('')}</div>`;
   const ctl = `<div class="filters">
-      <div class="seg" role="group" aria-label="Layout">${[['grouped', 'Graph by crate'], ['graph', 'Flat graph'], ['crate', 'Crate lists']].map(([k, l]) => `<button data-qmode="${k}" class="${qMode === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-      ${qMode !== 'crate' ? `<div class="seg" role="group" aria-label="Edges">${[['all', 'All edges'], ['direct', 'Direct only']].map(([k, l]) => `<button data-qedges="${k}" class="${qEdges === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-      <div class="seg" role="group" aria-label="Zoom">${[[true, 'Fit'], [false, '100%']].map(([k, l]) => `<button data-qfit="${k}" class="${qFit === k ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
+      ${seg('Layout', [['grouped', 'Graph by crate'], ['graph', 'Flat graph'], ['crate', 'Crate lists']], qMode, 'qmode')}
+      ${qMode !== 'crate' ? `
+      ${seg('Edges', [['all', 'All edges'], ['direct', 'Direct only']], qEdges, 'qedges')}
+      ${seg('Callers', [[true, 'With callers'], [false, 'Queries only']], qActors, 'qactors')}
+      ${qActors ? seg('Analyzers', [['kind', 'Analyzers by kind'], ['each', 'Each analyzer']], qAnalyzers, 'qanalyzers') : ''}
+      ${seg('Zoom', [[true, 'Fit'], [false, '100%']], qFit, 'qfit')}` : ''}
     </div>`;
   if (qMode !== 'crate') viewQueryGraph(ctl); else viewQueriesByCrate(ctl);
-  document.querySelectorAll('[data-qmode]').forEach(b => b.onclick = () => { qMode = b.dataset.qmode; render(); });
-  document.querySelectorAll('[data-qedges]').forEach(b => b.onclick = () => { qEdges = b.dataset.qedges; render(); });
-  document.querySelectorAll('[data-qfit]').forEach(b => b.onclick = () => { qFit = b.dataset.qfit === 'true'; render(); });
+  const on = (attr, fn) => document.querySelectorAll(`[data-${attr}]`).forEach(b => b.onclick = () => { fn(b.dataset[attr]); render(); });
+  on('qmode', v => { qMode = v; });
+  on('qedges', v => { qEdges = v; });
+  on('qactors', v => { qActors = v === 'true'; });
+  on('qanalyzers', v => { qAnalyzers = v; });
+  on('qfit', v => { qFit = v === 'true'; });
 }
 
-// Edges caller -> callee under the current filter (self-calls dropped).
+// Query -> query edges under the current filter (self-calls dropped).
 const qEdgeList = () => D.queries.flatMap(q => q.calls
   .filter(c => (qEdges === 'all' || c.kind === 'direct') && c.query !== q.name)
   .map(c => ({ from: q.name, to: c.query, kind: c.kind })));
+
+// The graph: every query, plus (optionally) the code that calls queries
+// without being one, such as analyzers, MIR lowering, LSP handlers and the
+// inference internals. Those "callers" only have outgoing edges.
+function graphModel() {
+  const nodes = D.queries.map(q => ({ id: q.name, label: q.name, crate: q.crate, type: 'query' }));
+  const edges = qEdgeList();
+  if (qActors) {
+    const groups = {};
+    for (const a of D.actors) {
+      const byKind = a.kind === 'analyzer' && qAnalyzers === 'kind';
+      const id = byKind ? '@' + a.analyzer_kind : a.id;
+      const g = groups[id] ||= { id, label: byKind ? `${a.analyzer_kind.replace('Check', '')} checks` : a.label, crate: a.crate, type: 'actor', kind: a.kind, members: [], calls: {} };
+      g.members.push(a);
+      a.calls.forEach(c => (g.calls[c.query] ||= []).push(...c.sites));
+    }
+    for (const g of Object.values(groups)) {
+      nodes.push(g);
+      Object.keys(g.calls).forEach(q => edges.push({ from: g.id, to: q, kind: 'caller' }));
+    }
+  }
+  GN = Object.fromEntries(nodes.map(n => [n.id, n]));
+  return { nodes, edges };
+}
 
 // Everything reachable from `n` along `adj` (not including n).
 function reach(n, adj) {
@@ -298,61 +331,15 @@ function reach(n, adj) {
   while (stack.length) for (const m of adj[stack.pop()] || []) if (m !== n && !seen.has(m)) { seen.add(m); stack.push(m); }
   return seen;
 }
-function adjacency(edges) {
+function adjacency(nodes, edges) {
   const out = {}, inn = {};
-  D.queries.forEach(q => { out[q.name] = []; inn[q.name] = []; });
+  nodes.forEach(n => { out[n.id] = []; inn[n.id] = []; });
   edges.forEach(e => { out[e.from].push(e.to); inn[e.to].push(e.from); });
   return { out, inn };
 }
 
-// Layered layout: a query's row is the length of its longest chain of
-// dependencies, so foundations sit at the bottom and entry points at the top.
-// Back edges on a cycle are ignored for layering and drawn upward.
-const measure = (() => { const c = document.createElement('canvas').getContext('2d'); return t => { c.font = '11.5px "JetBrains Mono", ui-monospace, monospace'; return c.measureText(t).width; }; })();
-function layoutQueries(edges) {
-  const { out, inn } = adjacency(edges);
-  const depth = {}, onStack = new Set();
-  const dfs = n => {
-    if (n in depth) return depth[n];
-    if (onStack.has(n)) return -1;
-    onStack.add(n);
-    let d = 0; for (const c of out[n]) d = Math.max(d, dfs(c) + 1);
-    onStack.delete(n);
-    return (depth[n] = d);
-  };
-  D.queries.forEach(q => dfs(q.name));
-  const isolated = D.queries.filter(q => !out[q.name].length && !inn[q.name].length).map(q => q.name);
-  const maxD = Math.max(0, ...D.queries.filter(q => !isolated.includes(q.name)).map(q => depth[q.name]));
-  const rows = Array.from({ length: maxD + 1 }, () => []);
-  const rank = n => crateOrder.indexOf(query[n].crate);
-  D.queries.filter(q => !isolated.includes(q.name)).sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name)).forEach(q => rows[maxD - depth[q.name]].push(q.name));
-  if (isolated.length) rows.push(isolated.sort((a, b) => rank(a) - rank(b)));
-
-  const PADX = 14, GAP = 10, ROWH = 64, NODEH = 24, M = 16;
-  const w = {}; D.queries.forEach(q => { w[q.name] = Math.ceil(measure(q.name)) + PADX * 2; });
-  const x = {};
-  const rowW = r => r.reduce((a, n) => a + w[n], 0) + GAP * (r.length - 1);
-  const W = Math.max(...rows.map(rowW));
-  const pack = r => { let cx = (W - rowW(r)) / 2; r.forEach(n => { x[n] = cx + w[n] / 2; cx += w[n] + GAP; }); };
-  rows.forEach(pack);
-  // Barycenter sweeps: pull each node toward the nodes it connects to.
-  const bary = (n, nbrs) => { const xs = nbrs.filter(m => m in x).map(m => x[m]); return xs.length ? xs.reduce((a, b) => a + b) / xs.length : x[n]; };
-  for (let it = 0; it < 8; it++) {
-    const order = it % 2 ? [...rows.keys()].reverse() : [...rows.keys()];
-    for (const i of order) {
-      if (isolated.length && i === rows.length - 1) continue;
-      const key = Object.fromEntries(rows[i].map(n => [n, bary(n, it % 2 ? out[n] : inn[n])]));
-      rows[i].sort((a, b) => key[a] - key[b]);
-      pack(rows[i]);
-    }
-  }
-  const pos = {};
-  rows.forEach((r, i) => r.forEach(n => { pos[n] = { x: M + x[n], y: M + i * ROWH, w: w[n], h: NODEH }; }));
-  return { pos, rows, W: W + M * 2, H: M * 2 + (rows.length - 1) * ROWH + NODEH, isolated, out, inn, ROWH, M };
-}
-
 // Longest-path depth over `out`, ignoring back edges on a cycle.
-function longestDepth(nodes, out) {
+function longestDepth(ids, out) {
   const depth = {}, onStack = new Set();
   const dfs = n => {
     if (n in depth) return depth[n];
@@ -362,50 +349,95 @@ function longestDepth(nodes, out) {
     onStack.delete(n);
     return (depth[n] = d);
   };
-  nodes.forEach(dfs);
+  ids.forEach(dfs);
   return depth;
 }
 
+const measure = (() => { const c = document.createElement('canvas').getContext('2d'); return t => { c.font = '11.5px "JetBrains Mono", ui-monospace, monospace'; return c.measureText(t).width; }; })();
+const PADX = 14, GAP = 10, NODEH = 24, M = 16, MAXROW = 1100;
+const nodeW = n => Math.ceil(measure(n.label)) + PADX * 2;
+// Split rows wider than MAXROW so a layer with many callers wraps instead of
+// stretching the whole graph.
+function wrapRows(rows, w) {
+  return rows.flatMap(r => {
+    const out = [[]]; let width = 0;
+    r.forEach(n => { if (out.at(-1).length && width + w[n] > MAXROW) { out.push([]); width = 0; } out.at(-1).push(n); width += w[n] + GAP; });
+    return out;
+  });
+}
+
+// Flat layout: a node's row is the length of its longest chain of
+// dependencies, so foundations sit at the bottom and entry points at the top.
+function layoutFlat(nodes, edges) {
+  const { out, inn } = adjacency(nodes, edges);
+  const ids = nodes.map(n => n.id);
+  const depth = longestDepth(ids, out);
+  const isolated = ids.filter(n => !out[n].length && !inn[n].length);
+  const live = ids.filter(n => !isolated.includes(n));
+  const maxD = Math.max(0, ...live.map(n => depth[n]));
+  const rank = n => crateOrder.indexOf(GN[n].crate);
+  const w = Object.fromEntries(nodes.map(n => [n.id, nodeW(n)]));
+  let rows = Array.from({ length: maxD + 1 }, () => []);
+  live.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).forEach(n => rows[maxD - depth[n]].push(n));
+  rows = wrapRows(rows, w);
+  const isoStart = rows.length;
+  if (isolated.length) rows.push(...wrapRows([isolated.sort((a, b) => rank(a) - rank(b))], w));
+
+  const ROWH = 64, x = {};
+  const rowW = r => r.reduce((a, n) => a + w[n], 0) + GAP * (r.length - 1);
+  const W = Math.max(...rows.map(rowW));
+  const pack = r => { let cx = (W - rowW(r)) / 2; r.forEach(n => { x[n] = cx + w[n] / 2; cx += w[n] + GAP; }); };
+  rows.forEach(pack);
+  const bary = (n, nbrs) => { const xs = nbrs.filter(m => m in x).map(m => x[m]); return xs.length ? xs.reduce((a, b) => a + b) / xs.length : x[n]; };
+  for (let it = 0; it < 8; it++) {
+    const order = it % 2 ? [...rows.keys()].reverse() : [...rows.keys()];
+    for (const i of order) {
+      if (i >= isoStart) continue;
+      const key = Object.fromEntries(rows[i].map(n => [n, bary(n, it % 2 ? out[n] : inn[n])]));
+      rows[i].sort((a, b) => key[a] - key[b]);
+      pack(rows[i]);
+    }
+  }
+  const pos = {};
+  rows.forEach((r, i) => r.forEach(n => { pos[n] = { x: M + x[n], y: M + i * ROWH, w: w[n], h: NODEH }; }));
+  const isoY = isolated.length ? M + isoStart * ROWH : null;
+  return { pos, W: W + M * 2, H: M * 2 + (rows.length - 1) * ROWH + NODEH, isoY, out, inn };
+}
+
 // Grouped layout: each crate is a box. Crates are stacked by their own
-// dependency depth (computed from the cross-crate query edges), and inside a
-// box the queries are layered by depth over same-crate edges only.
-function layoutGrouped(edges) {
-  const { out, inn } = adjacency(edges);
-  const crates = crateOrder.filter(c => D.queries.some(q => q.crate === c));
+// dependency depth (from the cross-crate edges), and inside a box the nodes
+// are layered by depth over same-crate edges only.
+function layoutGrouped(nodes, edges) {
+  const { out, inn } = adjacency(nodes, edges);
+  const crates = crateOrder.filter(c => nodes.some(n => n.crate === c));
   const cOut = Object.fromEntries(crates.map(c => [c, new Set()]));
-  edges.forEach(e => { const a = query[e.from].crate, b = query[e.to].crate; if (a !== b) cOut[a].add(b); });
+  edges.forEach(e => { const a = GN[e.from].crate, b = GN[e.to].crate; if (a !== b) cOut[a].add(b); });
   const cDepth = longestDepth(crates, Object.fromEntries(crates.map(c => [c, [...cOut[c]]])));
   const maxC = Math.max(...crates.map(c => cDepth[c]));
 
-  const PADX = 14, GAP = 10, ROWH = 52, NODEH = 24, M = 16, HEAD = 26, CPAD = 14, CGAP = 18, BANDGAP = 46;
-  const w = {}; D.queries.forEach(q => { w[q.name] = Math.ceil(measure(q.name)) + PADX * 2; });
-  const rank = n => n;
-
-  // Per-crate sub-rows (top = deepest within the crate).
+  const ROWH = 52, HEAD = 26, CPAD = 14, CGAP = 18, BANDGAP = 46;
+  const w = Object.fromEntries(nodes.map(n => [n.id, nodeW(n)]));
   const sub = {};
   crates.forEach(c => {
-    const qs = D.queries.filter(q => q.crate === c).map(q => q.name).sort();
-    const local = Object.fromEntries(qs.map(n => [n, out[n].filter(m => query[m].crate === c)]));
-    const d = longestDepth(qs, local);
-    const md = Math.max(0, ...qs.map(n => d[n]));
-    sub[c] = Array.from({ length: md + 1 }, () => []);
-    qs.forEach(n => sub[c][md - d[n]].push(n));
+    const ids = nodes.filter(n => n.crate === c).map(n => n.id).sort();
+    const local = Object.fromEntries(ids.map(n => [n, out[n].filter(m => GN[m].crate === c)]));
+    const d = longestDepth(ids, local);
+    const md = Math.max(0, ...ids.map(n => d[n]));
+    const rows = Array.from({ length: md + 1 }, () => []);
+    ids.forEach(n => rows[md - d[n]].push(n));
+    sub[c] = wrapRows(rows, w);
   });
   const rowW = r => r.reduce((a, n) => a + w[n], 0) + GAP * (r.length - 1);
   const cw = c => Math.max(measure(short(c)) + 40, ...sub[c].map(rowW)) + CPAD * 2;
   const ch = c => HEAD + (sub[c].length - 1) * ROWH + NODEH + CPAD;
 
-  // Bands of crates, top = most dependent.
   const bands = Array.from({ length: maxC + 1 }, () => []);
   crates.forEach(c => bands[maxC - cDepth[c]].push(c));
   const bandW = b => b.reduce((a, c) => a + cw(c), 0) + CGAP * (b.length - 1);
   const W = Math.max(...bands.map(bandW));
 
   const box = {}, x = {}, y = {};
-  const placeBand = (b, top) => {
-    let cx = (W - bandW(b)) / 2;
-    b.forEach(c => { box[c] = { x: cx, y: top, w: cw(c), h: ch(c) }; cx += box[c].w + CGAP; });
-  };
+  const placeBand = (b, top) => { let cx = (W - bandW(b)) / 2; b.forEach(c => { box[c] = { x: cx, y: top, w: cw(c), h: ch(c) }; cx += box[c].w + CGAP; }); };
   const packRow = (c, i) => {
     const r = sub[c][i], bx = box[c];
     let cx = bx.x + (bx.w - rowW(r)) / 2;
@@ -415,14 +447,13 @@ function layoutGrouped(edges) {
   bands.forEach(b => { placeBand(b, top); top += Math.max(...b.map(ch)) + BANDGAP; });
   crates.forEach(c => sub[c].forEach((_, i) => packRow(c, i)));
 
-  // Barycenter sweeps: reorder crates within a band, then queries within a box.
+  // Barycenter sweeps: reorder crates within a band, then nodes within a box.
   const bary = (n, nbrs) => { const xs = nbrs.map(m => x[m]); return xs.length ? xs.reduce((a, b) => a + b) / xs.length : x[n]; };
   for (let it = 0; it < 8; it++) {
     const up = it % 2 === 1;
-    const bandOrder = up ? [...bands.keys()].reverse() : [...bands.keys()];
-    for (const bi of bandOrder) {
+    for (const bi of up ? [...bands.keys()].reverse() : [...bands.keys()]) {
       const b = bands[bi];
-      const key = Object.fromEntries(b.map(c => { const qs = sub[c].flat(); const xs = qs.map(n => bary(n, [...out[n], ...inn[n]])); return [c, xs.reduce((a, v) => a + v, 0) / xs.length]; }));
+      const key = Object.fromEntries(b.map(c => { const xs = sub[c].flat().map(n => bary(n, [...out[n], ...inn[n]])); return [c, xs.reduce((a, v) => a + v, 0) / xs.length]; }));
       b.sort((a, c) => key[a] - key[c]);
       placeBand(b, box[b[0]].y);
       b.forEach(c => sub[c].forEach((r, i) => {
@@ -433,16 +464,16 @@ function layoutGrouped(edges) {
     }
   }
   const pos = {};
-  D.queries.forEach(q => { pos[q.name] = { x: M + x[q.name], y: M + y[q.name], w: w[q.name], h: NODEH }; });
+  nodes.forEach(n => { pos[n.id] = { x: M + x[n.id], y: M + y[n.id], w: w[n.id], h: NODEH }; });
   const clusters = crates.map(c => ({ crate: c, x: M + box[c].x, y: M + box[c].y, w: box[c].w, h: box[c].h }));
-  return { pos, clusters, W: W + M * 2, H: top - BANDGAP + M * 2, isolated: [], out, inn, M };
+  return { pos, clusters, W: W + M * 2, H: top - BANDGAP + M * 2, isoY: null, out, inn };
 }
 
 function viewQueryGraph(ctl) {
-  const edges = qEdgeList();
+  const { nodes, edges } = graphModel();
   const grouped = qMode === 'grouped';
-  const L = grouped ? layoutGrouped(edges) : layoutQueries(edges);
-  const s = sel?.t === 'query' && query[sel.n] ? sel.n : null;
+  const L = grouped ? layoutGrouped(nodes, edges) : layoutFlat(nodes, edges);
+  const s = (sel?.t === 'query' || sel?.t === 'actor') && GN[sel.n] ? sel.n : null;
   const down = s ? reach(s, L.out) : new Set(), up = s ? reach(s, L.inn) : new Set();
   const nodeCls = n => !s ? '' : n === s ? 'sel' : down.has(n) ? 'down' : up.has(n) ? 'up' : 'faded';
   const edgeCls = e => !s ? '' : (e.from === s || down.has(e.from)) && down.has(e.to) ? 'down' : (up.has(e.from) && (e.to === s || up.has(e.to))) ? 'up' : 'faded';
@@ -455,23 +486,27 @@ function viewQueryGraph(ctl) {
   };
   const order = { '': 0, faded: 0, up: 1, down: 1 };
   const es = edges.map(e => ({ ...e, c: edgeCls(e) })).sort((a, b) => order[a.c] - order[b.c]);
-  const nDirect = edges.filter(e => e.kind === 'direct').length;
-  const crates = crateOrder.filter(c => D.queries.some(q => q.crate === c));
-  const isoY = L.isolated.length ? L.pos[L.isolated[0]].y : 0;
+  const qe = edges.filter(e => e.kind !== 'caller');
+  const nDirect = qe.filter(e => e.kind === 'direct').length;
+  const actors = nodes.filter(n => n.type === 'actor');
+  const nCross = edges.filter(e => GN[e.from].crate !== GN[e.to].crate).length;
+  const crates = crateOrder.filter(c => nodes.some(n => n.crate === c));
   $('view').innerHTML = `
-    <p class="lede"><strong>${D.queries.length} queries, ${edges.length} dependency edges</strong> (${nDirect} written directly in <code>execute</code>${qEdges === 'all' ? `, ${edges.length - nDirect} traced through helper functions and drawn dashed` : ''}). Arrows point from a query to the queries it calls. ${grouped ? `Each box is a crate. Crates are stacked by how they depend on each other, and inside a box the queries are layered the same way, so foundations sit at the bottom. ${(() => { const x = edges.filter(e => query[e.from].crate !== query[e.to].crate).length; return `${x} of the ${edges.length} edges cross between crates.`; })()}` : 'Each row holds queries whose longest chain of dependencies has the same length, so the foundations are at the bottom and the entry points at the top.'} Select a query to light up everything it depends on and everything that depends on it.</p>
+    <p class="lede"><strong>${D.queries.length} queries, ${qe.length} query-to-query edges</strong> (${nDirect} written directly in <code>execute</code>${qEdges === 'all' ? `, ${qe.length - nDirect} traced through helper functions and drawn dashed` : ''})${actors.length ? `, plus <strong>${actors.length} callers</strong>: code that calls queries without being one, such as analyzers, MIR lowering, the LSP and inference internals. Callers are drawn as rounded pills` : ''}. Arrows point from the caller to the query it calls.
+    ${grouped ? `Each box is a crate. Crates are stacked by how they depend on each other, and inside a box the nodes are layered the same way, so foundations sit at the bottom. ${nCross} of the ${edges.length} edges cross between crates.` : 'Each row holds nodes whose longest chain of dependencies has the same length, so the foundations are at the bottom and the entry points at the top.'} Select a node to light up everything it depends on and everything that depends on it.</p>
     ${ctl}
     <div class="legend" style="margin:0 0 10px">${crates.map(c => `<span><i style="border-color:oklch(var(--sl) var(--sc) ${hueOf(c)});border-top-width:8px;width:10px"></i>${esc(short(c))}</span>`).join('')}</div>
-    <div class="gscroll"><svg id="qgraph" class="qgraph ${s ? 'has-sel' : ''}" viewBox="0 0 ${L.W} ${L.H}" style="width:${qFit ? '100%' : L.W + 'px'}" role="img" aria-label="Query dependency graph">
+    <div class="gscroll"><svg id="qgraph" class="qgraph" viewBox="0 0 ${L.W} ${L.H}" style="width:${qFit ? '100%' : L.W + 'px'}" role="img" aria-label="Query dependency graph">
       <defs>${['muted', 'call', 'caller'].map(k => `<marker id="qa-${k}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="var(--${k})"></path></marker>`).join('')}</defs>
       ${(L.clusters || []).map(c => `<g class="gc" style="--h:${hueOf(c.crate)}"><rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" rx="8"></rect><text x="${c.x + 12}" y="${c.y + 17}">${esc(short(c.crate))}</text></g>`).join('')}
-      ${L.isolated.length ? `<text x="${L.M}" y="${isoY - 10}" class="glabel">No query-to-query edges</text>` : ''}
+      ${L.isoY != null ? `<text x="${M}" y="${L.isoY - 10}" class="glabel">No edges</text>` : ''}
       <g>${es.map(e => `<path class="ge ${e.c} ${e.kind}" d="${path(e)}" marker-end="url(#qa-${e.c === 'down' ? 'call' : e.c === 'up' ? 'caller' : 'muted'})"></path>`).join('')}</g>
-      <g>${D.queries.map(q => { const p = L.pos[q.name]; return `<g class="gn ${nodeCls(q.name)}" data-query="${esc(q.name)}" tabindex="0" role="button" aria-label="${esc(q.name)}" style="--h:${hueOf(q.crate)}"><title>${esc(q.name)} · ${esc(short(q.crate))}</title><rect x="${p.x - p.w / 2}" y="${p.y}" width="${p.w}" height="${p.h}" rx="4"></rect><text x="${p.x}" y="${p.y + p.h / 2}">${esc(q.name)}</text></g>`; }).join('')}</g>
+      <g>${nodes.map(n => { const p = L.pos[n.id]; return `<g class="gn ${n.type} ${nodeCls(n.id)}" data-node="${esc(n.id)}" tabindex="0" role="button" aria-label="${esc(n.label)}" style="--h:${hueOf(n.crate)}"><title>${esc(n.label)} · ${esc(short(n.crate))}${n.type === 'actor' ? ' · calls queries but is not one' : ''}</title><rect x="${p.x - p.w / 2}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${n.type === 'actor' ? 12 : 4}"></rect><text x="${p.x}" y="${p.y + p.h / 2}">${esc(n.label)}</text></g>`; }).join('')}</g>
     </svg></div>
-    ${s ? `<div class="legend"><span><i style="border-color:var(--call)"></i>${down.size} queries ${esc(s)} depends on</span><span><i style="border-color:var(--caller)"></i>${up.size} queries that depend on it</span></div>` : ''}`;
+    ${s ? `<div class="legend"><span><i style="border-color:var(--call)"></i>${down.size} nodes ${esc(GN[s].label)} depends on</span><span><i style="border-color:var(--caller)"></i>${up.size} nodes that depend on it</span></div>` : ''}`;
   document.querySelectorAll('.gn').forEach(g => {
-    const pickIt = () => select(sel?.t === 'query' && sel.n === g.dataset.query ? null : 'query', g.dataset.query);
+    const id = g.dataset.node, t = GN[id].type;
+    const pickIt = () => select(sel?.n === id ? null : t, id);
     g.onclick = pickIt;
     g.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickIt(); } };
   });
@@ -585,11 +620,11 @@ function drawEdges() {
 // ---- Inspector
 const srcLink = (file, line, label) => `<a href="${gh(file, line)}" target="_blank" rel="noopener" class="mono">${esc(label ?? (file + (line ? ':' + line : '')))}</a>`;
 const pick = (t, n, label) => `<button class="linkish" data-t="${t}" data-n="${esc(n)}">${esc(label ?? n)}</button>`;
-const GOTO = { crate: 'pipeline', query: 'queries', comp: 'components', analyzer: 'analyzers' };
+const GOTO = { crate: 'pipeline', query: 'queries', actor: 'queries', comp: 'components', analyzer: 'analyzers' };
 
 function renderInspector() {
   const el = $('insp');
-  const r = !sel ? inspEmpty() : sel.t === 'crate' ? inspCrate(crate[sel.n]) : sel.t === 'query' ? inspQuery(query[sel.n]) : sel.t === 'comp' ? inspComp(comp[sel.n]) : sel.t === 'analyzer' ? inspAnalyzer(analyzer[sel.n]) : inspEmpty();
+  const r = !sel ? inspEmpty() : sel.t === 'crate' ? inspCrate(crate[sel.n]) : sel.t === 'query' ? inspQuery(query[sel.n]) : sel.t === 'comp' ? inspComp(comp[sel.n]) : sel.t === 'analyzer' ? inspAnalyzer(analyzer[sel.n]) : sel.t === 'actor' ? inspActor(GN[sel.n]) : inspEmpty();
   el.innerHTML = r;
   el.querySelectorAll('.linkish').forEach(b => b.onclick = () => { const t = b.dataset.t; select(t, b.dataset.n, t === 'crate' && view() !== 'pipeline' && view() !== 'drift' ? null : GOTO[t]); });
   el.querySelectorAll('[data-close]').forEach(b => b.onclick = () => select(null));
@@ -629,13 +664,26 @@ function inspQuery(q) {
   return `<span class="eyebrow" style="color:oklch(var(--sl) var(--sc) ${hueOf(q.crate)})">Query · ${esc(short(q.crate))}</span><h2>${esc(q.name)}</h2>
     ${q.doc ? `<p class="doc">${md(q.doc)}</p>` : '<p class="doc empty">No doc comment on the query struct.</p>'}
     <dl class="kv"><dt>Output</dt><dd>${esc(q.output)}</dd><dt>impl</dt><dd>${srcLink(q.file, q.line)}</dd><dt>Used by</dt><dd>${q.used_by_crates.map(short).join(', ') || '—'}</dd></dl>
-    ${(() => { const A = adjacency(qEdgeList()), dn = [...reach(q.name, A.out)], up = [...reach(q.name, A.inn)]; return `
+    ${(() => { const G = graphModel(), A = adjacency(G.nodes, G.edges), dn = [...reach(q.name, A.out)], up = [...reach(q.name, A.inn)]; return `
     <section><span class="eyebrow">Depends on, transitively (${dn.length})</span><div class="chips">${dn.sort().map(n => pick('query', n)).join('') || '<span class="empty">Nothing. It is a foundation.</span>'}</div></section>
-    <section><span class="eyebrow">Needed by, transitively (${up.length})</span><div class="chips">${up.sort().map(n => pick('query', n)).join('') || '<span class="empty">No other query. It is an entry point.</span>'}</div></section>
-    <p class="note">${qEdges === 'all' ? 'Counts include edges traced through helper functions.' : 'Counts use direct edges only.'}</p>`; })()}
+    <section><span class="eyebrow">Needed by, transitively (${up.length})</span><div class="chips">${up.sort().map(n => pick(GN[n].type, n, GN[n].label)).join('') || '<span class="empty">No other query. It is an entry point.</span>'}</div></section>
+    <p class="note">${qEdges === 'all' ? 'Counts include edges traced through helper functions' : 'Counts use direct edges only'}${qActors ? ', and code outside queries that calls them.' : '.'}</p>`; })()}
     <section><span class="eyebrow">Calls (${q.calls.length})</span><ul class="list">${q.calls.map(c => `<li>${pick('query', c.query)}<span class="r">${c.kind === 'indirect' ? `<span class="tag ind" title="reached through ${esc(c.via)}()">via ${esc(c.via)}</span>` : '<span class="tag">direct</span>'}</span></li>`).join('') || '<li class="empty">No other queries</li>'}</ul></section>
     <section><span class="eyebrow">Called by queries (${q.callers.length})</span><div class="chips">${q.callers.map(c => pick('query', c)).join('') || '<span class="empty">None. It is an entry point, or only called from plain functions.</span>'}</div></section>
     <section><span class="eyebrow">Call sites (${live.length} outside tests)</span><ul class="list">${live.slice(0, 40).map(s => `<li>${srcLink(s.file, s.line, s.file.replace(/^lib\/kestrel-/, '').replace('/src/', '/') + ':' + s.line)}<span class="r">${esc(s.query || s.fn + '()')}</span></li>`).join('')}</ul>${live.length > 40 ? `<p class="note">${live.length - 40} more</p>` : ''}</section>`;
+}
+function inspActor(g) {
+  if (!g) return inspEmpty();
+  const calls = Object.entries(g.calls).sort((a, b) => b[1].length - a[1].length);
+  const nSites = calls.reduce((a, [, v]) => a + v.length, 0);
+  const sites = calls.flatMap(([q, v]) => v.map(s => ({ ...s, q })));
+  const isAn = g.kind === 'analyzer';
+  return `<span class="eyebrow" style="color:oklch(var(--sl) var(--sc) ${hueOf(g.crate)})">Caller · ${esc(short(g.crate))}</span><h2>${esc(g.label)}</h2>
+    <p class="doc">${isAn ? `${g.members.length === 1 ? 'An analyzer' : `${g.members.length} analyzers`} that call queries directly. The <code>Analyze</code> query runs every analyzer, so these calls happen inside it at runtime.` : `Code in <code>${esc(g.crate)}</code> that calls queries but does not run inside one, so its results are not cached by the query system.`}</p>
+    <dl class="kv"><dt>Calls</dt><dd>${calls.length} queries, ${nSites} call sites</dd></dl>
+    ${isAn ? `<section><span class="eyebrow">Analyzers (${g.members.length})</span><div class="chips">${g.members.map(m => pick('analyzer', m.id.slice(1), m.label)).join('')}</div></section>` : `<section><span class="eyebrow">Functions (${g.members[0].fns.length})</span><div class="chips">${g.members[0].fns.map(f => `<span class="chip">${esc(f)}</span>`).join('')}</div></section>`}
+    <section><span class="eyebrow">Queries it calls</span><ul class="list">${calls.map(([q, v]) => `<li>${pick('query', q)}<span class="r">${v.length}×</span></li>`).join('')}</ul></section>
+    <section><span class="eyebrow">Call sites</span><ul class="list">${sites.slice(0, 40).map(s => `<li>${srcLink(s.file, s.line, s.file.replace(/^lib\/kestrel-/, '').replace('/src/', '/') + ':' + s.line)}<span class="r">${esc(s.q)}</span></li>`).join('')}</ul>${sites.length > 40 ? `<p class="note">${sites.length - 40} more</p>` : ''}</section>`;
 }
 function inspComp(c) {
   if (!c) return inspEmpty();
