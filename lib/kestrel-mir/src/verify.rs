@@ -2824,6 +2824,35 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                         notes,
                     );
                 },
+                // A METHOD's returned references root at its receiver — the
+                // contract callers rely on (they scope a returned ref or
+                // ref-carrying value to the receiver alone, so `xs.slice(0)`
+                // is not tied to the `0` temporary). A reference into any
+                // other parameter would outlive that argument at the caller.
+                RootProvenance::Param(idx)
+                    if idx != 0
+                        && matches!(func.kind, crate::item::FunctionKind::Method { .. }) =>
+                {
+                    let pname = func
+                        .params
+                        .get(idx as usize)
+                        .map(|p| format!(" `{}`", p.name))
+                        .unwrap_or_default();
+                    push(
+                        "E512",
+                        format!(
+                            "cannot return {what} parameter{pname}: a method's returned \
+                             references must borrow from its receiver"
+                        ),
+                        None,
+                        vec![
+                            "callers keep the result alive only as long as the receiver".into(),
+                            "borrow from `self`, or make this a free function whose only \
+                             borrowed parameter is the source"
+                                .into(),
+                        ],
+                    );
+                },
                 RootProvenance::Param(idx) => {
                     let convention = func.params.get(idx as usize).map(|p| p.convention);
                     if convention == Some(ParamConvention::Consuming) {

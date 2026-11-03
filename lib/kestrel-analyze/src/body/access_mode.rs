@@ -632,6 +632,13 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
     // field: mutable iff the field is `var` and its base is mutable. Without
     // this arm its `&T` read type classified it SharedRef, so
     // `&mutating self.items(at: i)` in a `mutating` method was E210.
+    // Through a stored REF field (`self.base(i)`, `base: &mutating T`) the
+    // place is the referent's: the ref kind decides, not the field or base.
+    match util::field_subscript_ref(cx, expr_id) {
+        Some(true) => return MutClass::Mutable,
+        Some(false) => return MutClass::SharedRef,
+        None => {},
+    }
     if let HirExpr::MethodCall { receiver, .. } = &cx.hir.exprs[expr_id]
         && let Some(&field) = cx.typed.field_subscripts.get(&expr_id)
         && util::member_has_write_provider(cx, expr_id)

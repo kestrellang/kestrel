@@ -3699,7 +3699,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 if self.ctx.module.escape_carry(ty).any() {
                     let convs = self.current_param_convs();
                     let mut joined: Option<RootProvenance> = None;
-                    for a in &args {
+                    // A METHOD's returned references root at its receiver
+                    // (the callee enforces it, E512), so only the receiver
+                    // scopes the result: `xs.slice(0)` doesn't borrow `0`.
+                    let candidates = if self.callee_is_method(&callee) {
+                        &args[..args.len().min(1)]
+                    } else {
+                        &args[..]
+                    };
+                    for a in candidates {
                         let (a_root, a_guaranteed, a_ty) = {
                             let d = self.body.value(a.value);
                             (d.root, d.ownership == Ownership::Guaranteed, d.ty)
@@ -4905,6 +4913,49 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         Some((receiver, index_args, member, is_static))
     }
 
+    /// Whether `callee` is an instance method (it has a receiver, which is
+    /// `args[0]`): directly, or a protocol requirement called by witness.
+    /// Function values and unresolved callees answer `false` — callers then
+    /// stay conservative and treat every borrowed arg as a possible root.
+    fn callee_is_method(&self, callee: &Callee) -> bool {
+        let entity = match callee {
+            Callee::Direct { func, .. } => Some(*func),
+            Callee::Witness {
+                protocol, method, ..
+            } => self.find_protocol_method_entity(*protocol, method),
+            _ => None,
+        };
+        entity
+            .and_then(|e| self.ctx.world.get::<kestrel_ast_builder::Callable>(e))
+            .is_some_and(|c| c.receiver.is_some())
+    }
+
+    /// A dotted subscript on a stored REFERENCE field (`s.base(i)` with
+    /// `base: &Array[T]` or `&mutating Array[T]`) addresses the REFERENT:
+    /// load the stored address with the ref-slot extract and hand back the
+    /// pointee view + pointee type (the receiver type the solver dispatched
+    /// on). `None` when the field isn't a reference. One source of truth for
+    /// the read (`rewrite_field_subscript`), assign
+    /// (`try_lower_method_call_setter`) and in-place (`+=`, mutating call)
+    /// paths. The referent's mutability is the analyzers' business
+    /// (`util::field_subscript_ref`): a write through a `&mutating` field
+    /// needs no mutable base, so this never asks for the base's address.
+    pub(crate) fn ref_field_view(
+        &mut self,
+        base: HirExprId,
+        field_idx: kestrel_mir::FieldIdx,
+        field_ty: TyId,
+    ) -> Option<(ValueId, TyId)> {
+        let MirTy::Ref { pointee, .. } = *self.ctx.module.ty_arena.get(field_ty) else {
+            return None;
+        };
+        let base_val = self.lower_expr_for_borrow(base);
+        Some((
+            self.emit_struct_extract(base_val, field_idx, field_ty),
+            pointee,
+        ))
+    }
+
     /// Mut-borrow receiver arg + receiver type for an accessor prelude.
     /// `FieldOf` fabricates the stored field's address from the base's var
     /// address (mirrors `try_lower_method_call_setter`'s field-addr path);
@@ -4942,6 +4993,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     }
                     field_ty =
                         kestrel_mir::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
+                }
+                // A stored REF field: the place is the referent, reached
+                // through the stored address — not the field's own slot.
+                if let Some((view, pointee)) = self.ref_field_view(*base, field_idx, field_ty) {
+                    return Some((
+                        CallArg {
+                            value: view,
+                            convention: ParamConvention::MutBorrow,
+                        },
+                        pointee,
+                    ));
                 }
                 // An observed field is written through its observer setter.
                 if let Some(slot) = self.observed_field_slot(*base, entity, name, field_ty) {

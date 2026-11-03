@@ -354,6 +354,7 @@ These apply to non-`Copyable` types, which move instead of copy.
 | E509 | a reference to '{name}' is stored somewhere that outlives '{name}' | A value carrying `&x` (directly or inside a struct or enum value) is stored into a binding declared in an outer scope, which outlives `x`, so the reference would dangle. Returns are covered by E494. |
 | E510 | cannot consume '{name}' while the same call borrows it | One call passes a non-Copyable value both to a borrowing (or `mutating`) parameter or receiver and to a `consuming` parameter, as in `f(x, x)`. |
 | E511 | cannot move a field out of '{type}', which has a deinit | Moving a non-Copyable field out of a value would take it apart without running its type's `deinit`. Borrow or copy the field instead. |
+| E512 | cannot return this value: it carries a reference that borrows parameter `{name}`: a method's returned references must borrow from its receiver | A method returns a reference, or a struct or enum value carrying one, that borrows a parameter other than `self`. Callers treat a method's result as borrowing only its receiver, so it would dangle once that argument goes away. Make it a free function, or borrow from `self`. |
 
 ### Example — E500 / E501 (use after move)
 

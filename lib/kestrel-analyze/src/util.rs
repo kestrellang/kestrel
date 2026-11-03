@@ -72,6 +72,33 @@ pub fn ref_place(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<bool> {
         .map(|r| r.mutating)
 }
 
+/// A subscript on a stored REFERENCE field (`self.base(i)` with
+/// `let base: &mutating Array[T]`): the place lives in the referent, so its
+/// mutability is the field's reference kind — not the field's `let`/`var`
+/// or its base's. `Some(true)` = through `&mutating`, `Some(false)` = through
+/// shared `&`, `None` = not a field subscript, or the field isn't a ref.
+/// Shared by the assignment (E201/E202/E208) and access-mode (E204/E207)
+/// analyzers, mirroring how a plain `self.base` field read is classified by
+/// [`ref_place`].
+pub fn field_subscript_ref(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<bool> {
+    if !matches!(cx.hir.exprs[expr_id], HirExpr::MethodCall { .. }) {
+        return None;
+    }
+    let field = *cx.typed.field_subscripts.get(&expr_id)?;
+    // Gate the forced lowering on the syntax (see `ast_contains_ref`).
+    let ann = cx.query.get::<kestrel_ast_builder::TypeAnnotation>(field)?;
+    if !matches!(ann.0, kestrel_ast::AstType::Ref { .. }) {
+        return None;
+    }
+    match cx.query.query(kestrel_hir_lower::LowerTypeAnnotation {
+        entity: field,
+        root: cx.root,
+    })? {
+        kestrel_hir::ty::HirTy::Ref { mutating, .. } => Some(mutating),
+        _ => None,
+    }
+}
+
 /// Stage 1.5 accessor places: when `expr` is a member expression (`x(i)`,
 /// `x.first`) whose member has a WRITE provider — a `mutating ref` accessor
 /// OR a setter (the get→op→set writeback fallback) — return the BASE

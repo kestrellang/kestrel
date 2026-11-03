@@ -462,6 +462,27 @@ impl OssaBodyCtx<'_, '_> {
                 }
             }
 
+            // A stored REFERENCE field (`let base: &Array[T]`) subscripted in
+            // place (`s.base(i)`): the receiver is the referent, not the
+            // field's own slot. Load the stored address via the ref-slot
+            // extract and dispatch on the POINTEE type — the solver already
+            // peeled the receiver (`solve_member`'s transparent-place peel),
+            // so the witness must be keyed on `T`, never `&T`.
+            if !call_args.is_empty()
+                && let MirTy::Ref { pointee, .. } = *self.ctx.module.ty_arena.get(field_ty)
+            {
+                // Extract from the receiver borrow itself: its source may be
+                // a stack ADDRESS (`begin_borrow_addr` of a local), which is
+                // not a struct value to extract from.
+                let old_receiver = call_args[0].value;
+                let view = self.emit_struct_extract(old_receiver, field_idx, field_ty);
+                call_args[0] = CallArg {
+                    value: view,
+                    convention: receiver_convention,
+                };
+                return (pointee, call_args);
+            }
+
             if !call_args.is_empty() {
                 // A mutating receiver (`modifying get`) on an observed field
                 // mutates a writeback slot; the observer setter stores it
