@@ -3699,7 +3699,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 if self.ctx.module.escape_carry(ty).any() {
                     let convs = self.current_param_convs();
                     let mut joined: Option<RootProvenance> = None;
-                    let sources = self.ref_source_args(&callee, args.len());
+                    let arg_tys: Vec<TyId> = args.iter().map(|a| self.body.value(a.value).ty).collect();
+                    let sources = kestrel_semantics::ref_source_mask(
+                        &mut crate::ref_sources::MirRefSources(&mut self.ctx.module),
+                        &ty,
+                        &arg_tys,
+                    );
                     for (i, a) in args.iter().enumerate() {
                         let (a_root, a_guaranteed, a_ty) = {
                             let d = self.body.value(a.value);
@@ -3710,8 +3715,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                                 && self.ctx.module.escape_carry(a_ty).any());
                         // Skip args that can't hold what the result points
                         // at: `xs.slice(0)` doesn't borrow the `0` temporary.
-                        let may_source = sources.as_ref().is_none_or(|s| s[i]);
-                        if candidate && may_source {
+                        if candidate && sources[i] {
                             joined = Some(match joined {
                                 None => a_root,
                                 Some(j) => j.join(a_root, &convs),
@@ -4907,34 +4911,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .get::<kestrel_ast_builder::Static>(member)
             .is_some();
         Some((receiver, index_args, member, is_static))
-    }
-
-    /// Per call arg: can the callee's ref-carrying result borrow from it?
-    /// The receiver always can; a declared param only when its type may
-    /// hold what the result points at (`kestrel_semantics::RefSourceParams`,
-    /// shared with the E509 analyzer). `None` = unknown callee or an arg
-    /// list that doesn't line up with the signature: every arg may be.
-    fn ref_source_args(&self, callee: &Callee, n_args: usize) -> Option<Vec<bool>> {
-        let entity = match callee {
-            Callee::Direct { func, .. } => *func,
-            Callee::Witness {
-                protocol, method, ..
-            } => self.find_protocol_method_entity(*protocol, method)?,
-            _ => return None,
-        };
-        let mut sources = self.ctx.query.query(kestrel_semantics::RefSourceParams {
-            callee: entity,
-            root: self.ctx.root,
-        })?;
-        let has_receiver = self
-            .ctx
-            .world
-            .get::<kestrel_ast_builder::Callable>(entity)
-            .is_some_and(|c| c.receiver.is_some());
-        if has_receiver {
-            sources.insert(0, true);
-        }
-        (sources.len() == n_args).then_some(sources)
     }
 
     /// A dotted subscript on a stored REFERENCE field (`s.base(i)` with

@@ -13,7 +13,7 @@ pub use existential::{
     Dispatch, ExistentialLayout, Layout, RequirementDispatch, SelfConformance, bound_closure,
     is_requirement, reachable_protocols, self_conformance,
 };
-pub use ref_sources::RefSourceParams;
+pub use ref_sources::{HirRefSources, RefShape, RefSourceLayer, ref_source_mask};
 pub use sizedness::{
     BoxDefect, ExistentialBoxDefect, NominalSizedness, SizeRequirement, SizedLayer, Sizedness,
     TypeParamSizeRequirement, assoc_may_be_unsized, hir_type_is_sized, instance_is_sized,

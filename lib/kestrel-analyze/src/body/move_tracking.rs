@@ -46,7 +46,7 @@ use kestrel_ast_builder::{
 };
 use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_hecs::Entity;
-use kestrel_hir::Builtin;
+use kestrel_hir::{Builtin, HirTy};
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
 use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
@@ -2130,11 +2130,9 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
                 // -> a slice): it can only have rooted its references at the
                 // arguments that may hold what it points at — the same
                 // sources MIR lowering joins into the result's root.
-                let sources = ref_source_mask(mcx, callee_entity, args.len());
-                for (i, arg) in args.iter().enumerate() {
-                    if sources.as_ref().is_none_or(|s| s[i]) {
-                        collect_borrowed_arg(mcx, state, arg.value, out);
-                    }
+                let arg_exprs: Vec<HirExprId> = args.iter().map(|a| a.value).collect();
+                for arg in ref_sources(mcx, expr, &arg_exprs) {
+                    collect_borrowed_arg(mcx, state, arg, out);
                 }
             }
         },
@@ -2142,13 +2140,10 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
         // any argument that may hold what it points at: `xs.slice(0)` views
         // `xs` alone.
         HirExpr::MethodCall { receiver, args, .. } if result_carries_refs(mcx, expr) => {
-            collect_borrowed_arg(mcx, state, *receiver, out);
-            let method = mcx.cx.typed.resolutions.get(&expr).copied();
-            let sources = ref_source_mask(mcx, method, args.len());
-            for (i, arg) in args.iter().enumerate() {
-                if sources.as_ref().is_none_or(|s| s[i]) {
-                    collect_borrowed_arg(mcx, state, arg.value, out);
-                }
+            let arg_exprs: Vec<HirExprId> =
+                std::iter::once(*receiver).chain(args.iter().map(|a| a.value)).collect();
+            for arg in ref_sources(mcx, expr, &arg_exprs) {
+                collect_borrowed_arg(mcx, state, arg, out);
             }
         },
         HirExpr::ImplicitMember {
@@ -2192,16 +2187,54 @@ fn result_carries_refs(mcx: &MoveCtx<'_>, call: HirExprId) -> bool {
     }
 }
 
-/// Per declared argument (receiver excluded): may the callee's result
-/// borrow from it (`kestrel_semantics::RefSourceParams`, shared with MIR
-/// lowering)? `None` = unknown callee or args that don't line up with its
-/// signature: treat every argument as a source.
-fn ref_source_mask(mcx: &MoveCtx<'_>, callee: Option<Entity>, n_args: usize) -> Option<Vec<bool>> {
-    let sources = mcx.cx.query.query(kestrel_semantics::RefSourceParams {
-        callee: callee?,
+/// The arguments of `call` its ref-carrying result may borrow from: those
+/// whose type can hold what the result points at
+/// (`kestrel_semantics::ref_source_mask`, the same rule MIR lowering joins
+/// roots by). An argument with no settled type counts as a source.
+fn ref_sources(mcx: &MoveCtx<'_>, call: HirExprId, args: &[HirExprId]) -> Vec<HirExprId> {
+    let types = &mcx.cx.typed.expr_types;
+    let Some(result) = types.get(&call).map(resolved_to_hir) else {
+        return args.to_vec();
+    };
+    let arg_tys: Vec<HirTy> = args
+        .iter()
+        .map(|a| types.get(a).map_or_else(opaque_hir_ty, resolved_to_hir))
+        .collect();
+    let mut layer = kestrel_semantics::HirRefSources {
+        ctx: mcx.cx.query,
         root: mcx.cx.root,
-    })?;
-    (sources.len() == n_args).then_some(sources)
+    };
+    let mask = kestrel_semantics::ref_source_mask(&mut layer, &result, &arg_tys);
+    args.iter()
+        .zip(mask)
+        .filter_map(|(a, m)| m.then_some(*a))
+        .collect()
+}
+
+/// A settled expression type as a `HirTy`, for the shared ref-source rule.
+/// Only the structure that rule reads is kept; the rest is opaque.
+fn resolved_to_hir(ty: &ResolvedTy) -> HirTy {
+    let sp = kestrel_span::Span::new(0, 0..0);
+    match ty {
+        ResolvedTy::Named { entity, args } => HirTy::Struct {
+            entity: *entity,
+            args: args.iter().map(resolved_to_hir).collect(),
+            span: sp,
+        },
+        ResolvedTy::Param { entity } => HirTy::Param(*entity, sp),
+        ResolvedTy::Tuple(elems) => HirTy::Tuple(elems.iter().map(resolved_to_hir).collect(), sp),
+        ResolvedTy::Ref { pointee, mutating } => HirTy::Ref {
+            inner: Box::new(resolved_to_hir(pointee)),
+            mutating: *mutating,
+            span: sp,
+        },
+        ResolvedTy::Never => HirTy::Never(sp),
+        _ => opaque_hir_ty(),
+    }
+}
+
+fn opaque_hir_ty() -> HirTy {
+    HirTy::Infer(kestrel_span::Span::new(0, 0..0))
 }
 
 /// What a call's result views through one borrowed argument: the argument's

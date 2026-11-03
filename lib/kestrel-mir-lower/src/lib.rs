@@ -2,6 +2,7 @@ pub(crate) mod body;
 mod context;
 mod existential;
 mod items;
+mod ref_sources;
 pub mod ty;
 mod validate;
 
