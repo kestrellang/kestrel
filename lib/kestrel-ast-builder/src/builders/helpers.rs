@@ -405,7 +405,7 @@ pub fn spawn_setter(
     file_entity: Entity,
     file_id: usize,
     is_static: bool,
-) {
+) -> Entity {
     let setter = world.spawn();
     world.set(setter, NodeKind::Setter);
     world.set(setter, FileId(file_entity));
@@ -423,6 +423,48 @@ pub fn spawn_setter(
         world.set(setter, Static);
     }
     set_documentation(world, setter, setter_clause);
+    setter
+}
+
+/// Mark a failable member (`var first?: T`, `subscript(…)? -> T`): its
+/// annotation becomes `T?`, the type every read provider produces (a `get`
+/// body returns `T?`; ref accessors lend `Optional[&T]`, see
+/// [`spawn_ref_accessor`]). Must run before the accessors are built.
+/// Mark a computed member declared `T throws E` [`Throwing`]. Call after
+/// its `TypeAnnotation` is set and before its accessors are built (their
+/// ref types read the marker).
+pub fn mark_throwing(world: &mut World, entity: Entity) {
+    if matches!(
+        world.get::<TypeAnnotation>(entity),
+        Some(TypeAnnotation(AstType::Result { .. }))
+    ) {
+        world.set(entity, Throwing);
+    }
+}
+
+pub fn mark_failable(world: &mut World, entity: Entity, span: kestrel_span::Span) {
+    world.set(entity, Failable);
+    if let Some(ty) = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone()) {
+        world.set(
+            entity,
+            TypeAnnotation(AstType::Optional(Box::new(ty), span)),
+        );
+    }
+}
+
+/// The accessor clauses an accessor block spells (see [`DeclaredAccessors`]).
+/// The `{ expr }` shorthand counts as `get`.
+pub fn declared_accessors(acc: &kestrel_syntax_tree::ast::PropertyAccessors) -> DeclaredAccessors {
+    DeclaredAccessors {
+        get: acc.declares_get() || acc.code_block().is_some(),
+        modifying_get: acc.modifying_getter().is_some(),
+        set: acc.declares_set(),
+        ref_: acc.ref_clause().is_some(),
+        modifying_ref: acc.modifying_ref_clause().is_some(),
+        mutating_ref: acc.mutating_ref_clause().is_some(),
+        will_set: acc.will_set().is_some(),
+        did_set: acc.did_set().is_some(),
+    }
 }
 
 /// Spawn a `NodeKind::RefAccessor` child entity under a Field or Subscript
@@ -463,15 +505,42 @@ pub fn spawn_ref_accessor(
     }
     // Synthesized ref return around the parent's declared type. Spanned at
     // the clause so any ref-placement diagnostic lands on the accessor.
+    // A failable member (`var first?: T`) is annotated `T?`; its accessors
+    // lend `Optional[&T]` / `Optional[&mutating T]` instead of `&T?`. A
+    // throwing one (`T throws E`) lends `Result[&T, E]` the same way.
     if let Some(parent_ty) = world.get::<TypeAnnotation>(parent).map(|t| t.0.clone()) {
-        world.set(
-            acc,
-            TypeAnnotation(AstType::Ref {
+        let span = get_decl_span(clause, file_id);
+        let ty = match parent_ty {
+            AstType::Optional(inner, opt_span) if world.has::<Failable>(parent) => {
+                AstType::Optional(
+                    Box::new(AstType::Ref {
+                        inner,
+                        mutating,
+                        span,
+                    }),
+                    opt_span,
+                )
+            },
+            AstType::Result {
+                ok,
+                err,
+                span: res_span,
+            } if world.has::<Throwing>(parent) => AstType::Result {
+                ok: Box::new(AstType::Ref {
+                    inner: ok,
+                    mutating,
+                    span,
+                }),
+                err,
+                span: res_span,
+            },
+            parent_ty => AstType::Ref {
                 inner: Box::new(parent_ty),
                 mutating,
-                span: get_decl_span(clause, file_id),
-            }),
-        );
+                span,
+            },
+        };
+        world.set(acc, TypeAnnotation(ty));
     }
     if is_static {
         world.set(acc, Static);

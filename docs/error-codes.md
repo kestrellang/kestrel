@@ -61,7 +61,7 @@ the type checker, and the code is assigned in one place,
 | E107 | does not conform to protocol | A type does not satisfy a required conformance or where clause. |
 | E108 | implicit 'it' parameter requires single-parameter context | `it` was used where the closure's expected type does not take exactly one parameter. |
 | E109 | type mismatch | The value's type is not the one the context requires (also: a mutating closure where a non-mutating one is expected). |
-| E113 | wrong number of arguments / wrong label / no matching overload | The call's shape (arity, argument labels, type-argument count) fits no declaration. |
+| E113 | wrong number of arguments / wrong label / no matching overload / ambiguous trailing closure | The call's shape (arity, argument labels, type-argument count) fits no declaration, or a trailing closure could fill more than one closure-typed parameter. |
 | E114 | literal not accepted | The literal's kind cannot be written as the expected type. |
 | E115 | member '{name}' is not accessible | Visibility forbids the access from this scope. |
 | E116 | wrong kind of member use | A static member used on an instance, an instance method on a type, a type parameter as a value, or a method not called. |
@@ -136,7 +136,8 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E208 | cannot assign through a shared reference | Writing through `&T` is not allowed; take `&mutating` instead. |
 | E209 | a ref binding must be a simple \`let\` | A borrow initializer (`let r = &x`) can't be combined with `var` or a destructuring pattern. |
 | E210 | cannot take a \`&mutating\` borrow of immutable variable '{name}' | Mutable borrows need a mutable place (`var`, mutable field, or `Pointer.mutatingValue`). |
-| E211 | \`&\` pattern bindings are not supported in this position | `&` patterns are only allowed in match-arm patterns, not in `let`/`for`/conditions/params. |
+| E211 | *(retired)* | Was "\`&\` pattern bindings are not supported in this position". `&` binders are now allowed in every pattern position; a `let` destructure of a temporary is rejected as E499 instead. |
+| E214 | cannot assign to failable/throwing place '{name}' | A failable (`var first?: T`, `subscript(...)? -> T`) or throwing (`-> T throws E`) property or subscript can't be assigned: the place may not exist. Write through its `mutating ref` with a `&mutating` payload binder. |
 | E213 | left-hand side of compound assignment is not assignable | `a op= b` needs a place (variable, field, subscript) on the left. |
 | E212 | *(retired)* | Was "closure cannot capture non-Static binding '{name}'". Retired with closure kinds (docs/design/closures.md): a view-kind closure's environment is frame-bound, so it may capture ref bindings and non-`Static` values freely. The owning tier keeps the rejection under E624. |
 
@@ -247,7 +248,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E474 | duplicate definition of {kind} '{name}' | Two declarations of the same kind share a name in the same scope. |
 | E475 | '{name}' is already defined as a {original_kind} | A name is reused by a declaration of a different kind (e.g. struct vs func). |
 | E476 | cannot find type '{name}' in this scope | A type annotation names a type that doesn't resolve. (Also emitted by HIR lowering for the same condition.) |
-| E477 | method '{name}' has wrong receiver kind for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) must match the requirement's exactly — a plain method no longer satisfies a `mutating` or `consuming` requirement. |
+| E477 | method '{name}' has wrong receiver kind for protocol '{proto}' · '{name}' satisfies a \`{ get }\` requirement with a \`modifying\` accessor for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) must match the requirement's exactly — a plain method no longer satisfies a `mutating` or `consuming` requirement, and a property whose read mutates `self` can't satisfy a `{ get }` requirement. |
 | E478 | 'static' is redundant here | Global (module-level) properties are already static. |
 | E479 | associated type '{name}' in where clause is ambiguous: '{type}' is bound by {protocols}, which each declare '{name}' | An equality clause `T.X = Y` where two or more protocols bound on `T` in the same clause each declare `X`. A where-clause path has no protocol-qualified form, so the clause is ignored. |
 
@@ -309,7 +310,7 @@ protocol/extension-target arguments, where-clause types).
 | E489 | reference types cannot be used here | The catch-all position — alias RHS, where-clause types, protocol bounds. |
 | E488 | a borrow expression is only allowed as a \`let\` initializer | `&x` is not a free-standing expression; parameters already borrow by signature. |
 | E490 | a throwing function cannot return a reference | `throws` wraps the return in `Result`, and a reference can't live in an enum payload. |
-| E491 | a reference-returning function cannot be used as a value | `-> &T` is a return convention, not part of a function type; call it instead of storing it. |
+| E491 | a reference-returning function cannot be used as a value | `-> &T` is a return convention, not part of a function type; call it instead of storing it. A function type may take refs (`xs.refs().map { … }`); only returning one is rejected. |
 | E492 | a reference cannot be a generic type argument | That would store the reference; bind the value first to store an owned copy. |
 | E493 | ambiguous borrow source for the returned reference | The compiler can't tell which parameter the returned `&T` borrows from. |
 | E494 | cannot return this reference/closure: it borrows local '{name}', which does not outlive the call | A reference (or a closure/value carrying one) rooted in a local would dangle after return. |
@@ -317,7 +318,7 @@ protocol/extension-target arguments, where-clause types).
 | E496 | cannot return a reference rooted at consuming parameter '{name}': it is destroyed when the call returns | Consuming parameters die with the call, so references into them can't escape. |
 | E497 | a reference cannot stay live across a control-flow merge in this version | A reference may not cross an `if`/`match`/loop boundary (current-version limitation). |
 | E498 | cannot consume {value} while a reference into it is live | Destroying or moving a value would leave an outstanding reference dangling. |
-| E499 | cannot borrow a temporary value | `&` needs a named place; temporaries and get/set members have no stable storage to borrow. |
+| E499 | cannot borrow a temporary value · \`&\` pattern binding would borrow a temporary | `&` needs a named place; temporaries and get/set members have no stable storage to borrow. A `let` destructure with `&` binders must destructure a named place. |
 
 ### Example — E494 (escaping reference)
 
@@ -497,17 +498,22 @@ func other() -> String {  // error[E616]: String does not conform to Exitable
 // an executable build with no `@main` at all    → error[E618]
 ```
 
-## E619–E622 — Place accessors
+## E619–E622, E636–E639 — Accessors, observers and `lazy`
 
-These govern `get` / `set` / `ref` / `mutating ref` accessor blocks on
-computed members.
+These govern `get` / `modifying get` / `set` / `ref` / `modifying ref` /
+`mutating ref` accessor blocks, `willSet` / `didSet` observers, failable
+members and `lazy` properties.
 
 | Code | Message | Explanation |
 |---|---|---|
-| E619 | duplicate read provider: this member declares both \`get\` and \`ref\` | Reads need exactly one provider — keep `get` or `ref`, not both. |
+| E619 | duplicate read provider: this member declares more than one of \`get\`, \`modifying get\`, \`ref\` and \`modifying ref\` | Reads need exactly one provider. |
 | E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. |
-| E621 | \`ref\` accessors are not allowed in protocols or protocol extensions | Declare `ref` accessors on concrete types only. |
-| E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a `get` or `ref`; add a read provider. |
+| E621 | \`ref\` and \`modifying\` accessors are not allowed in protocols or protocol extensions | Declare them on concrete types only. |
+| E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a read provider; add one. |
+| E636 | \`modifying\` accessors need an instance receiver | A static member or global has no `self` to modify; use a plain `get` / `ref`. |
+| E637 | a failable/throwing member needs a read accessor · a failable/throwing place cannot have a \`set\` accessor | A failable member (`var x?: T`, `subscript(...)? -> T`) reads as `Optional`, a throwing one (`-> T throws E` with accessors) as `Result`; neither can be assigned. Write through it with a `mutating ref` (`Optional[&mutating T]` / `Result[&mutating T, E]`) and a `&mutating` payload binder. |
+| E638 | (varies) | `willSet` / `didSet` on anything but an instance stored `var` of a struct or enum: a `let`, static or global property, a subscript, a failable member, a protocol member, or mixed with `get`/`set`/`ref`. Also `return` in an observer body, which would skip the store. |
+| E639 | (varies) | `lazy` on anything but an instance `var` of a struct or enum with a type annotation and an `= expr` initializer and no accessors; also a `lazy` property whose type isn't Copyable. |
 
 ## E624–E626 — Closure kinds
 

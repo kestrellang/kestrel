@@ -468,8 +468,18 @@ pub(super) fn unify_bound_protocol_args(
             root: ctx.root,
         });
     let mut applicable: Vec<ApplicableConformance> = Vec::new();
-    for (proto, source, ast_args) in &insts {
-        if *proto != protocol || ast_args.is_empty() {
+    for (proto, source, written) in &insts {
+        if *proto != protocol {
+            continue;
+        }
+        // `: Mul` declares `Mul[Self]`: a defaulted conformance is an
+        // instantiation too, or a sibling `Mul[Meters]` would win alone.
+        let ast_args = &kestrel_name_res::conformance_args_with_defaults(
+            ctx.query_ctx,
+            protocol,
+            written.clone(),
+        );
+        if ast_args.is_empty() {
             continue;
         }
         // Map the source's free type params to the receiver's concrete args:
@@ -630,8 +640,9 @@ pub(super) struct ApplicableConformance {
 }
 
 /// Does the (resolved state of) `tv` PROVABLY conflict with `hir`? Only a
-/// nominal-vs-nominal entity mismatch (recursively through args) counts;
-/// unresolved vars, `Param` patterns, and every non-nominal shape are
+/// nominal-vs-nominal entity mismatch (recursively through args) counts,
+/// plus an open literal against a nominal that literal can't spell;
+/// other unresolved vars, `Param` patterns, and every non-nominal shape are
 /// "can't rule out" — this must never reject on incompleteness.
 pub(super) fn tv_definitely_incompatible(
     ctx: &InferCtx<'_>,
@@ -647,6 +658,21 @@ pub(super) fn tv_definitely_incompatible(
     let (t_entity, t_args) = match ctx.slot(resolved) {
         TySlot::Resolved(TyKind::Struct { entity, args })
         | TySlot::Resolved(TyKind::Enum { entity, args }) => (*entity, args.clone()),
+        // An open literal can only become a type that literal can spell:
+        // `n.multiply(256)` never means `Multipliable[Meters]`.
+        TySlot::Unresolved { literal: Some(lit) } if h_args.is_empty() => {
+            let kind = match hir {
+                HirTy::Enum { .. } => TyKind::Enum {
+                    entity: h_entity,
+                    args: Vec::new(),
+                },
+                _ => TyKind::Struct {
+                    entity: h_entity,
+                    args: Vec::new(),
+                },
+            };
+            return !crate::unify::conforms_to_literal_protocol(ctx, &kind, *lit);
+        },
         _ => return false,
     };
     t_entity != h_entity

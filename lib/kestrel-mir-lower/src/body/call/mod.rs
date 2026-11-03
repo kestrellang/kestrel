@@ -463,6 +463,23 @@ impl OssaBodyCtx<'_, '_> {
             }
 
             if !call_args.is_empty() {
+                // A mutating receiver (`modifying get`) on an observed field
+                // mutates a writeback slot; the observer setter stores it
+                // back when the call's writebacks drain.
+                if receiver_convention == ParamConvention::MutBorrow
+                    && let Some(slot) =
+                        self.observed_field_slot(receiver_expr, recv_entity, field_name, field_ty)
+                {
+                    let old_receiver = call_args[0].value;
+                    if self.body.value(old_receiver).borrow_source.is_some() {
+                        self.emit_end_borrow(old_receiver);
+                    }
+                    call_args[0] = CallArg {
+                        value: self.lend_writeback_slot(slot, field_ty),
+                        convention: receiver_convention,
+                    };
+                    return (field_ty, call_args);
+                }
                 // Borrow-like receiver (subscript get/set): borrow the field
                 // IN PLACE via its address when the base is addressable
                 // (a var / field chain). `emit_struct_extract` would yield a
@@ -472,18 +489,34 @@ impl OssaBodyCtx<'_, '_> {
                 // bitwise-aliases heap elements and then over-releases them
                 // (corrupting `bag.items(i)` on a struct field). The address
                 // path mirrors how `bag.field.prop` (e.g. `.count`) is lowered.
-                if matches!(
-                    receiver_convention,
-                    ParamConvention::Borrow | ParamConvention::MutBorrow
-                ) && let Some(base_addr) = self.try_field_addr_chain(receiver_expr)
+                // A receiver that is already a writeback slot (`o.pos.c(5)`
+                // with `pos` observed): project into that slot.
+                let old_receiver = call_args[0].value;
+                if receiver_convention == ParamConvention::MutBorrow
+                    && let Some(borrow) =
+                        self.relend_lent_field(old_receiver, receiver_ty, field_idx, field_ty)
                 {
-                    let old_receiver = call_args[0].value;
+                    call_args[0] = CallArg {
+                        value: borrow,
+                        convention: receiver_convention,
+                    };
+                    return (field_ty, call_args);
+                }
+                let wb_mark = self.pending_writebacks.len();
+                let base_addr = match receiver_convention {
+                    ParamConvention::Borrow => {
+                        self.field_addr_chain(receiver_expr, crate::body::place::Access::Read)
+                    },
+                    ParamConvention::MutBorrow => self.write_place_addr(receiver_expr),
+                    _ => None,
+                };
+                if let Some(base_addr) = base_addr {
                     if self.body.value(old_receiver).borrow_source.is_some() {
                         self.emit_end_borrow(old_receiver);
                     }
                     let faddr = self.emit_field_addr(base_addr, receiver_ty, field_idx);
                     let borrow = if receiver_convention == ParamConvention::MutBorrow {
-                        self.emit_begin_mut_borrow_addr(faddr, field_ty)
+                        self.mut_borrow_write_addr(faddr, field_ty, wb_mark)
                     } else {
                         self.emit_begin_borrow_addr(faddr, field_ty)
                     };
@@ -843,6 +876,11 @@ impl OssaBodyCtx<'_, '_> {
                 (idx, val)
             })
             .collect();
+        // `lazy var` caches are never arguments: they start empty.
+        let mut fields = fields;
+        if known_struct {
+            fields.extend(self.empty_lazy_caches(result_ty));
+        }
 
         self.emit_struct(result_ty, fields)
     }

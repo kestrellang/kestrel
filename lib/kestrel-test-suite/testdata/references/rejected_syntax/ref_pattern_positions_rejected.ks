@@ -1,14 +1,13 @@
 // test: diagnostics
 // stdlib: false
 
-// `&` binder patterns parse everywhere a binding pattern is legal, but are
-// rejected outside `match` arm binder position (E211). A destructuring
-// `let` is rejected because the desugared scrutinee temp dies inside the
-// wrapper block — the binding would dangle. (Match-arm support is the
-// stage-1.5 item-2 place-mode lowering; until it lands the match position
-// is pinned in ref_pattern_match_inert_rejected.ks.)
+// `&` binders are allowed in every pattern position, but a destructuring
+// `let` of a TEMPORARY is rejected (E499): the desugared scrutinee temp
+// dies inside the wrapper block, so the binding would dangle. A `let`
+// destructure of a place is matched in place and is fine (see
+// patterns/ref_binders_in_every_position.ks).
 module Test
 
 func f() {
-    let (&x, y) = (1, 2); // ERROR(E211)
+    let (&x, y) = (1, 2); // ERROR(E499)
 }

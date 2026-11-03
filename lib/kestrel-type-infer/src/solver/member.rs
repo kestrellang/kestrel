@@ -1216,9 +1216,13 @@ pub(super) fn solve_member(
     let bind_params: Vec<BindParam> = resolution
         .param_types
         .iter()
-        .map(|p| BindParam::new(p.label.as_deref(), p.has_default))
+        .map(|p| BindParam {
+            label: p.label.as_deref(),
+            has_default: p.has_default,
+            takes_closure: p.takes_closure,
+        })
         .collect();
-    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
     // An UNAPPLIED static method (`let f = Box[Int64].make`) binds nothing:
     // it becomes a function value below.
     let is_unapplied_static = !is_call
@@ -1243,6 +1247,9 @@ pub(super) fn solve_member(
                 got: args[arg_index].label.clone(),
                 span,
             });
+        },
+        Err(BindError::AmbiguousTrailingClosure { candidates, .. }) => {
+            return SolveResult::Error(InferError::AmbiguousTrailingClosure { candidates, span });
         },
         Err(BindError::MissingArgument { .. } | BindError::TooManyArguments { .. }) => {
             let required_count = bind_params.iter().filter(|p| !p.has_default).count();
@@ -1283,8 +1290,11 @@ pub(super) fn solve_member(
             ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
         }
     }
-    let param_hir_tys: Vec<Option<kestrel_hir::HirTy>> =
-        resolution.param_types.iter().map(|p| Some(p.ty.clone())).collect();
+    let param_hir_tys: Vec<Option<kestrel_hir::HirTy>> = resolution
+        .param_types
+        .iter()
+        .map(|p| Some(p.ty.clone()))
+        .collect();
     for (param_ty, default_ty) in
         super::call::skipped_default_types(ctx, resolution.entity, &plan, &param_hir_tys)
     {
@@ -1336,19 +1346,47 @@ pub(super) fn solve_member(
     // unchanged. The wrap is read-only: RMW receivers are never typed
     // `&mutating T` — analyze and mir-lower route writes and RMW by ENTITY
     // (the PlaceAccessors query), not by this expression type.
-    let ret_tv = if matches!(
+    //
+    // A FAILABLE member (`var first?: T`) is annotated `T?`, and its ref
+    // accessor lends `Optional[&T]` — the accessor's own synthesized
+    // annotation is the read type, not `&` of the member's. A THROWING one
+    // (`T throws E`) lends `Result[&T, E]` the same way.
+    // Computed properties resolve as `MemberKind::Field` (the resolver
+    // classifies by NodeKind), so the failable lookup keys on the entity.
+    let place_accessors = ctx.query_ctx.query(kestrel_hir_lower::PlaceAccessors {
+        entity: resolution.entity,
+    });
+    let failable = kestrel_ast_builder::is_effectful_place(ctx.query_ctx, resolution.entity);
+    let wraps_ref = matches!(
         resolution.kind,
         crate::resolve::MemberKind::Subscript | crate::resolve::MemberKind::ComputedProperty { .. }
-    ) && ctx
-        .query_ctx
-        .query(kestrel_hir_lower::PlaceAccessors {
-            entity: resolution.entity,
-        })
-        .is_some_and(|info| info.ref_accessor.is_some())
-    {
-        ctx.ref_ty(ret_tv, false)
-    } else {
-        ret_tv
+    );
+    // A failable read that a `&mutating` binder writes through lends
+    // `Optional[&mutating T]` from the `mutating ref` instead.
+    let mutating_read = ctx.mutating_scrutinee_exprs.contains(&expr);
+    let read_accessor = place_accessors.and_then(|info| match failable {
+        true => info.failable_read_accessor(mutating_read),
+        false => info.ref_accessor,
+    });
+    let ret_tv = match read_accessor {
+        Some(accessor) if failable => {
+            let accessor_ty = ctx
+                .query_ctx
+                .query(kestrel_hir_lower::LowerCallableReturnType {
+                    entity: accessor,
+                    root: ctx.root,
+                });
+            lower_opaque_aware(
+                ctx,
+                &accessor_ty,
+                resolution.entity,
+                self_entity,
+                receiver,
+                &subs,
+            )
+        },
+        Some(_) if wraps_ref => ctx.ref_ty(ret_tv, false),
+        _ => ret_tv,
     };
     bind_call_result(ctx, result, ret_tv, expr, span.clone());
 
@@ -1458,7 +1496,7 @@ pub(super) fn solve_implicit(
     if ctx.query_ctx.get::<NodeKind>(resolution.entity) == Some(&NodeKind::EnumCase)
         && let Some(callable) = ctx.query_ctx.get::<Callable>(resolution.entity)
     {
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         if !crate::constraint::labels_match(&callable.params, &arg_labels) {
             let case_name = ctx
                 .query_ctx

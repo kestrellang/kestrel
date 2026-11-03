@@ -173,7 +173,13 @@ impl LowerCtx<'_> {
         self.alloc_expr(HirExpr::ImplicitMember {
             owner: None,
             name: HirName::name(name),
-            args: arg.map(|value| vec![HirCallArg { label: None, value }]),
+            args: arg.map(|value| {
+                vec![HirCallArg {
+                    trailing_closure: false,
+                    label: None,
+                    value,
+                }]
+            }),
             span: span.clone(),
         })
     }

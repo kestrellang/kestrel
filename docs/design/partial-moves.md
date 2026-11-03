@@ -186,7 +186,7 @@ gets dropped.
   read-only capture. A write capture is collapsed to the whole local.
 - **Change:** a view closure (normal or `mutating`) captures a written
   place by its field address. The parent side already does this:
-  `view_addr_of_place` → `try_field_addr_chain`. The closure body's
+  `view_addr_of_place` → `field_addr_chain`. The closure body's
   `place_capture_map` then routes writes through that pointer as well as
   reads.
 - **Analyzer:** `exclusive_args.rs` (E635) uses the captured place itself

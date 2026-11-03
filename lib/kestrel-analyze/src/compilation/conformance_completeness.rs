@@ -41,7 +41,7 @@ use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, ExtensionTarget, InitEffect, NodeKind,
+    Callable, ConformanceItem, Conformances, ExtensionTarget, InitEffect, MutatingRead, NodeKind,
     QualifiedTarget, ReceiverKind, Settable, TypeAnnotation, TypeParams, WhereClause,
     WhereConstraint,
 };
@@ -224,6 +224,36 @@ fn check_type_conformances(
             diags,
         );
     }
+}
+
+/// Every protocol instantiation `decl` (the type itself or one of its
+/// extensions) declares for `type_entity`, as `(protocol, param subs)` with
+/// defaults filled (`: Mul` is `: Mul[Self]`) and subs sorted by param, so
+/// two declarations name the same instantiation iff their pairs are equal.
+pub(crate) fn declared_instantiations(
+    cx: &CompilationContext<'_>,
+    type_entity: Entity,
+    decl: Entity,
+) -> Vec<(Entity, Vec<(Entity, ResolvedTy)>)> {
+    let Some(conformances) = cx.query.get::<Conformances>(decl) else {
+        return Vec::new();
+    };
+    conformances
+        .0
+        .iter()
+        .filter_map(|item| {
+            let ConformanceItem::Positive(ast_ty, _) = item else {
+                return None;
+            };
+            let protocol = resolve_conformance(cx, ast_ty, decl)?;
+            if cx.query.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
+                return None;
+            }
+            let mut subs = build_proto_param_subs(cx, type_entity, protocol, ast_ty, decl);
+            subs.sort_by_key(|(param, _)| param.index());
+            Some((protocol, subs))
+        })
+        .collect()
 }
 
 /// Check that an extension satisfies the protocol requirements it declares.
@@ -504,6 +534,12 @@ fn check_protocol_requirements(
                     // Setter requirement: if the protocol declares `{ get set }`
                     // the impl must also be settable (either a `var` stored
                     // property or a computed property with a `set` accessor).
+                    // A `{ get }` requirement reads without changing `self`;
+                    // a `modifying` read provider needs a mutable receiver, so
+                    // a borrowed witness call could not honor it.
+                    if cx.query.has::<MutatingRead>(field_entity) {
+                        diags.push(modifying_witness_diag(&name, &proto_name, &decl_span));
+                    }
                     let proto_needs_set = cx.query.get::<Settable>(child).is_some();
                     let impl_has_set = cx.query.get::<Settable>(field_entity).is_some();
                     if proto_needs_set && !impl_has_set {
@@ -1629,8 +1665,22 @@ fn find_associated_type_binding_entity(
     assoc_name: &str,
     protocol: Entity,
 ) -> Option<Entity> {
-    let mut search: Vec<Entity> = decl.into_iter().collect();
-    search.push(type_entity);
+    // The conformance's own declaration speaks first: with two conformances
+    // to one protocol (`N: Mul` in the body, `extend N: Mul[Meters]`), the
+    // extension's `type Output = Meters` binds ITS instantiation even though
+    // the body's qualified `type Mul.Output = N` names the same protocol.
+    // An unqualified alias speaks for the declaration only when it names
+    // `protocol` itself, not a protocol it reaches by refinement.
+    if let Some(decl) = decl
+        && let Some(binding) = assoc_binding_in(cx, &[decl], assoc_name, protocol)
+        && (cx.query.get::<QualifiedTarget>(binding).is_some()
+            || declared_instantiations(cx, type_entity, decl)
+                .iter()
+                .any(|(p, _)| *p == protocol))
+    {
+        return Some(binding);
+    }
+    let mut search = vec![type_entity];
     let extensions = cx.query.query(ExtensionsFor {
         target: type_entity,
         root: cx.root,
@@ -1652,11 +1702,21 @@ fn find_associated_type_binding_entity(
         search.extend(proto_exts.iter());
     }
 
-    // First pass: prefer bindings qualified to this exact protocol —
-    // `type Equal.Output = Bool` trumps a sibling `type Output = String`
-    // that would otherwise apply to any conformed protocol.
+    assoc_binding_in(cx, &search, assoc_name, protocol)
+}
+
+/// The `assoc_name` binding for `protocol` among `search`'s children.
+/// Prefers bindings qualified to this exact protocol — `type Equal.Output =
+/// Bool` trumps a sibling `type Output = String` that would otherwise apply
+/// to any conformed protocol.
+fn assoc_binding_in(
+    cx: &CompilationContext<'_>,
+    search: &[Entity],
+    assoc_name: &str,
+    protocol: Entity,
+) -> Option<Entity> {
     let mut fallback: Option<Entity> = None;
-    for &entity in &search {
+    for &entity in search {
         for child in util::children_named_of_kind(cx.query, entity, assoc_name, NodeKind::TypeAlias)
         {
             if cx.query.get::<TypeAnnotation>(child).is_none() {
@@ -1774,6 +1834,30 @@ fn resolve_type_entity_with_self(
 /// Types are checked separately by `check_method_return_type`; param types
 /// aren't compared here because type-param / Self substitution isn't modeled
 /// by entity equality.
+/// E477 for a property/subscript witness whose read provider is `modifying`.
+fn modifying_witness_diag(
+    name: &str,
+    proto_name: &str,
+    span: &kestrel_span::Span,
+) -> AnalyzeDiagnostic {
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[5].id, // E477
+        severity: DESCRIPTORS[5].default_severity,
+        message: format!(
+            "'{name}' satisfies a `{{ get }}` requirement with a `modifying` accessor \
+             for protocol '{proto_name}'"
+        ),
+        labels: vec![DiagLabel {
+            span: span.clone(),
+            message: format!("'{name}' mutates its receiver when read"),
+            is_primary: true,
+        }],
+        notes: vec![
+            "protocol reads borrow `self`; use a plain `get` or `ref` for the witness".into(),
+        ],
+    }
+}
+
 fn signatures_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
     let (Some(proto), Some(imp)) = (proto, imp) else {
         // If either side lacks a Callable component we can't prove a mismatch —

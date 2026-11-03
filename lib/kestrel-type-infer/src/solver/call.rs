@@ -222,8 +222,14 @@ pub(crate) fn skipped_default_types(
                 return None;
             }
             let default = callable.params.get(slot)?.default_entity?;
-            let hir = qctx.query(kestrel_hir_lower::LowerBody { entity: default, root: ctx.root })?;
-            let typed = qctx.query(crate::InferBody { entity: default, root: ctx.root })?;
+            let hir = qctx.query(kestrel_hir_lower::LowerBody {
+                entity: default,
+                root: ctx.root,
+            })?;
+            let typed = qctx.query(crate::InferBody {
+                entity: default,
+                root: ctx.root,
+            })?;
             let ty = typed.expr_types.get(&hir.tail_expr?)?;
             let default_ty = crate::conformance::resolved_ty_to_hir(ty);
             kestrel_debug::ktrace!(
@@ -253,7 +259,7 @@ pub(super) fn solve_overloaded_call(
         .map(|n| n.0.clone())
         .unwrap_or_else(|| "<overloaded>".into());
 
-    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
 
     // Step 1: filter candidates by label/arity
     let matched: Vec<Entity> = candidates
@@ -327,12 +333,8 @@ pub(crate) fn binding_plan_for(
     args: &[CallArg],
 ) -> Option<Vec<Binding>> {
     let callable = qctx.get::<Callable>(entity)?;
-    let bind_params: Vec<BindParam> = callable
-        .params
-        .iter()
-        .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
-        .collect();
-    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let bind_params: Vec<BindParam> = callable.params.iter().map(BindParam::of).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
     bind_arguments(&bind_params, &arg_labels).ok()
 }
 
@@ -527,7 +529,9 @@ pub(super) fn emit_resolved_call(
                         ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
                     }
                 }
-                for (param_ty, default_ty) in skipped_default_types(ctx, entity, &plan, &param_hir_tys) {
+                for (param_ty, default_ty) in
+                    skipped_default_types(ctx, entity, &plan, &param_hir_tys)
+                {
                     let param_tv = lower_hir_ty_sub(ctx, &param_ty, None, TyVar(0), &subs);
                     let default_tv = lower_hir_ty_sub(ctx, &default_ty, None, TyVar(0), &subs);
                     ctx.equal(param_tv, default_tv, span.clone());

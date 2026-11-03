@@ -4,6 +4,7 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
+use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, bind_arguments};
 use kestrel_ast_builder::{Callable, InitEffect, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
@@ -398,18 +399,26 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 && ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Function)
                 && let Some(callable) = ctx.query_ctx.get::<Callable>(*entity)
             {
-                let arg_labels: Vec<Option<&str>> =
-                    args.iter().map(|a| a.label.as_deref()).collect();
-                if !labels_match(&callable.params, &arg_labels) {
-                    let name = ctx
-                        .query_ctx
-                        .get::<Name>(*entity)
-                        .map(|n| n.0.clone())
-                        .unwrap_or_else(|| "<fn>".into());
+                let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
+                let params: Vec<BindParam> = callable.params.iter().map(BindParam::of).collect();
+                if let Err(e) = bind_arguments(&params, &arg_labels) {
                     let span = span.clone();
+                    let err = match e {
+                        BindError::AmbiguousTrailingClosure { candidates, .. } => {
+                            InferError::AmbiguousTrailingClosure { candidates, span }
+                        },
+                        _ => InferError::NoMatchingOverload {
+                            name: ctx
+                                .query_ctx
+                                .get::<Name>(*entity)
+                                .map(|n| n.0.clone())
+                                .unwrap_or_else(|| "<fn>".into()),
+                            span,
+                        },
+                    };
                     ctx.type_param_defs.remove(callee);
                     let _ = gen_call_args(ctx, hir, args);
-                    return ctx.report_error(InferError::NoMatchingOverload { name, span });
+                    return ctx.report_error(err);
                 }
             }
 
@@ -814,6 +823,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             span,
         } => {
             ctx.scrutinee_exprs.insert(*scrutinee);
+            if hir.arms_borrow_mode(arms) == Some(true) {
+                ctx.mutating_scrutinee_exprs.insert(*scrutinee);
+            }
             let scrut_tv = gen_expr(ctx, hir, *scrutinee);
             // Stage-1 transparent place: a scrutinee is a VALUE context, so a
             // ref-returning call used as a scrutinee must bind its result var
@@ -1402,6 +1414,16 @@ fn gen_pat(
     scrutinee_tv: TyVar,
     source: MatchSource,
 ) {
+    // A destructuring pattern matches THROUGH a ref anywhere, not only at
+    // the top of a `match`: `for (a, b) in pairs.refs()` checks `(a, b)`
+    // against the `&(Int64, Int64)` payload's pointee. Binders inside then
+    // read the pointee in place (MIR's access path peels ref slots); a
+    // binder or wildcard keeps the ref itself.
+    let scrutinee_tv = if hir.pats[pat_id].destructures() {
+        peel_ref_tv(ctx, scrutinee_tv)
+    } else {
+        scrutinee_tv
+    };
     match &hir.pats[pat_id] {
         HirPat::Wildcard { .. } => {
             // No constraint — matches anything
@@ -1638,15 +1660,22 @@ fn bind_skipped_default_type_params(
     }
     let (Some(plan), Some(param_tys), Some(type_args)) = (
         crate::solver::call::binding_plan_for(qctx, entity, args),
-        qctx.query(LowerCallableTypes { entity, root: ctx.root }),
+        qctx.query(LowerCallableTypes {
+            entity,
+            root: ctx.root,
+        }),
         ctx.type_args.get(&callee).cloned(),
     ) else {
         return;
     };
-    let type_params: Vec<Entity> =
-        qctx.get::<TypeParams>(entity).map(|tp| tp.0.clone()).unwrap_or_default();
+    let type_params: Vec<Entity> = qctx
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
     let subs: Vec<(Entity, TyVar)> = type_params.into_iter().zip(type_args).collect();
-    for (param_ty, default_ty) in crate::solver::call::skipped_default_types(ctx, entity, &plan, &param_tys) {
+    for (param_ty, default_ty) in
+        crate::solver::call::skipped_default_types(ctx, entity, &plan, &param_tys)
+    {
         let param_tv = lower_hir_ty_with_subs(ctx, &param_ty, &subs);
         let default_tv = lower_hir_ty_with_subs(ctx, &default_ty, &subs);
         ctx.equal(param_tv, default_tv, span.clone());
@@ -1662,7 +1691,13 @@ fn callee_names_type(ctx: &InferCtx<'_>, hir: &HirBody, callee: HirExprId) -> bo
         HirExpr::TypeRef { .. } => true,
         HirExpr::Def(entity, _, _) => matches!(
             ctx.query_ctx.get::<NodeKind>(*entity),
-            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::TypeParameter | NodeKind::TypeAlias)
+            Some(
+                NodeKind::Struct
+                    | NodeKind::Enum
+                    | NodeKind::Protocol
+                    | NodeKind::TypeParameter
+                    | NodeKind::TypeAlias
+            )
         ),
         _ => false,
     }
@@ -1732,7 +1767,7 @@ fn gen_struct_init(
         .collect();
 
     // Collect arg labels for init matching
-    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
 
     // Initializers come from the one member query every other lookup uses:
     // the type's own, its extensions', and its protocols' extension defaults.
@@ -1747,14 +1782,28 @@ fn gen_struct_init(
         root,
     });
     let is_default = |m: &kestrel_name_res::TypeMember| {
-        matches!(m.source, kestrel_name_res::TypeMemberSource::ProtocolExtension { .. })
+        matches!(
+            m.source,
+            kestrel_name_res::TypeMemberSource::ProtocolExtension { .. }
+        )
     };
-    let mut inits: Vec<Entity> = members.iter().filter(|m| !is_default(m)).map(|m| m.entity).collect();
+    let mut inits: Vec<Entity> = members
+        .iter()
+        .filter(|m| !is_default(m))
+        .map(|m| m.entity)
+        .collect();
     let matches_call = |init: &Entity| {
-        qctx.get::<Callable>(*init).is_some_and(|c| labels_match(&c.params, &arg_labels))
+        qctx.get::<Callable>(*init)
+            .is_some_and(|c| labels_match(&c.params, &arg_labels))
     };
     if !inits.iter().any(matches_call) {
-        inits.extend(members.iter().filter(|m| is_default(m)).map(|m| m.entity).filter(matches_call));
+        inits.extend(
+            members
+                .iter()
+                .filter(|m| is_default(m))
+                .map(|m| m.entity)
+                .filter(matches_call),
+        );
     }
 
     // A derived `Defaultable` adds `init()`, but deriving must not take the
@@ -1890,7 +1939,7 @@ fn gen_struct_init(
             .iter()
             .filter(|&&c| {
                 qctx.get::<kestrel_ast_builder::FieldClass>(c)
-                    .is_some_and(kestrel_ast_builder::FieldClass::is_stored_instance)
+                    .is_some_and(kestrel_ast_builder::FieldClass::is_declared_storage)
             })
             .copied()
             .collect();
@@ -2012,6 +2061,7 @@ fn gen_call_args(ctx: &mut InferCtx<'_>, hir: &HirBody, args: &[HirCallArg]) -> 
                 label: arg.label.clone(),
                 ty,
                 value: arg.value,
+                trailing_closure: arg.trailing_closure,
             }
         })
         .collect()
@@ -2582,6 +2632,7 @@ fn gen_call_args_phased(
                 label: arg.label.clone(),
                 ty,
                 value: arg.value,
+                trailing_closure: arg.trailing_closure,
             }
         })
         .collect();
@@ -2809,7 +2860,10 @@ fn instantiate_entity_inner(
         && let Some(declaring) = ctx.declaring_protocol(entity)
         && declaring != current
         && qctx
-            .query(kestrel_name_res::conformances::ConformingProtocols { entity: current, root })
+            .query(kestrel_name_res::conformances::ConformingProtocols {
+                entity: current,
+                root,
+            })
             .contains(&declaring)
     {
         let self_tv = ctx.self_type_ty(current);

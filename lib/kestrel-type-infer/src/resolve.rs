@@ -4,7 +4,7 @@
 //! depends on this trait, not on concrete `QueryContext`. `WorldResolver`
 //! is the real implementation; tests can provide mocks.
 
-use kestrel_ast_builder::arg_binding::{BindParam, binds};
+use kestrel_ast_builder::arg_binding::{BindArg, BindParam, binds};
 use kestrel_ast_builder::{
     AstType, Callable, ConformanceItem, Conformances, Gettable, Name, NodeKind, Settable, Static,
     TypeParams, Vis,
@@ -65,6 +65,8 @@ pub struct ParamInfo {
     pub label: Option<String>,
     pub ty: HirTy,
     pub has_default: bool,
+    /// `AstParam::takes_closure`: a trailing closure may fill it.
+    pub takes_closure: bool,
 }
 
 /// What kind of member was resolved.
@@ -925,7 +927,7 @@ impl TypeResolver for WorldResolver<'_> {
             };
         }
 
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let matches: Vec<kestrel_hecs::Entity> = static_candidates
             .iter()
             .copied()
@@ -1157,7 +1159,7 @@ impl WorldResolver<'_> {
         name: &str,
         args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError> {
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let mut protocols = vec![protocol];
         let mut visited = crate::collections::HashSet::default();
         visited.insert(protocol);
@@ -1208,7 +1210,7 @@ impl WorldResolver<'_> {
         // through.
         if let TyKind::Opaque { bounds, .. } | TyKind::RawExistential { bounds, .. } = receiver_ty {
             let bound_protocols: Vec<Entity> = bounds.iter().map(|(p, _)| *p).collect();
-            let arg_labels: Vec<Option<&str>> = _args.iter().map(|a| a.label.as_deref()).collect();
+            let arg_labels: Vec<BindArg> = _args.iter().map(BindArg::from).collect();
             match self.select_bound_candidate(&bound_protocols, name, &arg_labels)? {
                 Some(m) => return self.build_member_resolution(m),
                 None => {
@@ -1296,8 +1298,7 @@ impl WorldResolver<'_> {
         // protocol default when `Array` only declares `sorted(by:)` /
         // `sorted(byKey:)` (different signatures), but a direct overload that
         // does match wins.
-        let arg_labels_for_fallback: Vec<Option<&str>> =
-            _args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels_for_fallback: Vec<BindArg> = _args.iter().map(BindArg::from).collect();
         let direct_label_match = !all_candidates.is_empty()
             && all_candidates
                 .iter()
@@ -1376,7 +1377,7 @@ impl WorldResolver<'_> {
         }
 
         // Overload resolution: filter by matching argument labels and arity
-        let arg_labels: Vec<Option<&str>> = _args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = _args.iter().map(BindArg::from).collect();
         let matches: Vec<Entity> = instance_candidates
             .iter()
             .copied()
@@ -1670,6 +1671,7 @@ impl WorldResolver<'_> {
                         label: p.label.clone(),
                         ty,
                         has_default: p.default_entity.is_some(),
+                        takes_closure: p.takes_closure(),
                     }
                 })
                 .collect()
@@ -1763,7 +1765,7 @@ impl WorldResolver<'_> {
             root: self.root,
         });
 
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let mut found: Option<(Entity, Entity)> = None; // (protocol, method)
 
         for &proto in &protocols {
@@ -1892,13 +1894,14 @@ impl WorldResolver<'_> {
                     .and_then(|t| t.clone())
                     .unwrap_or(HirTy::Error(Span::synthetic(0))),
                 has_default: p.default_entity.is_some(),
+                takes_closure: p.takes_closure(),
             })
             .collect()
     }
 
     /// Check if a callable's parameter labels match the given argument labels.
     /// Handles arity with default parameters.
-    fn matches_labels(&self, entity: Entity, arg_labels: &[Option<&str>]) -> bool {
+    fn matches_labels(&self, entity: Entity, arg_labels: &[BindArg<'_>]) -> bool {
         // Fields and computed properties carry `Callable { params: [] }` for
         // the getter's signature, but for member-resolution purposes they are
         // value accesses, not function calls. Trailing `(args)` after a
@@ -1916,11 +1919,7 @@ impl WorldResolver<'_> {
         // Match args to params in declaration order, allowing defaulted params
         // to be skipped anywhere (not just trailing). Single source of truth:
         // `arg_binding::bind_arguments`.
-        let bind_params: Vec<BindParam> = callable
-            .params
-            .iter()
-            .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
-            .collect();
+        let bind_params: Vec<BindParam> = callable.params.iter().map(BindParam::of).collect();
         binds(&bind_params, arg_labels)
     }
 
@@ -2071,7 +2070,7 @@ impl WorldResolver<'_> {
         // resolves name collisions between a primary bound and its inherited
         // conformances (e.g., Equatable.equals vs Equal.equals introduced by
         // `extend Equatable: Equal[Self]`).
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let member =
             if let Some(m) = self.select_bound_candidate(&direct_bounds, name, &arg_labels)? {
                 m
@@ -2226,7 +2225,7 @@ impl WorldResolver<'_> {
         &self,
         protocols: &[Entity],
         name: &str,
-        arg_labels: &[Option<&str>],
+        arg_labels: &[BindArg<'_>],
     ) -> Result<Option<Entity>, MemberError> {
         if protocols.is_empty() {
             return Ok(None);
@@ -2274,7 +2273,7 @@ impl WorldResolver<'_> {
             return Err(MemberError::NotFound);
         }
 
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let matches: Vec<Entity> = instance_candidates
             .iter()
             .copied()
@@ -2352,7 +2351,7 @@ impl WorldResolver<'_> {
     ) -> Result<MemberResolution, MemberError> {
         // Prefer direct bounds over expanded bounds (same reason as
         // resolve_param_member — see the comment there).
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let mut direct = self.collect_assoc_type_direct_bounds(alias_entity);
         self.retain_base_admitted(alias_entity, base_spine, &mut direct);
         if let Some(m) = self.select_bound_candidate(&direct, name, &arg_labels)? {
@@ -2396,7 +2395,7 @@ impl WorldResolver<'_> {
         }
 
         // Label matching for static members
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let matches: Vec<Entity> = static_candidates
             .iter()
             .copied()

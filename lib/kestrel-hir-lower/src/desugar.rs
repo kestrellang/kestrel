@@ -74,6 +74,7 @@ impl LowerCtx<'_> {
                     method: HirName::name(method),
                     type_args: None,
                     args: vec![HirCallArg {
+                        trailing_closure: false,
                         label: label.map(|l| l.to_string()),
                         value: rhs_closure,
                     }],
@@ -95,6 +96,7 @@ impl LowerCtx<'_> {
                 method: HirName::name(method),
                 type_args: None,
                 args: vec![HirCallArg {
+                    trailing_closure: false,
                     label: label.map(|l| l.to_string()),
                     value: rhs,
                 }],
@@ -265,6 +267,7 @@ impl LowerCtx<'_> {
                 method: HirName::name(method),
                 type_args: None,
                 args: vec![HirCallArg {
+                    trailing_closure: false,
                     label: label.map(|l| l.to_string()),
                     value: lowered_rhs,
                 }],
@@ -816,6 +819,7 @@ impl LowerCtx<'_> {
             owner: None,
             name: HirName::name("fromResidual"),
             args: Some(vec![HirCallArg {
+                trailing_closure: false,
                 label: Some("residual".to_string()),
                 value: early_ref,
             }]),
@@ -873,6 +877,7 @@ impl LowerCtx<'_> {
             owner: None,
             name: HirName::name("Err"),
             args: Some(vec![HirCallArg {
+                trailing_closure: false,
                 label: None,
                 value: lowered_value,
             }]),
@@ -962,10 +967,12 @@ impl LowerCtx<'_> {
             callee: dsi_type_ref,
             args: vec![
                 HirCallArg {
+                    trailing_closure: false,
                     label: Some("literalCapacity".to_string()),
                     value: lit_cap,
                 },
                 HirCallArg {
+                    trailing_closure: false,
                     label: Some("interpolationCount".to_string()),
                     value: interp_count,
                 },
@@ -999,6 +1006,7 @@ impl LowerCtx<'_> {
                         method: HirName::name("appendLiteral"),
                         type_args: None,
                         args: vec![HirCallArg {
+                            trailing_closure: false,
                             label: None,
                             value: str_lit,
                         }],
@@ -1017,6 +1025,7 @@ impl LowerCtx<'_> {
                     let lowered = self.lower_expr_src(expr);
 
                     let mut args = vec![HirCallArg {
+                        trailing_closure: false,
                         label: None,
                         value: lowered,
                     }];
@@ -1026,6 +1035,7 @@ impl LowerCtx<'_> {
                         && let Some(opts_expr) = self.build_format_options_from_spec(spec_str, span)
                     {
                         args.push(HirCallArg {
+                            trailing_closure: false,
                             label: None,
                             value: opts_expr,
                         });
@@ -1140,6 +1150,7 @@ impl LowerCtx<'_> {
                 owner: None,
                 name: HirName::name("Some"),
                 args: Some(vec![HirCallArg {
+                    trailing_closure: false,
                     label: None,
                     value: int_lit,
                 }]),
@@ -1158,6 +1169,7 @@ impl LowerCtx<'_> {
                 owner: None,
                 name: HirName::name("Some"),
                 args: Some(vec![HirCallArg {
+                    trailing_closure: false,
                     label: None,
                     value: int_lit,
                 }]),

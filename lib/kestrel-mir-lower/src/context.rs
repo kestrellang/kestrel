@@ -1,10 +1,12 @@
 //! Lowering context — central state during HIR → MIR lowering.
 
 use kestrel_ast_builder::{
-    Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, Subscript,
+    Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, ReceiverKind, Subscript,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
-use kestrel_mir::{FieldIdx, MirModule, MirTy, TyId, VariantIdx, WitnessMethodKey};
+use kestrel_mir::{
+    FieldIdx, MirModule, MirTy, ParamConvention, TyId, VariantIdx, WitnessMethodKey,
+};
 use kestrel_name_res::ExtensionTargetEntity;
 
 use kestrel_ast_builder::qualified_name;
@@ -106,6 +108,23 @@ impl<'w> LowerCtx<'w> {
         Some(FieldIdx::new(idx))
     }
 
+    /// The `NodeKind::Field` member of nominal `owner` named `name` (stored
+    /// or computed).
+    pub fn field_named(&self, owner: Entity, name: &str) -> Option<Entity> {
+        self.world.children_of(owner).iter().copied().find(|&c| {
+            self.world.get::<NodeKind>(c) == Some(&NodeKind::Field)
+                && self.world.get::<Name>(c).is_some_and(|n| n.0 == name)
+        })
+    }
+
+    /// The `FieldIdx` of stored field entity `field` in its owner's lowered
+    /// struct.
+    pub fn field_idx_of(&self, field: Entity) -> Option<FieldIdx> {
+        let owner = self.world.parent_of(field)?;
+        let name = &self.world.get::<Name>(field)?.0;
+        self.resolve_field_idx(owner, name)
+    }
+
     pub fn resolve_field_ty(&self, struct_entity: Entity, field_idx: FieldIdx) -> Option<TyId> {
         let def = self.module.structs.get(&struct_entity)?;
         def.fields.get(field_idx.index()).map(|f| f.ty)
@@ -181,6 +200,22 @@ impl<'w> LowerCtx<'w> {
             self.world.get::<NodeKind>(e) == Some(&NodeKind::RefAccessor)
                 && self.world.get::<MutatingAccessor>(e).is_some() == mutating
         })
+    }
+
+    /// The receiver convention a member READ passes to its provider (`get`
+    /// body or `ref` accessor): `MutBorrow` for a `modifying get` /
+    /// `modifying ref` provider, whose receiver is mutable, else `Borrow`.
+    pub fn read_receiver_convention(&self, provider: Entity) -> ParamConvention {
+        let mutating = self
+            .world
+            .get::<Callable>(provider)
+            .and_then(|c| c.receiver.as_ref())
+            .is_some_and(|r| matches!(r, ReceiverKind::Mutating));
+        if mutating {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        }
     }
 
     /// Consume the context and return the built MIR module.

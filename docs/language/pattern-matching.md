@@ -121,6 +121,25 @@ value => use(value)           // immutable binding
 var value => { value = 1 }    // mutable binding
 ```
 
+### Reference Binding Pattern
+
+`&name` binds a shared reference into the matched value instead of copying it out; `&mutating name` binds a mutable one, so writes land in the matched place:
+
+```kestrel
+var s = Slot.Filled(1);
+if let .Filled(&mutating v) = s { v = 2; }   // s is now .Filled(2)
+
+var t = (1, 2);
+let (&mutating x, y) = t;                    // x writes t.0 in place
+
+func sum((&a, &b): (Int64, Int64)) -> Int64 { a + b }
+```
+
+Reference binders work in every pattern position: `match` arms, `if let`, `while let`, `guard let`, `let` destructuring, `for` patterns, and function and closure parameter patterns. The scrutinee is matched in place.
+
+- `&mutating` needs a mutable place to match (E210).
+- A `let` destructure of a temporary (`let (&x, y) = (1, 2);`) is rejected (E499), because the temporary dies at the end of the statement. Bind the value first, then destructure the binding.
+
 ### Literal Pattern
 
 Matches an exact value:
@@ -533,6 +552,8 @@ The ones you are most likely to meet:
 | E313 | Wrong payload arity for an enum case |
 | E314 | Tuple pattern arity doesn't match the tuple type |
 | E315 | Inconsistent bindings across `|` alternatives |
+| E210 | `&mutating` binder on an immutable scrutinee |
+| E499 | `&` binder in a `let` destructure of a temporary |
 
 ## Grammar
 
@@ -592,6 +613,7 @@ assoc_binding :=
     | "_"
     | IDENT
     | "var" IDENT
+    | "&" "mutating"? IDENT
     | IDENT ":" or_pattern
 
 if_let_expr := "if" condition_list block ("else" (block | if_expr))?

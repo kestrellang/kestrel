@@ -58,6 +58,14 @@
 //!   - Message: "this is a '&T' place; only '&mutating T' places can be written"
 //!
 //! **Notes:** (none)
+//!
+//! ### E214 — `assign_to_failable_place` (Error, Correctness)
+//!
+//! **Message:** "cannot assign to failable place '{name}'"
+//!
+//! A failable member (`var first?: T`, `subscript(...)? -> T`) may not
+//! exist, so plain and compound assignment through it are rejected — there
+//! is no place to store into when it is absent.
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -91,6 +99,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E214",
+        name: "assign_to_failable_place",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct AssignmentAnalyzer;
@@ -118,6 +132,9 @@ impl BodyCheck for AssignmentAnalyzer {
             let HirExpr::Assign { target, .. } = expr else {
                 continue;
             };
+            if push_if_failable(cx, *target, &mut diags) {
+                continue;
+            }
             check_target(cx, *target, is_initializer, &mut diags);
         }
 
@@ -139,6 +156,9 @@ impl BodyCheck for AssignmentAnalyzer {
             let HirExpr::ProtocolCall { receiver, .. } = &cx.hir.exprs[*inner] else {
                 continue;
             };
+            if push_if_failable(cx, *receiver, &mut diags) {
+                continue;
+            }
             if !matches!(
                 &cx.hir.exprs[*receiver],
                 HirExpr::Call { .. } | HirExpr::MethodCall { .. }
@@ -176,6 +196,47 @@ impl BodyCheck for AssignmentAnalyzer {
 
         diags
     }
+}
+
+/// E214: `target` resolves to a failable member. Returns whether it did.
+fn push_if_failable(
+    cx: &BodyContext<'_>,
+    target: HirExprId,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) -> bool {
+    let Some(member) = util::failable_member(cx, target) else {
+        return false;
+    };
+    let name = match cx.query.get::<NodeKind>(member) {
+        Some(NodeKind::Subscript) => "subscript".to_string(),
+        _ => cx
+            .query
+            .get::<kestrel_ast_builder::Name>(member)
+            .map(|n| n.0.clone())
+            .unwrap_or_default(),
+    };
+    let effect = if cx.query.has::<kestrel_ast_builder::Throwing>(member) {
+        "throwing"
+    } else {
+        "failable"
+    };
+    let d = &DESCRIPTORS[4];
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message: format!("cannot assign to {effect} place '{name}'"),
+        labels: vec![DiagLabel {
+            span: util::expr_span(cx.hir, target),
+            message: "this place may not exist".into(),
+            is_primary: true,
+        }],
+        notes: vec![
+            "write through its `mutating ref` with a `&mutating` payload binder \
+             (`if let .Some(&mutating v) = …`), or through the type's own API"
+                .into(),
+        ],
+    });
+    true
 }
 
 /// Validate an assignment target, emitting diagnostics for violations.

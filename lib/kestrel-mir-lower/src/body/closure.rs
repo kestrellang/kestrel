@@ -785,8 +785,13 @@ impl OssaBodyCtx<'_, '_> {
     /// The frame address of a projected view capture (`self.n`, `p.a`).
     fn view_addr_of_place(&mut self, cp: &CapturedPlace, cap_ty: TyId) -> ValueId {
         // Address route: project the field's address off an addressable base
-        // (`try_field_addr_chain` is the shared place walk).
-        if let Some(addr) = self.try_field_addr_chain(cp.repr) {
+        // (`field_addr_chain` is the shared place walk). Capture planning
+        // stops at observed fields, so a written capture never crosses one.
+        let access = match cp.kind {
+            CaptureKind::Read => super::place::Access::Read,
+            _ => super::place::Access::Write,
+        };
+        if let Some(addr) = self.field_addr_chain(cp.repr, access) {
             return addr;
         }
         // Base isn't addressable (a borrowed receiver, an rvalue): fall back to
@@ -869,7 +874,11 @@ impl OssaBodyCtx<'_, '_> {
                 // var-rooted field is a `FieldAddr` copy that borrows nothing:
                 // a hand-rolled extract left the root borrowed until scope
                 // exit, so consuming the root later (`eat(r)`) was an ICE.
-                let v = match self.lower_place(cp.repr, super::place::FieldViews::Forbid) {
+                let v = match self.lower_place(
+                    cp.repr,
+                    super::place::FieldViews::Forbid,
+                    super::place::Access::Read,
+                ) {
                     Some(place) => self.read_place(&place),
                     None => self.lower_place_value_parent(cp.repr),
                 };

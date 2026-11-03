@@ -55,6 +55,15 @@ pub fn build_subscript(
     {
         world.set(entity, TypeAnnotation(ty));
     }
+    if let Some(marker) = node.failable_marker() {
+        mark_failable(world, entity, get_decl_span(marker.syntax(), file_id));
+    }
+    if world
+        .get::<NodeKind>(parent)
+        .is_none_or(|k| *k != NodeKind::Protocol)
+    {
+        mark_throwing(world, entity);
+    }
 
     if let Some(body) = node.subscript_body() {
         if let Some(acc) = body.property_accessors() {
@@ -95,11 +104,29 @@ fn build_accessors(
     file_id: usize,
     is_static: bool,
 ) {
+    let declared = declared_accessors(acc);
+    world.set(entity, declared);
     let has_setter = acc.declares_set();
     if has_setter {
         world.set(entity, Settable);
     }
-    if let Some(block) = acc.getter().and_then(|g| g.code_block()) {
+    // A `modifying` read provider takes a mutable receiver: the subscript's
+    // own Callable is the getter's signature, so its receiver upgrades.
+    let reads_mutate = has_receiver && declared.any_modifying() && !declared.get && !declared.ref_;
+    if reads_mutate {
+        world.set(entity, MutatingRead);
+        if declared.modifying_get
+            && let Some(mut callable) = world.get::<Callable>(entity).cloned()
+        {
+            callable.receiver = Some(ReceiverKind::Mutating);
+            world.set(entity, callable);
+        }
+    }
+    let getter_body = acc
+        .getter()
+        .and_then(|g| g.code_block())
+        .or_else(|| acc.modifying_getter().and_then(|g| g.code_block()));
+    if let Some(block) = getter_body {
         world.set(entity, Valued(SyntaxNodePtr::new(block.syntax())));
     }
     let index_params = |world: &World| {
@@ -136,17 +163,20 @@ fn build_accessors(
     // `mutating ref { … }` the write provider (→ Settable, so assignment
     // checks accept it). Each spawns a RefAccessor child whose params are
     // the index params — no `newValue`.
+    // `(yields_mutating, receiver_mutating)` per clause.
     let ref_clauses = [
         acc.ref_clause()
-            .and_then(|c| Some((c.syntax().clone(), c.code_block()?, false))),
+            .and_then(|c| Some((c.syntax().clone(), c.code_block()?, false, false))),
+        acc.modifying_ref_clause()
+            .and_then(|c| Some((c.syntax().clone(), c.code_block()?, false, true))),
         acc.mutating_ref_clause()
-            .and_then(|c| Some((c.syntax().clone(), c.code_block()?, true))),
+            .and_then(|c| Some((c.syntax().clone(), c.code_block()?, true, true))),
     ];
-    for (clause, body, mutating) in ref_clauses.into_iter().flatten() {
+    for (clause, body, mutating, receiver_mutating) in ref_clauses.into_iter().flatten() {
         if mutating {
             world.set(entity, Settable);
         }
-        let accessor_receiver = has_receiver.then_some(if mutating {
+        let accessor_receiver = has_receiver.then_some(if receiver_mutating {
             ReceiverKind::Mutating
         } else {
             ReceiverKind::Borrowing

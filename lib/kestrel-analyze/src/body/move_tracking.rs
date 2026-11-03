@@ -139,6 +139,10 @@ impl Describe for MoveTrackingAnalyzer {
 
 impl BodyCheck for MoveTrackingAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
+        // A non-Copyable `lazy` getter is rejected as a whole (E639).
+        if crate::decl::lazy::is_non_copyable_lazy_getter(cx) {
+            return Vec::new();
+        }
         // Copyable is resolved via the builtin registry where possible, with a
         // name-based fallback. Minimal test inputs (`stdlib: false`) sometimes
         // can't resolve the builtin, but still declare `: not Copyable`

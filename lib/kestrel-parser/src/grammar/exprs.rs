@@ -493,7 +493,7 @@ fn argument(p: &mut Parser<'_>) {
 /// A trailing closure follows on the same line: `{ … }` or `label: { … }`.
 fn at_trailing_closure(p: &Parser<'_>) -> bool {
     if p.at(K::LBrace) {
-        return !p.nl_before();
+        return !p.nl_before() && !super::items::at_observer_block(p);
     }
     p.at(K::Identifier)
         && !p.nl_before()

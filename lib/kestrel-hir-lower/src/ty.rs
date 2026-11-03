@@ -1377,8 +1377,13 @@ impl QueryFn for LowerTypeAnnotation {
         // stage 2b accepts aggregate positions everywhere EXCEPT alias
         // RHS / other annotations, which stay Strict).
         let (pos, policy) = match nk {
+            // A failable member's ref accessor lends `Optional[&T]`.
             Some(
-                NodeKind::Function | NodeKind::Initializer | NodeKind::Subscript | NodeKind::Deinit,
+                NodeKind::Function
+                | NodeKind::Initializer
+                | NodeKind::Subscript
+                | NodeKind::Deinit
+                | NodeKind::RefAccessor,
             ) => (RefPosition::Return, RefPolicy::AllowAggregate),
             Some(NodeKind::Field | NodeKind::EnumCase) => {
                 (RefPosition::Field, RefPolicy::AllowAggregate)
@@ -1473,6 +1478,20 @@ pub struct PlaceAccessorInfo {
     pub ref_accessor: Option<Entity>,
     /// The `mutating ref { … }` child (write/RMW provider), if declared.
     pub mutating_ref_accessor: Option<Entity>,
+}
+
+impl PlaceAccessorInfo {
+    /// The accessor a FAILABLE member's read calls. A read that a
+    /// `&mutating` payload binder writes through (`if let .Some(&mutating
+    /// v) = b.first`) takes the `mutating ref` (`Optional[&mutating T]`);
+    /// every other read takes `ref`. A missing `mutating ref` falls back to
+    /// `ref`, and analyze rejects the binder (E210).
+    pub fn failable_read_accessor(&self, mutating: bool) -> Option<Entity> {
+        match (mutating, self.mutating_ref_accessor) {
+            (true, Some(accessor)) => Some(accessor),
+            _ => self.ref_accessor,
+        }
+    }
 }
 
 /// Query: the place-accessor children of a Subscript/Field member.

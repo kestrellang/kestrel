@@ -341,7 +341,8 @@ impl OssaBodyCtx<'_, '_> {
             }) if paths.iter().any(|p| p.path == path) => {},
             _ => return None,
         }
-        let addr = self.try_field_addr_chain(expr)?;
+        // Moving out empties the storage, so it is a write.
+        let addr = self.field_addr_chain(expr, super::place::Access::Write)?;
         let ty = self.resolve_expr_type(expr);
         let value = self.emit_take(addr, ty);
         self.record_var_path(local, &path, VarInit::DefUninit);
@@ -370,9 +371,13 @@ impl OssaBodyCtx<'_, '_> {
         else {
             return false;
         };
-        let addr = match self.try_field_addr_chain(target) {
-            Some(a) if !path.is_empty() => a,
-            _ => self.whole_slot_addr(slot),
+        let addr = if path.is_empty() {
+            self.whole_slot_addr(slot)
+        } else {
+            match self.field_addr_chain(target, super::place::Access::Write) {
+                Some(a) => a,
+                None => return false,
+            }
         };
         let ty = self.resolve_expr_type(target);
         // The state of the target place itself: its own tracked path, else

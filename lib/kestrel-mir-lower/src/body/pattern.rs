@@ -97,45 +97,6 @@ impl OssaBodyCtx<'_, '_> {
         val
     }
 
-    /// Does any arm pattern contain a `&`/`&mutating` binder? Returns the
-    /// place-mode request: `None` = value mode (today's lowering, byte
-    /// identical), `Some(mutating)` = place mode, mutable place iff any
-    /// binder is `&mutating`.
-    fn arms_ref_binding_mode(&self, arms: &[HirMatchArm]) -> Option<bool> {
-        fn walk(hir: &kestrel_hir::body::HirBody, id: kestrel_hir::body::HirPatId) -> Option<bool> {
-            use kestrel_hir::body::HirPat;
-            match &hir.pats[id] {
-                HirPat::Binding { by_ref, .. } => *by_ref,
-                HirPat::At { subpattern, .. } => walk(hir, *subpattern),
-                // A type test reads the scrutinee in place (its binding is a
-                // borrow of the payload), so it always takes place mode.
-                HirPat::TypeTest { sub, .. } => walk(hir, *sub).max(Some(false)),
-                HirPat::Tuple { prefix, suffix, .. } => prefix
-                    .iter()
-                    .chain(suffix)
-                    .filter_map(|&p| walk(hir, p))
-                    .max(),
-                HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
-                    args.iter().filter_map(|a| walk(hir, a.pattern)).max()
-                },
-                HirPat::Struct { fields, .. } => fields
-                    .iter()
-                    .filter_map(|f| f.pattern.and_then(|p| walk(hir, p)))
-                    .max(),
-                HirPat::Array { prefix, suffix, .. } => prefix
-                    .iter()
-                    .chain(suffix)
-                    .filter_map(|&p| walk(hir, p))
-                    .max(),
-                HirPat::Or { alternatives, .. } => {
-                    alternatives.iter().filter_map(|&p| walk(hir, p)).max()
-                },
-                _ => None,
-            }
-        }
-        arms.iter().filter_map(|a| walk(&self.hir, a.pattern)).max()
-    }
-
     /// Place-mode scrutinee: evaluate the scrutinee as a PLACE and pin its
     /// raw address. The address is an OWNED pointer scalar, so it threads
     /// through the decision tree's block params with the existing machinery
@@ -209,7 +170,7 @@ impl OssaBodyCtx<'_, '_> {
 
         // Place mode (any `&` binder in the arms): the scrutinee is pinned
         // as an address; value mode keeps today's lowering byte-identical.
-        let place_mode = self.arms_ref_binding_mode(arms);
+        let place_mode = self.hir.arms_borrow_mode(arms);
         // A match that moves only its bound parts (partial moves) keeps the
         // scrutinee in place too: bindings take their fields out of it.
         let part_moves = self
@@ -381,8 +342,12 @@ impl OssaBodyCtx<'_, '_> {
                     })
                 )
             });
-        if part_moves.is_some() {
-            return self.lower_destructure_in_place(scrutinee_expr, arm, part_moves);
+        // `&` / `&mutating` binders (`let (&a, b) = pair`) borrow the
+        // scrutinee place, so they bind in place like a partial move.
+        let ref_mode = self.hir.arms_borrow_mode(std::slice::from_ref(arm));
+        if part_moves.is_some() || ref_mode.is_some() {
+            let mutating = ref_mode.unwrap_or(false);
+            return self.lower_destructure_in_place(scrutinee_expr, arm, part_moves, mutating);
         }
         let scrutinee_val = self.lower_expr(scrutinee_expr);
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
@@ -404,16 +369,18 @@ impl OssaBodyCtx<'_, '_> {
         self.lower_expr(arm.body)
     }
 
-    /// `lower_irrefutable_destructure` for a partial move: bind from the
-    /// pinned scrutinee address; moving bindings take their fields out of
-    /// the slot (`emit_bindings_place`), the rest copy or borrow as usual.
+    /// `lower_irrefutable_destructure` for a partial move or `&` binders:
+    /// bind from the pinned scrutinee address; moving bindings take their
+    /// fields out of the slot (`emit_bindings_place`), `&` binders borrow
+    /// it (a mutable place when `mutating`), the rest copy as usual.
     fn lower_destructure_in_place(
         &mut self,
         scrutinee_expr: HirExprId,
         arm: &HirMatchArm,
         part_moves: Option<(LocalId, Vec<(LocalId, Vec<FieldIdx>)>)>,
+        mutating: bool,
     ) -> ValueId {
-        let addr = self.lower_match_scrutinee_place(scrutinee_expr, false);
+        let addr = self.lower_match_scrutinee_place(scrutinee_expr, mutating);
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
         let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
         let tree = kestrel_pattern_matching::compile_decision_tree(
@@ -1184,11 +1151,16 @@ impl OssaBodyCtx<'_, '_> {
             self.register_ref_binding(extracted, local_id);
             return;
         }
-        let bound_val = if self.body.value(extracted).ownership == Ownership::Owned {
-            self.emit_copy_value(extracted)
-        } else {
-            extracted
-        };
+        // An @owned extraction off a path is already a fresh copy the
+        // binding can own (`emit_enum_payload` / `emit_struct_extract` copy
+        // out of an @owned operand); only the scrutinee itself (an empty
+        // path) must be copied, since the match still owns it.
+        let bound_val =
+            if self.body.value(extracted).ownership == Ownership::Owned && extracted == base {
+                self.emit_copy_value(extracted)
+            } else {
+                extracted
+            };
         self.bind_pattern_local(local_id, bound_val);
     }
 

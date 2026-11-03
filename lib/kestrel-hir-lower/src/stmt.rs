@@ -255,6 +255,26 @@ impl LowerCtx<'_> {
         // Pass `is_mut` so an outer `var (a, b) = …` propagates mutability
         // into each sub-pattern binding (a, b), not just the temp.
         let hir_pat = self.lower_pat_forcing_mut(&pat, is_mut);
+        // `&` binders would borrow `$let_tmp`, which dies with the wrapper
+        // block below: the same borrow-of-a-temporary as `let r = &f();`.
+        let first_binder = kestrel_hir::body::pat_borrows(&self.pats, hir_pat)
+            .into_iter()
+            .find(|b| !b.type_test)
+            .map(|b| b.span.clone());
+        if let Some(binder) = first_binder {
+            self.ctx.accumulate(
+                kestrel_reporting::Diagnostic::error()
+                    .with_code("E499")
+                    .with_message("`&` pattern binding would borrow a temporary")
+                    .with_labels(vec![
+                        kestrel_reporting::Label::primary(binder.file_id, binder.range())
+                            .with_message("borrows part of a value that is dropped at the end of this statement"),
+                    ])
+                    .with_notes(vec![
+                        "bind the value first (`let v = …;`), then destructure `v`".to_string(),
+                    ]),
+            );
+        }
 
         // Create a match expression to destructure:
         // match $let_tmp { pattern => () }

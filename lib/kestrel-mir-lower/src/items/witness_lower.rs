@@ -1,9 +1,7 @@
 //! Witness generation — creates WitnessDef entries from conformance data.
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{
-    Callable, Computed, Name, NodeKind, Settable, Static, TypeParams,
-};
+use kestrel_ast_builder::{Callable, Computed, Name, NodeKind, Settable, Static, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::LowerExtensionTargetTypeArgs;
@@ -551,7 +549,10 @@ fn init_effect_adapter(
         return None;
     }
     let ret = requirement_ret?;
-    let MirTy::Named { entity: wrapper, .. } = ctx.module.ty_arena.get(ret).clone() else {
+    let MirTy::Named {
+        entity: wrapper, ..
+    } = ctx.module.ty_arena.get(ret).clone()
+    else {
         return None;
     };
     let def = ctx.module.functions.get(&init)?.clone();
@@ -726,7 +727,9 @@ fn expected_signature_for(
 /// The name a requirement answers to — name resolution's one rule, which
 /// gives nameless inits and subscripts their keyword sentinels.
 fn protocol_member_name(ctx: &LowerCtx, member: &ProtocolMember) -> String {
-    member_lookup_name(&ctx.query, member.entity).unwrap_or_default().to_string()
+    member_lookup_name(&ctx.query, member.entity)
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn find_impl_among(

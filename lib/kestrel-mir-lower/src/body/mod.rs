@@ -486,6 +486,15 @@ pub(crate) enum AccessorReceiver {
     FieldOf { base: HirExprId, name: String },
 }
 
+impl AccessorReceiver {
+    /// The receiver expression the place is rooted in.
+    pub(crate) fn root_expr(&self) -> HirExprId {
+        match self {
+            Self::Expr(e) | Self::FieldOf { base: e, .. } => *e,
+        }
+    }
+}
+
 /// One deferred get→op→set writeback (see `pending_writebacks`).
 pub(crate) struct PendingWriteback {
     /// The member's setter child (concrete) — witness-dispatched when the
@@ -504,6 +513,13 @@ pub(crate) struct PendingWriteback {
     /// Temp slot holding the element during the mutating operation.
     slot_addr: ValueId,
     elem_ty: TyId,
+    /// A mut-borrow of the slot lent out as a receiver (an observed field
+    /// under a subscript, `o.items(at: 0) += 1`): it, and the refs born
+    /// from it, must end before the slot is taken back.
+    lent: Option<ValueId>,
+    /// The ref results of calls that took `lent` as an argument (a
+    /// `mutating ref` element place), recorded when each call is emitted.
+    lent_refs: Vec<ValueId>,
 }
 
 impl<'a, 'w> OssaBodyCtx<'a, 'w> {
@@ -747,6 +763,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // stored fields in the entry block (so they dominate every failure
         // `return`). Must run after the param loop established `self_addr`.
         self.setup_init_field_flags();
+        self.init_field_defaults();
 
         // Consuming params stay as SSA @owned values — no var_local
         // promotion. Mutating calls use BeginMutBorrow on the SSA value
@@ -1504,6 +1521,96 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 self.field_inits.push((field_idx, VarInit::DefUninit));
             }
         }
+    }
+
+    /// Before an initializer's body runs, store what every init owes `self`
+    /// regardless of its body (Swift's rule for property initializers):
+    /// each `lazy var` cache starts empty, and each stored field with an
+    /// `= expr` default gets that default. The analyzer accepts a defaulted
+    /// field as initialized, so a body that never assigns it still leaves it
+    /// set; one that does assigns over the default.
+    fn init_field_defaults(&mut self) {
+        let Some(self_addr) = self.body_context.init_self_addr() else {
+            return;
+        };
+        let self_ty = self.body.value(self_addr).ty;
+        let mut stores = self.empty_lazy_caches(self_ty);
+        stores.extend(self.field_default_values(self_ty));
+        for (idx, value) in stores {
+            let field_addr = self.emit_field_addr(self_addr, self_ty, idx);
+            self.store_init_self_field(idx, field_addr, value);
+        }
+    }
+
+    /// The `= expr` default of each declared stored field of struct type
+    /// `struct_ty` that has one, lowered inline (the same lowering a
+    /// memberwise init's omitted argument gets), with its `FieldIdx`.
+    fn field_default_values(&mut self, struct_ty: TyId) -> Vec<(FieldIdx, ValueId)> {
+        let MirTy::Named {
+            entity, type_args, ..
+        } = self.ctx.module.ty_arena.get(struct_ty).clone()
+        else {
+            return Vec::new();
+        };
+        let world = self.ctx.world;
+        let defaulted: Vec<(Entity, FieldIdx)> = world
+            .children_of(entity)
+            .iter()
+            .filter(|&&c| {
+                world.get::<kestrel_ast_builder::Valued>(c).is_some()
+                    && world
+                        .get::<kestrel_ast_builder::FieldClass>(c)
+                        .is_some_and(|fc| fc.is_declared_storage())
+            })
+            .filter_map(|&c| Some((c, self.ctx.field_idx_of(c)?)))
+            .collect();
+        let field_tys = self.struct_field_tys(struct_ty);
+        defaulted
+            .into_iter()
+            .filter_map(|(field, idx)| {
+                let ty = *field_tys.get(idx.index())?;
+                Some((idx, self.lower_default_arg_inline(field, ty, &type_args)))
+            })
+            .collect()
+    }
+
+    /// An empty (`.None`) value for each `lazy var` cache field of struct
+    /// type `struct_ty`, with its `FieldIdx` (see `FieldClass::lazy_cache`).
+    pub(crate) fn empty_lazy_caches(&mut self, struct_ty: TyId) -> Vec<(FieldIdx, ValueId)> {
+        let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(struct_ty) else {
+            return Vec::new();
+        };
+        let caches: Vec<FieldIdx> = self
+            .ctx
+            .world
+            .children_of(*entity)
+            .iter()
+            .filter(|&&c| {
+                self.ctx
+                    .world
+                    .get::<kestrel_ast_builder::FieldClass>(c)
+                    .is_some_and(|fc| fc.lazy_cache)
+            })
+            .filter_map(|&c| self.ctx.field_idx_of(c))
+            .collect();
+        if caches.is_empty() {
+            return Vec::new();
+        }
+        let field_tys = self.struct_field_tys(struct_ty);
+        let mut out = Vec::new();
+        for idx in caches {
+            let Some(&opt_ty) = field_tys.get(idx.index()) else {
+                continue;
+            };
+            let MirTy::Named { entity: opt, .. } = self.ctx.module.ty_arena.get(opt_ty) else {
+                continue;
+            };
+            let Some(none) = self.ctx.resolve_variant_idx(*opt, "None") else {
+                continue;
+            };
+            out.push((idx, self.emit_enum_variant(opt_ty, none, Vec::new())));
+        }
+        out
     }
 
     /// Compile-time init state of a droppable `self` field in an init body, or
@@ -3638,7 +3745,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             self.consume(v);
         }
         if ret_ref_mutating.is_none() {
-            for borrow_val in borrows {
+            for &borrow_val in &borrows {
                 let src = self.body.value(borrow_val).borrow_source;
                 self.emit_end_borrow(borrow_val);
                 // A sub-borrow of a ref (receiver/arg prep) was that ref's
@@ -3667,6 +3774,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             if ret_ref_mutating.is_some() {
                 self.track_borrow(r);
                 self.ref_results.insert(r);
+                self.note_lent_ref(&borrows, r);
             } else {
                 self.track_owned(r);
             }
@@ -3866,7 +3974,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     // ================================================================
     // Var-local address access — the address walk lives in `place.rs`
-    // (`try_field_addr_chain` / `try_var_addr`), the place resolver.
+    // (`field_addr_chain` / `write_place_addr`), the place resolver.
     // ================================================================
 
     /// Inside a closure body: if `expr_id` is a captured *projected* place
@@ -3913,7 +4021,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// @guaranteed views); everything else falls back to the ordinary paths.
     /// Used ONLY at ret_borrow return sites.
     pub fn lower_expr_for_ref_return(&mut self, expr_id: HirExprId) -> ValueId {
-        if let Some(place) = self.lower_place(expr_id, place::FieldViews::Allow) {
+        if let Some(place) =
+            self.lower_place(expr_id, place::FieldViews::Allow, place::Access::Read)
+        {
             return match place.repr {
                 place::PlaceRepr::Addr(addr) => self.emit_begin_borrow_addr(addr, place.pointee),
                 place::PlaceRepr::View(v) => v,
@@ -3934,7 +4044,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // Field exprs deliberately fall to lower_expr: value-context reads
         // keep the Copyable-field snapshot and its clone counts.
         if !matches!(self.hir.exprs[expr_id], HirExpr::Field { .. })
-            && let Some(place) = self.lower_place(expr_id, place::FieldViews::Forbid)
+            && let Some(place) =
+                self.lower_place(expr_id, place::FieldViews::Forbid, place::Access::Read)
         {
             return match place.repr {
                 place::PlaceRepr::Addr(addr) => self.emit_begin_borrow_addr(addr, place.pointee),
@@ -4191,7 +4302,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // borrowing the value in place, never lower_expr's copy_value,
             // which would strand the mutation on a throwaway copy (the
             // Iterator.fold/reduce infinite loop).
-            if let Some(p) = self.lower_place(expr_id, place::FieldViews::Forbid) {
+            if let Some(p) =
+                self.lower_place(expr_id, place::FieldViews::Forbid, place::Access::Write)
+            {
                 return match p.repr {
                     place::PlaceRepr::Addr(addr) => {
                         let borrow = self.emit_begin_mut_borrow_addr(addr, p.pointee);
@@ -4222,10 +4335,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             if matches!(
                 self.hir.exprs[expr_id],
                 HirExpr::Field { .. } | HirExpr::TupleIndex { .. }
-            ) && let Some(addr) = self.accessor_writeback_place(expr_id)
+            ) && let wb_mark = self.pending_writebacks.len()
+                && let Some(addr) = self.writeback_place_addr(expr_id)
             {
                 let pointee = self.resolve_expr_type(expr_id);
-                let borrow = self.emit_begin_mut_borrow_addr(addr, pointee);
+                let borrow = self.mut_borrow_write_addr(addr, pointee, wb_mark);
                 return CallArg {
                     value: borrow,
                     convention,
@@ -4242,7 +4356,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // it never emits the spurious copy_value lower_expr would (a
             // clone() for Cloneable receivers, corrupting @guaranteed
             // aggregates, e.g. `valuePtr().with { v in v.clone() }`).
-            if let Some(p) = self.lower_place(expr_id, place::FieldViews::Forbid) {
+            if let Some(p) =
+                self.lower_place(expr_id, place::FieldViews::Forbid, place::Access::Read)
+            {
                 return match p.repr {
                     place::PlaceRepr::Addr(addr) => {
                         let borrow = self.emit_begin_borrow_addr(addr, p.pointee);
@@ -4336,6 +4452,165 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         })
     }
 
+    /// The setter a write to `member` on `receiver` goes through: its `set`
+    /// child, or an observed stored field's `ObserverSetter`. `None` for an
+    /// observed field this body writes directly (see
+    /// [`Self::writes_observed_storage`]). `receiver` is the written place's
+    /// base; `None` (no receiver expression) never bypasses observers.
+    pub(crate) fn write_setter(
+        &self,
+        member: kestrel_hecs::Entity,
+        receiver: Option<HirExprId>,
+    ) -> Option<kestrel_hecs::Entity> {
+        let setter = self.ctx.find_setter_child(member)?;
+        let observer = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::ObserverSetter>(setter)
+            .is_some();
+        if observer && receiver.is_some_and(|r| self.writes_observed_storage(setter, member, r)) {
+            return None;
+        }
+        Some(setter)
+    }
+
+    /// An owned copy of an observed stored field read off its receiver
+    /// place; `None` for any other member (those have a getter to call).
+    fn read_observed_storage(
+        &mut self,
+        recv_place: ValueId,
+        receiver_ty: TyId,
+        member: kestrel_hecs::Entity,
+    ) -> Option<ValueId> {
+        if self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Callable>(member)
+            .is_some()
+        {
+            return None;
+        }
+        let name = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Name>(member)?
+            .0
+            .clone();
+        let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(receiver_ty) else {
+            return None;
+        };
+        let field_idx = self.ctx.resolve_field_idx(*entity, &name)?;
+        let field_ty = *self.struct_field_tys(receiver_ty).get(field_idx.index())?;
+        let borrow = self.emit_begin_borrow(recv_place);
+        let view = self.emit_struct_extract(borrow, field_idx, field_ty);
+        let got = self.emit_copy_value(view);
+        self.emit_end_borrow(borrow);
+        Some(got)
+    }
+
+    /// The writeback slot for stored field `name` of `base` (of struct
+    /// `owner`) when it is observed and this body must run its observers:
+    /// the field is copied out, mutated in the slot, and written back through
+    /// the observer setter when pending writebacks drain. `None` when the
+    /// field isn't observed here (write its storage directly).
+    pub(crate) fn observed_field_slot(
+        &mut self,
+        base: HirExprId,
+        owner: kestrel_hecs::Entity,
+        name: &str,
+        field_ty: TyId,
+    ) -> Option<ValueId> {
+        let field = self.ctx.field_named(owner, name)?;
+        let setter = self.write_setter(field, Some(base))?;
+        self.ctx
+            .world
+            .get::<kestrel_ast_builder::ObserverSetter>(setter)?;
+        self.fabricate_writeback_slot_typed(
+            field_ty,
+            Vec::new(),
+            &AccessorReceiver::Expr(base),
+            &[],
+            field,
+        )
+    }
+
+    /// Does this body store into observed `field` of `receiver` directly,
+    /// without running its observers? Only for its own `self`, and only in
+    /// the observer setter itself or an initializer of the field's type
+    /// (observers never fire during initialization). Any other instance,
+    /// even one of the same type, runs them.
+    fn writes_observed_storage(
+        &self,
+        setter: kestrel_hecs::Entity,
+        field: kestrel_hecs::Entity,
+        receiver: HirExprId,
+    ) -> bool {
+        use kestrel_ast_builder::NodeKind;
+        if !self.is_own_self_place(receiver) {
+            return false;
+        }
+        if self.func_entity == setter {
+            return true;
+        }
+        let world = &self.ctx.world;
+        world.get::<NodeKind>(self.func_entity) == Some(&NodeKind::Initializer)
+            && self.self_type_entity().is_some()
+            && self.self_type_entity() == world.parent_of(field)
+    }
+
+    /// Is the place `expr` rooted at this body's own `self` receiver?
+    fn is_own_self_place(&self, expr: HirExprId) -> bool {
+        let has_receiver = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Callable>(self.func_entity)
+            .is_some_and(|c| c.receiver.is_some());
+        has_receiver
+            && self
+                .hir
+                .place_root(expr)
+                .is_some_and(|root| self.hir.params.first() == Some(&root))
+    }
+
+    /// The type this body's `self` is: the declaring type, or an
+    /// extension's target.
+    fn self_type_entity(&self) -> Option<kestrel_hecs::Entity> {
+        use kestrel_ast_builder::NodeKind;
+        let owner = self.ctx.world.parent_of(self.func_entity)?;
+        if self.ctx.world.get::<NodeKind>(owner) != Some(&NodeKind::Extension) {
+            return Some(owner);
+        }
+        self.ctx
+            .query
+            .query(kestrel_name_res::ExtensionTargetEntity {
+                extension: owner,
+                root: self.ctx.root,
+            })
+    }
+
+    /// Does writing the place `expr_id` pass through an observed stored
+    /// field (`o.count`, `o.pos.x` with `pos` observed) whose writes must
+    /// run its observers? Such places must not resolve to a raw address for
+    /// a write: the accessor writeback (get → mutate → observer setter)
+    /// owns them. Reads keep the plain place path.
+    pub(crate) fn place_crosses_observer(&self, expr_id: HirExprId) -> bool {
+        let (base, is_field) = match &self.hir.exprs[expr_id] {
+            HirExpr::Field { base, .. } => (*base, true),
+            HirExpr::TupleIndex { base, .. } => (*base, false),
+            _ => return false,
+        };
+        let observed = is_field
+            && self
+                .typed
+                .as_ref()
+                .and_then(|t| t.resolutions.get(&expr_id))
+                .is_some_and(|&m| {
+                    kestrel_type_infer::captures::is_observed_field(&self.ctx.query, m)
+                        && self.write_setter(m, Some(base)).is_some()
+                });
+        observed || self.place_crosses_observer(base)
+    }
+
     /// Copy an accessor-backed member's value out through its read provider
     /// into a fresh stack slot and register the set-back (`pending_writebacks`,
     /// drained by the owning call or the statement boundary). Returns the
@@ -4352,6 +4627,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         index_args: &[kestrel_hir::body::HirCallArg],
         member: kestrel_hecs::Entity,
     ) -> Option<ValueId> {
+        let pointee_ty = self.resolve_expr_type(expr_id);
+        let type_args = self.resolve_type_args(expr_id);
+        self.fabricate_writeback_slot_typed(pointee_ty, type_args, receiver, index_args, member)
+    }
+
+    /// [`Self::fabricate_setter_writeback_slot`] for a member with no HIR
+    /// expression of its own (the stored field under a dotted field
+    /// subscript, `o.items(at: 0) = v`): its type and type args are given.
+    fn fabricate_writeback_slot_typed(
+        &mut self,
+        pointee_ty: TyId,
+        type_args: Vec<TyId>,
+        receiver: &AccessorReceiver,
+        index_args: &[kestrel_hir::body::HirCallArg],
+        member: kestrel_hecs::Entity,
+    ) -> Option<ValueId> {
         // Statics keep today's rejection (not carved by the analyzer either).
         if self
             .ctx
@@ -4361,8 +4652,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         {
             return None;
         }
-        let pointee_ty = self.resolve_expr_type(expr_id);
-        let setter = self.ctx.find_setter_child(member)?;
+        let setter = self.write_setter(member, Some(receiver.root_expr()))?;
         // NotCopyable elements can't ride a copy-out — backstop the analyzer
         // (mirrors emit_move_out_of_borrow_backstop's accumulate pattern).
         if self.is_non_copyable(pointee_ty) {
@@ -4396,43 +4686,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // the place itself as its MutBorrow receiver at drain time.
         let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(receiver)?;
         let recv_place = recv_arg.value;
-        let type_args = self.resolve_type_args(expr_id);
         let index_vals: Vec<ValueId> = index_args
             .iter()
             .map(|a| self.lower_expr(a.value))
             .collect();
 
-        // GET: copy the element out.
-        let mut get_args: Vec<CallArg> = vec![CallArg {
-            value: self.emit_begin_borrow(recv_place),
-            convention: ParamConvention::Borrow,
-        }];
-        for &v in &index_vals {
-            get_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
-        }
-        // Read through the member's READ provider: the `ref` accessor child
-        // when present (a ref+set cross-mix leaves the parent bodyless;
-        // emit_store_init below copies out of the @guaranteed ref result),
-        // else the getter on the member itself.
-        let read_callee = self
-            .ctx
-            .find_ref_accessor_child(member, false)
-            .unwrap_or(member);
-        let got = if let Some(protocol) = self.ctx.is_protocol_method(read_callee) {
-            self.ctx.register_name(protocol);
-            let key = self.ctx.witness_method_key(read_callee);
-            let callee = Callee::Witness {
-                protocol,
-                method: key,
-                self_type: receiver_ty,
-                method_type_args: type_args.clone(),
-            };
-            self.emit_call_returning(callee, get_args, pointee_ty)
-        } else {
-            self.ctx.register_name(read_callee);
-            let ta = self.prepend_receiver_type_args(receiver_ty, type_args.clone());
-            let callee = Callee::direct_with_args(read_callee, ta, None);
-            self.emit_call_returning(callee, get_args, pointee_ty)
+        // GET: copy the element out. An observed stored field reads its
+        // storage directly (it has no getter to call).
+        let got = match self.read_observed_storage(recv_place, receiver_ty, member) {
+            Some(got) => got,
+            None => self.emit_read_provider_call(
+                member,
+                recv_place,
+                &index_vals,
+                receiver_ty,
+                &type_args,
+                pointee_ty,
+            ),
         };
 
         // Slot: the mutating operation runs on the slot's address.
@@ -4446,8 +4716,51 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             index_vals,
             slot_addr,
             elem_ty: pointee_ty,
+            lent: None,
+            lent_refs: Vec::new(),
         });
         Some(slot_addr)
+    }
+
+    /// Call `member`'s READ provider on a sub-borrow of `recv_place`: the
+    /// `ref` accessor child when present (a ref+set cross-mix leaves the
+    /// parent bodyless; the caller copies out of the @guaranteed ref
+    /// result), else the getter on the member itself.
+    fn emit_read_provider_call(
+        &mut self,
+        member: kestrel_hecs::Entity,
+        recv_place: ValueId,
+        index_vals: &[ValueId],
+        receiver_ty: TyId,
+        type_args: &[TyId],
+        result_ty: TyId,
+    ) -> ValueId {
+        let mut args: Vec<CallArg> = vec![CallArg {
+            value: self.emit_begin_borrow(recv_place),
+            convention: ParamConvention::Borrow,
+        }];
+        for &v in index_vals {
+            args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+        }
+        let read_callee = self
+            .ctx
+            .find_ref_accessor_child(member, false)
+            .unwrap_or(member);
+        if let Some(protocol) = self.ctx.is_protocol_method(read_callee) {
+            self.ctx.register_name(protocol);
+            let key = self.ctx.witness_method_key(read_callee);
+            let callee = Callee::Witness {
+                protocol,
+                method: key,
+                self_type: receiver_ty,
+                method_type_args: type_args.to_vec(),
+            };
+            return self.emit_call_returning(callee, args, result_ty);
+        }
+        self.ctx.register_name(read_callee);
+        let ta = self.prepend_receiver_type_args(receiver_ty, type_args.to_vec());
+        let callee = Callee::direct_with_args(read_callee, ta, None);
+        self.emit_call_returning(callee, args, result_ty)
     }
 
     /// `o.member.field = v` where `member` is a value-returning computed
@@ -4481,16 +4794,28 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         true
     }
 
-    /// The address to write through for a place whose root is an accessor
-    /// (`arr(0)`, `o.proxy`) reached through stored fields and tuple elements
-    /// (`arr(0).i.x`, `arr(0).0`): the accessor's value is gotten into a
-    /// writeback slot (its setter runs when pending writebacks drain) and the
-    /// stored projections are field addresses into that slot. `None` when the
-    /// chain does not bottom out on a settable accessor. Without this a
-    /// nested store mutated a temporary copy and was lost.
-    pub(crate) fn accessor_writeback_place(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+    /// THE address a write into place `expr_id` stores through: the plain
+    /// var-rooted chain when nothing on it needs a setter, else a writeback.
+    /// A computed accessor (`arr(0)`, `o.proxy`) or an observed stored field
+    /// (`o.pos` with observers) on the chain is gotten into a writeback slot
+    /// (its setter runs when pending writebacks drain), and the stored
+    /// projections below it are field addresses into that slot. `None` when
+    /// the place is neither (an rvalue, a let-bound value, ...).
+    pub(crate) fn write_place_addr(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        if let Some(addr) = self.field_addr_chain(expr_id, place::Access::Write) {
+            return Some(addr);
+        }
+        self.writeback_place_addr(expr_id)
+    }
+
+    /// [`Self::write_place_addr`] for a place with no plain address: the
+    /// writeback half. Without it a nested store mutated a temporary copy
+    /// and was lost, or skipped an observed field's observers.
+    pub(crate) fn writeback_place_addr(&mut self, expr_id: HirExprId) -> Option<ValueId> {
         if let Some((receiver, index_args, member, _)) = self.accessor_member_prelude(expr_id)
-            && self.ctx.find_setter_child(member).is_some()
+            && self
+                .write_setter(member, Some(receiver.root_expr()))
+                .is_some()
         {
             return self.fabricate_setter_writeback_slot(expr_id, &receiver, &index_args, member);
         }
@@ -4503,13 +4828,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     MirTy::Named { entity, .. } => *entity,
                     _ => return None,
                 };
+                // An observed stored field: its own writeback slot IS the place.
+                let field_ty = self.resolve_expr_type(expr_id);
+                if let Some(slot) = self.observed_field_slot(base, entity, &name, field_ty) {
+                    return Some(slot);
+                }
                 (base, self.ctx.resolve_field_idx(entity, &name)?)
             },
             HirExpr::TupleIndex { base, index, .. } => (*base, FieldIdx::new(*index as usize)),
             _ => return None,
         };
         let base_ty = self.resolve_expr_type(base);
-        let base_addr = self.accessor_writeback_place(base)?;
+        let base_addr = self.write_place_addr(base)?;
         Some(self.emit_field_addr(base_addr, base_ty, idx))
     }
 
@@ -4613,11 +4943,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     field_ty =
                         kestrel_mir::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
                 }
+                // An observed field is written through its observer setter.
+                if let Some(slot) = self.observed_field_slot(*base, entity, name, field_ty) {
+                    let borrow = self.lend_writeback_slot(slot, field_ty);
+                    return Some((
+                        CallArg {
+                            value: borrow,
+                            convention: ParamConvention::MutBorrow,
+                        },
+                        field_ty,
+                    ));
+                }
                 // Field addr through the base's var address (not a shallow
                 // copy) so the writeback's setter mutates the real storage.
-                let recv_addr = self.try_var_addr(*base)?;
+                let wb_mark = self.pending_writebacks.len();
+                let recv_addr = self.write_place_addr(*base)?;
                 let field_addr = self.emit_field_addr(recv_addr, base_ty, field_idx);
-                let borrow = self.emit_begin_mut_borrow_addr(field_addr, field_ty);
+                let borrow = self.mut_borrow_write_addr(field_addr, field_ty, wb_mark);
                 Some((
                     CallArg {
                         value: borrow,
@@ -4636,6 +4978,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub(crate) fn drain_writebacks(&mut self, watermark: usize) {
         while self.pending_writebacks.len() > watermark {
             let wb = self.pending_writebacks.pop().expect("len checked");
+            if let Some(lent) = wb.lent {
+                self.end_lent_slot_borrow(lent, &wb.lent_refs);
+            }
             let new_val = self.emit_take(wb.slot_addr, wb.elem_ty);
             let mut args: Vec<CallArg> = vec![CallArg {
                 value: wb.recv_place,
@@ -4659,6 +5004,92 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 let ta = self.prepend_receiver_type_args(wb.receiver_ty, wb.type_args);
                 let callee = Callee::direct_with_args(wb.setter, ta, None);
                 self.emit_call_void(callee, args);
+            }
+        }
+    }
+
+    /// Mut-borrow the newest writeback slot to lend it out as a receiver;
+    /// its drain ends the borrow (see [`PendingWriteback::lent`]).
+    pub(crate) fn lend_writeback_slot(&mut self, slot: ValueId, ty: TyId) -> ValueId {
+        let borrow = self.emit_begin_mut_borrow_addr(slot, ty);
+        if let Some(wb) = self.pending_writebacks.last_mut() {
+            wb.lent = Some(borrow);
+        }
+        borrow
+    }
+
+    /// If `borrow` mut-borrows a pending writeback's slot (of type
+    /// `slot_ty`), end it and lend field `field` of the slot instead, so a
+    /// call on a field of the slot's value mutates the slot in place rather
+    /// than opening a second writeback of the same place.
+    pub(crate) fn relend_lent_field(
+        &mut self,
+        borrow: ValueId,
+        slot_ty: TyId,
+        field: FieldIdx,
+        field_ty: TyId,
+    ) -> Option<ValueId> {
+        let i = self.pending_writebacks.iter().position(|wb| {
+            wb.lent == Some(borrow) || self.body.value(borrow).borrow_source == Some(wb.slot_addr)
+        })?;
+        let slot = self.pending_writebacks[i].slot_addr;
+        self.emit_end_mut_borrow(borrow);
+        let faddr = self.emit_field_addr(slot, slot_ty, field);
+        let relent = self.emit_begin_mut_borrow_addr(faddr, field_ty);
+        self.pending_writebacks[i].lent = Some(relent);
+        Some(relent)
+    }
+
+    /// Mut-borrow `addr` (from [`Self::write_place_addr`]) to pass to a call.
+    /// When resolving it opened a writeback (pending count grew past
+    /// `wb_mark`), `addr` points into the newest slot, so the borrow is lent
+    /// from it: the drain ends it before storing the slot back.
+    pub(crate) fn mut_borrow_write_addr(
+        &mut self,
+        addr: ValueId,
+        ty: TyId,
+        wb_mark: usize,
+    ) -> ValueId {
+        let borrow = self.emit_begin_mut_borrow_addr(addr, ty);
+        if self.pending_writebacks.len() > wb_mark
+            && let Some(wb) = self.pending_writebacks.last_mut()
+            && wb.lent.is_none()
+        {
+            wb.lent = Some(borrow);
+        }
+        borrow
+    }
+
+    /// Record ref result `r` against the pending writeback whose lent slot
+    /// borrow is among the call's borrowed `args`: the ref points into the
+    /// slot, so it must end before the slot is taken back.
+    fn note_lent_ref(&mut self, args: &[ValueId], r: ValueId) {
+        if let Some(wb) = self
+            .pending_writebacks
+            .iter_mut()
+            .find(|wb| wb.lent.is_some_and(|l| args.contains(&l)))
+        {
+            wb.lent_refs.push(r);
+        }
+    }
+
+    /// End a lent slot borrow, and the refs born from it, if the calls that
+    /// took it left them open (newest first).
+    fn end_lent_slot_borrow(&mut self, lent: ValueId, lent_refs: &[ValueId]) {
+        let open: Vec<ValueId> = self
+            .scope_stack
+            .iter()
+            .flat_map(|s| s.entries.iter())
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(v) if *v == lent || lent_refs.contains(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        for v in open.into_iter().rev() {
+            if v == lent {
+                self.emit_end_mut_borrow(v);
+            } else {
+                self.emit_end_borrow(v);
             }
         }
     }

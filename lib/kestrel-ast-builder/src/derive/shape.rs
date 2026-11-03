@@ -3,7 +3,7 @@
 
 use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree::SyntaxKind;
-use kestrel_syntax_tree::ast::{self, AstNode, HasAttributes, HasName, HasStatic};
+use kestrel_syntax_tree::ast::{self, AstNode, HasAttributes, HasName};
 
 use crate::build::is_excluded_by_target;
 use crate::builders::helpers::extract_attribute;
@@ -132,8 +132,9 @@ fn struct_fields(node: &ast::StructDeclaration, target: Option<&TargetConfig>) -
             ast::Item::FieldDeclaration(f) => Some(f),
             _ => None,
         })
-        // Stored instance fields: no `static`, no accessors.
-        .filter(|f| !f.is_static() && f.property_accessors().is_none())
+        // The fields the user declared as storage: an observed property is
+        // one, a `lazy` property (its cache is hidden state) is not.
+        .filter(|f| f.is_declared_instance_storage())
         .filter_map(|f| {
             let ty = f.ty()?;
             Some(Slot {
