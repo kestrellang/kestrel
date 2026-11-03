@@ -3699,15 +3699,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 if self.ctx.module.escape_carry(ty).any() {
                     let convs = self.current_param_convs();
                     let mut joined: Option<RootProvenance> = None;
-                    // A METHOD's returned references root at its receiver
-                    // (the callee enforces it, E512), so only the receiver
-                    // scopes the result: `xs.slice(0)` doesn't borrow `0`.
-                    let candidates = if self.callee_is_method(&callee) {
-                        &args[..args.len().min(1)]
-                    } else {
-                        &args[..]
-                    };
-                    for a in candidates {
+                    let sources = self.ref_source_args(&callee, args.len());
+                    for (i, a) in args.iter().enumerate() {
                         let (a_root, a_guaranteed, a_ty) = {
                             let d = self.body.value(a.value);
                             (d.root, d.ownership == Ownership::Guaranteed, d.ty)
@@ -3715,7 +3708,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         let candidate = a_guaranteed
                             || (a.convention == ParamConvention::Consuming
                                 && self.ctx.module.escape_carry(a_ty).any());
-                        if candidate {
+                        // Skip args that can't hold what the result points
+                        // at: `xs.slice(0)` doesn't borrow the `0` temporary.
+                        let may_source = sources.as_ref().is_none_or(|s| s[i]);
+                        if candidate && may_source {
                             joined = Some(match joined {
                                 None => a_root,
                                 Some(j) => j.join(a_root, &convs),
@@ -4913,21 +4909,32 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         Some((receiver, index_args, member, is_static))
     }
 
-    /// Whether `callee` is an instance method (it has a receiver, which is
-    /// `args[0]`): directly, or a protocol requirement called by witness.
-    /// Function values and unresolved callees answer `false` — callers then
-    /// stay conservative and treat every borrowed arg as a possible root.
-    fn callee_is_method(&self, callee: &Callee) -> bool {
+    /// Per call arg: can the callee's ref-carrying result borrow from it?
+    /// The receiver always can; a declared param only when its type may
+    /// hold what the result points at (`kestrel_semantics::RefSourceParams`,
+    /// shared with the E509 analyzer). `None` = unknown callee or an arg
+    /// list that doesn't line up with the signature: every arg may be.
+    fn ref_source_args(&self, callee: &Callee, n_args: usize) -> Option<Vec<bool>> {
         let entity = match callee {
-            Callee::Direct { func, .. } => Some(*func),
+            Callee::Direct { func, .. } => *func,
             Callee::Witness {
                 protocol, method, ..
-            } => self.find_protocol_method_entity(*protocol, method),
-            _ => None,
+            } => self.find_protocol_method_entity(*protocol, method)?,
+            _ => return None,
         };
-        entity
-            .and_then(|e| self.ctx.world.get::<kestrel_ast_builder::Callable>(e))
-            .is_some_and(|c| c.receiver.is_some())
+        let mut sources = self.ctx.query.query(kestrel_semantics::RefSourceParams {
+            callee: entity,
+            root: self.ctx.root,
+        })?;
+        let has_receiver = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Callable>(entity)
+            .is_some_and(|c| c.receiver.is_some());
+        if has_receiver {
+            sources.insert(0, true);
+        }
+        (sources.len() == n_args).then_some(sources)
     }
 
     /// A dotted subscript on a stored REFERENCE field (`s.base(i)` with

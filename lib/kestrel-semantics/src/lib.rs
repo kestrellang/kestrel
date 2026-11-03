@@ -5,6 +5,7 @@
 //! lowering do not each reinterpret raw conformance syntax differently.
 
 pub mod existential;
+pub mod ref_sources;
 pub mod sizedness;
 pub mod staticness;
 
@@ -12,6 +13,7 @@ pub use existential::{
     Dispatch, ExistentialLayout, Layout, RequirementDispatch, SelfConformance, bound_closure,
     is_requirement, reachable_protocols, self_conformance,
 };
+pub use ref_sources::RefSourceParams;
 pub use sizedness::{
     BoxDefect, ExistentialBoxDefect, NominalSizedness, SizeRequirement, SizedLayer, Sizedness,
     TypeParamSizeRequirement, assoc_may_be_unsized, hir_type_is_sized, instance_is_sized,
@@ -936,7 +938,7 @@ fn ast_type_last_segment_is(ast_ty: &AstType, name: &str) -> bool {
     segments.last().is_some_and(|s| s.name == name)
 }
 
-fn collect_child_types(
+pub(crate) fn collect_child_types(
     ctx: &QueryContext<'_>,
     entity: Entity,
     root: Entity,

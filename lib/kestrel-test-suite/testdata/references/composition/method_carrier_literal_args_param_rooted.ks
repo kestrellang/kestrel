@@ -4,9 +4,10 @@
 // expect-stdout: 2 2\n
 
 // A method that builds a carrier from its receiver, called with literal
-// arguments: the carrier roots at the receiver only, so returning it from
-// a function whose param is the receiver is fine (used to be a false
-// E494 rooted at the literal temporaries).
+// arguments: an `Int64` argument can't hold the `Array` the carrier points
+// at, so the carrier roots at the receiver only and returning it from a
+// function whose param is the receiver is fine (used to be a false E494
+// rooted at the literal temporaries).
 module Test
 
 struct View {

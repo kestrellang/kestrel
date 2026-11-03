@@ -63,26 +63,19 @@ impl RootProvenance {
     ///   `&mutating`-carrying return demands ALL components be
     ///   mutable-rooted (E495).
     pub fn join(self, other: Self, param_convs: &[crate::ty::ParamConvention]) -> Self {
-        // Doubled so a tie between params of one convention breaks toward a
-        // NON-receiver param (`i != 0`): a method's returned references must
-        // root at its receiver (E512), so the join has to surface any other
-        // param it reached rather than hide it behind the receiver.
         let rank = |root: RootProvenance| -> u8 {
             use crate::ty::ParamConvention as PC;
             match root {
                 // Includes the derived placeholder ("Local, no known def").
-                RootProvenance::Local(_) => 12,
-                RootProvenance::Param(i) => {
-                    let base = match param_convs.get(i as usize) {
-                        // Out-of-range index = builder bug; rank conservatively.
-                        Some(PC::Consuming) | None => 10,
-                        Some(PC::Borrow) => 8,
-                        Some(PC::MutBorrow) => 2,
-                    };
-                    base + u8::from(i != 0)
+                RootProvenance::Local(_) => 6,
+                RootProvenance::Param(i) => match param_convs.get(i as usize) {
+                    // Out-of-range index = builder bug; rank conservatively.
+                    Some(PC::Consuming) | None => 5,
+                    Some(PC::Borrow) => 4,
+                    Some(PC::MutBorrow) => 1,
                 },
-                RootProvenance::PointerDerived { mutable: false } => 6,
-                RootProvenance::Static => 4,
+                RootProvenance::PointerDerived { mutable: false } => 3,
+                RootProvenance::Static => 2,
                 RootProvenance::PointerDerived { mutable: true } => 0,
             }
         };
@@ -221,13 +214,6 @@ mod tests {
         // Ties keep self (stable diagnostic anchor).
         let borrow2 = RootProvenance::Param(1);
         assert_eq!(borrow.join(borrow2, &convs), borrow);
-        // Same convention: a non-receiver param beats the receiver (param 0),
-        // so E512 sees it.
-        let two_borrows = [PC::Borrow, PC::Borrow];
-        let recv = RootProvenance::Param(0);
-        let other = RootProvenance::Param(1);
-        assert_eq!(recv.join(other, &two_borrows), other);
-        assert_eq!(other.join(recv, &two_borrows), other);
         // Placeholder ranks as Local.
         assert_eq!(
             stat.join(RootProvenance::derived(), &convs),

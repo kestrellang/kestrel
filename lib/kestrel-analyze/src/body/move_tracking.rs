@@ -2127,18 +2127,29 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
                 }
             } else if result_carries_refs(mcx, expr) {
                 // A function returning a ref-carrying value (`mk(xs, 0, 1)`
-                // -> a slice): it can only have rooted its references at its
-                // arguments, so the result views every argument place — the
-                // same conservative join MIR lowering stamps on the result.
-                for arg in args {
-                    collect_borrowed_arg(mcx, state, arg.value, out);
+                // -> a slice): it can only have rooted its references at the
+                // arguments that may hold what it points at — the same
+                // sources MIR lowering joins into the result's root.
+                let sources = ref_source_mask(mcx, callee_entity, args.len());
+                for (i, arg) in args.iter().enumerate() {
+                    if sources.as_ref().is_none_or(|s| s[i]) {
+                        collect_borrowed_arg(mcx, state, arg.value, out);
+                    }
                 }
             }
         },
-        // A METHOD returning a ref-carrying value roots it at its receiver
-        // (E512 holds callees to that), so `xs.slice(0)` views `xs` alone.
-        HirExpr::MethodCall { receiver, .. } if result_carries_refs(mcx, expr) => {
+        // A METHOD returning a ref-carrying value views its receiver, plus
+        // any argument that may hold what it points at: `xs.slice(0)` views
+        // `xs` alone.
+        HirExpr::MethodCall { receiver, args, .. } if result_carries_refs(mcx, expr) => {
             collect_borrowed_arg(mcx, state, *receiver, out);
+            let method = mcx.cx.typed.resolutions.get(&expr).copied();
+            let sources = ref_source_mask(mcx, method, args.len());
+            for (i, arg) in args.iter().enumerate() {
+                if sources.as_ref().is_none_or(|s| s[i]) {
+                    collect_borrowed_arg(mcx, state, arg.value, out);
+                }
+            }
         },
         HirExpr::ImplicitMember {
             args: Some(args), ..
@@ -2179,6 +2190,18 @@ fn result_carries_refs(mcx: &MoveCtx<'_>, call: HirExprId) -> bool {
         None | Some(ResolvedTy::Ref { .. }) => false,
         Some(ty) => !crate::staticness::resolved_ty_is_static(cx.query, ty, cx.entity, cx.root),
     }
+}
+
+/// Per declared argument (receiver excluded): may the callee's result
+/// borrow from it (`kestrel_semantics::RefSourceParams`, shared with MIR
+/// lowering)? `None` = unknown callee or args that don't line up with its
+/// signature: treat every argument as a source.
+fn ref_source_mask(mcx: &MoveCtx<'_>, callee: Option<Entity>, n_args: usize) -> Option<Vec<bool>> {
+    let sources = mcx.cx.query.query(kestrel_semantics::RefSourceParams {
+        callee: callee?,
+        root: mcx.cx.root,
+    })?;
+    (sources.len() == n_args).then_some(sources)
 }
 
 /// What a call's result views through one borrowed argument: the argument's
