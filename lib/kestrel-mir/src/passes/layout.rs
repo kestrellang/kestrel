@@ -110,18 +110,18 @@ pub fn primitive_size_and_align(ty: &MirTy, target: &TargetConfig) -> Option<(u6
         MirTy::F32 => Some((4, 4)),
         MirTy::F64 => Some((8, 8)),
         MirTy::Never => Some((0, 1)),
-        MirTy::Str => Some((target.pointer_width * 2, target.pointer_width)),
-        MirTy::Pointer(_) => Some((target.pointer_width, target.pointer_width)),
+        MirTy::Str => Some((target.pointer_size() * 2, target.pointer_size())),
+        MirTy::Pointer(_) => Some((target.pointer_size(), target.pointer_size())),
         // Ref's ABI is a raw pointer to the pointee (signature-only type).
-        MirTy::Ref { .. } => Some((target.pointer_width, target.pointer_width)),
-        MirTy::FuncThin { .. } => Some((target.pointer_width, target.pointer_width)),
+        MirTy::Ref { .. } => Some((target.pointer_size(), target.pointer_size())),
+        MirTy::FuncThin { .. } => Some((target.pointer_size(), target.pointer_size())),
         // View tier / bare: `{fn, env_ptr}`. Owning tier: `{fn, env_handle,
         // retain_fn, release_fn}` — the two extra words carry the type-erased
         // share/release operations (lockstep 9: layout ↔ both codegen `ty.rs`
         // ↔ both `compile_apply_partial`).
         MirTy::FuncThick { kind, .. } => Some((
-            target.pointer_width * crate::ty::func_thick_words(*kind),
-            target.pointer_width,
+            target.pointer_size() * crate::ty::func_thick_words(*kind),
+            target.pointer_size(),
         )),
         MirTy::Error => Some((0, 1)),
         _ => None,
@@ -279,8 +279,9 @@ mod tests {
     use crate::item::struct_def::{FieldDef, StructDef};
     use crate::ty::MirTy;
 
+    /// A fixed 64-bit target, so the expected sizes don't depend on the host.
     fn target() -> TargetConfig {
-        TargetConfig::host_64()
+        TargetConfig::from_triple("x86_64-unknown-linux-gnu").unwrap()
     }
 
     #[test]

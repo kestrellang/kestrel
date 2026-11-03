@@ -51,7 +51,8 @@ pub struct Compiler {
     files: HashMap<String, Entity>,
     /// Root module entity — parent of all top-level modules.
     root: Entity,
-    /// Compilation target for conditional filtering (@platform, etc.)
+    /// The compilation target: `@platform` filtering, MIR layout, and codegen
+    /// all read this one value so they agree on the OS and pointer width.
     target: TargetConfig,
     /// Warnings found after monomorphization (E508), from the most recent
     /// `monomorphize_mir`. They live outside the query system because the
@@ -106,10 +107,15 @@ impl Compiler {
         &self.files
     }
 
-    /// Set the compilation target for conditional filtering.
+    /// Set the compilation target (defaults to the host).
     pub fn with_target(mut self, target: TargetConfig) -> Self {
         self.target = target;
         self
+    }
+
+    /// The compilation target every stage compiles for.
+    pub fn target(&self) -> &TargetConfig {
+        &self.target
     }
 
     /// Add or update a source file. Returns the entity handle.
@@ -254,9 +260,8 @@ impl Compiler {
         &self,
     ) -> Result<kestrel_mir::MirModule, kestrel_codegen_cranelift::CodegenError> {
         let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root());
-        let target = kestrel_mir::TargetConfig::host_64();
         let mut next_entity = self.world().entity_count() as u32;
-        let errors = kestrel_mir::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+        let errors = kestrel_mir::passes::run_pipeline(&mut mir, &self.target, &mut next_entity);
         if !errors.is_empty() {
             let ctx = self.world().query_context();
             // Cascade suppression: a coded user error (escape check) makes the
@@ -305,10 +310,9 @@ impl Compiler {
     ) {
         debug_assert!(stop.is_pre_mono());
         let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root());
-        let target = kestrel_mir::TargetConfig::host_64();
         let mut next_entity = self.world().entity_count() as u32;
         let errors =
-            kestrel_mir::passes::run_pipeline_until(&mut mir, &target, &mut next_entity, stop);
+            kestrel_mir::passes::run_pipeline_until(&mut mir, &self.target, &mut next_entity, stop);
         (mir, errors)
     }
 
@@ -351,8 +355,7 @@ impl Compiler {
         let mir = self.lower_to_mir()?;
         self.ensure_no_lowering_errors()?;
         let mono = self.monomorphize_mir(mir)?;
-        let target = kestrel_codegen::TargetConfig::host();
-        kestrel_codegen_cranelift::compile_and_link(&mono, &target, options, output_path)
+        kestrel_codegen_cranelift::compile_and_link(&mono, &self.target, options, output_path)
     }
 
     /// Same as [`Self::compile_and_link`] but uses the LLVM backend. Reuses the
@@ -370,8 +373,7 @@ impl Compiler {
         let mir = self.lower_to_mir().map_err(to_llvm)?;
         self.ensure_no_lowering_errors().map_err(to_llvm)?;
         let mono = self.monomorphize_mir(mir).map_err(to_llvm)?;
-        let target = kestrel_codegen::TargetConfig::host();
-        kestrel_codegen_llvm::compile_and_link(&mono, &target, options, output_path)
+        kestrel_codegen_llvm::compile_and_link(&mono, &self.target, options, output_path)
     }
 
     /// Warnings found after monomorphization by the most recent build
@@ -443,10 +445,9 @@ impl Compiler {
         &self,
         mir: kestrel_mir::MirModule,
     ) -> Result<kestrel_mir::mono::MonoModule, kestrel_codegen_cranelift::CodegenError> {
-        let target = kestrel_mir::TargetConfig::host_64();
         let generic_functions = mir.functions.clone();
 
-        let mut mono = kestrel_mir::mono::monomorphize(mir, &target).map_err(|errs| {
+        let mut mono = kestrel_mir::mono::monomorphize(mir, &self.target).map_err(|errs| {
             let detail = errs
                 .iter()
                 .map(|e| e.to_string())
@@ -533,10 +534,9 @@ impl Compiler {
         kestrel_codegen_cranelift::CodegenError,
     > {
         debug_assert!(stop.is_post_mono());
-        let target = kestrel_mir::TargetConfig::host_64();
         let generic_functions = mir.functions.clone();
 
-        let mut mono = kestrel_mir::mono::monomorphize(mir, &target).map_err(|errs| {
+        let mut mono = kestrel_mir::mono::monomorphize(mir, &self.target).map_err(|errs| {
             let detail = errs
                 .iter()
                 .map(|e| e.to_string())

@@ -64,6 +64,7 @@ members = [
     "lib/kestrel-debug",
     "lib/kestrel-reporting",
     "lib/kestrel-codegen",
+    "lib/kestrel-target",
     "lib/kestrel-doc",
     "lib/kestrel-lsp",
     "lib/kestrel-mir",

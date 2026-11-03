@@ -1383,7 +1383,7 @@ fn mono_size_and_align(
         },
         ty,
     ) {
-        return Some((target.pointer_width * 2, target.pointer_width));
+        return Some((target.pointer_size() * 2, target.pointer_size()));
     }
     if let Some(sa) = primitive_size_and_align(arena.get(ty), target) {
         return Some(sa);
@@ -1496,7 +1496,7 @@ mod tests {
         module.add_function(func);
         module.register_name(entity(1), "main");
 
-        let target = TargetConfig::host_64();
+        let target = TargetConfig::host();
         let mono = monomorphize(module, &target).unwrap();
 
         assert_eq!(mono.functions.len(), 1);
@@ -1580,7 +1580,7 @@ mod tests {
             });
             module.register_name(entity(1), "main");
 
-            let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+            let mono = monomorphize(module, &TargetConfig::host()).unwrap();
             assert_eq!(
                 mono_struct_size(&mono, (ghost, vec![i64_ty])),
                 Some(24),
@@ -1644,7 +1644,7 @@ mod tests {
         });
         module.register_name(entity(1), "main");
 
-        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let mono = monomorphize(module, &TargetConfig::host()).unwrap();
         assert_eq!(
             mono_struct_size(&mono, (inner, vec![i64_ty])),
             Some(24),
@@ -1741,7 +1741,7 @@ mod tests {
         module.register_name(entity(1), "main");
         module.register_name(entity(2), "identity");
 
-        let target = TargetConfig::host_64();
+        let target = TargetConfig::host();
         let mono = monomorphize(module, &target).unwrap();
 
         // main + identity[Int64]
@@ -1869,7 +1869,7 @@ mod tests {
             inline: None,
         });
 
-        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let mono = monomorphize(module, &TargetConfig::host()).unwrap();
         let maker = mono
             .functions
             .iter()
@@ -1972,7 +1972,7 @@ mod tests {
         });
         module.register_name(protocol_entity, "ClosureLifecycle");
 
-        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let mono = monomorphize(module, &TargetConfig::host()).unwrap();
         let main = mono
             .functions
             .iter()
@@ -2018,7 +2018,7 @@ mod tests {
         module.add_function(func);
         module.register_name(entity(1), "malloc");
 
-        let target = TargetConfig::host_64();
+        let target = TargetConfig::host();
         let mono = monomorphize(module, &target).unwrap();
 
         assert_eq!(mono.functions.len(), 1);
