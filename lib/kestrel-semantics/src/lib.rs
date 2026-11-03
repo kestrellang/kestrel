@@ -15,9 +15,10 @@ pub use existential::{
 };
 pub use ref_sources::RefSourceParams;
 pub use sizedness::{
-    BoxDefect, ExistentialBoxDefect, NominalSizedness, SizeRequirement, SizedLayer, Sizedness,
-    TypeParamSizeRequirement, assoc_may_be_unsized, hir_type_is_sized, instance_is_sized,
-    last_stored_field, last_stored_field_type, relaxed_param_by_value,
+    BoxDefect, ExistentialBoxDefect, NominalSizedness, SizeRequirement, SizedLayer, SizedShape,
+    Sizedness, TypeParamSizeRequirement, assoc_may_be_unsized, hir_type_is_sized,
+    instance_is_sized, last_stored_field, last_stored_field_type, relaxed_param_by_value,
+    ty_is_sized,
 };
 
 pub use staticness::{

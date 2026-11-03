@@ -941,8 +941,9 @@ pub(crate) fn is_sized_builtin(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
     }) == Some(protocol)
 }
 
-/// `SizedLayer` over `TyVar` — the solver's face of the per-instantiation
-/// sizedness rule (`kestrel_semantics::instance_is_sized`).
+/// `SizedLayer` over `TyVar` — the solver's face of the sizedness rule
+/// (`kestrel_semantics::ty_is_sized`). Depth bookkeeping mirrors
+/// `SolverStaticLayer`.
 struct SolverSizedLayer<'a, 'i> {
     ctx: &'a InferCtx<'i>,
     depth: u32,
@@ -950,6 +951,14 @@ struct SolverSizedLayer<'a, 'i> {
 
 impl kestrel_semantics::SizedLayer for SolverSizedLayer<'_, '_> {
     type Ty = TyVar;
+
+    fn query(&self) -> &kestrel_hecs::QueryContext<'_> {
+        self.ctx.query_ctx
+    }
+
+    fn root(&self) -> Entity {
+        self.ctx.root
+    }
 
     fn nominal_sizedness(&self, entity: Entity) -> kestrel_semantics::Sizedness {
         self.ctx
@@ -960,52 +969,56 @@ impl kestrel_semantics::SizedLayer for SolverSizedLayer<'_, '_> {
             })
     }
 
-    fn member_is_sized(&self, &tv: &TyVar) -> bool {
+    fn shape<'t>(&self, &tv: &'t TyVar) -> SizedShape<'t, TyVar> {
+        if self.depth > 64 {
+            return SizedShape::Leaf; // recursion guard — never block
+        }
+        let TySlot::Resolved(kind) = self.ctx.slot(self.ctx.resolve(tv)) else {
+            return SizedShape::Leaf; // unresolved: never block
+        };
+        match kind {
+            TyKind::RawExistential { .. } => SizedShape::RawExistential,
+            TyKind::Struct { entity, args } => SizedShape::Struct {
+                entity: *entity,
+                args: Cow::Owned(args.clone()),
+            },
+            TyKind::Param { entity } => SizedShape::Param(*entity),
+            TyKind::AssocProjection { assoc, .. } => SizedShape::AssocProjection(*assoc),
+            TyKind::Enum { .. }
+            | TyKind::Protocol { .. }
+            | TyKind::SelfType { .. }
+            | TyKind::TypeAlias { .. }
+            | TyKind::Tuple(_)
+            | TyKind::Function { .. }
+            | TyKind::Ref { .. }
+            | TyKind::Opaque { .. }
+            | TyKind::Never
+            | TyKind::Error => SizedShape::Leaf,
+        }
+    }
+
+    /// Judged from the body being inferred (`ctx.owner`), so a member of an
+    /// `extend Box[T] where T: Sized` extension sees `T` as Sized.
+    fn param_is_sized(&self, param: Entity) -> bool {
+        self.ctx
+            .query_ctx
+            .query(kestrel_semantics::TypeParamSizeRequirement {
+                param,
+                context: self.ctx.owner,
+                root: self.ctx.root,
+            })
+            == kestrel_semantics::SizeRequirement::RequiresSized
+    }
+
+    fn component_is_sized(&self, &tv: &TyVar) -> bool {
         solver_ty_is_sized(self.ctx, tv, self.depth + 1)
     }
 }
 
-/// Is `tv` Sized (existentials design §2)? The twin of
-/// `kestrel_semantics::hir_type_is_sized`. A type parameter is judged from
-/// the body being inferred (`ctx.owner`), so a member of an
-/// `extend Box[T] where T: Sized` extension sees `T` as Sized. Unresolved
-/// never blocks.
+/// Is `tv` Sized (existentials design §2)? The rule itself is
+/// `kestrel_semantics::ty_is_sized`; `depth` bounds the recursion.
 pub(crate) fn solver_ty_is_sized(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> bool {
-    if depth > 64 {
-        return true;
-    }
-    let resolved = ctx.resolve(tv);
-    let TySlot::Resolved(kind) = ctx.slot(resolved) else {
-        return true;
-    };
-    match kind.clone() {
-        TyKind::RawExistential { .. } => false,
-        TyKind::Struct { entity, args } => {
-            kestrel_semantics::instance_is_sized(&SolverSizedLayer { ctx, depth }, entity, &args)
-        },
-        TyKind::Param { entity } => {
-            ctx.query_ctx
-                .query(kestrel_semantics::TypeParamSizeRequirement {
-                    param: entity,
-                    context: ctx.owner,
-                    root: ctx.root,
-                })
-                == kestrel_semantics::SizeRequirement::RequiresSized
-        },
-        TyKind::AssocProjection { assoc, .. } => {
-            !kestrel_semantics::assoc_may_be_unsized(ctx.query_ctx, assoc, ctx.root)
-        },
-        TyKind::Enum { .. }
-        | TyKind::Protocol { .. }
-        | TyKind::SelfType { .. }
-        | TyKind::TypeAlias { .. }
-        | TyKind::Tuple(_)
-        | TyKind::Function { .. }
-        | TyKind::Ref { .. }
-        | TyKind::Opaque { .. }
-        | TyKind::Never
-        | TyKind::Error => true,
-    }
+    kestrel_semantics::ty_is_sized(&SolverSizedLayer { ctx, depth }, &tv)
 }
 
 /// Is `protocol` the `Static` builtin (references 2a)?

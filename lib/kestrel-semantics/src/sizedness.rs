@@ -13,6 +13,7 @@
 //! only the tail field can gate: every other stored field must be Sized
 //! (E403 enforces that).
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 
 use kestrel_ast_builder::WhereConstraint;
@@ -168,12 +169,61 @@ pub fn assoc_may_be_unsized(ctx: &QueryContext<'_>, assoc: Entity, root: Entity)
 
 // ===== The shared instance rule =====
 
-/// Layer hooks for `instance_is_sized`: the HIR walker below and the
+/// One type form's view of a type, as far as sizedness cares. Each layer
+/// (HIR, solver `TyVar`) only maps its own type onto this; what each shape
+/// *means* is decided once, in [`ty_is_sized`].
+pub enum SizedShape<'t, T: Clone> {
+    /// A raw existential: the one unsized value type.
+    RawExistential,
+    /// A struct instantiation: the per-instance rule (its tail may be a
+    /// relaxed param).
+    Struct { entity: Entity, args: Cow<'t, [T]> },
+    /// Exactly the type it stands for (a bounded alias's expansion).
+    Alias(&'t T),
+    /// A type parameter: Sized unless its bound was relaxed.
+    Param(Entity),
+    /// An associated-type projection: Sized unless declared `not Sized`.
+    AssocProjection(Entity),
+    /// Always Sized: enums, tuples, functions, refs (two words even to an
+    /// unsized pointee), protocols, opaques, `Self`, and recovery leaves.
+    Leaf,
+}
+
+/// Layer hooks for the sizedness rule: the HIR walker below and the
 /// solver's TyVar layer.
 pub trait SizedLayer {
-    type Ty;
+    type Ty: Clone;
+    fn query(&self) -> &QueryContext<'_>;
+    fn root(&self) -> Entity;
     fn nominal_sizedness(&self, entity: Entity) -> Sizedness;
-    fn member_is_sized(&self, ty: &Self::Ty) -> bool;
+    /// This layer's type, seen as a [`SizedShape`].
+    fn shape<'t>(&self, ty: &'t Self::Ty) -> SizedShape<'t, Self::Ty>;
+    /// Does this type parameter carry the (implicit) Sized bound? Layers
+    /// differ in the context they judge it from.
+    fn param_is_sized(&self, param: Entity) -> bool;
+    /// Is a component (type arg, alias expansion) Sized? Layers with
+    /// recursion bookkeeping (the solver's depth) override this.
+    fn component_is_sized(&self, ty: &Self::Ty) -> bool
+    where
+        Self: Sized,
+    {
+        ty_is_sized(self, ty)
+    }
+}
+
+/// THE sizedness rule over any layer's types: what each [`SizedShape`]
+/// means is written here once, for every layer.
+pub fn ty_is_sized<L: SizedLayer>(layer: &L, ty: &L::Ty) -> bool {
+    match layer.shape(ty) {
+        SizedShape::RawExistential => false,
+        SizedShape::Struct { entity, args } => instance_is_sized(layer, entity, &args),
+        SizedShape::Alias(expanded) => layer.component_is_sized(expanded),
+        SizedShape::Param(param) => layer.param_is_sized(param),
+        SizedShape::AssocProjection(assoc) => {
+            !assoc_may_be_unsized(layer.query(), assoc, layer.root())
+        },
+        SizedShape::Leaf => true,
+    }
 }
 
 /// THE per-instantiation sizedness rule for every layer: a Sized base wins;
@@ -184,7 +234,7 @@ pub fn instance_is_sized<L: SizedLayer>(layer: &L, entity: Entity, args: &[L::Ty
         Sizedness::Sized => true,
         Sizedness::ConditionalOn(positions) => positions
             .iter()
-            .all(|&i| args.get(i).is_some_and(|arg| layer.member_is_sized(arg))),
+            .all(|&i| args.get(i).is_some_and(|arg| layer.component_is_sized(arg))),
     }
 }
 
@@ -324,28 +374,28 @@ struct HirSizedWalk<'a, 'q> {
 impl SizedLayer for HirSizedWalk<'_, '_> {
     type Ty = HirTy;
 
+    fn query(&self) -> &QueryContext<'_> {
+        self.ctx
+    }
+
+    fn root(&self) -> Entity {
+        self.root
+    }
+
     fn nominal_sizedness(&self, entity: Entity) -> Sizedness {
         query_nominal_sizedness(self.ctx, entity, self.root)
     }
 
-    fn member_is_sized(&self, ty: &HirTy) -> bool {
+    fn shape<'t>(&self, ty: &'t HirTy) -> SizedShape<'t, HirTy> {
         match ty {
-            HirTy::RawExistential { .. } => false,
-            HirTy::Struct { entity, args, .. } => instance_is_sized(self, *entity, args),
-            // A bounded alias is exactly its expansion.
-            HirTy::Alias { expanded, .. } => self.member_is_sized(expanded),
-            HirTy::Param(param, _) => {
-                self.ctx.query(TypeParamSizeRequirement {
-                    param: *param,
-                    context: self.context,
-                    root: self.root,
-                }) == SizeRequirement::RequiresSized
+            HirTy::RawExistential { .. } => SizedShape::RawExistential,
+            HirTy::Struct { entity, args, .. } => SizedShape::Struct {
+                entity: *entity,
+                args: Cow::Borrowed(args),
             },
-            HirTy::AssocProjection { assoc, .. } => {
-                !assoc_may_be_unsized(self.ctx, *assoc, self.root)
-            },
-            // Enums, tuples, functions, refs (two words even to an unsized
-            // pointee), protocols, opaques, Self, aliases and recovery leaves.
+            HirTy::Alias { expanded, .. } => SizedShape::Alias(expanded),
+            HirTy::Param(param, _) => SizedShape::Param(*param),
+            HirTy::AssocProjection { assoc, .. } => SizedShape::AssocProjection(*assoc),
             HirTy::Enum { .. }
             | HirTy::Protocol { .. }
             | HirTy::Tuple(..)
@@ -356,8 +406,16 @@ impl SizedLayer for HirSizedWalk<'_, '_> {
             | HirTy::Ref { .. }
             | HirTy::Never(_)
             | HirTy::Infer(_)
-            | HirTy::Error(_) => true,
+            | HirTy::Error(_) => SizedShape::Leaf,
         }
+    }
+
+    fn param_is_sized(&self, param: Entity) -> bool {
+        self.ctx.query(TypeParamSizeRequirement {
+            param,
+            context: self.context,
+            root: self.root,
+        }) == SizeRequirement::RequiresSized
     }
 }
 
@@ -369,7 +427,7 @@ pub fn hir_type_is_sized(
     context: Entity,
     root: Entity,
 ) -> bool {
-    HirSizedWalk { ctx, context, root }.member_is_sized(ty)
+    ty_is_sized(&HirSizedWalk { ctx, context, root }, ty)
 }
 
 // ===== By-value uses of a relaxed param =====

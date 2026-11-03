@@ -30,8 +30,8 @@ use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_semantics::{
-    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, NominalStaticness, StaticLayer,
-    StaticRequirement, StaticShape, Staticness, TypeParamCopyRequirement,
+    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, NominalStaticness, SizedShape,
+    StaticLayer, StaticRequirement, StaticShape, Staticness, TypeParamCopyRequirement,
     TypeParamStaticRequirement, ty_is_static,
 };
 use kestrel_span::Span;
