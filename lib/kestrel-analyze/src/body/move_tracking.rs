@@ -44,7 +44,7 @@ use kestrel_ast_builder::{
     Callable, ConformanceItem, Conformances, NodeKind, ReceiverKind, WhereClause as AstWhereClause,
     WhereConstraint,
 };
-use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
+use kestrel_copy_fold::CopyLayer;
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
@@ -2305,61 +2305,53 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
     }
 
     fn member_semantics(&self, ty: &ResolvedTy) -> CopySemantics {
+        kestrel_semantics::ty_copy_semantics(self, ty)
+    }
+}
+
+impl kestrel_semantics::CopyShapeLayer for MoveCopyLayer<'_, '_> {
+    fn query(&self) -> &kestrel_hecs::QueryContext<'_> {
+        self.cx.query
+    }
+
+    fn root(&self) -> Entity {
+        self.cx.root
+    }
+
+    // HOOK: the body owner scopes both lookups.
+    fn param_context(&self, _: Entity) -> Entity {
+        self.cx.entity
+    }
+
+    fn self_context(&self) -> Entity {
+        self.cx.entity
+    }
+
+    fn copy_shape<'t>(&self, ty: &'t ResolvedTy) -> kestrel_semantics::CopyShape<'t, ResolvedTy> {
+        use kestrel_semantics::CopyShape;
         match ty {
-            ResolvedTy::Named { entity, args } => instance_semantics(self, *entity, args),
-            // A protocol's abstract `Self` is only as copyable as the protocol
-            // (or a `where Self:` bound) guarantees; a concrete `Self` is its nominal.
-            ResolvedTy::SelfType { entity } => kestrel_semantics::self_type_copy_semantics(
-                self.cx.query,
-                *entity,
-                self.cx.entity,
-                self.cx.root,
-            ),
-            // HOOK: body-owner context scopes the bound lookup.
-            ResolvedTy::Param { entity } => self
-                .cx
-                .query
-                .query(TypeParamCopyRequirement {
-                    param: *entity,
-                    context: self.cx.entity,
-                    root: self.cx.root,
-                })
-                .into(),
-            ResolvedTy::Tuple(elems) => {
-                fold_members(elems.iter().map(|e| self.member_semantics(e)))
+            ResolvedTy::Named { entity, args } => CopyShape::Nominal {
+                entity: *entity,
+                args: Cow::Borrowed(args),
             },
-            // `some P and not Copyable` hides a possibly move-only underlier —
-            // uses must move. A plain `some P` guarantees a duplicable
-            // underlier (enforced on the defining body post-solve).
-            ResolvedTy::Opaque { not_copyable, .. } => {
-                if *not_copyable {
-                    CopySemantics::NotCopyable
-                } else {
-                    CopySemantics::Copyable
-                }
+            ResolvedTy::SelfType { entity } => CopyShape::SelfType(*entity),
+            ResolvedTy::Param { entity } => CopyShape::Param(*entity),
+            ResolvedTy::Tuple(elems) => CopyShape::Tuple(Cow::Borrowed(elems)),
+            ResolvedTy::Opaque { not_copyable, .. } => CopyShape::Opaque {
+                not_copyable: *not_copyable,
             },
-            // A closure value's copy class is fixed by its KIND (plan D6):
-            // binding a `mutating`/`consuming` closure to a second name is a
-            // MOVE, and an `escaping` one clones (shares) its environment.
-            ResolvedTy::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),
+            ResolvedTy::Function { kind, .. } => CopyShape::Function(*kind),
             ResolvedTy::RawExistential { bounds, .. } => {
-                kestrel_semantics::raw_existential_copy_semantics(
-                    self.cx.query,
-                    bounds.iter().map(|(protocol, _)| *protocol),
-                    self.cx.root,
-                )
+                CopyShape::RawExistential(bounds.iter().map(|(protocol, _)| *protocol).collect())
             },
             // Assoc projections are Copyable-by-default (matches
             // `hir_type_copy_semantics`); never/error are recovery — all
-            // Copyable. Explicit so a future ResolvedTy variant forces a
-            // decision here.
-            // A ref (stage 1) is a borrow: copying it duplicates the pointer,
-            // never the pointee — Copyable, the same answer nightly's old
-            // catch-all gave.
+            // Copyable. A ref (stage 1) is a borrow: copying it duplicates the
+            // pointer, never the pointee.
             ResolvedTy::AssocProjection { .. }
             | ResolvedTy::Never
             | ResolvedTy::Ref { .. }
-            | ResolvedTy::Error => CopySemantics::Copyable,
+            | ResolvedTy::Error => CopyShape::Leaf(CopySemantics::Copyable),
         }
     }
 }

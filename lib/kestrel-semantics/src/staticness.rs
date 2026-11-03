@@ -3,22 +3,16 @@
 //!
 //! A type is **Static** iff no reference (`&T`) is reachable through its
 //! stored fields / enum payloads / tuple elements / type arguments. Static is
-//! a FRONT-END containment bound only — it never changes MIR lowering,
-//! drop/copy expansion, or codegen — so unlike copy semantics (5 layers via
-//! `kestrel-copy-fold`) it needs just the HIR layer here plus thin TyVar /
-//! ResolvedTy mirrors in the solver and analyzer.
+//! a containment bound only — it never changes MIR lowering, drop/copy
+//! expansion, or codegen.
 //!
-//! DELIBERATE divergence from `kestrel_copy_fold::instance_semantics`: the
-//! staticness fold is a 2-state AND whose gating positions are *structural*
-//! (which type params appear in stored positions — computed below, not
-//! declared via `extend … where`) and are legal on ANY non-`not Static`
-//! base. Do not "converge" this into the copy kernel: copy's invariant is
-//! "gating positions non-empty only when the base is NotCopyable", and its
-//! tri-state Cloneable arm has no Static analog.
-//!
-//! Single source of truth: `instance_is_static` is THE per-instantiation
-//! rule; every layer (HIR here, solver TyVar, analyze ResolvedTy) routes
-//! nominal instantiations through it via a `StaticLayer` impl.
+//! The shape and the rule (`StaticShape`, `ty_is_static`) live in the leaf
+//! `kestrel-structural` crate, shared with mono, which judges a witness's
+//! `where T: Static` clause on concrete types. This module holds the
+//! front-end parts: the per-nominal classification (`NominalStaticness`,
+//! carried into MIR on `StructDef` / `EnumDef`), the type-param requirement,
+//! and the HIR layer. The solver and analyzer map their own types onto the
+//! same shape.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -35,17 +29,11 @@ use crate::{
 
 // ===== Vocabulary =====
 
-/// Per-nominal classification: unconditionally Static, unconditionally not,
-/// or Static iff the type args at the given positions are Static.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Staticness {
-    Static,
-    NotStatic,
-    /// Positions are indices into the nominal's type-param list, sorted,
-    /// deduped. Unlike `ConditionalCopyableParams`, a conditional base is
-    /// the NORMAL state for any generic container that stores its param.
-    ConditionalOn(Vec<usize>),
-}
+// The shape and rule live in the leaf `kestrel-structural` crate, shared
+// with mono.
+pub use kestrel_structural::{
+    StaticLayer, StaticShape, Staticness, instance_is_static, ty_is_static,
+};
 
 /// Bound state of a type param: every param requires Static by default;
 /// `where T: not Static` (or a `not Static` owner) relaxes it — the param
@@ -70,98 +58,6 @@ pub enum StaticnessReason {
 pub struct StaticnessInfo {
     pub staticness: Staticness,
     pub reason: StaticnessReason,
-}
-
-// ===== The shared instance rule =====
-
-/// One type form's view of a type, as far as staticness cares. Each layer
-/// (HIR, solver `TyVar`, analyze `ResolvedTy`) only maps its own type onto
-/// this; what each shape *means* is decided once, in [`ty_is_static`].
-pub enum StaticShape<'t, T: Clone> {
-    /// A reference: never Static (the axiom).
-    Ref,
-    /// A nominal instantiation: the per-instance rule.
-    Nominal { entity: Entity, args: Cow<'t, [T]> },
-    /// `Self` / an abstract associated type, judged by its base alone: a
-    /// conditional base counts (Self inside its own definition is covered by
-    /// the `NominalStaticness` cycle guard).
-    BaseOnly(Entity),
-    /// A type parameter: Static unless its bound was relaxed.
-    Param(Entity),
-    /// Static iff every element is.
-    Tuple(Cow<'t, [T]>),
-    /// Exactly the type it stands for (a bounded alias's expansion).
-    Alias(&'t T),
-    /// A raw existential with these protocol bounds.
-    RawExistential(Vec<Entity>),
-    /// A closure: a view-kind closure holds views into its defining frame,
-    /// so it is not Static, exactly like a ref; owning kinds snapshot their
-    /// captures (references 2c, docs/design/closure-fields.md).
-    Function { is_view: bool },
-    /// Conservative never-block leaves (protocols, opaques, projections,
-    /// never, errors, unresolved inference variables).
-    Leaf,
-}
-
-/// Layer hooks for the staticness rule. Implementors: the HIR walker below,
-/// the solver's TyVar layer, the analyzer's ResolvedTy layer.
-pub trait StaticLayer {
-    type Ty: Clone;
-    fn query(&self) -> &QueryContext<'_>;
-    fn root(&self) -> Entity;
-    /// The nominal's classification (HIR layer: `NominalStaticness` through
-    /// the cycle guard).
-    fn nominal_staticness(&self, entity: Entity) -> Staticness;
-    /// This layer's type, seen as a [`StaticShape`].
-    fn shape<'t>(&self, ty: &'t Self::Ty) -> StaticShape<'t, Self::Ty>;
-    /// Does this type parameter carry the (implicit) Static bound? Layers
-    /// differ in the lookup context and in dependency tracking.
-    fn param_is_static(&self, param: Entity) -> bool;
-    /// Is a component (type arg, tuple element, alias expansion) Static?
-    /// Layers with recursion bookkeeping (the solver's depth) override this.
-    fn component_is_static(&self, ty: &Self::Ty) -> bool
-    where
-        Self: Sized,
-    {
-        ty_is_static(self, ty)
-    }
-}
-
-/// THE staticness rule over any layer's types: what each [`StaticShape`]
-/// means is written here once, for every layer.
-pub fn ty_is_static<L: StaticLayer>(layer: &L, ty: &L::Ty) -> bool {
-    match layer.shape(ty) {
-        StaticShape::Ref => false,
-        StaticShape::Nominal { entity, args } => instance_is_static(layer, entity, &args),
-        StaticShape::BaseOnly(entity) => {
-            !matches!(layer.nominal_staticness(entity), Staticness::NotStatic)
-        },
-        StaticShape::Param(param) => layer.param_is_static(param),
-        StaticShape::Tuple(elems) => elems.iter().all(|e| layer.component_is_static(e)),
-        StaticShape::Alias(expanded) => layer.component_is_static(expanded),
-        StaticShape::RawExistential(bounds) => {
-            crate::raw_existential_is_static(layer.query(), bounds, layer.root())
-        },
-        StaticShape::Function { is_view } => !is_view,
-        StaticShape::Leaf => true,
-    }
-}
-
-/// THE per-instantiation staticness rule, single source of truth for every
-/// layer: a Static base wins; a NotStatic base loses; a conditional base
-/// ANDs the args at the gating positions. A missing arg at a gating
-/// position is unprovable ⇒ false. Recursing ONLY into gating args is
-/// load-bearing: `Pointer[T]` / `lang.ptr[T]` store no `T` (raw address
-/// payload), so they classify Static for any `T` — the unsafe escape hatch.
-pub fn instance_is_static<L: StaticLayer>(layer: &L, entity: Entity, args: &[L::Ty]) -> bool {
-    match layer.nominal_staticness(entity) {
-        Staticness::Static => true,
-        Staticness::NotStatic => false,
-        Staticness::ConditionalOn(positions) => positions.iter().all(|&i| {
-            args.get(i)
-                .is_some_and(|arg| layer.component_is_static(arg))
-        }),
-    }
 }
 
 // ===== Type-param requirement =====
@@ -366,12 +262,8 @@ struct HirStaticWalk<'a, 'q> {
 impl StaticLayer for HirStaticWalk<'_, '_> {
     type Ty = HirTy;
 
-    fn query(&self) -> &QueryContext<'_> {
-        self.ctx
-    }
-
-    fn root(&self) -> Entity {
-        self.root
+    fn raw_existential_is_static(&self, bounds: &[Entity]) -> bool {
+        crate::raw_existential_is_static(self.ctx, bounds.iter().copied(), self.root)
     }
 
     fn nominal_staticness(&self, entity: Entity) -> Staticness {

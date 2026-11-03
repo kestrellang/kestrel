@@ -1016,6 +1016,7 @@ dependencies = [
  "kestrel-entail",
  "kestrel-hecs",
  "kestrel-span",
+ "kestrel-structural",
  "kestrel-target",
  "rustc-hash 2.1.2",
  "smallvec",
@@ -1104,6 +1105,7 @@ dependencies = [
  "kestrel-hir-lower",
  "kestrel-name-res",
  "kestrel-span",
+ "kestrel-structural",
 ]
 
 [[package]]
@@ -1111,6 +1113,13 @@ name = "kestrel-span"
 version = "0.18.0"
 dependencies = [
  "codespan-reporting",
+]
+
+[[package]]
+name = "kestrel-structural"
+version = "0.18.0"
+dependencies = [
+ "kestrel-hecs",
 ]
 
 [[package]]

@@ -23,12 +23,8 @@ struct ResolvedStaticLayer<'a, 'q> {
 impl StaticLayer for ResolvedStaticLayer<'_, '_> {
     type Ty = ResolvedTy;
 
-    fn query(&self) -> &QueryContext<'_> {
-        self.query
-    }
-
-    fn root(&self) -> Entity {
-        self.root
+    fn raw_existential_is_static(&self, bounds: &[Entity]) -> bool {
+        kestrel_semantics::raw_existential_is_static(self.query, bounds.iter().copied(), self.root)
     }
 
     fn nominal_staticness(&self, entity: Entity) -> Staticness {

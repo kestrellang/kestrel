@@ -2605,9 +2605,10 @@ impl WorldResolver<'_> {
                     CopyRequirement::MayBeNonCopyable => CopySemantics::NotCopyable,
                 }
             },
-            // Mirror `hir_type_copy_semantics`: protocol existentials / `some P`
-            // are Copyable; an abstract associated projection is conservatively
-            // NotCopyable (not known to be copyable).
+            // Protocol existentials / `some P` are Copyable. An abstract
+            // associated projection is conservatively NotCopyable here (not
+            // known to be copyable) — UNLIKE `ty_copy_semantics`, which makes
+            // it Copyable-by-default; see this function's doc comment.
             TyKind::Protocol { .. } => CopySemantics::Copyable,
             // `some P and not Copyable` may hide a move-only underlier.
             TyKind::Opaque { not_copyable, .. } => {

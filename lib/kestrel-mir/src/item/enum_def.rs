@@ -44,6 +44,9 @@ pub struct EnumDef {
     /// T: Copyable`). Empty unless conditionally copyable. See
     /// `kestrel_semantics::ConditionalCopyableParams` and `StructDef`.
     pub conditionally_copyable: Vec<usize>,
+    /// The front end's `NominalStaticness` (see `StructDef::staticness`).
+    /// An enum is always Sized, so it carries no sizedness.
+    pub staticness: kestrel_structural::Staticness,
     /// `@layout` / `@align`, the input to every layout of this type.
     pub layout_attrs: crate::layout::LayoutAttrs,
 }
@@ -57,6 +60,7 @@ impl EnumDef {
             cases: Vec::new(),
             type_info: TypeInfo::default(),
             conditionally_copyable: Vec::new(),
+            staticness: kestrel_structural::Staticness::Static,
             layout_attrs: crate::layout::LayoutAttrs::default(),
         }
     }

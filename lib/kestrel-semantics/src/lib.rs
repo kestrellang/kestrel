@@ -4,11 +4,13 @@
 //! downstream phases need so analyzers, type inference, move tracking, and MIR
 //! lowering do not each reinterpret raw conformance syntax differently.
 
+pub mod copy_shape;
 pub mod existential;
 pub mod ref_sources;
 pub mod sizedness;
 pub mod staticness;
 
+pub use copy_shape::{CopyShape, CopyShapeLayer, ty_copy_semantics};
 pub use existential::{
     Dispatch, ExistentialLayout, Layout, RequirementDispatch, SelfConformance, bound_closure,
     is_requirement, reachable_protocols, self_conformance,
@@ -36,7 +38,7 @@ use kestrel_ast_builder::{
     ConformanceItem, Conformances, FieldClass, NodeKind, WhereClause as AstWhereClause,
     WhereConstraint,
 };
-use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
+use kestrel_copy_fold::CopyLayer;
 use kestrel_hecs::guard::OnDrop;
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::builtin::BuiltinKind;
@@ -784,52 +786,61 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
     }
 
     fn member_semantics(&self, ty: &HirTy) -> CopySemantics {
+        ty_copy_semantics(self, ty)
+    }
+}
+
+impl CopyShapeLayer for HirCopyLayer<'_, '_> {
+    fn query(&self) -> &QueryContext<'_> {
+        self.ctx
+    }
+
+    fn root(&self) -> Entity {
+        self.root
+    }
+
+    // HOOK: the caller-supplied `context` scopes both lookups.
+    fn param_context(&self, _: Entity) -> Entity {
+        self.context
+    }
+
+    fn self_context(&self) -> Entity {
+        self.context
+    }
+
+    fn copy_shape<'t>(&self, ty: &'t HirTy) -> CopyShape<'t, HirTy> {
         match ty {
             HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => {
-                instance_semantics(self, *entity, args)
-            },
-            HirTy::Tuple(elems, _) => fold_members(elems.iter().map(|e| self.member_semantics(e))),
-            // HOOK: caller-supplied `context` scopes the bound lookup.
-            HirTy::Param(entity, _) => self
-                .ctx
-                .query(TypeParamCopyRequirement {
-                    param: *entity,
-                    context: self.context,
-                    root: self.root,
-                })
-                .into(),
-            // No per-instantiation refinement for Self/alias uses (current behavior).
-            HirTy::SelfType(entity, _) => {
-                self_type_copy_semantics(self.ctx, *entity, self.context, self.root)
-            },
-            HirTy::AbstractAssoc { entity, .. } => self.base_semantics(*entity),
-            HirTy::Alias { expanded, .. } => self.member_semantics(expanded),
-            HirTy::Protocol { .. } => CopySemantics::Copyable,
-            HirTy::RawExistential { bounds, .. } => raw_existential_copy_semantics(
-                self.ctx,
-                bounds.iter().filter_map(|b| match b {
-                    HirTy::Protocol { entity, .. } => Some(*entity),
-                    _ => None,
-                }),
-                self.root,
-            ),
-            // `some P and not Copyable` may hide a move-only underlier; the
-            // plain form guarantees a duplicable one (post-solve check).
-            HirTy::Opaque { not_copyable, .. } => {
-                if *not_copyable {
-                    CopySemantics::NotCopyable
-                } else {
-                    CopySemantics::Copyable
+                CopyShape::Nominal {
+                    entity: *entity,
+                    args: Cow::Borrowed(args),
                 }
             },
-            // A closure value's copy class is fixed by its KIND, not by what it
-            // captures (plan D6 / docs/design/closures.md §"Copy and Drop").
-            HirTy::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),
+            HirTy::Tuple(elems, _) => CopyShape::Tuple(Cow::Borrowed(elems)),
+            HirTy::Param(entity, _) => CopyShape::Param(*entity),
+            HirTy::SelfType(entity, _) => CopyShape::SelfType(*entity),
+            HirTy::AbstractAssoc { entity, .. } => CopyShape::BaseOnly(*entity),
+            HirTy::Alias { expanded, .. } => CopyShape::Alias(expanded),
+            HirTy::RawExistential { bounds, .. } => CopyShape::RawExistential(
+                bounds
+                    .iter()
+                    .filter_map(|b| match b {
+                        HirTy::Protocol { entity, .. } => Some(*entity),
+                        _ => None,
+                    })
+                    .collect(),
+            ),
+            HirTy::Opaque { not_copyable, .. } => CopyShape::Opaque {
+                not_copyable: *not_copyable,
+            },
+            HirTy::Function { kind, .. } => CopyShape::Function(*kind),
+            // A protocol existential is Copyable (not known Cloneable).
+            HirTy::Protocol { .. } => CopyShape::Leaf(CopySemantics::Copyable),
             // Ref is rejected (rewritten to Error) at HIR lowering and should
             // never reach here; treat it exactly like Error if it does.
             // Infer/Error are recovery.
             HirTy::Never(_) | HirTy::Infer(_) | HirTy::Error(_) | HirTy::Ref { .. } => {
-                CopySemantics::Copyable
+                CopyShape::Leaf(CopySemantics::Copyable)
             },
             // An associated projection (`I.Item`) is Copyable-by-default, exactly
             // like a type param: the model gives every associated type an implicit
@@ -837,10 +848,10 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
             // Copyable concretes are substituted at mono. Treating it as
             // `NotCopyable` here wrongly poisoned every container of an assoc type
             // (e.g. an iterator's `pendingItem: I.Item?`). MIR `ty_query` already
-            // classifies `AssociatedProjection` as `Bitwise`; the solver agrees via
-            // `type_conforms_copyable`. (A `type Item: not Copyable` associated type
-            // would need per-assoc requirement tracking — not modeled yet.)
-            HirTy::AssocProjection { .. } => CopySemantics::Copyable,
+            // classifies `AssociatedProjection` as `Bitwise`. (A `type Item: not
+            // Copyable` associated type would need per-assoc requirement
+            // tracking — not modeled yet.)
+            HirTy::AssocProjection { .. } => CopyShape::Leaf(CopySemantics::Copyable),
         }
     }
 }

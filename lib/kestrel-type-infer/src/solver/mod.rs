@@ -23,7 +23,7 @@ use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
 use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, Binding, bind_arguments};
 use kestrel_ast_builder::{Callable, InitEffect, Intrinsic, Name, NodeKind, TypeParams};
-use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
+use kestrel_copy_fold::CopyLayer;
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::{HirBody, HirExpr};
@@ -31,8 +31,8 @@ use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_semantics::{
     ConditionalCopyableParams, CopySemantics, NominalCopySemantics, NominalStaticness, SizedShape,
-    StaticLayer, StaticRequirement, StaticShape, Staticness, TypeParamCopyRequirement,
-    TypeParamStaticRequirement, ty_is_static,
+    StaticLayer, StaticRequirement, StaticShape, Staticness, TypeParamStaticRequirement,
+    ty_is_static,
 };
 use kestrel_span::Span;
 

@@ -7,15 +7,14 @@ use crate::TyId;
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
 use crate::inst::InstKind;
-use crate::item::enum_def::EnumDef;
 use crate::item::function::{FunctionDef, FunctionKind, WhereConstraint};
 use crate::item::protocol::ProtocolDef;
-use crate::item::struct_def::StructDef;
 use crate::item::witness::WitnessDef;
 use crate::mono::types::InstantiationKey;
 use crate::mono::witness::{self, MonoError};
 use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
+use crate::ty_query::TypeEnv;
 
 // -- Collection result --
 
@@ -63,28 +62,14 @@ impl WitnessCache {
 
 pub fn collect_all(
     functions: &IndexMap<Entity, FunctionDef>,
-    structs: &IndexMap<Entity, StructDef>,
-    enums: &IndexMap<Entity, EnumDef>,
-    protocols: &IndexMap<Entity, ProtocolDef>,
+    env: TypeEnv<'_>,
     witnesses: &[WitnessDef],
     arena: &mut TyArena,
     entity_names: &IndexMap<Entity, String>,
-    copyable_protocol: Option<Entity>,
-    cloneable_protocol: Option<Entity>,
     vtable_templates: &IndexMap<Entity, crate::item::VTableTemplate>,
     clone_thunk: Option<Entity>,
 ) -> Result<CollectionResult, Vec<MonoError>> {
-    let mut ctx = CollectionContext::new(
-        functions,
-        structs,
-        enums,
-        protocols,
-        witnesses,
-        arena,
-        entity_names,
-    );
-    ctx.copyable_protocol = copyable_protocol;
-    ctx.cloneable_protocol = cloneable_protocol;
+    let mut ctx = CollectionContext::new(functions, env, witnesses, arena, entity_names);
     ctx.vtable_templates = Some(vtable_templates);
     ctx.clone_thunk = clone_thunk;
     ctx.collect();
@@ -101,9 +86,9 @@ pub fn collect_all(
 
 struct CollectionContext<'a> {
     functions: &'a IndexMap<Entity, FunctionDef>,
-    structs: &'a IndexMap<Entity, StructDef>,
-    enums: &'a IndexMap<Entity, EnumDef>,
-    protocols: &'a IndexMap<Entity, ProtocolDef>,
+    /// Nominal / protocol defs and builtin protocol ids: what the copy
+    /// classifier and witness selection read.
+    env: TypeEnv<'a>,
     witnesses: &'a [WitnessDef],
     arena: &'a mut TyArena,
     entity_names: &'a IndexMap<Entity, String>,
@@ -113,10 +98,6 @@ struct CollectionContext<'a> {
     errors: Vec<MonoError>,
     /// Whether runaway polymorphic recursion was already reported.
     too_deep_reported: bool,
-    /// For [`crate::ty_query::CopyEnv`]: whether a concrete instance is
-    /// actually Clone before its clone impl is instantiated.
-    copyable_protocol: Option<Entity>,
-    cloneable_protocol: Option<Entity>,
     /// Table shapes; a table literal instantiates its entries' functions.
     vtable_templates: Option<&'a IndexMap<Entity, crate::item::VTableTemplate>>,
     /// Tables already scanned, by (template, payload).
@@ -128,18 +109,14 @@ struct CollectionContext<'a> {
 impl<'a> CollectionContext<'a> {
     fn new(
         functions: &'a IndexMap<Entity, FunctionDef>,
-        structs: &'a IndexMap<Entity, StructDef>,
-        enums: &'a IndexMap<Entity, EnumDef>,
-        protocols: &'a IndexMap<Entity, ProtocolDef>,
+        env: TypeEnv<'a>,
         witnesses: &'a [WitnessDef],
         arena: &'a mut TyArena,
         entity_names: &'a IndexMap<Entity, String>,
     ) -> Self {
         Self {
             functions,
-            structs,
-            enums,
-            protocols,
+            env,
             witnesses,
             arena,
             entity_names,
@@ -148,8 +125,6 @@ impl<'a> CollectionContext<'a> {
             witness_cache: WitnessCache::new(),
             errors: Vec::new(),
             too_deep_reported: false,
-            copyable_protocol: None,
-            cloneable_protocol: None,
             vtable_templates: None,
             seen_vtables: IndexSet::new(),
             clone_thunk: None,
@@ -192,10 +167,12 @@ impl<'a> CollectionContext<'a> {
 
             if let Some(parent_entity) = parent {
                 let is_concrete_nongeneric = self
+                    .env
                     .structs
                     .get(&parent_entity)
                     .is_some_and(|s| s.type_params.is_empty())
                     || self
+                        .env
                         .enums
                         .get(&parent_entity)
                         .is_some_and(|e| e.type_params.is_empty());
@@ -271,7 +248,7 @@ impl<'a> CollectionContext<'a> {
             &key.type_args,
             key.self_type,
             self.arena,
-            self.protocols,
+            self.env.protocols,
             self.witnesses,
         );
         let parent_self = key.self_type;
@@ -428,7 +405,7 @@ impl<'a> CollectionContext<'a> {
                 match witness::resolve_witness_call(
                     self.arena,
                     self.witnesses,
-                    self.protocols,
+                    &self.env,
                     self.functions,
                     self.entity_names,
                     *protocol,
@@ -441,7 +418,7 @@ impl<'a> CollectionContext<'a> {
                         if let Ok((widx, bindings)) = witness::find_witness_with_method(
                             self.arena,
                             self.witnesses,
-                            self.protocols,
+                            &self.env,
                             *protocol,
                             method,
                             concrete_self,
@@ -573,7 +550,7 @@ impl<'a> CollectionContext<'a> {
         }
         let mut tails = super::GenericTails {
             arena: self.arena,
-            structs: self.structs,
+            structs: self.env.structs,
             witnesses: self.witnesses,
         };
         if crate::ty::is_unsized(&mut tails, ty) {
@@ -588,15 +565,8 @@ impl<'a> CollectionContext<'a> {
     /// Is the concrete type `ty` duplicated by a clone (or bit-copy), rather
     /// than move-only? Same classifier as the rest of MIR.
     fn instance_may_clone(&self, ty: TyId) -> bool {
-        let env = crate::ty_query::CopyEnv {
-            structs: self.structs,
-            enums: self.enums,
-            protocols: self.protocols,
-            cloneable_protocol: self.cloneable_protocol,
-            copyable_protocol: self.copyable_protocol,
-        };
         !matches!(
-            crate::ty_query::copy_behavior_in(self.arena, &env, ty, None),
+            crate::ty_query::copy_behavior_in(self.arena, &self.env, ty, None),
             crate::CopyBehavior::None
         )
     }
@@ -611,10 +581,11 @@ impl<'a> CollectionContext<'a> {
     }
 
     fn type_info_of(&self, nominal: Entity) -> Option<&crate::item::TypeInfo> {
-        self.structs
+        self.env
+            .structs
             .get(&nominal)
             .map(|s| &s.type_info)
-            .or_else(|| self.enums.get(&nominal).map(|e| &e.type_info))
+            .or_else(|| self.env.enums.get(&nominal).map(|e| &e.type_info))
     }
 
     /// If `ty` is a Named type with a drop shim, enqueue the shim instantiation.
@@ -1097,6 +1068,22 @@ mod tests {
     fn struct_map(structs: Vec<StructDef>) -> IndexMap<Entity, StructDef> {
         structs.into_iter().map(|s| (s.entity, s)).collect()
     }
+    fn test_env<'a>(
+        structs: &'a IndexMap<Entity, StructDef>,
+        enums: &'a IndexMap<Entity, crate::item::enum_def::EnumDef>,
+        protocols: &'a IndexMap<Entity, ProtocolDef>,
+    ) -> TypeEnv<'a> {
+        TypeEnv {
+            structs,
+            enums,
+            protocols,
+            cloneable_protocol: None,
+            copyable_protocol: None,
+            static_protocol: None,
+            sized_protocol: None,
+        }
+    }
+
     fn proto_map(protos: Vec<ProtocolDef>) -> IndexMap<Entity, ProtocolDef> {
         protos.into_iter().map(|p| (p.entity, p)).collect()
     }
@@ -1178,14 +1165,10 @@ mod tests {
 
         let result = collect_all(
             &func_map(vec![func]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(&struct_map(vec![]), &IndexMap::new(), &proto_map(vec![])),
             &[],
             &mut arena,
             &IndexMap::new(),
-            None,
-            None,
             &IndexMap::new(),
             None,
         )
@@ -1222,14 +1205,10 @@ mod tests {
 
         let result = collect_all(
             &func_map(vec![func]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(&struct_map(vec![]), &IndexMap::new(), &proto_map(vec![])),
             &[],
             &mut arena,
             &IndexMap::new(),
-            None,
-            None,
             &IndexMap::new(),
             None,
         )
@@ -1294,14 +1273,10 @@ mod tests {
 
         let result = collect_all(
             &func_map(vec![main_fn, generic_fn]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(&struct_map(vec![]), &IndexMap::new(), &proto_map(vec![])),
             &[],
             &mut arena,
             &IndexMap::new(),
-            None,
-            None,
             &IndexMap::new(),
             None,
         )
@@ -1389,14 +1364,10 @@ mod tests {
 
         let result = collect_all(
             &func_map(vec![main_fn, recur]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(&struct_map(vec![]), &IndexMap::new(), &proto_map(vec![])),
             &[],
             &mut arena,
             &IndexMap::new(),
-            None,
-            None,
             &IndexMap::new(),
             None,
         );
@@ -1452,14 +1423,10 @@ mod tests {
 
         let result = collect_all(
             &func_map(vec![closure, thunk]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(&struct_map(vec![]), &IndexMap::new(), &proto_map(vec![])),
             &[],
             &mut arena,
             &IndexMap::new(),
-            None,
-            None,
             &IndexMap::new(),
             None,
         )
@@ -1496,14 +1463,14 @@ mod tests {
 
         let result = collect_all(
             &func_map(vec![method]),
-            &struct_map(vec![struct_def]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(
+                &struct_map(vec![struct_def]),
+                &IndexMap::new(),
+                &proto_map(vec![]),
+            ),
             &[],
             &mut arena,
             &IndexMap::new(),
-            None,
-            None,
             &IndexMap::new(),
             None,
         )
@@ -1587,14 +1554,14 @@ mod tests {
 
         let result = collect_all(
             &func_map(vec![main_fn, impl_func]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![protocol]),
+            test_env(
+                &struct_map(vec![]),
+                &IndexMap::new(),
+                &proto_map(vec![protocol]),
+            ),
             &[witness],
             &mut arena,
             &names,
-            None,
-            None,
             &IndexMap::new(),
             None,
         )

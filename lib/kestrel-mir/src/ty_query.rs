@@ -34,32 +34,61 @@ impl CopySem for CopyBehavior {
 /// threading for `TypeParam` bounds.
 struct MirCopyLayer<'a> {
     arena: &'a TyArena,
-    env: &'a CopyEnv<'a>,
+    env: &'a TypeEnv<'a>,
     where_clause: Option<&'a WhereClause>,
 }
 
-/// What the pre-mono copy classifier reads: the nominal and protocol defs
-/// and the two builtin protocol ids. Split from `MirModule` so mono's collector, which
-/// holds the module's parts separately (the arena is borrowed mutably), asks
-/// the same classifier instead of keeping its own.
-pub struct CopyEnv<'a> {
+/// The nominal and protocol defs plus the builtin protocol ids: what the
+/// structural classifiers (copy here, Static / Sized in `mono::entail`)
+/// read. Split from `MirModule` so mono, which holds the module's parts
+/// separately (the arena is borrowed mutably), asks the same classifiers
+/// instead of keeping its own.
+#[derive(Clone, Copy)]
+pub struct TypeEnv<'a> {
     pub structs: &'a IndexMap<Entity, StructDef>,
     pub enums: &'a IndexMap<Entity, EnumDef>,
     pub protocols: &'a IndexMap<Entity, ProtocolDef>,
     pub cloneable_protocol: Option<Entity>,
     pub copyable_protocol: Option<Entity>,
+    pub static_protocol: Option<Entity>,
+    pub sized_protocol: Option<Entity>,
 }
 
-impl<'a> CopyEnv<'a> {
+impl<'a> TypeEnv<'a> {
     pub fn of(module: &'a MirModule) -> Self {
-        CopyEnv {
+        TypeEnv {
             structs: &module.structs,
             enums: &module.enums,
             protocols: &module.protocols,
             cloneable_protocol: module.cloneable_protocol,
             copyable_protocol: module.copyable_protocol,
+            static_protocol: module.static_protocol,
+            sized_protocol: module.sized_protocol,
         }
     }
+
+    /// A nominal's generic copy behavior and conditional-Copyable gating
+    /// positions, from whichever of the struct / enum maps holds it.
+    /// Unknown entity -> Bitwise with no gating (the `Named` fallback).
+    pub fn nominal_copy(&self, entity: Entity) -> (CopyBehavior, &'a [usize]) {
+        nominal_copy_in(self.structs, self.enums, entity)
+    }
+}
+
+/// [`TypeEnv::nominal_copy`] over bare def maps, for mono's refine pass,
+/// which reads the generic defs without a full env.
+pub(crate) fn nominal_copy_in<'a>(
+    structs: &'a IndexMap<Entity, StructDef>,
+    enums: &'a IndexMap<Entity, EnumDef>,
+    entity: Entity,
+) -> (CopyBehavior, &'a [usize]) {
+    if let Some(s) = structs.get(&entity) {
+        return (s.type_info.copy.clone(), &s.conditionally_copyable);
+    }
+    if let Some(e) = enums.get(&entity) {
+        return (e.type_info.copy.clone(), &e.conditionally_copyable);
+    }
+    (CopyBehavior::Bitwise, &[])
 }
 
 impl CopyLayer for MirCopyLayer<'_> {
@@ -67,34 +96,11 @@ impl CopyLayer for MirCopyLayer<'_> {
     type Sem = CopyBehavior;
 
     fn base_semantics(&self, entity: Entity) -> CopyBehavior {
-        self.env
-            .structs
-            .get(&entity)
-            .map(|s| s.type_info.copy.clone())
-            .or_else(|| {
-                self.env
-                    .enums
-                    .get(&entity)
-                    .map(|e| e.type_info.copy.clone())
-            })
-            // Unknown entity -> Bitwise (current Named fallback).
-            .unwrap_or(CopyBehavior::Bitwise)
+        self.env.nominal_copy(entity).0
     }
 
     fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
-        Cow::Borrowed(
-            self.env
-                .structs
-                .get(&entity)
-                .map(|s| s.conditionally_copyable.as_slice())
-                .or_else(|| {
-                    self.env
-                        .enums
-                        .get(&entity)
-                        .map(|e| e.conditionally_copyable.as_slice())
-                })
-                .unwrap_or(&[]),
-        )
+        Cow::Borrowed(self.env.nominal_copy(entity).1)
     }
 
     fn member_semantics(&self, &ty: &TyId) -> CopyBehavior {
@@ -125,13 +131,13 @@ pub fn copy_behavior(
     ty: TyId,
     where_clause: Option<&WhereClause>,
 ) -> CopyBehavior {
-    copy_behavior_in(arena, &CopyEnv::of(module), ty, where_clause)
+    copy_behavior_in(arena, &TypeEnv::of(module), ty, where_clause)
 }
 
-/// [`copy_behavior`] over a [`CopyEnv`].
+/// [`copy_behavior`] over a [`TypeEnv`].
 pub fn copy_behavior_in(
     arena: &TyArena,
-    env: &CopyEnv<'_>,
+    env: &TypeEnv<'_>,
     ty: TyId,
     where_clause: Option<&WhereClause>,
 ) -> CopyBehavior {
@@ -455,7 +461,7 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
 // `MyCopyable` and would silently match nothing if the stdlib renamed either.
 
 /// Copy behavior of protocol `Self` from its (transitive) parents alone.
-fn protocol_self_copy_behavior(env: &CopyEnv<'_>, protocol: Entity) -> CopyBehavior {
+fn protocol_self_copy_behavior(env: &TypeEnv<'_>, protocol: Entity) -> CopyBehavior {
     let mut stack = vec![protocol];
     let mut seen = std::collections::HashSet::new();
     let mut copyable = false;
@@ -496,4 +502,164 @@ pub fn find_cloneable_protocol(module: &MirModule) -> Option<Entity> {
 /// "wraps one `lang.i1`" test is not an acceptable substitute.
 pub fn is_bool_struct(module: &MirModule, entity: Entity) -> bool {
     module.bool_struct == Some(entity)
+}
+
+// ===== Static / Sized over MIR types =====
+
+/// `StaticLayer` / `SizedLayer` over `TyId` — MIR's hooks into the shared
+/// structural rules (`kestrel_structural`). The per-nominal classifications
+/// are the front end's, carried on `StructDef` / `EnumDef`. Mono asks these
+/// to decide a witness's `where T: Static` / `T: Sized` clause on a concrete
+/// instantiation; no witness ever declares either protocol.
+struct MirStructuralLayer<'a> {
+    arena: &'a TyArena,
+    env: &'a TypeEnv<'a>,
+}
+
+impl kestrel_structural::StaticLayer for MirStructuralLayer<'_> {
+    type Ty = TyId;
+
+    fn nominal_staticness(&self, entity: Entity) -> kestrel_structural::Staticness {
+        if let Some(s) = self.env.structs.get(&entity) {
+            return s.staticness.clone();
+        }
+        if let Some(e) = self.env.enums.get(&entity) {
+            return e.staticness.clone();
+        }
+        // Protocols-as-types and synthetic `lang` entities store nothing.
+        kestrel_structural::Staticness::Static
+    }
+
+    fn shape<'t>(&self, &ty: &'t TyId) -> kestrel_structural::StaticShape<'t, TyId> {
+        use kestrel_structural::StaticShape;
+        match self.arena.get(ty) {
+            MirTy::Ref { .. } => StaticShape::Ref,
+            MirTy::Named { entity, type_args } => StaticShape::Nominal {
+                entity: *entity,
+                args: Cow::Owned(type_args.clone()),
+            },
+            MirTy::TypeParam(param) => StaticShape::Param(*param),
+            MirTy::Tuple(elems) => StaticShape::Tuple(Cow::Owned(elems.clone())),
+            MirTy::RawExistential { bounds, .. } => {
+                StaticShape::RawExistential(bounds.iter().map(|(p, _)| *p).collect())
+            },
+            MirTy::FuncThick { kind, .. } => StaticShape::Function {
+                is_view: kind.is_view(),
+            },
+            // A thin function pointer captures nothing; a raw pointer stores
+            // an address, not a `T` (the unsafe escape hatch, as in the
+            // front end); primitives, projections and errors never block.
+            MirTy::FuncThin { .. }
+            | MirTy::Pointer(_)
+            | MirTy::AssociatedProjection { .. }
+            | MirTy::I8
+            | MirTy::I16
+            | MirTy::I32
+            | MirTy::I64
+            | MirTy::F16
+            | MirTy::F32
+            | MirTy::F64
+            | MirTy::Bool
+            | MirTy::Never
+            | MirTy::Str
+            | MirTy::Error => StaticShape::Leaf,
+        }
+    }
+
+    /// A param left unbound by the instantiation cannot be disproven here.
+    fn param_is_static(&self, _: Entity) -> bool {
+        true
+    }
+
+    fn raw_existential_is_static(&self, bounds: &[Entity]) -> bool {
+        let Some(static_proto) = self.env.static_protocol else {
+            return false;
+        };
+        bounds
+            .iter()
+            .any(|&p| crate::mono::witness::protocol_inherits(self.env.protocols, p, static_proto))
+    }
+}
+
+impl kestrel_structural::SizedLayer for MirStructuralLayer<'_> {
+    type Ty = TyId;
+
+    fn nominal_sizedness(&self, entity: Entity) -> kestrel_structural::Sizedness {
+        // Only a struct can have an unsized tail.
+        self.env
+            .structs
+            .get(&entity)
+            .map_or(kestrel_structural::Sizedness::Sized, |s| {
+                s.sizedness.clone()
+            })
+    }
+
+    fn shape<'t>(&self, &ty: &'t TyId) -> kestrel_structural::SizedShape<'t, TyId> {
+        use kestrel_structural::SizedShape;
+        match self.arena.get(ty) {
+            MirTy::RawExistential { .. } => SizedShape::RawExistential,
+            MirTy::Named { entity, type_args } if self.env.structs.contains_key(entity) => {
+                SizedShape::Struct {
+                    entity: *entity,
+                    args: Cow::Owned(type_args.clone()),
+                }
+            },
+            MirTy::TypeParam(param) => SizedShape::Param(*param),
+            // A projection mono could not reduce: no declaration to read, so
+            // it is judged like any other leaf.
+            _ => SizedShape::Leaf,
+        }
+    }
+
+    /// A param left unbound by the instantiation cannot be disproven here.
+    fn param_is_sized(&self, _: Entity) -> bool {
+        true
+    }
+
+    fn assoc_is_sized(&self, _: Entity) -> bool {
+        true
+    }
+}
+
+/// Is the MIR type `ty` Static? See [`MirStructuralLayer`].
+pub fn ty_is_static(arena: &TyArena, env: &TypeEnv<'_>, ty: TyId) -> bool {
+    kestrel_structural::ty_is_static(&MirStructuralLayer { arena, env }, &ty)
+}
+
+/// Is the MIR type `ty` Sized? See [`MirStructuralLayer`].
+pub fn ty_is_sized(arena: &TyArena, env: &TypeEnv<'_>, ty: TyId) -> bool {
+    kestrel_structural::ty_is_sized(&MirStructuralLayer { arena, env }, &ty)
+}
+
+/// Does `ty` satisfy `protocol` when `protocol` is one of the structural
+/// builtins (Copyable, Cloneable, Static, Sized)? `None` for any other
+/// protocol: those are declared, and witnesses answer them. The same
+/// answers the front end's entailment layer gives: Cloneable needs a clone,
+/// Copyable needs a duplicable value with a compile-time size.
+pub fn structural_conformance(
+    arena: &TyArena,
+    env: &TypeEnv<'_>,
+    ty: TyId,
+    protocol: Entity,
+) -> Option<bool> {
+    let is = |builtin: Option<Entity>| builtin == Some(protocol);
+    if is(env.static_protocol) {
+        return Some(ty_is_static(arena, env, ty));
+    }
+    if is(env.sized_protocol) {
+        return Some(ty_is_sized(arena, env, ty));
+    }
+    if is(env.cloneable_protocol) {
+        return Some(matches!(
+            copy_behavior_in(arena, env, ty, None),
+            CopyBehavior::Clone(_)
+        ));
+    }
+    if is(env.copyable_protocol) {
+        return Some(
+            !matches!(copy_behavior_in(arena, env, ty, None), CopyBehavior::None)
+                && ty_is_sized(arena, env, ty),
+        );
+    }
+    None
 }

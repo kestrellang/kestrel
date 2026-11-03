@@ -814,6 +814,71 @@ impl CopyLayer for SolverCopyLayer<'_, '_> {
     }
 }
 
+impl kestrel_semantics::CopyShapeLayer for SolverCopyLayer<'_, '_> {
+    fn query(&self) -> &kestrel_hecs::QueryContext<'_> {
+        self.ctx.query_ctx
+    }
+
+    fn root(&self) -> Entity {
+        self.ctx.root
+    }
+
+    // HOOK: structural parent context scopes the bound lookup.
+    fn param_context(&self, param: Entity) -> Entity {
+        self.ctx.query_ctx.parent_of(param).unwrap_or(param)
+    }
+
+    fn self_context(&self) -> Entity {
+        self.ctx.owner
+    }
+
+    fn copy_shape<'t>(&self, &tv: &'t TyVar) -> kestrel_semantics::CopyShape<'t, TyVar> {
+        use kestrel_semantics::CopyShape;
+        // The never-block leaves answer `Cloneable`, so BOTH questions pass.
+        if self.depth > 64 {
+            return CopyShape::Leaf(CopySemantics::Cloneable); // recursion guard
+        }
+        let TySlot::Resolved(kind) = self.ctx.slot(self.ctx.resolve(tv)) else {
+            return CopyShape::Leaf(CopySemantics::Cloneable); // unresolved
+        };
+        match kind {
+            TyKind::Error => CopyShape::Leaf(CopySemantics::Cloneable),
+            TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => CopyShape::Nominal {
+                entity: *entity,
+                args: Cow::Owned(args.clone()),
+            },
+            TyKind::SelfType { entity } => CopyShape::SelfType(*entity),
+            TyKind::Param { entity } => CopyShape::Param(*entity),
+            // Canonical fold (copy-drift #2 resolved 2026-06-10): a mixed tuple
+            // like `(Int64, RcBox)` is Cloneable — it satisfies `T: Copyable` AND
+            // `T: Cloneable` bounds (MIR already clone-elaborates its copies).
+            // `()` folds to Copyable, no longer vacuously Cloneable.
+            TyKind::Tuple(elems) => CopyShape::Tuple(Cow::Owned(elems.clone())),
+            // A ref-as-TYPE is Copyable (stage 2b ruling: payload/field refs
+            // bit-copy — the copy aliases the same storage, may-alias model).
+            // Not known Cloneable. The pointee question ("can a read through
+            // this ref place copy?") is the Expr-origin peel in solve_conforms,
+            // never this fold — this classifies the ref VALUE for gating-arg
+            // folds (`Optional[&File]` is Copyable even though File isn't).
+            TyKind::Ref { .. } => CopyShape::Leaf(CopySemantics::Copyable),
+            TyKind::Opaque { not_copyable, .. } => CopyShape::Opaque {
+                not_copyable: *not_copyable,
+            },
+            TyKind::RawExistential { bounds, .. } => {
+                CopyShape::RawExistential(bounds.iter().map(|(protocol, _)| *protocol).collect())
+            },
+            TyKind::Function { kind, .. } => CopyShape::Function(*kind),
+            // Protocol existentials are Copyable (not known Cloneable); an
+            // associated projection (`I.Item`) is Copyable-by-default
+            // (implicit bound), like a type param.
+            TyKind::Protocol { .. }
+            | TyKind::Never
+            | TyKind::TypeAlias { .. }
+            | TyKind::AssocProjection { .. } => CopyShape::Leaf(CopySemantics::Copyable),
+        }
+    }
+}
+
 /// Per-instantiation Copyable/Cloneable classification. Evaluates conditional
 /// `extend X: Copyable where T: Copyable` conformances against the resolved
 /// type args (via `kestrel_copy_fold::instance_semantics`), recursing into
@@ -829,90 +894,7 @@ impl CopyLayer for SolverCopyLayer<'_, '_> {
 /// `type_conforms_copyable`; reading the class directly for clone-vs-bitcopy
 /// decisions or diagnostics would inherit a wrong answer.
 pub(crate) fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> CopySemantics {
-    if depth > 64 {
-        return CopySemantics::Cloneable; // recursion guard — never block (both questions)
-    }
-    let resolved = ctx.resolve(tv);
-    let kind = match ctx.slot(resolved) {
-        TySlot::Resolved(k) => k.clone(),
-        _ => return CopySemantics::Cloneable, // unresolved: never block (both questions)
-    };
-    match kind {
-        TyKind::Error => CopySemantics::Cloneable, // never block (both questions)
-        TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
-            instance_semantics(&SolverCopyLayer { ctx, depth }, entity, &args)
-        },
-        // A protocol's abstract `Self` is only as copyable as its refinements;
-        // a concrete `Self` is its nominal (empty args: a gated base folds to
-        // NotCopyable).
-        TyKind::SelfType { entity }
-            if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(entity)
-                == Some(&kestrel_ast_builder::NodeKind::Protocol) =>
-        {
-            ctx.query_ctx
-                .query(kestrel_semantics::ProtocolSelfCopySemantics {
-                    protocol: entity,
-                    context: ctx.owner,
-                    root: ctx.root,
-                })
-        },
-        TyKind::SelfType { entity } => {
-            instance_semantics(&SolverCopyLayer { ctx, depth }, entity, &[])
-        },
-        // HOOK: structural parent context scopes the bound lookup.
-        TyKind::Param { entity } => {
-            let context = ctx.query_ctx.parent_of(entity).unwrap_or(entity);
-            ctx.query_ctx
-                .query(TypeParamCopyRequirement {
-                    param: entity,
-                    context,
-                    root: ctx.root,
-                })
-                .into()
-        },
-        // Canonical fold (copy-drift #2 resolved 2026-06-10): a mixed tuple
-        // like `(Int64, RcBox)` is Cloneable — it satisfies `T: Copyable` AND
-        // `T: Cloneable` bounds (MIR already clone-elaborates its copies).
-        // `()` folds to Copyable, no longer vacuously Cloneable.
-        TyKind::Tuple(elems) => {
-            fold_members(elems.iter().map(|&e| solver_copy_class(ctx, e, depth + 1)))
-        },
-        // A ref-as-TYPE is Copyable (stage 2b ruling: payload/field refs
-        // bit-copy — the copy aliases the same storage, may-alias model).
-        // Not known Cloneable. The pointee question ("can a read through
-        // this ref place copy?") is the Expr-origin peel in solve_conforms,
-        // never this fold — this classifies the ref VALUE for gating-arg
-        // folds (`Optional[&File]` is Copyable even though File isn't).
-        TyKind::Ref { .. } => CopySemantics::Copyable,
-        // `some P and not Copyable`: the underlier may be move-only, so use
-        // sites must move, never bit-copy. Plain `some P` guarantees a
-        // duplicable underlier (enforced post-solve on the defining body).
-        TyKind::Opaque { not_copyable, .. } => {
-            if not_copyable {
-                CopySemantics::NotCopyable
-            } else {
-                CopySemantics::Copyable
-            }
-        },
-        TyKind::RawExistential { bounds, .. } => kestrel_semantics::raw_existential_copy_semantics(
-            ctx.query_ctx,
-            bounds.iter().map(|(protocol, _)| *protocol),
-            ctx.root,
-        ),
-        // A closure value's copy class is fixed by its KIND (plan D6): normal
-        // views bit-copy, `mutating`/`consuming` are move-only, `escaping`
-        // shares its environment through the box's clone.
-        TyKind::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(kind),
-        // Mirror `hir_type_copy_semantics`: protocol existentials are Copyable
-        // (not known Cloneable).
-        TyKind::Protocol { .. } | TyKind::Never | TyKind::TypeAlias { .. } => {
-            CopySemantics::Copyable
-        },
-        // Associated projection (`I.Item`) is Copyable-by-default (implicit
-        // bound), like a type param — matches `hir_type_copy_semantics` and MIR
-        // `ty_query`. Not known to be Cloneable, so only satisfies Copyable.
-        TyKind::AssocProjection { .. } => CopySemantics::Copyable,
-    }
+    kestrel_semantics::ty_copy_semantics(&SolverCopyLayer { ctx, depth }, &tv)
 }
 
 /// Boundary mapping from the tri-state classifier to the solver's boolean
@@ -952,12 +934,8 @@ struct SolverSizedLayer<'a, 'i> {
 impl kestrel_semantics::SizedLayer for SolverSizedLayer<'_, '_> {
     type Ty = TyVar;
 
-    fn query(&self) -> &kestrel_hecs::QueryContext<'_> {
-        self.ctx.query_ctx
-    }
-
-    fn root(&self) -> Entity {
-        self.ctx.root
+    fn assoc_is_sized(&self, assoc: Entity) -> bool {
+        !kestrel_semantics::assoc_may_be_unsized(self.ctx.query_ctx, assoc, self.ctx.root)
     }
 
     fn nominal_sizedness(&self, entity: Entity) -> kestrel_semantics::Sizedness {
@@ -1041,12 +1019,12 @@ pub(super) struct SolverStaticLayer<'a, 'i> {
 impl StaticLayer for SolverStaticLayer<'_, '_> {
     type Ty = TyVar;
 
-    fn query(&self) -> &kestrel_hecs::QueryContext<'_> {
-        self.ctx.query_ctx
-    }
-
-    fn root(&self) -> Entity {
-        self.ctx.root
+    fn raw_existential_is_static(&self, bounds: &[Entity]) -> bool {
+        kestrel_semantics::raw_existential_is_static(
+            self.ctx.query_ctx,
+            bounds.iter().copied(),
+            self.ctx.root,
+        )
     }
 
     fn nominal_staticness(&self, entity: Entity) -> Staticness {
