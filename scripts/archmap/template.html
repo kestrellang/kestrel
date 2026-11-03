@@ -1,0 +1,464 @@
+<title>Kestrel Compiler Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a pipeline of stage columns (source -> machine code) on the left, a
+   sticky inspector on the right. Stage hue rotates along the pipeline so the
+   color itself says "how far through the compiler" a thing lives. */
+:root {
+  --bg: #eef2f1; --surface: #ffffff; --sunk: #e4eae8; --ink: #142120; --muted: #5a6a68;
+  --line: #d0d9d7; --accent: #1d5c86; --accent-soft: #dbe8f2; --warn: #9a5b00; --warn-soft: #f6ead4;
+  --call: #1d5c86; --caller: #8a3d6b;
+  --sl: 0.62; --sc: 0.11; --sl-soft: 0.94; --sc-soft: 0.03;
+  --f-display: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1514; --surface: #162020; --sunk: #111a19; --ink: #e2ebe9; --muted: #92a4a1;
+  --line: #2a3735; --accent: #79b4dc; --accent-soft: #1b2e3b; --warn: #e3ad5b; --warn-soft: #33281a;
+  --call: #79b4dc; --caller: #d98fbd;
+  --sl: 0.74; --sc: 0.11; --sl-soft: 0.25; --sc-soft: 0.035; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0e1514; --surface: #162020; --sunk: #111a19; --ink: #e2ebe9; --muted: #92a4a1;
+  --line: #2a3735; --accent: #79b4dc; --accent-soft: #1b2e3b; --warn: #e3ad5b; --warn-soft: #33281a;
+  --call: #79b4dc; --caller: #d98fbd;
+  --sl: 0.74; --sc: 0.11; --sl-soft: 0.25; --sc-soft: 0.035; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--f-body); }
+a { color: var(--accent); }
+code, .mono { font-family: var(--f-mono); font-size: 0.86em; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+
+.wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.top-in { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding-block: 10px; }
+.brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.brand h1 { font: 700 20px/1.1 var(--f-display); letter-spacing: -0.01em; margin: 0; }
+.commit { font: 12px var(--f-mono); color: var(--muted); }
+.commit a { color: inherit; }
+nav.tabs { display: flex; gap: 2px; flex-wrap: wrap; }
+nav.tabs a { text-decoration: none; color: var(--muted); padding: 5px 10px; border-radius: 6px; font-weight: 500; }
+nav.tabs a[aria-current="page"] { color: var(--ink); background: var(--sunk); }
+nav.tabs a:hover { color: var(--ink); }
+.search { margin-left: auto; position: relative; flex: 1 1 220px; max-width: 340px; }
+.search input { width: 100%; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+.results { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.12); max-height: 60vh; overflow: auto; z-index: 6; }
+.results button { display: flex; width: 100%; gap: 8px; align-items: baseline; text-align: left; padding: 6px 10px; border: 0; background: none; cursor: pointer; }
+.results button:hover, .results button.on { background: var(--sunk); }
+.results .k { font: 11px var(--f-mono); color: var(--muted); min-width: 74px; }
+
+main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; padding-block: 18px 40px; align-items: start; }
+@media (max-width: 980px) { main { grid-template-columns: minmax(0, 1fr); } }
+.lede { margin: 0 0 14px; color: var(--muted); max-width: 72ch; }
+.lede strong { color: var(--ink); font-weight: 600; }
+h2 { font: 700 15px/1.2 var(--f-display); margin: 0 0 8px; letter-spacing: 0.01em; }
+.eyebrow { font: 600 11px var(--f-body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+
+/* ---- pipeline board */
+.board-scroll { overflow-x: auto; position: relative; padding-bottom: 6px; }
+.board { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(104px, 1fr); gap: 8px; min-width: 980px; }
+.board svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 2; }
+.col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.col-head { padding: 6px 8px; border-radius: 6px; background: oklch(var(--sl-soft) var(--sc-soft) var(--h)); border-top: 3px solid oklch(var(--sl) var(--sc) var(--h)); }
+.col-head .n { font: 600 10px var(--f-mono); color: var(--muted); }
+.col-head h3 { font: 700 13px/1.2 var(--f-display); margin: 1px 0 0; overflow-wrap: anywhere; hyphens: auto; }
+.card { position: relative; z-index: 3; text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 7px 8px 8px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; transition: opacity .15s, border-color .15s; min-width: 0; }
+.card:hover { border-color: oklch(var(--sl) var(--sc) var(--h)); }
+.card.sel { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.card.dep { border-color: var(--call); }
+.card.rdep { border-color: var(--caller); }
+.dim .card:not(.sel):not(.dep):not(.rdep), .dim .qpill:not(.sel):not(.dep):not(.rdep) { opacity: 0.32; }
+.card .nm { font: 600 11.5px var(--f-mono); overflow-wrap: anywhere; }
+.card .bar { height: 4px; border-radius: 2px; background: var(--sunk); overflow: hidden; }
+.card .bar i { display: block; height: 100%; background: oklch(var(--sl) var(--sc) var(--h)); }
+.card .meta { display: flex; flex-wrap: wrap; gap: 4px 8px; font: 11px var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 6px; }
+
+.mirstrip { margin-top: 22px; }
+.strip { display: flex; gap: 0; overflow-x: auto; padding-bottom: 4px; }
+.mst { flex: 1 0 110px; padding: 8px 10px; border: 1px solid var(--line); border-left-width: 0; background: var(--surface); }
+.mst:first-child { border-left-width: 1px; border-radius: 6px 0 0 6px; }
+.mst:last-child { border-radius: 0 6px 6px 0; }
+.mst.post { background: oklch(var(--sl-soft) var(--sc-soft) var(--h)); }
+.mst .nm { font: 600 12px var(--f-mono); }
+.mst p { margin: 3px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+.mono-note { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+
+/* ---- query graph */
+.qboard { position: relative; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; align-items: start; }
+.qboard svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 2; }
+.qgroup { position: relative; z-index: 3; background: var(--surface); border: 1px solid var(--line); border-top: 3px solid oklch(var(--sl) var(--sc) var(--h)); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.qgroup .gh { font: 600 11px var(--f-mono); color: var(--muted); margin-bottom: 2px; }
+.qpill { text-align: left; border: 1px solid transparent; background: var(--sunk); border-radius: 4px; padding: 3px 6px; font: 12px var(--f-mono); cursor: pointer; display: flex; justify-content: space-between; gap: 6px; transition: opacity .15s; min-width: 0; }
+.qpill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qpill b { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+.qpill:hover { border-color: var(--line); }
+.qpill.sel { border-color: var(--ink); background: var(--surface); }
+.qpill.dep { border-color: var(--call); }
+.qpill.rdep { border-color: var(--caller); }
+
+/* ---- tables */
+.tscroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+th, td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; background: var(--sunk); position: sticky; top: 0; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--sunk); }
+tr.sel td { background: var(--accent-soft); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--f-mono); }
+.matrix td.cell { padding: 0; text-align: center; width: 34px; min-width: 34px; font: 10.5px var(--f-mono); }
+.matrix td.cell div { margin: 2px; border-radius: 3px; padding: 4px 0; }
+.matrix th.vert { writing-mode: vertical-rl; transform: rotate(180deg); text-transform: none; letter-spacing: 0; font: 500 11px var(--f-mono); padding: 8px 4px; height: 150px; white-space: nowrap; }
+.chip { display: inline-block; font: 11px var(--f-mono); padding: 1px 6px; border-radius: 4px; background: var(--sunk); margin: 1px 2px 1px 0; }
+.chip.err { background: color-mix(in oklab, #c0392b 16%, var(--surface)); }
+.chip.warn { background: var(--warn-soft); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; align-items: center; }
+.filters input, .filters select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: var(--surface); padding: 5px 10px; cursor: pointer; color: var(--muted); }
+.seg button.on { background: var(--sunk); color: var(--ink); font-weight: 600; }
+
+/* ---- health */
+.health { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.hcard { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.hcard h3 { font: 700 14px var(--f-display); margin: 0 0 2px; display: flex; justify-content: space-between; gap: 8px; }
+.hcard h3 .c { font: 600 13px var(--f-mono); color: var(--warn); }
+.hcard p { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+.hcard ul { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px; }
+.linkish { border: 0; background: var(--sunk); padding: 1px 6px; border-radius: 4px; font: 11.5px var(--f-mono); cursor: pointer; color: var(--ink); }
+.linkish:hover { background: var(--accent-soft); }
+
+/* ---- inspector */
+aside.insp { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 72px); max-height: calc(100vh - 92px); overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px 18px; min-width: 0; }
+@media (max-width: 980px) { aside.insp { position: static; max-height: none; } }
+.insp h2 { font: 700 18px/1.2 var(--f-display); margin: 2px 0 6px; overflow-wrap: anywhere; }
+.insp .doc { margin: 0 0 12px; color: var(--ink); }
+.insp section { margin-top: 14px; }
+.insp section > .eyebrow { display: block; margin-bottom: 5px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-family: var(--f-mono); font-size: 12px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.list li { font-size: 12.5px; display: flex; gap: 8px; justify-content: space-between; align-items: baseline; min-width: 0; }
+.list li > :first-child { min-width: 0; overflow-wrap: anywhere; flex-shrink: 0; max-width: 100%; }
+.list li > .r:last-child { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
+.list .r { color: var(--muted); font: 11px var(--f-mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tag { font: 600 10px var(--f-mono); padding: 0 5px; border-radius: 3px; background: var(--sunk); color: var(--muted); }
+.tag.ind { border: 1px dashed var(--muted); background: none; }
+.empty { color: var(--muted); font-size: 13px; }
+.empty p { margin: 0 0 8px; }
+.note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header class="top"><div class="wrap top-in">
+  <div class="brand"><h1>Kestrel Compiler Map</h1><span class="commit" id="commit"></span></div>
+  <nav class="tabs" id="tabs">
+    <a href="#pipeline">Pipeline</a><a href="#queries">Queries</a><a href="#components">Components</a><a href="#analyzers">Analyzers</a><a href="#drift">Doc drift</a>
+  </nav>
+  <div class="search"><input id="q" type="search" placeholder="Find a crate, query, component, E-code…" autocomplete="off" aria-label="Search the map"><div class="results" id="results" hidden></div></div>
+</div></header>
+
+<main class="wrap">
+  <div id="view" style="min-width:0"></div>
+  <aside class="insp" id="insp" aria-live="polite"></aside>
+</main>
+
+<script id="archmap-data" type="application/json">/*ARCHMAP_DATA*/</script>
+<script>
+(() => {
+const D = JSON.parse(document.getElementById('archmap-data').textContent);
+const REPO = 'https://github.com/kestrellang/kestrel';
+const gh = (file, line) => `${REPO}/blob/${D.meta.commit}/${file}${line ? '#L' + line : ''}`;
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => n.toLocaleString('en-US');
+const md = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
+const $ = id => document.getElementById(id);
+
+// ---- indexes
+const stageIdx = {}; D.stages.forEach((s, i) => { s.hue = 195 - i * 21; s.i = i; stageIdx[s.id] = s; });
+const unassigned = D.crates.filter(c => !stageIdx[c.stage]);
+if (unassigned.length) { const s = { id: 'unassigned', title: 'Unassigned', crates: unassigned.map(c => c.name), hue: 0, i: D.stages.length }; D.stages.push(s); stageIdx.unassigned = s; }
+const crate = Object.fromEntries(D.crates.map(c => [c.name, c]));
+const query = Object.fromEntries(D.queries.map(q => [q.name, q]));
+const comp = Object.fromEntries(D.components.map(c => [c.name, c]));
+const analyzer = Object.fromEntries(D.analyzers.map(a => [a.name, a]));
+const hueOf = c => (stageIdx[crate[c]?.stage] || { hue: 0 }).hue;
+const crateOrder = D.stages.flatMap(s => s.crates.filter(c => crate[c]));
+const dependents = {}; D.crates.forEach(c => c.deps.forEach(d => (dependents[d] ||= []).push(c.name)));
+const maxLoc = Math.max(...D.crates.map(c => c.loc));
+const diagIndex = D.analyzers.flatMap(a => a.diagnostics.map(d => ({ ...d, analyzer: a.name })));
+const short = n => n.replace(/^kestrel-/, '');
+
+$('commit').innerHTML = `<a href="${REPO}/commit/${D.meta.commit}" target="_blank" rel="noopener">${esc(D.meta.tags_at_head.join(', ') || D.meta.describe)} · ${D.meta.commit_short}</a> · ${esc(D.meta.date.slice(0, 10))}`;
+
+// ---- selection state (inspector) and routing
+let sel = null; // {t: 'crate'|'query'|'comp'|'analyzer'|'module', n}
+const VIEWS = ['pipeline', 'queries', 'components', 'analyzers', 'drift'];
+const view = () => VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'pipeline';
+function select(t, n, goto) {
+  sel = t ? { t, n } : null;
+  if (goto && goto !== view()) { location.hash = goto; return; } // hashchange re-renders
+  render();
+}
+window.addEventListener('hashchange', render);
+window.addEventListener('resize', () => requestAnimationFrame(drawEdges));
+
+function render() {
+  const v = view();
+  document.querySelectorAll('#tabs a').forEach(a => a.setAttribute('aria-current', a.getAttribute('href') === '#' + v ? 'page' : 'false'));
+  ({ pipeline: viewPipeline, queries: viewQueries, components: viewComponents, analyzers: viewAnalyzers, drift: viewDrift })[v]();
+  renderInspector();
+  requestAnimationFrame(drawEdges);
+}
+
+// ---- Pipeline view
+function viewPipeline() {
+  const totalLoc = D.crates.reduce((a, c) => a + c.loc, 0);
+  const cols = D.stages.map((s, i) => `
+    <div class="col" style="--h:${s.hue}">
+      <div class="col-head"><div class="n">${String(i + 1).padStart(2, '0')}</div><h3>${esc(s.title)}</h3></div>
+      ${s.crates.filter(n => crate[n]).map(n => { const c = crate[n]; const nq = D.queries.filter(q => q.crate === n).length; const na = D.analyzers.filter(a => a.crate === n).length; return `
+        <button class="card" data-crate="${esc(n)}" style="--h:${s.hue}">
+          <span class="nm">${esc(short(n))}</span>
+          <span class="bar"><i style="width:${Math.max(2, Math.sqrt(c.loc / maxLoc) * 100)}%"></i></span>
+          <span class="meta"><span>${fmt(c.loc)} loc</span>${nq ? `<span>${nq} q</span>` : ''}${na ? `<span>${na} an</span>` : ''}</span>
+        </button>`; }).join('')}
+    </div>`).join('');
+  const preMono = D.mir_stages.findIndex(s => s.name === 'Mono');
+  $('view').innerHTML = `
+    <p class="lede"><strong>${D.crates.length} crates, ${fmt(totalLoc)} lines</strong> (not counting tests), laid out from source text on the left to machine code on the right. Click a crate to see what it depends on and what depends on it. Bar length is the square root of lines of code.</p>
+    <div class="board-scroll"><div class="board ${sel?.t === 'crate' ? 'dim' : ''}" id="board"><svg class="edges" id="edges"></svg>${cols}</div></div>
+    <div class="legend"><span><i style="border-color:var(--call)"></i>depends on</span><span><i style="border-color:var(--caller)"></i>depended on by</span><span>q = queries defined · an = analyzers</span></div>
+    <div class="mirstrip"><h2>MIR pass pipeline</h2>
+      <div class="strip" style="--h:${stageIdx.mir?.hue ?? 0}">${D.mir_stages.map((s, i) => `<div class="mst ${i >= preMono ? 'post' : ''}"><div class="nm">${esc(s.name)}</div><p>${md(s.doc)}</p></div>`).join('')}</div>
+      <p class="mono-note">From <code>kestrel_mir::passes::Stage</code>, in pipeline order. Shaded stages run after monomorphization. Dump any of them with <code>kestrel dump mir -s &lt;stage&gt;</code>.</p>
+    </div>`;
+  document.querySelectorAll('[data-crate]').forEach(b => {
+    const n = b.dataset.crate;
+    if (sel?.t === 'crate') {
+      if (n === sel.n) b.classList.add('sel');
+      else if (crate[sel.n].deps.includes(n)) b.classList.add('dep');
+      else if ((dependents[sel.n] || []).includes(n)) b.classList.add('rdep');
+    }
+    b.onclick = () => select(sel?.t === 'crate' && sel.n === n ? null : 'crate', n);
+  });
+}
+
+// ---- Queries view
+function viewQueries() {
+  const groups = crateOrder.filter(n => D.queries.some(q => q.crate === n));
+  const s = sel?.t === 'query' ? query[sel.n] : null;
+  const callees = new Set(s ? s.calls.map(c => c.query) : []);
+  const callers = new Set(s ? s.callers : []);
+  const nEdges = D.queries.reduce((a, q) => a + q.calls.length, 0);
+  const nDirect = D.queries.reduce((a, q) => a + q.calls.filter(c => c.kind === 'direct').length, 0);
+  $('view').innerHTML = `
+    <p class="lede"><strong>${D.queries.length} memoized queries</strong> (each an <code>impl QueryFn</code>), grouped by the crate that defines them. Select one to see the queries it calls and the queries that call it. ${nEdges} call edges were found: ${nDirect} written directly in <code>execute</code>, and ${nEdges - nDirect} reached through same-crate helper functions, which are drawn dashed and are a best guess. The number on each query counts its call sites outside tests.</p>
+    <div class="qboard ${s ? 'dim' : ''}" id="board"><svg class="edges" id="edges"></svg>
+      ${groups.map(g => `<div class="qgroup" style="--h:${hueOf(g)}"><div class="gh">${esc(short(g))}</div>
+        ${D.queries.filter(q => q.crate === g).map(q => `<button class="qpill ${s && q.name === s.name ? 'sel' : callees.has(q.name) ? 'dep' : callers.has(q.name) ? 'rdep' : ''}" data-query="${esc(q.name)}" title="${esc(q.name)}"><span>${esc(q.name)}</span><b>${q.sites.filter(x => !x.test).length}</b></button>`).join('')}
+      </div>`).join('')}
+    </div>
+    <div class="legend"><span><i style="border-color:var(--call)"></i>calls</span><span><i style="border-color:var(--call);border-top-style:dashed"></i>calls via a helper (heuristic)</span><span><i style="border-color:var(--caller)"></i>called by</span></div>`;
+  document.querySelectorAll('[data-query]').forEach(b => b.onclick = () => select(sel?.t === 'query' && sel.n === b.dataset.query ? null : 'query', b.dataset.query));
+}
+
+// ---- Components view
+let compMode = 'reads';
+function viewComponents() {
+  const rows = [...D.components].sort((a, b) => b.total - a.total);
+  const cols = crateOrder.filter(n => rows.some(r => r[compMode][n]));
+  const max = Math.max(1, ...rows.flatMap(r => Object.values(r[compMode])));
+  $('view').innerHTML = `
+    <p class="lede"><strong>${D.components.length} component types</strong> found by their accesses: <code>get::&lt;T&gt;</code> and <code>has::&lt;T&gt;</code> count as reads, <code>.set(entity, T…)</code> counts as a write. Each cell is the number of accesses from one crate. A crate that reads a component is coupled to the crate that defines it.</p>
+    <div class="filters"><div class="seg" role="group" aria-label="Access kind"><button data-mode="reads" class="${compMode === 'reads' ? 'on' : ''}">Reads</button><button data-mode="writes" class="${compMode === 'writes' ? 'on' : ''}">Writes</button></div></div>
+    <div class="tscroll"><table class="matrix"><thead><tr><th>Component</th><th>Defined in</th>${cols.map(c => `<th class="vert" style="color:oklch(var(--sl) var(--sc) ${hueOf(c)})">${esc(short(c))}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r => `<tr class="click ${sel?.t === 'comp' && sel.n === r.name ? 'sel' : ''}" data-comp="${esc(r.name)}"><td class="mono">${esc(r.name)}</td><td class="mono" style="color:var(--muted)">${esc(short(r.crate))}</td>
+      ${cols.map(c => { const v = r[compMode][c] || 0; const a = v ? 0.15 + 0.85 * Math.sqrt(v / max) : 0; return `<td class="cell">${v ? `<div style="background:oklch(var(--sl) var(--sc) ${hueOf(c)} / ${a.toFixed(2)})">${v}</div>` : ''}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`;
+  document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { compMode = b.dataset.mode; render(); });
+  document.querySelectorAll('[data-comp]').forEach(tr => tr.onclick = () => select('comp', tr.dataset.comp));
+}
+
+// ---- Analyzers view
+let anFilter = '', anKind = 'all';
+function viewAnalyzers() {
+  const kinds = ['all', 'BodyCheck', 'DeclCheck', 'CompilationCheck'];
+  const f = anFilter.toLowerCase();
+  const rows = D.analyzers.filter(a => (anKind === 'all' || a.kind === anKind) && (!f || [a.name, a.id, a.doc, ...a.diagnostics.flatMap(d => [d.id, d.name])].join(' ').toLowerCase().includes(f)));
+  const nd = D.analyzers.reduce((a, x) => a + x.diagnostics.length, 0);
+  $('view').innerHTML = `
+    <p class="lede"><strong>${D.analyzers.length} analyzers emitting ${nd} diagnostic codes.</strong> Body checks run on one function body at a time, decl checks on one declaration, and compilation checks once for the whole program. Each one only reports diagnostics and never changes the world.</p>
+    <div class="filters"><input id="anf" type="search" placeholder="Filter by name or code" value="${esc(anFilter)}" aria-label="Filter analyzers">
+      <div class="seg" role="group" aria-label="Granularity">${kinds.map(k => `<button data-kind="${k}" class="${anKind === k ? 'on' : ''}">${k === 'all' ? 'All' : k.replace('Check', '')}</button>`).join('')}</div>
+      <span class="eyebrow">${rows.length} shown</span></div>
+    <div class="tscroll"><table><thead><tr><th>Analyzer</th><th>Kind</th><th>Diagnostics</th><th>Queries used</th></tr></thead><tbody>
+      ${rows.map(a => `<tr class="click ${sel?.t === 'analyzer' && sel.n === a.name ? 'sel' : ''}" data-an="${esc(a.name)}"><td class="mono">${esc(a.name.replace(/Analyzer$/, ''))}</td><td>${esc(a.kind.replace('Check', ''))}</td>
+        <td>${a.diagnostics.map(d => `<span class="chip ${d.severity === 'Error' ? 'err' : d.severity === 'Warning' ? 'warn' : ''}" title="${esc(d.name)} · ${esc(d.severity)}">${esc(d.id)}</span>`).join('')}</td>
+        <td class="mono" style="color:var(--muted)">${a.queries.length || ''}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  const inp = $('anf');
+  inp.oninput = () => { anFilter = inp.value; const pos = inp.selectionStart; viewAnalyzers(); const n = $('anf'); n.focus(); n.setSelectionRange(pos, pos); };
+  document.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => { anKind = b.dataset.kind; render(); });
+  document.querySelectorAll('[data-an]').forEach(tr => tr.onclick = () => select('analyzer', tr.dataset.an));
+}
+
+// ---- Drift view: places where the docs and the code disagree or are silent
+function viewDrift() {
+  const lib = D.crates.filter(c => c.dir !== '.');
+  const checks = [
+    { t: 'Missing from architecture.md', d: 'Crates not named in docs/contributing/architecture.md.', items: lib.filter(c => !c.in_architecture_md).map(c => ['crate', c.name]) },
+    { t: 'No crate-level doc comment', d: 'lib.rs has no leading //! paragraph.', items: D.crates.filter(c => !c.doc).map(c => ['crate', c.name]) },
+    { t: 'No docs/ folder', d: 'Crates without per-crate architecture docs.', items: lib.filter(c => !c.docs.length).map(c => ['crate', c.name]) },
+    { t: 'No AGENTS.md', d: 'Crates without directory-scoped agent guidance.', items: lib.filter(c => !c.agents.length).map(c => ['crate', c.name]) },
+    { t: 'Undocumented queries', d: 'Query structs with no /// doc comment.', items: D.queries.filter(q => !q.doc).map(q => ['query', q.name]) },
+    { t: 'Undocumented components', d: 'Component types with no /// doc comment.', items: D.components.filter(c => !c.doc).map(c => ['comp', c.name]) },
+    { t: 'Queries only used in their own crate', d: 'Candidates to make private, or signs a stage boundary is in the wrong place.', items: D.queries.filter(q => q.used_by_crates.length === 1 && q.used_by_crates[0] === q.crate).map(q => ['query', q.name]) },
+    { t: 'Unassigned to a stage', d: 'New crates the generator does not know how to place yet. Add them to STAGES in extract.py.', items: unassigned.map(c => ['crate', c.name]) },
+  ];
+  const goto = { crate: 'pipeline', query: 'queries', comp: 'components' };
+  $('view').innerHTML = `
+    <p class="lede"><strong>Where the docs and the code disagree.</strong> Each card is a check computed from the same scan as the rest of the map, so it shows the current state of this commit.</p>
+    <div class="health">${checks.map(c => `<div class="hcard"><h3>${esc(c.t)}<span class="c" style="${c.items.length ? '' : 'color:var(--muted)'}">${c.items.length}</span></h3><p>${esc(c.d)}</p>
+      <ul>${c.items.map(([t, n]) => `<li><button class="linkish" data-t="${t}" data-n="${esc(n)}">${esc(t === 'crate' ? short(n) : n)}</button></li>`).join('') || '<li class="empty">None</li>'}</ul></div>`).join('')}</div>`;
+  document.querySelectorAll('.linkish').forEach(b => b.onclick = () => select(b.dataset.t, b.dataset.n, goto[b.dataset.t]));
+}
+
+// ---- SVG edges for pipeline + query views
+function drawEdges() {
+  const svg = $('edges'), board = $('board');
+  if (!svg || !board || !sel) { if (svg) svg.innerHTML = ''; return; }
+  const box = board.getBoundingClientRect();
+  const center = el => { const r = el.getBoundingClientRect(); return { l: r.left - box.left, r: r.right - box.left, y: r.top - box.top + r.height / 2 }; };
+  const curve = (a, b) => { // connect the facing sides of two boxes
+    const fwd = b.l >= a.r - 1; const x1 = fwd ? a.r : a.l, x2 = fwd ? b.l : b.r;
+    const dx = Math.max(30, Math.abs(x2 - x1) / 2) * (fwd ? 1 : -1);
+    if (Math.abs(a.l - b.l) < 4) { const x = a.r, k = 40 + Math.abs(b.y - a.y) * 0.08; return `M${x},${a.y} C${x + k},${a.y} ${x + k},${b.y} ${x},${b.y}`; }
+    return `M${x1},${a.y} C${x1 + dx},${a.y} ${x2 - dx},${b.y} ${x2},${b.y}`;
+  };
+  let edges = [];
+  if (sel.t === 'crate' && view() === 'pipeline') {
+    const c = crate[sel.n]; if (!c) return;
+    edges = [...c.deps.map(d => [sel.n, d, 'var(--call)', '']), ...(dependents[sel.n] || []).map(d => [d, sel.n, 'var(--caller)', ''])];
+    edges = edges.map(([a, b, col, dash]) => [board.querySelector(`[data-crate="${a}"]`), board.querySelector(`[data-crate="${b}"]`), col, dash]);
+  } else if (sel.t === 'query' && view() === 'queries') {
+    const q = query[sel.n]; if (!q) return;
+    edges = [...q.calls.map(c => [sel.n, c.query, 'var(--call)', c.kind === 'indirect' ? '4 3' : '']), ...q.callers.map(c => [c, sel.n, 'var(--caller)', query[c].calls.find(x => x.query === sel.n)?.kind === 'indirect' ? '4 3' : ''])];
+    edges = edges.map(([a, b, col, dash]) => [board.querySelector(`[data-query="${a}"]`), board.querySelector(`[data-query="${b}"]`), col, dash]);
+  }
+  svg.innerHTML = `<defs>${['call', 'caller'].map(k => `<marker id="ar-${k}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="var(--${k})"></path></marker>`).join('')}</defs>` +
+    edges.filter(e => e[0] && e[1] && e[0] !== e[1]).map(([a, b, col, dash]) => `<path d="${curve(center(a), center(b))}" fill="none" stroke="${col}" stroke-width="1.6" stroke-opacity="0.85" ${dash ? `stroke-dasharray="${dash}"` : ''} marker-end="url(#ar-${col.includes('caller') ? 'caller' : 'call'})"></path>`).join('');
+}
+
+// ---- Inspector
+const srcLink = (file, line, label) => `<a href="${gh(file, line)}" target="_blank" rel="noopener" class="mono">${esc(label ?? (file + (line ? ':' + line : '')))}</a>`;
+const pick = (t, n, label) => `<button class="linkish" data-t="${t}" data-n="${esc(n)}">${esc(label ?? n)}</button>`;
+const GOTO = { crate: 'pipeline', query: 'queries', comp: 'components', analyzer: 'analyzers' };
+
+function renderInspector() {
+  const el = $('insp');
+  const r = !sel ? inspEmpty() : sel.t === 'crate' ? inspCrate(crate[sel.n]) : sel.t === 'query' ? inspQuery(query[sel.n]) : sel.t === 'comp' ? inspComp(comp[sel.n]) : sel.t === 'analyzer' ? inspAnalyzer(analyzer[sel.n]) : inspEmpty();
+  el.innerHTML = r;
+  el.querySelectorAll('.linkish').forEach(b => b.onclick = () => { const t = b.dataset.t; select(t, b.dataset.n, t === 'crate' && view() !== 'pipeline' && view() !== 'drift' ? null : GOTO[t]); });
+  el.querySelectorAll('[data-close]').forEach(b => b.onclick = () => select(null));
+}
+function inspEmpty() {
+  const top = [...D.queries].sort((a, b) => b.used_by_crates.length - a.used_by_crates.length || b.sites.length - a.sites.length).slice(0, 8);
+  return `<span class="eyebrow">Inspector</span><h2>Nothing selected</h2>
+    <div class="empty"><p>Pick a crate, query, component or analyzer to see its docs, its connections and links to the source at this commit.</p></div>
+    <section><span class="eyebrow">Most widely used queries</span><ul class="list">${top.map(q => `<li>${pick('query', q.name)}<span class="r">${q.used_by_crates.length} crates</span></li>`).join('')}</ul></section>
+    <section><span class="eyebrow">Contributor docs</span><ul class="list">${D.top_docs.map(f => `<li>${srcLink(f, 0, f.split('/').pop())}</li>`).join('')}</ul></section>
+    <p class="note">Generated by <code>scripts/archmap/extract.py</code>. Rerun it on any commit to refresh the map.</p>`;
+}
+function inspCrate(c) {
+  if (!c) return inspEmpty();
+  const s = stageIdx[c.stage];
+  const mods = D.modules.filter(m => m.crate === c.name && !m.test).sort((a, b) => b.loc - a.loc);
+  const qs = D.queries.filter(q => q.crate === c.name);
+  const cs = D.components.filter(x => x.crate === c.name);
+  const as = D.analyzers.filter(a => a.crate === c.name);
+  const tr = D.traces.filter(t => t.crates[c.name]);
+  return `<span class="eyebrow" style="color:oklch(var(--sl) var(--sc) ${s.hue})">${esc(s.title)}</span><h2>${esc(c.name)}</h2>
+    ${c.doc ? `<p class="doc">${md(c.doc)}</p>` : '<p class="doc empty">No crate-level doc comment.</p>'}
+    <dl class="kv"><dt>Lines</dt><dd>${fmt(c.loc)} in ${c.files} files${c.test_loc ? ` · ${fmt(c.test_loc)} test` : ''}</dd><dt>Path</dt><dd>${srcLink(c.dir, 0, c.dir)}</dd></dl>
+    <section><span class="eyebrow">Depends on (${c.deps.length})</span><div class="chips">${c.deps.map(d => pick('crate', d, short(d))).join('') || '<span class="empty">Nothing in the workspace</span>'}</div></section>
+    <section><span class="eyebrow">Depended on by (${(dependents[c.name] || []).length})</span><div class="chips">${(dependents[c.name] || []).map(d => pick('crate', d, short(d))).join('') || '<span class="empty">Nothing</span>'}</div></section>
+    ${c.external_deps.length ? `<section><span class="eyebrow">External crates</span><div class="chips">${c.external_deps.map(d => `<span class="chip">${esc(d)}</span>`).join('')}</div></section>` : ''}
+    ${c.docs.length || c.agents.length ? `<section><span class="eyebrow">Docs</span><ul class="list">${[...c.docs, ...c.agents].map(f => `<li>${srcLink(f, 0, f.replace(c.dir + '/', ''))}</li>`).join('')}</ul></section>` : ''}
+    ${qs.length ? `<section><span class="eyebrow">Queries (${qs.length})</span><div class="chips">${qs.map(q => pick('query', q.name)).join('')}</div></section>` : ''}
+    ${cs.length ? `<section><span class="eyebrow">Components defined (${cs.length})</span><div class="chips">${cs.map(x => pick('comp', x.name)).join('')}</div></section>` : ''}
+    ${as.length ? `<section><span class="eyebrow">Analyzers (${as.length})</span><div class="chips">${as.map(a => pick('analyzer', a.name, a.name.replace(/Analyzer$/, ''))).join('')}</div></section>` : ''}
+    ${tr.length ? `<section><span class="eyebrow">ktrace categories</span><div class="chips">${tr.map(t => `<span class="chip">${esc(t.category)}</span>`).join('')}</div></section>` : ''}
+    <section><span class="eyebrow">Largest modules</span><ul class="list">${mods.slice(0, 14).map(m => `<li><span>${srcLink(m.path, 0, m.path.replace(c.dir + '/', ''))}${m.doc ? `<br><span class="note">${md(m.doc.slice(0, 140))}${m.doc.length > 140 ? '…' : ''}</span>` : ''}</span><span class="r">${fmt(m.loc)}</span></li>`).join('')}</ul>${mods.length > 14 ? `<p class="note">${mods.length - 14} more modules</p>` : ''}</section>`;
+}
+function inspQuery(q) {
+  if (!q) return inspEmpty();
+  const live = q.sites.filter(s => !s.test);
+  return `<span class="eyebrow" style="color:oklch(var(--sl) var(--sc) ${hueOf(q.crate)})">Query · ${esc(short(q.crate))}</span><h2>${esc(q.name)}</h2>
+    ${q.doc ? `<p class="doc">${md(q.doc)}</p>` : '<p class="doc empty">No doc comment on the query struct.</p>'}
+    <dl class="kv"><dt>Output</dt><dd>${esc(q.output)}</dd><dt>impl</dt><dd>${srcLink(q.file, q.line)}</dd><dt>Used by</dt><dd>${q.used_by_crates.map(short).join(', ') || '—'}</dd></dl>
+    <section><span class="eyebrow">Calls (${q.calls.length})</span><ul class="list">${q.calls.map(c => `<li>${pick('query', c.query)}<span class="r">${c.kind === 'indirect' ? `<span class="tag ind" title="reached through ${esc(c.via)}()">via ${esc(c.via)}</span>` : '<span class="tag">direct</span>'}</span></li>`).join('') || '<li class="empty">No other queries</li>'}</ul></section>
+    <section><span class="eyebrow">Called by queries (${q.callers.length})</span><div class="chips">${q.callers.map(c => pick('query', c)).join('') || '<span class="empty">None. It is an entry point, or only called from plain functions.</span>'}</div></section>
+    <section><span class="eyebrow">Call sites (${live.length} outside tests)</span><ul class="list">${live.slice(0, 40).map(s => `<li>${srcLink(s.file, s.line, s.file.replace(/^lib\/kestrel-/, '').replace('/src/', '/') + ':' + s.line)}<span class="r">${esc(s.query || s.fn + '()')}</span></li>`).join('')}</ul>${live.length > 40 ? `<p class="note">${live.length - 40} more</p>` : ''}</section>`;
+}
+function inspComp(c) {
+  if (!c) return inspEmpty();
+  const row = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<li>${pick('crate', k, short(k))}<span class="r">${v}</span></li>`).join('') || '<li class="empty">None found</li>';
+  return `<span class="eyebrow">Component · ${esc(c.kind)}</span><h2>${esc(c.name)}</h2>
+    ${c.doc ? `<p class="doc">${md(c.doc)}</p>` : '<p class="doc empty">No doc comment.</p>'}
+    <dl class="kv"><dt>Defined</dt><dd>${srcLink(c.file, c.line)}</dd><dt>Accesses</dt><dd>${c.total}</dd></dl>
+    <section><span class="eyebrow">Read by</span><ul class="list">${row(c.reads)}</ul></section>
+    <section><span class="eyebrow">Written by</span><ul class="list">${row(c.writes)}</ul></section>`;
+}
+function inspAnalyzer(a) {
+  if (!a) return inspEmpty();
+  return `<span class="eyebrow">Analyzer · ${esc(a.kind)}</span><h2>${esc(a.name)}</h2>
+    ${a.doc ? `<p class="doc">${md(a.doc)}</p>` : ''}
+    <dl class="kv"><dt>Id</dt><dd>${esc(a.id || '—')}</dd><dt>impl</dt><dd>${srcLink(a.file, a.line)}</dd></dl>
+    <section><span class="eyebrow">Diagnostics (${a.diagnostics.length})</span><ul class="list">${a.diagnostics.map(d => `<li><span><span class="chip ${d.severity === 'Error' ? 'err' : d.severity === 'Warning' ? 'warn' : ''}">${esc(d.id)}</span> <span class="mono">${esc(d.name)}</span></span><span class="r">${esc(d.severity)} · ${esc(d.category)}</span></li>`).join('') || '<li class="empty">No descriptors found in this file</li>'}</ul></section>
+    <section><span class="eyebrow">Queries it calls</span><div class="chips">${a.queries.map(q => pick('query', q)).join('') || '<span class="empty">None directly. It reads from its context.</span>'}</div></section>`;
+}
+
+// ---- Search
+const index = [
+  ...D.crates.map(c => ({ k: 'crate', n: c.name, s: c.name + ' ' + c.doc })),
+  ...D.queries.map(q => ({ k: 'query', n: q.name, s: q.name + ' ' + q.doc })),
+  ...D.components.map(c => ({ k: 'comp', n: c.name, s: c.name + ' ' + c.doc })),
+  ...D.analyzers.map(a => ({ k: 'analyzer', n: a.name, s: a.name + ' ' + a.doc })),
+  ...diagIndex.map(d => ({ k: 'analyzer', n: d.analyzer, label: `${d.id} ${d.name}`, s: d.id + ' ' + d.name, kl: 'diagnostic' })),
+];
+const qi = $('q'), res = $('results');
+let hits = [], hi = 0;
+function showResults() {
+  const t = qi.value.trim().toLowerCase();
+  if (!t) { res.hidden = true; return; }
+  hits = index.map(x => { const n = (x.label || x.n).toLowerCase(); const sc = n === t ? 0 : n.startsWith(t) ? 1 : n.includes(t) ? 2 : x.s.toLowerCase().includes(t) ? 3 : 9; return { ...x, sc }; }).filter(x => x.sc < 9).sort((a, b) => a.sc - b.sc).slice(0, 14);
+  hi = 0;
+  res.innerHTML = hits.map((h, i) => `<button data-i="${i}" class="${i === hi ? 'on' : ''}"><span class="k">${esc(h.kl || (h.k === 'comp' ? 'component' : h.k))}</span><span class="mono">${esc(h.label || h.n)}</span></button>`).join('') || '<div class="empty" style="padding:8px 10px">No matches</div>';
+  res.hidden = false;
+  res.querySelectorAll('button').forEach(b => b.onmousedown = e => { e.preventDefault(); go(hits[+b.dataset.i]); });
+}
+function go(h) { if (!h) return; res.hidden = true; qi.value = ''; qi.blur(); select(h.k, h.n, h.k === 'crate' ? (view() === 'drift' ? 'pipeline' : null) : GOTO[h.k]); }
+qi.addEventListener('input', showResults);
+qi.addEventListener('blur', () => setTimeout(() => res.hidden = true, 100));
+qi.addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); hi = (hi + (e.key === 'ArrowDown' ? 1 : -1) + hits.length) % Math.max(1, hits.length); res.querySelectorAll('button').forEach((b, i) => b.classList.toggle('on', i === hi)); }
+  else if (e.key === 'Enter') go(hits[hi]);
+  else if (e.key === 'Escape') { res.hidden = true; qi.blur(); }
+});
+document.addEventListener('keydown', e => { if (e.key === '/' && document.activeElement !== qi && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); qi.focus(); } });
+
+// Open on the pipeline with the type checker selected so the first frame shows the edges.
+sel = view() === 'pipeline' ? { t: 'crate', n: 'kestrel-type-infer' } : null;
+render();
+document.fonts?.ready.then(() => requestAnimationFrame(drawEdges));
+})();
+</script>
