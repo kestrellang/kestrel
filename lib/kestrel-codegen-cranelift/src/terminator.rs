@@ -9,8 +9,8 @@ use kestrel_mir::{MirTy, ValueId};
 use crate::abi::{self, ReturnMode};
 use crate::error::CodegenError;
 use crate::func::FuncCompiler;
-use crate::inst::find_mono_enum;
 use crate::mem;
+use kestrel_codegen::layout::find_mono_enum;
 
 fn to_block_args(vals: &[Value]) -> Vec<BlockArg> {
     vals.iter().map(|v| BlockArg::Value(*v)).collect()
@@ -211,7 +211,7 @@ fn compile_switch(
         MirTy::Named { entity, type_args } => {
             let entity = *entity;
             let type_args = type_args.clone();
-            if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc) {
+            if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module) {
                 crate::ty::int_bits_to_cl(e.discriminant_width)
             } else {
                 ir::types::I64

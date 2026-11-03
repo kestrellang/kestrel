@@ -26,7 +26,7 @@ use crate::CodegenOptions;
 use crate::abi;
 use crate::error::CodegenError;
 use crate::func;
-use crate::ty::TypeCache;
+use crate::ty::{ScalarTy, TypeCache};
 
 pub struct CodegenCtx<'ctx> {
     /// The LLVM context (lifetime root). `&'ctx` because the MIR module is
@@ -88,8 +88,14 @@ impl<'ctx> CodegenCtx<'ctx> {
         llmod.set_triple(&triple);
         llmod.set_data_layout(&machine.get_target_data().get_data_layout());
 
+        // Pointer-width scalars are the LLVM `ptr`. `ScalarTy::Ptr::bytes()` is
+        // hardcoded to 8, so a non-64-bit target would mis-size pointer fields.
         let ptr_size = target.pointer_size();
-        let tc = TypeCache::new(module, ptr_size);
+        debug_assert_eq!(
+            ptr_size, 8,
+            "ScalarTy::Ptr currently assumes 8-byte pointers"
+        );
+        let tc = TypeCache::new(module, ScalarTy::Ptr, ptr_size);
 
         Ok(Self {
             cx,

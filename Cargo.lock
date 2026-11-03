@@ -828,6 +828,9 @@ dependencies = [
 name = "kestrel-codegen"
 version = "0.18.0"
 dependencies = [
+ "kestrel-debug",
+ "kestrel-hecs",
+ "kestrel-mir",
  "kestrel-target",
 ]
 

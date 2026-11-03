@@ -14,9 +14,9 @@ use kestrel_mir::{BlockId, MirTy, ValueId};
 use crate::abi::{self, ReturnMode};
 use crate::error::CodegenError;
 use crate::func::FuncCompiler;
-use crate::inst::find_mono_enum;
 use crate::mem;
-use crate::ty::{ScalarTy, int_bits_to_scalar};
+use crate::ty::ScalarTy;
+use kestrel_codegen::layout::find_mono_enum;
 
 /// Emit `llvm.trap` followed by `unreachable` (a real trapping terminator).
 pub fn emit_trap<'ctx>(fc: &FuncCompiler<'_, 'ctx>, builder: &Builder<'ctx>) {
@@ -269,7 +269,7 @@ fn compile_switch<'ctx>(
             let entity = *entity;
             let type_args = type_args.clone();
             match find_mono_enum(&entity, &type_args, fc.ctx.module) {
-                Some(e) => int_bits_to_scalar(e.discriminant_width),
+                Some(e) => ScalarTy::from_int_bits(e.discriminant_width),
                 None => ScalarTy::I64,
             }
         },
