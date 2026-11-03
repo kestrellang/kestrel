@@ -1792,40 +1792,16 @@ fn entity_conforms_to(cx: &CompilationContext<'_>, entity: Entity, protocol: Ent
     closure.contains(&protocol)
 }
 
-/// Resolve an AstType to an entity for type comparison.
-/// When `self_type` is provided, `Self` resolves to that entity.
+/// Resolve an AstType to an entity for type comparison. `Self` stays
+/// unresolved, as it always has here: in a protocol requirement it means the
+/// conformer, not the declaring protocol.
 fn resolve_type_entity(
     cx: &CompilationContext<'_>,
     ast_ty: &kestrel_ast::AstType,
     context: Entity,
 ) -> Option<Entity> {
-    resolve_type_entity_with_self(cx, ast_ty, context, None)
-}
-
-/// Resolve an AstType to an entity, substituting `Self` with `self_type` if provided.
-fn resolve_type_entity_with_self(
-    cx: &CompilationContext<'_>,
-    ast_ty: &kestrel_ast::AstType,
-    context: Entity,
-    self_type: Option<Entity>,
-) -> Option<Entity> {
-    let segments: Vec<String> = match ast_ty {
-        kestrel_ast::AstType::Named { segments, .. } => {
-            segments.iter().map(|s| s.name.clone()).collect()
-        },
-        kestrel_ast::AstType::Array(_, _) => vec!["Array".into()],
-        kestrel_ast::AstType::Dictionary(_, _, _) => vec!["Dictionary".into()],
-        kestrel_ast::AstType::Optional(_, _) => vec!["Optional".into()],
-        kestrel_ast::AstType::Result { .. } => vec!["Result".into()],
-        _ => return None,
-    };
-    match cx.query.query(ResolveTypePath {
-        segments,
-        context,
-        root: cx.root,
-    }) {
+    match kestrel_name_res::resolve_annotation(cx.query, ast_ty, context, cx.root) {
         TypeResolution::Found(entity) => Some(entity),
-        TypeResolution::SelfType => self_type,
         _ => None,
     }
 }

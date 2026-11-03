@@ -470,27 +470,15 @@ fn self_protocol(ctx: &LowerCtx, owner: Entity) -> Option<Entity> {
     None
 }
 
-/// Walk the parent chain from a function entity to find the enclosing
-/// struct/enum/protocol and build its Self type as `Named(entity, [TypeParam...])`.
+/// The Self type of a function's enclosing struct/enum/protocol (or
+/// extension target), built as `Named(entity, [TypeParam...])`.
 fn resolve_self_type_for_function(ctx: &mut LowerCtx, func_entity: Entity) -> TyId {
-    let mut current = ctx.world.parent_of(func_entity);
-    while let Some(entity) = current {
-        match ctx.world.get::<NodeKind>(entity).cloned() {
-            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) => {
-                return crate::ty::build_self_type(ctx, entity);
-            },
-            Some(NodeKind::Extension) => {
-                // Extension target: resolve the target entity
-                if let Some(target) = ctx.query.query(kestrel_name_res::ExtensionTargetEntity {
-                    extension: entity,
-                    root: ctx.root,
-                }) {
-                    return crate::ty::build_self_type(ctx, target);
-                }
-                return ctx.module.ty_arena.error();
-            },
-            _ => current = ctx.world.parent_of(entity),
-        }
+    let self_entity = ctx.query.query(kestrel_name_res::SelfTypeEntity {
+        context: func_entity,
+        root: ctx.root,
+    });
+    match self_entity {
+        Some(entity) => crate::ty::build_self_type(ctx, entity),
+        None => ctx.module.ty_arena.error(),
     }
-    ctx.module.ty_arena.error()
 }

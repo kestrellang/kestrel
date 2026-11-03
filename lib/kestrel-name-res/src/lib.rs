@@ -7,6 +7,7 @@
 //! All resolution is implemented as incremental queries against the
 //! kestrel-hecs world.
 
+pub mod annotation;
 pub mod conformances;
 pub mod extensions;
 pub mod helpers;
@@ -22,6 +23,7 @@ pub mod type_members;
 pub mod visibility;
 
 // Re-export primary query types
+pub use annotation::{SelfTypeEntity, annotation_entity, container_type, resolve_annotation};
 pub use conformances::{
     ConformingProtocolInstantiations, ConformingProtocols, conformance_args_with_defaults,
     expand_protocol_closure, expand_protocol_closure_in_place, extract_ast_type_args,

@@ -216,7 +216,7 @@ impl<'a> UseSink<'a> {
         let member_of = self
             .ctx
             .parent_of(entity)
-            .and_then(|p| enclosed_type(self.ctx, p, self.root));
+            .and_then(|p| kestrel_name_res::container_type(self.ctx, p, self.root));
         if member_of.is_some_and(|t| self.context.types.contains(&t)) {
             return;
         }
@@ -320,7 +320,7 @@ fn use_context(ctx: &QueryContext<'_>, entity: Entity, root: Entity) -> UseConte
     while let Some(e) = current {
         let own = ctx.query(UseRestrictionOf { entity: e }).map(|r| r.kind);
         out.restriction = out.restriction.max(own);
-        if let Some(t) = enclosed_type(ctx, e, root) {
+        if let Some(t) = kestrel_name_res::container_type(ctx, e, root) {
             let extended = ctx.query(UseRestrictionOf { entity: t }).map(|r| r.kind);
             out.restriction = out.restriction.max(extended);
             out.types.push(t);
@@ -328,19 +328,6 @@ fn use_context(ctx: &QueryContext<'_>, entity: Entity, root: Entity) -> UseConte
         current = ctx.parent_of(e);
     }
     out
-}
-
-/// The type `entity` stands for as a container: itself for a struct, enum
-/// or protocol, the extended type for an extension.
-fn enclosed_type(ctx: &QueryContext<'_>, entity: Entity, root: Entity) -> Option<Entity> {
-    match ctx.get::<NodeKind>(entity)? {
-        NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol => Some(entity),
-        NodeKind::Extension => ctx.query(kestrel_name_res::ExtensionTargetEntity {
-            extension: entity,
-            root,
-        }),
-        _ => None,
-    }
 }
 
 /// How a restricted declaration is named in the message: `parse`,

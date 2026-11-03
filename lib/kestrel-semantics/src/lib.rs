@@ -1022,21 +1022,18 @@ pub(crate) fn param_bound_contexts(
     out
 }
 
+/// The entity an annotation names. Deliberately looser than
+/// `kestrel_name_res::annotation_entity`: a resolved non-type (`NotAType`)
+/// still counts, and `Self` stays unresolved (`None`) — the copyability and
+/// conformance-target rules here judge declared parameters and protocols, never
+/// the enclosing type.
 fn resolve_type_entity(
     ctx: &QueryContext<'_>,
     ast_ty: &AstType,
     context: Entity,
     root: Entity,
 ) -> Option<Entity> {
-    let AstType::Named { segments, .. } = ast_ty else {
-        return None;
-    };
-    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-    match ctx.query(ResolveTypePath {
-        segments: seg_names,
-        context,
-        root,
-    }) {
+    match kestrel_name_res::resolve_annotation(ctx, ast_ty, context, root) {
         TypeResolution::Found(entity) | TypeResolution::NotAType(entity) => Some(entity),
         TypeResolution::SelfType | TypeResolution::NotFound(_) => None,
     }
