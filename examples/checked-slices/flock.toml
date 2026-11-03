@@ -1,0 +1,5 @@
+[package]
+name = "checked-slices"
+version = "0.1.0"
+description = "Array slices as checked borrows: ArraySlice[T] and MutableArraySlice[T]"
+source = "src"

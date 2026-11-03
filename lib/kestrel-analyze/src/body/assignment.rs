@@ -171,7 +171,9 @@ impl BodyCheck for AssignmentAnalyzer {
             if util::accessor_place_mut_base(cx, *receiver).is_some() {
                 continue;
             }
-            match util::ref_place(cx, *receiver) {
+            match util::ref_place(cx, *receiver)
+                .or_else(|| util::field_subscript_ref(cx, *receiver))
+            {
                 // `&mutating T` call result — a writable place.
                 Some(true) => {},
                 // `&T` — the access-mode analyzer reports E207 on the
@@ -479,7 +481,9 @@ fn check_target(
         // the field's type. Same logic as the Call arm above.
         HirExpr::MethodCall { receiver, .. } => {
             // `&mutating T`-returning method call — writable place (see Call).
-            match util::ref_place(cx, target) {
+            // A subscript through a stored ref field writes the referent:
+            // the field's ref kind decides (see `util::field_subscript_ref`).
+            match util::ref_place(cx, target).or_else(|| util::field_subscript_ref(cx, target)) {
                 Some(true) => return,
                 Some(false) => {
                     push_assign_through_shared_ref(cx, target, &mut *diags);

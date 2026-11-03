@@ -1760,27 +1760,38 @@ impl OssaBodyCtx<'_, '_> {
 
         // An observed field is mutated in a writeback slot; its observer
         // setter stores the slot back when the assignment's writebacks drain.
-        let field_arg = if let Some(slot) =
-            self.observed_field_slot(receiver, recv_entity, method_name, field_ty)
-        {
-            CallArg {
-                value: self.lend_writeback_slot(slot, field_ty),
-                convention: ParamConvention::MutBorrow,
-            }
-        } else if let wb_mark = self.pending_writebacks.len()
-            && let Some(recv_addr) = self.write_place_addr(receiver)
-        {
-            let field_addr = self.emit_field_addr(recv_addr, receiver_ty, field_idx);
-            let borrow = self.mut_borrow_write_addr(field_addr, field_ty, wb_mark);
-            CallArg {
-                value: borrow,
-                convention: ParamConvention::MutBorrow,
-            }
-        } else {
-            let receiver_val = self.lower_expr(receiver);
-            let field_val = self.emit_struct_extract(receiver_val, field_idx, field_ty);
-            self.prepare_call_arg(field_val, ParamConvention::MutBorrow)
-        };
+        // A stored REFERENCE field (`let base: &mutating Array[T]`): the
+        // write lands in the referent. Load the stored address via the
+        // ref-slot extract (never the field's own slot) and dispatch on the
+        // pointee — the twin of the read path in `rewrite_field_subscript`.
+        let field_arg =
+            if let Some((view, pointee)) = self.ref_field_view(receiver, field_idx, field_ty) {
+                field_ty = pointee;
+                CallArg {
+                    value: view,
+                    convention: ParamConvention::MutBorrow,
+                }
+            } else if let Some(slot) =
+                self.observed_field_slot(receiver, recv_entity, method_name, field_ty)
+            {
+                CallArg {
+                    value: self.lend_writeback_slot(slot, field_ty),
+                    convention: ParamConvention::MutBorrow,
+                }
+            } else if let wb_mark = self.pending_writebacks.len()
+                && let Some(recv_addr) = self.write_place_addr(receiver)
+            {
+                let field_addr = self.emit_field_addr(recv_addr, receiver_ty, field_idx);
+                let borrow = self.mut_borrow_write_addr(field_addr, field_ty, wb_mark);
+                CallArg {
+                    value: borrow,
+                    convention: ParamConvention::MutBorrow,
+                }
+            } else {
+                let receiver_val = self.lower_expr(receiver);
+                let field_val = self.emit_struct_extract(receiver_val, field_idx, field_ty);
+                self.prepare_call_arg(field_val, ParamConvention::MutBorrow)
+            };
 
         let mut call_args = vec![field_arg];
         for v in subscript_args {

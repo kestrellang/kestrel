@@ -78,6 +78,18 @@ impl OssaBodyCtx<'_, '_> {
         self.rebind_scope_values(&live_vals, &then_params);
         self.push_scope();
         let then_val = self.lower_hir_block(then_body);
+        // An `if` with no `else` is a unit statement: a then-tail of another
+        // type (`if c { println("x") }`, whose tail is a `Result`) is
+        // discarded — the arm exit drops it with the arm's other temporaries
+        // — and the arm carries unit to the merge like the implicit else.
+        let then_val = if else_body.is_none()
+            && !self.is_terminated()
+            && self.body.value(then_val).ty != result_ty
+        {
+            self.emit_literal(Immediate::unit())
+        } else {
+            then_val
+        };
         // Arm-value decay copies in `capture_arm_exit` diagnose at the
         // branch's value expression (a tail-less block's value is unit —
         // never a ref/NotCopyable — so the enclosing span is fine there).

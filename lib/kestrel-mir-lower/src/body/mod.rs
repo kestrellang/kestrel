@@ -3699,7 +3699,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 if self.ctx.module.escape_carry(ty).any() {
                     let convs = self.current_param_convs();
                     let mut joined: Option<RootProvenance> = None;
-                    for a in &args {
+                    let sources = self.ref_source_args(&callee, args.len());
+                    for (i, a) in args.iter().enumerate() {
                         let (a_root, a_guaranteed, a_ty) = {
                             let d = self.body.value(a.value);
                             (d.root, d.ownership == Ownership::Guaranteed, d.ty)
@@ -3707,7 +3708,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         let candidate = a_guaranteed
                             || (a.convention == ParamConvention::Consuming
                                 && self.ctx.module.escape_carry(a_ty).any());
-                        if candidate {
+                        // Skip args that can't hold what the result points
+                        // at: `xs.slice(0)` doesn't borrow the `0` temporary.
+                        let may_source = sources.as_ref().is_none_or(|s| s[i]);
+                        if candidate && may_source {
                             joined = Some(match joined {
                                 None => a_root,
                                 Some(j) => j.join(a_root, &convs),
@@ -4905,6 +4909,60 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         Some((receiver, index_args, member, is_static))
     }
 
+    /// Per call arg: can the callee's ref-carrying result borrow from it?
+    /// The receiver always can; a declared param only when its type may
+    /// hold what the result points at (`kestrel_semantics::RefSourceParams`,
+    /// shared with the E509 analyzer). `None` = unknown callee or an arg
+    /// list that doesn't line up with the signature: every arg may be.
+    fn ref_source_args(&self, callee: &Callee, n_args: usize) -> Option<Vec<bool>> {
+        let entity = match callee {
+            Callee::Direct { func, .. } => *func,
+            Callee::Witness {
+                protocol, method, ..
+            } => self.find_protocol_method_entity(*protocol, method)?,
+            _ => return None,
+        };
+        let mut sources = self.ctx.query.query(kestrel_semantics::RefSourceParams {
+            callee: entity,
+            root: self.ctx.root,
+        })?;
+        let has_receiver = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Callable>(entity)
+            .is_some_and(|c| c.receiver.is_some());
+        if has_receiver {
+            sources.insert(0, true);
+        }
+        (sources.len() == n_args).then_some(sources)
+    }
+
+    /// A dotted subscript on a stored REFERENCE field (`s.base(i)` with
+    /// `base: &Array[T]` or `&mutating Array[T]`) addresses the REFERENT:
+    /// load the stored address with the ref-slot extract and hand back the
+    /// pointee view + pointee type (the receiver type the solver dispatched
+    /// on). `None` when the field isn't a reference. One source of truth for
+    /// the read (`rewrite_field_subscript`), assign
+    /// (`try_lower_method_call_setter`) and in-place (`+=`, mutating call)
+    /// paths. The referent's mutability is the analyzers' business
+    /// (`util::field_subscript_ref`): a write through a `&mutating` field
+    /// needs no mutable base, so this never asks for the base's address.
+    pub(crate) fn ref_field_view(
+        &mut self,
+        base: HirExprId,
+        field_idx: kestrel_mir::FieldIdx,
+        field_ty: TyId,
+    ) -> Option<(ValueId, TyId)> {
+        let MirTy::Ref { pointee, .. } = *self.ctx.module.ty_arena.get(field_ty) else {
+            return None;
+        };
+        let base_val = self.lower_expr_for_borrow(base);
+        Some((
+            self.emit_struct_extract(base_val, field_idx, field_ty),
+            pointee,
+        ))
+    }
+
     /// Mut-borrow receiver arg + receiver type for an accessor prelude.
     /// `FieldOf` fabricates the stored field's address from the base's var
     /// address (mirrors `try_lower_method_call_setter`'s field-addr path);
@@ -4942,6 +5000,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     }
                     field_ty =
                         kestrel_mir::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
+                }
+                // A stored REF field: the place is the referent, reached
+                // through the stored address — not the field's own slot.
+                if let Some((view, pointee)) = self.ref_field_view(*base, field_idx, field_ty) {
+                    return Some((
+                        CallArg {
+                            value: view,
+                            convention: ParamConvention::MutBorrow,
+                        },
+                        pointee,
+                    ));
                 }
                 // An observed field is written through its observer setter.
                 if let Some(slot) = self.observed_field_slot(*base, entity, name, field_ty) {
