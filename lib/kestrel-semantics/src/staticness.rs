@@ -20,6 +20,7 @@
 //! rule; every layer (HIR here, solver TyVar, analyze ResolvedTy) routes
 //! nominal instantiations through it via a `StaticLayer` impl.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 
 use kestrel_ast_builder::{TypeParams, WhereClause as AstWhereClause, WhereConstraint};
@@ -73,15 +74,77 @@ pub struct StaticnessInfo {
 
 // ===== The shared instance rule =====
 
-/// Layer hooks for `instance_is_static`. Implementors: the HIR walker below,
+/// One type form's view of a type, as far as staticness cares. Each layer
+/// (HIR, solver `TyVar`, analyze `ResolvedTy`) only maps its own type onto
+/// this; what each shape *means* is decided once, in [`ty_is_static`].
+pub enum StaticShape<'t, T: Clone> {
+    /// A reference: never Static (the axiom).
+    Ref,
+    /// A nominal instantiation: the per-instance rule.
+    Nominal { entity: Entity, args: Cow<'t, [T]> },
+    /// `Self` / an abstract associated type, judged by its base alone: a
+    /// conditional base counts (Self inside its own definition is covered by
+    /// the `NominalStaticness` cycle guard).
+    BaseOnly(Entity),
+    /// A type parameter: Static unless its bound was relaxed.
+    Param(Entity),
+    /// Static iff every element is.
+    Tuple(Cow<'t, [T]>),
+    /// Exactly the type it stands for (a bounded alias's expansion).
+    Alias(&'t T),
+    /// A raw existential with these protocol bounds.
+    RawExistential(Vec<Entity>),
+    /// A closure: a view-kind closure holds views into its defining frame,
+    /// so it is not Static, exactly like a ref; owning kinds snapshot their
+    /// captures (references 2c, docs/design/closure-fields.md).
+    Function { is_view: bool },
+    /// Conservative never-block leaves (protocols, opaques, projections,
+    /// never, errors, unresolved inference variables).
+    Leaf,
+}
+
+/// Layer hooks for the staticness rule. Implementors: the HIR walker below,
 /// the solver's TyVar layer, the analyzer's ResolvedTy layer.
 pub trait StaticLayer {
-    type Ty;
+    type Ty: Clone;
+    fn query(&self) -> &QueryContext<'_>;
+    fn root(&self) -> Entity;
     /// The nominal's classification (HIR layer: `NominalStaticness` through
     /// the cycle guard).
     fn nominal_staticness(&self, entity: Entity) -> Staticness;
-    /// Is this member type Static in the layer's vocabulary?
-    fn member_is_static(&self, ty: &Self::Ty) -> bool;
+    /// This layer's type, seen as a [`StaticShape`].
+    fn shape<'t>(&self, ty: &'t Self::Ty) -> StaticShape<'t, Self::Ty>;
+    /// Does this type parameter carry the (implicit) Static bound? Layers
+    /// differ in the lookup context and in dependency tracking.
+    fn param_is_static(&self, param: Entity) -> bool;
+    /// Is a component (type arg, tuple element, alias expansion) Static?
+    /// Layers with recursion bookkeeping (the solver's depth) override this.
+    fn component_is_static(&self, ty: &Self::Ty) -> bool
+    where
+        Self: Sized,
+    {
+        ty_is_static(self, ty)
+    }
+}
+
+/// THE staticness rule over any layer's types: what each [`StaticShape`]
+/// means is written here once, for every layer.
+pub fn ty_is_static<L: StaticLayer>(layer: &L, ty: &L::Ty) -> bool {
+    match layer.shape(ty) {
+        StaticShape::Ref => false,
+        StaticShape::Nominal { entity, args } => instance_is_static(layer, entity, &args),
+        StaticShape::BaseOnly(entity) => {
+            !matches!(layer.nominal_staticness(entity), Staticness::NotStatic)
+        },
+        StaticShape::Param(param) => layer.param_is_static(param),
+        StaticShape::Tuple(elems) => elems.iter().all(|e| layer.component_is_static(e)),
+        StaticShape::Alias(expanded) => layer.component_is_static(expanded),
+        StaticShape::RawExistential(bounds) => {
+            crate::raw_existential_is_static(layer.query(), bounds, layer.root())
+        },
+        StaticShape::Function { is_view } => !is_view,
+        StaticShape::Leaf => true,
+    }
 }
 
 /// THE per-instantiation staticness rule, single source of truth for every
@@ -94,9 +157,10 @@ pub fn instance_is_static<L: StaticLayer>(layer: &L, entity: Entity, args: &[L::
     match layer.nominal_staticness(entity) {
         Staticness::Static => true,
         Staticness::NotStatic => false,
-        Staticness::ConditionalOn(positions) => positions
-            .iter()
-            .all(|&i| args.get(i).is_some_and(|arg| layer.member_is_static(arg))),
+        Staticness::ConditionalOn(positions) => positions.iter().all(|&i| {
+            args.get(i)
+                .is_some_and(|arg| layer.component_is_static(arg))
+        }),
     }
 }
 
@@ -259,7 +323,7 @@ fn nominal_staticness_impl(ctx: &QueryContext<'_>, entity: Entity, root: Entity)
     };
 
     for (child, ty) in collect_child_types(ctx, entity, root) {
-        if !walker.member_is_static(&ty) {
+        if !ty_is_static(&walker, &ty) {
             return StaticnessInfo {
                 staticness: Staticness::NotStatic,
                 reason: StaticnessReason::NonStaticChild(child),
@@ -302,71 +366,76 @@ struct HirStaticWalk<'a, 'q> {
 impl StaticLayer for HirStaticWalk<'_, '_> {
     type Ty = HirTy;
 
+    fn query(&self) -> &QueryContext<'_> {
+        self.ctx
+    }
+
+    fn root(&self) -> Entity {
+        self.root
+    }
+
     fn nominal_staticness(&self, entity: Entity) -> Staticness {
         query_nominal_staticness(self.ctx, entity, self.root)
     }
 
-    fn member_is_static(&self, ty: &HirTy) -> bool {
+    fn shape<'t>(&self, ty: &'t HirTy) -> StaticShape<'t, HirTy> {
         match ty {
-            // The axiom. Unreachable from stored positions in 2a (E483/E484/
-            // E485 reject refs there first) — 2b's ref payloads land here.
-            HirTy::Ref { .. } => false,
+            HirTy::Ref { .. } => StaticShape::Ref,
             HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => {
-                instance_is_static(self, *entity, args)
-            },
-            HirTy::Tuple(elems, _) => elems.iter().all(|e| self.member_is_static(e)),
-            HirTy::Param(entity, _) => {
-                match self.ctx.query(TypeParamStaticRequirement {
-                    param: *entity,
-                    context: self.context,
-                    root: self.root,
-                }) {
-                    StaticRequirement::RequiresStatic => true,
-                    StaticRequirement::MayBeNonStatic => {
-                        let Some(params) = &self.owner_params else {
-                            return false;
-                        };
-                        match params.iter().position(|p| p == entity) {
-                            Some(pos) => {
-                                self.deps.borrow_mut().push(pos);
-                                true
-                            },
-                            // A relaxed param from an enclosing scope can't
-                            // gate THIS nominal's instantiations ⇒ unprovable.
-                            None => false,
-                        }
-                    },
+                StaticShape::Nominal {
+                    entity: *entity,
+                    args: Cow::Borrowed(args),
                 }
             },
-            // Base-only treatment for Self/alias uses (mirrors the copy
-            // layer): a conditional base is treated permissively — Self
-            // inside its own definition is covered by the cycle guard.
+            HirTy::Tuple(elems, _) => StaticShape::Tuple(Cow::Borrowed(elems)),
+            HirTy::Param(entity, _) => StaticShape::Param(*entity),
             HirTy::SelfType(entity, _) | HirTy::AbstractAssoc { entity, .. } => {
-                !matches!(self.nominal_staticness(*entity), Staticness::NotStatic)
+                StaticShape::BaseOnly(*entity)
             },
-            HirTy::Alias { expanded, .. } => self.member_is_static(expanded),
-            // A view-kind closure (normal / `mutating`) holds views into its
-            // defining frame, so it is not Static, exactly like a ref; owning
-            // kinds snapshot their captures (references 2c,
-            // docs/design/closure-fields.md).
-            HirTy::Function { kind, .. } => !kind.is_view(),
-            // Conservative never-block leaves, mirroring the copy layer:
-            // refs cannot reach these positions in 2a (revisit in 2b).
-            HirTy::RawExistential { bounds, .. } => crate::raw_existential_is_static(
-                self.ctx,
-                bounds.iter().filter_map(|b| match b {
-                    HirTy::Protocol { entity, .. } => Some(*entity),
-                    _ => None,
-                }),
-                self.root,
+            HirTy::Alias { expanded, .. } => StaticShape::Alias(expanded),
+            HirTy::Function { kind, .. } => StaticShape::Function {
+                is_view: kind.is_view(),
+            },
+            HirTy::RawExistential { bounds, .. } => StaticShape::RawExistential(
+                bounds
+                    .iter()
+                    .filter_map(|b| match b {
+                        HirTy::Protocol { entity, .. } => Some(*entity),
+                        _ => None,
+                    })
+                    .collect(),
             ),
             HirTy::Protocol { .. }
             | HirTy::Opaque { .. }
             | HirTy::AssocProjection { .. }
             | HirTy::Never(_)
             | HirTy::Infer(_)
-            | HirTy::Error(_) => true,
+            | HirTy::Error(_) => StaticShape::Leaf,
         }
+    }
+
+    fn param_is_static(&self, param: Entity) -> bool {
+        let requirement = self.ctx.query(TypeParamStaticRequirement {
+            param,
+            context: self.context,
+            root: self.root,
+        });
+        if requirement == StaticRequirement::RequiresStatic {
+            return true;
+        }
+        // A relaxed param is unprovable, except in nominal-classification
+        // mode, where the owner's own relaxed param becomes a gating
+        // position. One from an enclosing scope can't gate THIS nominal's
+        // instantiations ⇒ unprovable.
+        let Some(pos) = self
+            .owner_params
+            .as_ref()
+            .and_then(|params| params.iter().position(|p| *p == param))
+        else {
+            return false;
+        };
+        self.deps.borrow_mut().push(pos);
+        true
     }
 }
 
@@ -379,12 +448,12 @@ pub fn hir_type_is_static(
     context: Entity,
     root: Entity,
 ) -> bool {
-    HirStaticWalk {
+    let walker = HirStaticWalk {
         ctx,
         context,
         root,
         owner_params: None,
         deps: RefCell::new(Vec::new()),
-    }
-    .member_is_static(ty)
+    };
+    ty_is_static(&walker, ty)
 }

@@ -1017,7 +1017,7 @@ pub(crate) fn is_static_builtin(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
 }
 
 /// `StaticLayer` over `TyVar` — the solver's hooks into the per-instantiation
-/// staticness rule (`kestrel_semantics::instance_is_static`, the single
+/// staticness rule (`kestrel_semantics::ty_is_static`, the single
 /// source of truth across semantics / solver / analyze). Depth bookkeeping
 /// mirrors `SolverCopyLayer`.
 pub(super) struct SolverStaticLayer<'a, 'i> {
@@ -1027,6 +1027,14 @@ pub(super) struct SolverStaticLayer<'a, 'i> {
 
 impl StaticLayer for SolverStaticLayer<'_, '_> {
     type Ty = TyVar;
+
+    fn query(&self) -> &kestrel_hecs::QueryContext<'_> {
+        self.ctx.query_ctx
+    }
+
+    fn root(&self) -> Entity {
+        self.ctx.root
+    }
 
     fn nominal_staticness(&self, entity: Entity) -> Staticness {
         self.ctx
@@ -1038,62 +1046,62 @@ impl StaticLayer for SolverStaticLayer<'_, '_> {
             .staticness
     }
 
-    fn member_is_static(&self, &tv: &TyVar) -> bool {
+    fn shape<'t>(&self, &tv: &'t TyVar) -> StaticShape<'t, TyVar> {
+        if self.depth > 64 {
+            return StaticShape::Leaf; // recursion guard — never block
+        }
+        let TySlot::Resolved(kind) = self.ctx.slot(self.ctx.resolve(tv)) else {
+            return StaticShape::Leaf; // unresolved: never block
+        };
+        match kind {
+            TyKind::Ref { .. } => StaticShape::Ref,
+            TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
+                StaticShape::Nominal {
+                    entity: *entity,
+                    args: Cow::Owned(args.clone()),
+                }
+            },
+            // Unlike the HIR and analyze layers (`BaseOnly`), the solver
+            // judges `Self` as an instantiation with no args, so a
+            // conditional base is unprovable here (mirrors the copy layer's
+            // empty-args rule).
+            TyKind::SelfType { entity } => StaticShape::Nominal {
+                entity: *entity,
+                args: Cow::Owned(Vec::new()),
+            },
+            TyKind::Param { entity } => StaticShape::Param(*entity),
+            TyKind::Tuple(elems) => StaticShape::Tuple(Cow::Owned(elems.clone())),
+            TyKind::RawExistential { bounds, .. } => {
+                StaticShape::RawExistential(bounds.iter().map(|(protocol, _)| *protocol).collect())
+            },
+            TyKind::Function { kind, .. } => StaticShape::Function {
+                is_view: kind.is_view(),
+            },
+            TyKind::Error
+            | TyKind::Protocol { .. }
+            | TyKind::Opaque { .. }
+            | TyKind::Never
+            | TyKind::TypeAlias { .. }
+            | TyKind::AssocProjection { .. } => StaticShape::Leaf,
+        }
+    }
+
+    fn param_is_static(&self, param: Entity) -> bool {
+        let context = self.ctx.query_ctx.parent_of(param).unwrap_or(param);
+        self.ctx.query_ctx.query(TypeParamStaticRequirement {
+            param,
+            context,
+            root: self.ctx.root,
+        }) == StaticRequirement::RequiresStatic
+    }
+
+    fn component_is_static(&self, &tv: &TyVar) -> bool {
         solver_ty_is_static(self.ctx, tv, self.depth + 1)
     }
 }
 
-/// Per-instantiation staticness for the solver: structural contains-ref over
-/// resolved type vars. Never-block arms (unresolved / Error / depth guard)
-/// answer `true` — in 2a nothing unresolved can become non-Static, and a
-/// missed rejection is a mono-stage gap, not a miscompile (Static has no
-/// runtime semantics). The universal fast path: `Staticness::Static` bases
-/// return without touching args.
+/// Is this solver type provably Static? The rule itself is
+/// `kestrel_semantics::ty_is_static`; `depth` bounds the recursion.
 pub(crate) fn solver_ty_is_static(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> bool {
-    if depth > 64 {
-        return true; // recursion guard — never block
-    }
-    let resolved = ctx.resolve(tv);
-    let kind = match ctx.slot(resolved) {
-        TySlot::Resolved(k) => k.clone(),
-        _ => return true, // unresolved: never block
-    };
-    match kind {
-        // The axiom: a reference is never Static.
-        TyKind::Ref { .. } => false,
-        TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
-            instance_is_static(&SolverStaticLayer { ctx, depth }, entity, &args)
-        },
-        // Empty args: a conditional base is unprovable here (mirrors the
-        // copy layer's empty-args rule).
-        TyKind::SelfType { entity } => {
-            instance_is_static(&SolverStaticLayer { ctx, depth }, entity, &[])
-        },
-        TyKind::Param { entity } => {
-            let context = ctx.query_ctx.parent_of(entity).unwrap_or(entity);
-            ctx.query_ctx.query(TypeParamStaticRequirement {
-                param: entity,
-                context,
-                root: ctx.root,
-            }) == StaticRequirement::RequiresStatic
-        },
-        TyKind::Tuple(elems) => elems
-            .iter()
-            .all(|&e| solver_ty_is_static(ctx, e, depth + 1)),
-        TyKind::RawExistential { bounds, .. } => kestrel_semantics::raw_existential_is_static(
-            ctx.query_ctx,
-            bounds.iter().map(|(protocol, _)| *protocol),
-            ctx.root,
-        ),
-        // A view-kind closure is not Static (references 2c); owning kinds are.
-        TyKind::Function { kind, .. } => !kind.is_view(),
-        // Protocol / opaque / alias / assoc-projection / Never / Error:
-        // conservative never-block leaves — refs can't reach them in 2a.
-        TyKind::Error
-        | TyKind::Protocol { .. }
-        | TyKind::Opaque { .. }
-        | TyKind::Never
-        | TyKind::TypeAlias { .. }
-        | TyKind::AssocProjection { .. } => true,
-    }
+    ty_is_static(&SolverStaticLayer { ctx, depth }, &tv)
 }

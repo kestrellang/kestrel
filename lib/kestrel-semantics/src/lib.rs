@@ -21,8 +21,9 @@ pub use sizedness::{
 };
 
 pub use staticness::{
-    NominalStaticness, StaticLayer, StaticRequirement, Staticness, StaticnessInfo,
+    NominalStaticness, StaticLayer, StaticRequirement, StaticShape, Staticness, StaticnessInfo,
     StaticnessReason, TypeParamStaticRequirement, hir_type_is_static, instance_is_static,
+    ty_is_static,
 };
 
 use std::borrow::Cow;
