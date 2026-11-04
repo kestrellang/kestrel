@@ -633,9 +633,10 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
     // this arm its `&T` read type classified it SharedRef, so
     // `&mutating self.items(at: i)` in a `mutating` method was E210.
     // Through a stored REF field (`self.base(i)`, `base: &mutating T`) the
-    // place is the referent's: the ref kind decides, not the field or base.
+    // place is the referent's: the ref kind decides, not the field's
+    // `let`/`var` — but a `&mutating` one still needs a mutable base.
     match util::field_subscript_ref(cx, expr_id) {
-        Some(true) => return MutClass::Mutable,
+        Some(true) => return mutating_ref_class(cx, expr_id),
         Some(false) => return MutClass::SharedRef,
         None => {},
     }
@@ -659,7 +660,7 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
     // the receiver check ACCEPTS temporaries, so without this consult a
     // mutating method on a shared ref would silently pass (const-cast hole).
     match util::ref_place(cx, expr_id) {
-        Some(true) => return MutClass::Mutable,
+        Some(true) => return mutating_ref_class(cx, expr_id),
         Some(false) => return MutClass::SharedRef,
         None => {},
     }
@@ -691,6 +692,20 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
         HirExpr::TupleIndex { base, .. } => classify_mutability(cx, *base),
         // Everything else is a temporary (call results, literals, if-exprs, etc.)
         _ => MutClass::Temporary,
+    }
+}
+
+/// A `&mutating` place is mutable, unless it is reached through a stored
+/// ref field (`v.p`, `self.base(i)`): no interior mutability, so the field's
+/// base must be mutable (see `util::stored_ref_field_base`). A temporary
+/// holder is owned, so writing through it is fine.
+fn mutating_ref_class(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
+    let Some(base) = util::stored_ref_field_base(cx, expr_id) else {
+        return MutClass::Mutable;
+    };
+    match classify_mutability(cx, base) {
+        MutClass::Temporary => MutClass::Mutable,
+        class => class,
     }
 }
 

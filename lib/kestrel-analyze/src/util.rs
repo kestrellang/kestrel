@@ -72,6 +72,32 @@ pub fn ref_place(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<bool> {
         .map(|r| r.mutating)
 }
 
+/// The base a place reaches a STORED REFERENCE field through: `v` for
+/// `v.p` and for the field subscript `v.base(i)`, when `p` / `base` is a
+/// stored instance field of type `&T` / `&mutating T`. `None` otherwise.
+///
+/// A `&mutating` field gives no interior mutability: writing through it is
+/// a write to the holder, so it needs the same mutable base a write to any
+/// other field does (`let v: View` or a borrowing `self` can only read
+/// through `v.p`). Shared by the assignment (E201) and access-mode (E204)
+/// analyzers, which gate a `&mutating` [`ref_place`] /
+/// [`field_subscript_ref`] answer on this base's mutability.
+pub fn stored_ref_field_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<HirExprId> {
+    let (field, base) = match &cx.hir.exprs[expr_id] {
+        HirExpr::Field { base, .. } => (*cx.typed.resolutions.get(&expr_id)?, *base),
+        HirExpr::MethodCall { receiver, .. } => {
+            (*cx.typed.field_subscripts.get(&expr_id)?, *receiver)
+        },
+        _ => return None,
+    };
+    let stored = cx
+        .query
+        .get::<kestrel_ast_builder::FieldClass>(field)
+        .is_some_and(|c| c.is_stored_instance());
+    let ann = cx.query.get::<kestrel_ast_builder::TypeAnnotation>(field)?;
+    (stored && matches!(ann.0, kestrel_ast::AstType::Ref { .. })).then_some(base)
+}
+
 /// A subscript on a stored REFERENCE field (`self.base(i)` with
 /// `let base: &mutating Array[T]`): the place lives in the referent, so its
 /// mutability is the field's reference kind — not the field's `let`/`var`
