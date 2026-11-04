@@ -6,8 +6,8 @@ import std.core.(Bool, Equatable, Range, ClosedRange, RangeFrom, RangeUpTo, Rang
 import std.numeric.(Int64, UInt64, RandomNumberGenerator, SystemRandom)
 import std.result.(Optional)
 import std.memory.(UnsafeSlice, Pointer)
-import std.iter.(Iterable)
-import std.collections.(Array, ArrayIterator, Slice, SeqIndex, SeqClampable, SeqWrappable, SeqRange)
+import std.iter.(Iterable, Iterator)
+import std.collections.(Array, ArrayIterator, Slice, SeqIndex, SeqClampable, SeqWrappable, SeqRange, ChunksView, WindowsView, ReversedView, ArraySplitView, ArraySplitWhereView)
 
 // ============================================================================
 // ARRAY SLICE
@@ -93,6 +93,12 @@ public struct ArraySlice[T] {
     /// so it sees the elements as they are now, like `Array.iter()`.
     public func iter() -> ArrayIterator[T] {
         self.base.iterRange(start: self.start, count: liveCount(self.base, self.start, self.len))
+    }
+
+    /// Iterator over SHARED REFERENCES (`&T`) to the elements, in place.
+    /// It borrows the array, so it can't outlive it.
+    public func refs() -> ArrayRefsIterator[T] {
+        ArrayRefsIterator(base: self.base, index: self.start, end: self.start + self.len)
     }
 
     /// An owned copy of the elements.
@@ -479,6 +485,160 @@ extend MutableArraySlice[T] {
 }
 
 // ============================================================================
+// LAZY VIEWS
+// ============================================================================
+// Multi-pass views that borrow the array (see collections/views.ks). They
+// live on ArraySlice; Array and MutableArraySlice forward to it.
+
+extend ArraySlice[T] {
+    /// Multi-pass lazy view over non-overlapping `size`-sized chunks. The
+    /// last chunk is shorter when `count` isn't a multiple of `size`.
+    /// Panics if `size <= 0`.
+    ///
+    /// ```
+    /// let v = [1, 2, 3, 4, 5].chunks(of: 2);
+    /// v.count;          // 3
+    /// v(2).count;       // 1
+    /// ```
+    public func chunks(of size: Int64) -> ChunksView[T] {
+        if size <= 0 {
+            fatalError("chunks: size must be positive")
+        }
+        ChunksView(slice: self, chunkSize: size)
+    }
+
+    /// Multi-pass lazy view over overlapping `size`-sized sliding windows.
+    /// Empty when there are fewer than `size` elements. Panics if
+    /// `size <= 0`.
+    ///
+    /// ```
+    /// [1, 2, 3, 4].windows(of: 2).count;   // 3
+    /// ```
+    public func windows(of size: Int64) -> WindowsView[T] {
+        if size <= 0 {
+            fatalError("windows: size must be positive")
+        }
+        WindowsView(slice: self, windowSize: size)
+    }
+
+    /// Multi-pass lazy view that reads back to front.
+    ///
+    /// ```
+    /// let v = [1, 2, 3].reversed();
+    /// v(0);           // 3
+    /// v.toArray();    // [3, 2, 1]
+    /// ```
+    public func reversed() -> ReversedView[T] {
+        ReversedView(slice: self)
+    }
+
+    /// Multi-pass lazy view over the segments between elements matching
+    /// `predicate`. The matching elements are dropped.
+    public func split(consuming where predicate: escaping (T) -> Bool) -> ArraySplitWhereView[T] {
+        ArraySplitWhereView(slice: self, predicate: predicate)
+    }
+}
+
+extend ArraySlice[T] where T: Equatable {
+    /// Multi-pass lazy view over the segments between occurrences of
+    /// `separator`. `toArray()` copies them into owned arrays.
+    ///
+    /// ```
+    /// [1, 0, 2, 0, 3].split(0).toArray();   // [[1], [2], [3]]
+    /// ```
+    public func split(separator: T) -> ArraySplitView[T] {
+        ArraySplitView(slice: self, separator: separator)
+    }
+}
+
+extend Array[T] {
+    /// See `ArraySlice.chunks(of:)`.
+    public func chunks(of size: Int64) -> ChunksView[T] { self.asSlice().chunks(of: size) }
+    /// See `ArraySlice.windows(of:)`.
+    public func windows(of size: Int64) -> WindowsView[T] { self.asSlice().windows(of: size) }
+    /// See `ArraySlice.reversed()`.
+    public func reversed() -> ReversedView[T] { self.asSlice().reversed() }
+    /// See `ArraySlice.split(where:)`.
+    public func split(consuming where predicate: escaping (T) -> Bool) -> ArraySplitWhereView[T] {
+        ArraySplitWhereView(slice: self.asSlice(), predicate: predicate)
+    }
+}
+
+extend Array[T] where T: Equatable {
+    /// See `ArraySlice.split(separator:)`.
+    public func split(separator: T) -> ArraySplitView[T] { ArraySplitView(slice: self.asSlice(), separator: separator) }
+}
+
+extend MutableArraySlice[T] {
+    /// See `ArraySlice.chunks(of:)`.
+    public func chunks(of size: Int64) -> ChunksView[T] { self.readOnly().chunks(of: size) }
+    /// See `ArraySlice.windows(of:)`.
+    public func windows(of size: Int64) -> WindowsView[T] { self.readOnly().windows(of: size) }
+    /// See `ArraySlice.reversed()`.
+    public func reversed() -> ReversedView[T] { self.readOnly().reversed() }
+    /// See `ArraySlice.split(where:)`.
+    public func split(consuming where predicate: escaping (T) -> Bool) -> ArraySplitWhereView[T] {
+        ArraySplitWhereView(slice: self.readOnly(), predicate: predicate)
+    }
+}
+
+extend MutableArraySlice[T] where T: Equatable {
+    /// See `ArraySlice.split(separator:)`.
+    public func split(separator: T) -> ArraySplitView[T] { ArraySplitView(slice: self.readOnly(), separator: separator) }
+}
+
+// ============================================================================
+// REFERENCE ITERATORS
+// ============================================================================
+
+/// Iterator over `&T` references to a range of an array's elements.
+/// Returned by `Array.refs()` and `ArraySlice.refs()`. It borrows the
+/// array and reads each element through it, so a reference can't
+/// outlive the array. Stops early if the array gets shorter.
+public struct ArrayRefsIterator[T]: Iterator {
+    type Item = &T
+
+    fileprivate let base: &Array[T]
+    fileprivate var index: Int64
+    fileprivate let end: Int64
+
+    public mutating func next() -> Optional[&T] {
+        if self.index >= self.end or self.index >= self.base.count {
+            return .None
+        }
+        let i = self.index;
+        self.index = i + 1;
+        let r = &self.base(at: i);
+        let o: Optional[&T] = .Some(r);
+        o
+    }
+}
+
+/// Iterator over `&mutating T` references to an array's elements, for
+/// in-place updates (`for x in xs.mutableRefs() { x += 1 }`). Returned by
+/// `Array.mutableRefs()`. Each write goes through the array's own
+/// element accessor, so it runs the copy-on-write check: a copy of the
+/// array taken during the loop keeps its old contents.
+public struct ArrayMutableRefsIterator[T]: Iterator {
+    type Item = &mutating T
+
+    fileprivate let base: &mutating Array[T]
+    fileprivate var index: Int64
+    fileprivate let end: Int64
+
+    public mutating func next() -> Optional[&mutating T] {
+        if self.index >= self.end or self.index >= self.base.count {
+            return .None
+        }
+        let i = self.index;
+        self.index = i + 1;
+        let r = &mutating self.base(at: i);
+        let o: Optional[&mutating T] = .Some(r);
+        o
+    }
+}
+
+// ============================================================================
 // ARRAY: SLICING
 // ============================================================================
 
@@ -525,6 +685,40 @@ extend Array[T] {
     }
 
     /// A writable slice of the whole array.
+    /// Iterator over SHARED REFERENCES (`&T`) to the elements, in place —
+    /// no copies, no clones. It borrows the array, so it can't outlive it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let words = ["alpha", "beta"];
+    /// for w in words.refs() {
+    ///     print(w.len());   // reads in place — no element copy
+    /// }
+    /// ```
+    public func refs() -> ArrayRefsIterator[T] {
+        let b = &self;
+        ArrayRefsIterator(base: b, index: 0, end: self.count)
+    }
+
+    /// Iterator over MUTABLE REFERENCES (`&mutating T`) to the elements,
+    /// for in-place updates without writeback. Each write runs the
+    /// copy-on-write check, so writes never leak into shared storage.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var xs = [1, 2, 3];
+    /// for x in xs.mutableRefs() {
+    ///     x += 1;
+    /// }
+    /// // xs == [2, 3, 4]
+    /// ```
+    public mutating func mutableRefs() -> ArrayMutableRefsIterator[T] {
+        let b = &mutating self;
+        ArrayMutableRefsIterator(base: b, index: 0, end: self.count)
+    }
+
     public mutating func asMutableSlice() -> MutableArraySlice[T] {
         let n = self.count;
         let b = &mutating self;

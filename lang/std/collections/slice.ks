@@ -965,82 +965,6 @@ extend Slice[T] {
 
     // -- Views ---------------------------------------------------------------
 
-    /// Multi-pass lazy view over non-overlapping `size`-sized chunks.
-    ///
-    /// The trailing chunk may be shorter than `size`. Multi-pass: query
-    /// `count`, index with `view.get(i)`, and iterate repeatedly without
-    /// re-creating the view.
-    ///
-    /// # Errors
-    ///
-    /// Panics if `size <= 0`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let v = [1, 2, 3, 4, 5].chunks(of: 2);
-    /// v.count;          // 3
-    /// v.get(2);          // UnsafeSlice[5]
-    /// for c in v { ... }
-    /// ```
-    public func chunks(of size: Int64) -> ChunksView[T] {
-        if size <= 0 {
-            fatalError("chunks: size must be positive")
-        }
-        ChunksView(slice: self.asUnsafeSlice(), chunkSize: size)
-    }
-
-    /// Multi-pass lazy view over overlapping `size`-sized sliding
-    /// windows.
-    ///
-    /// Adjacent windows overlap by `size - 1` elements. Empty when the
-    /// source has fewer than `size` elements.
-    ///
-    /// # Errors
-    ///
-    /// Panics if `size <= 0`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let v = [1, 2, 3, 4].windows(of: 2);
-    /// v.count;          // 3
-    /// for w in v { ... }
-    /// ```
-    public func windows(of size: Int64) -> WindowsView[T] {
-        if size <= 0 {
-            fatalError("windows: size must be positive")
-        }
-        WindowsView(slice: self.asUnsafeSlice(), windowSize: size)
-    }
-
-    /// Multi-pass lazy reversed view. Iterates back-to-front and
-    /// supports indexed access in O(1).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let v = [1, 2, 3].reversed();
-    /// v.first();        // Some(3)
-    /// v.toArray();       // [3, 2, 1] — eager copy
-    /// ```
-    public func reversed() -> ReversedView[T] {
-        ReversedView(slice: self.asUnsafeSlice())
-    }
-
-    /// Multi-pass lazy view over the segments produced by splitting at
-    /// each element matching `predicate`. Matching elements are dropped.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let v = [1, -1, 2, 3, -1, 4].split(where: { it < 0 });
-    /// for seg in v { ... }
-    /// ```
-    public func split(consuming where predicate: escaping (T) -> Bool) -> ArraySplitWhereView[T] {
-        ArraySplitWhereView(slice: self.asUnsafeSlice(), predicate: predicate)
-    }
-
     // -- Eager transforms ---------------------------------------------------
 
     /// Maps every element through `transform` into a new array. O(n).
@@ -1248,27 +1172,6 @@ extend Slice[T] where T: Equatable {
             }
         }
         true
-    }
-
-    /// Multi-pass lazy view over the segments produced by splitting on
-    /// each occurrence of `separator`. Separators are dropped; empty
-    /// runs between adjacent separators are preserved.
-    ///
-    /// Use `view.toArray()` to materialize all segments into an owned
-    /// `Array[UnsafeSlice[T]]`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let v = [1, 0, 2, 0, 3].split(separator: 0);
-    /// for seg in v { ... }            // UnsafeSlice[1], UnsafeSlice[2], UnsafeSlice[3]
-    /// v.toArray();                     // eager: 3 segments
-    ///
-    /// [1, 2, 3].split(separator: 0).toArray();
-    /// // [UnsafeSlice[1, 2, 3]] — separator not found, single segment
-    /// ```
-    public func split(separator: T) -> ArraySplitView[T] {
-        ArraySplitView(slice: self.asUnsafeSlice(), separator: separator)
     }
 }
 
