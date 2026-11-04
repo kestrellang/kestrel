@@ -766,11 +766,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.init_field_defaults();
 
         // Consuming params stay as SSA @owned values — no var_local
-        // promotion. Mutating calls use BeginMutBorrow on the SSA value
-        // directly, and last-use forwarding avoids unnecessary clones.
-        // Exception: a consuming param whose fields this body moves out
-        // (`consuming self` returning `self.inner`) gets a slot, so its other
-        // fields stay in place with per-field drop tracking.
+        // promotion — and last-use forwarding avoids unnecessary clones.
+        // Exceptions get a slot: a param whose fields this body moves out
+        // (`consuming self` returning `self.inner`), so its other fields
+        // stay in place with per-field drop tracking, and a param the body
+        // mutates in place (`s.bump()`, `s.n += 1`), so the write lands in
+        // storage later reads see.
         self.spill_partially_moved_params(params_len);
 
         // Lower top-level statements
@@ -3699,7 +3700,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 if self.ctx.module.escape_carry(ty).any() {
                     let convs = self.current_param_convs();
                     let mut joined: Option<RootProvenance> = None;
-                    let arg_tys: Vec<TyId> = args.iter().map(|a| self.body.value(a.value).ty).collect();
+                    let arg_tys: Vec<TyId> =
+                        args.iter().map(|a| self.body.value(a.value).ty).collect();
                     let sources = kestrel_semantics::ref_source_mask(
                         &mut crate::ref_sources::MirRefSources(&mut self.ctx.module),
                         &ty,
