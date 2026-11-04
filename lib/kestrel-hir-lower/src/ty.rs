@@ -263,21 +263,24 @@ fn lower_structural_type(
                 .iter()
                 .map(|b| lower_bound_type(ctx, owner, root, b))
                 .collect();
-            // The only legal negative bound is `Copyable` (same rule as the
-            // E424 conformance-list check). Recovery keeps the flag set so a
-            // bad negative doesn't cascade into "underlier must be Copyable".
+            // The legal negative bounds are the implicit builtins: `Copyable`
+            // and `Static` (`some Slice[T] and not Static` takes a borrowing
+            // slice; the param desugar turns it into a where-clause bound).
+            // Recovery keeps the flag set so a bad negative doesn't cascade
+            // into "underlier must be Copyable".
             let not_copyable = match negative {
                 None => false,
+                Some(neg) if negative_bound_is(ctx, owner, root, neg, Builtin::Static) => false,
                 Some(neg) => {
-                    if !negative_bound_is_copyable(ctx, owner, root, neg) {
+                    if !negative_bound_is(ctx, owner, root, neg, Builtin::Copyable) {
                         let neg_span = ast_type_span(neg);
                         ctx.accumulate(
                             Diagnostic::error()
                                 .with_code("E140")
-                                .with_message("negative bound on an opaque type must be 'Copyable'")
+                                .with_message("negative bound on an opaque type must be 'Copyable' or 'Static'")
                                 .with_labels(vec![
                                     Label::primary(neg_span.file_id, neg_span.range())
-                                        .with_message("only 'not Copyable' is supported here"),
+                                        .with_message("only 'not Copyable' and 'not Static' are supported here"),
                                 ])
                                 .with_notes(vec![
                                     "`not` is only legal on builtin protocols with implicit \
@@ -1674,11 +1677,14 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
 /// Entity comparison is the source of truth; the last-segment string match is
 /// a fallback for stdlib-less fixtures where the builtin entity isn't
 /// registered (mirrors `nominal_copy_semantics_impl` in kestrel-semantics).
-fn negative_bound_is_copyable(
+/// Whether the negative bound `neg` names the implicit builtin `builtin`
+/// (`Copyable` or `Static`).
+fn negative_bound_is(
     ctx: &QueryContext<'_>,
     owner: Entity,
     root: Entity,
     neg: &AstType,
+    builtin: Builtin,
 ) -> bool {
     let AstType::Named { segments, .. } = neg else {
         return false;
@@ -1689,12 +1695,9 @@ fn negative_bound_is_copyable(
         context: owner,
         root,
     }) {
-        return ctx.query(ResolveBuiltin {
-            builtin: Builtin::Copyable,
-            root,
-        }) == Some(entity);
+        return ctx.query(ResolveBuiltin { builtin, root }) == Some(entity);
     }
-    segments.last().is_some_and(|s| s.name == "Copyable")
+    segments.last().is_some_and(|s| s.name == builtin.name())
 }
 
 fn ast_type_span(ty: &AstType) -> Span {
