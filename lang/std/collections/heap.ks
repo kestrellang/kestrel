@@ -102,7 +102,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
     /// h.peek();   // .Some(1)
     /// h.count;    // 5
     /// ```
-    public init[I](from iterable: I) where I: Iterable, I.Item = T {
+    public init[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
         self.data = Array[T]();
         var iter = iterable.iter();
         while let .Some(item) = iter.next() {

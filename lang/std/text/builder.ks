@@ -83,7 +83,7 @@ public struct StringBuilder: Cloneable, Formatter {
 
     /// Appends the UTF-8 bytes of `other` to this builder. Accepts any
     /// type conforming to `Str` — `String`, `StringSlice`, etc.
-    public mutating func append(other: some Str) {
+    public mutating func append(other: some Str and not Static) {
         let slice = other.asSlice();
         let otherLen = (slice.end - slice.start);
         if otherLen == 0 { return }

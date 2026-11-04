@@ -242,7 +242,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// let set = Set(from: arr);    // {1, 2, 3}
     /// let r   = Set(from: 1..<4);  // {1, 2, 3}
     /// ```
-    public init[I](from elements: I) where I: Iterable, I.Item = T {
+    public init[I](from elements: I) where I: Iterable, I: not Static, I.Item = T {
         self.dict = Dictionary();
         var iter = elements.iter();
         while let .Some(elem) = iter.next() {
@@ -406,7 +406,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// set.insert(contentsOf: [3, 4, 5]);  // {1, 2, 3, 4, 5}
     /// set.insert(contentsOf: 5..<8);      // {1, 2, 3, 4, 5, 6, 7}
     /// ```
-    public mutating func insert[I](contentsOf elements: I) where I: Iterable, I.Item = T {
+    public mutating func insert[I](contentsOf elements: I) where I: Iterable, I: not Static, I.Item = T {
         var iter = elements.iter();
         while let .Some(elem) = iter.next() {
              self.insert(elem);
