@@ -49,7 +49,11 @@ pub trait RefSourceLayer {
 
 /// Per argument: may a call returning `result` hand back a borrow of it?
 /// Over-approximates (every `true` when the result's pointees are unknown).
-pub fn ref_source_mask<L: RefSourceLayer>(layer: &mut L, result: &L::Ty, args: &[L::Ty]) -> Vec<bool> {
+pub fn ref_source_mask<L: RefSourceLayer>(
+    layer: &mut L,
+    result: &L::Ty,
+    args: &[L::Ty],
+) -> Vec<bool> {
     let mut pointees = Vec::new();
     if !ref_pointees(layer, result, &mut pointees, &mut HashSet::new()) {
         return vec![true; args.len()];
@@ -61,6 +65,14 @@ pub fn ref_source_mask<L: RefSourceLayer>(layer: &mut L, result: &L::Ty, args: &
                 .any(|p| may_hold(layer, a, p, &mut HashSet::new()))
         })
         .collect()
+}
+
+/// Whether a value of type `holder` may come to hold a value of type
+/// `value` (inline, behind a pointer, or through a stored reference). A
+/// call's writable destination whose type can't hold an argument's type is
+/// not where that argument comes to rest.
+pub fn may_contain<L: RefSourceLayer>(layer: &mut L, holder: &L::Ty, value: &L::Ty) -> bool {
+    may_hold(layer, holder, value, &mut HashSet::new())
 }
 
 /// Collects the pointee of every reference a `ty` value carries. `false` =
@@ -80,13 +92,19 @@ fn ref_pointees<L: RefSourceLayer>(
             // `&View` also reaches whatever `View` borrows.
             ref_pointees(layer, &inner, out, expanding)
         },
-        RefShape::Nominal { entity, fields, args } => {
+        RefShape::Nominal {
+            entity,
+            fields,
+            args,
+        } => {
             if !expanding.insert(entity) {
                 return true; // a cycle adds no new reference on its own
             }
             // Args matter only through the fields they're substituted into.
             let members = fields.unwrap_or(args);
-            let ok = members.iter().all(|m| ref_pointees(layer, m, out, expanding));
+            let ok = members
+                .iter()
+                .all(|m| ref_pointees(layer, m, out, expanding));
             expanding.remove(&entity);
             ok
         },
@@ -111,7 +129,11 @@ fn may_hold<L: RefSourceLayer>(
         _ => None,
     };
     match layer.shape(ty) {
-        RefShape::Nominal { entity, fields, args } => {
+        RefShape::Nominal {
+            entity,
+            fields,
+            args,
+        } => {
             if target_head == Some(entity) {
                 return true;
             }
@@ -126,7 +148,9 @@ fn may_hold<L: RefSourceLayer>(
             expanding.remove(&entity);
             found
         },
-        RefShape::Ref(inner) | RefShape::Pointer(inner) => may_hold(layer, &inner, target, expanding),
+        RefShape::Ref(inner) | RefShape::Pointer(inner) => {
+            may_hold(layer, &inner, target, expanding)
+        },
         RefShape::Tuple(elems) => {
             layer.same(ty, target) || elems.iter().any(|e| may_hold(layer, e, target, expanding))
         },
@@ -153,7 +177,8 @@ impl RefSourceLayer for HirRefSources<'_, '_> {
                     .get::<TypeParams>(*entity)
                     .map(|tp| tp.0.clone())
                     .unwrap_or_default();
-                let subs: Vec<(Entity, HirTy)> = params.into_iter().zip(args.iter().cloned()).collect();
+                let subs: Vec<(Entity, HirTy)> =
+                    params.into_iter().zip(args.iter().cloned()).collect();
                 let fields: Vec<HirTy> = collect_child_types(self.ctx, *entity, self.root)
                     .into_iter()
                     .map(|(_, t)| t.substitute_params(&subs))

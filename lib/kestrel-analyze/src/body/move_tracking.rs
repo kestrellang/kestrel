@@ -46,9 +46,9 @@ use kestrel_ast_builder::{
 };
 use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_hecs::Entity;
-use kestrel_hir::{Builtin, HirTy};
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
+use kestrel_hir::{Builtin, HirTy};
 use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_semantics::{
     ConditionalCopyableParams, CopyRequirement, CopySemantics, ExplicitlyNegatesProtocol,
@@ -525,7 +525,12 @@ fn analyze_expr(
             {
                 let dest_depth = state.local_depth.get(&tid).copied().unwrap_or(0);
                 check_outlives(mcx, &mut state, diags, &carried, dest_depth, *value);
-                state.carriers.entry(tid).or_default().extend(carried);
+                let set = state.carriers.entry(tid).or_default();
+                for p in carried {
+                    if !set.contains(&p) {
+                        set.push(p);
+                    }
+                }
             }
             // The value is moved into the target (`x = y`, `x = p.a`), except
             // a self-assignment `x = x`, which moves nothing.
@@ -1972,15 +1977,6 @@ fn check_call_arg_outlives(
             dests.push(arg.value);
         }
     }
-    // The shallowest writable destination bounds them all.
-    let Some(dest_depth) = dests
-        .iter()
-        .filter_map(|&d| place_root(mcx.cx.hir, d))
-        .map(|local| state.local_depth.get(&local).copied().unwrap_or(0))
-        .min()
-    else {
-        return;
-    };
     for (i, arg) in args.iter().enumerate() {
         if callable
             .params
@@ -1993,8 +1989,45 @@ fn check_call_arg_outlives(
         if carried.is_empty() {
             continue;
         }
+        // Only a destination whose type can hold the argument's type is where
+        // it may come to rest (`r.read(into: rest.mutatingSlice(0..))` on a
+        // plain struct `r` stores nothing). The shallowest one bounds them all.
+        let Some(dest_depth) = dests
+            .iter()
+            .filter(|&&d| dest_may_hold(mcx, d, arg.value))
+            .filter_map(|&d| place_root(mcx.cx.hir, d))
+            .map(|local| state.local_depth.get(&local).copied().unwrap_or(0))
+            .min()
+        else {
+            continue;
+        };
         check_outlives(mcx, state, diags, &carried, dest_depth, arg.value);
     }
+}
+
+/// Whether the writable destination `dest` may come to hold `value`, by their
+/// settled types. Unknown types may hold anything. A closure always may: a
+/// function type is `Static` whatever its value captures, so neither
+/// staticness nor the type structure says where a view closure can rest.
+/// Otherwise a `Static` destination holds no reference-carrying value, and
+/// the rest is the shared ref-source rule (`Rep` can't hold a slice).
+fn dest_may_hold(mcx: &MoveCtx<'_>, dest: HirExprId, value: HirExprId) -> bool {
+    let cx = mcx.cx;
+    let types = &cx.typed.expr_types;
+    let (Some(d), Some(v)) = (types.get(&dest), types.get(&value)) else {
+        return true;
+    };
+    if matches!(v, ResolvedTy::Function { .. }) {
+        return true;
+    }
+    if crate::staticness::resolved_ty_is_static(cx.query, d, cx.entity, cx.root) {
+        return false;
+    }
+    let mut layer = kestrel_semantics::HirRefSources {
+        ctx: mcx.cx.query,
+        root: mcx.cx.root,
+    };
+    kestrel_semantics::may_contain(&mut layer, &resolved_to_hir(d), &resolved_to_hir(v))
 }
 
 /// The root local of a place chain (`x`, `x.f`, `x.f.0`), or `None` for
@@ -2140,8 +2173,9 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
         // any argument that may hold what it points at: `xs.slice(0)` views
         // `xs` alone.
         HirExpr::MethodCall { receiver, args, .. } if result_carries_refs(mcx, expr) => {
-            let arg_exprs: Vec<HirExprId> =
-                std::iter::once(*receiver).chain(args.iter().map(|a| a.value)).collect();
+            let arg_exprs: Vec<HirExprId> = std::iter::once(*receiver)
+                .chain(args.iter().map(|a| a.value))
+                .collect();
             for arg in ref_sources(mcx, expr, &arg_exprs) {
                 collect_borrowed_arg(mcx, state, arg, out);
             }
@@ -2522,11 +2556,16 @@ fn join_freeze_state<'a>(out: &mut State, branches: impl Iterator<Item = &'a Sta
     for b in branches {
         out.frozen
             .extend(b.frozen.iter().map(|(k, v)| (k.clone(), v.clone())));
+        // Union, not append: the out state already holds the pre-branch
+        // places, and appending them again doubled each list per branch
+        // (2^k after k `if`s).
         for (local, places) in &b.carriers {
-            out.carriers
-                .entry(*local)
-                .or_default()
-                .extend(places.iter().cloned());
+            let set = out.carriers.entry(*local).or_default();
+            for p in places {
+                if !set.contains(p) {
+                    set.push(p.clone());
+                }
+            }
         }
         out.local_depth.extend(b.local_depth.iter());
         out.freeze_reported
