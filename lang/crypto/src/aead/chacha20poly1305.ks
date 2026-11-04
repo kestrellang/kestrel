@@ -87,9 +87,9 @@ public struct SealedBox {
     /// Serialized form: nonce (12) || ciphertext || tag (16).
     public var combined: Array[UInt8] {
         var result: [UInt8] = [];
-        result.append(contentsOf: self.nonceStorage.bytes.asSlice());
-        result.append(contentsOf: self.ciphertextStorage.asSlice());
-        result.append(contentsOf: self.tagStorage.asSlice());
+        result.append(contentsOf: self.nonceStorage.bytes.asUnsafeSlice());
+        result.append(contentsOf: self.ciphertextStorage.asUnsafeSlice());
+        result.append(contentsOf: self.tagStorage.asUnsafeSlice());
         return result;
     }
 }
@@ -111,12 +111,12 @@ public struct ChaCha20Poly1305 {
     /// want unless a protocol dictates the nonce. Throws `.InvalidKeySize`
     /// unless the key is 32 bytes.
     public static func seal(
-        message: some Slice[UInt8],
+        message: some Slice[UInt8] and not Static,
         using key: SymmetricKey,
-        authenticating aad: some Slice[UInt8] = Array[UInt8](),
+        authenticating aad: some Slice[UInt8] and not Static = Array[UInt8](),
         nonce nonce: Nonce = Nonce.random()
     ) -> SealedBox throws CryptoError {
-        return ChaCha20Poly1305.sealWith(message.asSlice(), key, nonce, aad.asSlice());
+        return ChaCha20Poly1305.sealWith(message.asUnsafeSlice(), key, nonce, aad.asUnsafeSlice());
     }
 
     /// Decrypts and verifies `box` and `aad` (empty unless given). Throws
@@ -125,18 +125,18 @@ public struct ChaCha20Poly1305 {
     public static func open(
         box: SealedBox,
         using key: SymmetricKey,
-        authenticating aad: some Slice[UInt8] = Array[UInt8]()
+        authenticating aad: some Slice[UInt8] and not Static = Array[UInt8]()
     ) -> Array[UInt8] throws CryptoError {
-        return ChaCha20Poly1305.openWith(box, key, aad.asSlice());
+        return ChaCha20Poly1305.openWith(box, key, aad.asUnsafeSlice());
     }
 
     // --- internals ---
 
     static func sealWith(
-        plaintext: ArraySlice[UInt8],
+        plaintext: UnsafeSlice[UInt8],
         key: SymmetricKey,
         nonce: Nonce,
-        aad: ArraySlice[UInt8]
+        aad: UnsafeSlice[UInt8]
     ) -> SealedBox throws CryptoError {
         if key.count != ChaCha20Poly1305.keySize { throw CryptoError.InvalidKeySize; }
         let keyBytes = key.bytes;
@@ -154,7 +154,7 @@ public struct ChaCha20Poly1305 {
         let ct = ChaCha20Poly1305.chachaEncrypt(keyBytes, nonceBytes, 1, plaintext);
 
         // Compute tag
-        let tag = ChaCha20Poly1305.computeTag(polyKey, aad, ct.asSlice());
+        let tag = ChaCha20Poly1305.computeTag(polyKey, aad, ct.asUnsafeSlice());
 
         return .Ok(SealedBox(sealed: nonce, ciphertext: ct, tag: tag));
     }
@@ -162,7 +162,7 @@ public struct ChaCha20Poly1305 {
     static func openWith(
         box: SealedBox,
         key: SymmetricKey,
-        aad: ArraySlice[UInt8]
+        aad: UnsafeSlice[UInt8]
     ) -> Array[UInt8] throws CryptoError {
         if key.count != ChaCha20Poly1305.keySize { throw CryptoError.InvalidKeySize; }
         let keyBytes = key.bytes;
@@ -178,7 +178,7 @@ public struct ChaCha20Poly1305 {
 
         // Verify tag (constant-time)
         let ciphertext = box.ciphertext;
-        let expectedTag = ChaCha20Poly1305.computeTag(polyKey, aad, ciphertext.asSlice());
+        let expectedTag = ChaCha20Poly1305.computeTag(polyKey, aad, ciphertext.asUnsafeSlice());
         let tag = box.tag;  // 16 bytes: SealedBox enforces it
         var diff: UInt8 = 0;
         for i in 0..<16 {
@@ -189,7 +189,7 @@ public struct ChaCha20Poly1305 {
         }
 
         // Decrypt
-        let plaintext = ChaCha20Poly1305.chachaEncrypt(keyBytes, nonceBytes, 1, ciphertext.asSlice());
+        let plaintext = ChaCha20Poly1305.chachaEncrypt(keyBytes, nonceBytes, 1, ciphertext.asUnsafeSlice());
         return .Ok(plaintext);
     }
 
@@ -257,7 +257,7 @@ public struct ChaCha20Poly1305 {
         key: Array[UInt8],
         nonce: Array[UInt8],
         startCounter: UInt32,
-        data: ArraySlice[UInt8]
+        data: UnsafeSlice[UInt8]
     ) -> Array[UInt8] {
         var result: [UInt8] = [];
         var block = Array[UInt8](repeating: 0, count: 64);
@@ -286,23 +286,23 @@ public struct ChaCha20Poly1305 {
     /// full, so only the length-free spec construction is valid here.
     static func computeTag(
         key: Array[UInt8],
-        aad: ArraySlice[UInt8],
-        ciphertext: ArraySlice[UInt8]
+        aad: UnsafeSlice[UInt8],
+        ciphertext: UnsafeSlice[UInt8]
     ) -> Array[UInt8] {
         var mac: [UInt8] = [];
         mac.append(contentsOf: aad);
         while mac.count % 16 != 0 { mac.append(0); }
         mac.append(contentsOf: ciphertext);
         while mac.count % 16 != 0 { mac.append(0); }
-        mac.append(contentsOf: UInt64(from: aad.count).toBytesLittleEndian().asSlice());
-        mac.append(contentsOf: UInt64(from: ciphertext.count).toBytesLittleEndian().asSlice());
-        ChaCha20Poly1305.poly1305(key, mac.asSlice())
+        mac.append(contentsOf: UInt64(from: aad.count).toBytesLittleEndian().asUnsafeSlice());
+        mac.append(contentsOf: UInt64(from: ciphertext.count).toBytesLittleEndian().asUnsafeSlice());
+        ChaCha20Poly1305.poly1305(key, mac.asUnsafeSlice())
     }
 
     /// Poly1305 (RFC 8439 §2.5) with five 26-bit limbs, after poly1305-donna-32.
     /// 26-bit limbs keep every product below 2^55 and each five-term sum below
     /// 2^58, so the 130-bit arithmetic never overflows a `UInt64`.
-    static func poly1305(key: Array[UInt8], message: ArraySlice[UInt8]) -> Array[UInt8] {
+    static func poly1305(key: Array[UInt8], message: UnsafeSlice[UInt8]) -> Array[UInt8] {
         let mask: UInt64 = 0x3ffffff;
         // r, clamped, split into 26-bit limbs; s_i = 5 r_i folds 2^130 ≡ 5.
         let r0 = UInt64(from: loadLE32(key, 0)) & 0x3ffffff;
@@ -395,10 +395,10 @@ public struct ChaCha20Poly1305 {
         let t3 = UInt32(from: f & 0xffffffff);
 
         var tag: [UInt8] = [];
-        tag.append(contentsOf: t0.toBytesLittleEndian().asSlice());
-        tag.append(contentsOf: t1.toBytesLittleEndian().asSlice());
-        tag.append(contentsOf: t2.toBytesLittleEndian().asSlice());
-        tag.append(contentsOf: t3.toBytesLittleEndian().asSlice());
+        tag.append(contentsOf: t0.toBytesLittleEndian().asUnsafeSlice());
+        tag.append(contentsOf: t1.toBytesLittleEndian().asUnsafeSlice());
+        tag.append(contentsOf: t2.toBytesLittleEndian().asUnsafeSlice());
+        tag.append(contentsOf: t3.toBytesLittleEndian().asUnsafeSlice());
         tag
     }
 

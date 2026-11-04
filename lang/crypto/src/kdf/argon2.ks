@@ -23,8 +23,8 @@ public struct Argon2id {
     /// `.InvalidIterationCount` below 1 iteration; `.InvalidLength` if
     /// `length` is below 4 or the salt is shorter than 8 bytes.
     public static func deriveKey(
-        password: some Slice[UInt8],
-        salt salt: some Slice[UInt8],
+        password: some Slice[UInt8] and not Static,
+        salt salt: some Slice[UInt8] and not Static,
         memory memory: Int64,
         iterations iterations: Int64,
         parallelism parallelism: Int64,
@@ -34,8 +34,8 @@ public struct Argon2id {
         if memory < 8 * parallelism or memory > 4294967295 { throw CryptoError.InvalidParameter; }
         if iterations < 1 { throw CryptoError.InvalidIterationCount; }
         if length < 4 or length > 4294967295 { throw CryptoError.InvalidLength; }
-        let passwordBytes = password.asSlice();
-        let saltBytes = salt.asSlice();
+        let passwordBytes = password.asUnsafeSlice();
+        let saltBytes = salt.asUnsafeSlice();
         if saltBytes.count < 8 { throw CryptoError.InvalidLength; }
 
         // H0 (RFC 9106 §3.2): every parameter and input, length-prefixed.
@@ -68,9 +68,9 @@ public struct Argon2id {
         for lane in 0..<parallelism {
             for column in 0..<2 {
                 var input: [UInt8] = [];
-                input.append(contentsOf: seed.asSlice());
-                input.append(contentsOf: Argon2id.le32(column).asSlice());
-                input.append(contentsOf: Argon2id.le32(lane).asSlice());
+                input.append(contentsOf: seed.asUnsafeSlice());
+                input.append(contentsOf: Argon2id.le32(column).asUnsafeSlice());
+                input.append(contentsOf: Argon2id.le32(lane).asUnsafeSlice());
                 state.store(Argon2id.wordsFromBytes(Argon2id.variableHash(1024, input)), lane, column);
             }
         }
@@ -98,8 +98,8 @@ public struct Argon2id {
     /// 64-byte hashes and keeping the first 32 bytes of each.
     static func variableHash(length: Int64, input: Array[UInt8]) -> Array[UInt8] {
         var prefixed: [UInt8] = [];
-        prefixed.append(contentsOf: Argon2id.le32(length).asSlice());
-        prefixed.append(contentsOf: input.asSlice());
+        prefixed.append(contentsOf: Argon2id.le32(length).asUnsafeSlice());
+        prefixed.append(contentsOf: input.asUnsafeSlice());
         if length <= 64 {
             return BLAKE2b.hash(prefixed, outputLength: length).expect("1...64").bytes;
         }
@@ -107,13 +107,13 @@ public struct Argon2id {
         let r = (length + 31) / 32 - 2;
         var v = BLAKE2b512.hash(prefixed).bytes;
         var result: [UInt8] = [];
-        result.append(contentsOf: v.asSlice().prefix(32));
+        result.append(contentsOf: v.asUnsafeSlice().prefix(32));
         for _ in 1..<r {
             v = BLAKE2b512.hash(v).bytes;
-            result.append(contentsOf: v.asSlice().prefix(32));
+            result.append(contentsOf: v.asUnsafeSlice().prefix(32));
         }
         let tail = BLAKE2b.hash(v, outputLength: length - 32 * r).expect("33...64");
-        result.append(contentsOf: tail.bytes.asSlice());
+        result.append(contentsOf: tail.bytes.asUnsafeSlice());
         result
     }
 
@@ -133,7 +133,7 @@ public struct Argon2id {
 
     static func bytesFromWords(words: Array[UInt64]) -> Array[UInt8] {
         var bytes: [UInt8] = [];
-        for w in words { bytes.append(contentsOf: w.toBytesLittleEndian().asSlice()); }
+        for w in words { bytes.append(contentsOf: w.toBytesLittleEndian().asUnsafeSlice()); }
         bytes
     }
 }

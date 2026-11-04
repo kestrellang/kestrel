@@ -3,191 +3,200 @@
 //! A callee can only hand back a borrow of something its arguments hold, so
 //! an argument whose type cannot contain any type the result points at is
 //! never a source: in `xs.slice(from: 0, count: 2)`, an `Int64` can't hold
-//! an `Array`, so the result borrows `xs` alone. Decided once per callee
-//! SIGNATURE, so the analyzers (E509) and MIR lowering (E494 roots) agree.
+//! an `Array`, so the result borrows `xs` alone.
+//!
+//! Decided on the call's INSTANCE types (a generic subscript's `I.SeqOutput`
+//! is only known there). One algorithm, run over each layer's own type
+//! representation through [`RefSourceLayer`]: HIR types for the analyzers
+//! (E509) and MIR types for lowering (E494 roots), so the two checks agree.
 
 use std::collections::HashSet;
 
 use kestrel_ast_builder::TypeParams;
-use kestrel_hecs::{Entity, QueryContext, QueryFn};
+use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::HirTy;
-use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes};
 
 use crate::collect_child_types;
 
-/// Per declared parameter (receiver excluded — it is always a possible
-/// source): can the callee's result carry a reference into this argument?
-/// `None` when the signature can't be read; callers then treat every
-/// argument as a source.
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct RefSourceParams {
-    pub callee: Entity,
-    pub root: Entity,
+/// How [`ref_source_mask`] sees one type.
+pub enum RefShape<T> {
+    /// A reference to `T`.
+    Ref(T),
+    /// A nominal instance. `fields` are its stored fields / payloads with the
+    /// type args substituted (`None` when its storage isn't visible, e.g. a
+    /// builtin); `args` are the type args.
+    Nominal {
+        entity: Entity,
+        fields: Option<Vec<T>>,
+        args: Vec<T>,
+    },
+    Tuple(Vec<T>),
+    /// A raw pointer to `T`: may reach a `T`, but carries no reference.
+    Pointer(T),
+    /// Generic, opaque, existential or closure: may hold or carry anything.
+    Opaque,
+    /// A primitive or other type holding nothing else.
+    Leaf,
 }
 
-impl QueryFn for RefSourceParams {
-    type Output = Option<Vec<bool>>;
+/// One compiler layer's view of its types, for [`ref_source_mask`].
+pub trait RefSourceLayer {
+    type Ty: Clone;
+    fn shape(&mut self, ty: &Self::Ty) -> RefShape<Self::Ty>;
+    /// Structural equality (used for leaves).
+    fn same(&self, a: &Self::Ty, b: &Self::Ty) -> bool;
+}
 
-    fn execute(&self, ctx: &QueryContext<'_>) -> Option<Vec<bool>> {
-        let params = ctx.query(LowerCallableTypes {
-            entity: self.callee,
-            root: self.root,
-        })?;
-        let ret = ctx.query(LowerCallableReturnType {
-            entity: self.callee,
-            root: self.root,
-        });
-        let mut pointees = Vec::new();
-        let known = ref_pointees(ctx, self.root, &ret, &mut pointees, &mut HashSet::new());
-        Some(
-            params
+/// Per argument: may a call returning `result` hand back a borrow of it?
+/// Over-approximates (every `true` when the result's pointees are unknown).
+pub fn ref_source_mask<L: RefSourceLayer>(
+    layer: &mut L,
+    result: &L::Ty,
+    args: &[L::Ty],
+) -> Vec<bool> {
+    let mut pointees = Vec::new();
+    if !ref_pointees(layer, result, &mut pointees, &mut HashSet::new()) {
+        return vec![true; args.len()];
+    }
+    args.iter()
+        .map(|a| {
+            pointees
                 .iter()
-                .map(|p| {
-                    let Some(p) = p else { return true };
-                    !known
-                        || pointees
-                            .iter()
-                            .any(|t| may_hold(ctx, self.root, p, t, &mut HashSet::new()))
-                })
-                .collect(),
-        )
-    }
-
-    fn describe(&self) -> String {
-        format!("RefSourceParams({:?})", self.callee)
-    }
+                .any(|p| may_hold(layer, a, p, &mut HashSet::new()))
+        })
+        .collect()
 }
 
-/// Collects the pointee of every reference a `ty` value carries, fields and
-/// payloads included. `false` = unknowable (a closure's captures, an opaque
-/// or generic type that may itself carry refs).
-fn ref_pointees(
-    ctx: &QueryContext<'_>,
-    root: Entity,
-    ty: &HirTy,
-    out: &mut Vec<HirTy>,
+/// Whether a value of type `holder` may come to hold a value of type
+/// `value` (inline, behind a pointer, or through a stored reference). A
+/// call's writable destination whose type can't hold an argument's type is
+/// not where that argument comes to rest.
+pub fn may_contain<L: RefSourceLayer>(layer: &mut L, holder: &L::Ty, value: &L::Ty) -> bool {
+    may_hold(layer, holder, value, &mut HashSet::new())
+}
+
+/// Collects the pointee of every reference a `ty` value carries. `false` =
+/// unknowable (a closure's captures, an opaque or generic pointee).
+fn ref_pointees<L: RefSourceLayer>(
+    layer: &mut L,
+    ty: &L::Ty,
+    out: &mut Vec<L::Ty>,
     expanding: &mut HashSet<Entity>,
 ) -> bool {
-    match ty {
-        HirTy::Ref { inner, .. } => {
-            out.push((**inner).clone());
+    match layer.shape(ty) {
+        RefShape::Ref(inner) => {
+            if matches!(layer.shape(&inner), RefShape::Opaque) {
+                return false;
+            }
+            out.push(inner.clone());
             // `&View` also reaches whatever `View` borrows.
-            ref_pointees(ctx, root, inner, out, expanding)
+            ref_pointees(layer, &inner, out, expanding)
         },
-        HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => {
-            if !expanding.insert(*entity) {
+        RefShape::Nominal {
+            entity,
+            fields,
+            args,
+        } => {
+            if !expanding.insert(entity) {
                 return true; // a cycle adds no new reference on its own
             }
-            // Args matter only through the fields they're substituted into;
-            // a nominal with no visible storage (a builtin) may carry its args.
-            let children = instance_children(ctx, root, *entity, args);
-            let members = if children.is_empty() {
-                args.as_slice()
-            } else {
-                &children
-            };
+            // Args matter only through the fields they're substituted into.
+            let members = fields.unwrap_or(args);
             let ok = members
                 .iter()
-                .all(|c| ref_pointees(ctx, root, c, out, expanding));
-            expanding.remove(entity);
+                .all(|m| ref_pointees(layer, m, out, expanding));
+            expanding.remove(&entity);
             ok
         },
-        HirTy::Tuple(elems, _) => elems
-            .iter()
-            .all(|e| ref_pointees(ctx, root, e, out, expanding)),
-        HirTy::Alias { expanded, .. } => ref_pointees(ctx, root, expanded, out, expanding),
-        HirTy::Function { .. }
-        | HirTy::Param(..)
-        | HirTy::SelfType(..)
-        | HirTy::AssocProjection { .. }
-        | HirTy::AbstractAssoc { .. }
-        | HirTy::Opaque { .. }
-        | HirTy::RawExistential { .. }
-        | HirTy::Protocol { .. }
-        | HirTy::Infer(_)
-        | HirTy::Error(_) => false,
-        HirTy::Never(_) => true,
+        RefShape::Tuple(elems) => elems.iter().all(|e| ref_pointees(layer, e, out, expanding)),
+        RefShape::Opaque => false,
+        RefShape::Pointer(_) | RefShape::Leaf => true,
     }
 }
 
 /// Whether a value of `ty` may hold (inline, behind a pointer, or through a
 /// stored reference) a value of type `target`. Nominals match by head
-/// (`Array[Int64]` may be `Array[T]`); generic and opaque types may hold
-/// anything.
-fn may_hold(
-    ctx: &QueryContext<'_>,
-    root: Entity,
-    ty: &HirTy,
-    target: &HirTy,
+/// (`Array[Int64]` may be `Array[T]`).
+fn may_hold<L: RefSourceLayer>(
+    layer: &mut L,
+    ty: &L::Ty,
+    target: &L::Ty,
     expanding: &mut HashSet<Entity>,
 ) -> bool {
-    if let HirTy::Alias { expanded, .. } = target {
-        return may_hold(ctx, root, ty, expanded, expanding);
-    }
-    if !is_concrete_head(target) {
-        return true;
-    }
-    match ty {
-        HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => {
-            if head_entity(target) == Some(*entity) {
+    let target_head = match layer.shape(target) {
+        RefShape::Nominal { entity, .. } => Some(entity),
+        RefShape::Opaque => return true,
+        _ => None,
+    };
+    match layer.shape(ty) {
+        RefShape::Nominal {
+            entity,
+            fields,
+            args,
+        } => {
+            if target_head == Some(entity) {
                 return true;
             }
-            if !expanding.insert(*entity) {
+            if !expanding.insert(entity) {
                 return false;
             }
-            let found = args
-                .iter()
-                .any(|a| may_hold(ctx, root, a, target, expanding))
-                || instance_children(ctx, root, *entity, args)
-                    .iter()
-                    .any(|c| may_hold(ctx, root, c, target, expanding));
-            expanding.remove(entity);
+            let found = fields
+                .into_iter()
+                .flatten()
+                .chain(args)
+                .any(|m| may_hold(layer, &m, target, expanding));
+            expanding.remove(&entity);
             found
         },
-        HirTy::Ref { inner, .. } => may_hold(ctx, root, inner, target, expanding),
-        HirTy::Tuple(elems, _) => {
-            matches!(target, HirTy::Tuple(..))
-                || elems
-                    .iter()
-                    .any(|e| may_hold(ctx, root, e, target, expanding))
+        RefShape::Ref(inner) | RefShape::Pointer(inner) => {
+            may_hold(layer, &inner, target, expanding)
         },
-        HirTy::Alias { expanded, .. } => may_hold(ctx, root, expanded, target, expanding),
-        HirTy::Never(_) => false,
-        // Generic, opaque, existential, closure: may hold anything.
-        _ => true,
+        RefShape::Tuple(elems) => {
+            layer.same(ty, target) || elems.iter().any(|e| may_hold(layer, e, target, expanding))
+        },
+        RefShape::Opaque => true,
+        RefShape::Leaf => layer.same(ty, target),
     }
 }
 
-/// A target we can rule out by structure: a nominal or tuple. Anything
-/// else (a type param, `Self`, a projection) could be any type.
-fn is_concrete_head(ty: &HirTy) -> bool {
-    matches!(
-        ty,
-        HirTy::Struct { .. } | HirTy::Enum { .. } | HirTy::Tuple(..)
-    )
+/// [`RefSourceLayer`] over `HirTy` (the analyzers' instance types).
+pub struct HirRefSources<'a, 'q> {
+    pub ctx: &'a QueryContext<'q>,
+    pub root: Entity,
 }
 
-fn head_entity(ty: &HirTy) -> Option<Entity> {
-    match ty {
-        HirTy::Struct { entity, .. } | HirTy::Enum { entity, .. } => Some(*entity),
-        _ => None,
+impl RefSourceLayer for HirRefSources<'_, '_> {
+    type Ty = HirTy;
+
+    fn shape(&mut self, ty: &HirTy) -> RefShape<HirTy> {
+        match ty {
+            HirTy::Ref { inner, .. } => RefShape::Ref((**inner).clone()),
+            HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => {
+                let params = self
+                    .ctx
+                    .get::<TypeParams>(*entity)
+                    .map(|tp| tp.0.clone())
+                    .unwrap_or_default();
+                let subs: Vec<(Entity, HirTy)> =
+                    params.into_iter().zip(args.iter().cloned()).collect();
+                let fields: Vec<HirTy> = collect_child_types(self.ctx, *entity, self.root)
+                    .into_iter()
+                    .map(|(_, t)| t.substitute_params(&subs))
+                    .collect();
+                RefShape::Nominal {
+                    entity: *entity,
+                    fields: (!fields.is_empty()).then_some(fields),
+                    args: args.clone(),
+                }
+            },
+            HirTy::Tuple(elems, _) => RefShape::Tuple(elems.clone()),
+            HirTy::Alias { expanded, .. } => self.shape(expanded),
+            HirTy::Never(_) => RefShape::Leaf,
+            _ => RefShape::Opaque,
+        }
     }
-}
 
-/// Stored field / payload types of a nominal instance, its args substituted.
-fn instance_children(
-    ctx: &QueryContext<'_>,
-    root: Entity,
-    entity: Entity,
-    args: &[HirTy],
-) -> Vec<HirTy> {
-    let params = ctx
-        .get::<TypeParams>(entity)
-        .map(|tp| tp.0.clone())
-        .unwrap_or_default();
-    let subs: Vec<(Entity, HirTy)> = params.into_iter().zip(args.iter().cloned()).collect();
-    collect_child_types(ctx, entity, root)
-        .into_iter()
-        .map(|(_, t)| t.substitute_params(&subs))
-        .collect()
+    fn same(&self, a: &HirTy, b: &HirTy) -> bool {
+        a.same_type(b)
+    }
 }

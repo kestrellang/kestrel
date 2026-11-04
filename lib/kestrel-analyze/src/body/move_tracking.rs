@@ -46,9 +46,9 @@ use kestrel_ast_builder::{
 };
 use kestrel_copy_fold::CopyLayer;
 use kestrel_hecs::Entity;
-use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
+use kestrel_hir::{Builtin, HirTy};
 use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_semantics::{
     ConditionalCopyableParams, CopyRequirement, CopySemantics, ExplicitlyNegatesProtocol,
@@ -525,7 +525,12 @@ fn analyze_expr(
             {
                 let dest_depth = state.local_depth.get(&tid).copied().unwrap_or(0);
                 check_outlives(mcx, &mut state, diags, &carried, dest_depth, *value);
-                state.carriers.entry(tid).or_default().extend(carried);
+                let set = state.carriers.entry(tid).or_default();
+                for p in carried {
+                    if !set.contains(&p) {
+                        set.push(p);
+                    }
+                }
             }
             // The value is moved into the target (`x = y`, `x = p.a`), except
             // a self-assignment `x = x`, which moves nothing.
@@ -1972,15 +1977,6 @@ fn check_call_arg_outlives(
             dests.push(arg.value);
         }
     }
-    // The shallowest writable destination bounds them all.
-    let Some(dest_depth) = dests
-        .iter()
-        .filter_map(|&d| place_root(mcx.cx.hir, d))
-        .map(|local| state.local_depth.get(&local).copied().unwrap_or(0))
-        .min()
-    else {
-        return;
-    };
     for (i, arg) in args.iter().enumerate() {
         if callable
             .params
@@ -1993,8 +1989,45 @@ fn check_call_arg_outlives(
         if carried.is_empty() {
             continue;
         }
+        // Only a destination whose type can hold the argument's type is where
+        // it may come to rest (`r.read(into: rest.mutatingSlice(0..))` on a
+        // plain struct `r` stores nothing). The shallowest one bounds them all.
+        let Some(dest_depth) = dests
+            .iter()
+            .filter(|&&d| dest_may_hold(mcx, d, arg.value))
+            .filter_map(|&d| place_root(mcx.cx.hir, d))
+            .map(|local| state.local_depth.get(&local).copied().unwrap_or(0))
+            .min()
+        else {
+            continue;
+        };
         check_outlives(mcx, state, diags, &carried, dest_depth, arg.value);
     }
+}
+
+/// Whether the writable destination `dest` may come to hold `value`, by their
+/// settled types. Unknown types may hold anything. A closure always may: a
+/// function type is `Static` whatever its value captures, so neither
+/// staticness nor the type structure says where a view closure can rest.
+/// Otherwise a `Static` destination holds no reference-carrying value, and
+/// the rest is the shared ref-source rule (`Rep` can't hold a slice).
+fn dest_may_hold(mcx: &MoveCtx<'_>, dest: HirExprId, value: HirExprId) -> bool {
+    let cx = mcx.cx;
+    let types = &cx.typed.expr_types;
+    let (Some(d), Some(v)) = (types.get(&dest), types.get(&value)) else {
+        return true;
+    };
+    if matches!(v, ResolvedTy::Function { .. }) {
+        return true;
+    }
+    if crate::staticness::resolved_ty_is_static(cx.query, d, cx.entity, cx.root) {
+        return false;
+    }
+    let mut layer = kestrel_semantics::HirRefSources {
+        ctx: mcx.cx.query,
+        root: mcx.cx.root,
+    };
+    kestrel_semantics::may_contain(&mut layer, &resolved_to_hir(d), &resolved_to_hir(v))
 }
 
 /// The root local of a place chain (`x`, `x.f`, `x.f.0`), or `None` for
@@ -2130,11 +2163,9 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
                 // -> a slice): it can only have rooted its references at the
                 // arguments that may hold what it points at — the same
                 // sources MIR lowering joins into the result's root.
-                let sources = ref_source_mask(mcx, callee_entity, args.len());
-                for (i, arg) in args.iter().enumerate() {
-                    if sources.as_ref().is_none_or(|s| s[i]) {
-                        collect_borrowed_arg(mcx, state, arg.value, out);
-                    }
+                let arg_exprs: Vec<HirExprId> = args.iter().map(|a| a.value).collect();
+                for arg in ref_sources(mcx, expr, &arg_exprs) {
+                    collect_borrowed_arg(mcx, state, arg, out);
                 }
             }
         },
@@ -2142,13 +2173,11 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
         // any argument that may hold what it points at: `xs.slice(0)` views
         // `xs` alone.
         HirExpr::MethodCall { receiver, args, .. } if result_carries_refs(mcx, expr) => {
-            collect_borrowed_arg(mcx, state, *receiver, out);
-            let method = mcx.cx.typed.resolutions.get(&expr).copied();
-            let sources = ref_source_mask(mcx, method, args.len());
-            for (i, arg) in args.iter().enumerate() {
-                if sources.as_ref().is_none_or(|s| s[i]) {
-                    collect_borrowed_arg(mcx, state, arg.value, out);
-                }
+            let arg_exprs: Vec<HirExprId> = std::iter::once(*receiver)
+                .chain(args.iter().map(|a| a.value))
+                .collect();
+            for arg in ref_sources(mcx, expr, &arg_exprs) {
+                collect_borrowed_arg(mcx, state, arg, out);
             }
         },
         HirExpr::ImplicitMember {
@@ -2192,16 +2221,54 @@ fn result_carries_refs(mcx: &MoveCtx<'_>, call: HirExprId) -> bool {
     }
 }
 
-/// Per declared argument (receiver excluded): may the callee's result
-/// borrow from it (`kestrel_semantics::RefSourceParams`, shared with MIR
-/// lowering)? `None` = unknown callee or args that don't line up with its
-/// signature: treat every argument as a source.
-fn ref_source_mask(mcx: &MoveCtx<'_>, callee: Option<Entity>, n_args: usize) -> Option<Vec<bool>> {
-    let sources = mcx.cx.query.query(kestrel_semantics::RefSourceParams {
-        callee: callee?,
+/// The arguments of `call` its ref-carrying result may borrow from: those
+/// whose type can hold what the result points at
+/// (`kestrel_semantics::ref_source_mask`, the same rule MIR lowering joins
+/// roots by). An argument with no settled type counts as a source.
+fn ref_sources(mcx: &MoveCtx<'_>, call: HirExprId, args: &[HirExprId]) -> Vec<HirExprId> {
+    let types = &mcx.cx.typed.expr_types;
+    let Some(result) = types.get(&call).map(resolved_to_hir) else {
+        return args.to_vec();
+    };
+    let arg_tys: Vec<HirTy> = args
+        .iter()
+        .map(|a| types.get(a).map_or_else(opaque_hir_ty, resolved_to_hir))
+        .collect();
+    let mut layer = kestrel_semantics::HirRefSources {
+        ctx: mcx.cx.query,
         root: mcx.cx.root,
-    })?;
-    (sources.len() == n_args).then_some(sources)
+    };
+    let mask = kestrel_semantics::ref_source_mask(&mut layer, &result, &arg_tys);
+    args.iter()
+        .zip(mask)
+        .filter_map(|(a, m)| m.then_some(*a))
+        .collect()
+}
+
+/// A settled expression type as a `HirTy`, for the shared ref-source rule.
+/// Only the structure that rule reads is kept; the rest is opaque.
+fn resolved_to_hir(ty: &ResolvedTy) -> HirTy {
+    let sp = kestrel_span::Span::new(0, 0..0);
+    match ty {
+        ResolvedTy::Named { entity, args } => HirTy::Struct {
+            entity: *entity,
+            args: args.iter().map(resolved_to_hir).collect(),
+            span: sp,
+        },
+        ResolvedTy::Param { entity } => HirTy::Param(*entity, sp),
+        ResolvedTy::Tuple(elems) => HirTy::Tuple(elems.iter().map(resolved_to_hir).collect(), sp),
+        ResolvedTy::Ref { pointee, mutating } => HirTy::Ref {
+            inner: Box::new(resolved_to_hir(pointee)),
+            mutating: *mutating,
+            span: sp,
+        },
+        ResolvedTy::Never => HirTy::Never(sp),
+        _ => opaque_hir_ty(),
+    }
+}
+
+fn opaque_hir_ty() -> HirTy {
+    HirTy::Infer(kestrel_span::Span::new(0, 0..0))
 }
 
 /// What a call's result views through one borrowed argument: the argument's
@@ -2481,11 +2548,16 @@ fn join_freeze_state<'a>(out: &mut State, branches: impl Iterator<Item = &'a Sta
     for b in branches {
         out.frozen
             .extend(b.frozen.iter().map(|(k, v)| (k.clone(), v.clone())));
+        // Union, not append: the out state already holds the pre-branch
+        // places, and appending them again doubled each list per branch
+        // (2^k after k `if`s).
         for (local, places) in &b.carriers {
-            out.carriers
-                .entry(*local)
-                .or_default()
-                .extend(places.iter().cloned());
+            let set = out.carriers.entry(*local).or_default();
+            for p in places {
+                if !set.contains(p) {
+                    set.push(p.clone());
+                }
+            }
         }
         out.local_depth.extend(b.local_depth.iter());
         out.freeze_reported

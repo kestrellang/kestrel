@@ -3,9 +3,9 @@
 module std.memory
 
 import std.ffi.(FFISafe)
-import std.core.(Equatable, Bool, Hashable, Hasher, ArrayMatchable, Range, ClosedRange, fatalError, Indirection, MutableIndirection, Sized)
+import std.core.(Equatable, Bool, Hashable, Hasher, Range, ClosedRange, fatalError, Indirection, MutableIndirection, Sized, ArrayMatchable)
 import std.numeric.(Int64, UInt64, UInt8)
-import std.memory.(ArraySlice)
+import std.memory.(UnsafeSlice)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 import std.collections.(Slice)
@@ -103,7 +103,7 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiply(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        hasher.write(ArraySlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
+        hasher.write(UnsafeSlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
     }
 }
 
@@ -342,7 +342,7 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiply(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        hasher.write(ArraySlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
+        hasher.write(UnsafeSlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
     }
 }
 
@@ -386,32 +386,25 @@ extend Pointer[T] where T: Sized {
 /// `Pointer[T]` is FFI-safe whenever its element type is.
 extend Pointer: FFISafe where T: FFISafe {}
 
-/// Non-owning view over a contiguous run of `T` values.
+/// Unchecked view over a contiguous run of `T` values: a pointer and a
+/// count.
 ///
-/// `Slice` is the standard "borrow" type for arrays, buffers, and any
-/// other contiguous storage: it stores a pointer + length and provides
-/// safe and unchecked indexing, sub-slicing, iteration, and pattern
-/// matching. The slice does **not** track or extend the lifetime of the
-/// underlying storage — keeping a slice past the end of its source is a
-/// use-after-free.
+/// The slice does **not** track or extend the lifetime of the underlying
+/// storage, and the compiler doesn't check it: keeping one past its source,
+/// or past the source's next change, is a use-after-free. Use it for FFI,
+/// `Buffer`s and other memory that isn't an `Array`, and inside one call.
+/// To view part of an `Array`, use the checked `ArraySlice`
+/// (`xs(1..<3)`), which the compiler keeps from outliving the array.
 ///
 /// # Examples
 ///
 /// ```
 /// let arr = [1, 2, 3, 4];
-/// let s = arr.asSlice();
-/// s[safe: 0]                    // .Some(1)
-/// s[safe: 99]                   // .None
-/// for x in s.iter() { print(x) }
+/// let s = arr.asUnsafeSlice();   // valid until `arr` next changes
+/// s(checked: 0)                  // .Some(1)
+/// s(checked: 99)                 // .None
 /// ```
-///
-/// # Memory Model
-///
-/// Non-owning. Drop the source (`Array`, `Buffer`, literal scope) and the
-/// slice becomes dangling. Slices freely copy — they're just `(ptr, len)`
-/// pairs.
-@builtin(.SliceStruct)
-public struct ArraySlice[T] {
+public struct UnsafeSlice[T] {
     fileprivate var ptr: Pointer[T]
     fileprivate var len: Int64
 
@@ -437,8 +430,8 @@ public struct ArraySlice[T] {
     // subscript(clamped:), subscript(wrapped:): provided by extend Slice[T]
 
     /// Forward iterator over the elements.
-    public func iter() -> ArraySliceIterator[T] {
-        ArraySliceIterator(ptr: self.ptr, remaining: self.len)
+    public func iter() -> UnsafeSliceIterator[T] {
+        UnsafeSliceIterator(ptr: self.ptr, remaining: self.len)
     }
 
     /// First element, or `.None` for an empty slice.
@@ -461,43 +454,17 @@ public struct ArraySlice[T] {
 
 }
 
-/// `ArrayMatchable` conformance so `Slice` can appear in array patterns
-/// (`[a, b]`, `[a, ..rest]`, `[a, .., z]`). The `match*` methods skip
-/// bounds checks because the compiler has already verified them.
-extend ArraySlice[T]: ArrayMatchable {
-    type Element = T
-
-    /// Element count, exposed to the pattern matcher.
-    public func matchLength() -> Int64 {
-        self.count
-    }
-
-    /// Compiler-driven element read; safe to skip the bounds check
-    /// because the matcher emits `index < matchLength()` first.
-    public func matchGet(index: Int64) -> T {
-        self.pointer.offset(by: index).read()
-    }
-
-    /// Sub-slice for rest-pattern bindings (`..rest`). As above, the
-    /// matcher guarantees `0 <= from <= to <= matchLength()`.
-    public func matchSlice(from: Int64, to: Int64) -> ArraySlice[T] {
-        ArraySlice(pointer: self.pointer.offset(by: from), count: to - from)
-    }
-}
-
-/// `Slice[T]` conformance — `ArraySlice` is the kernel type, so
-/// `asSlice()` returns `self`. Also declares the `Iterable` associated
+/// `Slice[T]` conformance — `UnsafeSlice` is the kernel type, so
+/// `asUnsafeSlice()` returns `self`. Also declares the `Iterable` associated
 /// types so slices can be used in `for`-`in` loops and generic
 /// `I: Iterable` contexts.
-extend ArraySlice[T]: Slice[T], Iterable {
+extend UnsafeSlice[T]: Slice[T], Iterable {
     type Item = T
-    type TargetIterator = ArraySliceIterator[T]
+    type TargetIterator = UnsafeSliceIterator[T]
 
-    /// Returns `self` — `ArraySlice` is already the borrowed view.
-    public func asSlice() -> ArraySlice[T] { self }
+    /// Returns `self` — `UnsafeSlice` is already the borrowed view.
+    public func asUnsafeSlice() -> UnsafeSlice[T] { self }
 
-    /// No-op — `ArraySlice` is a non-owning view with no COW barrier.
-    public mutating func ensureUnique() { }
 }
 
 /// Element-wise equality when the element type is `Equatable`. `isEqual`
@@ -507,22 +474,37 @@ extend ArraySlice[T]: Slice[T], Iterable {
 /// # Examples
 ///
 /// ```
-/// let a = [1, 2, 3].asSlice();
-/// let b = [1, 2, 3].asSlice();
+/// let a = [1, 2, 3].asUnsafeSlice();
+/// let b = [1, 2, 3].asUnsafeSlice();
 /// a == b;  // true
 ///
-/// let c = [4, 5, 6].asSlice();
+/// let c = [4, 5, 6].asUnsafeSlice();
 /// a == c;  // false (same length, different elements)
 /// ```
-extend ArraySlice[T]: Equatable where T: Equatable { }
+extend UnsafeSlice[T]: Equatable where T: Equatable { }
 
-/// Forward iterator over an `ArraySlice[T]`. Holds a moving pointer and a
+/// `ArrayMatchable` conformance: array patterns over raw memory. `..rest`
+/// binds a narrower `UnsafeSlice` (no lifetime tracking, like the slice).
+extend UnsafeSlice[T]: ArrayMatchable {
+    type Element = T
+    type Rest = UnsafeSlice[T]
+
+    public func matchLength() -> Int64 { self.len }
+
+    public func matchGet(index: Int64) -> T { self.ptr.offset(by: index).read() }
+
+    public func matchSlice(from: Int64, to: Int64) -> UnsafeSlice[T] {
+        UnsafeSlice(pointer: self.ptr.offset(by: from), count: to - from)
+    }
+}
+
+/// Forward iterator over an `UnsafeSlice[T]`. Holds a moving pointer and a
 /// remaining count; advancing reads through the pointer.
 ///
 /// # Representation
 ///
 /// A `Pointer[T]` cursor and an `Int64` countdown.
-public struct ArraySliceIterator[T]: Iterator {
+public struct UnsafeSliceIterator[T]: Iterator {
     type Item = T
 
     private var ptr: Pointer[T]
@@ -550,7 +532,7 @@ public struct ArraySliceIterator[T]: Iterator {
 
 /// Forward iterator yielding SHARED REFERENCES (`&T`) to contiguous
 /// elements in place — no copies, no clones. The by-reference sibling of
-/// `ArraySliceIterator`; surfaced as `Array.refs()`.
+/// `UnsafeSliceIterator`; surfaced as `Array.refs()`.
 ///
 /// # Invalidation
 ///

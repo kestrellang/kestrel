@@ -5,7 +5,7 @@ module std.collections
 import std.core.(Bool, Cloneable, fatalError)
 import std.numeric.(Int64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, ArraySlice, SystemAllocator, CowBox)
+import std.memory.(Layout, Pointer, UnsafeSlice, SystemAllocator, CowBox)
 import std.iter.(Iterator, Iterable)
 
 // ============================================================================
@@ -620,12 +620,12 @@ public struct Deque[T]: Iterable, Cloneable {
     /// let (a, b) = d.asSlices();
     /// // non-wrapping: a contains all 3 elements, b is empty
     /// ```
-    public func asSlices() -> (ArraySlice[T], ArraySlice[T]) {
+    public func asSlices() -> (UnsafeSlice[T], UnsafeSlice[T]) {
         let myLen = self.len();
         if myLen == 0 {
             return (
-                ArraySlice(pointer: Pointer[T].nullPointer(), count: 0),
-                ArraySlice(pointer: Pointer[T].nullPointer(), count: 0)
+                UnsafeSlice(pointer: Pointer[T].nullPointer(), count: 0),
+                UnsafeSlice(pointer: Pointer[T].nullPointer(), count: 0)
             )
         }
         let myHead = self.head();
@@ -634,14 +634,14 @@ public struct Deque[T]: Iterable, Cloneable {
         let tailEnd = myHead + myLen;
         if tailEnd <= myCap {
             return (
-                ArraySlice(pointer: myPtr.offset(by: myHead), count: myLen),
-                ArraySlice(pointer: myPtr, count: 0)
+                UnsafeSlice(pointer: myPtr.offset(by: myHead), count: myLen),
+                UnsafeSlice(pointer: myPtr, count: 0)
             )
         }
         let firstLen = myCap - myHead;
         return (
-            ArraySlice(pointer: myPtr.offset(by: myHead), count: firstLen),
-            ArraySlice(pointer: myPtr, count: myLen - firstLen)
+            UnsafeSlice(pointer: myPtr.offset(by: myHead), count: firstLen),
+            UnsafeSlice(pointer: myPtr, count: myLen - firstLen)
         )
     }
 

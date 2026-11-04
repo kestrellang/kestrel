@@ -16,7 +16,7 @@ import std.core.(
     RangeFrom, RangeUpTo, RangeThrough
 )
 import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
-import std.memory.(ArraySlice, Pointer)
+import std.memory.(UnsafeSlice, Pointer)
 import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64)
 
@@ -316,7 +316,7 @@ public struct {{TYPE_NAME}}:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(ArraySlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[{{TYPE_NAME}}]().size))
+        hasher.write(UnsafeSlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[{{TYPE_NAME}}]().size))
     }
 
     // ========================================================================

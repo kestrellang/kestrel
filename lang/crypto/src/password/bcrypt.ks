@@ -12,11 +12,11 @@ struct Bcrypt {
     static func digest(password: Array[UInt8], salt: Array[UInt8], cost: Int64) -> Array[UInt8] {
         // The key is the password plus its NUL terminator, cut at 72 bytes.
         var key: [UInt8] = [];
-        key.append(contentsOf: password.asSlice());
+        key.append(contentsOf: password.asUnsafeSlice());
         key.append(0);
         if key.count > 72 {
             var cut: [UInt8] = [];
-            cut.append(contentsOf: key.asSlice().prefix(72));
+            cut.append(contentsOf: key.asUnsafeSlice().prefix(72));
             key = cut;
         }
 
@@ -43,10 +43,10 @@ struct Bcrypt {
 
         var result: [UInt8] = [];
         for word in text {
-            result.append(contentsOf: word.toBytesBigEndian().asSlice());
+            result.append(contentsOf: word.toBytesBigEndian().asUnsafeSlice());
         }
         var digest: [UInt8] = [];
-        digest.append(contentsOf: result.asSlice().prefix(23));
+        digest.append(contentsOf: result.asUnsafeSlice().prefix(23));
         digest
     }
 

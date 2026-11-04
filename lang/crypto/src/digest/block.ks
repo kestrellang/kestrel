@@ -3,7 +3,7 @@ module crypto.digest
 /// The algorithm-specific half of a block-based hash: its state, and how
 /// one full block changes it. `BlockBuffer` supplies everything else.
 protocol BlockFunction {
-    mutating func compress(block: ArraySlice[UInt8])
+    mutating func compress(block: UnsafeSlice[UInt8])
 }
 
 /// How Merkle–Damgård padding encodes the message length (in bits).
@@ -35,7 +35,7 @@ struct BlockBuffer[F] where F: BlockFunction {
         self.blockLength = blockLength;
     }
 
-    mutating func update(bytes: ArraySlice[UInt8]) {
+    mutating func update(bytes: UnsafeSlice[UInt8]) {
         self.totalLength = self.totalLength + UInt64(from: bytes.count);
         var offset: Int64 = 0;
 
@@ -49,7 +49,7 @@ struct BlockBuffer[F] where F: BlockFunction {
             self.pending.append(contentsOf: bytes.prefix(needed));
             var block = self.pending;
             self.pending = Array[UInt8]();
-            self.function.compress(block.asSlice());
+            self.function.compress(block.asUnsafeSlice());
             offset = needed;
         }
 
@@ -71,7 +71,7 @@ struct BlockBuffer[F] where F: BlockFunction {
         let lengthSize: Int64 = match encoding { .BigEndian128 => 16, _ => 8 };
 
         var tail: [UInt8] = [];
-        tail.append(contentsOf: self.pending.asSlice());
+        tail.append(contentsOf: self.pending.asUnsafeSlice());
         tail.append(0x80);
         while tail.count % self.blockLength != self.blockLength - lengthSize {
             tail.append(0);
@@ -79,19 +79,19 @@ struct BlockBuffer[F] where F: BlockFunction {
 
         let bitLength = self.totalLength * 8;
         match encoding {
-            .BigEndian64 => { tail.append(contentsOf: bitLength.toBytesBigEndian().asSlice()); },
+            .BigEndian64 => { tail.append(contentsOf: bitLength.toBytesBigEndian().asUnsafeSlice()); },
             .BigEndian128 => {
                 // The upper 64 bits are zero for any message under 2 EiB.
                 let high: UInt64 = 0;
-                tail.append(contentsOf: high.toBytesBigEndian().asSlice());
-                tail.append(contentsOf: bitLength.toBytesBigEndian().asSlice());
+                tail.append(contentsOf: high.toBytesBigEndian().asUnsafeSlice());
+                tail.append(contentsOf: bitLength.toBytesBigEndian().asUnsafeSlice());
             },
-            .LittleEndian64 => { tail.append(contentsOf: bitLength.toBytesLittleEndian().asSlice()); }
+            .LittleEndian64 => { tail.append(contentsOf: bitLength.toBytesLittleEndian().asUnsafeSlice()); }
         }
 
         var offset: Int64 = 0;
         while offset < tail.count {
-            function.compress(tail.asSlice().drop(first: offset).prefix(self.blockLength));
+            function.compress(tail.asUnsafeSlice().drop(first: offset).prefix(self.blockLength));
             offset = offset + self.blockLength;
         }
         function

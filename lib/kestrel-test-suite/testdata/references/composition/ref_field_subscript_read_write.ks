@@ -7,15 +7,16 @@
 // `base: &Array[T]`) dispatch on the pointee, not on `&Array`. Reads work
 // through a `&` field; writes and `+=` work through a `&mutating` field and
 // land in the referenced array (not a copy), still running its
-// copy-on-write check (`ys` keeps its old contents).
+// copy-on-write check (`ys` keeps its old contents). Writing needs a
+// mutable holder: a `&mutating` field gives no interior mutability.
 module Test
 
 struct View { let base: &Array[Int64] }
 
 struct MutView {
     let base: &mutating Array[Int64]
-    func put(i: Int64, v: Int64) { self.base(at: i) = v; }
-    func bump(i: Int64) { self.base(i) += 10; }
+    mutating func put(i: Int64, v: Int64) { self.base(at: i) = v; }
+    mutating func bump(i: Int64) { self.base(i) += 10; }
 }
 
 func viaField(s: View) -> Int64 { s.base(1) + s.base(at: 2) }
@@ -27,7 +28,7 @@ func main() {
     let s = View(base: b);
     println("\(viaField(s)) \(s.base(0))");
     let mb = &mutating xs;
-    let m = MutView(base: mb);
+    var m = MutView(base: mb);
     let ys = xs;
     m.put(0, 99);
     m.bump(1);

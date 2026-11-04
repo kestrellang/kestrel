@@ -13,7 +13,7 @@ protocol Named { static func name() -> Int64 }
 struct A: Named { static func name() -> Int64 { 7 } }
 
 struct Wrap[H] where H: Named {
-    static func run[S](x: S) -> Int64 where S: Slice[UInt8] { H.name() + x.count }
+    static func run[S](x: S) -> Int64 where S: Slice[UInt8], S: not Static { H.name() + x.count }
 }
 
 @main

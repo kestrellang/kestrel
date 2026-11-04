@@ -28,9 +28,14 @@
 //! **Labels:**
 //! - Primary: the assignment target
 //!   - Span source: `util::expr_span` on the target `HirExprId`
-//!   - Message: "field is not settable"
+//!   - Message: "field is not settable" (a `let` field), or "cannot assign
+//!     through immutable binding" (a mutable field on an immutable base, or a
+//!     write through a stored `&mutating` field whose holder is immutable)
 //!
-//! **Notes:** (none)
+//! **Notes:**
+//! - "a '&mutating' field gives no interior mutability: writing through it
+//!   needs a mutable holder (a 'var', or a 'mutating' method)" (stored ref
+//!   field writes only)
 //!
 //! ### E202 — `assign_to_expression` (Error, Correctness)
 //!
@@ -301,8 +306,15 @@ fn check_target(
             // Ref-returning getter (`cell.mutatingValue = v`): the place's
             // writability comes from the REFERENCE type, not the binding —
             // skip the Settable/base-mutability checks. `&T` is read-only.
+            // A stored `&mutating` field still needs a mutable base.
             match util::ref_place(cx, target) {
-                Some(true) => return,
+                Some(true) => {
+                    if !ref_field_base_is_mutable(cx, target) {
+                        let message = format!("cannot assign to immutable field '{name}'");
+                        push_write_through_ref_field(cx, target, message, diags);
+                    }
+                    return;
+                },
                 Some(false) => {
                     push_assign_through_shared_ref(cx, target, &mut *diags);
                     return;
@@ -484,7 +496,13 @@ fn check_target(
             // A subscript through a stored ref field writes the referent:
             // the field's ref kind decides (see `util::field_subscript_ref`).
             match util::ref_place(cx, target).or_else(|| util::field_subscript_ref(cx, target)) {
-                Some(true) => return,
+                Some(true) => {
+                    if !ref_field_base_is_mutable(cx, target) {
+                        let message = "cannot assign to subscript on immutable binding".into();
+                        push_write_through_ref_field(cx, target, message, diags);
+                    }
+                    return;
+                },
                 Some(false) => {
                     push_assign_through_shared_ref(cx, target, &mut *diags);
                     return;
@@ -559,6 +577,32 @@ fn push_assign_to_expression(
 }
 
 /// E208: the target is a `&T` place — readable through, never writable.
+/// E201 for a write through a stored `&mutating` field whose holder is
+/// not mutable (`v.p.x = 1` with `let v`, `self.base(i) = x` in a
+/// borrowing method).
+fn push_write_through_ref_field(
+    cx: &BodyContext<'_>,
+    target: HirExprId,
+    message: String,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[1].id,
+        severity: DESCRIPTORS[1].default_severity,
+        message,
+        labels: vec![DiagLabel {
+            span: util::expr_span(cx.hir, target),
+            message: "cannot assign through immutable binding".into(),
+            is_primary: true,
+        }],
+        notes: vec![
+            "a '&mutating' field gives no interior mutability: writing through it \
+             needs a mutable holder (a 'var', or a 'mutating' method)"
+                .into(),
+        ],
+    });
+}
+
 fn push_assign_through_shared_ref(
     cx: &BodyContext<'_>,
     target: HirExprId,
@@ -586,6 +630,13 @@ fn is_self_local(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
     }
 }
 
+/// A `&mutating` place reached through a stored ref field (`v.p`,
+/// `self.base(i)`) is writable only through a mutable base: a ref field
+/// gives no interior mutability (see `util::stored_ref_field_base`).
+fn ref_field_base_is_mutable(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    util::stored_ref_field_base(cx, expr_id).is_none_or(|base| is_mutable_base(cx, base))
+}
+
 /// Check whether a base path is mutable. Walks through field / tuple-index
 /// chains: the path is mutable only if the root local is `var` AND every
 /// intermediate field along the chain is settable.
@@ -594,7 +645,7 @@ fn is_mutable_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
     // (the assignment-side surface of E207's const-cast guard — the
     // fact itself is classified once, in `util::ref_place`).
     if let Some(mutating) = util::ref_place(cx, expr_id) {
-        return mutating;
+        return mutating && ref_field_base_is_mutable(cx, expr_id);
     }
     match &cx.hir.exprs[expr_id] {
         HirExpr::Local(local_id, _) => {

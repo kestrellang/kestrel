@@ -45,7 +45,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Request throws IoError {
 
         // Bulk-append exactly the bytes recv produced, in one pass:
         // append(contentsOf:) grows once and copies once → O(n).
-        buffer.append(contentsOf: ArraySlice(pointer: chunk.asPointer(), count: bytesRead));
+        buffer.append(contentsOf: UnsafeSlice(pointer: chunk.asPointer(), count: bytesRead));
 
         headerEnd = findHeaderEnd(buffer);
         if headerEnd >= 0 {
@@ -95,7 +95,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Request throws IoError {
                 if bytesRead <= 0 {
                     break
                 }
-                bodyBytes.append(contentsOf: ArraySlice(pointer: bodyChunk.asPointer(), count: bytesRead));
+                bodyBytes.append(contentsOf: UnsafeSlice(pointer: bodyChunk.asPointer(), count: bytesRead));
             }
 
             body = String(fromUtf8: bodyBytes.asSlice()) ?? String()

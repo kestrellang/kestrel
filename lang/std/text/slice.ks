@@ -5,7 +5,7 @@ module std.text
 import std.core.(Bool, Equal, NotEqual, Equatable, Comparable, Ordering, Cloneable, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, RcBox, ArraySlice)
+import std.memory.(Layout, Pointer, RawPointer, RcBox, UnsafeSlice)
 import std.iter.(Iterable)
 import std.text.(Formattable, Formatter, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringBuilder, StringStorage, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, Str, _bytesEqual, _bytesCompare)
 
@@ -240,7 +240,7 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
     }
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(ArraySlice(pointer: self._rawPtr().offset(by: self.start), count: (self.end - self.start)))
+        hasher.write(UnsafeSlice(pointer: self._rawPtr().offset(by: self.start), count: (self.end - self.start)))
     }
 
     public func clone() -> StringSlice {

@@ -11,8 +11,8 @@ module Test
 
 func total(data: some Slice[UInt8], extra extra: some Slice[UInt8] = Array[UInt8]()) -> Int64 {
     var sum: Int64 = 0;
-    for b in data.asSlice() { sum = sum + Int64(from: b); }
-    for b in extra.asSlice() { sum = sum + Int64(from: b); }
+    for b in data.asUnsafeSlice() { sum = sum + Int64(from: b); }
+    for b in extra.asUnsafeSlice() { sum = sum + Int64(from: b); }
     sum
 }
 

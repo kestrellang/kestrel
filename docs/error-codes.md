@@ -88,7 +88,7 @@ the type checker, and the code is assigned in one place,
 | E137 | undeclared variable '{name}' | An assignment target names no binding in scope. |
 | E138 | 'Self' is not valid in this scope | `Self` in a type position outside any type scope. |
 | E139 | '{name}' is not a type | A type annotation names a value or module. |
-| E140 | negative bound on an opaque type must be 'Copyable' | `some P and not Q` only supports `not Copyable`. |
+| E140 | negative bound on an opaque type must be 'Copyable' or 'Static' | `some P and not Q` only supports `not Copyable` and `not Static`. |
 | E141 | {name} is not defined | A type operator's lang item (`Optional`, `Result`, …) or the default existential box (`DefaultBox`, for plain `any P`) is missing; is the standard library imported? |
 | E142 *(warning)* | implicit parameter 'it' shadows the 'it' of an enclosing closure | A closure written without a parameter list uses `it` inside another such closure; the inner `it` is the inner closure's own parameter. Name one of the parameters to make the intent explicit. |
 | E143 *(warning)* | implicit parameter 'it' shadows the outer binding 'it' | A closure's implicit `it` hides an outer `let it` or parameter named `it`; the closure uses its own parameter, never the outer binding. |

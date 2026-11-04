@@ -32,22 +32,22 @@ public struct SHA512: Digest {
         self.blocks = BlockBuffer(function: SHA512State(words: initialState), blockLength: 128);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
-        self.blocks.update(bytes.asSlice());
+    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+        self.blocks.update(bytes.asUnsafeSlice());
     }
 
     public func finalize() -> DigestOutput {
         let words = self.blocks.finishedWithLengthPadding(.BigEndian128).words;
         var result: [UInt8] = [];
         for i in 0..<8 {
-            result.append(contentsOf: words(i).toBytesBigEndian().asSlice());
+            result.append(contentsOf: words(i).toBytesBigEndian().asUnsafeSlice());
         }
         DigestOutput(bytes: result)
     }
 
     // --- internals ---
 
-    static func compress(block: ArraySlice[UInt8], mutating state: Array[UInt64]) {
+    static func compress(block: UnsafeSlice[UInt8], mutating state: Array[UInt64]) {
         let k: [UInt64] = [
             0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc,
             0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118,
@@ -138,7 +138,7 @@ struct SHA512State: BlockFunction {
         self.words = words;
     }
 
-    mutating func compress(block: ArraySlice[UInt8]) {
+    mutating func compress(block: UnsafeSlice[UInt8]) {
         SHA512.compress(block, self.words);
     }
 }

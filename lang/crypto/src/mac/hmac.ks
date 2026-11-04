@@ -20,7 +20,7 @@ public struct AuthenticationCode: ByteValue, Equatable, Hashable {
 
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(self.storage.asSlice());
+        hasher.write(self.storage.asUnsafeSlice());
     }
 }
 
@@ -65,7 +65,7 @@ public struct HMAC[H] where H: Digest {
         HMAC.setup(hasher, key.bytes, self.inner, self.base, self.opadKey);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
+    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
         self.inner.update(bytes);
     }
 
@@ -79,7 +79,7 @@ public struct HMAC[H] where H: Digest {
     }
 
     /// One-shot authentication.
-    public static func authenticate(message: some Slice[UInt8], using key: SymmetricKey) -> AuthenticationCode {
+    public static func authenticate(message: some Slice[UInt8] and not Static, using key: SymmetricKey) -> AuthenticationCode {
         var mac = HMAC[H](key: key);
         mac.update(message);
         return mac.finalize();
@@ -102,7 +102,7 @@ public struct HMAC[H] where H: Digest {
             h.update(keyBytes);
             normKey = h.finalize().bytes;
         } else {
-            normKey.append(contentsOf: keyBytes.asSlice());
+            normKey.append(contentsOf: keyBytes.asUnsafeSlice());
         }
 
         while normKey.count < bs {

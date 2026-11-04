@@ -18,7 +18,7 @@ public struct BLAKE2b512: Digest {
         self.core = BLAKE2b(validLength: 64);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
+    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
         self.core.update(bytes);
     }
 
@@ -40,7 +40,7 @@ public struct BLAKE2b256: Digest {
         self.core = BLAKE2b(validLength: 32);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
+    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
         self.core.update(bytes);
     }
 
@@ -87,7 +87,7 @@ public struct BLAKE2b {
 
     /// One-shot hash with a chosen output length, or null unless
     /// `outputLength` is between 1 and 64.
-    public static func hash(bytes: some Slice[UInt8], outputLength outputLength: Int64) -> DigestOutput? {
+    public static func hash(bytes: some Slice[UInt8] and not Static, outputLength outputLength: Int64) -> DigestOutput? {
         guard let some hasher = BLAKE2b(outputLength: outputLength) else { return null; }
         var h = hasher;
         h.update(bytes);
@@ -111,8 +111,8 @@ public struct BLAKE2b {
         h
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
-        let sl = bytes.asSlice();
+    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+        let sl = bytes.asUnsafeSlice();
         var offset: Int64 = 0;
 
         if self.buffer.count > 0 {
@@ -125,7 +125,7 @@ public struct BLAKE2b {
             self.incrementCounter(128);
             var block = self.buffer;
             self.buffer = Array[UInt8]();
-            BLAKE2b.compress(block.asSlice(), self.state, self.t0, self.t1, false);
+            BLAKE2b.compress(block.asUnsafeSlice(), self.state, self.t0, self.t1, false);
             offset = needed;
         }
 
@@ -147,7 +147,7 @@ public struct BLAKE2b {
 
         // Pad the remaining buffer with zeros
         var buf: [UInt8] = [];
-        buf.append(contentsOf: self.buffer.asSlice());
+        buf.append(contentsOf: self.buffer.asUnsafeSlice());
         let remaining = UInt64(from: buf.count);
 
         // Increment counter by remaining bytes
@@ -160,7 +160,7 @@ public struct BLAKE2b {
             buf.append(0);
         }
 
-        BLAKE2b.compress(buf.asSlice(), st, ct0, ct1, true);
+        BLAKE2b.compress(buf.asUnsafeSlice(), st, ct0, ct1, true);
 
         // Extract output bytes (little-endian)
         var result: [UInt8] = [];
@@ -201,7 +201,7 @@ public struct BLAKE2b {
     }
 
     static func compress(
-        block: ArraySlice[UInt8],
+        block: UnsafeSlice[UInt8],
         mutating state: Array[UInt64],
         t0: UInt64,
         t1: UInt64,

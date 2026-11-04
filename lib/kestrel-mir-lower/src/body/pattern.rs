@@ -1111,6 +1111,11 @@ impl OssaBodyCtx<'_, '_> {
         let mut addr = base;
         let mut ty = base_ty;
         for elem in path {
+            // An array element is a `matchGet` call result, not a stored
+            // field: there is no address to take it from.
+            if self.is_array_matchable_ty(ty) {
+                return None;
+            }
             let idx = match elem {
                 PathElement::Index(i) => FieldIdx::new(*i),
                 PathElement::Field(name) => {
@@ -1258,6 +1263,13 @@ impl OssaBodyCtx<'_, '_> {
                     }
                     current_ty = field_ty;
                 },
+                // An array element comes from `matchGet` (an owned call
+                // result), not from destructuring the array's storage.
+                PathElement::Index(_)
+                    if pending_downcast.is_none() && self.is_array_matchable_ty(current_ty) =>
+                {
+                    return false;
+                },
                 PathElement::Index(i) => {
                     let field_ty = if let Some(variant_idx) = pending_downcast.take() {
                         self.resolve_enum_payload_field_by_index(
@@ -1314,6 +1326,13 @@ impl OssaBodyCtx<'_, '_> {
                         return true;
                     }
                     current_ty = field_ty;
+                },
+                // An array element comes from `matchGet` (an owned call
+                // result), not from destructuring the array's storage.
+                PathElement::Index(_)
+                    if pending_downcast.is_none() && self.is_array_matchable_ty(current_ty) =>
+                {
+                    return false;
                 },
                 PathElement::Index(i) => {
                     let field_ty = if let Some(variant_idx) = pending_downcast.take() {
@@ -1931,11 +1950,17 @@ impl OssaBodyCtx<'_, '_> {
     /// binding `type Element = T` substitutes `T → Int64`; for a non-generic
     /// one (`Trio` with `type Element = Int64`) the binding is concrete.
     fn array_element_ty(&mut self, array_ty: TyId) -> TyId {
+        self.array_assoc_ty(array_ty, "Element")
+    }
+
+    /// An `ArrayMatchable` associated type (`Element` or `Rest`) of the
+    /// conformer `array_ty`, substituted with its type args.
+    fn array_assoc_ty(&mut self, array_ty: TyId, name: &str) -> TyId {
         let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(array_ty).clone()
         else {
             return array_ty;
         };
-        let Some((binding, owner)) = self.resolve_array_element_binding(entity) else {
+        let Some((binding, owner)) = self.resolve_array_assoc_binding(entity, name) else {
             // Binding lookup failed (broken stdlib / missing protocol) — fall
             // back to the first type arg so generic conformers still work.
             return type_args.first().copied().unwrap_or(array_ty);
@@ -1963,11 +1988,15 @@ impl OssaBodyCtx<'_, '_> {
         kestrel_mir::substitute(&mut self.ctx.module.ty_arena, binding, &subst)
     }
 
-    /// Find the `type Element = ...` binding for an `ArrayMatchable` conformer,
+    /// Find the `type <name> = ...` binding (`Element` or `Rest`) for an `ArrayMatchable` conformer,
     /// returning the (unsubstituted) binding type and the entity that OWNS it
     /// (the type body, or the conforming extension) — the owner provides the
     /// type params for substitution.
-    fn resolve_array_element_binding(&mut self, type_entity: Entity) -> Option<(TyId, Entity)> {
+    fn resolve_array_assoc_binding(
+        &mut self,
+        type_entity: Entity,
+        name: &str,
+    ) -> Option<(TyId, Entity)> {
         let proto = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
             builtin: kestrel_hir::Builtin::ArrayMatchable,
             root: self.ctx.root,
@@ -1985,7 +2014,7 @@ impl OssaBodyCtx<'_, '_> {
                     .world
                     .get::<kestrel_ast_builder::Name>(m.entity)
                     .map(|n| n.0.as_str())
-                    == Some("Element")
+                    == Some(name)
             })?
             .entity;
         // Binding in the type body, then in a conforming extension.
@@ -2090,7 +2119,7 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// Emit `array.matchSlice(prefix, matchLength() - suffix)` — the rest
-    /// slice bound by `..rest`. Returns an `ArraySlice[Element]`. The compiler
+    /// slice bound by `..rest`. Returns the conformer's `Rest` type. The compiler
     /// guarantees `0 <= from <= to <= matchLength()`.
     fn emit_array_match_slice(
         &mut self,
@@ -2109,16 +2138,7 @@ impl OssaBodyCtx<'_, '_> {
         // suffix elements; `suffix_len == 0` gives the whole tail).
         let to_raw = self.emit_array_index_from_end(array, array_ty, suffix_len);
         let to = self.emit_int64_wrap(to_raw, int64_ty);
-        let elem_ty = self.array_element_ty(array_ty);
-        let result_ty = self
-            .ctx
-            .query
-            .query(kestrel_name_res::ResolveBuiltin {
-                builtin: kestrel_hir::Builtin::SliceStruct,
-                root: self.ctx.root,
-            })
-            .map(|e| self.ctx.module.ty_arena.named(e, vec![elem_ty]))
-            .unwrap_or(array_ty);
+        let result_ty = self.array_assoc_ty(array_ty, "Rest");
         self.emit_array_matchable_call(
             proto,
             kestrel_hir::Builtin::ArrayMatchableMatchSlice,

@@ -20,22 +20,22 @@ public struct SHA1: Digest {
         self.blocks = BlockBuffer(function: SHA1State(words: initial), blockLength: 64);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
-        self.blocks.update(bytes.asSlice());
+    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+        self.blocks.update(bytes.asUnsafeSlice());
     }
 
     public func finalize() -> DigestOutput {
         let words = self.blocks.finishedWithLengthPadding(.BigEndian64).words;
         var result: [UInt8] = [];
         for i in 0..<5 {
-            result.append(contentsOf: words(i).toBytesBigEndian().asSlice());
+            result.append(contentsOf: words(i).toBytesBigEndian().asUnsafeSlice());
         }
         DigestOutput(bytes: result)
     }
 
     // --- internals ---
 
-    static func compress(block: ArraySlice[UInt8], mutating state: Array[UInt32]) {
+    static func compress(block: UnsafeSlice[UInt8], mutating state: Array[UInt32]) {
         // Message schedule: 16 big-endian words, expanded to 80.
         var w = Array[UInt32](repeating: 0, count: 80);
         for i in 0..<16 {
@@ -96,7 +96,7 @@ struct SHA1State: BlockFunction {
         self.words = words;
     }
 
-    mutating func compress(block: ArraySlice[UInt8]) {
+    mutating func compress(block: UnsafeSlice[UInt8]) {
         SHA1.compress(block, self.words);
     }
 }

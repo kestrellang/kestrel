@@ -5,7 +5,7 @@ module std.collections
 import std.core.(Bool, Equatable, fatalError)
 import std.numeric.(Int64)
 import std.result.(Optional)
-import std.memory.(Pointer, ArraySlice)
+import std.memory.(Pointer, UnsafeSlice)
 import std.iter.(Iterator, Iterable)
 
 // ============================================================================
@@ -13,15 +13,15 @@ import std.iter.(Iterator, Iterable)
 // ============================================================================
 
 /// Multi-pass lazy view over non-overlapping `chunkSize`-sized
-/// `ArraySlice[T]` segments.
+/// `UnsafeSlice[T]` segments.
 public struct ChunksView[T]: Iterable {
-    type Item = ArraySlice[T]
+    type Item = UnsafeSlice[T]
     type TargetIterator = ChunksIterator[T]
 
-    private var slice: ArraySlice[T]
+    private var slice: UnsafeSlice[T]
     private var chunkSize: Int64
 
-    public init(slice slice: ArraySlice[T], chunkSize chunkSize: Int64) {
+    public init(slice slice: UnsafeSlice[T], chunkSize chunkSize: Int64) {
         self.slice = slice;
         self.chunkSize = chunkSize;
     }
@@ -33,7 +33,7 @@ public struct ChunksView[T]: Iterable {
 
     public var isEmpty: Bool { self.slice.count == 0 }
 
-    public subscript(index: Int64) -> ArraySlice[T] {
+    public subscript(index: Int64) -> UnsafeSlice[T] {
         if index < 0 or index >= self.count {
             fatalError("ChunksView index out of bounds")
         }
@@ -43,10 +43,10 @@ public struct ChunksView[T]: Iterable {
         if remaining < self.chunkSize {
             thisSize = remaining
         }
-        ArraySlice(pointer: self.slice.pointer.offset(by: start), count: thisSize)
+        UnsafeSlice(pointer: self.slice.pointer.offset(by: start), count: thisSize)
     }
 
-    public var first: Optional[ArraySlice[T]] {
+    public var first: Optional[UnsafeSlice[T]] {
         if self.slice.count > 0 {
             .Some(self(0))
         } else {
@@ -54,7 +54,7 @@ public struct ChunksView[T]: Iterable {
         }
     }
 
-    public var last: Optional[ArraySlice[T]] {
+    public var last: Optional[UnsafeSlice[T]] {
         if self.slice.count > 0 {
             .Some(self(self.count - 1))
         } else {
@@ -66,8 +66,8 @@ public struct ChunksView[T]: Iterable {
         ChunksIterator(ptr: self.slice.pointer, remaining: self.slice.count, chunkSize: self.chunkSize)
     }
 
-    public func toArray() -> Array[ArraySlice[T]] {
-        var result = Array[ArraySlice[T]]();
+    public func toArray() -> Array[UnsafeSlice[T]] {
+        var result = Array[UnsafeSlice[T]]();
         let n = self.count;
         result.reserveCapacity(n);
         for i in 0..<n {
@@ -78,7 +78,7 @@ public struct ChunksView[T]: Iterable {
 }
 
 public struct ChunksIterator[T]: Iterator {
-    type Item = ArraySlice[T]
+    type Item = UnsafeSlice[T]
 
     private var ptr: Pointer[T]
     private var remaining: Int64
@@ -90,7 +90,7 @@ public struct ChunksIterator[T]: Iterator {
         self.chunkSize = chunkSize;
     }
 
-    public mutating func next() -> Optional[ArraySlice[T]] {
+    public mutating func next() -> Optional[UnsafeSlice[T]] {
         if self.remaining <= 0 {
             return .None
         }
@@ -98,7 +98,7 @@ public struct ChunksIterator[T]: Iterator {
         if self.remaining < self.chunkSize {
             thisSize = self.remaining
         }
-        let slice = ArraySlice(pointer: self.ptr, count: thisSize);
+        let slice = UnsafeSlice(pointer: self.ptr, count: thisSize);
         self.ptr = self.ptr.offset(by: thisSize);
         self.remaining = self.remaining - thisSize;
         .Some(slice)
@@ -111,13 +111,13 @@ public struct ChunksIterator[T]: Iterator {
 
 /// Multi-pass lazy view over overlapping fixed-size sliding windows.
 public struct WindowsView[T]: Iterable {
-    type Item = ArraySlice[T]
+    type Item = UnsafeSlice[T]
     type TargetIterator = WindowsIterator[T]
 
-    private var slice: ArraySlice[T]
+    private var slice: UnsafeSlice[T]
     private var windowSize: Int64
 
-    public init(slice slice: ArraySlice[T], windowSize windowSize: Int64) {
+    public init(slice slice: UnsafeSlice[T], windowSize windowSize: Int64) {
         self.slice = slice;
         self.windowSize = windowSize;
     }
@@ -131,21 +131,21 @@ public struct WindowsView[T]: Iterable {
 
     public var isEmpty: Bool { self.slice.count < self.windowSize }
 
-    public subscript(index: Int64) -> ArraySlice[T] {
+    public subscript(index: Int64) -> UnsafeSlice[T] {
         if index < 0 or index >= self.count {
             fatalError("WindowsView index out of bounds")
         }
-        ArraySlice(pointer: self.slice.pointer.offset(by: index), count: self.windowSize)
+        UnsafeSlice(pointer: self.slice.pointer.offset(by: index), count: self.windowSize)
     }
 
-    public var first: Optional[ArraySlice[T]] {
+    public var first: Optional[UnsafeSlice[T]] {
         if self.isEmpty {
             return .None
         }
         .Some(self(0))
     }
 
-    public var last: Optional[ArraySlice[T]] {
+    public var last: Optional[UnsafeSlice[T]] {
         if self.isEmpty {
             return .None
         }
@@ -156,8 +156,8 @@ public struct WindowsView[T]: Iterable {
         WindowsIterator(ptr: self.slice.pointer, totalCount: self.slice.count, windowSize: self.windowSize)
     }
 
-    public func toArray() -> Array[ArraySlice[T]] {
-        var result = Array[ArraySlice[T]]();
+    public func toArray() -> Array[UnsafeSlice[T]] {
+        var result = Array[UnsafeSlice[T]]();
         let n = self.count;
         result.reserveCapacity(n);
         for i in 0..<n {
@@ -168,7 +168,7 @@ public struct WindowsView[T]: Iterable {
 }
 
 public struct WindowsIterator[T]: Iterator {
-    type Item = ArraySlice[T]
+    type Item = UnsafeSlice[T]
 
     private var ptr: Pointer[T]
     private var remaining: Int64
@@ -185,11 +185,11 @@ public struct WindowsIterator[T]: Iterator {
         };
     }
 
-    public mutating func next() -> Optional[ArraySlice[T]] {
+    public mutating func next() -> Optional[UnsafeSlice[T]] {
         if self.remaining <= 0 {
             return .None
         }
-        let slice = ArraySlice(pointer: self.ptr, count: self.windowSize);
+        let slice = UnsafeSlice(pointer: self.ptr, count: self.windowSize);
         self.ptr = self.ptr.offset(by: 1);
         self.remaining = self.remaining - 1;
         .Some(slice)
@@ -206,9 +206,9 @@ public struct ReversedView[T]: Iterable {
     type Item = T
     type TargetIterator = ReversedSliceIterator[T]
 
-    private var slice: ArraySlice[T]
+    private var slice: UnsafeSlice[T]
 
-    public init(slice slice: ArraySlice[T]) {
+    public init(slice slice: UnsafeSlice[T]) {
         self.slice = slice;
     }
 
@@ -282,13 +282,13 @@ public struct ReversedSliceIterator[T]: Iterator {
 /// occurrence of a separator value. (Named `ArraySplitView` to avoid
 /// collision with `std.text.SplitView`.)
 public struct ArraySplitView[T]: Iterable where T: Equatable {
-    type Item = ArraySlice[T]
+    type Item = UnsafeSlice[T]
     type TargetIterator = ArraySplitIterator[T]
 
-    private var slice: ArraySlice[T]
+    private var slice: UnsafeSlice[T]
     private var separator: T
 
-    public init(slice slice: ArraySlice[T], separator separator: T) {
+    public init(slice slice: UnsafeSlice[T], separator separator: T) {
         self.slice = slice;
         self.separator = separator;
     }
@@ -310,23 +310,23 @@ public struct ArraySplitView[T]: Iterable where T: Equatable {
         ArraySplitIterator(ptr: self.slice.pointer, remaining: self.slice.count, separator: self.separator, done: false)
     }
 
-    public func toArray() -> Array[ArraySlice[T]] {
-        var result = Array[ArraySlice[T]]();
+    public func toArray() -> Array[UnsafeSlice[T]] {
+        var result = Array[UnsafeSlice[T]]();
         let p = self.slice.pointer;
         var start: Int64 = 0;
         for i in 0..<self.slice.count {
             if p.offset(by: i).read().isEqual(to: self.separator) {
-                result.append(ArraySlice(pointer: p.offset(by: start), count: i - start));
+                result.append(UnsafeSlice(pointer: p.offset(by: start), count: i - start));
                 start = i + 1
             }
         }
-        result.append(ArraySlice(pointer: p.offset(by: start), count: self.slice.count - start));
+        result.append(UnsafeSlice(pointer: p.offset(by: start), count: self.slice.count - start));
         result
     }
 }
 
 public struct ArraySplitIterator[T]: Iterator where T: Equatable {
-    type Item = ArraySlice[T]
+    type Item = UnsafeSlice[T]
 
     private var ptr: Pointer[T]
     private var remaining: Int64
@@ -340,21 +340,21 @@ public struct ArraySplitIterator[T]: Iterator where T: Equatable {
         self.done = done;
     }
 
-    public mutating func next() -> Optional[ArraySlice[T]] {
+    public mutating func next() -> Optional[UnsafeSlice[T]] {
         if self.done {
             return .None
         }
         var i: Int64 = 0;
         while i < self.remaining {
             if self.ptr.offset(by: i).read().isEqual(to: self.separator) {
-                let segment = ArraySlice(pointer: self.ptr, count: i);
+                let segment = UnsafeSlice(pointer: self.ptr, count: i);
                 self.ptr = self.ptr.offset(by: i + 1);
                 self.remaining = self.remaining - i - 1;
                 return .Some(segment)
             }
             i = i + 1
         }
-        let segment = ArraySlice(pointer: self.ptr, count: self.remaining);
+        let segment = UnsafeSlice(pointer: self.ptr, count: self.remaining);
         self.done = true;
         .Some(segment)
     }
@@ -369,13 +369,13 @@ public struct ArraySplitIterator[T]: Iterator where T: Equatable {
 /// (Named `ArraySplitWhereView` to avoid collision with
 /// `std.text.SplitWhereView`.)
 public struct ArraySplitWhereView[T]: Iterable {
-    type Item = ArraySlice[T]
+    type Item = UnsafeSlice[T]
     type TargetIterator = ArraySplitWhereIterator[T]
 
-    private var slice: ArraySlice[T]
+    private var slice: UnsafeSlice[T]
     private var predicate: escaping (T) -> Bool
 
-    public init(slice slice: ArraySlice[T], consuming predicate predicate: escaping (T) -> Bool) {
+    public init(slice slice: UnsafeSlice[T], consuming predicate predicate: escaping (T) -> Bool) {
         self.slice = slice;
         self.predicate = predicate;
     }
@@ -397,23 +397,23 @@ public struct ArraySplitWhereView[T]: Iterable {
         ArraySplitWhereIterator(ptr: self.slice.pointer, remaining: self.slice.count, predicate: self.predicate, done: false)
     }
 
-    public func toArray() -> Array[ArraySlice[T]] {
-        var result = Array[ArraySlice[T]]();
+    public func toArray() -> Array[UnsafeSlice[T]] {
+        var result = Array[UnsafeSlice[T]]();
         let p = self.slice.pointer;
         var start: Int64 = 0;
         for i in 0..<self.slice.count {
             if self.predicate(p.offset(by: i).read()) {
-                result.append(ArraySlice(pointer: p.offset(by: start), count: i - start));
+                result.append(UnsafeSlice(pointer: p.offset(by: start), count: i - start));
                 start = i + 1
             }
         }
-        result.append(ArraySlice(pointer: p.offset(by: start), count: self.slice.count - start));
+        result.append(UnsafeSlice(pointer: p.offset(by: start), count: self.slice.count - start));
         result
     }
 }
 
 public struct ArraySplitWhereIterator[T]: Iterator {
-    type Item = ArraySlice[T]
+    type Item = UnsafeSlice[T]
 
     private var ptr: Pointer[T]
     private var remaining: Int64
@@ -427,21 +427,21 @@ public struct ArraySplitWhereIterator[T]: Iterator {
         self.done = done;
     }
 
-    public mutating func next() -> Optional[ArraySlice[T]] {
+    public mutating func next() -> Optional[UnsafeSlice[T]] {
         if self.done {
             return .None
         }
         var i: Int64 = 0;
         while i < self.remaining {
             if self.predicate(self.ptr.offset(by: i).read()) {
-                let segment = ArraySlice(pointer: self.ptr, count: i);
+                let segment = UnsafeSlice(pointer: self.ptr, count: i);
                 self.ptr = self.ptr.offset(by: i + 1);
                 self.remaining = self.remaining - i - 1;
                 return .Some(segment)
             }
             i = i + 1
         }
-        let segment = ArraySlice(pointer: self.ptr, count: self.remaining);
+        let segment = UnsafeSlice(pointer: self.ptr, count: self.remaining);
         self.done = true;
         .Some(segment)
     }

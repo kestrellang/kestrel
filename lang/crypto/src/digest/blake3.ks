@@ -23,8 +23,8 @@ public struct BLAKE3: Digest {
         self.stack = Array[Array[UInt32]]();
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
-        let input = bytes.asSlice();
+    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+        let input = bytes.asUnsafeSlice();
         var offset: Int64 = 0;
         while offset < input.count {
             // A full chunk is only finished once more input arrives, so the
@@ -82,8 +82,8 @@ public struct BLAKE3: Digest {
     /// The node joining two child chaining values.
     static func parent(left: Array[UInt32], right: Array[UInt32]) -> BLAKE3Output {
         var words: [UInt32] = [];
-        words.append(contentsOf: left.asSlice());
-        words.append(contentsOf: right.asSlice());
+        words.append(contentsOf: left.asUnsafeSlice());
+        words.append(contentsOf: right.asUnsafeSlice());
         BLAKE3Output(BLAKE3.IV, words, 0, 64, BLAKE3.parentFlag)
     }
 
@@ -97,7 +97,7 @@ public struct BLAKE3: Digest {
     ) -> Array[UInt32] {
         let iv = BLAKE3.IV;
         var state: [UInt32] = [];
-        state.append(contentsOf: chainingValue.asSlice());
+        state.append(contentsOf: chainingValue.asUnsafeSlice());
         state.append(iv(0));
         state.append(iv(1));
         state.append(iv(2));
@@ -178,7 +178,7 @@ struct BLAKE3Chunk {
         if self.blocksCompressed == 0 { BLAKE3.chunkStart } else { 0 }
     }
 
-    mutating func update(input: ArraySlice[UInt8]) {
+    mutating func update(input: UnsafeSlice[UInt8]) {
         var offset: Int64 = 0;
         while offset < input.count {
             // Like chunks, a full block is only compressed once more input
@@ -234,14 +234,14 @@ struct BLAKE3Output {
         let words = BLAKE3.compress(self.inputChainingValue, self.block, 0, self.blockLength, self.flags | BLAKE3.root);
         var result: [UInt8] = [];
         for i in 0..<8 {
-            result.append(contentsOf: words(i).toBytesLittleEndian().asSlice());
+            result.append(contentsOf: words(i).toBytesLittleEndian().asUnsafeSlice());
         }
         result
     }
 
     static func firstEight(words: Array[UInt32]) -> Array[UInt32] {
         var result: [UInt32] = [];
-        result.append(contentsOf: words.asSlice().prefix(8));
+        result.append(contentsOf: words.asUnsafeSlice().prefix(8));
         result
     }
 }
