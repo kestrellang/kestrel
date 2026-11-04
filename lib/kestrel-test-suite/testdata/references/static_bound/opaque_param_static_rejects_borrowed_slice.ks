@@ -6,9 +6,9 @@
 
 module Test
 
-import std.collections.(Array, ArraySlice, Slice)
+import std.collections.(Array, ArraySlice, Sliceable)
 
-func count(xs: some Slice[Int64]) -> Int64 { xs.asUnsafeSlice().count }
+func count(xs: some Sliceable[Int64]) -> Int64 { xs.asUnsafeSlice().count }
 
 func caller() -> Int64 {
     let xs = [1, 2, 3];

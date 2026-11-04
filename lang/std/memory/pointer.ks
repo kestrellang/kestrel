@@ -8,7 +8,7 @@ import std.numeric.(Int64, UInt64, UInt8)
 import std.memory.(UnsafeSlice)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
-import std.collections.(Slice)
+import std.collections.(Sliceable)
 
 /// Untyped pointer to raw memory — `void*` in C terms.
 ///
@@ -389,7 +389,7 @@ public struct UnsafeSlice[T] {
     public var pointer: Pointer[T] { self.ptr }
 
     // subscript(index:), subscript(checked:), subscript(unchecked:),
-    // subscript(clamped:), subscript(wrapped:): provided by extend Slice[T]
+    // subscript(clamped:), subscript(wrapped:): provided by extend Sliceable[T]
 
     /// Forward iterator over the elements.
     public func iter() -> UnsafeSliceIterator[T] {
@@ -416,11 +416,11 @@ public struct UnsafeSlice[T] {
 
 }
 
-/// `Slice[T]` conformance — `UnsafeSlice` is the kernel type, so
+/// `Sliceable[T]` conformance — `UnsafeSlice` is the kernel type, so
 /// `asUnsafeSlice()` returns `self`. Also declares the `Iterable` associated
 /// types so slices can be used in `for`-`in` loops and generic
 /// `I: Iterable` contexts.
-extend UnsafeSlice[T]: Slice[T], Iterable {
+extend UnsafeSlice[T]: Sliceable[T], Iterable {
     type Item = T
     type TargetIterator = UnsafeSliceIterator[T]
 
@@ -430,7 +430,7 @@ extend UnsafeSlice[T]: Slice[T], Iterable {
 }
 
 /// Element-wise equality when the element type is `Equatable`. `isEqual`
-/// is supplied by `extend Slice[T] where T: Equatable` in
+/// is supplied by `extend Sliceable[T] where T: Equatable` in
 /// `std.collections.slice`.
 ///
 /// # Examples

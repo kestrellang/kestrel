@@ -30,7 +30,7 @@ public struct SHA256: Digest {
         self.blocks = BlockBuffer(function: SHA256State(words: initialState), blockLength: 64);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+    public mutating func update[S](bytes: S) where S: Sliceable[UInt8], S: not Static {
         self.blocks.update(bytes.asUnsafeSlice());
     }
 

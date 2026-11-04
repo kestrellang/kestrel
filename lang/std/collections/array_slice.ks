@@ -7,7 +7,7 @@ import std.numeric.(Int64, UInt64, RandomNumberGenerator, SystemRandom)
 import std.result.(Optional)
 import std.memory.(UnsafeSlice, Pointer)
 import std.iter.(Iterable, Iterator)
-import std.collections.(Array, ArrayIterator, Slice, SeqIndex, SeqClampable, SeqWrappable, SeqRange, ChunksView, WindowsView, ReversedView, ArraySplitView, ArraySplitWhereView)
+import std.collections.(Array, ArrayIterator, Sliceable, SeqIndex, SeqClampable, SeqWrappable, SeqRange, ChunksView, WindowsView, ReversedView, ArraySplitView, ArraySplitWhereView)
 
 // ============================================================================
 // ARRAY SLICE
@@ -111,9 +111,9 @@ public struct ArraySlice[T] {
     }
 }
 
-/// `Slice[T]` conformance: every read-only algorithm on `Slice` works on an
+/// `Sliceable[T]` conformance: every read-only algorithm on `Sliceable` works on an
 /// `ArraySlice` too.
-extend ArraySlice[T]: Slice[T], Iterable {
+extend ArraySlice[T]: Sliceable[T], Iterable {
     type Item = T
     type TargetIterator = ArrayIterator[T]
 
@@ -142,7 +142,7 @@ extend ArraySlice[T]: ArrayMatchable {
     }
 }
 
-/// Element-wise equality (`isEqual` comes from `extend Slice[T] where T: Equatable`).
+/// Element-wise equality (`isEqual` comes from `extend Sliceable[T] where T: Equatable`).
 extend ArraySlice[T]: Equatable where T: Equatable { }
 
 // ============================================================================
@@ -463,9 +463,9 @@ fileprivate func siftDown[T](s: UnsafeSlice[T], lo: Int64, start: Int64, n: Int6
     }
 }
 
-/// `Slice[T]` conformance: the read-only algorithms work on a mutable
+/// `Sliceable[T]` conformance: the read-only algorithms work on a mutable
 /// slice too.
-extend MutableArraySlice[T]: Slice[T], Iterable {
+extend MutableArraySlice[T]: Sliceable[T], Iterable {
     type Item = T
     type TargetIterator = ArrayIterator[T]
 

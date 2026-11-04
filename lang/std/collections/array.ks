@@ -14,7 +14,7 @@ import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RawPointer
 import std.ffi.(memcpy)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
-import std.collections.(Slice, ArraySlice)
+import std.collections.(Sliceable, ArraySlice)
 
 /// Forward iterator over an `Array[T]`: an `UnsafeSliceIterator[T]` cursor plus
 /// a share of the array's storage.
@@ -251,7 +251,7 @@ struct ArrayStorage[T]: Cloneable {
 /// - Iteration order is insertion order.
 /// - Operations marked O(1) are amortized; growth is geometric.
 @builtin(.ArrayStruct)
-public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable {
+public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable {
     /// `Iterable` element type — the element produced by `iter().next()`.
     type Item = T
     /// `Iterable` iterator type — the concrete iterator returned by `iter()`.
@@ -551,7 +551,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     // PROPERTIES
     // ========================================================================
 
-    // count, isEmpty, indices, asPointer, isValidIndex: provided by extend Slice[T]
+    // count, isEmpty, indices, asPointer, isValidIndex: provided by extend Sliceable[T]
 
     /// The number of elements the buffer can hold without reallocating.
     public var capacity: Int64 { self.cap() }
@@ -714,7 +714,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.append(contentsOf: [3, 4]);  // [1, 2, 3, 4]
     /// arr.append(contentsOf: []);      // [1, 2, 3, 4]  — no-op
     /// ```
-    public mutating func append(contentsOf other: some Slice[T] and not Static) {
+    public mutating func append(contentsOf other: some Sliceable[T] and not Static) {
         let sl = other.asUnsafeSlice();
         let otherLen = sl.count;
         if otherLen == 0 {
@@ -1058,7 +1058,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         self.asMutableSlice().reverse()
     }
 
-    // reversed(): provided by extend Slice[T] — returns a lazy ReversedView[T]
+    // reversed(): provided by extend Sliceable[T] — returns a lazy ReversedView[T]
     // (use `arr.reversed().toArray()` if an owned Array is needed).
 
     /// Rotates the elements in place by `amount` positions to the left.
@@ -1289,7 +1289,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     // first(), last(), firstIndex(where:), lastIndex(where:),
     // first(where:), last(where:), all(where:), any(where:),
     // countItems(where:), prefix(count:), suffix(count:),
-    // drop(first:), drop(last:): provided by extend Slice[T]
+    // drop(first:), drop(last:): provided by extend Sliceable[T]
 
     // ========================================================================
     // ITERATION
@@ -1313,7 +1313,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
 
     // refs(), mutatingRefs(): in array_slice.ks — they borrow the array.
 
-    // chunks(of:), windows(of:): provided by extend Slice[T] — return
+    // chunks(of:), windows(of:): provided by extend Sliceable[T] — return
     // ChunksView[T] / WindowsView[T] (multi-pass; subscript via .get(i)).
 
     // ========================================================================
@@ -1402,7 +1402,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
 /// `Equatable` and value-based search/dedup operations available when the
 /// element type itself is `Equatable`.
 // contains, firstIndex(of:), lastIndex(of:), starts(with:), ends(with:), split(separator:),
-// isEqual: provided by extend Slice[T] where T: Equatable
+// isEqual: provided by extend Sliceable[T] where T: Equatable
 extend Array[T]: Equatable where T: Equatable { }
 
 extend Array[T] where T: Equatable {
@@ -1563,7 +1563,7 @@ extend Array[T] where T: Comparable {
         self.sort(by: { (a, b) in a < b })
     }
 
-    // sorted(), min(), max(), isSorted(), binarySearch(): provided by extend Slice[T] where T: Comparable
+    // sorted(), min(), max(), isSorted(), binarySearch(): provided by extend Sliceable[T] where T: Comparable
 }
 
 // ============================================================================
@@ -1746,7 +1746,7 @@ extend Array[T] where T: Formattable {
     }
 }
 
-// Formattable: provided by extend Slice[T] where T: Formattable
+// Formattable: provided by extend Sliceable[T] where T: Formattable
 
 // ============================================================================
 // DIRECT ITERABLE CONFORMANCE

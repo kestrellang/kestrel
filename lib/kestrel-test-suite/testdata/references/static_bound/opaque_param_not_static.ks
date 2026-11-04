@@ -9,15 +9,15 @@
 
 module Test
 
-import std.collections.(Array, ArraySlice, Slice)
+import std.collections.(Array, ArraySlice, Sliceable)
 
-func total(xs: some Slice[Int64] and not Static) -> Int64 {
+func total(xs: some Sliceable[Int64] and not Static) -> Int64 {
     var t: Int64 = 0;
     for x in xs.asUnsafeSlice() { t += x; }
     t
 }
 
-func totalOr(xs: some Slice[Int64] and not Static = Array[Int64]()) -> Int64 {
+func totalOr(xs: some Sliceable[Int64] and not Static = Array[Int64]()) -> Int64 {
     total(xs)
 }
 
