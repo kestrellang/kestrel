@@ -1111,6 +1111,11 @@ impl OssaBodyCtx<'_, '_> {
         let mut addr = base;
         let mut ty = base_ty;
         for elem in path {
+            // An array element is a `matchGet` call result, not a stored
+            // field: there is no address to take it from.
+            if self.is_array_matchable_ty(ty) {
+                return None;
+            }
             let idx = match elem {
                 PathElement::Index(i) => FieldIdx::new(*i),
                 PathElement::Field(name) => {
@@ -1258,6 +1263,13 @@ impl OssaBodyCtx<'_, '_> {
                     }
                     current_ty = field_ty;
                 },
+                // An array element comes from `matchGet` (an owned call
+                // result), not from destructuring the array's storage.
+                PathElement::Index(_)
+                    if pending_downcast.is_none() && self.is_array_matchable_ty(current_ty) =>
+                {
+                    return false;
+                },
                 PathElement::Index(i) => {
                     let field_ty = if let Some(variant_idx) = pending_downcast.take() {
                         self.resolve_enum_payload_field_by_index(
@@ -1314,6 +1326,13 @@ impl OssaBodyCtx<'_, '_> {
                         return true;
                     }
                     current_ty = field_ty;
+                },
+                // An array element comes from `matchGet` (an owned call
+                // result), not from destructuring the array's storage.
+                PathElement::Index(_)
+                    if pending_downcast.is_none() && self.is_array_matchable_ty(current_ty) =>
+                {
+                    return false;
                 },
                 PathElement::Index(i) => {
                     let field_ty = if let Some(variant_idx) = pending_downcast.take() {
