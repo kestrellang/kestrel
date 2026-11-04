@@ -41,6 +41,14 @@ impl<'w> LowerCtx<'w> {
             builtin: kestrel_hir::Builtin::Cloneable,
             root,
         });
+        module.static_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Static,
+            root,
+        });
+        module.sized_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Sized,
+            root,
+        });
         // Implicit-condition lowering needs both of these at *every* branch
         // site (~1835 in a trivial stdlib program), so resolve them once here
         // rather than re-querying per branch.

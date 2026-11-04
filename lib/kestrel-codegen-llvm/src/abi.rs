@@ -7,45 +7,14 @@
 
 use inkwell::context::Context;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, FunctionType};
+use kestrel_mir::TyArena;
 use kestrel_mir::mono::{MonoFunction, MonoModule};
-use kestrel_mir::{ParamConvention, TyArena};
 
-use crate::ty::{ScalarTy, TypeCache, TypeRepr};
+use crate::ty::{Llvm, TypeCache, TypeRepr};
 
-#[derive(Debug, Clone, Copy)]
-pub enum PassMode {
-    ByVal(ScalarTy),
-    ByRef,
-    Zst,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ReturnMode {
-    Direct(ScalarTy),
-    Sret,
-    Void,
-}
-
-pub fn param_pass_mode(convention: ParamConvention, repr: TypeRepr) -> PassMode {
-    match convention {
-        ParamConvention::Borrow | ParamConvention::MutBorrow => PassMode::ByRef,
-        ParamConvention::Consuming => match repr {
-            TypeRepr::Scalar(t) => PassMode::ByVal(t),
-            TypeRepr::Aggregate { .. } => PassMode::ByRef,
-            TypeRepr::Zst => PassMode::Zst,
-        },
-    }
-}
-
-pub fn return_mode(repr: TypeRepr) -> ReturnMode {
-    // The `@main` entry point is an ordinary `i64`-returning function (the
-    // MIR-synthesized wrapper), so no entry-point special-casing is needed here.
-    match repr {
-        TypeRepr::Scalar(t) => ReturnMode::Direct(t),
-        TypeRepr::Aggregate { .. } => ReturnMode::Sret,
-        TypeRepr::Zst => ReturnMode::Void,
-    }
-}
+pub type PassMode = kestrel_codegen::PassMode<Llvm>;
+pub type ReturnMode = kestrel_codegen::ReturnMode<Llvm>;
+pub use kestrel_codegen::{param_pass_mode, return_mode};
 
 fn finish_fn_type<'ctx>(
     cx: &'ctx Context,

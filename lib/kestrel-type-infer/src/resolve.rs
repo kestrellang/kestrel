@@ -16,8 +16,8 @@ use kestrel_hir_lower::{
     LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation,
 };
 use kestrel_name_res::{
-    ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeMemberSource, TypeMembersByName,
-    TypeResolution, expand_protocol_closure_in_place,
+    ConformingProtocols, ResolveBuiltin, TypeMemberSource, TypeMembersByName,
+    expand_protocol_closure_in_place,
 };
 use kestrel_semantics::{
     CopyRequirement, CopySemantics, IsBuiltinProtocol, NominalCopySemantics, NominalStaticness,
@@ -2007,47 +2007,12 @@ impl WorldResolver<'_> {
         false
     }
 
-    /// Resolve an AstType to a type entity using ResolveTypePath. Resolution
-    /// starts from `self.body_owner` (the body being inferred). For type-definition-
-    /// scoped resolution (e.g. where clauses), use the `WhereClausesOf` query
-    /// instead of threading `self.body_owner` through to non-body contexts.
+    /// The type entity an annotation names, resolved from `self.body_owner`
+    /// (the body being inferred). For type-definition-scoped resolution (e.g.
+    /// where clauses), use the `WhereClausesOf` query instead of threading
+    /// `self.body_owner` through to non-body contexts.
     fn resolve_type_entity(&self, ast_ty: &kestrel_ast_builder::AstType) -> Option<Entity> {
-        use kestrel_ast_builder::AstType;
-        match ast_ty {
-            AstType::Named { segments, .. } => {
-                let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-                match self.ctx.query(ResolveTypePath {
-                    segments: seg_names,
-                    context: self.body_owner,
-                    root: self.root,
-                }) {
-                    TypeResolution::Found(entity) => Some(entity),
-                    TypeResolution::SelfType => self.resolve_self_entity_from(self.body_owner),
-                    _ => None,
-                }
-            },
-            _ => None,
-        }
-    }
-
-    /// Resolve `Self` to the enclosing type entity, starting from `start`.
-    fn resolve_self_entity_from(&self, start: Entity) -> Option<Entity> {
-        let mut current = Some(start);
-        while let Some(entity) = current {
-            match self.ctx.get::<NodeKind>(entity) {
-                Some(NodeKind::Extension) => {
-                    return self.ctx.query(kestrel_name_res::ExtensionTargetEntity {
-                        extension: entity,
-                        root: self.root,
-                    });
-                },
-                Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) => {
-                    return Some(entity);
-                },
-                _ => current = self.ctx.parent_of(entity),
-            }
-        }
-        None
+        kestrel_name_res::annotation_entity(self.ctx, ast_ty, self.body_owner, self.root)
     }
 
     /// Resolve a member on a type parameter by searching its protocol bounds.
@@ -2640,9 +2605,10 @@ impl WorldResolver<'_> {
                     CopyRequirement::MayBeNonCopyable => CopySemantics::NotCopyable,
                 }
             },
-            // Mirror `hir_type_copy_semantics`: protocol existentials / `some P`
-            // are Copyable; an abstract associated projection is conservatively
-            // NotCopyable (not known to be copyable).
+            // Protocol existentials / `some P` are Copyable. An abstract
+            // associated projection is conservatively NotCopyable here (not
+            // known to be copyable) — UNLIKE `ty_copy_semantics`, which makes
+            // it Copyable-by-default; see this function's doc comment.
             TyKind::Protocol { .. } => CopySemantics::Copyable,
             // `some P and not Copyable` may hide a move-only underlier.
             TyKind::Opaque { not_copyable, .. } => {

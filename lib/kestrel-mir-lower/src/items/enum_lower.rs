@@ -33,6 +33,13 @@ pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) {
             entity,
             root: ctx.root,
         });
+    def.staticness = ctx
+        .query
+        .query(kestrel_semantics::NominalStaticness {
+            entity,
+            root: ctx.root,
+        })
+        .staticness;
     def.layout_attrs = lower_layout_attrs(ctx, entity);
 
     let children: Vec<Entity> = ctx.world.children_of(entity).to_vec();

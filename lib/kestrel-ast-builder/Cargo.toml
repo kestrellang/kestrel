@@ -10,6 +10,7 @@ workspace = true
 kestrel-ast = { path = "../kestrel-ast" }
 kestrel-debug = { path = "../kestrel-debug" }
 kestrel-hecs = { path = "../kestrel-hecs" }
+kestrel-target = { path = "../kestrel-target" }
 kestrel-hir = { path = "../kestrel-hir" }
 kestrel-lexer = { path = "../kestrel-lexer" }
 kestrel-parser = { path = "../kestrel-parser" }

@@ -197,7 +197,7 @@ fn item_attributes(item: &ast::Item) -> Vec<ast::Attribute> {
 /// arguments, or written twice) never excludes: the declaration is kept so
 /// `AttrsOf` can report it.
 pub(crate) fn is_excluded_by_target(item: &ast::Item, target: Option<&TargetConfig>) -> bool {
-    let Some(target_os) = target.and_then(|t| t.os) else {
+    let Some(target_os) = target.and_then(|t| t.os()) else {
         return false; // no OS target set — don't filter
     };
     let attrs: Vec<_> = item_attributes(item)

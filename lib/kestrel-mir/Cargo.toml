@@ -8,6 +8,8 @@ workspace = true
 
 [dependencies]
 kestrel-copy-fold = { path = "../kestrel-copy-fold" }
+kestrel-structural = { path = "../kestrel-structural" }
+kestrel-target = { path = "../kestrel-target" }
 kestrel-entail = { path = "../kestrel-entail" }
 kestrel-hecs = { path = "../kestrel-hecs" }
 kestrel-span = { path = "../kestrel-span" }

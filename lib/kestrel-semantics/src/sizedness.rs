@@ -13,6 +13,7 @@
 //! only the tail field can gate: every other stored field must be Sized
 //! (E403 enforces that).
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 
 use kestrel_ast_builder::WhereConstraint;
@@ -29,17 +30,9 @@ use crate::{ExplicitlyNegatesProtocol, param_bound_contexts, resolve_type_entity
 
 // ===== Vocabulary =====
 
-/// Per-nominal classification. There is no unconditional "unsized"
-/// nominal: a struct is unsized only through its tail type argument.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Sizedness {
-    Sized,
-    /// Sized iff the type args at these positions (indices into the
-    /// nominal's type params, sorted, deduped) are Sized. Non-empty only for
-    /// a struct whose last stored field is (transitively) one of its own
-    /// `not Sized` params.
-    ConditionalOn(Vec<usize>),
-}
+// The shape and rule live in the leaf `kestrel-structural` crate, shared
+// with mono.
+pub use kestrel_structural::{SizedLayer, SizedShape, Sizedness, instance_is_sized, ty_is_sized};
 
 /// Bound state of a type param: every param requires Sized by default;
 /// `where T: not Sized` relaxes it — the param then accepts both sized and
@@ -164,28 +157,6 @@ pub fn assoc_may_be_unsized(ctx: &QueryContext<'_>, assoc: Entity, root: Entity)
             root,
         })
     })
-}
-
-// ===== The shared instance rule =====
-
-/// Layer hooks for `instance_is_sized`: the HIR walker below and the
-/// solver's TyVar layer.
-pub trait SizedLayer {
-    type Ty;
-    fn nominal_sizedness(&self, entity: Entity) -> Sizedness;
-    fn member_is_sized(&self, ty: &Self::Ty) -> bool;
-}
-
-/// THE per-instantiation sizedness rule for every layer: a Sized base wins;
-/// a conditional base ANDs the args at its tail positions. A missing arg at
-/// a gating position is unprovable ⇒ false.
-pub fn instance_is_sized<L: SizedLayer>(layer: &L, entity: Entity, args: &[L::Ty]) -> bool {
-    match layer.nominal_sizedness(entity) {
-        Sizedness::Sized => true,
-        Sizedness::ConditionalOn(positions) => positions
-            .iter()
-            .all(|&i| args.get(i).is_some_and(|arg| layer.member_is_sized(arg))),
-    }
 }
 
 // ===== Nominal classification =====
@@ -324,28 +295,24 @@ struct HirSizedWalk<'a, 'q> {
 impl SizedLayer for HirSizedWalk<'_, '_> {
     type Ty = HirTy;
 
+    fn assoc_is_sized(&self, assoc: Entity) -> bool {
+        !assoc_may_be_unsized(self.ctx, assoc, self.root)
+    }
+
     fn nominal_sizedness(&self, entity: Entity) -> Sizedness {
         query_nominal_sizedness(self.ctx, entity, self.root)
     }
 
-    fn member_is_sized(&self, ty: &HirTy) -> bool {
+    fn shape<'t>(&self, ty: &'t HirTy) -> SizedShape<'t, HirTy> {
         match ty {
-            HirTy::RawExistential { .. } => false,
-            HirTy::Struct { entity, args, .. } => instance_is_sized(self, *entity, args),
-            // A bounded alias is exactly its expansion.
-            HirTy::Alias { expanded, .. } => self.member_is_sized(expanded),
-            HirTy::Param(param, _) => {
-                self.ctx.query(TypeParamSizeRequirement {
-                    param: *param,
-                    context: self.context,
-                    root: self.root,
-                }) == SizeRequirement::RequiresSized
+            HirTy::RawExistential { .. } => SizedShape::RawExistential,
+            HirTy::Struct { entity, args, .. } => SizedShape::Struct {
+                entity: *entity,
+                args: Cow::Borrowed(args),
             },
-            HirTy::AssocProjection { assoc, .. } => {
-                !assoc_may_be_unsized(self.ctx, *assoc, self.root)
-            },
-            // Enums, tuples, functions, refs (two words even to an unsized
-            // pointee), protocols, opaques, Self, aliases and recovery leaves.
+            HirTy::Alias { expanded, .. } => SizedShape::Alias(expanded),
+            HirTy::Param(param, _) => SizedShape::Param(*param),
+            HirTy::AssocProjection { assoc, .. } => SizedShape::AssocProjection(*assoc),
             HirTy::Enum { .. }
             | HirTy::Protocol { .. }
             | HirTy::Tuple(..)
@@ -356,8 +323,16 @@ impl SizedLayer for HirSizedWalk<'_, '_> {
             | HirTy::Ref { .. }
             | HirTy::Never(_)
             | HirTy::Infer(_)
-            | HirTy::Error(_) => true,
+            | HirTy::Error(_) => SizedShape::Leaf,
         }
+    }
+
+    fn param_is_sized(&self, param: Entity) -> bool {
+        self.ctx.query(TypeParamSizeRequirement {
+            param,
+            context: self.context,
+            root: self.root,
+        }) == SizeRequirement::RequiresSized
     }
 }
 
@@ -369,7 +344,7 @@ pub fn hir_type_is_sized(
     context: Entity,
     root: Entity,
 ) -> bool {
-    HirSizedWalk { ctx, context, root }.member_is_sized(ty)
+    ty_is_sized(&HirSizedWalk { ctx, context, root }, ty)
 }
 
 // ===== By-value uses of a relaxed param =====
