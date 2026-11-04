@@ -6,7 +6,7 @@ import std.core.(Equatable, Comparable, Ordering, Hashable, Hasher, Bool, Contro
 import std.text.(String, StringBuilder, Formatter, FormatOptions, Formattable)
 import std.result.(Result)
 import std.numeric.(Int64, UInt8)
-import std.memory.(ArraySlice, Pointer, swap)
+import std.memory.(UnsafeSlice, Pointer, swap)
 import std.iter.(Iterator)
 
 /// A type-safe stand-in for nullable references — either `Some(value)` or
@@ -632,13 +632,13 @@ extend Optional[T]: Hashable where T: Hashable {
             .Some(value) => {
                 // Write 1 to indicate Some
                 let marker: Int64 = 1;
-                hasher.write(ArraySlice(pointer: Pointer(to: marker).asRaw().cast[UInt8](), count: 8));
+                hasher.write(UnsafeSlice(pointer: Pointer(to: marker).asRaw().cast[UInt8](), count: 8));
                 value.hash(into: hasher)
             },
             .None => {
                 // Write 0 to indicate None
                 let marker: Int64 = 0;
-                hasher.write(ArraySlice(pointer: Pointer(to: marker).asRaw().cast[UInt8](), count: 8))
+                hasher.write(UnsafeSlice(pointer: Pointer(to: marker).asRaw().cast[UInt8](), count: 8))
             }
         }
     }

@@ -121,8 +121,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
     var headerEnd: Int64 = -1;
 
     loop {
-        let slice = ArraySlice(pointer: chunk.asPointer(), count: 4096);
-        let n = match recvStream.read(into: slice) {
+        let n = match recvStream.read(into: chunk.mutatingSlice(..<4096)) {
             .Ok(bytes) => bytes,
             .Err(_) => throw SwoopError.connectionFailed("failed to read response")
         };
@@ -192,8 +191,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
                 readSize = remaining
             }
             var bodyChunk = Array[UInt8](repeating: 0, count: readSize);
-            let bodySlice = ArraySlice(pointer: bodyChunk.asPointer(), count: readSize);
-            let bn = match recvStream.read(into: bodySlice) {
+            let bn = match recvStream.read(into: bodyChunk.mutatingSlice(..<readSize)) {
                 .Ok(bytes) => bytes,
                 .Err(_) => break
             };
@@ -206,8 +204,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
     } else {
         loop {
             var readChunk = Array[UInt8](repeating: 0, count: 4096);
-            let readSlice = ArraySlice(pointer: readChunk.asPointer(), count: 4096);
-            let rn = match recvStream.read(into: readSlice) {
+            let rn = match recvStream.read(into: readChunk.mutatingSlice(..<4096)) {
                 .Ok(bytes) => bytes,
                 .Err(_) => break
             };
@@ -249,7 +246,7 @@ func sendAllBytes[S](mutating stream: S, buf: [UInt8]) -> () throws IoError wher
     while sent < len {
         let ptr = buf.asPointer().offset(by: sent);
         let remaining = len - sent;
-        let slice = ArraySlice(pointer: ptr, count: remaining);
+        let slice = UnsafeSlice(pointer: ptr, count: remaining);
         let n = try stream.write(from: slice);
         if n == 0 {
             throw IoError(code: 32)

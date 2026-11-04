@@ -8,7 +8,7 @@ import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 import std.text.(Char, Grapheme, decodeUtf8, String, StringSlice, Str, LineIndex)
 import std.text.unicode.(GraphemeBreakProperty, graphemeBreakProperty, shouldBreakBetween)
-import std.memory.(Pointer, ArraySlice)
+import std.memory.(Pointer, UnsafeSlice)
 import std.collections.(Array)
 import std.ffi.(memmem)
 
@@ -210,7 +210,7 @@ public struct BytesView: Iterable, Cloneable {
     /// from a sub-view cut mid-codepoint) is replaced with U+FFFD,
     /// so the result is always a well-formed `String`.
     public func toString() -> String {
-        String(fromUtf8Lossy: ArraySlice(
+        String(fromUtf8Lossy: UnsafeSlice(
             pointer: self.slice._rawPtr().offset(by: self.slice.start),
             count: self.length
         ))

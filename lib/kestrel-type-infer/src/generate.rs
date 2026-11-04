@@ -1607,9 +1607,11 @@ fn gen_pat(
             // → `Int64`, a custom `Trio.Element` → its binding, an abstract
             // `T: ArrayMatchable` → the projection `T.Element`).
             let elem_tv = ctx.fresh();
+            let rest_tv = ctx.fresh();
             if let Some(proto) = ctx.resolver.builtin(kestrel_hir::Builtin::ArrayMatchable) {
                 ctx.conforms(scrutinee_tv, proto, span.clone());
                 ctx.associated(scrutinee_tv, "Element", elem_tv, span.clone());
+                ctx.associated(scrutinee_tv, "Rest", rest_tv, span.clone());
             }
 
             // Equate each prefix/suffix element pattern against elem_tv
@@ -1619,19 +1621,11 @@ fn gen_pat(
                 gen_pat(ctx, hir, elem_pat, pat_tv, source);
             }
 
-            // Named rest binding → `ArraySlice[elem_tv]` local. This is
-            // `matchSlice`'s protocol-fixed return type (the same for every
-            // conformer), not scrutinee special-casing.
+            // Named rest binding → the conformer's `ArrayMatchable.Rest`
+            // (what its `matchSlice` returns: `ArraySlice[T]` for arrays,
+            // whatever view a custom conformer picks).
             if let Some(Some(local)) = rest {
-                if let Some(slice_ent) = ctx.resolver.builtin(kestrel_hir::Builtin::SliceStruct) {
-                    let slice_tv = ctx.named(slice_ent, vec![elem_tv]);
-                    ctx.local_types.insert(*local, slice_tv);
-                } else {
-                    // No SliceStruct builtin available — fall back to a fresh
-                    // TyVar so at least the local is resolvable.
-                    let tv = ctx.fresh();
-                    ctx.local_types.insert(*local, tv);
-                }
+                ctx.local_types.insert(*local, rest_tv);
             }
         },
 

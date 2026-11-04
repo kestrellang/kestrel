@@ -44,7 +44,7 @@ module Test
             data.append(byte1);
             data.append(byte2);
             data.append(byte3);
-            let slice = std.memory.ArraySlice[std.numeric.UInt8](pointer: data.asPointer(), count: 3);
+            let slice = std.memory.UnsafeSlice[std.numeric.UInt8](pointer: data.asPointer(), count: 3);
             let wa = std.io.write.writeAll( buf4, from: slice);
             match wa {
                 .Ok(_) => 0,

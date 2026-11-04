@@ -27,9 +27,9 @@ public struct HKDF[H] where H: Digest {
     /// If salt is empty (the default), a string of zeros equal to the hash
     /// digest size is used.
     /// The result is key material, so it's a `SymmetricKey`, not a MAC tag.
-    public static func extract(ikm: SymmetricKey, salt salt: some Slice[UInt8] = Array[UInt8]()) -> SymmetricKey {
+    public static func extract(ikm: SymmetricKey, salt salt: some Slice[UInt8] and not Static = Array[UInt8]()) -> SymmetricKey {
         var effectiveSalt: [UInt8] = [];
-        effectiveSalt.append(contentsOf: salt.asSlice());
+        effectiveSalt.append(contentsOf: salt.asUnsafeSlice());
         if effectiveSalt.count == 0 {
             effectiveSalt = Array[UInt8](repeating: 0, count: H.digestSize);
         }
@@ -47,7 +47,7 @@ public struct HKDF[H] where H: Digest {
     public static func expand(
         prk: SymmetricKey,
         length length: Int64,
-        info info: some Slice[UInt8] = Array[UInt8]()
+        info info: some Slice[UInt8] and not Static = Array[UInt8]()
     ) -> SymmetricKey throws CryptoError {
         let hashLen = H.digestSize;
         if length < 0 or length > 255 * hashLen { throw CryptoError.InvalidLength; }
@@ -59,13 +59,13 @@ public struct HKDF[H] where H: Digest {
         for i in 1..=n {
             var mac = HMAC[H](key: prk);
             mac.update(prev);
-            mac.update(info.asSlice());
+            mac.update(info.asUnsafeSlice());
             let counter: UInt8 = UInt8(from: i);
             let counterBuf: Array[UInt8] = [counter];
             mac.update(counterBuf);
             let block = mac.finalize();
             prev = block.bytes;
-            okm.append(contentsOf: prev.asSlice());
+            okm.append(contentsOf: prev.asUnsafeSlice());
         }
 
         var result: [UInt8] = [];
@@ -80,8 +80,8 @@ public struct HKDF[H] where H: Digest {
     public static func deriveKey(
         ikm: SymmetricKey,
         length length: Int64,
-        salt salt: some Slice[UInt8] = Array[UInt8](),
-        info info: some Slice[UInt8] = Array[UInt8]()
+        salt salt: some Slice[UInt8] and not Static = Array[UInt8](),
+        info info: some Slice[UInt8] and not Static = Array[UInt8]()
     ) -> SymmetricKey throws CryptoError {
         let prk = HKDF[H].extract(ikm, salt: salt);
         return HKDF[H].expand(prk, length: length, info: info);

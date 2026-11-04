@@ -21,6 +21,6 @@ public struct Token: ByteValue, RandomByteValue, Equatable, Hashable {
 
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(self.storage.asSlice());
+        hasher.write(self.storage.asUnsafeSlice());
     }
 }

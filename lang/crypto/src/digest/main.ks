@@ -17,7 +17,7 @@ public struct DigestOutput: ByteValue, Equatable, Hashable {
 
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(self.storage.asSlice());
+        hasher.write(self.storage.asUnsafeSlice());
     }
 }
 
@@ -34,7 +34,7 @@ public protocol Digest {
     init()
 
     /// Feeds data into the hash function.
-    mutating func update[S](bytes: S) where S: Slice[UInt8]
+    mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static
 
     /// Computes the final digest. The hasher state is unchanged, so
     /// you can continue calling `update` and `finalize` again to get
@@ -45,7 +45,7 @@ public protocol Digest {
 extend Digest {
     /// One-shot hash: a fresh hasher, one `update`, `finalize`. Defined
     /// once here, so it also works in generic code (`H.hash(data)`).
-    public static func hash(bytes: some Slice[UInt8]) -> DigestOutput {
+    public static func hash(bytes: some Slice[UInt8] and not Static) -> DigestOutput {
         var hasher = Self();
         hasher.update(bytes);
         hasher.finalize()

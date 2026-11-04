@@ -3,7 +3,7 @@
 
 module Test
 
-import std.memory.ArraySlice
+import std.collections.ArraySlice
 
 func sliceFirst(s: ArraySlice[lang.i64]) -> lang.i64 {
     match s {

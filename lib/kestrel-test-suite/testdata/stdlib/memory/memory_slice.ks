@@ -5,7 +5,7 @@ module Test
 
         @main
         func main() -> lang.i64 {
-            // Create slice from array's asSlice()
+            // Create a raw slice from the array (asUnsafeSlice)
             var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(10);
             arr.append(20);
@@ -13,7 +13,7 @@ module Test
             arr.append(40);
             arr.append(50);
 
-            let slice = arr.asSlice();
+            let slice = arr.asUnsafeSlice();
 
             // Test count
             if slice.count != 5 { return 1 }
@@ -23,7 +23,7 @@ module Test
 
             // Test isEmpty on empty slice
             let emptyArr = std.collections.Array[std.numeric.Int64]();
-            let emptySlice = emptyArr.asSlice();
+            let emptySlice = emptyArr.asUnsafeSlice();
             if emptySlice.isEmpty == false { return 3 }
             if emptySlice.count != 0 { return 4 }
 

@@ -149,7 +149,7 @@ func main() {
 
     // --- #1 / #5 ---
     check("generic H.hash", genericHex[SHA256](abc), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    check("hash ArraySlice input", SHA256.hash(abc.asSlice()).hexString, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    check("hash UnsafeSlice input", SHA256.hash(abc.asSlice()).hexString, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     check("hash string bytes", SHA256.hash("abc".asByteSlice()).hexString, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     let s1 = ChaCha20Poly1305.seal(msg, using: key).expect("s1");
     let s2 = ChaCha20Poly1305.seal(msg, using: key).expect("s2");

@@ -5,7 +5,7 @@ module std.text
 import std.core.(Bool, Equatable, Comparable, Ordering, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Pointer, RawPointer, ArraySlice)
+import std.memory.(Pointer, RawPointer, UnsafeSlice)
 import std.collections.(Array)
 import std.iter.(Iterable)
 import std.ffi.(memmem)
@@ -119,13 +119,13 @@ extend Str {
         if n == 0 {
             return buffer
         }
-        // ArraySlice is a non-owning view over the live string buffer;
+        // UnsafeSlice is a non-owning view over the live string buffer;
         // append(contentsOf:) copies out of it in a single pass.
-        buffer.append(contentsOf: ArraySlice(pointer: slice._rawPtr().offset(by: slice.start), count: n));
+        buffer.append(contentsOf: UnsafeSlice(pointer: slice._rawPtr().offset(by: slice.start), count: n));
         buffer
     }
 
-    /// Returns a non-owning `ArraySlice[UInt8]` view over this string's
+    /// Returns a non-owning `UnsafeSlice[UInt8]` view over this string's
     /// raw UTF-8 bytes — no copy, no allocation. The slice borrows the
     /// live string buffer, so it must not outlive the string (or any
     /// mutation of it). O(1).
@@ -139,9 +139,9 @@ extend Str {
     /// let bytes = "Hi".asByteSlice();
     /// bytes.count;  // 2
     /// ```
-    public func asByteSlice() -> ArraySlice[UInt8] {
+    public func asByteSlice() -> UnsafeSlice[UInt8] {
         let slice = self.asSlice();
-        ArraySlice(pointer: slice._rawPtr().offset(by: slice.start), count: (slice.end - slice.start))
+        UnsafeSlice(pointer: slice._rawPtr().offset(by: slice.start), count: (slice.end - slice.start))
     }
 
     // -- Iteration -----------------------------------------------------------

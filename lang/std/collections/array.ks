@@ -10,13 +10,13 @@ import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
 import std.numeric.(RandomNumberGenerator, Lcg64, SystemRandom)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RefSliceIterator, MutRefSliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
+import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RefSliceIterator, MutRefSliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
 import std.ffi.(memcpy)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
-import std.collections.(Slice)
+import std.collections.(Slice, ArraySlice)
 
-/// Forward iterator over an `Array[T]`: an `ArraySliceIterator[T]` cursor plus
+/// Forward iterator over an `Array[T]`: an `UnsafeSliceIterator[T]` cursor plus
 /// a share of the array's storage.
 ///
 /// The share keeps the buffer alive and marks it shared, so the iterator sees
@@ -32,11 +32,11 @@ public struct ArrayIterator[T]: Iterator, Cloneable {
     type Item = T
 
     private var storage: CowBox[ArrayStorage[T]]
-    private var cursor: ArraySliceIterator[T]
+    private var cursor: UnsafeSliceIterator[T]
 
     /// @name From Storage
     /// Holds `storage` for the cursor's lifetime.
-    fileprivate init(storage storage: CowBox[ArrayStorage[T]], cursor cursor: ArraySliceIterator[T]) {
+    fileprivate init(storage storage: CowBox[ArrayStorage[T]], cursor cursor: UnsafeSliceIterator[T]) {
         self.storage = storage;
         self.cursor = cursor;
     }
@@ -190,8 +190,8 @@ struct ArrayStorage[T]: Cloneable {
 /// arbitrary-position insert/remove via shifting. Storage is shared between
 /// copies until one of them mutates, at which point that copy lazily clones
 /// the buffer (see "Memory Model" below). For non-owning views over an
-/// existing buffer use `ArraySlice[T]`; for fixed-size or set-like collections
-/// see `ArraySlice[T]`, `Set`, or `Dictionary`.
+/// existing buffer use `UnsafeSlice[T]`; for fixed-size or set-like collections
+/// see `UnsafeSlice[T]`, `Set`, or `Dictionary`.
 ///
 /// # Examples
 ///
@@ -218,7 +218,7 @@ struct ArrayStorage[T]: Cloneable {
 /// same labels — `arr(0..<3)`, `arr(checked: r)`, `arr(unchecked: r)`,
 /// `arr(clamped: r)` — dispatched through the unified `SeqIndex[T]`,
 /// `SeqClampable[T]`, and `SeqWrappable[T]` protocols. `Int64` and range
-/// types share each label; the result type varies (`T?` vs `ArraySlice[T]`
+/// types share each label; the result type varies (`T?` vs `UnsafeSlice[T]`
 /// for `clamped:`).
 ///
 /// # Capacity & Reallocation
@@ -556,9 +556,9 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// The number of elements the buffer can hold without reallocating.
     public var capacity: Int64 { self.cap() }
 
-    /// Slice protocol kernel — borrows the array's buffer as an ArraySlice.
-    public func asSlice() -> ArraySlice[T] {
-        ArraySlice(pointer: self.ptr(), count: self.len())
+    /// Slice protocol kernel — borrows the array's buffer as an UnsafeSlice.
+    public func asUnsafeSlice() -> UnsafeSlice[T] {
+        UnsafeSlice(pointer: self.ptr(), count: self.len())
     }
 
     /// In-place element access (stage-1.5 place accessors): reads borrow
@@ -577,10 +577,10 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// semantics.
     ///
     /// The unlabeled subscripts (`arr(i)`, `arr(1..<3)`, `checked:`,
-    /// `unchecked:`, `clamped:`, `wrapped:`) live on `extend Slice[T]`
-    /// and keep get/set semantics; `at:` is the labeled in-place form.
+    /// `unchecked:`, `clamped:`, `wrapped:`) live in `array_slice.ks` and
+    /// keep get/set semantics; `at:` is the labeled in-place form.
     public func atProbe(index index: Int64) -> T {
-        self.asSlice()(unchecked: index)
+        self.asUnsafeSlice()(unchecked: index)
     }
 
     public subscript(at index: Int64) -> T {
@@ -603,7 +603,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         }
     }
 
-    // All other subscripts provided by extend Slice[T] in slice.ks
+    // All other subscripts: array_slice.ks
 
     /// COW write barrier — deep-copies storage if shared.
     public mutating func ensureUnique() {
@@ -710,8 +710,8 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.append(contentsOf: [3, 4]);  // [1, 2, 3, 4]
     /// arr.append(contentsOf: []);      // [1, 2, 3, 4]  — no-op
     /// ```
-    public mutating func append(contentsOf other: some Slice[T]) {
-        let sl = other.asSlice();
+    public mutating func append(contentsOf other: some Slice[T] and not Static) {
+        let sl = other.asUnsafeSlice();
         let otherLen = sl.count;
         if otherLen == 0 {
             return
@@ -1055,18 +1055,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.reverse();  // [3, 2, 1]
     /// ```
     public mutating func reverse() {
-        self.makeUnique();
-        self.storage.modify { (mutating s) in
-            var left: Int64 = 0;
-            var right: Int64 = s.len - 1;
-            while left < right {
-                let temp = s.ptr.offset(by: left).read();
-                s.ptr.offset(by: left).write(s.ptr.offset(by: right).read());
-                s.ptr.offset(by: right).write(temp);
-                left = left + 1;
-                right = right - 1
-            }
-        }
+        self.asMutableSlice().reverse()
     }
 
     // reversed(): provided by extend Slice[T] — returns a lazy ReversedView[T]
@@ -1088,42 +1077,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.rotate(by:  7);  // same as rotate(by: 2) for count == 5
     /// ```
     public mutating func rotate(by amount: Int64) {
-        let myLen = self.len();
-        if myLen <= 1 {
-            return
-        }
-        var normalized = amount % myLen;
-        if normalized < 0 {
-            normalized = normalized + myLen
-        }
-        if normalized == 0 {
-            return
-        }
-        // Three-reversal algorithm
-        self.makeUnique();
-        // Reverse first part [0, normalized)
-        self.reverseRange(from: 0, to: normalized);
-        // Reverse second part [normalized, len)
-        self.reverseRange(from: normalized, to: myLen);
-        // Reverse entire array
-        self.reverse()
-    }
-
-    /// Reverses the half-open sub-range `[start, end)` in place.
-    ///
-    /// Internal helper used by `rotate(by:)`'s three-reversal algorithm.
-    /// Does not bounds-check; callers must pass valid indices.
-    private mutating func reverseRange(from start: Int64, to end: Int64) {
-        var left = start;
-        var right = end - 1;
-        let ptr = self.ptr();
-        while left < right {
-            let temp = ptr.offset(by: left).read();
-            ptr.offset(by: left).write(ptr.offset(by: right).read());
-            ptr.offset(by: right).write(temp);
-            left = left + 1;
-            right = right - 1
-        }
+        self.asMutableSlice().rotate(by: amount)
     }
 
     /// Replaces the elements in `range` with the elements of `replacement`.
@@ -1204,23 +1158,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.shuffle(using: rng);  // deterministic for the seed
     /// ```
     public mutating func shuffle(mutating using rng: some RandomNumberGenerator) {
-        let n = self.len();
-        if n <= 1 {
-            return
-        }
-        self.makeUnique();
-        // Fisher-Yates shuffle. The generator is mutated directly (not the
-        // storage closure's copy) so the caller's stream advances; draws go
-        // through the unbiased nextUInt64(below:).
-        let ptr = self.ptr();
-        var i: Int64 = n - 1;
-        while i > 0 {
-            let j = Int64(from: rng.nextUInt64(below: UInt64(from: i) + 1));
-            let temp = ptr.offset(by: i).read();
-            ptr.offset(by: i).write(ptr.offset(by: j).read());
-            ptr.offset(by: j).write(temp);
-            i = i - 1
-        }
+        self.asMutableSlice().shuffle(using: rng)
     }
 
     /// Shuffles the array in place using a fresh default RNG.
@@ -1364,9 +1302,15 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// the iterator shares the storage, so later mutation of the array copies
     /// first and the iteration is unaffected.
     public func iter() -> ArrayIterator[T] {
+        self.iterRange(start: 0, count: self.len())
+    }
+
+    /// Iterator over elements `[start, start + count)`, sharing the storage
+    /// (the slices' `iter()`). The caller has checked the range fits.
+    internal func iterRange(start start: Int64, count count: Int64) -> ArrayIterator[T] {
         ArrayIterator(
             storage: self.storage.clone(),
-            cursor: ArraySliceIterator(ptr: self.ptr(), remaining: self.len()),
+            cursor: UnsafeSliceIterator(ptr: self.ptr().offset(by: start), remaining: count),
         )
     }
 
@@ -1432,40 +1376,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// // pivot == 2 — first two elements satisfy the predicate
     /// ```
     public mutating func partition(by predicate: (T) -> Bool) -> Int64 {
-        self.makeUnique();
-        self.storage.modify { (mutating s) in
-            var lo: Int64 = 0;
-            var hi: Int64 = s.len - 1;
-
-            while true {
-                // Find first element that doesn't satisfy predicate
-                while lo < s.len {
-                    let matches = s.ptr.offset(by: lo).with { (element) in predicate(element) };
-                    if matches == false { break };
-                    lo = lo + 1
-                }
-                // Find last element that satisfies predicate
-                while hi >= 0 {
-                    let matches = s.ptr.offset(by: hi).with { (element) in predicate(element) };
-                    if matches { break };
-                    hi = hi - 1
-                }
-
-                if lo >= hi {
-                    break
-                }
-
-                // Swap
-                let loPtr = s.ptr.offset(by: lo);
-                let hiPtr = s.ptr.offset(by: hi);
-                let temp = loPtr.take();
-                loPtr.write(hiPtr.take());
-                hiPtr.write(temp);
-                lo = lo + 1;
-                hi = hi - 1
-            }
-            lo
-        }
+        self.asMutableSlice().partition(by: predicate)
     }
 
     /// Returns two new arrays: elements matching `predicate` first, then
@@ -1635,6 +1546,8 @@ extend Array[T] where T: Equatable {
 extend Array[T]: ArrayMatchable {
     /// `ArrayMatchable` element type — what the pattern bindings extract.
     type Element = T
+    /// `..rest` binds a narrower slice of the same array.
+    type Rest = ArraySlice[T]
 
     /// Pattern-matcher hook returning the array's `count`.
     ///
@@ -1661,7 +1574,7 @@ extend Array[T]: ArrayMatchable {
     /// Used to bind `..rest` segments. The matcher guarantees the
     /// indices are in range.
     public func matchSlice(from: Int64, to: Int64) -> ArraySlice[T] {
-        ArraySlice(pointer: self.asPointer().offset(by: from), count: to - from)
+        self(from..<to)
     }
 }
 
@@ -1759,123 +1672,7 @@ extend Array[T] {
     /// arr.sort(by: { (a, b) in a > b });  // [5, 4, 3, 2, 1] descending
     /// ```
     public mutating func sort(by comparator: (T, T) -> Bool) {
-        let n = self.count;
-        if n <= 1 { return }
-        self.makeUnique();
-        var depthLimit: Int64 = 0;
-        var v = n;
-        while v > 1 { v = v / 2; depthLimit = depthLimit + 1 }
-        depthLimit = depthLimit * 2;
-        self.introsortLoop(low: 0, high: n, depthLimit: depthLimit, by: comparator)
-    }
-
-    // -- Introsort internals ------------------------------------------------
-
-    private mutating func introsortLoop(low lo: Int64, high hi: Int64, depthLimit depth: Int64, by cmp: (T, T) -> Bool) {
-        if hi - lo <= 16 {
-            self.insertionSortRange(low: lo, high: hi, by: cmp);
-            return
-        }
-        if depth == 0 {
-            self.heapsortRange(low: lo, high: hi, by: cmp);
-            return
-        }
-        let p = self.partitionRange(low: lo, high: hi, by: cmp);
-        self.introsortLoop(low: lo, high: p, depthLimit: depth - 1, by: cmp);
-        self.introsortLoop(low: p + 1, high: hi, depthLimit: depth - 1, by: cmp)
-    }
-
-    // Lomuto partition with median-of-three pivot selection.
-    private mutating func partitionRange(low lo: Int64, high hi: Int64, by cmp: (T, T) -> Bool) -> Int64 {
-        let mid = lo + (hi - lo) / 2;
-        let last = hi - 1;
-        // Sort lo, mid, last so median lands at mid
-        if cmp(self(unchecked: mid), self(unchecked: lo)) {
-            let t = self(unchecked: lo);
-            self(unchecked: lo) = self(unchecked: mid);
-            self(unchecked: mid) = t
-        }
-        if cmp(self(unchecked: last), self(unchecked: lo)) {
-            let t = self(unchecked: lo);
-            self(unchecked: lo) = self(unchecked: last);
-            self(unchecked: last) = t
-        }
-        if cmp(self(unchecked: last), self(unchecked: mid)) {
-            let t = self(unchecked: mid);
-            self(unchecked: mid) = self(unchecked: last);
-            self(unchecked: last) = t
-        }
-        // Move median to pivot position (last)
-        let t = self(unchecked: mid);
-        self(unchecked: mid) = self(unchecked: last);
-        self(unchecked: last) = t;
-        let pivot = self(unchecked: last);
-        var i = lo;
-        for j in lo..<last {
-            if cmp(self(unchecked: j), pivot) {
-                let tmp = self(unchecked: i);
-                self(unchecked: i) = self(unchecked: j);
-                self(unchecked: j) = tmp;
-                i = i + 1
-            }
-        }
-        // Place pivot at its final position
-        let tmp = self(unchecked: i);
-        self(unchecked: i) = self(unchecked: last);
-        self(unchecked: last) = tmp;
-        i
-    }
-
-    private mutating func insertionSortRange(low lo: Int64, high hi: Int64, by cmp: (T, T) -> Bool) {
-        for i in (lo + 1)..<hi {
-            let key = self(unchecked: i);
-            var j = i - 1;
-            while j >= lo and cmp(key, self(unchecked: j)) {
-                self(unchecked: j + 1) = self(unchecked: j);
-                j = j - 1
-            }
-            self(unchecked: j + 1) = key
-        }
-    }
-
-    // Max-heap sort on the subrange [lo, hi).
-    private mutating func heapsortRange(low lo: Int64, high hi: Int64, by cmp: (T, T) -> Bool) {
-        let n = hi - lo;
-        // Build max-heap
-        var i = n / 2 - 1;
-        while i >= 0 {
-            self.siftDown(lo: lo, index: i, count: n, by: cmp);
-            i = i - 1
-        }
-        // Extract max repeatedly
-        var end = n - 1;
-        while end > 0 {
-            let t = self(unchecked: lo);
-            self(unchecked: lo) = self(unchecked: lo + end);
-            self(unchecked: lo + end) = t;
-            self.siftDown(lo: lo, index: 0, count: end, by: cmp);
-            end = end - 1
-        }
-    }
-
-    private mutating func siftDown(lo lo: Int64, index start: Int64, count n: Int64, by cmp: (T, T) -> Bool) {
-        var idx = start;
-        while true {
-            var largest = idx;
-            let left = 2 * idx + 1;
-            let right = 2 * idx + 2;
-            if left < n and cmp(self(unchecked: lo + largest), self(unchecked: lo + left)) {
-                largest = left
-            }
-            if right < n and cmp(self(unchecked: lo + largest), self(unchecked: lo + right)) {
-                largest = right
-            }
-            if largest == idx { return }
-            let t = self(unchecked: lo + idx);
-            self(unchecked: lo + idx) = self(unchecked: lo + largest);
-            self(unchecked: lo + largest) = t;
-            idx = largest
-        }
+        self.asMutableSlice().sort(by: comparator)
     }
 
     // -- Public sort variants -----------------------------------------------

@@ -30,8 +30,7 @@ module Test
             buf.append(zeroByte);
             buf.append(zeroByte);
             buf.append(zeroByte);
-            let slice = std.memory.ArraySlice[std.numeric.UInt8](pointer: buf.asPointer(), count: 3);
-            let result = cursor.read(into: slice);
+            let result = cursor.read(into: buf.asMutableSlice());
             match result {
                 .Ok(n) => if n != 3 { return 2 },
                 .Err(_) => return 3
@@ -52,8 +51,7 @@ module Test
             buf2.append(zeroByte);
             buf2.append(zeroByte);
             buf2.append(zeroByte);
-            let slice2 = std.memory.ArraySlice[std.numeric.UInt8](pointer: buf2.asPointer(), count: 5);
-            let result2 = cursor.read(into: slice2);
+            let result2 = cursor.read(into: buf2.asMutableSlice());
             match result2 {
                 .Ok(n) => if n != 2 { return 8 },
                 .Err(_) => return 9
@@ -65,7 +63,7 @@ module Test
             if cursor.position != 5 { return 12 }
 
             // Read at EOF should return 0
-            let result3 = cursor.read(into: slice);
+            let result3 = cursor.read(into: buf.asMutableSlice());
             match result3 {
                 .Ok(n) => if n != 0 { return 13 },
                 .Err(_) => return 14
@@ -79,8 +77,7 @@ module Test
             var buf3 = std.collections.Array[std.numeric.UInt8]();
             buf3.append(zeroByte);
             buf3.append(zeroByte);
-            let slice3 = std.memory.ArraySlice[std.numeric.UInt8](pointer: buf3.asPointer(), count: 2);
-            let result4 = cursor.read(into: slice3);
+            let result4 = cursor.read(into: buf3.asMutableSlice());
             match result4 {
                 .Ok(n) => if n != 2 { return 16 },
                 .Err(_) => return 17

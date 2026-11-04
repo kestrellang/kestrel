@@ -6,7 +6,7 @@ import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleBy
 import std.numeric.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.collections.(Array)
-import std.memory.(ArraySlice, Pointer)
+import std.memory.(UnsafeSlice, Pointer)
 import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.text.unicode as unicode
 
@@ -459,7 +459,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// use the result for content-addressed storage.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self._value;
-        hasher.write(ArraySlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
+        hasher.write(UnsafeSlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
     }
 
     /// Returns true if `self >= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.

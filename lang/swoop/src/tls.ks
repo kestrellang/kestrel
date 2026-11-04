@@ -6,6 +6,7 @@
 module swoop.tls
 
 import std.io.error.(IoError)
+import std.collections.(MutableArraySlice)
 import std.memory.(RcBox)
 import http.wire.(stringToBytes)
 
@@ -119,12 +120,13 @@ public struct TlsStream: Readable, Writable, Cloneable {
         TlsStream(conn: self.conn.clone())
     }
 
-    public mutating func read(into buf: ArraySlice[UInt8]) -> Int64 throws IoError {
+    public mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Int64 throws IoError {
+        let raw = buf.asUnsafeMutableSlice();
         let ssl = self.conn.valuePtr().with { (c) in c.ssl };
-        let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
+        let count32 = if raw.count > 2147483647 { 2147483647 } else { Int32(from: raw.count) };
         let n = Int32(raw: libc_SSL_read(
             ssl,
-            lang.cast_ptr[_, lang.i8](buf.pointer.raw),
+            lang.cast_ptr[_, lang.i8](raw.pointer.raw),
             count32.raw
         ));
         if n < 0 {
@@ -133,7 +135,7 @@ public struct TlsStream: Readable, Writable, Cloneable {
         .Ok(Int64(from: n))
     }
 
-    public mutating func write(from buf: ArraySlice[UInt8]) -> Int64 throws IoError {
+    public mutating func write(from buf: UnsafeSlice[UInt8]) -> Int64 throws IoError {
         let ssl = self.conn.valuePtr().with { (c) in c.ssl };
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
         let n = Int32(raw: libc_SSL_write(

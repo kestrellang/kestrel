@@ -49,8 +49,8 @@ module Test
             let rNeg = buf.read(at: -1);
             if rNeg.isSome() { return 13 }
 
-            // Test asSlice
-            let sl = buf.asSlice();
+            // Test asUnsafeSlice
+            let sl = buf.asUnsafeSlice();
             if sl.count != 10 { return 14 }
             if sl(unchecked: 0) != 42 { return 15 }
             if sl(unchecked: 1) != 99 { return 16 }

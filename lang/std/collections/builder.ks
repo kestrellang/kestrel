@@ -4,7 +4,7 @@ module std.collections
 
 import std.core.(Bool, fatalError)
 import std.numeric.(Int64)
-import std.memory.(Layout, Pointer, ArraySlice, SystemAllocator, CowBox)
+import std.memory.(Layout, Pointer, UnsafeSlice, SystemAllocator, CowBox)
 import std.iter.(Iterable)
 
 /// Write-only buffer for efficient array construction. No COW, no
@@ -109,7 +109,7 @@ public struct ArrayBuilder[T] {
     }
 
     /// Appends every element of `slice`.
-    public mutating func append(contentsOf slice: ArraySlice[T]) {
+    public mutating func append(contentsOf slice: UnsafeSlice[T]) {
         let n = slice.count;
         if n == 0 { return }
         self.grow(self.len + n);

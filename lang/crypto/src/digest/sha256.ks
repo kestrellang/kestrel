@@ -30,22 +30,22 @@ public struct SHA256: Digest {
         self.blocks = BlockBuffer(function: SHA256State(words: initialState), blockLength: 64);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
-        self.blocks.update(bytes.asSlice());
+    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+        self.blocks.update(bytes.asUnsafeSlice());
     }
 
     public func finalize() -> DigestOutput {
         let words = self.blocks.finishedWithLengthPadding(.BigEndian64).words;
         var result: [UInt8] = [];
         for i in 0..<8 {
-            result.append(contentsOf: words(i).toBytesBigEndian().asSlice());
+            result.append(contentsOf: words(i).toBytesBigEndian().asUnsafeSlice());
         }
         DigestOutput(bytes: result)
     }
 
     // --- internals ---
 
-    static func compress(block: ArraySlice[UInt8], mutating state: Array[UInt32]) {
+    static func compress(block: UnsafeSlice[UInt8], mutating state: Array[UInt32]) {
         let k: [UInt32] = [
             0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
             0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -128,7 +128,7 @@ struct SHA256State: BlockFunction {
         self.words = words;
     }
 
-    mutating func compress(block: ArraySlice[UInt8]) {
+    mutating func compress(block: UnsafeSlice[UInt8]) {
         SHA256.compress(block, self.words);
     }
 }
