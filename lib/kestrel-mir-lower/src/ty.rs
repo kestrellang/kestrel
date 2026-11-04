@@ -464,6 +464,10 @@ fn try_lang_primitive(ctx: &mut LowerCtx, entity: Entity, type_args: &[TyId]) ->
             let inner = type_args.first().copied()?;
             Some(ctx.module.ty_arena.pointer(inner))
         },
+        "slice" => {
+            let elem = type_args.first().copied()?;
+            Some(ctx.module.ty_arena.slice(elem))
+        },
         // Synthetic ref-extension targets: the type layer always uses
         // `MirTy::Ref` — the entities exist only for decl/name-res.
         "&" => {

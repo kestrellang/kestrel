@@ -209,9 +209,15 @@ fn nominal_sizedness_impl(ctx: &QueryContext<'_>, entity: Entity, root: Entity) 
     if ctx.get::<NodeKind>(entity) != Some(&NodeKind::Struct) {
         return Sizedness::Sized;
     }
+    if is_lang_slice(ctx, entity) {
+        return Sizedness::Unsized;
+    }
     let Some(tail) = last_stored_field_type(ctx, entity, root) else {
         return Sizedness::Sized;
     };
+    if tail_always_unsized(ctx, &tail, root) {
+        return Sizedness::Unsized;
+    }
     let own_params: Vec<Entity> = ctx
         .get::<TypeParams>(entity)
         .map(|tp| tp.0.clone())
@@ -252,6 +258,31 @@ pub fn last_stored_field_type(
     })
 }
 
+/// `lang.slice` — the one intrinsic nominal that is never Sized.
+fn is_lang_slice(ctx: &QueryContext<'_>, entity: Entity) -> bool {
+    ctx.get::<Intrinsic>(entity).is_some()
+        && ctx
+            .get::<kestrel_ast_builder::Name>(entity)
+            .is_some_and(|n| n.0 == "slice")
+}
+
+/// Is a tail type unsized whatever the owner's args are: an always-unsized
+/// nominal, or a conditional one gated on an always-unsized arg
+/// (`Wrapper[lang.slice[T]]`).
+fn tail_always_unsized(ctx: &QueryContext<'_>, tail: &HirTy, root: Entity) -> bool {
+    let HirTy::Struct { entity, args, .. } = tail else {
+        return false;
+    };
+    match query_nominal_sizedness(ctx, *entity, root) {
+        Sizedness::Sized => false,
+        Sizedness::Unsized => true,
+        Sizedness::ConditionalOn(gating) => gating
+            .iter()
+            .filter_map(|&i| args.get(i))
+            .any(|arg| tail_always_unsized(ctx, arg, root)),
+    }
+}
+
 /// Which of `owner`'s own `not Sized` params a tail type's size depends on.
 fn tail_positions(
     ctx: &QueryContext<'_>,
@@ -273,7 +304,8 @@ fn tail_positions(
             }
         },
         HirTy::Struct { entity, args, .. } => match query_nominal_sizedness(ctx, *entity, root) {
-            Sizedness::Sized => Vec::new(),
+            // Always-unsized tails are caught before this walk.
+            Sizedness::Sized | Sizedness::Unsized => Vec::new(),
             Sizedness::ConditionalOn(gating) => gating
                 .iter()
                 .filter_map(|&i| args.get(i))

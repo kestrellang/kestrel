@@ -568,13 +568,13 @@ impl OssaBodyCtx<'_, '_> {
 
         // Computed property: call the getter
         if self.ctx.world.get::<Gettable>(field_entity).is_some() {
-            let field_ty = crate::ty::resolve_type_annotation(self.ctx, field_entity);
-            self.ctx.register_name(field_entity);
-            let type_args = self.prepend_receiver_type_args(receiver_ty, vec![]);
-            let callee = Callee::direct_with_args(field_entity, type_args, None);
             let old_receiver = call_args.remove(0);
-            let getter_result = self.emit_call_returning(callee, vec![old_receiver], field_ty);
-            let field_arg = self.prepare_call_arg(getter_result, receiver_convention);
+            let (field_arg, field_ty) = self.computed_prefix_receiver(
+                old_receiver,
+                receiver_ty,
+                field_entity,
+                receiver_convention,
+            );
             call_args.insert(0, field_arg);
             return (field_ty, call_args);
         }

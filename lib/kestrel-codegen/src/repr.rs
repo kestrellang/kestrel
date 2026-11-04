@@ -134,7 +134,7 @@ impl<M: ScalarModel> TypeCache<M> {
             MirTy::Never => TypeRepr::Zst,
 
             // Always fat (handled above); kept for exhaustiveness.
-            MirTy::RawExistential { .. } => two_words,
+            MirTy::RawExistential { .. } | MirTy::Slice(_) => two_words,
 
             MirTy::Tuple(elems) => {
                 let elems = elems.clone();

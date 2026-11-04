@@ -164,7 +164,8 @@ pub fn copy_behavior_in(
         // copyable. (Its values are borrowed (data, table) views, which are
         // never copied.) This keeps `Box[any P]` off conditional `Copyable`
         // and `Cloneable` impls gated on the payload.
-        MirTy::RawExistential { .. } => CopyBehavior::None,
+        // Unsized: only ever borrowed, never copied as a value.
+        MirTy::RawExistential { .. } | MirTy::Slice(_) => CopyBehavior::None,
 
         // The closure kind, not the environment payload's fold, decides the
         // closure value's copy class (docs/design/closures.md §"Copy and
@@ -425,6 +426,8 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
         // Ref: a borrow view (signature or stage-2b payload/field slot) —
         // never owns its pointee, never drops.
         | MirTy::RawExistential { .. }
+        // A slice is only ever borrowed: its owner drops the elements.
+        | MirTy::Slice(_)
         | MirTy::Ref { .. }
         | MirTy::Error => false,
 
@@ -540,6 +543,8 @@ impl kestrel_structural::StaticLayer for MirStructuralLayer<'_> {
             },
             MirTy::TypeParam(param) => StaticShape::Param(*param),
             MirTy::Tuple(elems) => StaticShape::Tuple(Cow::Owned(elems.clone())),
+            // A run of `T`s is Static iff `T` is.
+            MirTy::Slice(elem) => StaticShape::Tuple(Cow::Owned(vec![*elem])),
             MirTy::RawExistential { bounds, .. } => {
                 StaticShape::RawExistential(bounds.iter().map(|(p, _)| *p).collect())
             },
@@ -598,6 +603,7 @@ impl kestrel_structural::SizedLayer for MirStructuralLayer<'_> {
         use kestrel_structural::SizedShape;
         match self.arena.get(ty) {
             MirTy::RawExistential { .. } => SizedShape::RawExistential,
+            MirTy::Slice(_) => SizedShape::Slice,
             MirTy::Named { entity, type_args } if self.env.structs.contains_key(entity) => {
                 SizedShape::Struct {
                     entity: *entity,

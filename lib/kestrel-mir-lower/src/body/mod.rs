@@ -4986,6 +4986,57 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         ))
     }
 
+    /// Receiver for a subscript applied to a computed property
+    /// (`p.value(i)`, `p.mutatingValue(i) = v`): call the property's getter
+    /// on `receiver` and hand its result to the subscript. The property type
+    /// is substituted with the receiver's type args (the declared `&T` names
+    /// the owner's own params). A reference-typed property (`var value: &T`)
+    /// lends its pointee in place, so the subscript dispatches on — and
+    /// writes through to — the referent, never a temporary copy.
+    pub(crate) fn computed_prefix_receiver(
+        &mut self,
+        receiver: CallArg,
+        receiver_ty: TyId,
+        prop: Entity,
+        convention: ParamConvention,
+    ) -> (CallArg, TyId) {
+        let declared = crate::ty::resolve_type_annotation(self.ctx, prop);
+        let prop_ty = self.subst_receiver_args(receiver_ty, declared);
+        self.ctx.register_name(prop);
+        let type_args = self.prepend_receiver_type_args(receiver_ty, vec![]);
+        let callee = Callee::direct_with_args(prop, type_args, None);
+        let result = self.emit_call_returning(callee, vec![receiver], prop_ty);
+        if let MirTy::Ref { pointee, .. } = *self.ctx.module.ty_arena.get(prop_ty) {
+            let arg = CallArg {
+                value: result,
+                convention,
+            };
+            return (arg, pointee);
+        }
+        (self.prepare_call_arg(result, convention), prop_ty)
+    }
+
+    /// Substitute a member's declared type (written against its owner's type
+    /// params) with `receiver_ty`'s concrete type args.
+    pub(crate) fn subst_receiver_args(&mut self, receiver_ty: TyId, ty: TyId) -> TyId {
+        let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(receiver_ty) else {
+            return ty;
+        };
+        let (entity, type_args) = (*entity, type_args.clone());
+        let params = match self.ctx.module.structs.get(&entity) {
+            Some(s) => &s.type_params,
+            None => match self.ctx.module.enums.get(&entity) {
+                Some(e) => &e.type_params,
+                None => return ty,
+            },
+        };
+        let mut subst = kestrel_mir::SubstMap::new();
+        for (tp, &arg) in params.iter().zip(type_args.iter()) {
+            subst.type_params.insert(tp.entity, arg);
+        }
+        kestrel_mir::substitute(&mut self.ctx.module.ty_arena, ty, &subst)
+    }
+
     /// Mut-borrow receiver arg + receiver type for an accessor prelude.
     /// `FieldOf` fabricates the stored field's address from the base's var
     /// address (mirrors `try_lower_method_call_setter`'s field-addr path);

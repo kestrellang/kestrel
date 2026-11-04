@@ -205,6 +205,8 @@ fn fmt_ty(ty: TyId, arena: &TyArena, module: &dyn NameResolver) -> String {
             format!("Pointer[{}]", fmt_ty(*inner, arena, module))
         },
 
+        MirTy::Slice(elem) => format!("lang.slice[{}]", fmt_ty(*elem, arena, module)),
+
         MirTy::Ref { pointee, mutating } => {
             let prefix = if *mutating { "&mutating " } else { "&" };
             format!("{prefix}{}", fmt_ty(*pointee, arena, module))

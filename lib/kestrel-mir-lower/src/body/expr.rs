@@ -13,6 +13,7 @@
 //! - `closure` — closure capture and thunk generation
 
 use kestrel_ast_builder::{Callable, NodeKind, Settable};
+use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_mir::TyId;
 use kestrel_mir::callee::Callee;
@@ -1713,21 +1714,41 @@ impl OssaBodyCtx<'_, '_> {
             return None;
         }
 
-        // Skip computed-property subscript-set (stored fields only)
-        let prefix_entity =
-            receiver_entity.and_then(|recv| self.ctx.field_named(recv, method_name));
-        let is_computed_property =
-            prefix_entity.is_some_and(|e| self.ctx.world.get::<Callable>(e).is_some());
-        if is_computed_property {
-            return None;
-        }
-
         let mutating_ref = self.ctx.find_ref_accessor_child(resolved, true);
         let setter = if mutating_ref.is_none() {
             Some(self.write_setter(resolved, Some(receiver))?)
         } else {
             None
         };
+
+        // A reference-typed computed prefix (`p.mutatingValue(i) = v`): the
+        // getter lends the referent, which is the subscript's receiver.
+        if let Some(prop) = self.computed_subscript_prefix(target_id) {
+            let subscript_args: Vec<ValueId> =
+                args.iter().map(|a| self.lower_expr(a.value)).collect();
+            let rhs = self.lower_expr(value_id);
+            let type_args = self.resolve_type_args(target_id);
+            let recv_arg = self.prepare_call_arg_for_expr(receiver, ParamConvention::Borrow);
+            let (field_arg, field_ty) = self.computed_prefix_receiver(
+                recv_arg,
+                receiver_ty,
+                prop,
+                ParamConvention::MutBorrow,
+            );
+            let mut call_args = vec![field_arg];
+            for v in subscript_args {
+                call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+            }
+            return Some(self.emit_subscript_store(
+                target_id,
+                mutating_ref,
+                setter,
+                field_ty,
+                type_args,
+                call_args,
+                rhs,
+            ));
+        }
 
         // Resolve field type and extract through it
         let recv_entity = receiver_entity?;
@@ -1798,6 +1819,43 @@ impl OssaBodyCtx<'_, '_> {
             call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
         }
 
+        Some(self.emit_subscript_store(
+            target_id,
+            mutating_ref,
+            setter,
+            field_ty,
+            type_args,
+            call_args,
+            rhs,
+        ))
+    }
+
+    /// The computed property a field-subscript place (`p.mutatingValue(i)`)
+    /// is applied to, when its prefix is computed rather than stored.
+    fn computed_subscript_prefix(&self, target_id: HirExprId) -> Option<Entity> {
+        let prop = *self.typed.as_ref()?.field_subscripts.get(&target_id)?;
+        self.ctx
+            .world
+            .get::<Callable>(prop)
+            .is_some()
+            .then_some(prop)
+    }
+
+    /// Store `rhs` into subscript place `target_id` whose receiver arg (and
+    /// index args) are already in `call_args`: through the `mutating ref`
+    /// accessor when declared, else the setter. `field_ty` is the receiver's
+    /// type (the field or computed-ref pointee the subscript belongs to).
+    #[allow(clippy::too_many_arguments)]
+    fn emit_subscript_store(
+        &mut self,
+        target_id: HirExprId,
+        mutating_ref: Option<Entity>,
+        setter: Option<Entity>,
+        field_ty: TyId,
+        type_args: Vec<TyId>,
+        mut call_args: Vec<CallArg>,
+        rhs: ValueId,
+    ) -> ValueId {
         // Stage 1.5: `mutating ref` write provider — fabricate the element
         // place through the accessor (receiver = the field place) and store
         // through it. RHS was lowered before the place fabrication above.
@@ -1805,9 +1863,7 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.register_name(accessor);
             let pointee_ty = self.resolve_expr_type(target_id);
             let type_args = self.prepend_receiver_type_args(field_ty, type_args);
-            return Some(
-                self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs),
-            );
+            return self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs);
         }
 
         let setter = setter.expect("setter present when no mutating ref accessor");
@@ -1829,6 +1885,6 @@ impl OssaBodyCtx<'_, '_> {
             let callee = Callee::direct_with_args(setter, type_args, None);
             self.emit_call_void(callee, call_args);
         }
-        Some(self.emit_literal(Immediate::unit()))
+        self.emit_literal(Immediate::unit())
     }
 }
