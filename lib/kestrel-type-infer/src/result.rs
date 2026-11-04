@@ -79,6 +79,12 @@ pub struct TypedBody {
     /// (`let f = b.first`): MIR copies the payload out through the
     /// `@builtin(.DecayOptionalRef)` function.
     pub optional_ref_decays: HashSet<HirExprId>,
+    /// Calls whose callee returns a ref ONCE INSTANTIATED (value: mutating),
+    /// including generic returns that only become refs through their type
+    /// arguments (`-> I.Ref` at `I.Ref = &T`, `-> T` at `T = &U`). A
+    /// declared `-> &T` is covered too. MIR lowering reads this as the
+    /// call's return convention; the declared signature alone can't say.
+    pub ref_return_calls: HashMap<HirExprId, bool>,
     /// Existential conversions at check leaves: `expr` (of type `from`)
     /// becomes the existential `to` by the recorded rule. MIR lowering emits
     /// them from here and never re-derives one (existentials design §4).
@@ -190,6 +196,7 @@ impl Hash for TypedBody {
             kind_coercions,
             direct_iterators,
             optional_ref_decays,
+            ref_return_calls,
             existential_conversions,
             type_tests,
             chain_modes,
@@ -211,6 +218,7 @@ impl Hash for TypedBody {
         let mut decays: Vec<_> = optional_ref_decays.iter().map(|e| e.raw()).collect();
         decays.sort_unstable();
         decays.hash(state);
+        hash_sorted(ref_return_calls, state);
         hash_sorted(existential_conversions, state);
         hash_sorted(type_tests, state);
         hash_sorted(chain_modes, state);
@@ -490,6 +498,14 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         kind_coercions: ctx.kind_coercions.clone(),
         direct_iterators: ctx.direct_iterators.clone(),
         optional_ref_decays: ctx.optional_ref_decays.clone(),
+        ref_return_calls: ctx
+            .call_return_tvs
+            .iter()
+            .filter_map(|(&expr, &tv)| match resolve_to_concrete(ctx, tv) {
+                ResolvedTy::Ref { mutating, .. } => Some((expr, mutating)),
+                _ => None,
+            })
+            .collect(),
         existential_conversions: ctx
             .existential_conversions
             .iter()
@@ -1074,6 +1090,7 @@ mod tests {
             kind_coercions: HashMap::default(),
             direct_iterators: HashSet::default(),
             optional_ref_decays: HashSet::default(),
+            ref_return_calls: HashMap::default(),
             existential_conversions: HashMap::default(),
             type_tests: HashMap::default(),
             chain_modes: HashMap::default(),
@@ -1160,6 +1177,13 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    ..base.clone()
+                },
+            ),
+            (
+                "ref_return_calls",
+                TypedBody {
+                    ref_return_calls: [(e, false)].into_iter().collect(),
                     ..base.clone()
                 },
             ),

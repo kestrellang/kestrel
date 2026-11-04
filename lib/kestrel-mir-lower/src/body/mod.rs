@@ -3526,11 +3526,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // Emit calls
     // ================================================================
 
+    /// `ret_ref_hint`: the call's instantiated return is a ref (`Some(mutating)`)
+    /// per inference (`TypedBody.ref_return_calls`) — known only for calls
+    /// lowered from a HIR call expression (`emit_call_for_expr`).
     fn emit_call_inner(
         &mut self,
         callee: Callee,
         mut args: Vec<CallArg>,
         result_ty: Option<TyId>,
+        ret_ref_hint: Option<bool>,
     ) -> Option<ValueId> {
         // Resolve any arg / indirect-callee value that was renamed by a
         // block-boundary rebind since it was prepared (e.g. an @owned arg
@@ -3585,6 +3589,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 .map(|r| r.mutating),
             _ => None,
         };
+        // A generic return that is a ref only once instantiated (`-> I.Ref`
+        // at `I.Ref = &T`): the mono instance hands back the pointer, so the
+        // caller must register it like a ret_borrow result.
+        let ret_ref_mutating = ret_ref_mutating.or(ret_ref_hint);
         // Stage 2b: a generic `-> T` callee instantiated at `T = &U`
         // (unwrap()/or() on Optional[&U], `identity[&U]`) returns the REF
         // by value — the mono instance's ret IS `MirTy::Ref` while
@@ -3798,11 +3806,29 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         args: Vec<CallArg>,
         result_ty: TyId,
     ) -> ValueId {
-        self.emit_call_inner(callee, args, Some(result_ty)).unwrap()
+        self.emit_call_inner(callee, args, Some(result_ty), None)
+            .unwrap()
+    }
+
+    /// `emit_call_returning` for the call lowered from HIR expr `expr_id`:
+    /// takes the return convention inference recorded for it.
+    pub fn emit_call_for_expr(
+        &mut self,
+        expr_id: HirExprId,
+        callee: Callee,
+        args: Vec<CallArg>,
+        result_ty: TyId,
+    ) -> ValueId {
+        let hint = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.ref_return_calls.get(&expr_id).copied());
+        self.emit_call_inner(callee, args, Some(result_ty), hint)
+            .unwrap()
     }
 
     pub fn emit_call_void(&mut self, callee: Callee, args: Vec<CallArg>) {
-        self.emit_call_inner(callee, args, None);
+        self.emit_call_inner(callee, args, None, None);
     }
 
     // ================================================================

@@ -294,7 +294,7 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        let result = self.emit_call_returning(callee, call_args, result_ty);
+        let result = self.emit_call_for_expr(expr_id, callee, call_args, result_ty);
         self.drain_writebacks(wb_mark);
 
         // Failable-init delegation (#144): `self.init(...)` to a failable/throwing
@@ -646,7 +646,7 @@ impl OssaBodyCtx<'_, '_> {
             method_type_args,
         };
 
-        let result = self.emit_call_returning(callee, call_args, result_ty);
+        let result = self.emit_call_for_expr(expr_id, callee, call_args, result_ty);
         self.drain_writebacks(wb_mark);
         result
     }
@@ -815,7 +815,7 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        let result = self.emit_call_returning(callee, call_args, result_ty);
+        let result = self.emit_call_for_expr(expr_id, callee, call_args, result_ty);
         self.drain_writebacks(wb_mark);
         result
     }

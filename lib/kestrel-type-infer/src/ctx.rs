@@ -215,6 +215,10 @@ pub struct InferCtx<'a> {
     /// Surfaced on `TypedBody.optional_ref_decays`.
     pub(crate) optional_ref_decays: HashSet<HirExprId>,
 
+    /// Every resolved call's instantiated return var (`bind_call_result`).
+    /// Those that resolve to a ref surface as `TypedBody.ref_return_calls`.
+    pub(crate) call_return_tvs: HashMap<HirExprId, TyVar>,
+
     /// Member-access exprs that came from a desugared `ProtocolCall`
     /// (operators, for-in, try). The lazy `Indirection` peel in `solve_member`
     /// is SKIPPED for these — operators/conformances forward via explicit
@@ -484,6 +488,7 @@ impl<'a> InferCtx<'a> {
             for_loop_iter_calls: HashSet::default(),
             direct_iterators: HashSet::default(),
             optional_ref_decays: HashSet::default(),
+            call_return_tvs: HashMap::default(),
             protocol_dispatch_members: HashSet::default(),
             operator_members: HashMap::default(),
             resolutions: HashMap::default(),

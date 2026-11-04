@@ -358,6 +358,7 @@ pub(super) fn bind_call_result(
     expr: kestrel_hir::body::HirExprId,
     span: Span,
 ) {
+    ctx.call_return_tvs.insert(expr, ret_tv);
     let rr = ctx.resolve(ret_tv);
     if matches!(ctx.slot(rr), TySlot::Resolved(TyKind::Ref { .. })) {
         kestrel_debug::ktrace!(
