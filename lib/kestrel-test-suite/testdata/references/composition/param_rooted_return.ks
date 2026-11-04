@@ -15,7 +15,7 @@ func wrapRef(a: Int64) -> Optional[&Int64] {
 @main
 func main() {
     var x = 5;
-    let o = wrapRef(x);
+    let o: Optional[&Int64] = wrapRef(x); // annotated: an unannotated binding copies out
     x = 8;
     if let .Some(r) = o {
         if r != 8 {

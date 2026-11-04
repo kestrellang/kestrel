@@ -87,7 +87,7 @@ public protocol SharedBox: ExistentialBox, Cloneable, MutableIndirection {
     /// This is the marked exception to value semantics, and the operation
     /// escaping closures and (later) classes are built on. Value-semantic
     /// clients — `any` payloads, `indirect enum`s — must not use it; they
-    /// check `isUnique()` and fork instead.
+    /// check `isUnique` and fork instead.
     ///
     /// # Safety
     ///
@@ -114,5 +114,5 @@ public protocol SharedBox: ExistentialBox, Cloneable, MutableIndirection {
     /// treat `false` as "fork before mutating" rather than as proof of
     /// sharing. A box that always answers `false` degrades to fork-always —
     /// slower, still correct.
-    func isUnique() -> Bool
+    var isUnique: Bool { get }
 }

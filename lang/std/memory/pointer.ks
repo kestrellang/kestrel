@@ -110,7 +110,7 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
 /// Typed pointer to a single value of `T`.
 ///
 /// Element-typed counterpart to `RawPointer`: `offset(by:)` strides in
-/// units of `sizeof[T]`, and `pointee` reads/writes through the address.
+/// units of `sizeof[T]`, and `value` / `mutatingValue` borrow the pointee in place.
 /// `Pointer[T]` is FFI-safe when `T` is.
 ///
 /// # Examples
@@ -140,9 +140,9 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
 // size is only known at runtime. Members that move a `T` or stride by its
 // size say `where T: Sized`.
 public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Static, T: not Sized {
-    // `fileprivate`, not `private`: the conditional `pointee` accessor lives in
-    // `extend Pointer[T] where T: Copyable` (a conditional member can't sit in
-    // the struct body), and an extension can only reach file-scoped members.
+    // `fileprivate`, not `private`: the conditional members live in
+    // extensions (a conditional member can't sit in the struct body), and an
+    // extension can only reach file-scoped members.
     fileprivate var _raw: lang.ptr[T]
 
     /// The wrapped primitive pointer.
@@ -199,7 +199,7 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
 
     /// Bit-copies `T` out of the address — `T.deinit` does not run. This is
     /// a copy, so it requires `T: Copyable`; for non-Copyable pointees use
-    /// `with` (borrow) or `move` (consuming read-out).
+    /// `value` (borrow) or `take` (consuming read-out).
     public func read() -> T where T: Copyable {
         lang.ptr_read(self._raw)
     }
@@ -257,8 +257,7 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
         lang.ptr_mut_ref(self._raw)
     }
 
-    /// Writes `value` through the pointer. Same safety preconditions as
-    /// `pointee.set`.
+    /// Writes `value` through the pointer, without dropping the old pointee.
     ///
     /// # Safety
     ///
@@ -343,43 +342,6 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
         x = x.multiply(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
         hasher.write(UnsafeSlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
-    }
-}
-
-/// Live, copy-based view of the pointee. The getter bit-copies `T` out of the
-/// address and the setter copies in, so this property is only available when
-/// `T: Copyable`. For non-Copyable pointees, borrow via `with`, read-out via
-/// `move`, or write via `write`.
-///
-/// # Safety
-///
-/// The pointer must be non-null and the storage must hold a valid initialised
-/// `T`. Reading past the end of an allocation, after the pointee has been
-/// freed, or through a dangling pointer is undefined behavior.
-extend Pointer[T] where T: Copyable {
-    public var pointee: T {
-        get { lang.ptr_read(self._raw) }
-        set { lang.ptr_write(self._raw, newValue) }
-    }
-}
-
-/// Closure-scoped access to a sized pointee. In an extension because a
-/// generic method's own `where` can't constrain the outer `T`.
-extend Pointer[T] where T: Sized {
-    /// Borrows the pointee in place and passes it to `body`. The pointee
-    /// is never copied or cloned — `T.deinit` does not run. Use this
-    /// to extract fields from heap-allocated structs without triggering
-    /// resource cleanup on a temporary clone.
-    public func with[R](body: (T) -> R) -> R {
-        body(lang.ptr_read(self._raw))
-    }
-
-    /// Mutably borrows the pointee in place and passes it to `body` as a
-    /// `mutating` argument. The pointee is mutated directly on the heap —
-    /// never copied, cloned, or written back — so `T.deinit` does not run on
-    /// a temporary. This is the in-place primitive behind COW `modify`.
-    public func withMut[R](body: (mutating T) -> R) -> R {
-        body(lang.ptr_mut_borrow(self._raw))
     }
 }
 
@@ -574,8 +536,8 @@ public struct RefSliceIterator[T]: Iterator {
 
 /// Forward iterator yielding MUTABLE REFERENCES (`&mutating T`) to
 /// contiguous elements — in-place mutation without writeback
-/// (`for x in arr.mutableRefs() { x += 1 }`). Surfaced as
-/// `Array.mutableRefs()`, which runs the COW barrier before handing out
+/// (`for x in arr.mutatingRefs() { x += 1 }`). Surfaced as
+/// `Array.mutatingRefs()`, which runs the COW barrier before handing out
 /// the buffer.
 ///
 /// # Invalidation
@@ -618,8 +580,7 @@ public struct MutRefSliceIterator[T]: Iterator {
 
 // A raw `Pointer[T]` is a smart pointer: `ptr.field` reaches the pointee.
 // `pointeeRef`/`pointeeMutRef` are the existing `value`/`mutatingValue` views
-// under the protocol's names. Works for any `T` (Copyable or not), unlike the
-// by-value `pointee` accessor.
+// under the protocol's names. Works for any `T` (Copyable or not).
 extend Pointer[T]: MutableIndirection {
     type Target = T
     public func pointeeRef() -> &T { self.value }

@@ -266,6 +266,13 @@ pub enum Builtin {
     DefaultStringInterpolationAppendInterpolation,
     DefaultStringInterpolationBuild,
     FormatOptions,
+
+    // ===== References =====
+    /// `@builtin(.DecayOptionalRef) func decayOptionalRef[T](_: Optional[&T])
+    /// -> Optional[T]`: copies the payload out when an `Optional[&T]` is
+    /// bound (`let f = b.first`), so the binding owns a value and stops
+    /// borrowing the place.
+    DecayOptionalRef,
     FormattableProtocol,
     FormattableFormatIntoMethod,
 
@@ -529,6 +536,7 @@ impl Builtin {
                 "DefaultStringInterpolationAppendInterpolation"
             },
             Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
+            Self::DecayOptionalRef => "DecayOptionalRef",
             Self::FormatOptions => "FormatOptions",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
@@ -775,6 +783,7 @@ impl Builtin {
                 Some(Self::DefaultStringInterpolationAppendInterpolation)
             },
             "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
+            "DecayOptionalRef" => Some(Self::DecayOptionalRef),
             "FormatOptions" => Some(Self::FormatOptions),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
@@ -1018,7 +1027,8 @@ impl Builtin {
             Self::DefaultStringInterpolationInit
             | Self::DefaultStringInterpolationAppendLiteral
             | Self::DefaultStringInterpolationAppendInterpolation
-            | Self::DefaultStringInterpolationBuild => BuiltinKind::Function,
+            | Self::DefaultStringInterpolationBuild
+            | Self::DecayOptionalRef => BuiltinKind::Function,
             Self::FormattableProtocol => BuiltinKind::protocol(),
             Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
             Self::EquatableProtocol

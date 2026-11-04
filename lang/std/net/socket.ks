@@ -154,7 +154,7 @@ public struct TcpStream: Readable, Writable, Cloneable {
     /// returns `-1`.
     public mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Result[Int64, IoError] {
         let raw = buf.asUnsafeMutableSlice();
-        let n = libc.recv(self.conn.getValue(), raw.pointer, raw.count, 0);
+        let n = libc.recv(self.conn.value, raw.pointer, raw.count, 0);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -172,7 +172,7 @@ public struct TcpStream: Readable, Writable, Cloneable {
     /// Returns `Err(IoError)` from the captured `errno` if `send`
     /// returns `-1`.
     public mutating func write(from buf: UnsafeSlice[UInt8]) -> Result[Int64, IoError] {
-        let n = libc.send(self.conn.getValue(), buf.pointer, buf.count, 0);
+        let n = libc.send(self.conn.value, buf.pointer, buf.count, 0);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -193,7 +193,7 @@ public struct TcpStream: Readable, Writable, Cloneable {
     /// not expose (`fcntl`, `setsockopt`, …). Do not close it
     /// yourself — the deinit still will.
     public func rawFd() -> Int32 {
-        self.conn.getValue()
+        self.conn.value
     }
 
     /// Releases ownership of the fd and returns it.
@@ -203,18 +203,16 @@ public struct TcpStream: Readable, Writable, Cloneable {
     /// closing the returned fd. Use this when handing the fd to another
     /// owner (e.g. an event loop, a child process, or a TLS stream).
     public mutating func detachFd() -> Int32 {
-        self.conn.modify { (mutating fd) in
-            let old = fd;
-            fd = -1;
-            old
-        }
+        let old = self.conn.value;
+        self.conn.mutatingValue = -1;
+        old
     }
 
     /// Closes the owned fd once, when the last shared handle drops.
     /// The `-1` sentinel set by `detachFd` makes the close a no-op.
     deinit {
-        if self.conn.isUnique() {
-            let fd = self.conn.getValue();
+        if self.conn.isUnique {
+            let fd = self.conn.value;
             if fd >= 0 {
                  libc.close(fd);
             }

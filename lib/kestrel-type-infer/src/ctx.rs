@@ -211,6 +211,10 @@ pub struct InferCtx<'a> {
     /// Surfaced on `TypedBody.direct_iterators`.
     pub(crate) direct_iterators: HashSet<HirExprId>,
 
+    /// Bound initializers whose `Optional[&T]` decayed to `Optional[T]`.
+    /// Surfaced on `TypedBody.optional_ref_decays`.
+    pub(crate) optional_ref_decays: HashSet<HirExprId>,
+
     /// Member-access exprs that came from a desugared `ProtocolCall`
     /// (operators, for-in, try). The lazy `Indirection` peel in `solve_member`
     /// is SKIPPED for these — operators/conformances forward via explicit
@@ -479,6 +483,7 @@ impl<'a> InferCtx<'a> {
             poison_protocol_call_recv_on_failure: HashSet::default(),
             for_loop_iter_calls: HashSet::default(),
             direct_iterators: HashSet::default(),
+            optional_ref_decays: HashSet::default(),
             protocol_dispatch_members: HashSet::default(),
             operator_members: HashMap::default(),
             resolutions: HashMap::default(),

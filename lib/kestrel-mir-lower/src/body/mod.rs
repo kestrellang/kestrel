@@ -4822,6 +4822,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// writeback half. Without it a nested store mutated a temporary copy
     /// and was lost, or skipped an observed field's observers.
     pub(crate) fn writeback_place_addr(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        // A `mutating ref` accessor lends the place itself: write through it.
+        // Without this a nested store (`w.value.x = 5`, `w.value.x += 1`)
+        // fell back to the READ provider and wrote through its shared `&T`,
+        // skipping the write accessor's work (a copy-on-write fork).
+        if let Some(addr) = self.mutating_ref_place_addr(expr_id) {
+            return Some(addr);
+        }
         if let Some((receiver, index_args, member, _)) = self.accessor_member_prelude(expr_id)
             && self
                 .write_setter(member, Some(receiver.root_expr()))
@@ -4851,6 +4858,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let base_ty = self.resolve_expr_type(base);
         let base_addr = self.write_place_addr(base)?;
         Some(self.emit_field_addr(base_addr, base_ty, idx))
+    }
+
+    /// The address of an accessor-backed member (`w.value`, `x(i)`) whose
+    /// `mutating ref` accessor lends it: the accessor's `&mutating` result,
+    /// as a pointer. `None` for a member without one.
+    fn mutating_ref_place_addr(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        let (_, _, member, _) = self.accessor_member_prelude(expr_id)?;
+        self.ctx.find_ref_accessor_child(member, true)?;
+        let arg = self.try_lower_accessor_place_mut(expr_id)?;
+        let pointee = self.resolve_expr_type(expr_id);
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
+        Some(self.emit_op1(Op::PtrTo(pointee), arg.value, ptr_ty))
     }
 
     /// Resolve an accessor-backed member expression (`x(i)`, `x.first`,

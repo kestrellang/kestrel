@@ -25,7 +25,7 @@ func captureAndObserve(counter: Pointer[Int64]) -> Int64 {
     let p = Pointer(to: r);
     // The capture borrowed `r` without consuming it: reading the field
     // through the pointer sees the live, not-yet-deinit'd resource.
-    let observed = p.with { it.value() };
+    let observed = p.value.value();
     if observed != 10 { return 1; }
     // `r` is still usable directly after the capture (not moved).
     if r.value() != 10 { return 2; }

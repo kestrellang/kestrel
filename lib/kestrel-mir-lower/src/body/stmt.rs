@@ -5,12 +5,49 @@
 //! - `Expr` — lower expression for side effects (result unused)
 //! - `Deinit` — explicit deinit: emit DestroyValue for the local's current value
 
-use kestrel_hir::body::{HirStmt, HirStmtId};
+use kestrel_hir::body::{HirExprId, HirStmt, HirStmtId};
+use kestrel_mir::callee::Callee;
+use kestrel_mir::{MirTy, ParamConvention, TyId, ValueId};
 use kestrel_span::Span;
 
 use super::OssaBodyCtx;
 
 impl OssaBodyCtx<'_, '_> {
+    /// Did inference decay this bound `Optional[&T]` initializer to
+    /// `Optional[T]` (`let f = b.first`)?
+    fn decays_optional_ref(&self, init: HirExprId) -> bool {
+        self.typed
+            .as_ref()
+            .is_some_and(|t| t.optional_ref_decays.contains(&init))
+    }
+
+    /// Copy an `Optional[&T]` out into the binding's `Optional[T]`
+    /// (`result_ty`) through the `@builtin(.DecayOptionalRef)` function, so
+    /// the binding owns a value and the place's borrow ends here.
+    fn emit_optional_ref_decay(&mut self, value: ValueId, result_ty: TyId) -> ValueId {
+        let decay = self
+            .ctx
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::DecayOptionalRef,
+                root: self.ctx.root,
+            })
+            .expect("ICE: Optional[&T] decay without `@builtin(.DecayOptionalRef)`");
+        self.ctx.register_name(decay);
+        let MirTy::Named { type_args, .. } = self.ctx.module.ty_arena.get(result_ty) else {
+            unreachable!("decayed binding must be Optional[T]");
+        };
+        let payload = type_args[0];
+        // A non-Copyable payload can't be copied out of the place (E503).
+        if self.is_non_copyable(payload) {
+            self.emit_move_out_of_borrow_backstop(payload);
+            return value;
+        }
+        let arg = self.prepare_call_arg(value, ParamConvention::Consuming);
+        let callee = Callee::direct_with_args(decay, vec![payload], None);
+        self.emit_call_returning(callee, vec![arg], result_ty)
+    }
+
     pub fn lower_stmt(&mut self, stmt_id: HirStmtId) {
         let stmt = self.hir.stmts[stmt_id].clone();
         let span = stmt_span(&self.hir.stmts[stmt_id]);
@@ -49,6 +86,9 @@ impl OssaBodyCtx<'_, '_> {
                         let owned = self.emit_copy_value(init_val);
                         self.end_ref_if_single_use(init_val);
                         owned
+                    } else if self.decays_optional_ref(*init_expr) {
+                        let ty = self.resolve_local_type(*local);
+                        self.emit_optional_ref_decay(init_val, ty)
                     } else {
                         init_val
                     };

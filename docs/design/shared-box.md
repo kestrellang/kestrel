@@ -72,7 +72,7 @@ public protocol SharedBox: Cloneable, MutableIndirection {
     /// copy-on-write forking. Implementations without cheap uniqueness
     /// information (a tracing GC) may conservatively return `false`;
     /// callers must treat `false` as "fork before mutating".
-    func isUnique() -> Bool
+    var isUnique: Bool { get }
 }
 ```
 
@@ -86,7 +86,7 @@ Most of the contract is inherited rather than invented:
 | create | `init(consuming:)` | protocol requirement |
 | shared mutation | `sharedMutRef()` | protocol requirement, see below |
 | identity | `isIdentical(to:)` | protocol requirement |
-| uniqueness | `isUnique()` | protocol requirement, may be conservative |
+| uniqueness | `isUnique` | protocol requirement, may be conservative |
 
 `sharedMutRef` is the one genuinely new operation, and it is the honest name
 for what escaping closures and classes do: mutate through a shared handle

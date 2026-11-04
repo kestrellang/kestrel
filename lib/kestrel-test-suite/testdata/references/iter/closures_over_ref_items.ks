@@ -3,7 +3,7 @@
 // backends: cranelift,llvm
 
 // A closure can take a reference: iterator adapters over `refs()` /
-// `mutableRefs()` pass each `&T` / `&mutating T` item straight to the
+// `mutatingRefs()` pass each `&T` / `&mutating T` item straight to the
 // closure, with no copy. Only a function type that RETURNS a ref is
 // rejected (E491, see escape/ref_function_value_rejected.ks).
 module Test
@@ -33,7 +33,7 @@ func main() -> lang.i64 {
     if seen != 6 { return 4; }
 
     // A closure over mutable refs writes the elements in place.
-    xs.mutableRefs().forEach({ (r) in r.n += 1; });
+    xs.mutatingRefs().forEach({ (r) in r.n += 1; });
     if xs(0).n != 2 { return 5; }
     if xs(2).n != 4 { return 6; }
     0

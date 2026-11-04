@@ -200,11 +200,9 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     private var storage: CowBox[StringStorage]
 
     // Helper accessors for storage fields
-    private func ptr() -> Pointer[UInt8] {
-        self.storage.valuePtr().with { (storage) in storage.ptr }
-    }
-    private func len() -> Int64 { self.storage.valuePtr().with { (s) in s.len } }
-    private func cap() -> Int64 { self.storage.valuePtr().with { (s) in s.cap } }
+    private func ptr() -> Pointer[UInt8] { self.storage.value.ptr }
+    private func len() -> Int64 { self.storage.value.len }
+    private func cap() -> Int64 { self.storage.value.cap }
 
     // ========================================================================
     // CONSTRUCTORS
@@ -494,9 +492,14 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
 
         let newLayout = Layout.array[UInt8](newCap);
         let newPtr = _textAlloc(newLayout);
-        let oldStorage = self.storage.write();
-        _memcpyBytes(dst: newPtr, src: oldStorage.ptr, n: oldStorage.len);
-        self.storage.setValue(StringStorage(ptr: newPtr, len: oldStorage.len, cap: newCap))
+        // Writing through `value` forks shared storage first.
+        let s = &mutating self.storage.value;
+        _memcpyBytes(dst: newPtr, src: s.ptr, n: s.len);
+        if s.cap > 0 {
+            _textDealloc(s.ptr, Layout.array[UInt8](s.cap))
+        }
+        s.ptr = newPtr;
+        s.cap = newCap
     }
 
     // ========================================================================
@@ -524,10 +527,9 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         let myLen = self.len();
         self.grow(myLen + otherLen);
         let srcPtr = slice._rawPtr().offset(by: slice.start);
-        self.storage.modify { (mutating s) in
-            _memcpyBytes(dst: s.ptr.offset(by: s.len), src: srcPtr, n: otherLen);
-            s.len = s.len + otherLen
-        }
+        let s = &mutating self.storage.value;
+        _memcpyBytes(dst: s.ptr.offset(by: s.len), src: srcPtr, n: otherLen);
+        s.len = s.len + otherLen
     }
 
     /// Appends a single code point, encoding it as UTF-8.
@@ -546,12 +548,11 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     public mutating func append(char c: Char) {
         let utf8Len = c.utf8Length();
         self.grow(self.len() + utf8Len);
-        self.storage.modify { (mutating s) in
-            // Encode to buffer
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](s.ptr.asRaw().raw);
-            let written = encodeUtf8(c, rawPtr, at: s.len);
-            s.len = s.len + written
-        }
+        let s = &mutating self.storage.value;
+        // Encode to buffer
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](s.ptr.asRaw().raw);
+        let written = encodeUtf8(c, rawPtr, at: s.len);
+        s.len = s.len + written
     }
 
     /// Appends a raw byte. Internal — caller ensures UTF-8 validity.
@@ -561,10 +562,9 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// inside the stdlib (e.g. an encoder that already produced bytes).
     internal mutating func appendByte(byte: UInt8) {
         self.grow(self.len() + 1);
-        self.storage.modify { (mutating s) in
-            s.ptr.offset(by: s.len).write(byte);
-            s.len = s.len + 1
-        }
+        let s = &mutating self.storage.value;
+        s.ptr.offset(by: s.len).write(byte);
+        s.len = s.len + 1
     }
 
     /// Appends `n` bytes from `ptr` via `memcpy`. Internal — caller
@@ -579,10 +579,9 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
             return
         }
         self.grow(self.len() + n);
-        self.storage.modify { (mutating s) in
-            _memcpyBytes(dst: s.ptr.offset(by: s.len), src: ptr, n: n);
-            s.len = s.len + n
-        }
+        let s = &mutating self.storage.value;
+        _memcpyBytes(dst: s.ptr.offset(by: s.len), src: ptr, n: n);
+        s.len = s.len + n
     }
 
     /// Internal substring by byte range. Returns empty for invalid ranges.
@@ -604,7 +603,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Capacity is unchanged, so this is the right primitive for
     /// reusing a buffer in a hot loop.
     public mutating func clear() {
-        self.storage.modify { (mutating s) in s.len = 0 }
+        self.storage.value.len = 0
     }
 
     // ========================================================================
@@ -681,15 +680,14 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// ```
     public mutating func lowercaseAscii() {
         let myLen = self.len();
-        self.storage.modify { (mutating s) in
-            for i in 0..<myLen {
-                let byte = s.ptr.offset(by: i).read();
-                let v: lang.i32 = lang.cast_i8_i32(byte.raw);
-                // A-Z: 65-90 -> a-z: 97-122
-                let isUppercase = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
-                if Bool(boolLiteral: isUppercase) {
-                    s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_add(v, 32))))
-                }
+        let s = &mutating self.storage.value;
+        for i in 0..<myLen {
+            let byte = s.ptr.offset(by: i).read();
+            let v: lang.i32 = lang.cast_i8_i32(byte.raw);
+            // A-Z: 65-90 -> a-z: 97-122
+            let isUppercase = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
+            if Bool(boolLiteral: isUppercase) {
+                s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_add(v, 32))))
             }
         }
     }
@@ -697,15 +695,14 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Uppercases ASCII letters in place; non-ASCII bytes are left untouched.
     public mutating func uppercaseAscii() {
         let myLen = self.len();
-        self.storage.modify { (mutating s) in
-            for i in 0..<myLen {
-                let byte = s.ptr.offset(by: i).read();
-                let v: lang.i32 = lang.cast_i8_i32(byte.raw);
-                // a-z: 97-122 -> A-Z: 65-90
-                let isLowercase = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
-                if Bool(boolLiteral: isLowercase) {
-                    s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_sub(v, 32))))
-                }
+        let s = &mutating self.storage.value;
+        for i in 0..<myLen {
+            let byte = s.ptr.offset(by: i).read();
+            let v: lang.i32 = lang.cast_i8_i32(byte.raw);
+            // a-z: 97-122 -> A-Z: 65-90
+            let isLowercase = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
+            if Bool(boolLiteral: isLowercase) {
+                s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_sub(v, 32))))
             }
         }
     }
@@ -756,7 +753,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// When `self` is uniquely owned (refcount 1), appends in place —
     /// no allocation. Otherwise builds a fresh string with both halves.
     public consuming func add(consuming other: String) -> String {
-        if self.storage.isUnique() {
+        if self.storage.isUnique {
             var result = self;
             result.append(other);
             result

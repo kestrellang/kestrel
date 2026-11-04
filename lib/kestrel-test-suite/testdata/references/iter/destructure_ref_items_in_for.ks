@@ -3,7 +3,7 @@
 // stdlib: true
 
 // A `for` pattern can destructure a reference item (`refs()` /
-// `mutableRefs()`) the way a `match` on a ref binding does: the pattern
+// `mutatingRefs()`) the way a `match` on a ref binding does: the pattern
 // matches the pointee, and a `&mutating` binder writes the element in
 // place. Nested patterns look through a ref-typed
 // payload (the loop's `.Some(item)`).
@@ -19,7 +19,7 @@ func main() -> lang.i64 {
     if sum != 10 { return 1; }
 
     var cells = [(1, 0), (2, 0)];
-    for (&mutating x, _) in cells.mutableRefs() {
+    for (&mutating x, _) in cells.mutatingRefs() {
         x += 10;
     }
     if cells(0).0 != 11 { return 2; }

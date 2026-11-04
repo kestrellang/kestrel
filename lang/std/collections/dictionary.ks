@@ -54,6 +54,14 @@ enum Bucket[K, V] {
 // HELPER FUNCTIONS
 // ============================================================================
 
+/// Is `bucket` a never-used slot (the end of a probe chain)?
+func bucketIsEmpty[K, V](bucket: Bucket[K, V]) -> Bool {
+    match bucket {
+        .Empty => true,
+        _ => false
+    }
+}
+
 /// Returns the smallest power of two `>= n`, clamped up to a minimum of 8.
 ///
 /// Used to pick the next hash-table capacity. A power of two is required
@@ -353,11 +361,11 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     private var storage: CowBox[DictionaryStorage[K, V, H]]
 
     /// Returns the bucket-array pointer from storage. Internal helper.
-    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.valuePtr().with { (s) in s.buckets } }
+    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.value.buckets }
     /// Returns the live-entry count from storage. Internal helper.
-    private func len() -> Int64 { self.storage.valuePtr().with { (s) in s.len } }
+    private func len() -> Int64 { self.storage.value.len }
     /// Returns the total bucket capacity from storage. Internal helper.
-    private func cap() -> Int64 { self.storage.valuePtr().with { (s) in s.cap } }
+    private func cap() -> Int64 { self.storage.value.cap }
 
     /// COW write barrier — ensures the storage is uniquely owned.
     private mutating func makeUnique() {
@@ -838,125 +846,49 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// reclaim space wasted by previous removes. Triggers COW.
     /// Panics on allocation failure.
     private mutating func resize() {
-        self.makeUnique();
-        let s = self.storage.read();
-        let newCap: Int64 = if s.cap == 0 {
-            8
-        } else {
-            s.cap * 2
-        };
-
-        let oldBuckets = s.buckets;
-        let oldCap = s.cap;
-
-        // Allocate new table
-        let layout = Layout.array[Bucket[K, V]](newCap);
-        var allocator = SystemAllocator();
-        let result = allocator.allocate(layout);
-        if let .Some(rawPtr) = result {
-            let newBuckets = rawPtr.cast[Bucket[K, V]]();
-
-            // Initialize new buckets as empty
-            for i in 0..<newCap {
-                newBuckets.offset(by: i).write(.Empty);
-            }
-
-            // Copy occupied buckets
-            var newLen: Int64 = 0;
-            for i in 0..<oldCap {
-                let bucket = oldBuckets.offset(by: i).read();
-                match bucket {
-                    .Occupied(key, value, hashValue) => {
-                        // Find empty slot in new table using hashing and linear probing
-                        let newCapU: UInt64 = UInt64(from: newCap);
-                        let mod: UInt64 = hashValue.modulo(newCapU);
-                        var slotIndex: Int64 = Int64(from: mod);
-                        var foundSlot: Bool = false;
-                        while not foundSlot {
-                            let slotBucket = newBuckets.offset(by: slotIndex).read();
-                            match slotBucket {
-                                .Empty => {
-                                    newBuckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-                                    newLen = newLen + 1;
-                                    foundSlot = true
-                                },
-                                _ => slotIndex = (slotIndex + 1) % newCap
-                            }
-                        }
-                    },
-                    _ => {}
-                }
-            }
-
-            self.storage.setValue(DictionaryStorage(
-                buckets: newBuckets,
-                len: newLen,
-                cap: newCap
-            ))
-        } else {
-            fatalError("Dictionary resize failed")
-        }
+        let oldCap = self.cap();
+        self.resizeToCapacity(if oldCap == 0 { 8 } else { oldCap * 2 })
     }
 
     /// Rebuilds the bucket array at the exact `newCap` capacity.
     ///
-    /// Used by `reserveCapacity` and `shrinkToFit`. The caller must
-    /// ensure `newCap` is large enough to hold the current `count`
+    /// Used by `resize`, `reserveCapacity` and `shrinkToFit`. The caller
+    /// must ensure `newCap` is large enough to hold the current `count`
     /// without exceeding the load factor; this routine itself does
     /// not check. Triggers COW. Panics on allocation failure.
     private mutating func resizeToCapacity(newCap: Int64) {
-        self.makeUnique();
-        let s = self.storage.read();
-        let oldBuckets = s.buckets;
-        let oldCap = s.cap;
-
-        // Allocate new table
+        // Writing through `value` forks shared storage first.
+        let s = &mutating self.storage.value;
         let layout = Layout.array[Bucket[K, V]](newCap);
         var allocator = SystemAllocator();
         let result = allocator.allocate(layout);
+        var newBuckets = Pointer[Bucket[K, V]].nullPointer();
         if let .Some(rawPtr) = result {
-            let newBuckets = rawPtr.cast[Bucket[K, V]]();
-
-            // Initialize new buckets as empty
-            for i in 0..<newCap {
-                newBuckets.offset(by: i).write(.Empty);
-            }
-
-            // Copy occupied buckets
-            var newLen: Int64 = 0;
-            for i in 0..<oldCap {
-                let bucket = oldBuckets.offset(by: i).read();
-                match bucket {
-                    .Occupied(key, value, hashValue) => {
-                        // Find empty slot in new table using hashing and linear probing
-                        let newCapU: UInt64 = UInt64(from: newCap);
-                        let mod: UInt64 = hashValue.modulo(newCapU);
-                        var slotIndex: Int64 = Int64(from: mod);
-                        var foundSlot: Bool = false;
-                        while not foundSlot {
-                            let slotBucket = newBuckets.offset(by: slotIndex).read();
-                            match slotBucket {
-                                .Empty => {
-                                    newBuckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-                                    newLen = newLen + 1;
-                                    foundSlot = true
-                                },
-                                _ => slotIndex = (slotIndex + 1) % newCap
-                            }
-                        }
-                    },
-                    _ => {}
-                }
-            }
-
-            self.storage.setValue(DictionaryStorage(
-                buckets: newBuckets,
-                len: newLen,
-                cap: newCap
-            ))
+            newBuckets = rawPtr.cast[Bucket[K, V]]()
         } else {
             fatalError("Dictionary resize failed")
         }
+        for i in 0..<newCap {
+            newBuckets.offset(by: i).write(.Empty);
+        }
+
+        // Move every live entry into the new table (linear probing). The
+        // old buckets are left moved-out, so freeing them drops nothing.
+        let newCapU: UInt64 = UInt64(from: newCap);
+        for i in 0..<s.cap {
+            if let .Occupied(key, value, hashValue) = s.buckets.offset(by: i).take() {
+                var slotIndex: Int64 = Int64(from: hashValue.modulo(newCapU));
+                while not bucketIsEmpty(newBuckets.offset(by: slotIndex).value) {
+                    slotIndex = (slotIndex + 1) % newCap
+                }
+                newBuckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue))
+            }
+        }
+        if s.cap > 0 {
+            allocator.deallocate(s.buckets.asRaw(), Layout.array[Bucket[K, V]](s.cap))
+        }
+        s.buckets = newBuckets;
+        s.cap = newCap
     }
 
     // ========================================================================
@@ -1021,10 +953,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         // Find empty slot
         let maybeSlot = self.findEmptySlot(hashValue);
         if let .Some(slotIndex) = maybeSlot {
-            self.storage.modify { (mutating s) in
-                s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-                s.len = s.len + 1
-            }
+            let s = &mutating self.storage.value;
+            s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
+            s.len = s.len + 1
         } else {
             fatalError("Dictionary insert failed - no empty slot")
         }
@@ -1050,21 +981,16 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
-            let removedValue = self.storage.modify { (mutating s) in
-                // Moved out (not `read()`): the tombstone write drops nothing.
-                let bucket = s.buckets.offset(by: index).take();
-                let rv: V? = match bucket {
-                    .Occupied(_, v, _) => .Some(v),
-                    _ => .None
-                };
-
-                // Mark as deleted (tombstone)
-                s.buckets.offset(by: index).write(.Deleted);
-                s.len = s.len - 1;
-                rv
-            };
-
-            return removedValue
+            let s = &mutating self.storage.value;
+            // Moved out (not `read()`): the tombstone write drops nothing.
+            let bucket = s.buckets.offset(by: index).take();
+            // Mark as deleted (tombstone)
+            s.buckets.offset(by: index).write(.Deleted);
+            s.len = s.len - 1;
+            return match bucket {
+                .Occupied(_, v, _) => .Some(v),
+                _ => .None
+            }
         }
 
         .None
@@ -1090,21 +1016,16 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
-            let removedEntry = self.storage.modify { (mutating s) in
-                // Moved out (not `read()`): the tombstone write drops nothing.
-                let bucket = s.buckets.offset(by: index).take();
-                let rv: (K, V)? = match bucket {
-                    .Occupied(k, v, _) => .Some((k, v)),
-                    _ => .None
-                };
-
-                // Mark as deleted (tombstone)
-                s.buckets.offset(by: index).write(.Deleted);
-                s.len = s.len - 1;
-                rv
-            };
-
-            return removedEntry
+            let s = &mutating self.storage.value;
+            // Moved out (not `read()`): the tombstone write drops nothing.
+            let bucket = s.buckets.offset(by: index).take();
+            // Mark as deleted (tombstone)
+            s.buckets.offset(by: index).write(.Deleted);
+            s.len = s.len - 1;
+            return match bucket {
+                .Occupied(k, v, _) => .Some((k, v)),
+                _ => .None
+            }
         }
 
         .None
@@ -1124,13 +1045,12 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// dict.capacity;   // unchanged
     /// ```
     public mutating func clear() {
-        self.makeUnique();
-        self.storage.modify { (mutating s) in
-            for i in 0..<s.cap {
-                s.buckets.offset(by: i).write(.Empty);
-            }
-            s.len = 0
+        let s = &mutating self.storage.value;
+        // `assign` drops the entry it replaces; `write` leaked them.
+        for i in 0..<s.cap {
+            s.buckets.offset(by: i).assign(.Empty);
         }
+        s.len = 0
     }
 
     /// Applies `transform` to the existing value for `key` and writes

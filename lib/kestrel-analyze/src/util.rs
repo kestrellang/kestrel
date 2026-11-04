@@ -50,6 +50,13 @@ pub fn is_mut_borrow_param(cx: &BodyContext<'_>, local: LocalId) -> bool {
 /// var to the pointee type before the member resolves), and the resolved
 /// callee's `CallableRefReturn` (entity-keyed ground truth).
 pub fn ref_place(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<bool> {
+    // A member with a `mutating ref` accessor (`xs(at: i)`, `box.value`) is a
+    // place like a stored field, not a reference value: its writability
+    // follows its base. Its read type is the `ref` accessor's `&T`, which
+    // would otherwise make `xs(at: 0).x = 1` look like a write through `&T`.
+    if member_has_mutating_ref(cx, expr_id) {
+        return None;
+    }
     if let Some(ResolvedTy::Ref { mutating, .. }) = cx.typed.expr_types.get(&expr_id) {
         return Some(*mutating);
     }
@@ -167,6 +174,23 @@ pub fn failable_member(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<kestr
     }
     let member = cx.typed.resolutions.get(&expr_id).copied()?;
     kestrel_ast_builder::is_effectful_place(cx.query, member).then_some(member)
+}
+
+/// Does the member `expr_id` resolves to (a subscript or computed property)
+/// have a `mutating ref` accessor.
+pub fn member_has_mutating_ref(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    if !matches!(
+        cx.hir.exprs[expr_id],
+        HirExpr::Field { .. } | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+    ) {
+        return false;
+    }
+    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
+        return false;
+    };
+    cx.query
+        .query(kestrel_hir_lower::PlaceAccessors { entity: member })
+        .is_some_and(|info| info.mutating_ref_accessor.is_some())
 }
 
 /// Does the member `expr_id` resolves to (a subscript or computed property)

@@ -21,7 +21,7 @@ struct Box {
 @main
 func main() {
     var b = Box(v: 5);
-    let o = b.pick();
+    let o: Optional[&Int64] = b.pick(); // annotated: an unannotated binding copies out
     b.v = 8;
     if let .Some(rv) = o {
         if rv != 8 {

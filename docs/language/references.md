@@ -169,16 +169,17 @@ Mutability is exact: `&mutating T` does not inherit conformances declared for `&
 ## Standard Library Surface
 
 - **`Array.refs()`** — iterator of shared `&T` over the elements, in place, no copies. Writing through an item is rejected (E208).
-- **`Array.mutableRefs()`** — mutating iterator of `&mutating T`; runs the copy-on-write barrier once up front, then yields in-place slots:
+- **`Array.mutatingRefs()`** — mutating iterator of `&mutating T`; runs the copy-on-write barrier once up front, then yields in-place slots:
 
   ```kestrel
   var xs = [1, 2, 3];
-  for x in xs.mutableRefs() {
+  for x in xs.mutatingRefs() {
       x += 10;
   }
   // xs is now [11, 12, 13]
   ```
 - **`Array(at: i)`** — the labeled `at:` subscript lends elements via `ref`/`mutating ref` accessors.
+- **Box `.value`** — every box lends its payload as a place. On `CowBox` and `OwnedBox` (value semantics) `.value` has `ref` and `mutating ref` accessors: `&c.value` borrows, `c.value.len += 1` writes in place, and a shared `CowBox` forks first. On `RcBox` (shared) `.value` is a read-only `&T`, and writes go through `mutatingValue`, which every handle sees and which works on a `let` handle.
 - **`Pointer.value` / `Pointer.mutatingValue`** — the low-level bridge from raw pointers to references. Pointer-derived references are *your* contract: the compiler does not verify them.
 
 ## The Escape Rule (E494) — No Lifetimes

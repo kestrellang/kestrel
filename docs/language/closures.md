@@ -150,12 +150,12 @@ var total: Int64 = 0;
 
 ## Closures Over References
 
-A closure can take a reference. Adapters over `refs()` and `mutableRefs()`
+A closure can take a reference. Adapters over `refs()` and `mutatingRefs()`
 hand each `&T` / `&mutating T` item straight to the closure, with no copy:
 
 ```kestrel
 let total = people.refs().fold(from: 0, by: { (acc, p) in acc + p.age });
-people.mutableRefs().forEach { (p) in p.age += 1; };
+people.mutatingRefs().forEach { (p) in p.age += 1; };
 ```
 
 The parameter's reference type is inferred from the iterator; an explicit

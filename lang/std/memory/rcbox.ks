@@ -38,7 +38,8 @@ struct RcBoxStorage[T]: not Copyable where T: not Copyable, T: not Sized, T: not
 /// ```
 /// let a = RcBox(value: [1, 2, 3]);
 /// let b = a.clone();          // shares storage; refCount == 2
-/// if b.isUnique() { ... } else { let c = b.deepClone(); /* ... */ }
+/// b.mutatingValue.append(4);  // every handle sees it
+/// &a.value;                   // read-only borrow: [1, 2, 3, 4]
 /// ```
 ///
 /// # Representation
@@ -54,15 +55,15 @@ struct RcBoxStorage[T]: not Copyable where T: not Copyable, T: not Sized, T: not
 ///
 /// # Guarantees
 ///
-/// - `isUnique()` returning `true` means in-place mutation is safe; this is
+/// - `isUnique` being `true` means in-place mutation is safe; this is
 ///   how COW types decide whether to copy.
 /// - The refcount is currently **not** atomic, so `RcBox` is not safe to
 ///   share across threads.
 /// - The payload may be non-`Copyable` (`where T: not Copyable` is a
 ///   relaxation, the same shape `Pointer[T]` uses): implicit boxing needs it,
 ///   because a boxed closure environment owns its captures. The two
-///   operations that copy the payload back out — `getValue()` and
-///   `deepClone()` — are therefore only available when `T: Copyable`.
+///   `deepClone()`, which copies the payload out, is therefore only
+///   available when `T: Copyable`.
 ///
 /// `T: not Sized`: an `RcBox` can hold a raw existential — `any P` is
 /// `RcBox[<raw any P>]` by default. Members that move a `T` say
@@ -72,7 +73,7 @@ struct RcBoxStorage[T]: not Copyable where T: not Copyable, T: not Sized, T: not
 @builtin(.SharedBox)
 public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not Static {
     // `fileprivate` (not `private`) so the same-file extensions can reach it:
-    // the conditional `getValue`/`deepClone` (a conditional member can't sit in
+    // the conditional `deepClone` (a conditional member can't sit in
     // the struct body) and `extend RcBox: SharedBox`, which compares storage
     // addresses for `isIdentical(to:)`.
     fileprivate var ptr: Pointer[RcBoxStorage[T]]
@@ -96,7 +97,7 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
         }
     }
 
-    // Used by clone() and forkStorage(): adopts an existing storage block
+    // Used by clone() and fork(): adopts an existing storage block
     // (already refcount-bumped, or fresh with count 1) without allocating.
     fileprivate init(inner inner: Pointer[RcBoxStorage[T]]) {
         self.ptr = inner;
@@ -106,10 +107,28 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
     /// is valid as long as the RcBox (and its storage) is alive. Use
     /// this to read individual fields without creating a full `T` clone
     /// whose deinit would free owned resources prematurely.
-    public func valuePtr() -> Pointer[T] {
+    internal func valuePtr() -> Pointer[T] {
         // The payload's table rides on `self.ptr` (existentials): an
         // unsized `T` is reached by (address, table).
         self.ptr.asRaw().offset(by: self.payloadOffset()).cast[T]().withMetadata(of: self.ptr)
+    }
+
+    /// The payload, read-only. Writes go through `mutatingValue`, because
+    /// every handle onto this storage sees them.
+    public var value: &T {
+        self.valuePtr().value
+    }
+
+    /// The payload for writing, through a shared handle: no fork, and every
+    /// clone observes the write. Works on a `let` handle.
+    ///
+    /// # Safety
+    ///
+    /// Sound only while Kestrel is single-threaded.
+    //
+    // Must stay a direct pointer-peel chain: see `sharedMutRef`.
+    public var mutatingValue: &mutating T {
+        self.valuePtr().mutatingValue
     }
 
     // Byte offset of `value` inside the storage block `[refCount: Int64,
@@ -121,31 +140,13 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
         Int64(intLiteral: lang.alignof_val(self.ptr.raw))
     }
 
-    /// Overwrites the wrapped value in place. Safe only when this is the
-    /// unique owner (`isUnique() == true`); otherwise other clones see the
-    /// new value, defeating COW. The COW types check `isUnique` before
-    /// calling this and `deepClone` otherwise.
-    /// Takes `value` by consuming — the caller's copy is dead after this.
-    public func setValue(consuming value: T) where T: Sized {
-        // Drop the heap occupant before overwriting. Callers always pass a
-        // freshly cloned/constructed `value` (read()/getValue() clone; grow()
-        // builds a new storage), so the slot's prior value owns a DIFFERENT
-        // buffer that `write` (a non-dropping raw store) would otherwise orphan
-        // → memory leak on every COW mutation. No caller passes a `value`
-        // aliasing the occupant, so dropping first cannot use-after-free.
-        self.valuePtr().dropInPlace();
-        self.valuePtr().write(value);
-    }
-
-    /// Returns `true` when no other clone is sharing storage. The litmus
-    /// test for "safe to mutate in place" in COW collections.
-    public func isUnique() -> Bool {
-        self.refCount() == 1
-    }
+    /// `true` when no other clone is sharing storage. The litmus test for
+    /// "safe to mutate in place" in COW collections.
+    public var isUnique: Bool { self.refCount == 1 }
 
     /// Current strong reference count. Mostly useful for tests and
     /// diagnostics; production COW logic should branch on `isUnique`.
-    public func refCount() -> Int64 {
+    public var refCount: Int64 {
         // The refcount is the block's first field; read it directly, so
         // this works whatever (and however sized) the payload is.
         self.ptr.asRaw().cast[Int64]().read()
@@ -186,36 +187,15 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
     }
 }
 
-// In-place mutation through a closure that takes the payload `mutating`:
-// the closure's parameter is a `T` by value, so it needs a sized payload.
-extend RcBox[T] where T: Sized {
-    /// Mutates the wrapped value in place, passing it to `body` as a
-    /// `mutating` argument. No clone or write-back — `body` mutates the
-    /// heap value directly. Safe only when this is the unique owner
-    /// (`isUnique() == true`); COW types check that first (see `CowBox.modify`).
-    public func modify[R](body: (mutating T) -> R) -> R {
-        self.valuePtr().withMut(body)
-    }
-}
-
-// The two operations that copy the payload OUT of storage. They need
-// `T: Copyable` and therefore cannot sit in the struct body, which is relaxed
-// to `T: not Copyable`. Every COW client (`CowBox[T] where T: Cloneable`,
-// String/Array/Dictionary/Set) satisfies the bound, so this is invisible to
-// them; only a box over a non-Copyable payload loses these two methods.
+// Copies the payload out of storage, so it needs `T: Copyable` and cannot
+// sit in the struct body, which is relaxed to `T: not Copyable`.
 extend RcBox[T] where T: Copyable {
-    /// Reads the wrapped value out of storage. Returns a bitwise copy read
-    /// straight from the payload slot, so no temporary `RcBoxStorage` is
-    /// created or dropped and `T.deinit` does not run.
-    public func getValue() -> T {
-        self.valuePtr().pointee
-    }
-
     /// Allocates fresh storage with a copy of the value. Used by COW
-    /// types when `isUnique()` returns `false` — splits off a private
+    /// types when `isUnique` is `false` — splits off a private
     /// copy so the caller can mutate without affecting other clones.
     public func deepClone() -> RcBox[T] {
-        RcBox(self.valuePtr().pointee)
+        let copy: T = self.valuePtr().value;
+        RcBox(copy)
     }
 }
 
@@ -224,7 +204,7 @@ extend RcBox[T] where T: Copyable {
 // block is measured from this one and the payload clones through its
 // function table (`lang.clone_val_into`).
 extend RcBox[T] where T: Cloneable {
-    public func forkStorage() -> RcBox[T] {
+    public func fork() -> RcBox[T] {
         let layout = Layout.ofValue(at: self.ptr);
         var allocator = SystemAllocator();
         let result: RawPointer? = allocator.allocate(layout);
@@ -240,7 +220,7 @@ extend RcBox[T] where T: Cloneable {
 
 // Transparent member access: `rc.field` reaches the boxed value via the
 // heap pointee. `pointeeRef`/`pointeeMutRef` are `&T`/`&mutating T` views into
-// the shared storage — NOT through `getValue()` (which would copy out). The
+// the shared storage, never a copy. The
 // wrapper still wins name clashes (`rc.clone()` is RcBox.clone, the peel is
 // lazy).
 extend RcBox[T]: MutableIndirection {
@@ -250,7 +230,7 @@ extend RcBox[T]: MutableIndirection {
 }
 
 // The shared-ownership contract (docs/design/shared-box.md). Most of it is
-// already here: `init(consuming value: T)`, `clone()`, `isUnique()` and
+// already here: `init(consuming value: T)`, `clone()`, `isUnique` and
 // `deinit` on the struct, `Target`/`pointeeRef()` on the `MutableIndirection`
 // extension above — `Target` is inherited through that conformance and must
 // NOT be redeclared here. Only the two genuinely new operations live below.

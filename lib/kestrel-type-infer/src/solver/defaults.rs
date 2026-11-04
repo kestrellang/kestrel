@@ -87,7 +87,22 @@ pub(crate) fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
 pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option<TyVar>) -> bool {
     let only = only.map(|t| ctx.resolve(t));
     let mut decays: Vec<(TyVar, TyVar)> = Vec::new();
+    // Bound `Optional[&T]` initializers: (target, Optional entity, T, expr).
+    let mut optional_decays = Vec::new();
     for c in &ctx.constraints {
+        if let Constraint::Coerce { from, to, expr, .. } = c
+            && ctx.binding_init_exprs.contains(expr)
+            && let Some((optional, pointee)) = equality::optional_ref_pointee(ctx, *from)
+            // Not filtered by `only`: the stalled receiver is often the
+            // payload (`o?.x`, `.Some(r) => r.x`), not the binding. Every
+            // pending one belongs to an earlier, finished statement — a
+            // binding's Coerce is emitted after its initializer generates —
+            // so no annotation can still be coming for it.
+            && matches!(ctx.slot(ctx.resolve(*to)), TySlot::Unresolved { literal: None })
+        {
+            optional_decays.push((*to, optional, pointee, *expr));
+            continue;
+        }
         let (from, to) = match c {
             Constraint::Coerce { from, to, .. } => (from, to),
             // Arm results / tuple-literal elements wait on the same race.
@@ -109,6 +124,19 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
         }
     }
     let mut progress = false;
+    for (to, optional, pointee, expr) in optional_decays {
+        if !matches!(
+            ctx.slot(ctx.resolve(to)),
+            TySlot::Unresolved { literal: None }
+        ) {
+            continue;
+        }
+        let decayed = ctx.named(optional, vec![pointee]);
+        if unify::unify(ctx, to, decayed).is_ok() {
+            ctx.optional_ref_decays.insert(expr);
+            progress = true;
+        }
+    }
     for (to, pointee) in decays {
         // Re-check: an earlier decay in this batch may have pinned it.
         if matches!(

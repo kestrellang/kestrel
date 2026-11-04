@@ -75,6 +75,10 @@ pub struct TypedBody {
     /// the iterable itself is CONSUMED as the loop's iterator. Decided once
     /// by inference; the move checker and MIR lowering both read it.
     pub direct_iterators: HashSet<HirExprId>,
+    /// Bound initializers of type `Optional[&T]` that decay to `Optional[T]`
+    /// (`let f = b.first`): MIR copies the payload out through the
+    /// `@builtin(.DecayOptionalRef)` function.
+    pub optional_ref_decays: HashSet<HirExprId>,
     /// Existential conversions at check leaves: `expr` (of type `from`)
     /// becomes the existential `to` by the recorded rule. MIR lowering emits
     /// them from here and never re-derives one (existentials design §4).
@@ -185,6 +189,7 @@ impl Hash for TypedBody {
             indirection_peels,
             kind_coercions,
             direct_iterators,
+            optional_ref_decays,
             existential_conversions,
             type_tests,
             chain_modes,
@@ -203,6 +208,9 @@ impl Hash for TypedBody {
         let mut direct: Vec<_> = direct_iterators.iter().map(|e| e.raw()).collect();
         direct.sort_unstable();
         direct.hash(state);
+        let mut decays: Vec<_> = optional_ref_decays.iter().map(|e| e.raw()).collect();
+        decays.sort_unstable();
+        decays.hash(state);
         hash_sorted(existential_conversions, state);
         hash_sorted(type_tests, state);
         hash_sorted(chain_modes, state);
@@ -481,6 +489,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
             .collect(),
         kind_coercions: ctx.kind_coercions.clone(),
         direct_iterators: ctx.direct_iterators.clone(),
+        optional_ref_decays: ctx.optional_ref_decays.clone(),
         existential_conversions: ctx
             .existential_conversions
             .iter()
@@ -1064,6 +1073,7 @@ mod tests {
             indirection_peels: HashMap::default(),
             kind_coercions: HashMap::default(),
             direct_iterators: HashSet::default(),
+            optional_ref_decays: HashSet::default(),
             existential_conversions: HashMap::default(),
             type_tests: HashMap::default(),
             chain_modes: HashMap::default(),

@@ -397,6 +397,30 @@ pub(super) fn solve_coerce(
             },
         }
     }
+    // 1b. A bound `Optional[&T]` (`let f = b.first`) decays to `Optional[T]`
+    //     like a bound `&T` does: the binding owns a copy. Only binding
+    //     initializers decay (MIR copies them out, `optional_ref_decays`); an
+    //     unresolved target waits for an annotation, else the end-of-body
+    //     default decays it (`apply_ref_decay_defaults`).
+    if ctx.binding_init_exprs.contains(&expr)
+        && let Some((optional, pointee)) = optional_ref_pointee(ctx, fr)
+    {
+        if matches!(ctx.slot(tr), TySlot::Unresolved { literal: None }) {
+            return SolveResult::Deferred(Constraint::Coerce {
+                from,
+                to,
+                expr,
+                span,
+                reason: Reason::Unspecified,
+            });
+        }
+        if optional_ref_pointee(ctx, tr).is_none() {
+            ctx.optional_ref_decays.insert(expr);
+            let decayed = ctx.named(optional, vec![pointee]);
+            return solve_coerce(ctx, decayed, to, expr, span);
+        }
+    }
+
     // 2. `from` is a ref, `to` is not — copy-out DECAY (binding decay,
     //    consuming args, assignment RHS, return-of-T): the value read is of
     //    the POINTEE type; continue the whole coercion (incl. FromValue
@@ -826,4 +850,29 @@ pub(super) fn reconcile_closure_conventions(
         .zip(&actual)
         .any(|(e, a)| *e != MutBorrow && *a == MutBorrow);
     mismatch.then(|| InferError::ConventionMismatch { span: span.clone() })
+}
+
+/// Shared `Optional[&T]` → the `Optional` entity and `T`. `None` for any other
+/// type (an `Optional[&mutating T]`, or an `Optional` whose payload is not yet
+/// known).
+pub(crate) fn optional_ref_pointee(ctx: &InferCtx<'_>, tv: TyVar) -> Option<(Entity, TyVar)> {
+    let optional = ctx.resolver.builtin(Builtin::OptionalEnum)?;
+    let (TySlot::Resolved(TyKind::Enum { entity, args })
+    | TySlot::Resolved(TyKind::Struct { entity, args })) = ctx.slot(ctx.resolve(tv))
+    else {
+        return None;
+    };
+    if *entity != optional || args.len() != 1 {
+        return None;
+    }
+    // Only a shared payload decays: an `Optional[&mutating T]` local is how
+    // callers write through a lookup (`let m = c.pick(); if let .Some(w) = m`).
+    let TySlot::Resolved(TyKind::Ref {
+        pointee,
+        mutating: false,
+    }) = ctx.slot(ctx.resolve(args[0]))
+    else {
+        return None;
+    };
+    Some((optional, *pointee))
 }

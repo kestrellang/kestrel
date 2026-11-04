@@ -288,12 +288,12 @@ public struct MutableArraySlice[T] {
         var hi: Int64 = raw.count - 1;
         while true {
             while lo < raw.count {
-                let matches = p.offset(by: lo).with { (element) in predicate(element) };
+                let matches = predicate(p.offset(by: lo).value);
                 if matches == false { break };
                 lo = lo + 1
             }
             while hi >= 0 {
-                let matches = p.offset(by: hi).with { (element) in predicate(element) };
+                let matches = predicate(p.offset(by: hi).value);
                 if matches { break };
                 hi = hi - 1
             }
@@ -362,8 +362,9 @@ extend MutableArraySlice[T] where T: Comparable {
 fileprivate func swapRaw[T](s: UnsafeSlice[T], i: Int64, j: Int64) {
     let a = s.pointer.offset(by: i);
     let b = s.pointer.offset(by: j);
-    let t = a.read();
-    a.write(b.read());
+    // Move, not `read()`: `write` drops nothing, so a copy leaked.
+    let t = a.take();
+    a.write(b.take());
     b.write(t)
 }
 
@@ -615,11 +616,11 @@ public struct ArrayRefsIterator[T]: Iterator {
 }
 
 /// Iterator over `&mutating T` references to an array's elements, for
-/// in-place updates (`for x in xs.mutableRefs() { x += 1 }`). Returned by
-/// `Array.mutableRefs()`. Each write goes through the array's own
+/// in-place updates (`for x in xs.mutatingRefs() { x += 1 }`). Returned by
+/// `Array.mutatingRefs()`. Each write goes through the array's own
 /// element accessor, so it runs the copy-on-write check: a copy of the
 /// array taken during the loop keeps its old contents.
-public struct ArrayMutableRefsIterator[T]: Iterator {
+public struct ArrayMutatingRefsIterator[T]: Iterator {
     type Item = &mutating T
 
     fileprivate let base: &mutating Array[T]
@@ -709,14 +710,14 @@ extend Array[T] {
     ///
     /// ```
     /// var xs = [1, 2, 3];
-    /// for x in xs.mutableRefs() {
+    /// for x in xs.mutatingRefs() {
     ///     x += 1;
     /// }
     /// // xs == [2, 3, 4]
     /// ```
-    public mutating func mutableRefs() -> ArrayMutableRefsIterator[T] {
+    public mutating func mutatingRefs() -> ArrayMutatingRefsIterator[T] {
         let b = &mutating self;
-        ArrayMutableRefsIterator(base: b, index: 0, end: self.count)
+        ArrayMutatingRefsIterator(base: b, index: 0, end: self.count)
     }
 
     public mutating func asMutableSlice() -> MutableArraySlice[T] {

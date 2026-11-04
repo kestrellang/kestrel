@@ -10,7 +10,9 @@
 //!
 //! Checks declaration signatures: stored fields, computed fields, function /
 //! initializer / subscript parameters and return types, and enum payloads.
-//! Uses inside bodies are covered by the implicit `T: Sized` bound on every
+//! A field or subscript whose accessors are all `ref` / `mutating ref` /
+//! `modifying ref` only lends `&T`, so its declared type is behind a
+//! reference and exempt. Uses inside bodies are covered by the implicit `T: Sized` bound on every
 //! generic they reach and by member availability.
 //!
 //! ## Diagnostics
@@ -30,7 +32,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{FieldClass, Intrinsic, NodeKind};
+use kestrel_ast_builder::{DeclaredAccessors, FieldClass, Intrinsic, NodeKind};
 use kestrel_hecs::Entity;
 use kestrel_hir::{Builtin, HirTy};
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
@@ -120,6 +122,9 @@ pub(crate) fn signature_types(cx: &DeclContext<'_>) -> Vec<(HirTy, bool)> {
     let entity = cx.entity;
     match q.get::<NodeKind>(entity) {
         Some(NodeKind::Field) => {
+            if lends_only(cx) {
+                return vec![];
+            }
             let Some(ty) = q.query(LowerTypeAnnotation {
                 entity,
                 root: cx.root,
@@ -147,7 +152,7 @@ pub(crate) fn signature_types(cx: &DeclContext<'_>) -> Vec<(HirTy, bool)> {
                 .flatten()
                 .map(|t| (t, false))
                 .collect();
-            if q.get::<NodeKind>(entity) != Some(&NodeKind::EnumCase) {
+            if q.get::<NodeKind>(entity) != Some(&NodeKind::EnumCase) && !lends_only(cx) {
                 out.push((
                     q.query(LowerCallableReturnType {
                         entity,
@@ -160,4 +165,14 @@ pub(crate) fn signature_types(cx: &DeclContext<'_>) -> Vec<(HirTy, bool)> {
         },
         None => vec![],
     }
+}
+
+/// The member only lends places (`ref` accessors, no `get`/`set`): its type
+/// is reached through `&T`, never by value.
+fn lends_only(cx: &DeclContext<'_>) -> bool {
+    let Some(acc) = cx.query.get::<DeclaredAccessors>(cx.entity) else {
+        return false;
+    };
+    let lends = acc.ref_ || acc.modifying_ref || acc.mutating_ref;
+    lends && !acc.get && !acc.modifying_get && !acc.set
 }
