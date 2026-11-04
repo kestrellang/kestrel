@@ -34,32 +34,28 @@ import std.ffi.(memmem)
 ///
 /// # Representation
 ///
-/// A `(ptr, length, index)` triple: a raw pointer to the buffer plus
+/// A `(source, length, index)` triple: the borrowed `StringSlice` plus
 /// the cursor and total-length pair the iterator advances through.
 ///
 /// # Memory Model
 ///
-/// Value type. The pointer aliases string storage; do not retain the
-/// iterator across mutations of the source `String`.
+/// Borrows the source `String` and reads its current buffer on every
+/// `next()`, so it can't outlive the string and never reads freed memory.
 public struct BytesIterator: Iterator {
     /// The element type yielded by `next()` — always `UInt8`.
     type Item = UInt8
 
-    private var ptr: lang.ptr[lang.i8]
+    private var source: StringSlice
+    // Re-read on every access: the string may have changed since.
+    private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
     private var length: Int64
     private var index: Int64
 
-    /// @name From Pointer
-    /// Constructs a bytes iterator from a raw pointer, total byte count, and starting offset.
-    ///
-    /// Prefer `String.bytes.iter()` over calling this directly.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must point to at least `length` valid bytes; `index` must
-    /// be in `0..=length`.
-    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64, index index: Int64) {
-        self.ptr = ptr;
+    /// @name From Slice
+    /// Iterates the first `length` bytes of `source`, from `index`. Use
+    /// `String.bytes.iter()`; `length` must not exceed the slice.
+    init(source source: StringSlice, length length: Int64, index index: Int64) {
+        self.source = source;
         self.length = length;
         self.index = index;
     }
@@ -100,12 +96,12 @@ public struct BytesIterator: Iterator {
 ///
 /// # Representation
 ///
-/// A `(ptr, length)` pair pointing at the source string's UTF-8 buffer.
+/// A `(slice, length)` pair: the borrowed `StringSlice` and its byte count.
 ///
 /// # Memory Model
 ///
-/// Borrows the source string's storage; the view is invalidated by any
-/// mutation that reallocates that buffer. Copy out to a new `String`
+/// Borrows the source `String` and reads its current buffer on every
+/// access, so it can't outlive the string. Copy out to a new `String`
 /// (e.g. via `substring`) if you need an independent value.
 public struct BytesView: Iterable, Cloneable {
     /// The element type yielded by iteration — always `UInt8`.
@@ -114,7 +110,8 @@ public struct BytesView: Iterable, Cloneable {
     type TargetIterator = BytesIterator
 
     fileprivate var slice: StringSlice
-    fileprivate var ptr: lang.ptr[lang.i8]
+    // Re-read on every access: the string may have changed since.
+    fileprivate var ptr: lang.ptr[lang.i8] { self.slice._bytes() }
     fileprivate var length: Int64
 
     /// @name From Slice
@@ -122,7 +119,6 @@ public struct BytesView: Iterable, Cloneable {
     /// The view retains shared ownership of the underlying bytes.
     public init(slice slice: StringSlice) {
         self.slice = slice;
-        self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
         self.length = (slice.end - slice.start);
     }
 
@@ -192,7 +188,7 @@ public struct BytesView: Iterable, Cloneable {
     /// Required by `Iterable`. Each call produces a fresh iterator —
     /// the view is reusable.
     public func iter() -> BytesIterator {
-        BytesIterator(ptr: self.ptr, length: self.length, index: 0)
+        BytesIterator(source: self.slice, length: self.length, index: 0)
     }
 
     /// Internal: read a single byte at `index` without bounds check.
@@ -253,32 +249,29 @@ public struct BytesView: Iterable, Cloneable {
 ///
 /// # Representation
 ///
-/// A `(ptr, length, byteIndex)` triple. `byteIndex` walks the buffer
+/// A `(source, length, byteIndex)` triple. `byteIndex` walks the buffer
 /// in variable-width steps according to the UTF-8 encoding.
 ///
 /// # Memory Model
 ///
-/// Value type that aliases the source string's buffer. Do not retain
-/// across mutations of the source `String`.
+/// Borrows the source `String` and reads its current buffer on every
+/// `next()`, so it can't outlive the string and never reads freed memory.
 public struct CharsIterator: Iterator {
     /// The element type yielded by `next()` — always `Char`.
     type Item = Char
 
-    private var ptr: lang.ptr[lang.i8]
+    private var source: StringSlice
+    // Re-read on every access: the string may have changed since.
+    private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
     private var length: Int64
     private var byteIndex: Int64
 
-    /// @name From Pointer
-    /// Constructs a chars iterator from a raw pointer, byte length, and starting byte offset.
-    ///
-    /// Prefer `String.chars.iter()` over calling this directly.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must point to `length` valid UTF-8 bytes; `byteIndex` must
-    /// be `0` or land on a UTF-8 boundary.
-    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64, byteIndex byteIndex: Int64) {
-        self.ptr = ptr;
+    /// @name From Slice
+    /// Iterates the first `length` bytes of `source` as code points, from
+    /// `byteIndex` (0 or a UTF-8 boundary). Use `String.chars.iter()`;
+    /// `length` must not exceed the slice.
+    init(source source: StringSlice, length length: Int64, byteIndex byteIndex: Int64) {
+        self.source = source;
         self.length = length;
         self.byteIndex = byteIndex;
     }
@@ -340,7 +333,8 @@ public struct CharsView: Iterable, Cloneable {
     type TargetIterator = CharsIterator
 
     fileprivate var slice: StringSlice
-    fileprivate var ptr: lang.ptr[lang.i8]
+    // Re-read on every access: the string may have changed since.
+    fileprivate var ptr: lang.ptr[lang.i8] { self.slice._bytes() }
     fileprivate var length: Int64
 
     /// @name From Slice
@@ -348,7 +342,6 @@ public struct CharsView: Iterable, Cloneable {
     /// The view retains shared ownership of the underlying bytes.
     public init(slice slice: StringSlice) {
         self.slice = slice;
-        self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
         self.length = (slice.end - slice.start);
     }
 
@@ -358,7 +351,7 @@ public struct CharsView: Iterable, Cloneable {
     ///
     /// Each call returns a fresh iterator; the view itself is reusable.
     public func iter() -> CharsIterator {
-        CharsIterator(ptr: self.ptr, length: self.length, byteIndex: 0)
+        CharsIterator(source: self.slice, length: self.length, byteIndex: 0)
     }
 
     /// `true` when the view spans zero bytes (no code points).
@@ -614,7 +607,8 @@ public struct GraphemesView: Iterable, Cloneable {
     type TargetIterator = GraphemesIterator
 
     fileprivate var slice: StringSlice
-    fileprivate var ptr: lang.ptr[lang.i8]
+    // Re-read on every access: the string may have changed since.
+    fileprivate var ptr: lang.ptr[lang.i8] { self.slice._bytes() }
     fileprivate var length: Int64
 
     /// @name From Slice
@@ -622,7 +616,6 @@ public struct GraphemesView: Iterable, Cloneable {
     /// The view retains shared ownership of the underlying bytes.
     public init(slice slice: StringSlice) {
         self.slice = slice;
-        self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
         self.length = (slice.end - slice.start);
     }
 
@@ -630,7 +623,7 @@ public struct GraphemesView: Iterable, Cloneable {
 
     /// Returns a `GraphemesIterator` positioned at byte 0.
     public func iter() -> GraphemesIterator {
-        GraphemesIterator(CharsIterator(ptr: self.ptr, length: self.length, byteIndex: 0))
+        GraphemesIterator(CharsIterator(source: self.slice, length: self.length, byteIndex: 0))
     }
 
     /// `true` when the view spans zero bytes (no graphemes).
@@ -765,22 +758,19 @@ public struct LinesIterator: Iterator {
     /// The element type yielded by `next()` — always `String`.
     type Item = String
 
-    private var ptr: lang.ptr[lang.i8]
+    private var source: StringSlice
+    // Re-read on every access: the string may have changed since.
+    private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
     private var length: Int64
     private var byteIndex: Int64
     private var done: Bool
 
-    /// @name From Pointer
-    /// Constructs a lines iterator from a raw pointer, total byte count, starting byte offset, and `done` flag.
-    ///
-    /// Prefer `someString.lines.iter()` over calling this directly.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must point to `length` valid UTF-8 bytes; `byteIndex`
-    /// must be `0` or sit at a UTF-8 boundary.
-    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64, byteIndex byteIndex: Int64, done done: Bool) {
-        self.ptr = ptr;
+    /// @name From Slice
+    /// Iterates the lines in the first `length` bytes of `source`, from
+    /// `byteIndex` (0 or a UTF-8 boundary). Use `someString.lines.iter()`;
+    /// `length` must not exceed the slice.
+    init(source source: StringSlice, length length: Int64, byteIndex byteIndex: Int64, done done: Bool) {
+        self.source = source;
         self.length = length;
         self.byteIndex = byteIndex;
         self.done = done;
@@ -892,7 +882,8 @@ public struct LinesView: Iterable, Cloneable {
     type TargetIterator = LinesIterator
 
     fileprivate var slice: StringSlice
-    fileprivate var ptr: lang.ptr[lang.i8]
+    // Re-read on every access: the string may have changed since.
+    fileprivate var ptr: lang.ptr[lang.i8] { self.slice._bytes() }
     fileprivate var length: Int64
 
     /// @name From Slice
@@ -900,7 +891,6 @@ public struct LinesView: Iterable, Cloneable {
     /// The view retains shared ownership of the underlying bytes.
     public init(slice slice: StringSlice) {
         self.slice = slice;
-        self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
         self.length = (slice.end - slice.start);
     }
 
@@ -908,7 +898,7 @@ public struct LinesView: Iterable, Cloneable {
 
     /// Returns a `LinesIterator` positioned at byte 0.
     public func iter() -> LinesIterator {
-        LinesIterator(ptr: self.ptr, length: self.length, byteIndex: 0, done: false)
+        LinesIterator(source: self.slice, length: self.length, byteIndex: 0, done: false)
     }
 
     /// `true` when the view spans zero bytes (no lines).
@@ -3114,7 +3104,7 @@ extend GraphemeIndex {
         var offset = self.byteOffset;
         var remaining = n;
 
-        var charsIter = CharsIterator(ptr: rawPtr, length: length, byteIndex: offset);
+        var charsIter = CharsIterator(source: source, length: length, byteIndex: offset);
         var graphemeIter = GraphemesIterator(charsIter);
 
         while remaining > 0 {
@@ -3190,12 +3180,14 @@ extend LineIndex {
 public struct IndexedCharsIterator: Iterator {
     type Item = (CharIndex, Char)
 
-    private var ptr: lang.ptr[lang.i8]
+    private var source: StringSlice
+    // Re-read on every access: the string may have changed since.
+    private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
     private var length: Int64
     private var byteIndex: Int64
 
-    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
-        self.ptr = ptr;
+    init(source source: StringSlice, length length: Int64) {
+        self.source = source;
         self.length = length;
         self.byteIndex = 0;
     }
@@ -3245,13 +3237,15 @@ public struct IndexedGraphemesIterator: Iterator {
 public struct IndexedLinesIterator: Iterator {
     type Item = (LineIndex, String)
 
-    private var ptr: lang.ptr[lang.i8]
+    private var source: StringSlice
+    // Re-read on every access: the string may have changed since.
+    private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
     private var length: Int64
     private var byteIndex: Int64
     private var done: Bool
 
-    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
-        self.ptr = ptr;
+    init(source source: StringSlice, length length: Int64) {
+        self.source = source;
         self.length = length;
         self.byteIndex = 0;
         self.done = false;
@@ -3323,7 +3317,7 @@ public struct IndexedLinesIterator: Iterator {
 extend CharsView {
     /// Returns an iterator yielding `(CharIndex, Char)` pairs.
     public func indexedIter() -> IndexedCharsIterator {
-        IndexedCharsIterator(ptr: self.ptr, length: self.length)
+        IndexedCharsIterator(source: self.slice, length: self.length)
     }
 }
 
@@ -3337,7 +3331,7 @@ extend GraphemesView {
 extend LinesView {
     /// Returns an iterator yielding `(LineIndex, String)` pairs.
     public func indexedIter() -> IndexedLinesIterator {
-        IndexedLinesIterator(ptr: self.ptr, length: self.length)
+        IndexedLinesIterator(source: self.slice, length: self.length)
     }
 }
 
@@ -3351,12 +3345,14 @@ extend LinesView {
 public struct ReversedCharsIterator: Iterator {
     type Item = Char
 
-    private var ptr: lang.ptr[lang.i8]
+    private var source: StringSlice
+    // Re-read on every access: the string may have changed since.
+    private var ptr: lang.ptr[lang.i8] { self.source._bytes() }
     private var length: Int64
     private var byteIndex: Int64
 
-    public init(ptr ptr: lang.ptr[lang.i8], length length: Int64) {
-        self.ptr = ptr;
+    init(source source: StringSlice, length length: Int64) {
+        self.source = source;
         self.length = length;
         self.byteIndex = length;
     }
@@ -3402,19 +3398,19 @@ public struct ReversedCharsView: Iterable, Cloneable {
     type TargetIterator = ReversedCharsIterator
 
     fileprivate var slice: StringSlice
-    fileprivate var ptr: lang.ptr[lang.i8]
+    // Re-read on every access: the string may have changed since.
+    fileprivate var ptr: lang.ptr[lang.i8] { self.slice._bytes() }
     fileprivate var length: Int64
 
     public init(slice slice: StringSlice) {
         self.slice = slice;
-        self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
         self.length = (slice.end - slice.start);
     }
 
     public func clone() -> ReversedCharsView { ReversedCharsView(slice: self.slice.clone()) }
 
     public func iter() -> ReversedCharsIterator {
-        ReversedCharsIterator(ptr: self.ptr, length: self.length)
+        ReversedCharsIterator(source: self.slice, length: self.length)
     }
 
     /// Number of code points. O(n).
@@ -3496,7 +3492,8 @@ public struct SplitViewIterator: Iterator, Cloneable {
 
     fileprivate var slice: StringSlice
     fileprivate var separator: StringSlice
-    fileprivate var sourcePtr: Pointer[UInt8]
+    // Re-read on every access: the string may have changed since.
+    fileprivate var sourcePtr: Pointer[UInt8] { self.slice._rawPtr().offset(by: self.slice.start) }
     fileprivate var sourceLen: Int64
     fileprivate var index: Int64
     fileprivate var done: Bool
@@ -3504,7 +3501,6 @@ public struct SplitViewIterator: Iterator, Cloneable {
     public init(slice slice: StringSlice, separator separator: StringSlice) {
         self.slice = slice;
         self.separator = separator;
-        self.sourcePtr = slice._rawPtr().offset(by: slice.start);
         self.sourceLen = (slice.end - slice.start);
         self.index = 0;
         self.done = false;
@@ -3513,7 +3509,6 @@ public struct SplitViewIterator: Iterator, Cloneable {
     fileprivate init(slice slice: StringSlice, separator separator: StringSlice, index index: Int64, done done: Bool) {
         self.slice = slice;
         self.separator = separator;
-        self.sourcePtr = slice._rawPtr().offset(by: slice.start);
         self.sourceLen = (slice.end - slice.start);
         self.index = index;
         self.done = done;
@@ -3632,11 +3627,12 @@ public struct SplitView: Iterable, Cloneable {
         result
     }
 
-    /// Collects all segments into an array.
-    public func collect() -> Array[StringSlice] {
-        var result = Array[StringSlice]();
+    /// Collects all segments into an array of owned strings. (A segment
+    /// borrows the source string, so an array of slices can't exist.)
+    public func collect() -> Array[String] {
+        var result = Array[String]();
         for segment in self {
-            result.append(segment)
+            result.append(segment.toOwned())
         }
         result
     }
@@ -3654,7 +3650,8 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
 
     fileprivate var slice: StringSlice
     fileprivate var predicate: escaping (Char) -> Bool
-    fileprivate var sourcePtr: Pointer[UInt8]
+    // Re-read on every access: the string may have changed since.
+    fileprivate var sourcePtr: Pointer[UInt8] { self.slice._rawPtr().offset(by: self.slice.start) }
     fileprivate var sourceLen: Int64
     fileprivate var index: Int64
     fileprivate var done: Bool
@@ -3662,7 +3659,6 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
     public init(slice slice: StringSlice, consuming where predicate: escaping (Char) -> Bool) {
         self.slice = slice;
         self.predicate = predicate;
-        self.sourcePtr = slice._rawPtr().offset(by: slice.start);
         self.sourceLen = (slice.end - slice.start);
         self.index = 0;
         self.done = false;
@@ -3671,7 +3667,6 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
     fileprivate init(slice slice: StringSlice, consuming where predicate: escaping (Char) -> Bool, index index: Int64, done done: Bool) {
         self.slice = slice;
         self.predicate = predicate;
-        self.sourcePtr = slice._rawPtr().offset(by: slice.start);
         self.sourceLen = (slice.end - slice.start);
         self.index = index;
         self.done = done;
@@ -3769,11 +3764,12 @@ public struct SplitWhereView: Iterable, Cloneable {
         result
     }
 
-    /// Collects all segments into an array.
-    public func collect() -> Array[StringSlice] {
-        var result = Array[StringSlice]();
+    /// Collects all segments into an array of owned strings. (A segment
+    /// borrows the source string, so an array of slices can't exist.)
+    public func collect() -> Array[String] {
+        var result = Array[String]();
         for segment in self {
-            result.append(segment)
+            result.append(segment.toOwned())
         }
         result
     }

@@ -10,7 +10,7 @@ import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
 import std.numeric.(RandomNumberGenerator, Lcg64, SystemRandom)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RefSliceIterator, MutRefSliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
+import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
 import std.ffi.(memcpy)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
@@ -501,7 +501,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// let fromSet   = Array(from: mySet);         // arbitrary order
     /// let collected = lines.iter().collect();     // an iterator: use collect()
     /// ```
-    public init[I](from iterable: I) where I: Iterable, I.Item = T {
+    public init[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
         self.init();
         var iter = iterable.iter();
         while let .Some(item) = iter.next() {
@@ -740,7 +740,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// var arr = [1, 2];
     /// arr.append(from: 3..<6);  // [1, 2, 3, 4, 5]
     /// ```
-    public mutating func append[I](from iterable: I) where I: Iterable, I.Item = T {
+    public mutating func append[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
         var iter = iterable.iter();
         while let .Some(item) = iter.next() {
             self.append(item)
@@ -1314,42 +1314,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         )
     }
 
-    /// Returns an iterator yielding SHARED REFERENCES (`&T`) to the
-    /// elements in place — no copies, no clones. References are
-    /// read-only views; they alias the array's buffer, so structural
-    /// mutation (append, removal) during iteration invalidates them.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let words = ["alpha", "beta"];
-    /// for w in words.refs() {
-    ///     print(w.len());   // reads in place — no element copy
-    /// }
-    /// ```
-    public func refs() -> RefSliceIterator[T] {
-        RefSliceIterator(ptr: self.ptr(), remaining: self.len())
-    }
-
-    /// Returns an iterator yielding MUTABLE REFERENCES (`&mutating T`)
-    /// to the elements — in-place mutation without writeback. Runs the
-    /// COW barrier first, so writes never leak into shared storage.
-    /// Structural mutation (append, removal) during iteration
-    /// invalidates the yielded references.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var xs = [1, 2, 3];
-    /// for x in xs.mutableRefs() {
-    ///     x += 1;
-    /// }
-    /// // xs == [2, 3, 4]
-    /// ```
-    public mutating func mutableRefs() -> MutRefSliceIterator[T] {
-        self.ensureUnique();
-        MutRefSliceIterator(ptr: self.ptr(), remaining: self.len())
-    }
+    // refs(), mutableRefs(): in array_slice.ks — they borrow the array.
 
     // chunks(of:), windows(of:): provided by extend Slice[T] — return
     // ChunksView[T] / WindowsView[T] (multi-pass; subscript via .get(i)).

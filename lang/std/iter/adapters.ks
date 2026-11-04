@@ -22,7 +22,7 @@ import std.numeric.(Int64)
 ///
 /// Wraps the source iterator and the transform closure. No buffering —
 /// elements pass through one at a time.
-public struct MapIterator[I, U]: Iterator where I: Iterator, I: not Copyable {
+public struct MapIterator[I, U]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = U
 
     internal var inner: I
@@ -57,7 +57,7 @@ public struct MapIterator[I, U]: Iterator where I: Iterator, I: not Copyable {
 ///
 /// Source iterator + predicate closure. `next()` skips ahead until the
 /// predicate accepts.
-public struct FilterIterator[I]: Iterator where I: Iterator, I: not Copyable {
+public struct FilterIterator[I]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I
@@ -90,7 +90,7 @@ public struct FilterIterator[I]: Iterator where I: Iterator, I: not Copyable {
 ///
 /// Source iterator + transform closure. `next()` skips ahead until the
 /// transform yields `Some`.
-public struct FilterMapIterator[I, U]: Iterator where I: Iterator, I: not Copyable {
+public struct FilterMapIterator[I, U]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = U
 
     internal var inner: I
@@ -127,7 +127,7 @@ public struct FilterMapIterator[I, U]: Iterator where I: Iterator, I: not Copyab
 ///
 /// Source iterator + predicate + a one-bit `done` flag that latches once
 /// the predicate fails.
-public struct TakeWhileIterator[I]: Iterator where I: Iterator, I: not Copyable {
+public struct TakeWhileIterator[I]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I
@@ -172,7 +172,7 @@ public struct TakeWhileIterator[I]: Iterator where I: Iterator, I: not Copyable 
 ///
 /// Source iterator + predicate + a one-bit `doneSkipping` flag that
 /// latches once the skipping phase ends.
-public struct SkipWhileIterator[I]: Iterator where I: Iterator, I: not Copyable {
+public struct SkipWhileIterator[I]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I
@@ -217,7 +217,7 @@ public struct SkipWhileIterator[I]: Iterator where I: Iterator, I: not Copyable 
 /// # Representation
 ///
 /// Holds both source iterators. No buffering.
-public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator, A: not Copyable, B: not Copyable {
+public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator, A: not Copyable, B: not Copyable, A: not Static, B: not Static {
     type Item = (A.Item, B.Item)
 
     internal var first: A
@@ -251,7 +251,7 @@ public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator, A: not
 /// # Representation
 ///
 /// Source iterator + a running `Int64` index that ticks per element.
-public struct EnumerateIterator[I]: Iterator where I: Iterator, I: not Copyable {
+public struct EnumerateIterator[I]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = (Int64, I.Item)
 
     internal var inner: I
@@ -288,7 +288,7 @@ public struct EnumerateIterator[I]: Iterator where I: Iterator, I: not Copyable 
 /// # Representation
 ///
 /// Source iterator + a counter that ticks down to zero.
-public struct TakeIterator[I]: Iterator where I: Iterator, I: not Copyable {
+public struct TakeIterator[I]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I
@@ -320,7 +320,7 @@ public struct TakeIterator[I]: Iterator where I: Iterator, I: not Copyable {
 ///
 /// Source iterator + a counter; the first `next()` call drains the
 /// budget by pulling the source.
-public struct SkipIterator[I]: Iterator where I: Iterator, I: not Copyable {
+public struct SkipIterator[I]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I
@@ -356,7 +356,7 @@ public struct SkipIterator[I]: Iterator where I: Iterator, I: not Copyable {
 ///
 /// Both source iterators + a one-bit `firstDone` flag that latches when
 /// the first iterator runs out.
-public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.Item = A.Item, A: not Copyable, B: not Copyable {
+public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.Item = A.Item, A: not Copyable, B: not Copyable, A: not Static, B: not Static {
     type Item = A.Item
 
     internal var first: A
@@ -394,7 +394,7 @@ public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.It
 ///
 /// Source iterator + a one-slot lookahead buffer (`peeked`). `peek()`
 /// fills the buffer; `next()` drains it before pulling the source.
-public struct PeekableIterator[I]: Iterator where I: Iterator, I: not Copyable, I.Item: Copyable {
+public struct PeekableIterator[I]: Iterator where I: Iterator, I: not Copyable, I.Item: Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I
@@ -443,7 +443,7 @@ public struct PeekableIterator[I]: Iterator where I: Iterator, I: not Copyable, 
 /// Two copies of the source: `original` (immutable template) and
 /// `current` (the working iterator). When `current` exhausts, it is
 /// reset from `original`.
-public struct CycleIterator[I]: Iterator where I: Iterator, I: Copyable {
+public struct CycleIterator[I]: Iterator where I: Iterator, I: Copyable, I: not Static {
     type Item = I.Item
 
     internal var original: I
@@ -472,7 +472,7 @@ public struct CycleIterator[I]: Iterator where I: Iterator, I: Copyable {
 /// # Representation
 ///
 /// Source iterator + a one-bit latch.
-public struct FusedIterator[I]: Iterator where I: Iterator, I: not Copyable {
+public struct FusedIterator[I]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I
@@ -612,7 +612,7 @@ public struct RepeatNIterator[T]: Iterator where T: Copyable {
 ///
 /// Source iterator + transform closure + a one-slot buffer (`current`)
 /// holding the inner iterator currently being drained.
-public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator, I: not Copyable, U: not Copyable {
+public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator, I: not Copyable, U: not Copyable, I: not Static {
     type Item = U.Item
 
     internal var inner: I
@@ -663,7 +663,7 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator, I:
 ///
 /// Source iterator + a one-slot buffer holding the inner iterator
 /// currently being drained.
-public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator, I: not Copyable, I.Item: not Copyable {
+public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator, I: not Copyable, I.Item: not Copyable, I: not Static {
     type Item = I.Item.Item
 
     internal var inner: I
@@ -710,7 +710,7 @@ public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator, 
 /// # Representation
 ///
 /// Source iterator + inspector closure. No buffering.
-public struct InspectIterator[I]: Iterator where I: Iterator, I: not Copyable {
+public struct InspectIterator[I]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I
@@ -747,7 +747,7 @@ public struct InspectIterator[I]: Iterator where I: Iterator, I: not Copyable {
 /// Source iterator + step size + a one-bit `first` flag (the first
 /// element is always emitted; subsequent ones consume `step - 1` extra
 /// pulls). Construction panics when `step < 1`.
-public struct StepByIterator[I]: Iterator where I: Iterator, I: not Copyable {
+public struct StepByIterator[I]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I
@@ -799,7 +799,7 @@ public struct StepByIterator[I]: Iterator where I: Iterator, I: not Copyable {
 /// # Representation
 ///
 /// Just the inner iterator — no buffering.
-public struct ReversedIterator[I]: Iterator where I: DoubleEndedIterator, I: Iterator, I: not Copyable {
+public struct ReversedIterator[I]: Iterator where I: DoubleEndedIterator, I: Iterator, I: not Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I
@@ -824,7 +824,7 @@ public struct ReversedIterator[I]: Iterator where I: DoubleEndedIterator, I: Ite
 ///
 /// Source iterator + the running accumulator state + the combine
 /// closure.
-public struct ScanIterator[I, Acc]: Iterator where I: Iterator, I: not Copyable, Acc: Copyable {
+public struct ScanIterator[I, Acc]: Iterator where I: Iterator, I: not Copyable, Acc: Copyable, I: not Static {
     type Item = Acc
 
     internal var inner: I
@@ -863,7 +863,7 @@ public struct ScanIterator[I, Acc]: Iterator where I: Iterator, I: not Copyable,
 /// Source iterator + separator value + a `needsSeparator` flag + a
 /// one-slot pending-element buffer (used to remember an element while a
 /// separator is being yielded).
-public struct IntersperseIterator[I]: Iterator where I: Iterator, I: not Copyable, I.Item: Copyable {
+public struct IntersperseIterator[I]: Iterator where I: Iterator, I: not Copyable, I.Item: Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I
@@ -911,7 +911,7 @@ public struct IntersperseIterator[I]: Iterator where I: Iterator, I: not Copyabl
 ///
 /// Same as `IntersperseIterator`, except the stored value is a
 /// zero-arg closure producing fresh separators.
-public struct IntersperseWithIterator[I]: Iterator where I: Iterator, I: not Copyable {
+public struct IntersperseWithIterator[I]: Iterator where I: Iterator, I: not Copyable, I: not Static {
     type Item = I.Item
 
     internal var inner: I

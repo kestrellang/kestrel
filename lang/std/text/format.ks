@@ -371,7 +371,7 @@ public struct FormatOptions: Equatable {
 /// points. `StringBuilder` is the default implementation; streaming sinks can
 /// implement this protocol without forcing an intermediate `String`.
 public protocol Formatter {
-    mutating func append(other: some Str)
+    mutating func append(other: some Str and not Static)
     mutating func append(char c: Char)
 }
 

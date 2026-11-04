@@ -297,7 +297,7 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d.first();  // .Some(1)
     /// d.last();   // .Some(4)
     /// ```
-    public init[I](from iterable: I) where I: Iterable, I.Item = T {
+    public init[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
         self.init();
         var iter = iterable.iter();
         while let .Some(item) = iter.next() {

@@ -446,11 +446,18 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     // STR CONFORMANCE
     // ========================================================================
 
-    /// Returns a `StringSlice` covering this string's entire buffer.
-    /// Shares storage via refcount — zero-copy.
+    /// Returns a `StringSlice` covering the whole string. It borrows the
+    /// string — zero-copy, no refcount.
     public func asSlice() -> StringSlice {
-        StringSlice(source: self.storage.shareBox(), start: 0, end: self.len())
+        let b = &self;
+        StringSlice(base: b, start: 0, end: self.len())
     }
+
+    /// The current byte buffer, for `StringSlice` reads.
+    func _bytePtr() -> Pointer[UInt8] { self.ptr() }
+
+    /// The current byte count, for `StringSlice` bounds checks.
+    func _byteCount() -> Int64 { self.len() }
 
     // ========================================================================
     // SIZE & CAPACITY
@@ -508,7 +515,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// s.append(", world");
     /// s;  // "hello, world"
     /// ```
-    public mutating func append(other: some Str) {
+    public mutating func append(other: some Str and not Static) {
         let slice = other.asSlice();
         let otherLen = (slice.end - slice.start);
         if otherLen == 0 {
@@ -725,7 +732,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     // ========================================================================
 
     /// Replaces every occurrence of `pattern` with `replacement`, in place.
-    public mutating func replace(pattern: some Str, with replacement: some Str) {
+    public mutating func replace(pattern: some Str and not Static, with replacement: some Str and not Static) {
         self = self.replaced(pattern, with: replacement)
     }
 
@@ -738,7 +745,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Required by `Iterable`. Each call returns a fresh iterator;
     /// the string itself is reusable.
     public func iter() -> CharsIterator {
-        CharsIterator(ptr: lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw), length: self.len(), byteIndex: 0)
+        CharsIterator(source: self.asSlice(), length: self.len(), byteIndex: 0)
     }
 
     // ========================================================================
@@ -893,7 +900,7 @@ extend String {
     /// let upper = String(from: "hello".chars.iter().map { it.toUpper() }.collect());
     /// // "HELLO"
     /// ```
-    public init[I](from chars: I) where I: Iterable, I.Item = Char {
+    public init[I](from chars: I) where I: Iterable, I: not Static, I.Item = Char {
         var b = StringBuilder();
         var iter = chars.iter();
         while let .Some(c) = iter.next() {

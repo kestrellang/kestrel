@@ -456,7 +456,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// let dict = Dictionary(from: pairs);              // ["a": 1, "b": 2]
     /// let dups = Dictionary(from: [("a", 1), ("a", 2)]);  // ["a": 2] — later wins
     /// ```
-    public init[I](from pairs: I) where I: Iterable, I.Item = (K, V) {
+    public init[I](from pairs: I) where I: Iterable, I: not Static, I.Item = (K, V) {
         self.init();
         var iter = pairs.iter();
         while let .Some(pair) = iter.next() {
@@ -485,7 +485,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// // [0: [2, 4], 1: [1, 3, 5]]
     /// ```
     public init[I, E](grouping elements: I, by keyFunc: (E) -> K)
-        where I: Iterable, I.Item = E, V = Array[E]
+        where I: Iterable, I: not Static, I.Item = E, V = Array[E]
     {
         self.init();
         var iter = elements.iter();
@@ -528,7 +528,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Dictionary(uniquePairs: [("a", 1), ("a", 2)]);
     /// // PANIC: Dictionary(uniquePairs:): duplicate key
     /// ```
-    public init[I](uniquePairs pairs: I) where I: Iterable, I.Item = (K, V) {
+    public init[I](uniquePairs pairs: I) where I: Iterable, I: not Static, I.Item = (K, V) {
         self.init();
         var iter = pairs.iter();
         while let .Some(pair) = iter.next() {
@@ -1275,7 +1275,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// // dict == ["a": 1, "b": 2, "c": 3]
     /// ```
     public mutating func merge[I](from pairs: I, uniquingKeysWith combine: (V, V) -> V)
-        where I: Iterable, I.Item = (K, V)
+        where I: Iterable, I: not Static, I.Item = (K, V)
     {
         var iter = pairs.iter();
         while let .Some(pair) = iter.next() {
