@@ -38,6 +38,27 @@ Builds an exit code from a byte. `exit(-1)`-style codes are spelled
 
 _Defined in `lang/std/os/exitable.ks`._
 
+#### initializer `init`
+
+```kestrel
+public init(intLiteral: lang.i64)
+```
+
+`exit(2)` takes a literal. Only the low 8 bits are kept, as
+`WEXITSTATUS` does.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+#### field `isSuccess`
+
+```kestrel
+public var isSuccess: Bool { get }
+```
+
+True for `0`, the conventional success code.
+
+_Defined in `lang/std/os/exitable.ks`._
+
 #### field `success`
 
 ```kestrel
@@ -45,6 +66,28 @@ public static var success: ExitCode { get }
 ```
 
 The conventional success code, `0`.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+#### field `value`
+
+```kestrel
+public var value: UInt8 { get }
+```
+
+The code as a byte, `0`–`255`.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+### Implements `ExpressibleByIntLiteral`
+
+### Implements `Equatable`
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: ExitCode) -> Bool
+```
 
 _Defined in `lang/std/os/exitable.ks`._
 

@@ -12,5 +12,6 @@
 - [`std.numeric`](std.numeric.md)
 - [`std.os`](std.os.md)
 - [`std.result`](std.result.md)
+- [`std.system`](std.system.md)
 - [`std.text`](std.text.md)
 

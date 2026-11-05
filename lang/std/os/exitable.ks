@@ -8,6 +8,7 @@ module std.os
 
 import std.numeric.(Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64)
 import std.text.(Formattable)
+import std.core.(Bool, Equatable, ExpressibleByIntLiteral)
 import std.result.(Result)
 import std.io.stdio.(eprintln)
 
@@ -18,7 +19,7 @@ import std.io.stdio.(eprintln)
 /// `0`–`255`. The byte is private; build one with `ExitCode(_:)` or use the
 /// `.success` / `.failure` constants.
 @builtin(.ExitCode)
-public struct ExitCode {
+public struct ExitCode: ExpressibleByIntLiteral, Equatable {
     // Signed `lang.i8` backing: a returned code sign-extends into the C `int`
     // exactly the way `exit(-1)` truncates to 255. The synthesized `@main`
     // wrapper reads this field directly.
@@ -35,7 +36,22 @@ public struct ExitCode {
 
     /// The conventional generic-failure code, `1`.
     public static var failure: ExitCode { ExitCode(1) }
+
+    /// The code as a byte, `0`–`255`.
+    public var value: UInt8 { UInt8(intLiteral: lang.cast_i8_i64(self.rawValue)) }
+
+    /// True for `0`, the conventional success code.
+    public var isSuccess: Bool { self.value == 0 }
+
+    /// `exit(2)` takes a literal. Only the low 8 bits are kept, as
+    /// `WEXITSTATUS` does.
+    public init(intLiteral value: lang.i64) {
+        self.rawValue = lang.cast_i64_i8(value)
+    }
+
+    public func isEqual(to other: ExitCode) -> Bool { self.value == other.value }
 }
+
 
 /// A type that a `@main` function may return: it knows how to produce a process
 /// exit code.
