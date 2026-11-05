@@ -376,7 +376,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// ```
     public mutating func insert(element: T) -> Bool {
         let oldValue = self.dict.insert(element, Unit());
-        oldValue.isNone()
+        oldValue.isNone
     }
 
     // TODO: public mutating func update(element: T) -> Optional[T]

@@ -12,23 +12,23 @@ module Test
 
             // addChecked — overflow at 32767
             let addOverflow = maxVal.addChecked(one);
-            if addOverflow.isSome() { return 1 }
+            if addOverflow.isSome { return 1 }
 
             // addChecked — normal case
             let hundred: std.numeric.Int16 = 100;
             let fifty: std.numeric.Int16 = 50;
             let addNormal = hundred.addChecked(fifty);
-            if addNormal.isNone() { return 2 }
+            if addNormal.isNone { return 2 }
             let expectedAdd: std.numeric.Int16 = 150;
             if addNormal.unwrap() != expectedAdd { return 3 }
 
             // subtractChecked — underflow at -32768
             let subOverflow = minVal.subtractChecked(one);
-            if subOverflow.isSome() { return 4 }
+            if subOverflow.isSome { return 4 }
 
             // subtractChecked — normal case
             let subNormal = hundred.subtractChecked(fifty);
-            if subNormal.isNone() { return 5 }
+            if subNormal.isNone { return 5 }
             let expectedSub: std.numeric.Int16 = 50;
             if subNormal.unwrap() != expectedSub { return 6 }
 
@@ -36,34 +36,34 @@ module Test
             let big: std.numeric.Int16 = 20000;
             let two: std.numeric.Int16 = 2;
             let mulOverflow = big.multiplyChecked(two);
-            if mulOverflow.isSome() { return 7 }
+            if mulOverflow.isSome { return 7 }
 
             // multiplyChecked — normal case
             let ten: std.numeric.Int16 = 10;
             let five: std.numeric.Int16 = 5;
             let mulNormal = ten.multiplyChecked(five);
-            if mulNormal.isNone() { return 8 }
+            if mulNormal.isNone { return 8 }
             let expectedMul: std.numeric.Int16 = 50;
             if mulNormal.unwrap() != expectedMul { return 9 }
 
             // negateChecked — overflow at -32768
             let negMin = minVal.negateChecked();
-            if negMin.isSome() { return 10 }
+            if negMin.isSome { return 10 }
 
             // negateChecked — normal case
             let negHundred = hundred.negateChecked();
-            if negHundred.isNone() { return 11 }
+            if negHundred.isNone { return 11 }
             let expectedNeg: std.numeric.Int16 = -100;
             if negHundred.unwrap() != expectedNeg { return 12 }
 
             // absChecked — overflow at -32768
             let absMin = minVal.absChecked();
-            if absMin.isSome() { return 13 }
+            if absMin.isSome { return 13 }
 
             // absChecked — normal case
             let negFifty: std.numeric.Int16 = -50;
             let absFifty = negFifty.absChecked();
-            if absFifty.isNone() { return 14 }
+            if absFifty.isNone { return 14 }
             if absFifty.unwrap() != fifty { return 15 }
 
             // addSaturating — clamps to 32767

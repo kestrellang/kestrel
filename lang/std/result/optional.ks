@@ -66,37 +66,6 @@ public enum Optional[T]: not Copyable where T: not Static {
     case None
 
     // ========================================================================
-    // CONSTRUCTORS
-    // ========================================================================
-
-    /// Wraps `value` in `.Some`. Rarely needed in practice — bare values
-    /// are promoted via `FromValue`, and `let x: Int64? = 42` does the
-    /// right thing.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let opt = Optional.wrap(42);   // Some(42)
-    /// let opt: Int64? = 42;                 // identical, preferred
-    /// ```
-    public static func wrap(value: T) -> Optional[T] {
-        .Some(value)
-    }
-
-    /// Returns `.None`. Prefer the `null` literal — it works in any
-    /// optional context without naming the type parameter.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let a = Optional[Int64].none();   // None
-    /// let b: Int64? = null;             // identical, preferred
-    /// ```
-    public static func none() -> Optional[T] {
-        .None
-    }
-
-    // ========================================================================
     // QUERY METHODS
     // ========================================================================
 
@@ -105,10 +74,10 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// # Examples
     ///
     /// ```
-    /// Some(42).isSome();   // true
-    /// None.isSome();       // false
+    /// Some(42).isSome;   // true
+    /// None.isSome;       // false
     /// ```
-    public func isSome() -> Bool {
+    public var isSome: Bool {
         match self {
             .Some(_) => true,
             .None => false
@@ -116,7 +85,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     }
 
     /// True when this is `.None`. The complement of `isSome`.
-    public func isNone() -> Bool {
+    public var isNone: Bool {
         match self {
             .Some(_) => false,
             .None => true
@@ -259,11 +228,11 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// ```
     /// func parse(s: String) -> Int64? { ... }
     ///
-    /// Some("42").flatMap(parse);    // Some(42)
-    /// Some("abc").flatMap(parse);   // None  (parse failed)
-    /// None.flatMap(parse);          // None
+    /// Some("42").andThen(parse);    // Some(42)
+    /// Some("abc").andThen(parse);   // None  (parse failed)
+    /// None.andThen(parse);          // None
     /// ```
-    public consuming func flatMap[U](transform: (T) -> Optional[U]) -> Optional[U] {
+    public consuming func andThen[U](transform: (T) -> Optional[U]) -> Optional[U] {
         match self {
             .Some(value) => transform(value),
             .None => .None
@@ -336,19 +305,35 @@ public enum Optional[T]: not Copyable where T: not Static {
     // ========================================================================
 
     /// Returns `other` when `self` is `Some`, otherwise `None`. `other` is
-    /// evaluated eagerly — use `flatMap` for lazy chaining.
+    /// evaluated eagerly — use `andThen` for lazy chaining.
     ///
     /// # Examples
     ///
     /// ```
-    /// Some(1).then(Some("a"));    // Some("a")
-    /// Some(1).then(None);         // None
-    /// None.then(Some("a"));       // None
+    /// Some(1).andValue(Some("a"));    // Some("a")
+    /// Some(1).andValue(None);         // None
+    /// None.andValue(Some("a"));       // None
     /// ```
-    public consuming func then[U](consuming other: Optional[U]) -> Optional[U] {
+    public consuming func andValue[U](consuming other: Optional[U]) -> Optional[U] {
         match self {
             .Some(_) => other,
             .None => .None
+        }
+    }
+
+    /// Returns `self` when `Some`, otherwise `other`. `other` is evaluated
+    /// eagerly — use `orElse` for a lazy fallback.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Some(1).orValue(Some(2));   // Some(1)
+    /// None.orValue(Some(2));      // Some(2)
+    /// ```
+    public consuming func orValue(consuming other: Optional[T]) -> Optional[T] {
+        match self {
+            .Some(value) => .Some(value),
+            .None => other
         }
     }
 

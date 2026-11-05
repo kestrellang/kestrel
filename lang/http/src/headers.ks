@@ -166,7 +166,7 @@ public struct Headers: Cloneable {
     /// h.has(name: "missing");  // false
     /// ```
     public func has(name: String) -> Bool {
-        self.value(forName: name).isSome()
+        self.value(forName: name).isSome
     }
 
     /// The total number of header entries (including duplicate names).

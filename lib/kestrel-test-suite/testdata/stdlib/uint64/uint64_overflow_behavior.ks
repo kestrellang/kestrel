@@ -13,33 +13,33 @@ module Test
 
             // addChecked — normal case
             let addNorm = one.addChecked(two);
-            if addNorm.isNone() { return 1 }
+            if addNorm.isNone { return 1 }
             let three: std.numeric.UInt64 = 3;
             if addNorm.unwrap().isEqual(to: three) == false { return 2 }
 
             // addChecked — overflow at max
             let addOver = maxVal.addChecked(one);
-            if addOver.isSome() { return 3 }
+            if addOver.isSome { return 3 }
 
             // subtractChecked — normal case
             let subNorm = two.subtractChecked(one);
-            if subNorm.isNone() { return 4 }
+            if subNorm.isNone { return 4 }
             if subNorm.unwrap().isEqual(to: one) == false { return 5 }
 
             // subtractChecked — underflow at 0
             let subUnder = minVal.subtractChecked(one);
-            if subUnder.isSome() { return 6 }
+            if subUnder.isSome { return 6 }
 
             // multiplyChecked — normal case
             let mulThree: std.numeric.UInt64 = 3;
             let mulNorm = two.multiplyChecked(mulThree);
-            if mulNorm.isNone() { return 7 }
+            if mulNorm.isNone { return 7 }
             let six: std.numeric.UInt64 = 6;
             if mulNorm.unwrap().isEqual(to: six) == false { return 8 }
 
             // multiplyChecked — overflow near max
             let mulOver = large.multiplyChecked(two);
-            if mulOver.isSome() { return 9 }
+            if mulOver.isSome { return 9 }
 
             // addSaturating — clamps to maxValue
             let hundred: std.numeric.UInt64 = 100;

@@ -35,7 +35,7 @@ func main() -> lang.i64 {
     if s.count != 1 { return 3 }
 
     // Absent element: returns .None.
-    if s.remove(99).isSome() { return 4 }
+    if s.remove(99).isSome { return 4 }
     if s.count != 1 { return 5 }
 
     // Coarse equality: the stored value (tag 1) comes back, not the probe

@@ -219,7 +219,7 @@ extend Str {
     /// "hello world".contains(substring: "xyz");    // false
     /// ```
     public func contains(substring: some Str and not Static) -> Bool {
-        self.firstIndex(of: substring).isSome()
+        self.firstIndex(of: substring).isSome
     }
 
     /// Returns true if any code point matches `predicate`.
@@ -230,7 +230,7 @@ extend Str {
     /// "abc123".contains(where: { (c) in c.isAsciiDigit });  // true
     /// ```
     public func contains(where predicate: (Char) -> Bool) -> Bool {
-        self.chars.firstIndex(where: predicate).isSome()
+        self.chars.firstIndex(where: predicate).isSome
     }
 
     /// Returns true if this string starts with `prefix`.

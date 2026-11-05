@@ -16,12 +16,12 @@ module Test
 
             // Test andValue - Ok and Err = Err
             let andOkErr = ok.andValue(other_err);
-            if andOkErr.isOk() { return 2 }
+            if andOkErr.isOk { return 2 }
             if andOkErr.unwrapErr() != 99 { return 3 }
 
             // Test andValue - Err and Ok = Err (original error)
             let andErrOk = err.andValue(other_ok);
-            if andErrOk.isOk() { return 4 }
+            if andErrOk.isOk { return 4 }
             if andErrOk.unwrapErr() != 5 { return 5 }
 
             // Test andThen - Ok with transform
@@ -30,7 +30,7 @@ module Test
 
             // Test andThen - Err passes through
             let andThenErr = err.andThen[std.numeric.Int64]({ (x) in .Ok(x * 3) });
-            if andThenErr.isOk() { return 7 }
+            if andThenErr.isOk { return 7 }
             if andThenErr.unwrapErr() != 5 { return 8 }
 
             // Test orValue - Ok returns self
@@ -51,7 +51,7 @@ module Test
 
             // Test orElse - Err returning new Err
             let orElseNewErr: std.result.Result[std.numeric.Int64, std.numeric.Int64] = err.orElse({ (e) in .Err(e * 10) });
-            if orElseNewErr.isOk() { return 13 }
+            if orElseNewErr.isOk { return 13 }
             if orElseNewErr.unwrapErr() != 50 { return 14 }
 
             0

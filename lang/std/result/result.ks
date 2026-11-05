@@ -53,22 +53,6 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     type Residual = E
 
     // ========================================================================
-    // CONSTRUCTORS
-    // ========================================================================
-
-    /// Wraps `value` in `.Ok`. Rarely needed in practice — `FromValue`
-    /// promotes bare values where the context expects a `Result`.
-    public static func ok(value: T) -> Result[T, E] {
-        .Ok(value)
-    }
-
-    /// Wraps `error` in `.Err`. Useful when constructing a `Result` from
-    /// a known error in non-promotion contexts.
-    public static func err(error: E) -> Result[T, E] {
-        .Err(error)
-    }
-
-    // ========================================================================
     // QUERY METHODS
     // ========================================================================
 
@@ -77,10 +61,10 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     /// # Examples
     ///
     /// ```
-    /// Ok(42).isOk();          // true
-    /// Err("oops").isOk();     // false
+    /// Ok(42).isOk;          // true
+    /// Err("oops").isOk;     // false
     /// ```
-    public func isOk() -> Bool {
+    public var isOk: Bool {
         match self {
             .Ok(_) => true,
             .Err(_) => false
@@ -88,7 +72,7 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     }
 
     /// True when this is `.Err`. Complement of `isOk`.
-    public func isErr() -> Bool {
+    public var isErr: Bool {
         match self {
             .Ok(_) => false,
             .Err(_) => true
@@ -243,6 +227,19 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
         }
     }
 
+    /// Returns the error value, panicking with `message` if `Ok`. Mirror
+    /// of `expect(_:)` for asserting that a call failed.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `message` on `.Ok` via `fatalError`.
+    public consuming func expectErr(message: String) -> E {
+        match self {
+            .Ok(_) => fatalError(message),
+            .Err(error) => error
+        }
+    }
+
     // ========================================================================
     // TRANSFORMATIONS - SUCCESS VALUE
     // ========================================================================
@@ -258,15 +255,6 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     public consuming func map[U](transform: (T) -> U) -> Result[U, E] {
         match self {
             .Ok(value) => .Ok(transform(value)),
-            .Err(error) => .Err(error)
-        }
-    }
-
-    /// Monadic bind on the success branch — apply a transform that itself
-    /// returns a `Result`, without nesting.
-    public consuming func flatMap[U](transform: (T) -> Result[U, E]) -> Result[U, E] {
-        match self {
-            .Ok(value) => transform(value),
             .Err(error) => .Err(error)
         }
     }
@@ -350,15 +338,6 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
         }
     }
 
-    /// Monadic bind on the error branch — apply a recovery function that
-    /// itself returns a `Result`, without nesting. Mirror of `flatMap`.
-    public consuming func flatMapErr[F](transform: (E) -> Result[T, F]) -> Result[T, F] {
-        match self {
-            .Ok(value) => .Ok(value),
-            .Err(error) => transform(error)
-        }
-    }
-
     // ========================================================================
     // CONVERSION TO OPTIONAL
     // ========================================================================
@@ -395,8 +374,8 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
         }
     }
 
-    /// Alias for `flatMap` — chains a fallible step onto an `Ok` branch.
-    /// Reads more naturally in long pipelines (`parseInput().andThen(validate).andThen(persist)`).
+    /// Chains a fallible step onto an `Ok` branch, without nesting:
+    /// `parseInput().andThen(validate).andThen(persist)`.
     public consuming func andThen[U](transform: (T) -> Result[U, E]) -> Result[U, E] {
         match self {
             .Ok(value) => transform(value),

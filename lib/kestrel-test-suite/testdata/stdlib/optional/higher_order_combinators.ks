@@ -13,12 +13,12 @@ module Test
 
             // Test filter
             let filtered = someOpt.filter(where: { (x) in x > 5 });
-            if filtered.isNone() { return 2 }
+            if filtered.isNone { return 2 }
             let filteredOut = someOpt.filter(where: { (x) in x > 100 });
-            if filteredOut.isSome() { return 3 }
+            if filteredOut.isSome { return 3 }
 
-            // Test flatMap
-            let flatMapped = someOpt.flatMap[std.numeric.Int64]({ (x) in .Some(x + 1) });
+            // Test andThen
+            let flatMapped = someOpt.andThen[std.numeric.Int64]({ (x) in .Some(x + 1) });
             if flatMapped.unwrap() != 11 { return 4 }
 
             0

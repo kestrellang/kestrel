@@ -907,7 +907,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ["a": 1, "b": 2].contains("z");  // false
     /// ```
     public func contains(key: K) -> Bool {
-        self.findEntry(key).isSome()
+        self.findEntry(key).isSome
     }
 
     // ========================================================================

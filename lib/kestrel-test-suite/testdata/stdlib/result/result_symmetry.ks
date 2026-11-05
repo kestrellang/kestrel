@@ -24,12 +24,12 @@ module Test
 
             // inspect returns self unchanged
             let tapped = ok.inspect({ (x) in () });
-            if tapped.isOk() == false { return 8 }
+            if tapped.isOk == false { return 8 }
             if tapped.unwrap() != 42 { return 9 }
 
             // inspect on Err skips fn, passes Err through
             let errTapped = err.inspect({ (x) in () });
-            if errTapped.isErr() == false { return 10 }
+            if errTapped.isErr == false { return 10 }
 
             // inspectErr returns self unchanged
             let err2: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(99);

@@ -27,7 +27,7 @@ module Test
 
             // subscript(checked:) — Range arg, valid
             let checked = arr(checked: std.core.Range[std.numeric.Int64](0, 3));
-            if checked.isNone() { return 9 }
+            if checked.isNone { return 9 }
             let checkedSlice = checked.unwrap();
             if checkedSlice.count != 3 { return 10 }
             if checkedSlice(unchecked: 0) != 10 { return 11 }
@@ -35,11 +35,11 @@ module Test
 
             // subscript(checked:) — Range arg, end out of bounds
             let oob = arr(checked: std.core.Range[std.numeric.Int64](0, 10));
-            if oob.isSome() { return 13 }
+            if oob.isSome { return 13 }
 
             // subscript(checked:) — Range arg, negative start
             let negStart = arr(checked: std.core.Range[std.numeric.Int64](-1, 3));
-            if negStart.isSome() { return 14 }
+            if negStart.isSome { return 14 }
 
             // subscript(unchecked:) — Range arg
             let unchecked = arr(unchecked: std.core.Range[std.numeric.Int64](2, 4));
