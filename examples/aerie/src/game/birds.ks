@@ -57,30 +57,56 @@ struct Bird {
 
     mutating func update(dt: Float32, mutating dice: Dice) {
         match self.kind {
-            .Kestrel => {
-                if self.hover > 0.0 {
-                    // Kiting: wings beating fast, holding still over the ground.
-                    self.hover = self.hover - dt;
-                    self.flap = self.flap + dt * 22.0;
-                    return;
-                }
-                self.untilHover = self.untilHover - dt;
-                if self.untilHover <= 0.0 {
-                    self.hover = dice.between(2.0, 5.0);
-                    self.untilHover = dice.between(6.0, 14.0);
-                }
-                self.angle = self.angle + self.speed * dt;
-                // Bursts of quick wingbeats between glides.
-                let beating = (self.offset + self.angle * 1.7).sin() > 0.1;
-                self.flap = self.flap + dt * (if beating { 14.0 } else { 0.0 });
-            },
-            .Vulture => {
-                self.angle = self.angle + self.speed * dt;
-                // Soaring: a rare, slow beat.
-                let beating = (self.offset + self.angle * 0.9).sin() > 0.85;
-                self.flap = self.flap + dt * (if beating { 5.0 } else { 0.0 });
-            }
+            .Kestrel => { self.kite(dt, dice) },
+            .Vulture => { self.soar(dt) }
         }
+    }
+
+    /// A kestrel's flight: bursts of quick wingbeats between glides, and
+    /// now and then a stop to hover, wings beating fast, holding still
+    /// over the ground.
+    mutating func kite(dt: Float32, mutating dice: Dice) {
+        if self.hover > 0.0 {
+            self.hover = self.hover - dt;
+            self.flap = self.flap + dt * 22.0;
+            return;
+        }
+        self.untilHover = self.untilHover - dt;
+        if self.untilHover <= 0.0 {
+            self.hover = dice.between(2.0, 5.0);
+            self.untilHover = dice.between(6.0, 14.0);
+        }
+        self.angle = self.angle + self.speed * dt;
+        let beating = (self.offset + self.angle * 1.7).sin() > 0.1;
+        self.flap = self.flap + dt * (if beating { 14.0 } else { 0.0 });
+    }
+
+    /// A vulture's flight: soaring, with a rare, slow beat.
+    mutating func soar(dt: Float32) {
+        self.angle = self.angle + self.speed * dt;
+        let beating = (self.offset + self.angle * 0.9).sin() > 0.85;
+        self.flap = self.flap + dt * (if beating { 5.0 } else { 0.0 });
+    }
+
+    /// Drift the circle's middle over `target` and keep above it, once
+    /// within 60 blocks: vultures in a lair close in on the player.
+    mutating func circle(over target: Vec3, dt dt: Float32) {
+        let toward = target - self.home;
+        guard toward.x * toward.x + toward.z * toward.z < 60.0 * 60.0 else {
+            return;
+        }
+        let pull = (dt * 0.04).clamp(0.0, 1.0);
+        self.home = self.home + Vec3(x: toward.x * pull, y: 0.0, z: toward.z * pull);
+        if self.home.y < target.y + 12.0 {
+            self.home = self.home + Vec3(x: 0.0, y: dt * 2.0, z: 0.0);
+        }
+    }
+
+    /// Whether it's more than `reach` blocks from `center` across the
+    /// ground at `time`.
+    func isFar(center: Vec3, reach reach: Float32, time time: Float32) -> Bool {
+        let away = self.position(time) - center;
+        away.x * away.x + away.z * away.z > reach * reach
     }
 
     /// How far the wings are raised, in radians.
@@ -104,65 +130,81 @@ struct Bird {
         let bank: Float32 = if self.hover > 0.0 { 0.0 } else { inward * 0.35 };
         let right = flatRight * bank.cos() - Vec3.unitY * bank.sin();
         let up = Vec3.unitY * bank.cos() + flatRight * bank.sin();
-        match self.kind {
-            .Kestrel => kestrel(Pose(origin: here, right: right, up: up, forward: forward, scale: 1.3), self.wingAngle()),
-            .Vulture => vulture(Pose(origin: here, right: right, up: up, forward: forward, scale: 1.0), self.wingAngle())
+        let pose = Pose(origin: here, right: right, up: up, forward: forward, scale: self.kind.scale);
+        self.kind.model(pose, wingAngle: self.wingAngle())
+    }
+}
+
+extend Pose {
+    /// One wing as two boxes hinged at the shoulder and the wrist, raised
+    /// `angle` (the outer part flexes further). `side` is 1 for the right wing
+    /// and -1 for the left.
+    func wing(side: Float32, shoulder shoulder: Vec3, angle angle: Float32, inner inner: Vec3, outer outer: Vec3, layers layers: (Layer, Layer, Layer, Layer)) -> [ModelBox] {
+        let (innerTop, outerTop, under, edge) = layers;
+        let along = Vec3(x: side * angle.cos(), y: angle.sin(), z: 0.0);
+        let lift = Vec3(x: -side * angle.sin(), y: angle.cos(), z: 0.0);
+        let tipAngle = angle * 1.5;
+        let tipAlong = Vec3(x: side * tipAngle.cos(), y: tipAngle.sin(), z: 0.0);
+        let tipLift = Vec3(x: -side * tipAngle.sin(), y: tipAngle.cos(), z: 0.0);
+        let wrist = shoulder + along * (inner.x * 2.0);
+        // The outer part sweeps back a little.
+        let sweep = Vec3(x: 0.0, y: 0.0, z: -outer.z * 0.35);
+        [
+            self.box(shoulder + along * inner.x, inner, x: along, y: lift, z: Vec3.unitZ, side: edge, top: innerTop, bottom: under),
+            self.box(wrist + tipAlong * outer.x + sweep, outer, x: tipAlong, y: tipLift, z: Vec3.unitZ, side: edge, top: outerTop, bottom: under)
+        ]
+    }
+}
+
+extend BirdKind {
+    /// How big the model is drawn: kestrels a little over life size, so
+    /// they read from a distance.
+    var scale: Float32 {
+        match self { .Kestrel => 1.3, .Vulture => 1.0 }
+    }
+
+    /// The bird's boxes in `pose`, wings raised `wingAngle` radians.
+    func model(pose: Pose, wingAngle wingAngle: Float32) -> [ModelBox] {
+        match self {
+            .Kestrel => BirdKind.kestrelModel(pose, wingAngle),
+            .Vulture => BirdKind.vultureModel(pose, wingAngle)
         }
     }
-}
 
-/// One wing as two boxes hinged at the shoulder and the wrist, raised
-/// `angle` (the outer part flexes further). `side` is 1 for the right wing
-/// and -1 for the left.
-func wing(pose: Pose, side: Float32, shoulder shoulder: Vec3, angle angle: Float32, inner inner: Vec3, outer outer: Vec3, layers layers: (Layer, Layer, Layer, Layer)) -> [ModelBox] {
-    let (innerTop, outerTop, under, edge) = layers;
-    let along = Vec3(x: side * angle.cos(), y: angle.sin(), z: 0.0);
-    let lift = Vec3(x: -side * angle.sin(), y: angle.cos(), z: 0.0);
-    let tipAngle = angle * 1.5;
-    let tipAlong = Vec3(x: side * tipAngle.cos(), y: tipAngle.sin(), z: 0.0);
-    let tipLift = Vec3(x: -side * tipAngle.sin(), y: tipAngle.cos(), z: 0.0);
-    let wrist = shoulder + along * (inner.x * 2.0);
-    // The outer part sweeps back a little.
-    let sweep = Vec3(x: 0.0, y: 0.0, z: -outer.z * 0.35);
-    [
-        pose.box(shoulder + along * inner.x, inner, x: along, y: lift, z: Vec3.unitZ, side: edge, top: innerTop, bottom: under),
-        pose.box(wrist + tipAlong * outer.x + sweep, outer, x: tipAlong, y: tipLift, z: Vec3.unitZ, side: edge, top: outerTop, bottom: under)
-    ]
-}
-
-/// A kestrel: rufous back, cream spotted belly, slate head and tail,
-/// pointed dark wingtips.
-func kestrel(pose: Pose, wingAngle: Float32) -> [ModelBox] {
-    var boxes = [
-        pose.alignedBox(Vec3(x: 0.0, y: 0.0, z: 0.0), Vec3(x: 0.1, y: 0.09, z: 0.24), side: .KestrelBack, top: .KestrelBack, bottom: .KestrelBelly),
-        pose.alignedBox(Vec3(x: 0.0, y: 0.05, z: 0.3), Vec3(x: 0.085, y: 0.085, z: 0.085), side: .KestrelHead, top: .KestrelHead, bottom: .KestrelBelly),
-        pose.alignedBox(Vec3(x: 0.0, y: 0.02, z: 0.41), Vec3(x: 0.03, y: 0.03, z: 0.035), side: .Beak, top: .Beak, bottom: .Beak),
-        pose.alignedBox(Vec3(x: 0.0, y: 0.01, z: -0.4), Vec3(x: 0.07, y: 0.02, z: 0.17), side: .KestrelTail, top: .KestrelTail, bottom: .KestrelWingUnder)
-    ];
-    let layers: (Layer, Layer, Layer, Layer) = (.KestrelWing, .KestrelTips, .KestrelWingUnder, .KestrelTips);
-    for side in [1.0, -1.0] {
-        boxes.append(contentsOf: wing(pose, side, shoulder: Vec3(x: side * 0.08, y: 0.04, z: 0.05), angle: wingAngle,
-            inner: Vec3(x: 0.19, y: 0.02, z: 0.12), outer: Vec3(x: 0.18, y: 0.015, z: 0.08), layers: layers));
+    /// A kestrel: rufous back, cream spotted belly, slate head and tail,
+    /// pointed dark wingtips.
+    static func kestrelModel(pose: Pose, wingAngle: Float32) -> [ModelBox] {
+        var boxes = [
+            pose.alignedBox(Vec3(x: 0.0, y: 0.0, z: 0.0), Vec3(x: 0.1, y: 0.09, z: 0.24), side: .KestrelBack, top: .KestrelBack, bottom: .KestrelBelly),
+            pose.alignedBox(Vec3(x: 0.0, y: 0.05, z: 0.3), Vec3(x: 0.085, y: 0.085, z: 0.085), side: .KestrelHead, top: .KestrelHead, bottom: .KestrelBelly),
+            pose.alignedBox(Vec3(x: 0.0, y: 0.02, z: 0.41), Vec3(x: 0.03, y: 0.03, z: 0.035), side: .Beak, top: .Beak, bottom: .Beak),
+            pose.alignedBox(Vec3(x: 0.0, y: 0.01, z: -0.4), Vec3(x: 0.07, y: 0.02, z: 0.17), side: .KestrelTail, top: .KestrelTail, bottom: .KestrelWingUnder)
+        ];
+        let layers: (Layer, Layer, Layer, Layer) = (.KestrelWing, .KestrelTips, .KestrelWingUnder, .KestrelTips);
+        for side in [1.0, -1.0] {
+            boxes.append(contentsOf: pose.wing(side, shoulder: Vec3(x: side * 0.08, y: 0.04, z: 0.05), angle: wingAngle,
+                inner: Vec3(x: 0.19, y: 0.02, z: 0.12), outer: Vec3(x: 0.18, y: 0.015, z: 0.08), layers: layers));
+        }
+        boxes
     }
-    boxes
-}
 
-/// A vulture: sooty and broad-winged, silver flight feathers beneath, a
-/// pale ruff and a bare red head.
-func vulture(pose: Pose, wingAngle: Float32) -> [ModelBox] {
-    var boxes = [
-        pose.alignedBox(Vec3(x: 0.0, y: 0.0, z: 0.0), Vec3(x: 0.2, y: 0.16, z: 0.44), side: .VultureBody, top: .VultureBody, bottom: .VultureBody),
-        pose.alignedBox(Vec3(x: 0.0, y: 0.05, z: 0.44), Vec3(x: 0.15, y: 0.13, z: 0.08), side: .VultureRuff, top: .VultureRuff, bottom: .VultureRuff),
-        pose.alignedBox(Vec3(x: 0.0, y: 0.06, z: 0.6), Vec3(x: 0.07, y: 0.07, z: 0.1), side: .VultureHead, top: .VultureHead, bottom: .VultureHead),
-        pose.alignedBox(Vec3(x: 0.0, y: 0.02, z: 0.72), Vec3(x: 0.035, y: 0.04, z: 0.04), side: .Beak, top: .Beak, bottom: .Beak),
-        pose.alignedBox(Vec3(x: 0.0, y: 0.0, z: -0.6), Vec3(x: 0.17, y: 0.03, z: 0.18), side: .VultureBody, top: .VultureWing, bottom: .VultureWingUnder)
-    ];
-    let layers: (Layer, Layer, Layer, Layer) = (.VultureWing, .VultureWing, .VultureWingUnder, .VultureBody);
-    for side in [1.0, -1.0] {
-        boxes.append(contentsOf: wing(pose, side, shoulder: Vec3(x: side * 0.17, y: 0.06, z: 0.05), angle: wingAngle,
-            inner: Vec3(x: 0.5, y: 0.03, z: 0.32), outer: Vec3(x: 0.45, y: 0.025, z: 0.26), layers: layers));
+    /// A vulture: sooty and broad-winged, silver flight feathers beneath, a
+    /// pale ruff and a bare red head.
+    static func vultureModel(pose: Pose, wingAngle: Float32) -> [ModelBox] {
+        var boxes = [
+            pose.alignedBox(Vec3(x: 0.0, y: 0.0, z: 0.0), Vec3(x: 0.2, y: 0.16, z: 0.44), side: .VultureBody, top: .VultureBody, bottom: .VultureBody),
+            pose.alignedBox(Vec3(x: 0.0, y: 0.05, z: 0.44), Vec3(x: 0.15, y: 0.13, z: 0.08), side: .VultureRuff, top: .VultureRuff, bottom: .VultureRuff),
+            pose.alignedBox(Vec3(x: 0.0, y: 0.06, z: 0.6), Vec3(x: 0.07, y: 0.07, z: 0.1), side: .VultureHead, top: .VultureHead, bottom: .VultureHead),
+            pose.alignedBox(Vec3(x: 0.0, y: 0.02, z: 0.72), Vec3(x: 0.035, y: 0.04, z: 0.04), side: .Beak, top: .Beak, bottom: .Beak),
+            pose.alignedBox(Vec3(x: 0.0, y: 0.0, z: -0.6), Vec3(x: 0.17, y: 0.03, z: 0.18), side: .VultureBody, top: .VultureWing, bottom: .VultureWingUnder)
+        ];
+        let layers: (Layer, Layer, Layer, Layer) = (.VultureWing, .VultureWing, .VultureWingUnder, .VultureBody);
+        for side in [1.0, -1.0] {
+            boxes.append(contentsOf: pose.wing(side, shoulder: Vec3(x: side * 0.17, y: 0.06, z: 0.05), angle: wingAngle,
+                inner: Vec3(x: 0.5, y: 0.03, z: 0.32), outer: Vec3(x: 0.45, y: 0.025, z: 0.26), layers: layers));
+        }
+        boxes
     }
-    boxes
 }
 
 /// The birds near the player.
@@ -179,30 +221,18 @@ struct Flock {
     /// above an island within `reach` blocks of `center`.
     mutating func update(dt: Float32, center center: Vec3, reach reach: Float32, generator generator: Generator, time time: Float32) {
         let inLair = generator.lairness(center.x, center.z) >= 0.5;
-        var i: Int64 = 0;
-        while i < self.birds.count {
-            var bird = self.birds(i);
+        var kept: [Bird] = [];
+        for b in self.birds {
+            var bird = b;
             bird.update(dt, self.dice);
-            // In a lair, vultures drift over to circle above the player.
             if inLair and bird.kind.isVulture {
-                let toward = center - bird.home;
-                if toward.x * toward.x + toward.z * toward.z < 60.0 * 60.0 {
-                    let pull = (dt * 0.04).clamp(0.0, 1.0);
-                    bird.home = bird.home + Vec3(x: toward.x * pull, y: 0.0, z: toward.z * pull);
-                    // And keep above them.
-                    if bird.home.y < center.y + 12.0 {
-                        bird.home = bird.home + Vec3(x: 0.0, y: dt * 2.0, z: 0.0);
-                    }
-                }
+                bird.circle(over: center, dt: dt);
             }
-            let away = bird.position(time) - center;
-            if away.x * away.x + away.z * away.z > (reach + 16.0) * (reach + 16.0) {
-                let _ = self.birds.remove(at: i);
-            } else {
-                self.birds(i) = bird;
-                i = i + 1;
+            if not bird.isFar(center, reach: reach + 16.0, time: time) {
+                kept.append(bird);
             }
         }
+        self.birds = kept;
         if self.birds.count < flockSize {
             self.spawn(center, reach, generator);
         }
@@ -216,7 +246,7 @@ struct Flock {
         let x = center.x + turn.cos() * distance;
         let z = center.z + turn.sin() * distance;
         let column = generator.column(x.floor().toInt64() ?? 0, z.floor().toInt64() ?? 0);
-        if column.top < column.bottom {
+        guard column.isLand else {
             return;
         }
         let ground = Float32(from: column.top);

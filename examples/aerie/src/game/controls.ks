@@ -1,8 +1,9 @@
 module Aerie
 
-import sdl.(Key)
+import sdl.(Event, Key)
 
-/// Which movement keys are held.
+/// What the player is pressing: keys and buttons held, presses waiting
+/// for the next frame, and mouse movement.
 struct Controls {
     var forward: Bool = false
     var back: Bool = false
@@ -25,6 +26,7 @@ struct Controls {
 
     init() {}
 
+    /// Note that `key` went down (`held`) or up.
     mutating func setKey(key: Key, held held: Bool) {
         match key {
             .W => { self.forward = held },
@@ -48,6 +50,28 @@ struct Controls {
         }
     }
 
+    /// Take in a mouse or key event during play.
+    mutating func handle(event: Event) {
+        match event {
+            .MouseDown(.Left, _, _) => { self.breakHeld = true },
+            .MouseDown(.Right, _, _) => { self.placePressed = true },
+            .MouseUp(.Left, _, _) => { self.breakHeld = false },
+            .MouseMove(_, _, dx, dy) => {
+                self.mouseX = self.mouseX + Float32(from: dx);
+                self.mouseY = self.mouseY + Float32(from: dy);
+            },
+            .MouseWheel(clicks) => { self.wheel = self.wheel + clicks },
+            .KeyDown(key) => { self.setKey(key, held: true) },
+            .KeyUp(key) => { self.setKey(key, held: false) },
+            _ => {}
+        }
+    }
+
+    /// Movement asked for along each axis, -1 to 1: forward, right, up.
+    var forwardAxis: Float32 { axis(self.forward, self.back) }
+    var strafeAxis: Float32 { axis(self.right, self.left) }
+    var liftAxis: Float32 { axis(self.up, self.down) }
+
     /// Forget presses once a frame has handled them.
     mutating func clearPresses() {
         self.placePressed = false;
@@ -60,9 +84,10 @@ struct Controls {
     }
 }
 
+/// Radians of turn per pixel of mouse movement.
+let mouseSensitivity: Float32 = 0.0025;
+
+/// 1 for `positive`, -1 for `negative`, 0 for both or neither.
 func axis(positive: Bool, negative: Bool) -> Float32 {
     (if positive { 1.0 } else { 0.0 }) - (if negative { 1.0 } else { 0.0 })
 }
-
-/// Radians of turn per pixel of mouse movement.
-let mouseSensitivity: Float32 = 0.0025;

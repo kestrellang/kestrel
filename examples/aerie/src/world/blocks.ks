@@ -56,6 +56,11 @@ enum Layer {
         }
     }
 
+    /// `index` as a float, for shaders that take layers in vectors.
+    var number: Float32 {
+        Float32(from: Int64(from: self.index))
+    }
+
     /// The crack stages follow `Crack0` in the atlas.
     static var crackStages: Int64 { 5 }
 
@@ -130,6 +135,13 @@ enum Block {
         }
     }
 
+    var isAir: Bool {
+        match self {
+            .Air => true,
+            _ => false
+        }
+    }
+
     /// What the hotbar calls it.
     var name: String {
         match self {
@@ -181,6 +193,17 @@ enum Block {
             .Driftstone => 1.4, .Ashrock => 1.4, .Embercore => 1.6, .Darkbrick => 1.8,
             .Skyiron => 2.5,
             _ => 1.0
+        }
+    }
+
+    /// Whether a face of this block that looks at `neighbor` can be seen.
+    func showsFace(toward neighbor: Block) -> Bool {
+        match neighbor.shape {
+            .Solid => false,
+            // Leaves and glass hide their own kind, so a canopy isn't a
+            // maze of inner faces.
+            .Clear => neighbor.id != self.id,
+            _ => true
         }
     }
 

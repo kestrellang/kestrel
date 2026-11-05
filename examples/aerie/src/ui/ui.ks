@@ -34,7 +34,7 @@ enum UISprite {
         }
     }
 
-    /// Drawn on the 24-pixel grid, so sampled crisp (see `pixelQuad`).
+    /// Drawn on the 24-pixel grid, so sampled crisp (see `OverlayQuad.pixel`).
     var pixelArt: Bool {
         match self {
             .Slot => true, .SlotSelected => true, .Panel => true, .Button => true, .Glow => false, .Twinkle => false

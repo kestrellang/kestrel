@@ -11,22 +11,19 @@ struct Noise {
 
     init(seed: Int64) {
         var p: [Int64] = [];
-        var i: Int64 = 0;
-        while i < 256 {
+        for i in 0..<256 {
             p.append(i);
-            i = i + 1;
         }
         // Fisher-Yates with a 31-bit LCG; products stay under 2^62.
         var state = seed % 2147483648;
         if state < 0 { state = state + 2147483648; }
-        i = 255;
-        while i > 0 {
+        for step in 0..<255 {
+            let i = 255 - step;
             state = (state * 1103515245 + 12345) % 2147483648;
             let j = state % (i + 1);
             let t = p(i);
             p(i) = p(j);
             p(j) = t;
-            i = i - 1;
         }
         var doubled = p;
         for v in p {
@@ -61,13 +58,11 @@ struct Noise {
         var weight: Float32 = 1.0;
         var scale: Float32 = 1.0;
         var norm: Float32 = 0.0;
-        var i: Int64 = 0;
-        while i < octaves {
+        for _ in 0..<octaves {
             total = total + self.sample(x * scale, y * scale) * weight;
             norm = norm + weight;
             weight = weight * 0.5;
             scale = scale * 2.0;
-            i = i + 1;
         }
         total / norm
     }

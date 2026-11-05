@@ -109,8 +109,7 @@ struct World {
     /// back any stored changed chunks instead of generating them.
     mutating func generateColumn(cx: Int64, cz: Int64) {
         let columns = self.generator.columns(cx, cz);
-        var cy: Int64 = 0;
-        while cy < worldChunksY {
+        for cy in 0..<worldChunksY {
             let key = chunkKey(cx, cy, cz);
             match self.stored.remove(key) {
                 .Some(chunk) => {
@@ -121,7 +120,6 @@ struct World {
                     let _ = self.chunks.insert(key, self.generator.chunk(cx, cy, cz, columns));
                 }
             }
-            cy = cy + 1;
         }
     }
 
@@ -132,14 +130,8 @@ struct World {
     /// Whether every chunk touching column (cx, cz) exists, so it can be
     /// meshed without seams.
     func neighborsReady(cx: Int64, cz: Int64) -> Bool {
-        var dz: Int64 = -1;
-        while dz <= 1 {
-            var dx: Int64 = -1;
-            while dx <= 1 {
-                if not self.hasColumn(cx + dx, cz + dz) { return false; }
-                dx = dx + 1;
-            }
-            dz = dz + 1;
+        for i in 0..<9 {
+            if not self.hasColumn(cx + i % 3 - 1, cz + i / 3 - 1) { return false; }
         }
         true
     }
@@ -147,18 +139,8 @@ struct World {
     /// Chunk (cx, cy, cz) with its neighbors' border, for the mesher.
     func padded(cx: Int64, cy: Int64, cz: Int64) -> Padded {
         var around: [Chunk] = [];
-        var dy: Int64 = -1;
-        while dy <= 1 {
-            var dz: Int64 = -1;
-            while dz <= 1 {
-                var dx: Int64 = -1;
-                while dx <= 1 {
-                    around.append(self.chunk(cx + dx, cy + dy, cz + dz));
-                    dx = dx + 1;
-                }
-                dz = dz + 1;
-            }
-            dy = dy + 1;
+        for (dx, dy, dz) in neighborhood() {
+            around.append(self.chunk(cx + dx, cy + dy, cz + dz));
         }
         Padded.around(around)
     }
@@ -169,33 +151,9 @@ struct World {
     func lights(cx: Int64, cy: Int64, cz: Int64) -> [Vec4] {
         let size = Float32(from: chunkSize);
         let middle = Vec3(x: (Float32(from: cx) + 0.5) * size, y: (Float32(from: cy) + 0.5) * size, z: (Float32(from: cz) + 0.5) * size);
-        // Inside the chunk's box grown by the light radius.
-        let low = middle - Vec3(splat: size * 0.5 + lightRadius);
-        let high = middle + Vec3(splat: size * 0.5 + lightRadius);
         var found: [(Float32, Vec4)] = [];
-        var dy: Int64 = -1;
-        while dy <= 1 {
-            var dz: Int64 = -1;
-            while dz <= 1 {
-                var dx: Int64 = -1;
-                while dx <= 1 {
-                    let (nx, ny, nz) = (cx + dx, cy + dy, cz + dz);
-                    let neighbor = self.chunk(nx, ny, nz);
-                    for i in neighbor.emitters {
-                        let p = Vec3(
-                            x: Float32(from: nx * chunkSize + i % chunkSize) + 0.5,
-                            y: Float32(from: ny * chunkSize + i / (chunkSize * chunkSize)) + 0.5,
-                            z: Float32(from: nz * chunkSize + (i / chunkSize) % chunkSize) + 0.5
-                        );
-                        if p.x >= low.x and p.y >= low.y and p.z >= low.z and p.x <= high.x and p.y <= high.y and p.z <= high.z {
-                            found.append(((p - middle).lengthSquared, p.extended(w: Block.from(neighbor.blocks(i)).glow)));
-                        }
-                    }
-                    dx = dx + 1;
-                }
-                dz = dz + 1;
-            }
-            dy = dy + 1;
+        for (dx, dy, dz) in neighborhood() {
+            found.append(contentsOf: self.lightsIn(cx + dx, cy + dy, cz + dz, near: middle, reach: size * 0.5 + lightRadius));
         }
         found.sort(by: { (a: (Float32, Vec4), b: (Float32, Vec4)) in a.0 < b.0 });
         var out: [Vec4] = [];
@@ -203,6 +161,26 @@ struct World {
             if out.count < maxLights { out.append(p); }
         }
         out
+    }
+
+    /// The glowing blocks of chunk (cx, cy, cz) within `reach` of `near`
+    /// on every axis (inside the box a light can reach from), each with its
+    /// squared distance to `near`.
+    func lightsIn(cx: Int64, cy: Int64, cz: Int64, near near: Vec3, reach reach: Float32) -> [(Float32, Vec4)] {
+        let chunk = self.chunk(cx, cy, cz);
+        var found: [(Float32, Vec4)] = [];
+        for i in chunk.emitters {
+            let p = Vec3(
+                x: Float32(from: cx * chunkSize + i % chunkSize) + 0.5,
+                y: Float32(from: cy * chunkSize + i / (chunkSize * chunkSize)) + 0.5,
+                z: Float32(from: cz * chunkSize + (i / chunkSize) % chunkSize) + 0.5
+            );
+            let d = p - near;
+            if d.x.abs() <= reach and d.y.abs() <= reach and d.z.abs() <= reach {
+                found.append((d.lengthSquared, p.extended(w: Block.from(chunk.blocks(i)).glow)));
+            }
+        }
+        found
     }
 
     /// Forget columns further than `radius` chunks from (cx, cz), moving

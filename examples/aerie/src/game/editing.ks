@@ -1,7 +1,5 @@
 module Aerie
 
-/// The blocks on the hotbar, keys 1 to 9.
-let hotbar: [Block] = [.Driftstone, .Loam, .Mossloam, .Emberwood, .Planks, .Cloudglass, .Featherthatch, .Sailcloth, .Glowcap];
 /// How far away blocks can be broken or placed.
 let reach: Float32 = 6.0;
 
@@ -20,7 +18,7 @@ extend Game {
     /// looking away or letting go starts over.
     mutating func useBlocks(dt: Float32) {
         let view = self.player.camera;
-        let target = raycast(self.world, view.position, view.forward, reach);
+        let target = self.world.raycast(view.position, view.forward, reach);
         if self.controls.breakHeld {
             match target {
                 .Some(hit) => { self.chip(hit.x, hit.y, hit.z, dt) },
@@ -36,7 +34,7 @@ extend Game {
         if self.player.overlaps(hit.beforeX, hit.beforeY, hit.beforeZ) {
             return;
         }
-        let block = hotbar(self.selected);
+        let block = self.hotbar.block;
         if self.world.setBlock(hit.beforeX, hit.beforeY, hit.beforeZ, block) {
             self.remeshAround(hit.beforeX, hit.beforeY, hit.beforeZ, light: block.emits);
         }
@@ -70,7 +68,7 @@ extend Game {
         var boxes = self.flock.models(self.seconds);
         let birds = boxes.count;
         if let .Some(b) = self.breaking {
-            boxes.append(crackBox(b.x, b.y, b.z, b.progress));
+            boxes.append(ModelBox.crack(b.x, b.y, b.z, b.progress));
         }
         (boxes, birds)
     }

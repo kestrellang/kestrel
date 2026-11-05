@@ -382,7 +382,7 @@ def main():
         "        }",
         "    }",
         "",
-        "    /// Drawn on the 24-pixel grid, so sampled crisp (see `pixelQuad`).",
+        "    /// Drawn on the 24-pixel grid, so sampled crisp (see `OverlayQuad.pixel`).",
         "    var pixelArt: Bool {",
         "        match self {",
         "            " + ", ".join(f".{n} => {'true' if n in PIXEL_ART else 'false'}" for n, _ in named),

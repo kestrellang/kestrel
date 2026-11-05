@@ -38,10 +38,8 @@ struct ByteWriter {
 
     /// The low `size` bytes of `value`.
     mutating func int(value: Int64, size size: Int64) {
-        var i: Int64 = 0;
-        while i < size {
+        for i in 0..<size {
             self.data.append(UInt8(from: (value >> (i * 8)) & 255));
-            i = i + 1;
         }
     }
 
@@ -62,14 +60,12 @@ struct ByteReader {
 
     /// `size` bytes as an unsigned value; 8 bytes round-trip any Int64.
     mutating func int(size size: Int64) -> Int64? {
-        if self.at + size > self.data.count {
+        guard self.at + size <= self.data.count else {
             return .None;
         }
         var value: Int64 = 0;
-        var i: Int64 = 0;
-        while i < size {
+        for i in 0..<size {
             value = value | (Int64(from: self.data(self.at + i)) << (i * 8));
-            i = i + 1;
         }
         self.at = self.at + size;
         .Some(value)
@@ -81,56 +77,61 @@ struct ByteReader {
     }
 }
 
-/// `state` as uncompressed bytes.
-func encodeSave(state: SaveState) -> [UInt8] {
-    var out = ByteWriter();
-    out.int(saveMagic, size: 4);
-    out.int(saveVersion, size: 4);
-    out.int(state.seed, size: 8);
-    out.float(state.timeOfDay);
-    out.float(state.position.x);
-    out.float(state.position.y);
-    out.float(state.position.z);
-    out.float(state.yaw);
-    out.float(state.pitch);
-    out.int(state.chunks.count, size: 4);
-    for (key, chunk) in state.chunks {
-        out.int(key, size: 8);
-        for id in chunk.blocks {
-            out.int(Int64(from: id), size: 2);
+extend SaveState {
+    /// The state as uncompressed bytes.
+    func encode() -> [UInt8] {
+        var out = ByteWriter();
+        out.int(saveMagic, size: 4);
+        out.int(saveVersion, size: 4);
+        out.int(self.seed, size: 8);
+        out.float(self.timeOfDay);
+        out.float(self.position.x);
+        out.float(self.position.y);
+        out.float(self.position.z);
+        out.float(self.yaw);
+        out.float(self.pitch);
+        out.int(self.chunks.count, size: 4);
+        for (key, chunk) in self.chunks {
+            out.int(key, size: 8);
+            for id in chunk.blocks {
+                out.int(Int64(from: id), size: 2);
+            }
         }
+        out.data
     }
-    let bytes = out.data;
-    bytes
+
+    /// The save in `data`, or `None` if it's truncated, from another
+    /// version, or not a save at all.
+    static func decode(data: [UInt8]) -> SaveState? {
+        var input = ByteReader(data);
+        let magic = (try input.int(size: 4));
+        let version = (try input.int(size: 4));
+        guard magic == saveMagic and version == saveVersion else {
+            return .None;
+        }
+        let seed = (try input.int(size: 8));
+        let timeOfDay = (try input.float());
+        let position = Vec3(x: (try input.float()), y: (try input.float()), z: (try input.float()));
+        let yaw = (try input.float());
+        let pitch = (try input.float());
+        let count = (try input.int(size: 4));
+        var chunks: [(Int64, Chunk)] = [];
+        for _ in 0..<count {
+            let key = (try input.int(size: 8));
+            chunks.append((key, Chunk((try input.chunkBlocks()))));
+        }
+        .Some(SaveState(seed: seed, timeOfDay: timeOfDay, position: position, yaw: yaw, pitch: pitch, chunks: chunks))
+    }
 }
 
-/// The save in `data`, or `None` if it's truncated, from another version,
-/// or not a save at all.
-func decodeSave(data: [UInt8]) -> SaveState? {
-    var input = ByteReader(data);
-    let magic = (try input.int(size: 4));
-    let version = (try input.int(size: 4));
-    if magic != saveMagic or version != saveVersion {
-        return .None;
-    }
-    let seed = (try input.int(size: 8));
-    let timeOfDay = (try input.float());
-    let position = Vec3(x: (try input.float()), y: (try input.float()), z: (try input.float()));
-    let yaw = (try input.float());
-    let pitch = (try input.float());
-    let count = (try input.int(size: 4));
-    var chunks: [(Int64, Chunk)] = [];
-    var c: Int64 = 0;
-    while c < count {
-        let key = (try input.int(size: 8));
+extend ByteReader {
+    /// One chunk's block ids, or `None` if the data runs out.
+    mutating func chunkBlocks() -> [UInt16]? {
         var blocks: [UInt16] = [];
-        var i: Int64 = 0;
-        while i < chunkSize * chunkSize * chunkSize {
-            blocks.append(UInt16(from: (try input.int(size: 2))));
-            i = i + 1;
+        blocks.reserveCapacity(chunkSize * chunkSize * chunkSize);
+        for _ in 0..<(chunkSize * chunkSize * chunkSize) {
+            blocks.append(UInt16(from: (try self.int(size: 2))));
         }
-        chunks.append((key, Chunk(blocks)));
-        c = c + 1;
+        .Some(blocks)
     }
-    .Some(SaveState(seed: seed, timeOfDay: timeOfDay, position: position, yaw: yaw, pitch: pitch, chunks: chunks))
 }

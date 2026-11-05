@@ -71,14 +71,8 @@ struct Generator {
         let side = chunkSize + 2 * treeReach;
         var out: [Column] = [];
         out.reserveCapacity(side * side);
-        var z: Int64 = 0;
-        while z < side {
-            var x: Int64 = 0;
-            while x < side {
-                out.append(self.column(cx * chunkSize + x - treeReach, cz * chunkSize + z - treeReach));
-                x = x + 1;
-            }
-            z = z + 1;
+        for i in 0..<(side * side) {
+            out.append(self.column(cx * chunkSize + i % side - treeReach, cz * chunkSize + i / side - treeReach));
         }
         out
     }
@@ -86,187 +80,158 @@ struct Generator {
     /// The blocks of chunk (cx, cy, cz), given `columns(cx, cz)`.
     func chunk(cx: Int64, cy: Int64, cz: Int64, columns: [Column]) -> Chunk {
         var out = Chunk();
-        let x0 = cx * chunkSize;
-        let y0 = cy * chunkSize;
-        let z0 = cz * chunkSize;
+        let (x0, y0, z0) = (cx * chunkSize, cy * chunkSize, cz * chunkSize);
         let side = chunkSize + 2 * treeReach;
-        var lz: Int64 = 0;
-        while lz < chunkSize {
-            var lx: Int64 = 0;
-            while lx < chunkSize {
-                let c = columns((lz + treeReach) * side + lx + treeReach);
-                out = fillColumn(out, c, lx, lz, x0 + lx, y0, z0 + lz);
-                lx = lx + 1;
-            }
-            lz = lz + 1;
+        for i in 0..<(chunkSize * chunkSize) {
+            let (lx, lz) = (i % chunkSize, i / chunkSize);
+            let c = columns((lz + treeReach) * side + lx + treeReach);
+            out.fill(c, lx: lx, lz: lz, x: x0 + lx, y0: y0, z: z0 + lz);
         }
         // Trees and lair towers that reach into this chunk, clipped to it.
         // Both are decided per column, so one on a chunk's edge comes out
         // the same from both sides.
-        var z: Int64 = 0;
-        while z < side {
-            var x: Int64 = 0;
-            while x < side {
-                let c = columns(z * side + x);
-                let (wx, wz) = (x0 + x - treeReach, z0 + z - treeReach);
-                let height = treeHeight(wx, wz, c);
-                if height > 0 {
-                    out = placeTree(out, x - treeReach, c.top + 1 - y0, z - treeReach, height, lair: c.lair, wx: wx, wz: wz);
-                }
-                let tower = towerHeight(wx, wz, c);
-                if tower > 0 {
-                    out = placeTower(out, x - treeReach, c.top + 1 - y0, z - treeReach, tower);
-                }
-                x = x + 1;
+        for i in 0..<(side * side) {
+            let (x, z) = (i % side, i / side);
+            let c = columns(i);
+            let (wx, wz) = (x0 + x - treeReach, z0 + z - treeReach);
+            let (lx, ly, lz) = (x - treeReach, c.top + 1 - y0, z - treeReach);
+            let height = c.treeHeight(wx, wz);
+            if height > 0 {
+                out.growTree(lx, ly, lz, height: height, lair: c.lair, wx: wx, wz: wz);
             }
-            z = z + 1;
+            let tower = c.towerHeight(wx, wz);
+            if tower > 0 {
+                out.buildTower(lx, ly, lz, height: tower);
+            }
         }
         out
+    }
+
+    /// A spot a little above and behind the island nearest the origin.
+    func spawnPoint() -> Vec3 {
+        for step in 0..<500 {
+            let r = step * 4;
+            let c = self.column(r, r / 2);
+            if c.top >= c.bottom and c.strength > 0.6 {
+                return Vec3(x: Float32(from: r) + 0.5, y: Float32(from: c.top + 2), z: Float32(from: r / 2) + 0.5);
+            }
+        }
+        Vec3(x: 0.0, y: 90.0, z: 0.0)
     }
 }
 
 /// How far a tree's leaves, or a tower's walls, reach from its column.
 let treeReach: Int64 = 3;
 
-/// Island blocks for one column of a chunk whose floor is at `y0`.
-func fillColumn(chunk: Chunk, c: Column, lx: Int64, lz: Int64, x: Int64, y0: Int64, z: Int64) -> Chunk {
-    var out = chunk;
-    if c.top < c.bottom or c.top < y0 or c.bottom >= y0 + chunkSize {
-        return out;
+extend Column {
+    var isLand: Bool { self.top >= self.bottom }
+
+    /// The island's block `depth` below its surface at (x, y, z). Dreamy
+    /// islands are moss over loam over driftstone, veined with skyiron;
+    /// lairs are scorched soil, cracked with the odd molten pool, over
+    /// ashrock.
+    func block(depth: Int64, x: Int64, y: Int64, z: Int64) -> Block {
+        if self.lair {
+            if depth > 0 { return .Ashrock; }
+            return if scatter(x, y, z) < 6 { .Embercore } else { .Scorchloam };
+        }
+        if depth == 0 { return .Mossloam; }
+        if depth <= 3 { return .Loam; }
+        if depth > 8 and scatter(x, y, z) < 30 { return .Skyiron; }
+        .Driftstone
     }
-    var y = if c.bottom > y0 { c.bottom } else { y0 };
-    let last = if c.top < y0 + chunkSize - 1 { c.top } else { y0 + chunkSize - 1 };
-    while y <= last {
-        let block = if c.lair { lairBlock(c.top - y, x, y, z) } else { dreamBlock(c.top - y, x, y, z) };
-        out.put(lx, y - y0, lz, block);
-        y = y + 1;
+
+    /// The height of the tree growing on this column at (x, z), or 0 for
+    /// none.
+    func treeHeight(x: Int64, z: Int64) -> Int64 {
+        guard self.isLand and self.strength >= 0.35 else {
+            return 0;
+        }
+        let h = scatter(x, 0, z);
+        if h >= 3 { 0 } else { 4 + h % 3 }
     }
-    // A glowing plant here and there: glowcaps, or hexblooms in a lair.
-    if c.top + 1 <= y0 + chunkSize - 1 and c.top + 1 >= y0 and scatter(x, c.top + 1, z) < 8 {
-        out.put(lx, c.top + 1 - y0, lz, if c.lair { .Hexbloom } else { .Glowcap });
+
+    /// The height of the lair tower standing on this column at (x, z), or
+    /// 0 for none: rare, and only well inland on a lair island.
+    func towerHeight(x: Int64, z: Int64) -> Int64 {
+        guard self.lair and self.isLand and self.strength >= 0.7 else {
+            return 0;
+        }
+        let h = scatter(x, 1, z);
+        if h >= 2 { 0 } else { 10 + scatter(x, 2, z) % 7 }
     }
-    out
 }
 
-/// A dreamy island's block `depth` below its surface at (x, y, z).
-func dreamBlock(depth: Int64, x: Int64, y: Int64, z: Int64) -> Block {
-    if depth == 0 { return .Mossloam; }
-    if depth <= 3 { return .Loam; }
-    if depth > 8 and scatter(x, y, z) < 30 { return .Skyiron; }
-    .Driftstone
-}
-
-/// A lair island's block `depth` below its surface: scorched soil cracked
-/// with the odd molten pool, over ashrock.
-func lairBlock(depth: Int64, x: Int64, y: Int64, z: Int64) -> Block {
-    if depth == 0 {
-        return if scatter(x, y, z) < 6 { .Embercore } else { .Scorchloam };
+extend Chunk {
+    /// Island blocks for `column`, at chunk-local (lx, lz) and world (x,
+    /// z), in this chunk whose floor is at world height `y0`.
+    mutating func fill(c: Column, lx lx: Int64, lz lz: Int64, x x: Int64, y0 y0: Int64, z z: Int64) {
+        guard c.isLand and c.top >= y0 and c.bottom < y0 + chunkSize else {
+            return;
+        }
+        let first = if c.bottom > y0 { c.bottom } else { y0 };
+        let last = if c.top < y0 + chunkSize - 1 { c.top } else { y0 + chunkSize - 1 };
+        for y in first..<(last + 1) {
+            self.put(lx, y - y0, lz, c.block(c.top - y, x, y, z));
+        }
+        // A glowing plant here and there: glowcaps, or hexblooms in a lair.
+        let above = c.top + 1;
+        if above < y0 + chunkSize and above >= y0 and scatter(x, above, z) < 8 {
+            self.put(lx, above - y0, lz, if c.lair { .Hexbloom } else { .Glowcap });
+        }
     }
-    .Ashrock
-}
 
-/// Whether an emberwood tree grows on column (x, z), and its height.
-func treeHeight(x: Int64, z: Int64, column: Column) -> Int64 {
-    if column.top < column.bottom or column.strength < 0.35 {
-        return 0;
-    }
-    let h = scatter(x, 0, z);
-    if h >= 3 { 0 } else { 4 + h % 3 }
-}
-
-/// A tree with its trunk's base at chunk-local (x, y, z); `put` clips
-/// whatever falls outside the chunk. Dreamy islands grow emberwood in
-/// blossom; lairs grow deadwood with sparse, ragged gloomleaf, decided per
-/// leaf from its world position (wx, wz are the trunk's).
-func placeTree(chunk: Chunk, x: Int64, y: Int64, z: Int64, height: Int64, lair lair: Bool, wx wx: Int64, wz wz: Int64) -> Chunk {
-    var out = chunk;
-    let crown = y + height;
-    // Leaves first, so the trunk overwrites the middle.
-    var dy: Int64 = -2;
-    while dy <= 2 {
-        var dz: Int64 = -3;
-        while dz <= 3 {
-            var dx: Int64 = -3;
-            while dx <= 3 {
-                if dx * dx + dz * dz + dy * dy * 2 <= 10 {
-                    if not lair {
-                        out.put(x + dx, crown + dy, z + dz, .Emberleaf);
-                    } else if scatter(wx + dx, crown + dy, wz + dz) < 450 {
-                        out.put(x + dx, crown + dy, z + dz, .Gloomleaf);
-                    }
-                }
-                dx = dx + 1;
+    /// A tree with its trunk's base at chunk-local (x, y, z); `put` clips
+    /// whatever falls outside the chunk. Dreamy islands grow emberwood in
+    /// blossom; lairs grow deadwood with sparse, ragged gloomleaf, decided
+    /// per leaf from its world position (wx, wz are the trunk's).
+    mutating func growTree(x: Int64, y: Int64, z: Int64, height height: Int64, lair lair: Bool, wx wx: Int64, wz wz: Int64) {
+        let crown = y + height;
+        // Leaves first, in a squashed ball, so the trunk overwrites the
+        // middle: 7 across, 5 high.
+        for i in 0..<(7 * 7 * 5) {
+            let (dx, dz, dy) = (i % 7 - 3, i / 7 % 7 - 3, i / 49 - 2);
+            let inBall = dx * dx + dz * dz + dy * dy * 2 <= 10;
+            if inBall and (not lair or scatter(wx + dx, crown + dy, wz + dz) < 450) {
+                self.put(x + dx, crown + dy, z + dz, if lair { .Gloomleaf } else { .Emberleaf });
             }
-            dz = dz + 1;
         }
-        dy = dy + 1;
+        for t in y..<(crown + 1) {
+            self.put(x, t, z, if lair { .Deadwood } else { .Emberwood });
+        }
     }
-    var t = y;
-    while t <= crown {
-        out.put(x, t, z, if lair { .Deadwood } else { .Emberwood });
-        t = t + 1;
-    }
-    out
-}
 
-/// Whether a lair tower stands on column (x, z), and its height: rare, and
-/// only well inland on a lair island.
-func towerHeight(x: Int64, z: Int64, column: Column) -> Int64 {
-    if not column.lair or column.top < column.bottom or column.strength < 0.7 {
-        return 0;
-    }
-    let h = scatter(x, 1, z);
-    if h >= 2 { 0 } else { 10 + scatter(x, 2, z) % 7 }
-}
-
-/// A dark brick spire, 5x5 and hollow, with its floor at chunk-local
-/// (x, y, z) and `height` storeys: windows glowing with embercore, a
-/// battlement with corner spikes, and a brazier burning on its roof.
-func placeTower(chunk: Chunk, x: Int64, y: Int64, z: Int64, height: Int64) -> Chunk {
-    var out = chunk;
-    var dy: Int64 = 0;
-    while dy <= height + 1 {
-        var dz: Int64 = -2;
-        while dz <= 2 {
-            var dx: Int64 = -2;
-            while dx <= 2 {
-                let edge = dx.abs() == 2 or dz.abs() == 2;
-                let corner = dx.abs() == 2 and dz.abs() == 2;
-                let block: Block? = if dy == height + 1 {
-                    // Spikes on the corners above the battlement.
-                    if corner { .Some(.Darkbrick) } else { .None }
-                } else if dy == height {
-                    // Battlement: every other wall block, and the brazier.
-                    if dx == 0 and dz == 0 { .Some(.Embercore) } else if edge and (dx + dz) % 2 == 0 { .Some(.Darkbrick) } else { .None }
-                } else if dy == 0 or dy == height - 1 {
-                    .Some(.Darkbrick)
-                } else if edge {
-                    // Windows in the middle of each wall every four storeys.
-                    if dy % 4 == 2 and (dx == 0 or dz == 0) { .Some(.Embercore) } else { .Some(.Darkbrick) }
-                } else {
-                    .Some(.Air)
-                };
-                if let .Some(b) = block {
-                    out.put(x + dx, y + dy, z + dz, b);
-                }
-                dx = dx + 1;
+    /// A dark brick spire, 5x5 and hollow, with its floor at chunk-local
+    /// (x, y, z) and `height` storeys.
+    mutating func buildTower(x: Int64, y: Int64, z: Int64, height height: Int64) {
+        for i in 0..<(5 * 5 * (height + 2)) {
+            let (dx, dz, dy) = (i % 5 - 2, i / 5 % 5 - 2, i / 25);
+            if let .Some(block) = towerBlock(dx, dy, dz, height: height) {
+                self.put(x + dx, y + dy, z + dz, block);
             }
-            dz = dz + 1;
         }
-        dy = dy + 1;
     }
-    out
 }
 
-/// A spot a little above and behind the island nearest the origin.
-func spawnPoint(generator: Generator) -> Vec3 {
-    var r: Int64 = 0;
-    while r < 2000 {
-        let c = generator.column(r, r / 2);
-        if c.top >= c.bottom and c.strength > 0.6 {
-            return Vec3(x: Float32(from: r) + 0.5, y: Float32(from: c.top + 2), z: Float32(from: r / 2) + 0.5);
-        }
-        r = r + 4;
+/// What a tower `height` storeys tall has at (dx, dy, dz) from the middle
+/// of its floor, or `None` to leave what's there: windows glowing with
+/// embercore, a battlement with corner spikes, and a brazier burning on
+/// its roof.
+func towerBlock(dx: Int64, dy: Int64, dz: Int64, height height: Int64) -> Block? {
+    let edge = dx.abs() == 2 or dz.abs() == 2;
+    let corner = dx.abs() == 2 and dz.abs() == 2;
+    // Spikes on the corners above the battlement.
+    if dy == height + 1 {
+        return if corner { .Some(.Darkbrick) } else { .None };
     }
-    Vec3(x: 0.0, y: 90.0, z: 0.0)
+    // The battlement: every other wall block, and the brazier.
+    if dy == height {
+        if dx == 0 and dz == 0 { return .Some(.Embercore); }
+        return if edge and (dx + dz) % 2 == 0 { .Some(.Darkbrick) } else { .None };
+    }
+    // Floors at the bottom and under the roof; hollow inside.
+    if dy == 0 or dy == height - 1 { return .Some(.Darkbrick); }
+    if not edge { return .Some(.Air); }
+    // Windows in the middle of each wall every four storeys.
+    if dy % 4 == 2 and (dx == 0 or dz == 0) { .Some(.Embercore) } else { .Some(.Darkbrick) }
 }
