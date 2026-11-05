@@ -902,7 +902,7 @@ public type OptionalTypeOperator[T] = Optional[T];
 /// when such a value is bound (`let f = b.first`): the binding owns a copy
 /// and stops borrowing the place, the same way binding a `&T` copies.
 @builtin(.DecayOptionalRef)
-public func decayOptionalRef[T](optional: Optional[&T]) -> Optional[T] {
+func decayOptionalRef[T](optional: Optional[&T]) -> Optional[T] {
     match optional {
         .Some(r) => .Some(r),
         .None => .None

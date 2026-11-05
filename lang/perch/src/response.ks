@@ -54,7 +54,7 @@ extend Response {
             hdrs.setValue("Content-Type", ct)
         }
         let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        let body = String(utf8: bytes.asSlice()) ?? String();
         Response(StatusCode.ok(), hdrs, body)
     }
 
@@ -65,7 +65,7 @@ extend Response {
             hdrs.setValue("Content-Type", ct)
         }
         let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        let body = String(utf8: bytes.asSlice()) ?? String();
         Response(StatusCode.created(), hdrs, body)
     }
 
@@ -76,7 +76,7 @@ extend Response {
             hdrs.setValue("Content-Type", ct)
         }
         let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        let body = String(utf8: bytes.asSlice()) ?? String();
         Response(StatusCode.badRequest(), hdrs, body)
     }
 
@@ -87,7 +87,7 @@ extend Response {
             hdrs.setValue("Content-Type", ct)
         }
         let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        let body = String(utf8: bytes.asSlice()) ?? String();
         Response(StatusCode.conflict(), hdrs, body)
     }
 
@@ -98,7 +98,7 @@ extend Response {
             hdrs.setValue("Content-Type", ct)
         }
         let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        let body = String(utf8: bytes.asSlice()) ?? String();
         Response(StatusCode.unprocessableEntity(), hdrs, body)
     }
 
@@ -109,7 +109,7 @@ extend Response {
             hdrs.setValue("Content-Type", ct)
         }
         let bytes = content.toBytes();
-        let body = String(fromUtf8: bytes.asSlice()) ?? String();
+        let body = String(utf8: bytes.asSlice()) ?? String();
         Response(StatusCode(code), hdrs, body)
     }
 }

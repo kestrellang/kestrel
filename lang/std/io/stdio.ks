@@ -62,7 +62,7 @@ public struct Stdout: Writable {
     public init() {}
 
     /// Calls `write(2)` on `STDOUT_FILENO`.
-    public mutating func write(from buf: UnsafeSlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(libc.STDOUT(), buf.pointer, buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -95,7 +95,7 @@ public struct Stderr: Writable {
     public init() {}
 
     /// Calls `write(2)` on `STDERR_FILENO`.
-    public mutating func write(from buf: UnsafeSlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(libc.STDERR(), buf.pointer, buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -217,7 +217,7 @@ public func readLine() -> Result[Optional[String], IoError] {
         }
     }
 
-    .Ok(.Some(String(fromUtf8Lossy: bytes)))
+    .Ok(.Some(String(utf8Lossy: bytes)))
 }
 
 /// Writes `message` to stdout, flushes, then reads a line from stdin.

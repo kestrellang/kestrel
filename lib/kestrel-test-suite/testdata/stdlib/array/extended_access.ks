@@ -60,11 +60,11 @@ module Test
             let clampEmpty = emptyArr(clamped: 0);
             if clampEmpty.isSome() { return 18 }
 
-            // Test isValidIndex
-            if arr.isValidIndex(0) == false { return 19 }
-            if arr.isValidIndex(2) == false { return 20 }
-            if arr.isValidIndex(3) { return 21 }
-            if arr.isValidIndex(-1) { return 22 }
+            // Test isValid(index:)
+            if arr.isValid(index: 0) == false { return 19 }
+            if arr.isValid(index: 2) == false { return 20 }
+            if arr.isValid(index: 3) { return 21 }
+            if arr.isValid(index: -1) { return 22 }
 
             // Test unchecked subscript setter
             arr(unchecked: 0) = 99;

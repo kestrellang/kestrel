@@ -206,7 +206,7 @@ public struct BytesView: Iterable, Cloneable {
     /// from a sub-view cut mid-codepoint) is replaced with U+FFFD,
     /// so the result is always a well-formed `String`.
     public func toString() -> String {
-        String(fromUtf8Lossy: UnsafeSlice(
+        String(utf8Lossy: UnsafeSlice(
             pointer: self.slice._rawPtr().offset(by: self.slice.start),
             count: self.length
         ))

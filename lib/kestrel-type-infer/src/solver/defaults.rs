@@ -159,7 +159,7 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
         ) {
             // An unsized pointee (`&Slice[T]`) has no value to copy out, so a
             // binding keeps the reference. A generic argument still takes the
-            // pointee (`String(fromUtf8: buf(0..<n))` binds `S = Slice[UInt8]`):
+            // pointee (`String(utf8: buf(0..<n))` binds `S = Slice[UInt8]`):
             // it is passed by borrow, so nothing is copied.
             // A binding whose pointee is still unresolved (`let s = xs(0..<2)`
             // before the literal defaults pick the range's type) waits: it

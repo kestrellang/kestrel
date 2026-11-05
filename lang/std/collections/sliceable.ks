@@ -714,11 +714,11 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [10, 20, 30].isValidIndex(2);   // true
-    /// [10, 20, 30].isValidIndex(3);   // false
-    /// [10, 20, 30].isValidIndex(-1);  // false
+    /// [10, 20, 30].isValid(index: 2);   // true
+    /// [10, 20, 30].isValid(index: 3);   // false
+    /// [10, 20, 30].isValid(index: -1);  // false
     /// ```
-    public func isValidIndex(index: Int64) -> Bool {
+    public func isValid(index index: Int64) -> Bool {
         index >= 0 and index < self.asUnsafeSlice().count
     }
 

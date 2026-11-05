@@ -245,8 +245,8 @@ public struct PasswordHash {
         saltChars.append(contentsOf: chars.asUnsafeSlice().prefix(22));
         var keyChars: [UInt8] = [];
         keyChars.append(contentsOf: chars.asUnsafeSlice().drop(first: 22));
-        guard let some saltBytes = Bcrypt.decode(String(fromUtf8Unchecked: saltChars), 16) else { return null; }
-        guard let some keyBytes = Bcrypt.decode(String(fromUtf8Unchecked: keyChars), 23) else { return null; }
+        guard let some saltBytes = Bcrypt.decode(String(utf8Unchecked: saltChars), 16) else { return null; }
+        guard let some keyBytes = Bcrypt.decode(String(utf8Unchecked: keyChars), 23) else { return null; }
         guard let some salt = Salt(bytes: saltBytes) else { return null; }
         PasswordHash(scheme: .Bcrypt(cost: cost), salt: salt, derivedKey: SymmetricKey(bytes: keyBytes))
     }

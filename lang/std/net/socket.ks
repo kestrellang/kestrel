@@ -171,7 +171,7 @@ public struct TcpStream: Readable, Writable, Cloneable {
     ///
     /// Returns `Err(IoError)` from the captured `errno` if `send`
     /// returns `-1`.
-    public mutating func write(from buf: UnsafeSlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.send(self.conn.value, buf.pointer, buf.count, 0);
         if n < 0 {
             return .Err(IoError.last())

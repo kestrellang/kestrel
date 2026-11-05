@@ -149,7 +149,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
         throw SwoopError.invalidResponse("no header terminator found")
     }
 
-    let headerStr = String(fromUtf8: buf(0..<headerEnd)) ?? String();
+    let headerStr = String(utf8: buf(0..<headerEnd)) ?? String();
 
     let hdrSlice = headerStr.asSlice();
     guard let .Some(firstLineEnd) = headerStr.firstIndex(of: "\r\n") else {
@@ -222,7 +222,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
         rawBuf
     };
 
-    let bodyStr = String(fromUtf8: bodyBuf.asSlice()) ?? String();
+    let bodyStr = String(utf8: bodyBuf.asSlice()) ?? String();
 
     .Ok(Response(StatusCode(statusCode), headers, bodyStr, bodyBuf))
 }
@@ -244,10 +244,7 @@ func sendAllBytes[S](mutating stream: S, buf: [UInt8]) -> () throws IoError wher
     let len = buf.count;
     var sent: Int64 = 0;
     while sent < len {
-        let ptr = buf.asPointer().offset(by: sent);
-        let remaining = len - sent;
-        let slice = UnsafeSlice(pointer: ptr, count: remaining);
-        let n = try stream.write(from: slice);
+        let n = try stream.write(from: buf(sent..));
         if n == 0 {
             throw IoError(code: 32)
         }

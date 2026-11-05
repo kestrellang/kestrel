@@ -135,7 +135,7 @@ public struct TlsStream: Readable, Writable, Cloneable {
         .Ok(Int64(from: n))
     }
 
-    public mutating func write(from buf: UnsafeSlice[UInt8]) -> Int64 throws IoError {
+    public mutating func write(from buf: Slice[UInt8]) -> Int64 throws IoError {
         let ssl = self.conn.value.ssl;
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
         let n = Int32(raw: libc_SSL_write(

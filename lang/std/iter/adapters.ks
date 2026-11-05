@@ -794,7 +794,7 @@ public struct StepByIterator[I]: Iterator where I: Iterator, I: not Copyable, I:
 /// Wraps a `DoubleEndedIterator` to walk it back to front. The
 /// `Iterator` conformance is added by the `extend ReversedIterator[I]:
 /// DoubleEndedIterator` block in `iterator.ks`. Returned by
-/// `DoubleEndedIterator.rev()`.
+/// `DoubleEndedIterator.reversed()`.
 ///
 /// # Representation
 ///
@@ -805,7 +805,7 @@ public struct ReversedIterator[I]: Iterator where I: DoubleEndedIterator, I: Ite
     internal var inner: I
 
     /// @name From Source
-    /// Builds a `ReversedIterator`. Prefer `inner.rev()`.
+    /// Builds a `ReversedIterator`. Prefer `inner.reversed()`.
     public init(consuming inner inner: I) {
         self.inner = inner;
     }

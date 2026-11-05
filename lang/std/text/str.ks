@@ -987,9 +987,9 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "42".pad(leading: 5, with: '0');  // "00042"
+    /// "42".padded(leading: 5, with: '0');  // "00042"
     /// ```
-    public func pad(leading length: Int64, with char: Char) -> String {
+    public func padded(leading length: Int64, with char: Char) -> String {
         let currentLen = self.chars.count;
         if currentLen >= length {
             return self.toOwned()
@@ -1013,9 +1013,9 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "42".pad(trailing: 5, with: '.');  // "42..."
+    /// "42".padded(trailing: 5, with: '.');  // "42..."
     /// ```
-    public func pad(trailing length: Int64, with char: Char) -> String {
+    public func padded(trailing length: Int64, with char: Char) -> String {
         let currentLen = self.chars.count;
         if currentLen >= length {
             return self.toOwned()

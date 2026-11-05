@@ -23,7 +23,7 @@ func count(s: &some Sliceable[Int64] and not Static and not Copyable and not Siz
 func main() -> Int64 {
     var xs: Array[Int64] = [1, 2, 3, 4, 5];
     let bytes: Array[UInt8] = [104, 105, 33];
-    let str = String(fromUtf8: bytes(0..<2)) ?? String();
+    let str = String(utf8: bytes(0..<2)) ?? String();
     var ys: Array[Int64] = [9, 9];
     ys.append(contentsOf: xs(3..));
     print("sum \(total(xs(1..<4))) \(total(xs(..<2))) utf8 \(str) ");

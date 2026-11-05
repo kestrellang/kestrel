@@ -226,7 +226,7 @@ struct ArrayStorage[T]: Cloneable {
 /// `count` is the number of elements; `capacity` is how many can fit
 /// without reallocating. When `append` would exceed capacity the buffer
 /// doubles (starting from 4 if previously zero). Use
-/// `reserveCapacity(minimumCapacity:)` to pre-allocate, and
+/// `reserveCapacity(_:)` to pre-allocate, and
 /// `shrinkToFit()` to release excess.
 ///
 /// # Representation
@@ -551,7 +551,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     // PROPERTIES
     // ========================================================================
 
-    // count, isEmpty, indices, asPointer, isValidIndex: provided by extend Sliceable[T]
+    // count, isEmpty, indices, asPointer, isValid(index:): provided by extend Sliceable[T]
 
     /// The number of elements the buffer can hold without reallocating.
     public var capacity: Int64 { self.cap() }
