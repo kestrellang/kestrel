@@ -26,6 +26,10 @@ struct Controls {
     var savePressed: Bool = false
     /// -1 or 1 to shrink or grow the view distance by a chunk, else 0.
     var viewStep: Int64 = 0
+    /// Mouse movement since the last frame, in pixels, and wheel clicks.
+    var mouseX: Float32 = 0.0
+    var mouseY: Float32 = 0.0
+    var wheel: Int64 = 0
 
     init() {}
 
@@ -70,6 +74,9 @@ struct Controls {
         self.timePressed = false;
         self.savePressed = false;
         self.viewStep = 0;
+        self.mouseX = 0.0;
+        self.mouseY = 0.0;
+        self.wheel = 0;
     }
 }
 
@@ -148,159 +155,10 @@ let dayLength: Float32 = 480.0;
 
 /// The blocks on the hotbar, keys 1 to 9.
 let hotbar: [Block] = [.Driftstone, .Loam, .Mossloam, .Emberwood, .Planks, .Cloudglass, .Featherthatch, .Sailcloth, .Glowcap];
+/// Radians of turn per pixel of mouse movement.
+let mouseSensitivity: Float32 = 0.0025;
 /// How far away blocks can be broken or placed.
 let reach: Float32 = 6.0;
-
-/// A plain overlay rectangle.
-func rect(x: Float32, y: Float32, w: Float32, h: Float32, color: Vec4) -> OverlayQuad {
-    OverlayQuad(rect: Vec4(x: x, y: y, z: w, w: h), color: color, tile: Vec4(x: -1.0, y: 0.0, z: 0.0, w: 0.0))
-}
-
-/// A four-pointed twinkle centered on (x, y), `size` pixels from tip to tip.
-func sparkle(x: Float32, y: Float32, size: Float32, color: Vec4) -> [OverlayQuad] {
-    let arm = (size * 0.5).floor();
-    let t = (size / 8.0).ceil();
-    [
-        rect(x - arm, y - t * 0.5, arm * 2.0, t, color),
-        rect(x - t * 0.5, y - arm, t, arm * 2.0, color),
-        rect(x - t * 1.5, y - t * 1.5, t * 3.0, t * 3.0, color)
-    ]
-}
-
-/// `text` shading from `color` to `bottom`, ringed by `rim` so pale
-/// letters stay readable over a pale sky.
-func outlinedQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, color color: Vec4, bottom bottom: Vec4, rim rim: Vec4) -> [OverlayQuad] {
-    var quads: [OverlayQuad] = [];
-    let edge = (scale * 0.3).ceil();
-    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
-        let outline = textQuads(text, x: x + dx * edge, y: y + dy * edge, scale: scale, color: rim, bottom: rim);
-        quads.append(contentsOf: outline);
-    }
-    let lit = textQuads(text, x: x, y: y, scale: scale, color: color, bottom: bottom);
-    quads.append(contentsOf: lit);
-    quads
-}
-
-/// The crosshair, the hotbar and the selected block's name for a `width`
-/// by `height` screen, `time` seconds in.
-func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool, time: Float32) -> [OverlayQuad] {
-    var quads: [OverlayQuad] = [];
-    let w = Float32(from: width);
-    let h = Float32(from: height);
-    // Crosshair, on a soft indigo outline; it widens while gliding.
-    let arm: Float32 = if gliding { 13.0 } else { 8.0 };
-    let (cx, cy) = ((w * 0.5).floor(), (h * 0.5).floor());
-    let outline = Vec4(x: 0.14, y: 0.14, z: 0.26, w: 0.45);
-    let white = Vec4(x: 1.0, y: 0.97, z: 1.0, w: 0.9);
-    quads.append(rect(cx - arm - 1.0, cy - 2.0, arm * 2.0 + 2.0, 4.0, outline));
-    quads.append(rect(cx - 2.0, cy - arm - 1.0, 4.0, arm * 2.0 + 2.0, outline));
-    quads.append(rect(cx - arm, cy - 1.0, arm * 2.0, 2.0, white));
-    quads.append(rect(cx - 1.0, cy - arm, 2.0, arm * 2.0, white));
-
-    // Hotbar: a frosted slate tray of slots. The selected slot rises,
-    // ringed in gold, and its block's name floats above.
-    let slot: Float32 = 56.0;
-    let gap: Float32 = 6.0;
-    let count = Float32(from: hotbar.count);
-    let total = count * slot + (count - 1.0) * gap;
-    let left = ((w - total) * 0.5).floor();
-    let top = h - slot - 20.0;
-    quads.append(rect(left - 10.0, top - 10.0, total + 20.0, slot + 20.0, Vec4(x: 0.26, y: 0.28, z: 0.42, w: 0.45)));
-    quads.append(rect(left - 10.0, top - 10.0, total + 20.0, 2.0, Vec4(x: 0.92, y: 0.94, z: 1.0, w: 0.45)));
-    quads.append(rect(left - 10.0, top + slot + 8.0, total + 20.0, 2.0, Vec4(x: 0.14, y: 0.14, z: 0.24, w: 0.45)));
-    var i: Int64 = 0;
-    while i < hotbar.count {
-        let chosen = i == selected;
-        let x = left + Float32(from: i) * (slot + gap);
-        let y = if chosen { top - 6.0 } else { top };
-        if chosen {
-            let pulse = 0.8 + 0.2 * (time * 4.0).sin();
-            quads.append(rect(x - 4.0, y - 4.0, slot + 8.0, slot + 8.0, Vec4(x: 1.0, y: 0.86, z: 0.56, w: pulse)));
-            quads.append(rect(x - 2.0, y - 2.0, slot + 4.0, slot + 4.0, Vec4(x: 1.0, y: 0.97, z: 0.88, w: 1.0)));
-        }
-        let face = if chosen { Vec4(x: 0.96, y: 0.96, z: 1.0, w: 0.95) } else { Vec4(x: 0.90, y: 0.92, z: 1.0, w: 0.28) };
-        quads.append(rect(x, y, slot, slot, face));
-        // A recess for the block, a little shadow under it, then the block.
-        quads.append(rect(x + 3.0, y + 3.0, slot - 6.0, slot - 6.0, Vec4(x: 0.16, y: 0.18, z: 0.30, w: 0.30)));
-        let icon = slot - 20.0;
-        quads.append(rect(x + 12.0, y + 13.0, icon, icon, Vec4(x: 0.10, y: 0.10, z: 0.20, w: 0.45)));
-        let layer = Float32(from: Int64(from: hotbar(i).layer(.South).index));
-        quads.append(OverlayQuad(
-            rect: Vec4(x: x + 10.0, y: y + 10.0, z: icon, w: icon),
-            color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: 1.0),
-            tile: Vec4(x: layer, y: 0.0, z: 0.0, w: 0.0)
-        ));
-        let number = labelQuads("\(i + 1)", x: x + 4.0, y: y + 4.0, scale: 2.0, color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: if chosen { 0.95 } else { 0.7 }));
-        quads.append(contentsOf: number);
-        i = i + 1;
-    }
-    let name = hotbar(selected).name;
-    let nameScale: Float32 = 3.0;
-    let label = gradientLabelQuads(name, x: ((w - textWidth(name, nameScale)) * 0.5).floor(), y: top - 38.0, scale: nameScale,
-        color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: 0.95), bottom: Vec4(x: 0.84, y: 0.90, z: 1.0, w: 0.95));
-    quads.append(contentsOf: label);
-    quads
-}
-
-/// The title screen's overlay, `time` seconds in: a bobbing name
-/// with twinkles around it, a pulsing prompt and the controls.
-func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [OverlayQuad] {
-    let w = Float32(from: width);
-    let h = Float32(from: height);
-    var quads: [OverlayQuad] = [];
-    // A soft indigo veil behind the text, so pastel letters read over a
-    // pastel sky: stacked bands, densest in the middle, instead of a box.
-    let middle = h * 0.47;
-    var band: Int64 = 0;
-    while band < 8 {
-        let reach = h * 0.30 * (1.0 - Float32(from: band) / 8.0);
-        quads.append(rect(0.0, (middle - reach).floor(), w, (reach * 2.0).floor(), Vec4(x: 0.20, y: 0.22, z: 0.40, w: 0.05)));
-        band = band + 1;
-    }
-    let titleScale = (w / 60.0).floor().clamp(10.0, 24.0);
-    let bob = (time * 1.3).sin() * titleScale * 0.3;
-    let titleTop = (h * 0.24 + bob).floor();
-    let title = "AERIE";
-    let titleLeft = ((w - textWidth(title, titleScale)) * 0.5).floor();
-    // A deep extrusion and an outline give the letters a puffy depth.
-    let deep = Vec4(x: 0.30, y: 0.34, z: 0.56, w: 0.85);
-    let depth = textQuads(title, x: titleLeft + titleScale * 0.6, y: titleTop + titleScale * 0.9, scale: titleScale, color: deep, bottom: Vec4(x: 0.20, y: 0.22, z: 0.40, w: 0.85));
-    quads.append(contentsOf: depth);
-    let name = outlinedQuads(title, x: titleLeft, y: titleTop, scale: titleScale,
-        color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: 1.0), bottom: Vec4(x: 0.78, y: 0.88, z: 1.0, w: 1.0), rim: Vec4(x: 0.36, y: 0.42, z: 0.66, w: 0.95));
-    quads.append(contentsOf: name);
-    // Twinkles around the name, each on its own beat.
-    let titleWidth = textWidth(title, titleScale);
-    let spots: [(Float32, Float32, Float32)] = [(-0.08, 0.1, 0.0), (1.06, 0.2, 1.7), (0.18, -0.25, 3.1), (0.86, -0.2, 4.4), (0.5, 1.35, 2.3), (-0.04, 1.1, 5.2), (1.1, 1.0, 0.9)];
-    for (fx, fy, phase) in spots {
-        let beat = ((time * 2.2 + phase).sin() * 0.5 + 0.5);
-        let size = (titleScale * (0.6 + beat * 0.9)).floor();
-        let glints = sparkle(titleLeft + titleWidth * fx, titleTop + titleScale * 5.0 * fy, size, Vec4(x: 1.0, y: 0.95, z: 1.0, w: 0.35 + beat * 0.6));
-        quads.append(contentsOf: glints);
-    }
-    let subtitle = "ISLANDS ABOVE THE CLOUD SEA";
-    let subScale = (titleScale * 0.22).floor().clamp(3.0, 6.0);
-    let sub = outlinedQuads(subtitle, x: ((w - textWidth(subtitle, subScale)) * 0.5).floor(), y: (h * 0.24 + titleScale * 6.5).floor(), scale: subScale,
-        color: Vec4(x: 0.90, y: 0.95, z: 1.0, w: 1.0), bottom: Vec4(x: 0.80, y: 0.84, z: 1.0, w: 1.0), rim: Vec4(x: 0.22, y: 0.26, z: 0.46, w: 0.85));
-    quads.append(contentsOf: sub);
-    // Bound first: an `if` directly inside an array literal crashes the
-    // compiler (array_literal_if_expression_owned_element.ks).
-    let prompt = if resumed { "PRESS ENTER TO CONTINUE" } else { "PRESS ENTER TO START A NEW WORLD" };
-    let promptScale = subScale + 1.0;
-    let glow = 0.75 + 0.25 * (time * 3.0).sin();
-    let promptTop = (h * 0.66).floor();
-    let pressed = outlinedQuads(prompt, x: ((w - textWidth(prompt, promptScale)) * 0.5).floor(), y: promptTop, scale: promptScale,
-        color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: glow), bottom: Vec4(x: 1.0, y: 0.94, z: 0.80, w: glow), rim: Vec4(x: 0.22, y: 0.26, z: 0.46, w: glow * 0.9));
-    quads.append(contentsOf: pressed);
-    // The controls, on a frosted strip along the bottom.
-    let controls = "WASD MOVE  ARROWS LOOK  SPACE JUMP/GLIDE  Q BREAK  E PLACE  P SAVE  -/= VIEW";
-    let controlScale: Float32 = 3.0;
-    quads.append(rect(0.0, h - 48.0, w, 48.0, Vec4(x: 0.20, y: 0.22, z: 0.36, w: 0.45)));
-    quads.append(rect(0.0, h - 48.0, w, 2.0, Vec4(x: 0.92, y: 0.94, z: 1.0, w: 0.40)));
-    let help = labelQuads(controls, x: ((w - textWidth(controls, controlScale)) * 0.5).floor(), y: h - 32.0, scale: controlScale, color: Vec4(x: 0.96, y: 0.94, z: 1.0, w: 0.9));
-    quads.append(contentsOf: help);
-    quads
-}
 
 /// How many chunk columns around the player are drawn, by default and at
 /// most; `AERIE_VIEW` and the - and = keys pick within the range.
@@ -337,6 +195,9 @@ struct Game: not Copyable {
     var noticeTime: Float32
     /// How many chunk columns around the player are loaded and drawn.
     var viewRadius: Int64
+    /// Whether the mouse should be captured for mouse look; the driver
+    /// applies it to the window.
+    var mouseCaptured: Bool
 
     /// A new world from `seed`, or the one in `save`.
     init(consuming renderer: Renderer, seed seed: Int64, save save: SaveState?) {
@@ -347,6 +208,7 @@ struct Game: not Copyable {
             .None => defaultViewRadius
         };
         self.viewRadius = view.clamp(minViewRadius, maxViewRadius);
+        self.mouseCaptured = false;
         self.renderer.viewDistance = Float32(from: self.viewRadius * chunkSize);
         let worldSeed = match save { .Some(s) => s.seed, .None => seed };
         self.world = World(worldSeed);
@@ -393,8 +255,31 @@ struct Game: not Copyable {
     mutating func event(event: Event) {
         match event {
             .Quit => { self.running = false },
-            .KeyDown(.Escape) => { self.running = false },
-            .KeyDown(.Return) => { self.onTitle = false },
+            // Escape frees a captured mouse first, then saves and quits.
+            .KeyDown(.Escape) => {
+                if self.mouseCaptured { self.mouseCaptured = false } else { self.running = false }
+            },
+            .KeyDown(.Return) => { self.start() },
+            // A click starts play or recaptures the mouse; once captured,
+            // left breaks and right places.
+            .MouseDown(button, _, _) => {
+                if self.onTitle or not self.mouseCaptured {
+                    self.start();
+                } else {
+                    match button {
+                        .Left => { self.controls.breakPressed = true },
+                        .Right => { self.controls.placePressed = true },
+                        _ => {}
+                    }
+                }
+            },
+            .MouseMove(_, _, dx, dy) => {
+                if self.mouseCaptured {
+                    self.controls.mouseX = self.controls.mouseX + Float32(from: dx);
+                    self.controls.mouseY = self.controls.mouseY + Float32(from: dy);
+                }
+            },
+            .MouseWheel(clicks) => { self.controls.wheel = self.controls.wheel + clicks },
             .KeyDown(key) => { self.controls.setKey(key, held: true) },
             .KeyUp(key) => { self.controls.setKey(key, held: false) },
             _ => {}
@@ -528,9 +413,13 @@ struct Game: not Copyable {
         } else {
             self.player.camera
         };
-        var overlay = if self.onTitle { titleScreen(w, h, self.resumed, self.seconds) } else { hud(w, h, self.selected, self.player.gliding, self.seconds) };
+        var overlay = if self.onTitle {
+            titleScreen(w, h, self.resumed, self.seconds)
+        } else {
+            hud(w, h, self.selected, self.player.gliding, self.seconds, captured: self.mouseCaptured)
+        };
         if self.noticeTime > 0.0 {
-            let notice = labelQuads(self.notice, x: 16.0, y: 16.0, scale: 4.0, color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: 0.9));
+            let notice = noticeQuads(self.notice, fade: self.noticeTime.clamp(0.0, 1.0));
             overlay.append(contentsOf: notice);
         }
         try self.renderer.draw(view.view(), eye: view.position, light: daylight(self.timeOfDay), time: self.seconds, overlay: overlay);
@@ -545,6 +434,11 @@ struct Game: not Copyable {
         if self.controls.slotPressed >= 0 {
             self.selected = self.controls.slotPressed;
         }
+        // The wheel steps through the hotbar, wrapping at the ends; away
+        // from you moves left.
+        let slots = hotbar.count;
+        self.selected = ((self.selected - self.controls.wheel) % slots + slots) % slots;
+        self.player.look(yaw: self.controls.mouseX * mouseSensitivity, pitch: -self.controls.mouseY * mouseSensitivity);
         // Physics in steps of at most 50 ms, so a slow frame can't launch
         // the player through the floor; a long stall is dropped. Unloaded
         // chunks count as solid, so the player waits, frozen, until the
@@ -574,7 +468,13 @@ struct Game: not Copyable {
     mutating func setViewRadius(radius: Int64) {
         self.viewRadius = radius.clamp(minViewRadius, maxViewRadius);
         self.renderer.viewDistance = Float32(from: self.viewRadius * chunkSize);
-        self.notify("VIEW DISTANCE \(self.viewRadius) CHUNKS");
+        self.notify("View distance: \(self.viewRadius) chunks");
+    }
+
+    /// Leave the title screen and capture the mouse.
+    mutating func start() {
+        self.onTitle = false;
+        self.mouseCaptured = true;
     }
 
     /// Show `text` in the corner for a few seconds.

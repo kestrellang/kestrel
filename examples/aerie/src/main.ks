@@ -120,7 +120,7 @@ func run() -> Int64 {
     }
     var window = SDLWindow(title: "Aerie", width: 1280, height: 720);
     let (width, height) = window.drawableSize;
-    let renderer = match Renderer.create(window.nativeWindow, width: width, height: height, atlasPath: "assets/blocks.png") {
+    let renderer = match Renderer.create(window.nativeWindow, width: width, height: height) {
         .Ok(r) => r,
         .Err(e) => {
             println("wgpu error: \(e.message)");
@@ -136,6 +136,7 @@ func run() -> Int64 {
     };
     var last = unsafe monotonicMs();
     var frames = 0;
+    var captured = false;
     while game.running {
         while let .Some(event) = window.pollEvent() {
             match event {
@@ -145,6 +146,10 @@ func run() -> Int64 {
                 },
                 _ => { game.event(event) }
             }
+        }
+        if game.mouseCaptured != captured {
+            captured = game.mouseCaptured;
+            window.setRelativeMouseMode(captured);
         }
         let now = unsafe monotonicMs();
         let dt = Float32(from: now - last) / 1000.0;
@@ -159,7 +164,7 @@ func run() -> Int64 {
         if game.wantsSave {
             game.wantsSave = false;
             if let .Some(p) = path {
-                game.notify(if writeSave(p, game.save()) { "WORLD SAVED" } else { "COULDN'T SAVE" });
+                game.notify(if writeSave(p, game.save()) { "World saved" } else { "Couldn't save" });
             }
         }
         frames = frames + 1;

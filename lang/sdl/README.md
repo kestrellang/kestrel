@@ -27,8 +27,10 @@ sdl = { path = "../../lang/sdl" }
   - `drawableSize: (Int64, Int64)` - the size in pixels, which can exceed the window size on high-DPI screens
   - `nativeWindow: NativeWindow` - the platform handles to make a GPU surface from
   - `pollEvent() -> Event?` (mutating), `delay(ms: Milliseconds)`
+  - `setRelativeMouseMode(enabled: Bool)` - capture the mouse for mouse look (pointer lock in a browser)
 - **NativeWindow** - `.Xlib(display, window)`, `.Wayland(display, surface)`, `.MetalLayer(layer)`, `.Windows(hinstance, hwnd)`, or `.Unsupported`
-- **Event** - `.Quit`, `.KeyDown(Key)`, `.KeyUp(Key)`, `.MouseDown(x, y)`, `.MouseMove(x, y)`, `.Resized(width, height)`
+- **Event** - `.Quit`, `.KeyDown(Key)`, `.KeyUp(Key)`, `.MouseDown(MouseButton, x, y)`, `.MouseUp(MouseButton, x, y)`, `.MouseMove(x, y, dx, dy)`, `.MouseWheel(clicks)`, `.Resized(width, height)`
+- **MouseButton** - `.Left`, `.Middle`, `.Right`, or `.Other(Int64)`
 - **Key** - letters, digits, F1-F12, arrows, modifiers, navigation, punctuation, and `.Other(Int32)` for unmapped scancodes
 - **Color** - `r/g/b/a` fields plus presets: `Color.black()`, `.white()`, `.red()`, `.green()`, `.blue()`, `.yellow()`, `.cyan()`, `.magenta()`
 - **Rectangle** - `x`, `y`, `width`, `height`

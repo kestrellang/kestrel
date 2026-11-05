@@ -76,8 +76,10 @@ func lightViewProjection(sun: Vec3, center: Vec3) -> Mat4 {
 }
 
 /// One overlay rectangle: `rect` is (x, y, width, height) in pixels from
-/// the top left; `tile.x` is an atlas layer to draw tinted by `color`, or
-/// negative for a plain `color` fill.
+/// the top left. `tile.x` is a layer to draw tinted by `color`, or negative
+/// for a plain `color` fill; `tile.y` picks the block atlas (0) or the
+/// interface atlas (1); `tile.z` to `tile.w` is the span of the layer's
+/// width to show, so a sprite can be drawn in stretched slices.
 struct OverlayQuad: FFISafe {
     var rect: Vec4
     var color: Vec4
@@ -132,13 +134,14 @@ func boxVisible(planes: [Vec4], low: Vec3, high: Vec3) -> Bool {
     true
 }
 
-/// The block atlas: `assets/blocks.png` is a column of 16x16 tiles, and
-/// each becomes one layer of a mipmapped 2D array texture, so tiles never
-/// bleed into each other at a distance.
-func loadAtlas(device: Device, path: String) -> Texture {
+/// An atlas image that is a column of `size`-pixel square tiles, as a
+/// mipmapped 2D array texture with one layer per tile, so tiles never
+/// bleed into each other at a distance. Used for the block atlas
+/// (`assets/blocks.png`, 16x16) and the interface atlas (`assets/ui.png`).
+func loadAtlas(device: Device, path: String, size tileSize: Int64) -> Texture {
     let image = match Image[Rgba8].load(path: path) {
         .Ok(i) => i,
-        .Err(e) => fatalError("can't load the block atlas \(path): \(e.message)")
+        .Err(e) => fatalError("can't load the atlas \(path): \(e.message)")
     };
     let layers = image.height / tileSize;
     let texture = device.createTexture(
@@ -148,7 +151,7 @@ func loadAtlas(device: Device, path: String) -> Texture {
         usage: [.TextureBinding, .CopyDst, .RenderAttachment],
         layers: layers,
         mipLevels: Texture.fullMipChain(width: tileSize, height: tileSize),
-        label: "block atlas"
+        label: path
     );
     let tileBytes = tileSize * tileSize * 4;
     var layer: Int64 = 0;
@@ -213,7 +216,7 @@ struct Renderer: not Copyable {
         device.createTexture(width: width, height: height, format: format, usage: [.RenderAttachment], sampleCount: samples, label: "color")
     }
 
-    static func create(window: NativeWindow, width width: Int64, height height: Int64, atlasPath atlasPath: String) -> Renderer throws WgpuError {
+    static func create(window: NativeWindow, width width: Int64, height height: Int64) -> Renderer throws WgpuError {
         let instance = Instance();
         let surface = instance.createSurface(surfaceSource(window));
         let adapter = try instance.requestAdapter(compatibleWith: surface);
@@ -222,7 +225,11 @@ struct Renderer: not Copyable {
         let format = surface.preferredFormat(adapter);
         surface.configure(device: device, format: format, width: width, height: height);
 
-        let atlas = loadAtlas(device, atlasPath);
+        let atlas = loadAtlas(device, "assets/blocks.png", size: tileSize);
+        let ui = loadAtlas(device, "assets/ui.png", size: uiCellSize);
+        let uiView = ui.createView(range: ViewRange(dimension: .Some(.D2Array)), label: "interface atlas");
+        // Smooth: the interface atlas holds font glyphs and drawn sprites.
+        let uiSampler = device.createSampler(filter: .Linear, mipmapFilter: .Some(.Linear), label: "interface atlas");
         let atlasView = atlas.createView(range: ViewRange(dimension: .Some(.D2Array)), label: "block atlas");
         // Nearest within a mip level keeps the pixel-art edges; linear
         // between levels keeps distant ground from sparkling.
@@ -310,7 +317,9 @@ struct Renderer: not Copyable {
         let overlayLayout = device.createPipelineLayout(groups: [[
             BindingLayout.uniformBuffer(0, visibility: [.Vertex]),
             BindingLayout.texture(1, visibility: [.Fragment], dimension: .D2Array),
-            BindingLayout.sampler(2, visibility: [.Fragment])
+            BindingLayout.sampler(2, visibility: [.Fragment]),
+            BindingLayout.texture(3, visibility: [.Fragment], dimension: .D2Array),
+            BindingLayout.sampler(4, visibility: [.Fragment])
         ]], label: "overlay");
         let overlayModule = device.createShaderModule(wgsl: overlayShader, label: "overlay");
         let overlayPipeline = device.createRenderPipeline(
@@ -325,7 +334,7 @@ struct Renderer: not Copyable {
         let screenBuffer = device.createBuffer(size: 16, usage: [.Uniform, .CopyDst], label: "screen");
         let overlayGroup = device.createBindGroup(
             layout: overlayLayout.bindGroupLayout(0),
-            entries: [screenBuffer.binding(0), atlasView.binding(1), atlasSampler.binding(2)]
+            entries: [screenBuffer.binding(0), atlasView.binding(1), atlasSampler.binding(2), uiView.binding(3), uiSampler.binding(4)]
         );
         let overlayBuffer = device.createBuffer(size: maxOverlayQuads * overlayQuadSize, usage: [.Vertex, .CopyDst], label: "overlay");
         let depth = Renderer.makeDepth(device, width, height);
