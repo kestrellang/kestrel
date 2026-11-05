@@ -198,6 +198,9 @@ struct Game: not Copyable {
     /// Whether the mouse should be captured for mouse look; the driver
     /// applies it to the window.
     var mouseCaptured: Bool
+    /// How much the lairs' crimson sky shows, easing toward how deep in
+    /// lair country the camera is.
+    var gloom: Float32
 
     /// A new world from `seed`, or the one in `save`.
     init(consuming renderer: Renderer, seed seed: Int64, save save: SaveState?) {
@@ -209,6 +212,7 @@ struct Game: not Copyable {
         };
         self.viewRadius = view.clamp(minViewRadius, maxViewRadius);
         self.mouseCaptured = false;
+        self.gloom = 0.0;
         self.renderer.viewDistance = Float32(from: self.viewRadius * chunkSize);
         let worldSeed = match save { .Some(s) => s.seed, .None => seed };
         self.world = World(worldSeed);
@@ -413,6 +417,9 @@ struct Game: not Copyable {
         } else {
             self.player.camera
         };
+        // Ease the sky toward the realm underfoot, over a couple of seconds.
+        let target = self.world.generator.lairness(view.position.x, view.position.z);
+        self.gloom = self.gloom + (target - self.gloom) * (dt * 0.6).clamp(0.0, 1.0);
         var overlay = if self.onTitle {
             titleScreen(w, h, self.resumed, self.seconds)
         } else {
@@ -422,7 +429,7 @@ struct Game: not Copyable {
             let notice = noticeQuads(self.notice, fade: self.noticeTime.clamp(0.0, 1.0));
             overlay.append(contentsOf: notice);
         }
-        try self.renderer.draw(view.view(), eye: view.position, light: daylight(self.timeOfDay), time: self.seconds, overlay: overlay);
+        try self.renderer.draw(view.view(), eye: view.position, light: daylight(self.timeOfDay, gloom: self.gloom), time: self.seconds, overlay: overlay);
         .Ok(())
     }
 

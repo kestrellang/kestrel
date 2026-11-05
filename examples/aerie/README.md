@@ -65,6 +65,15 @@ lowercase, the hotbar is a frosted tray of rounded slots holding little 3D
 blocks, and the title screen has an outlined, bobbing name with twinkles.
 The mouse looks around once captured (click, or Enter on the title).
 
+About half the sky belongs to evil lairs. A low-frequency theme noise
+(`Generator.lairness`) splits the world into dream and lair regions; lair
+islands grow scorched loam over ashrock with spiked keels, dead trees with
+sparse gloomleaf, hexblooms in place of glowcaps, embercore veins that glow
+red, and the odd darkbrick spire with ember windows and a brazier on top.
+As you fly into a lair the sky, sun, clouds and ambient light ease toward
+a crimson dusk (`Game.gloom`, carried to the shaders in `sunColor.w`). The
+border follows the noise, not the islands, so an island can straddle it.
+
 Controls: WASD to walk, the mouse or arrow keys to look, Space to jump (hold to glide),
 left click or Q to break, right click or E to place, the wheel or 1 to 9 for the hotbar, T to skip time, P to save, - and = to shrink or grow the view distance, F to fly (Space and Left
 Shift to rise and sink), Escape to free the mouse (and again to save and quit), Enter or a click to leave the title screen. `AERIE_FRAMES=n` quits after n

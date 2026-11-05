@@ -39,6 +39,8 @@ struct Daylight {
     var sunColor: Vec3
     var ambient: Vec3
     var night: Float32
+    /// How much of the lairs' crimson gloom is mixed in, 0 to 1.
+    var gloom: Float32
 }
 
 /// `a` moved toward `b` by `t`, 0 to 1.
@@ -48,8 +50,9 @@ func blend(a: Vec3, b: Vec3, t: Float32) -> Vec3 {
 
 /// `phase` runs 0 to 1 over a day: 0 is sunrise, 0.25 noon, 0.5 sunset,
 /// 0.75 midnight. The palette is soft pastel: a pale rose-cream horizon
-/// under baby blue by day, apricot at dusk, deep indigo at night.
-func daylight(phase: Float32) -> Daylight {
+/// under baby blue by day, apricot at dusk, deep indigo at night. Over the
+/// lairs, `gloom` (0 to 1) turns it smoky crimson under a red sun.
+func daylight(phase: Float32, gloom gloom: Float32) -> Daylight {
     let angle = phase * Float32.pi * 2.0;
     // Up is +y; the sun crosses the sky from east to west, tilted south.
     let up = angle.sin();
@@ -67,7 +70,17 @@ func daylight(phase: Float32) -> Daylight {
     let sunColor = blend(Vec3(x: 1.00, y: 0.92, z: 0.90), Vec3(x: 1.00, y: 0.70, z: 0.52), dusk);
     // Cool sky light, so shadows read blue-grey.
     let ambient = blend(Vec3(x: 0.12, y: 0.13, z: 0.26), Vec3(x: 0.54, y: 0.54, z: 0.64), day);
-    Daylight(sun: sun, strength: day, horizon: horizon, zenith: zenith, sunColor: sunColor, ambient: ambient, night: 1.0 - day)
+    // The lairs' palette, mixed in by `gloom`.
+    let g = gloom * 0.9;
+    let lairHorizon = blend(Vec3(x: 0.12, y: 0.03, z: 0.06), Vec3(x: 0.40, y: 0.11, z: 0.12), day);
+    let lairZenith = blend(Vec3(x: 0.03, y: 0.01, z: 0.05), Vec3(x: 0.10, y: 0.04, z: 0.10), day);
+    let lairAmbient = blend(Vec3(x: 0.14, y: 0.06, z: 0.10), Vec3(x: 0.36, y: 0.22, z: 0.28), day);
+    Daylight(
+        sun: sun, strength: day,
+        horizon: blend(horizon, lairHorizon, g), zenith: blend(zenith, lairZenith, g),
+        sunColor: blend(sunColor, Vec3(x: 1.0, y: 0.50, z: 0.32), g), ambient: blend(ambient, lairAmbient, g),
+        night: 1.0 - day, gloom: gloom
+    )
 }
 
 /// The sun's view: an orthographic box around `center`, looking along
@@ -373,7 +386,7 @@ struct Renderer: not Copyable {
     }
 
     /// Draw `faces` for chunk (cx, cy, cz), replacing any it had.
-    mutating func upload(cx: Int64, cy: Int64, cz: Int64, faces: ChunkFaces, lights: [Vec3]) {
+    mutating func upload(cx: Int64, cy: Int64, cz: Int64, faces: ChunkFaces, lights: [Vec4]) {
         let key = chunkKey(cx, cy, cz);
         self.remove(where: { (k: Int64, x: Int64, z: Int64) in k == key });
         if faces.count == 0 {
@@ -381,10 +394,11 @@ struct Renderer: not Copyable {
         }
         let size = Float32(from: chunkSize);
         // The shader's `ChunkData`: the origin with the light count in w,
-        // then a fixed-size array of light positions.
+        // then a fixed-size array of light positions, each with its color
+        // (`Block.glow`) in w.
         var data = [Vec4(x: Float32(from: cx) * size, y: Float32(from: cy) * size, z: Float32(from: cz) * size, w: Float32(from: lights.count))];
         for light in lights {
-            data.append(light.extended(w: 1.0));
+            data.append(light);
         }
         while data.count < maxLights + 1 {
             data.append(Vec4(x: 0.0, y: 0.0, z: 0.0, w: 0.0));
@@ -432,7 +446,7 @@ struct Renderer: not Copyable {
             fog: light.horizon.extended(w: self.viewDistance),
             sky: light.ambient.extended(w: light.night),
             zenith: light.zenith.extended(w: 0.0),
-            sunColor: light.sunColor.extended(w: 0.0)
+            sunColor: light.sunColor.extended(w: light.gloom)
         ));
         let shadowPlanes = frustumPlanes(lightViewProj);
         let planes = frustumPlanes(viewProj);

@@ -1,6 +1,6 @@
 module Aerie
 
-import linalg.(Vec3)
+import linalg.(Vec3, Vec4)
 
 /// How far a glowing block's light reaches, in blocks.
 let lightRadius: Float32 = 10.0;
@@ -164,14 +164,15 @@ struct World {
     }
 
     /// Up to `maxLights` glowing blocks that can reach chunk (cx, cy, cz),
-    /// nearest its middle first, as world positions of their centers.
-    func lights(cx: Int64, cy: Int64, cz: Int64) -> [Vec3] {
+    /// nearest its middle first, as world positions of their centers with
+    /// their `Block.glow` color in w.
+    func lights(cx: Int64, cy: Int64, cz: Int64) -> [Vec4] {
         let size = Float32(from: chunkSize);
         let middle = Vec3(x: (Float32(from: cx) + 0.5) * size, y: (Float32(from: cy) + 0.5) * size, z: (Float32(from: cz) + 0.5) * size);
         // Inside the chunk's box grown by the light radius.
         let low = middle - Vec3(splat: size * 0.5 + lightRadius);
         let high = middle + Vec3(splat: size * 0.5 + lightRadius);
-        var found: [(Float32, Vec3)] = [];
+        var found: [(Float32, Vec4)] = [];
         var dy: Int64 = -1;
         while dy <= 1 {
             var dz: Int64 = -1;
@@ -179,14 +180,15 @@ struct World {
                 var dx: Int64 = -1;
                 while dx <= 1 {
                     let (nx, ny, nz) = (cx + dx, cy + dy, cz + dz);
-                    for i in self.chunk(nx, ny, nz).emitters {
+                    let neighbor = self.chunk(nx, ny, nz);
+                    for i in neighbor.emitters {
                         let p = Vec3(
                             x: Float32(from: nx * chunkSize + i % chunkSize) + 0.5,
                             y: Float32(from: ny * chunkSize + i / (chunkSize * chunkSize)) + 0.5,
                             z: Float32(from: nz * chunkSize + (i / chunkSize) % chunkSize) + 0.5
                         );
                         if p.x >= low.x and p.y >= low.y and p.z >= low.z and p.x <= high.x and p.y <= high.y and p.z <= high.z {
-                            found.append(((p - middle).lengthSquared, p));
+                            found.append(((p - middle).lengthSquared, p.extended(w: Block.from(neighbor.blocks(i)).glow)));
                         }
                     }
                     dx = dx + 1;
@@ -195,8 +197,8 @@ struct World {
             }
             dy = dy + 1;
         }
-        found.sort(by: { (a: (Float32, Vec3), b: (Float32, Vec3)) in a.0 < b.0 });
-        var out: [Vec3] = [];
+        found.sort(by: { (a: (Float32, Vec4), b: (Float32, Vec4)) in a.0 < b.0 });
+        var out: [Vec4] = [];
         for (_, p) in found {
             if out.count < maxLights { out.append(p); }
         }

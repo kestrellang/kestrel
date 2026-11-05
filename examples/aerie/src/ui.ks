@@ -34,7 +34,7 @@ func uiIconLayer(id: UInt16) -> Float32 {
 func uiGlyphLayer(byte: UInt8) -> Float32 {
     let code = Int64(from: byte);
     let printable = if code >= 32 and code <= 126 { code } else { 63 };
-    Float32(from: printable - 32 + 16)
+    Float32(from: printable - 32 + 23)
 }
 
 /// How far the pen moves after a byte, in font pixels at `uiFontSize`.

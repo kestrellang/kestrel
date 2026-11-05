@@ -24,7 +24,8 @@ SUPER = 4  # supersampling for smooth edges
 
 # Block atlas layers (see `Layer` in src/blocks.ks).
 DRIFTSTONE, LOAM, MOSS_TOP, MOSS_SIDE, BARK, RINGS, EMBERLEAF, CLOUDGLASS, \
-    SKYIRON, GLOWCAP, SAILCLOTH, FEATHERTHATCH, PLANKS = range(13)
+    SKYIRON, GLOWCAP, SAILCLOTH, FEATHERTHATCH, PLANKS, ASHROCK, SCORCH_TOP, \
+    SCORCH_SIDE, DARKBRICK, EMBERCORE, DEADWOOD, DEAD_RINGS, GLOOMLEAF, HEXBLOOM = range(22)
 
 # Icons in block id order (id 1 first): (top, side) layers, or one layer
 # for a plant drawn flat.
@@ -40,6 +41,13 @@ ICONS = [
     ("Sailcloth", (SAILCLOTH, SAILCLOTH)),
     ("Featherthatch", (FEATHERTHATCH, FEATHERTHATCH)),
     ("Planks", (PLANKS, PLANKS)),
+    ("Ashrock", (ASHROCK, ASHROCK)),
+    ("Scorchloam", (SCORCH_TOP, SCORCH_SIDE)),
+    ("Darkbrick", (DARKBRICK, DARKBRICK)),
+    ("Embercore", (EMBERCORE, EMBERCORE)),
+    ("Deadwood", (DEAD_RINGS, DEADWOOD)),
+    ("Gloomleaf", (GLOOMLEAF, GLOOMLEAF)),
+    ("Hexbloom", HEXBLOOM),
 ]
 
 
