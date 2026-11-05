@@ -24,7 +24,9 @@ func patternRaw(layout: PixelLayout, width: Int64, height: Int64) -> RawImage {
         }
     }
     raw.planes(0) = plane;
-    raw
+    // Through a binding: see `subscript_assign_then_return_array`.
+    let out = raw;
+    out
 }
 
 func sameBytes(a: RawImage, b: RawImage) -> Bool {

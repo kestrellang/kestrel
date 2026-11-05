@@ -25,7 +25,7 @@ public struct Crc32 {
     public var value: UInt32 { !self.state }
 
     /// Feeds more bytes into the checksum.
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         let data = bytes.asUnsafeSlice();
         var crc = self.state;
         for i in 0..<data.count {
@@ -36,7 +36,7 @@ public struct Crc32 {
     }
 
     /// The CRC-32 of `bytes` in one call.
-    public static func checksum[S](bytes: S) -> UInt32 where S: Slice[UInt8], S: not Static {
+    public static func checksum[S](bytes: &S) -> UInt32 where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         var crc = Crc32();
         crc.update(bytes);
         crc.value
@@ -80,7 +80,7 @@ public struct Adler32 {
     public var value: UInt32 { (self.b << 16) | self.a }
 
     /// Feeds more bytes into the checksum.
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         let data = bytes.asUnsafeSlice();
         var a = self.a;
         var b = self.b;
@@ -103,7 +103,7 @@ public struct Adler32 {
     }
 
     /// The Adler-32 of `bytes` in one call.
-    public static func checksum[S](bytes: S) -> UInt32 where S: Slice[UInt8], S: not Static {
+    public static func checksum[S](bytes: &S) -> UInt32 where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         var adler = Adler32();
         adler.update(bytes);
         adler.value

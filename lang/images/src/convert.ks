@@ -402,31 +402,31 @@ struct PixelCodec {
 
     func readSample(p: Pointer[UInt8], channel: Int64) -> Float32 {
         let at = p.offset(by: channel * self.sampleBytes);
-        if self.sampleBytes == 1 { return unitFrom8(at.read()); }
+        if self.sampleBytes == 1 { return unsafe unitFrom8(at.read()); }
         if self.sampleBytes == 2 {
-            let bits = UInt16(from: at.read()) | (UInt16(from: at.offset(by: 1).read()) << 8);
+            let bits = unsafe (UInt16(from: at.read()) | (UInt16(from: at.offset(by: 1).read()) << 8));
             if self.isFloat { return halfToFloat(bits); }
             return unitFrom16(bits);
         }
-        let bits = UInt32(from: at.read()) | (UInt32(from: at.offset(by: 1).read()) << 8) | (UInt32(from: at.offset(by: 2).read()) << 16) | (UInt32(from: at.offset(by: 3).read()) << 24);
+        let bits = unsafe (UInt32(from: at.read()) | (UInt32(from: at.offset(by: 1).read()) << 8) | (UInt32(from: at.offset(by: 2).read()) << 16) | (UInt32(from: at.offset(by: 3).read()) << 24));
         Float32(bitPattern: bits)
     }
 
     func writeSample(p: Pointer[UInt8], channel: Int64, value: Float32) {
         let at = p.offset(by: channel * self.sampleBytes);
-        if self.sampleBytes == 1 { at.write(to8(value)); return; }
+        if self.sampleBytes == 1 { unsafe at.write(to8(value)); return; }
         if self.sampleBytes == 2 {
             var bits = to16(value);
             if self.isFloat { bits = floatToHalf(value); }
-            at.write(UInt8(from: bits));
-            at.offset(by: 1).write(UInt8(from: bits >> 8));
+            unsafe at.write(UInt8(from: bits));
+            unsafe at.offset(by: 1).write(UInt8(from: bits >> 8));
             return;
         }
         let bits = value.bitPattern;
-        at.write(UInt8(from: bits));
-        at.offset(by: 1).write(UInt8(from: bits >> 8));
-        at.offset(by: 2).write(UInt8(from: bits >> 16));
-        at.offset(by: 3).write(UInt8(from: bits >> 24));
+        unsafe at.write(UInt8(from: bits));
+        unsafe at.offset(by: 1).write(UInt8(from: bits >> 8));
+        unsafe at.offset(by: 2).write(UInt8(from: bits >> 16));
+        unsafe at.offset(by: 3).write(UInt8(from: bits >> 24));
     }
 
     func read(p: Pointer[UInt8]) -> RgbaF32 {

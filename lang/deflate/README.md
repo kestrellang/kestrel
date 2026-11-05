@@ -47,7 +47,7 @@ compressed.append(contentsOf: encoder.finish());
 | **Crc32**, **Adler32** | Checksums, incremental `update` plus one-shot `checksum(data)` |
 | **DeflateError** | What went wrong decoding: truncated input, bad header, bad checksum, ... |
 
-- Byte inputs are `some Slice[UInt8]`, so arrays and slices both work.
+- Byte inputs are borrowed `Sliceable[UInt8]`s, so arrays and slices (`data(0..<n)`) both work.
 - Decoders back up to the last whole symbol when a chunk ends mid-symbol, so chunks can be split anywhere.
 - `GzipDecoder` reads concatenated members. `ZlibDecoder` and `GzipDecoder` reject trailing garbage; `Inflater.remainingInput` gives the bytes after a raw stream.
 - Encoders pick the smallest of stored, fixed-Huffman and dynamic-Huffman for each block. Compression ratio at level 6 matches zlib's closely.
