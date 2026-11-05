@@ -73,7 +73,7 @@ only covers the last quarter of it, so chunks fade in at the edge.
 
 ## Running
 
-Same requirements as `examples/wgpu_scene` (wgpu-native v27 in
+Same requirements as `examples/wgpu_scene` (wgpu-native v27.0.2.0 in
 `WGPU_NATIVE_DIR`, SDL2). Run from this folder so the atlas path resolves:
 
 ```sh
