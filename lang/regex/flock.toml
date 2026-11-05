@@ -1,0 +1,9 @@
+[package]
+name = "regex"
+version = "0.1.0"
+description = "Regular expressions in pure Kestrel, matched in linear time"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[dependencies]
