@@ -26,7 +26,8 @@ use crate::syntax::{BlockSyntax, Cond, ExprSrc, PatSrc, expr_children, first_exp
 pub(crate) fn is_place_syntax(expr: &SyntaxNode) -> bool {
     match expr.kind() {
         SyntaxKind::ExprPath | SyntaxKind::ExprTupleIndex => true,
-        SyntaxKind::ExprGrouping => first_expr(expr)
+        // `unsafe p.value += 1`: the prefix marks a region, the place is its operand.
+        SyntaxKind::ExprGrouping | SyntaxKind::ExprUnsafe => first_expr(expr)
             .map(|inner| crate::syntax::unwrap_expr(&inner))
             .is_some_and(|inner| is_place_syntax(&inner)),
         _ => false,
@@ -236,9 +237,13 @@ impl LowerCtx<'_> {
         // but only the typed layer can tell it apart from a temporary — the
         // assignment analyzer rejects the non-ref ones.
         let lhs_node = lhs.inner();
-        let call_shaped = lhs_node
-            .as_ref()
-            .is_some_and(|n| n.kind() == SyntaxKind::ExprCall);
+        let call_shaped = lhs_node.as_ref().is_some_and(|n| {
+            let n = match n.kind() {
+                SyntaxKind::ExprUnsafe => first_expr(n).map(|i| crate::syntax::unwrap_expr(&i)),
+                _ => Some(n.clone()),
+            };
+            n.is_some_and(|n| n.kind() == SyntaxKind::ExprCall)
+        });
         if !lhs_node.as_ref().is_some_and(is_place_syntax) && !call_shaped {
             self.ctx.accumulate(
                 Diagnostic::error()

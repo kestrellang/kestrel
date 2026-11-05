@@ -16,7 +16,7 @@ extend RefRange: Iterator {
 
     mutating func next() -> Optional[&Int64] {
         if self.idx >= self.count { return .None; }
-        let r = &unsafe self.base.offset(by: self.idx).value;
+        let r = unsafe &self.base.offset(by: self.idx).value;
         self.idx = self.idx + 1;
         let o: Optional[&Int64] = .Some(r);
         o

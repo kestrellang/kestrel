@@ -19,7 +19,7 @@ extend MutRefRange: Iterator {
 
     mutating func next() -> Optional[&mutating Int64] {
         if self.idx >= self.count { return .None; }
-        let r = &mutating unsafe self.base.offset(by: self.idx).mutatingValue;
+        let r = unsafe &mutating self.base.offset(by: self.idx).mutatingValue;
         self.idx = self.idx + 1;
         let o: Optional[&mutating Int64] = .Some(r);
         o
