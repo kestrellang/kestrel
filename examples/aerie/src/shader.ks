@@ -192,11 +192,10 @@ fn shade(in: VertexOut, texel: vec4f) -> vec4f {
     }
     let toEye = in.world - u.camera.xyz;
     let distance = length(toEye);
-    // A soft dreamy haze everywhere, closing in fully at the view distance
-    // so chunks fade in instead of popping.
-    let haze = 1.0 - exp(-distance * 0.0045);
-    let edge = smoothstep(u.fog.w * 0.5, u.fog.w, distance);
-    color = mix(color, skyGradient(toEye / max(distance, 0.001)), max(haze, edge));
+    // Fog only near the view distance, so chunks fade in at the edge
+    // instead of popping; everything nearer is clear.
+    let edge = smoothstep(u.fog.w * 0.75, u.fog.w, distance);
+    color = mix(color, skyGradient(toEye / max(distance, 0.001)), edge);
     return vec4f(color, texel.a);
 }
 
