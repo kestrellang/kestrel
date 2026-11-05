@@ -1,10 +1,11 @@
-// Aerie: a voxel sandbox on floating islands above a cloud sea.
+// Kestrelcraft: a voxel sandbox on floating islands above a cloud sea.
 //
-// Walk with WASD, look with the arrow keys, jump with Space and hold it
-// while falling to glide. Q breaks the block you look at, E places the
-// selected one, 1 to 9 pick from the hotbar, F toggles flying (Space and
-// Left Shift to rise and sink), T skips ahead a quarter day, P saves.
-// Escape saves and quits. The title screen waits for Enter
+// Walk with WASD, look with the mouse, jump with Space and hold it while
+// falling to glide. Hold the left button to break the block you look at,
+// right click to place the selected one; the wheel or 1 to 9 pick from the
+// hotbar, F toggles flying (Space and Left Shift to rise and sink), Z shows
+// frames per second. The world saves every minute; Escape frees the mouse,
+// then saves and quits. The title screen waits for Enter or a click
 // (`AERIE_PLAY=1` skips it).
 //
 // The world is saved to `world.aerie`, or the path in `AERIE_SAVE`
@@ -118,7 +119,7 @@ func run() -> Int64 {
     if let .Some(runs) = getenv("AERIE_BENCH") {
         return bench(Int64(parsing: runs) ?? 10);
     }
-    var window = SDLWindow(title: "Aerie", width: 1280, height: 720);
+    var window = SDLWindow(title: "Kestrelcraft", width: 1280, height: 720);
     let (width, height) = window.drawableSize;
     let renderer = match Renderer.create(window.nativeWindow, width: width, height: height) {
         .Ok(r) => r,
@@ -163,8 +164,9 @@ func run() -> Int64 {
         }
         if game.wantsSave {
             game.wantsSave = false;
+            // Quietly: only a failure is worth a notice.
             if let .Some(p) = path {
-                game.notify(if writeSave(p, game.save()) { "World saved" } else { "Couldn't save" });
+                if not writeSave(p, game.save()) { game.notify("Couldn't save"); }
             }
         }
         frames = frames + 1;

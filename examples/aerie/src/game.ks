@@ -12,21 +12,14 @@ struct Controls {
     var right: Bool = false
     var up: Bool = false
     var down: Bool = false
-    var turnLeft: Bool = false
-    var turnRight: Bool = false
-    var lookUp: Bool = false
-    var lookDown: Bool = false
-    /// Breaking: the left mouse button or Q, held.
+    /// Breaking: the left mouse button, held.
     var breakHeld: Bool = false
     /// Presses waiting for the next frame: place, toggle flying, and a
     /// hotbar slot (or -1).
     var placePressed: Bool = false
     var flyPressed: Bool = false
     var slotPressed: Int64 = -1
-    var timePressed: Bool = false
-    var savePressed: Bool = false
-    /// -1 or 1 to shrink or grow the view distance by a chunk, else 0.
-    var viewStep: Int64 = 0
+    var fpsPressed: Bool = false
     /// Mouse movement since the last frame, in pixels, and wheel clicks.
     var mouseX: Float32 = 0.0
     var mouseY: Float32 = 0.0
@@ -42,12 +35,6 @@ struct Controls {
             .D => { self.right = held },
             .Space => { self.up = held },
             .LeftShift => { self.down = held },
-            .LeftArrow => { self.turnLeft = held },
-            .RightArrow => { self.turnRight = held },
-            .UpArrow => { self.lookUp = held },
-            .DownArrow => { self.lookDown = held },
-            .Q => { self.breakHeld = held },
-            .E => { if held { self.placePressed = true } },
             .F => { if held { self.flyPressed = true } },
             .Digit1 => { if held { self.slotPressed = 0 } },
             .Digit2 => { if held { self.slotPressed = 1 } },
@@ -58,10 +45,7 @@ struct Controls {
             .Digit7 => { if held { self.slotPressed = 6 } },
             .Digit8 => { if held { self.slotPressed = 7 } },
             .Digit9 => { if held { self.slotPressed = 8 } },
-            .T => { if held { self.timePressed = true } },
-            .P => { if held { self.savePressed = true } },
-            .Minus => { if held { self.viewStep = -1 } },
-            .Equals => { if held { self.viewStep = 1 } },
+            .Z => { if held { self.fpsPressed = true } },
             _ => {}
         }
     }
@@ -71,9 +55,7 @@ struct Controls {
         self.placePressed = false;
         self.flyPressed = false;
         self.slotPressed = -1;
-        self.timePressed = false;
-        self.savePressed = false;
-        self.viewStep = 0;
+        self.fpsPressed = false;
         self.mouseX = 0.0;
         self.mouseY = 0.0;
         self.wheel = 0;
@@ -160,8 +142,11 @@ let mouseSensitivity: Float32 = 0.0025;
 /// How far away blocks can be broken or placed.
 let reach: Float32 = 6.0;
 
+/// How often the world saves itself during play, in seconds.
+let autosaveSeconds: Float32 = 60.0;
+
 /// How many chunk columns around the player are drawn, by default and at
-/// most; `AERIE_VIEW` and the - and = keys pick within the range.
+/// most; `AERIE_VIEW` picks within the range.
 let defaultViewRadius: Int64 = 5;
 let minViewRadius: Int64 = 2;
 let maxViewRadius: Int64 = 16;
@@ -198,6 +183,14 @@ struct Game: not Copyable {
     /// Whether the mouse should be captured for mouse look; the driver
     /// applies it to the window.
     var mouseCaptured: Bool
+    /// Seconds until the next autosave.
+    var untilAutosave: Float32
+    /// Z shows frames per second in the corner: the count shown, and
+    /// frames and seconds counted toward the next one.
+    var showFps: Bool
+    var fps: Int64
+    var fpsFrames: Int64
+    var fpsSeconds: Float32
     /// The block being broken and how far along, 0 to 1; breaking takes
     /// `Block.hardness` seconds of holding.
     var breaking: (Int64, Int64, Int64)?
@@ -220,6 +213,11 @@ struct Game: not Copyable {
         self.gloom = 0.0;
         self.breaking = .None;
         self.breakProgress = 0.0;
+        self.untilAutosave = autosaveSeconds;
+        self.showFps = false;
+        self.fps = 0;
+        self.fpsFrames = 0;
+        self.fpsSeconds = 0.0;
         self.renderer.viewDistance = Float32(from: self.viewRadius * chunkSize);
         let worldSeed = match save { .Some(s) => s.seed, .None => seed };
         self.world = World(worldSeed);
@@ -456,6 +454,7 @@ struct Game: not Copyable {
         self.flock.update(dt, center: self.player.position, reach: self.renderer.viewDistance.clamp(32.0, 96.0), generator: self.world.generator, time: self.seconds);
         self.timeOfDay = self.timeOfDay + dt / dayLength;
         self.timeOfDay = self.timeOfDay - self.timeOfDay.floor();
+        self.countFps(dt);
         self.controls.clearPresses();
         self.noticeTime = self.noticeTime - dt;
 
@@ -474,6 +473,9 @@ struct Game: not Copyable {
         } else {
             hud(w, h, self.selected, self.player.gliding, self.seconds)
         };
+        if self.showFps and not self.onTitle {
+            overlay.append(contentsOf: fpsQuads(self.fps));
+        }
         if self.noticeTime > 0.0 {
             let notice = noticeQuads(self.notice, fade: self.noticeTime.clamp(0.0, 1.0));
             overlay.append(contentsOf: notice);
@@ -508,24 +510,27 @@ struct Game: not Copyable {
             remaining = remaining - step;
         }
         self.useBlocks(dt);
-        if self.controls.savePressed {
+        // Saved every minute of play, and on quitting.
+        self.untilAutosave = self.untilAutosave - dt;
+        if self.untilAutosave <= 0.0 {
             self.wantsSave = true;
-        }
-        // T skips ahead a quarter of a day.
-        if self.controls.timePressed {
-            self.timeOfDay = self.timeOfDay + 0.25;
-        }
-        if self.controls.viewStep != 0 {
-            self.setViewRadius(self.viewRadius + self.controls.viewStep);
+            self.untilAutosave = autosaveSeconds;
         }
     }
 
-    /// Load and draw `radius` chunk columns around the player, within the
-    /// allowed range; streaming fills in or drops columns to match.
-    mutating func setViewRadius(radius: Int64) {
-        self.viewRadius = radius.clamp(minViewRadius, maxViewRadius);
-        self.renderer.viewDistance = Float32(from: self.viewRadius * chunkSize);
-        self.notify("View distance: \(self.viewRadius) chunks");
+    /// Count this frame toward the FPS readout, which updates twice a
+    /// second; Z shows or hides it.
+    mutating func countFps(dt: Float32) {
+        if self.controls.fpsPressed {
+            self.showFps = not self.showFps;
+        }
+        self.fpsFrames = self.fpsFrames + 1;
+        self.fpsSeconds = self.fpsSeconds + dt;
+        if self.fpsSeconds >= 0.5 {
+            self.fps = (Float32(from: self.fpsFrames) / self.fpsSeconds + 0.5).toInt64() ?? 0;
+            self.fpsFrames = 0;
+            self.fpsSeconds = 0.0;
+        }
     }
 
     /// Leave the title screen and capture the mouse.

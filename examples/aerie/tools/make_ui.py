@@ -177,7 +177,8 @@ def logo(atlas, text, columns, rows):
     stack of the same blocks for depth and outlined in ink. Returns
     `columns` x `rows` cells, left to right, top to bottom."""
     w, h = CELL * columns, CELL * rows
-    unit = 32
+    # Each font pixel is one block tile, at its own 16 pixels.
+    unit = 16
     stone = atlas.crop((0, DRIFTSTONE * 16, 16, DRIFTSTONE * 16 + 16)).resize((unit, unit), Image.NEAREST)
     moss = atlas.crop((0, MOSS_TOP * 16, 16, MOSS_TOP * 16 + 16)).resize((unit, unit), Image.NEAREST)
     # The pixels of the text, as (column, row) cells.
@@ -203,14 +204,14 @@ def logo(atlas, text, columns, rows):
         out.paste(stone, (x, y))
         if (cx, cy - 1) not in cells:
             # Grass on top, a few pixels deep, ragged where it drips.
-            cap = moss.crop((0, 0, unit, 10))
+            cap = moss.crop((0, 0, unit, 5))
             out.paste(cap, (x, y))
-            for dx in range(0, unit, 2):
-                if rng.random() < 0.35:
-                    drip = rng.choice([2, 4, 6])
-                    out.paste(moss.crop((dx, 10, dx + 2, 10 + drip)), (x + dx, y + 10))
-            ImageDraw.Draw(out).rectangle((x, y, x + unit - 1, y + 1), fill=(226, 252, 230, 255))
-    ring = out.getchannel("A").filter(ImageFilter.MaxFilter(9))
+            for dx in range(unit):
+                if rng.random() < 0.3:
+                    drip = rng.choice([1, 2, 3])
+                    out.paste(moss.crop((dx, 5, dx + 1, 5 + drip)), (x + dx, y + 5))
+            ImageDraw.Draw(out).rectangle((x, y, x + unit - 1, y), fill=(226, 252, 230, 255))
+    ring = out.getchannel("A").filter(ImageFilter.MaxFilter(5))
     outlined = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     outlined.paste(Image.new("RGBA", (w, h), INK), (0, 0), ring)
     outlined = Image.alpha_composite(outlined, out)
@@ -311,7 +312,7 @@ def glyph(ch):
 # same grid.
 FONT_UNIT = 4
 GLYPH_PAD = 4
-LOGO_COLUMNS, LOGO_ROWS = 8, 3
+LOGO_COLUMNS, LOGO_ROWS = 9, 2
 PIXEL_ART = {"Slot", "SlotSelected", "Panel", "Button"}
 
 
@@ -333,7 +334,7 @@ def main():
             icon.paste(sprite_icon(atlas, faces), (8, 8))
         layers.append(("Icon" + name, icon))
     logo_base = len(layers)
-    for cell in logo(atlas, "Aerie", LOGO_COLUMNS, LOGO_ROWS):
+    for cell in logo(atlas, "Kestrelcraft", LOGO_COLUMNS, LOGO_ROWS):
         layers.append((None, cell))
     glyph_base = len(layers)
     advances = []

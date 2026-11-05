@@ -129,7 +129,6 @@ struct Player {
     }
 
     mutating func update(controls: Controls, world: World, dt dt: Float32) {
-        self.look(yaw: axis(controls.turnRight, controls.turnLeft) * 1.8 * dt, pitch: axis(controls.lookUp, controls.lookDown) * 1.4 * dt);
         let ahead = Vec3(x: self.yaw.sin(), y: 0.0, z: -self.yaw.cos());
         let side = ahead.cross(Vec3.unitY);
         var wish = ahead * axis(controls.forward, controls.back) + side * axis(controls.right, controls.left);

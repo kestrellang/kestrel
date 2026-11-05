@@ -13,8 +13,8 @@ let uiGlyphPad: Float32 = 4.0;
 /// The title logo: this many cells across and down, from this layer,
 /// left to right then top to bottom.
 let uiLogoLayer: Float32 = 24.0;
-let uiLogoColumns: Int64 = 8;
-let uiLogoRows: Int64 = 3;
+let uiLogoColumns: Int64 = 9;
+let uiLogoRows: Int64 = 2;
 
 /// A sprite in the interface atlas.
 enum UISprite {
@@ -48,7 +48,7 @@ func uiIconLayer(id: UInt16) -> Float32 {
 func uiGlyphLayer(byte: UInt8) -> Float32 {
     let code = Int64(from: byte);
     let printable = if code >= 32 and code <= 126 { code } else { 63 };
-    Float32(from: printable - 32 + 48)
+    Float32(from: printable - 32 + 42)
 }
 
 /// How far the pen moves after a byte, in font pixels at `uiFontSize`.
