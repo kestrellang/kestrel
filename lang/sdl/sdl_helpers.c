@@ -15,6 +15,13 @@ int64_t Kestrel_MonotonicMs(void) {
     return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
 }
 
+// The same clock in microseconds, for timing work shorter than a frame.
+int64_t Kestrel_MonotonicUs(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + (int64_t)(ts.tv_nsec / 1000);
+}
+
 // Event helpers
 uint32_t Kestrel_GetEventType(SDL_Event* event) { return event->type; }
 int32_t Kestrel_GetKeyScancode(SDL_Event* event) {

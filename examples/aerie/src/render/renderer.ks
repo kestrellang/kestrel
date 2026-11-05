@@ -1,6 +1,6 @@
 module Aerie
 
-import wgpu.(Instance, Device, Surface, Buffer, BindGroup, RenderPipeline, Texture, TextureFormat, WgpuError, ColorTarget, Color, DepthTest, BindingLayout, ViewRange, PipelineLayout)
+import wgpu.(Instance, Device, Surface, PresentMode, Buffer, BindGroup, RenderPipeline, Texture, TextureFormat, WgpuError, ColorTarget, Color, DepthTest, BindingLayout, ViewRange, PipelineLayout)
 import sdl.(NativeWindow)
 import linalg.(Vec3, Vec4, Mat4, radians)
 
@@ -64,6 +64,8 @@ struct Renderer: not Copyable {
     var device: Device
     var surface: Surface
     var format: TextureFormat
+    /// How frames reach the screen: vsynced, or as fast as they're drawn.
+    var presentMode: PresentMode
     var width: Int64
     var height: Int64
     var depth: Texture
@@ -101,14 +103,14 @@ struct Renderer: not Copyable {
         device.createTexture(width: width, height: height, format: format, usage: [.RenderAttachment], sampleCount: samples, label: "color")
     }
 
-    static func create(window: NativeWindow, width width: Int64, height height: Int64) -> Renderer throws WgpuError {
+    static func create(window: NativeWindow, width width: Int64, height height: Int64, presentMode presentMode: PresentMode) -> Renderer throws WgpuError {
         let instance = Instance();
         let surface = instance.createSurface(surfaceSource(window));
         let adapter = try instance.requestAdapter(compatibleWith: surface);
         println("adapter: \(adapter.info.name)");
         let device = try adapter.requestDevice(label: "aerie");
         let format = surface.preferredFormat(adapter);
-        surface.configure(device: device, format: format, width: width, height: height);
+        surface.configure(device: device, format: format, width: width, height: height, presentMode: presentMode);
 
         let atlas = Atlas.load(device, "assets/blocks.png", tileSize: tileSize);
         let atlasView = atlas.createView(range: ViewRange(dimension: .Some(.D2Array)), label: "block atlas");
@@ -154,7 +156,7 @@ struct Renderer: not Copyable {
         let depth = Renderer.makeDepth(device, width, height);
         let color = Renderer.makeColor(device, format, width, height);
         .Ok(Renderer(
-            instance: instance, device: device, surface: surface, format: format, width: width, height: height,
+            instance: instance, device: device, surface: surface, format: format, presentMode: presentMode, width: width, height: height,
             depth: depth, color: color, skyPipeline: skyPipeline, worldGroup: worldGroup,
             shadowMap: shadowMap, shadowGroup: shadowGroup, uniformBuffer: uniformBuffer,
             chunks: chunks, models: models, overlay: overlay, icons: icons,
@@ -169,7 +171,7 @@ struct Renderer: not Copyable {
         guard width > 0 and height > 0 else {
             return;
         }
-        self.surface.configure(device: self.device, format: self.format, width: width, height: height);
+        self.surface.configure(device: self.device, format: self.format, width: width, height: height, presentMode: self.presentMode);
         self.depth = Renderer.makeDepth(self.device, width, height);
         self.color = Renderer.makeColor(self.device, self.format, width, height);
     }
@@ -197,7 +199,7 @@ struct Renderer: not Copyable {
         let frame = match self.surface.currentTexture() {
             .Ok(f) => f,
             .Err(.SurfaceOutdated(_)) => {
-                self.surface.configure(device: self.device, format: self.format, width: self.width, height: self.height);
+                self.surface.configure(device: self.device, format: self.format, width: self.width, height: self.height, presentMode: self.presentMode);
                 return .Ok(());
             },
             .Err(.SurfaceTimeout(_)) => { return .Ok(()); },
