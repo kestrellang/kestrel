@@ -1002,6 +1002,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 HirExpr::Local(..) | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
             );
             if route_via_assign_target {
+                if !matches!(hir.exprs[*target], HirExpr::Local(..)) {
+                    ctx.place_assign_values.insert(*value);
+                }
                 ctx.assign_target(value_tv, target_tv, *value, span.clone());
             } else {
                 let reason = Reason::Assign(expr_span(hir, *target));

@@ -333,10 +333,7 @@ func ensureTable(mutating root: [String: Value], name: String) {
 /// Inserts a key-value pair into the named sub-table within `root`.
 func insertIntoTable(mutating root: [String: Value], table: String, key: String, value: Value) {
     // A non-Obj value at `table` is overwritten — TOML forbids reusing a key as a table.
-    // Bound first: matching a nested pattern straight through the lent
-    // `root(table)` would hold its reference across the arms (E497).
-    let entry = root(table);
-    var obj: [String: Value] = match entry {
+    var obj: [String: Value] = match root(table) {
         some .Obj(existing) => existing,
         _ => [:]
     };
