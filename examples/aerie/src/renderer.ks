@@ -114,7 +114,7 @@ struct Renderer: not Copyable {
             BindingLayout.texture(1, visibility: [.Fragment], dimension: .D2Array),
             BindingLayout.sampler(2, visibility: [.Fragment])
         ]], label: "blocks");
-        let shaderModule = device.createShaderModule(wgsl: blockShader, label: "blocks");
+        let shaderModule = device.createShaderModule(wgsl: blockShader(), label: "blocks");
         let pipeline = device.createRenderPipeline(
             shader: shaderModule,
             targets: [ColorTarget(format: format)],

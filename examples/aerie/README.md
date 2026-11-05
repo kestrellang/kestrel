@@ -9,6 +9,11 @@ loads it with `lang/images`.
 face-culled blocks, one instanced quad per visible face, a mipmapped texture
 array, 4x MSAA and fog, with a fly camera.
 
+**Milestone 2** adds ambient occlusion: each face corner darkens by how many
+solid blocks touch it, and quads split along the brighter diagonal so the
+shading has no crease. `AERIE_BENCH=n` times chunk generation and meshing
+without a window.
+
 Controls: WASD to move, Space and Left Shift to rise and fall, arrow keys to
 look, Escape to quit. `AERIE_FRAMES=n` quits after n frames.
 
