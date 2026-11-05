@@ -200,12 +200,21 @@ stepBy(3)
 ```
 // Good
 min(by: { it.age })
-String(utf8: bytes)
+String(fromUtf8: bytes)
 
 // Bad
 minBy(key: { it.age })
 String.fromUtf8(bytes: bytes)
 ```
+
+**Converting initializers say what they convert from** with a `from…:` label: `from:` for a value of another type, and `from` + the encoding when the bytes need decoding. Acronyms are lowerCamelCase inside a name (§1): `fromUtf8:`, not `fromUTF8:`.
+
+```
+String(fromUtf8: bytes)          // decodes; returns nil on invalid UTF-8
+Int64(from: count32)             // another type's value
+```
+
+`init(from:)` between number types is lossless or traps. A lossy conversion names how it loses information: `truncating:` (keep the low bits), `clamping:` (saturate), `bitPattern:` (reinterpret a same-width value).
 
 **Use `where:` for all predicate closures.** One label, everywhere.
 
@@ -314,4 +323,23 @@ fold(from: 0, by: { a + b })
 // Bad — different names/labels for the same thing
 Array.all(satisfying: ...)   // vs Set.all(where: ...)
 Iterator.find(...)           // vs Array.first(where: ...)
+```
+
+## 14. Slices in public APIs
+
+Public APIs use the safe slice types. `UnsafeSlice` only appears in APIs that are unsafe by name (`asUnsafeSlice()`, `memory.Buffer`).
+
+- **Read-only parameters** take `&some Sliceable[T]`, so callers can pass an `Array`, a `Slice` or a sub-slice without copying.
+- **Protocol requirements** take `Slice[T]`. A generic requirement can't be called through `any P` (E145), so `any Hasher` and `any Writable` need the concrete type.
+- **Returned views** are `&Slice[T]` (or `&mutating Slice[T]`), borrowed from the receiver: `asSlice()`, `prefix(n)`, `drop(first:)`, `asByteSlice()`.
+
+```
+// Good
+func append(contentsOf other: &some Sliceable[T])
+protocol Writable { mutating func write(from bytes: Slice[UInt8]) -> … }
+func asByteSlice() -> &Slice[UInt8]
+
+// Bad
+func append(contentsOf other: UnsafeSlice[T])
+func asByteSlice() -> UnsafeSlice[UInt8]
 ```
