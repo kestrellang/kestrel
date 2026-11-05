@@ -120,10 +120,16 @@ struct Player {
         hits
     }
 
-    mutating func update(controls: Controls, world: World, dt dt: Float32) {
-        self.yaw = self.yaw + axis(controls.turnRight, controls.turnLeft) * 1.8 * dt;
+    /// Turn by `yaw` and tilt by `pitch` radians, never past straight up
+    /// or down.
+    mutating func look(yaw yaw: Float32, pitch pitch: Float32) {
         let limit = 1.5;
-        self.pitch = (self.pitch + axis(controls.lookUp, controls.lookDown) * 1.4 * dt).clamp(-limit, limit);
+        self.yaw = self.yaw + yaw;
+        self.pitch = (self.pitch + pitch).clamp(-limit, limit);
+    }
+
+    mutating func update(controls: Controls, world: World, dt dt: Float32) {
+        self.look(yaw: axis(controls.turnRight, controls.turnLeft) * 1.8 * dt, pitch: axis(controls.lookUp, controls.lookDown) * 1.4 * dt);
         let ahead = Vec3(x: self.yaw.sin(), y: 0.0, z: -self.yaw.cos());
         let side = ahead.cross(Vec3.unitY);
         var wish = ahead * axis(controls.forward, controls.back) + side * axis(controls.right, controls.left);

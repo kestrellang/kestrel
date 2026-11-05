@@ -47,6 +47,21 @@ func sdlGetMouseX(event: lang.ptr[lang.i8]) -> Int32
 @extern(.C, mangleName: "Kestrel_GetMouseY")
 func sdlGetMouseY(event: lang.ptr[lang.i8]) -> Int32
 
+@extern(.C, mangleName: "Kestrel_GetMouseButton")
+func sdlGetMouseButton(event: lang.ptr[lang.i8]) -> Int32
+
+@extern(.C, mangleName: "Kestrel_GetMouseRelX")
+func sdlGetMouseRelX(event: lang.ptr[lang.i8]) -> Int32
+
+@extern(.C, mangleName: "Kestrel_GetMouseRelY")
+func sdlGetMouseRelY(event: lang.ptr[lang.i8]) -> Int32
+
+@extern(.C, mangleName: "Kestrel_GetWheelY")
+func sdlGetWheelY(event: lang.ptr[lang.i8]) -> Int32
+
+@extern(.C, mangleName: "SDL_SetRelativeMouseMode")
+func sdlSetRelativeMouseMode(enabled: Int32) -> Int32
+
 @extern(.C, mangleName: "SDL_Delay")
 func sdlDelay(ms: UInt32)
 
@@ -86,6 +101,8 @@ let sdlEventKeyDown: UInt32 = 0x300;
 let sdlEventKeyUp: UInt32 = 0x301;
 let sdlEventMouseMotion: UInt32 = 0x400;
 let sdlEventMouseButtonDown: UInt32 = 0x401;
+let sdlEventMouseButtonUp: UInt32 = 0x402;
+let sdlEventMouseWheel: UInt32 = 0x403;
 
 // --- High-Level Abstractions ---
 
@@ -244,12 +261,36 @@ public enum Key {
     case Other(Int32)
 }
 
+/// A mouse button; `.Other` holds SDL's number for extra buttons.
+public enum MouseButton {
+    case Left
+    case Middle
+    case Right
+    case Other(Int64)
+}
+
+/// The button for SDL button number `code`.
+func mouseButton(code: Int32) -> MouseButton {
+    match Int64(from: code) {
+        1 => .Left,
+        2 => .Middle,
+        3 => .Right,
+        n => .Other(n)
+    }
+}
+
 public enum Event {
     case Quit
     case KeyDown(Key)
     case KeyUp(Key)
-    case MouseDown(Int64, Int64)
-    case MouseMove(Int64, Int64)
+    /// A button went down or up at (x, y) in the window.
+    case MouseDown(MouseButton, Int64, Int64)
+    case MouseUp(MouseButton, Int64, Int64)
+    /// The mouse moved to (x, y), by (dx, dy). With relative mouse mode on,
+    /// only the movement is meaningful.
+    case MouseMove(Int64, Int64, Int64, Int64)
+    /// The wheel turned this many clicks, positive away from the user.
+    case MouseWheel(Int64)
     /// The window was resized, to this size in screen units (use
     /// `SDLWindow.drawableSize` for pixels).
     case Resized(Int64, Int64)
@@ -355,13 +396,22 @@ func nextEvent(mutating eventBuffer: Array[Int8]) -> Event? {
     if eventType == sdlEventKeyUp {
         return .Some(Event.KeyUp(scancodeToKey(unsafe sdlGetKeyScancode(eventPtr))));
     }
-    if eventType == sdlEventMouseMotion or eventType == sdlEventMouseButtonDown {
+    if eventType == sdlEventMouseMotion or eventType == sdlEventMouseButtonDown or eventType == sdlEventMouseButtonUp {
         let mx = Int64(from: unsafe sdlGetMouseX(eventPtr));
         let my = Int64(from: unsafe sdlGetMouseY(eventPtr));
         if eventType == sdlEventMouseMotion {
-            return .Some(Event.MouseMove(mx, my));
+            let dx = Int64(from: unsafe sdlGetMouseRelX(eventPtr));
+            let dy = Int64(from: unsafe sdlGetMouseRelY(eventPtr));
+            return .Some(Event.MouseMove(mx, my, dx, dy));
         }
-        return .Some(Event.MouseDown(mx, my));
+        let button = mouseButton(unsafe sdlGetMouseButton(eventPtr));
+        if eventType == sdlEventMouseButtonDown {
+            return .Some(Event.MouseDown(button, mx, my));
+        }
+        return .Some(Event.MouseUp(button, mx, my));
+    }
+    if eventType == sdlEventMouseWheel {
+        return .Some(Event.MouseWheel(Int64(from: unsafe sdlGetWheelY(eventPtr))));
     }
     if eventType == sdlEventWindow {
         var w: Int64 = 0;
@@ -438,6 +488,13 @@ public struct SDLWindow: not Copyable {
     /// The next pending event, or `None`.
     public mutating func pollEvent() -> Event? {
         nextEvent(self.eventBuffer)
+    }
+
+    /// Capture the mouse: hide the cursor, keep it in the window, and
+    /// report only movement, for mouse look. In a browser this asks for
+    /// pointer lock, which the browser grants only after a click.
+    public func setRelativeMouseMode(enabled: Bool) {
+        unsafe sdlSetRelativeMouseMode(if enabled { 1 } else { 0 });
     }
 
     public func delay(ms: Milliseconds) {

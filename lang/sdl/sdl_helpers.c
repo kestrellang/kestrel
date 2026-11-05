@@ -32,6 +32,24 @@ int32_t Kestrel_GetMouseY(SDL_Event* event) {
     return 0;
 }
 
+// Which button a mouse button event is for (SDL_BUTTON_LEFT is 1).
+int32_t Kestrel_GetMouseButton(SDL_Event* event) {
+    if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP) return event->button.button;
+    return 0;
+}
+// How far the mouse moved, also while relative mouse mode hides it.
+int32_t Kestrel_GetMouseRelX(SDL_Event* event) {
+    return event->type == SDL_MOUSEMOTION ? event->motion.xrel : 0;
+}
+int32_t Kestrel_GetMouseRelY(SDL_Event* event) {
+    return event->type == SDL_MOUSEMOTION ? event->motion.yrel : 0;
+}
+// Wheel clicks: positive away from the user, whatever the OS's direction.
+int32_t Kestrel_GetWheelY(SDL_Event* event) {
+    if (event->type != SDL_MOUSEWHEEL) return 0;
+    return event->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event->wheel.y : event->wheel.y;
+}
+
 // Pointer helpers
 int32_t Kestrel_IsNull(void* ptr) { return ptr == NULL; }
 

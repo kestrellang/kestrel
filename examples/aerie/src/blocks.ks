@@ -86,10 +86,10 @@ enum Block {
     /// What the hotbar calls it.
     var name: String {
         match self {
-            .Air => "AIR", .Driftstone => "DRIFTSTONE", .Loam => "LOAM", .Mossloam => "MOSSLOAM",
-            .Emberwood => "EMBERWOOD", .Emberleaf => "EMBERLEAF", .Cloudglass => "CLOUDGLASS",
-            .Skyiron => "SKYIRON", .Glowcap => "GLOWCAP", .Sailcloth => "SAILCLOTH",
-            .Featherthatch => "FEATHERTHATCH", .Planks => "PLANKS"
+            .Air => "Air", .Driftstone => "Driftstone", .Loam => "Loam", .Mossloam => "Mossloam",
+            .Emberwood => "Emberwood", .Emberleaf => "Emberleaf", .Cloudglass => "Cloudglass",
+            .Skyiron => "Skyiron", .Glowcap => "Glowcap", .Sailcloth => "Sailcloth",
+            .Featherthatch => "Featherthatch", .Planks => "Planks"
         }
     }
 
