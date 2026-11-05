@@ -81,6 +81,7 @@ struct Renderer: not Copyable {
     /// Boxes at any angle: birds, and the cracks on a block being broken.
     var models: ModelPass
     var overlay: OverlayPass
+    var icons: IconPass
     /// How far, in blocks, chunks are drawn; fog closes in before it.
     var viewDistance: Float32
     /// The vertical field of view, in degrees.
@@ -148,6 +149,7 @@ struct Renderer: not Copyable {
         let shadowGroup = device.createBindGroup(layout: shadowLayout.bindGroupLayout(0), entries: [uniformBuffer.binding(0)]);
         let chunks = ChunkPass.create(device, shader, format: format, layout: layout, shadowLayout: shadowLayout);
         let models = ModelPass.create(device, shader, format: format, layout: skyLayout);
+        let icons = IconPass.create(device, shader, format: format);
         let overlay = OverlayPass.create(device, format: format, encode: encode, blocks: atlasView, blockSampler: atlasSampler, ui: uiView, uiSampler: uiSampler);
         let depth = Renderer.makeDepth(device, width, height);
         let color = Renderer.makeColor(device, format, width, height);
@@ -155,7 +157,7 @@ struct Renderer: not Copyable {
             instance: instance, device: device, surface: surface, format: format, width: width, height: height,
             depth: depth, color: color, skyPipeline: skyPipeline, worldGroup: worldGroup,
             shadowMap: shadowMap, shadowGroup: shadowGroup, uniformBuffer: uniformBuffer,
-            chunks: chunks, models: models, overlay: overlay,
+            chunks: chunks, models: models, overlay: overlay, icons: icons,
             viewDistance: 160.0, fieldOfView: baseFieldOfView, drawnChunks: 0, chunkDraws: 0
         ))
     }
@@ -178,19 +180,19 @@ struct Renderer: not Copyable {
         self.chunks.upload(self.device, cx, cy, cz, faces, lights);
     }
 
-    /// Draw one frame as seen through `view`, in the light of `light`, at
-    /// `time` seconds (which drifts the clouds). The first `casters` of
-    /// `models` cast shadows.
-    mutating func draw(view: Mat4, eye eye: Vec3, light light: Daylight, time time: Float32, models models: [ModelBox], casters casters: Int64, overlay overlay: [OverlayQuad]) -> () throws WgpuError {
+    /// Draw one frame of `scene`.
+    mutating func draw(scene: Scene) -> () throws WgpuError {
         // A hidden or collapsed window has nothing to draw into.
         guard self.width > 0 and self.height > 0 else {
             return .Ok(());
         }
-        let (viewProj, lightViewProj) = self.writeUniforms(view, eye: eye, light: light, time: time);
-        let list = self.chunks.cull(Frustum(viewProj: viewProj), shadow: Frustum(viewProj: lightViewProj), eye: eye);
-        let quadCount = self.overlay.write(self.device, quads: overlay, width: self.width, height: self.height);
-        let boxCount = self.models.write(self.device, boxes: models);
-        let shadowBoxes = casters.clamp(0, boxCount);
+        let light = scene.light;
+        let (viewProj, lightViewProj) = self.writeUniforms(scene.view, eye: scene.eye, light: light, time: scene.time);
+        let list = self.chunks.cull(Frustum(viewProj: viewProj), shadow: Frustum(viewProj: lightViewProj), eye: scene.eye);
+        let quadCount = self.overlay.write(self.device, quads: scene.overlay, width: self.width, height: self.height);
+        let iconCount = self.icons.write(self.device, boxes: scene.icons, width: self.width, height: self.height);
+        let boxCount = self.models.write(self.device, boxes: scene.models);
+        let shadowBoxes = scene.casters.clamp(0, boxCount);
 
         let frame = match self.surface.currentTexture() {
             .Ok(f) => f,
@@ -219,6 +221,7 @@ struct Renderer: not Copyable {
             self.models.draw(pass, count: boxCount);
             self.chunks.drawGlass(pass, list: list);
             self.overlay.draw(pass, count: quadCount);
+            self.icons.draw(pass, count: iconCount, world: self.worldGroup);
         };
         self.drawnChunks = list.visible;
         self.chunkDraws = list.opaque.count;
@@ -247,4 +250,20 @@ struct Renderer: not Copyable {
         ));
         (viewProj, lightViewProj)
     }
+}
+
+/// Everything one frame shows.
+struct Scene {
+    /// The camera's view matrix, and where it is.
+    var view: Mat4
+    var eye: Vec3
+    var light: Daylight
+    /// Seconds since the start, which drifts the clouds.
+    var time: Float32
+    /// Boxes in the world; the first `casters` cast shadows.
+    var models: [ModelBox]
+    var casters: Int64
+    /// The 2D interface, and the hotbar's 3D icons over it.
+    var overlay: [OverlayQuad]
+    var icons: [ModelBox]
 }

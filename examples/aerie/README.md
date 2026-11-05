@@ -69,7 +69,7 @@ are cool blue-grey. Every block texture is redrawn at 16x16 (`tools/make_atlas.p
 and the interface comes from a generated atlas (`tools/make_ui.py`,
 `assets/ui.png`): text is set in our own pixel font (`tools/pixel_font.py`),
 upper and lowercase, drawn crisp at whole-pixel sizes. The interface is pixel art to match the blocks: a wooden tray of
-stone slots holding little 3D blocks (gold for the selected one), wooden
+stone slots holding little 3D blocks, drawn live with the block textures (gold for the selected one, which bobs and slowly spins), wooden
 boards behind text, a warm wooden button on the title screen, and a logo
 whose every pixel is a driftstone block, mossy where it's open to the sky.
 The mouse looks around once captured (click, or Enter on the title).
@@ -86,7 +86,7 @@ border follows the noise, not the islands, so an island can straddle it.
 Birds fly over the islands (`src/birds.ks`): kestrels over the dream
 islands, circling and stopping to hover on fast wingbeats, and broad-winged
 vultures soaring over the lairs, where they drift over to circle above
-you. Each is a handful of boxes (`ModelBox` in `src/model.ks`) drawn by a
+you. Each is a handful of boxes (`ModelBox` in `src/render/model.ks`) drawn by a
 model pipeline that takes boxes at any angle, so wings hinge at the
 shoulder and wrist, and the birds cast shadows. Breaking a block takes
 holding: cracks spread over it for its `Block.hardness` in seconds (a
@@ -158,11 +158,13 @@ truth) is in [`AGENTS.md`](AGENTS.md).
   - `mesh.ks` — face culling and ambient occlusion into packed `FaceInstance`s.
   - `model.ks` — `ModelBox`, `Pose` and `ModelPass`: boxes at any angle, for birds and cracks.
   - `overlay.ks` — `OverlayQuad` and `OverlayPass`: the 2D interface.
+  - `icons.ks` — `IconPass`: the hotbar's blocks, as model boxes placed in screen pixels.
   - `daylight.ks` — the sun, sky colors and shadow view for a time of day.
   - `frustum.ks`, `atlas.ks` — view culling, and loading texture atlases.
   - `shader.ks` — loads the WGSL in `assets/shaders/`, after a header of constants the game decides.
 - `src/ui/` — the interface:
   - `hud.ks`, `title.ks` — `Hud`: the crosshair and hotbar, and the title screen.
+  - `icon.ks` — `IconPose`: a block as boxes, turned and tilted for a hotbar slot.
   - `label.ks` — `Label`: text in the pixel font, shadowed, centered or on a board.
   - `quads.ks` — building overlay quads from sprites and colors.
   - `readouts.ks` — the FPS counter and notices in the corner.
