@@ -887,8 +887,10 @@ fn override_span(ty: &mut HirTy, span: &Span) {
 /// generic arg, function-type param/return) structurally as it descends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefPosition {
-    /// Parameter position — the one PERMANENT rejection (references-gaps.md
-    /// §10.6): conventions are the only parameter spelling, forever.
+    /// Parameter position. A param may spell its access mode with a ref
+    /// type (`x: &T`) instead of a keyword — the AST builder strips that ref
+    /// from the written type — so a ref still here was combined with
+    /// `mutating` / `consuming`, or came through a type alias.
     Param,
     /// Return position — carved out (made legal) in stage 1.
     Return,
@@ -909,10 +911,9 @@ pub enum RefPosition {
 impl RefPosition {
     fn code_and_message(self) -> (&'static str, &'static str) {
         match self {
-            // Permanent rule — worded as "are not", never "not yet".
             RefPosition::Param => (
                 "E480",
-                "parameters are not reference-typed; spell the convention instead — `x: T` borrows, `mutating x: T` mutably borrows",
+                "a reference-typed parameter must be written `x: &T` or `x: &mutating T`: without a `mutating` / `consuming` keyword, and not through a type alias",
             ),
             RefPosition::Return => ("E481", "reference return types are not supported yet"),
             RefPosition::Binding => ("E482", "references cannot be stored in bindings"),

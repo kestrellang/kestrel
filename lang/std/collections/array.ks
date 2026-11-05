@@ -724,7 +724,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// arr.append(contentsOf: [3, 4]);  // [1, 2, 3, 4]
     /// arr.append(contentsOf: []);      // [1, 2, 3, 4]  — no-op
     /// ```
-    public mutating func append(contentsOf other: some Sliceable[T] and not Static and not Copyable and not Sized) {
+    public mutating func append(contentsOf other: &some Sliceable[T] and not Static and not Copyable and not Sized) {
         let sl = other.asUnsafeSlice();
         let otherLen = sl.count;
         if otherLen == 0 {

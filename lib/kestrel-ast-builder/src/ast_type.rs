@@ -154,8 +154,9 @@ fn assoc_bindings(bound: &ast::Ty, file_id: usize) -> Vec<AssocTypeBinding> {
         .collect()
 }
 
-/// `kind? (mutating? T, …) -> R`. A `mutating` inside the list marks the
-/// parameter after it as `MutBorrow`; every other parameter is `Consuming`.
+/// `kind? (mutating? T, …) -> R`. A `mutating` inside the list (or a
+/// `&mutating T` param) marks it `MutBorrow`; every other parameter,
+/// `&T` included, is `Consuming` (passed by borrow at indirect calls).
 /// The node's span covers the kind keyword (LSP signature help slices
 /// source by it).
 fn lower_fn_type(f: &ast::TyFunction, span: Span, file_id: usize) -> AstType {
@@ -172,12 +173,24 @@ fn lower_fn_type(f: &ast::TyFunction, span: Span, file_id: usize) -> AstType {
                 continue;
             };
             if let Some(ty) = lower_type(&ty, file_id) {
+                // `(&T) -> R` / `(&mutating T) -> R` spell the convention
+                // with the type, as a declared `x: &T` param does. A plain
+                // `&T` is the default convention: indirect calls already
+                // pass every non-`mutating` arg by borrow.
+                let (ty, convention) = match ty.param_ref() {
+                    Some((inner, mutating)) if !pending_mut => (
+                        inner.clone(),
+                        if mutating {
+                            ParamConvention::MutBorrow
+                        } else {
+                            ParamConvention::Consuming
+                        },
+                    ),
+                    _ if pending_mut => (ty, ParamConvention::MutBorrow),
+                    _ => (ty, ParamConvention::Consuming),
+                };
                 params.push(ty);
-                param_conventions.push(if pending_mut {
-                    ParamConvention::MutBorrow
-                } else {
-                    ParamConvention::Consuming
-                });
+                param_conventions.push(convention);
             }
             pending_mut = false;
         }

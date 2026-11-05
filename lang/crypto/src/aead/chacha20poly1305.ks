@@ -111,9 +111,9 @@ public struct ChaCha20Poly1305 {
     /// want unless a protocol dictates the nonce. Throws `.InvalidKeySize`
     /// unless the key is 32 bytes.
     public static func seal(
-        message: some Sliceable[UInt8] and not Static and not Copyable and not Sized,
+        message: &some Sliceable[UInt8] and not Static and not Copyable and not Sized,
         using key: SymmetricKey,
-        authenticating aad: some Sliceable[UInt8] and not Static and not Copyable and not Sized = Array[UInt8](),
+        authenticating aad: &some Sliceable[UInt8] and not Static and not Copyable and not Sized = Array[UInt8](),
         nonce nonce: Nonce = Nonce.random()
     ) -> SealedBox throws CryptoError {
         return ChaCha20Poly1305.sealWith(message.asUnsafeSlice(), key, nonce, aad.asUnsafeSlice());
@@ -125,7 +125,7 @@ public struct ChaCha20Poly1305 {
     public static func open(
         box: SealedBox,
         using key: SymmetricKey,
-        authenticating aad: some Sliceable[UInt8] and not Static and not Copyable and not Sized = Array[UInt8]()
+        authenticating aad: &some Sliceable[UInt8] and not Static and not Copyable and not Sized = Array[UInt8]()
     ) -> Array[UInt8] throws CryptoError {
         return ChaCha20Poly1305.openWith(box, key, aad.asUnsafeSlice());
     }

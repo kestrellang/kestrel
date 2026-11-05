@@ -118,7 +118,7 @@ extend Slice[T] {
 extend Slice[T] where T: Copyable {
     /// Overwrites every element with the matching element of `other`.
     /// Panics if the counts differ.
-    public mutating func assign(from other: some Sliceable[T] and not Static and not Copyable and not Sized) {
+    public mutating func assign(from other: &some Sliceable[T] and not Static and not Copyable and not Sized) {
         let src = other.asUnsafeSlice();
         let n = self.count;
         if src.count != n {

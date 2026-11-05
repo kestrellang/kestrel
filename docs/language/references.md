@@ -31,10 +31,10 @@ Rules for borrow expressions:
 - **Function and method return types** — `-> &Int64`, `-> &mutating T`
 - **Struct fields and tuple elements** — `var item: &Int64;`, `(&Int64, Int64)`
 - **Generic arguments** — `Optional[&T]`, iterator `Item` types
+- **Parameters** — `x: &T` borrows (like `x: T`) and `x: &mutating T` mutably borrows (like `mutating x: T`), in declarations, function types and closure params. Only a ref-typed param may take an unsized type: `func sum[S](s: &S) where S: Sliceable[Int64], S: not Copyable, S: not Sized` accepts a `Slice[Int64]`. Combining the ref with a `mutating`/`consuming` keyword is E480.
 
 They may **not** appear in:
 
-- **Parameter types** (E480). Spell the convention instead: `x: T` borrows, `mutating x: T` mutably borrows. This is a permanent design decision, not a gap.
 - **`let`/`var` type annotations** (E482). Write `let r = &x;` and let the type be inferred.
 - **Subscript return types** (E481) — subscripts use `ref` accessors instead (below).
 - **Function types** (E486) — `() -> &Int64` as a value is rejected.
@@ -214,7 +214,7 @@ That's the entire model. There are no lifetime parameters, no `'a`, no borrow an
 
 | Code | Meaning |
 |---|---|
-| E480 | Reference type in parameter position — spell the convention (`x: T` borrows, `mutating x: T`) instead |
+| E480 | Reference-typed parameter combined with `mutating`/`consuming`, or written through a type alias |
 | E481 | Declared reference return on a subscript — use `ref`/`mutating ref` accessors |
 | E482 | Reference type in a `let`/`var` annotation — write `let r = &x;` unannotated |
 | E486 | Function type with a reference return (`() -> &Int64`) used as a value |

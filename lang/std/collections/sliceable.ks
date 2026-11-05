@@ -25,7 +25,7 @@ import std.collections.(Array)
 /// # Examples
 ///
 /// ```
-/// func sum[S](s: S) -> Int64 where S: Sliceable[Int64], S: not Static, S: not Copyable, S: not Sized {
+/// func sum[S](s: &S) -> Int64 where S: Sliceable[Int64], S: not Static, S: not Copyable, S: not Sized {
 ///     var total: Int64 = 0;
 ///     for elem in s { total = total + elem }
 ///     total
@@ -1134,7 +1134,7 @@ extend Sliceable[T] where T: Equatable {
     /// [1, 2, 3].starts(with: [2, 3]);     // false
     /// [1, 2, 3].starts(with: []);          // true (vacuous)
     /// ```
-    public func starts(with prefix: some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool {
+    public func starts(with prefix: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool {
         let a = self.asUnsafeSlice();
         let b = prefix.asUnsafeSlice();
         if b.count > a.count {
@@ -1158,7 +1158,7 @@ extend Sliceable[T] where T: Equatable {
     /// [1, 2, 3].ends(with: [1, 2]);  // false
     /// [1, 2, 3].ends(with: []);       // true (vacuous)
     /// ```
-    public func ends(with suffix: some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool {
+    public func ends(with suffix: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool {
         let a = self.asUnsafeSlice();
         let b = suffix.asUnsafeSlice();
         if b.count > a.count {

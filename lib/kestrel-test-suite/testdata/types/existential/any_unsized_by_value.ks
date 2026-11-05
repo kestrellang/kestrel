@@ -2,8 +2,7 @@
 // stdlib: true
 //
 // E403: a `not Sized` type parameter can only be used behind a pointer or as
-// the last stored field of a struct (design §2). A borrowed parameter counts
-// as behind a pointer: it is passed by address.
+// the last stored field of a struct (design §2).
 
 module Test
 
@@ -21,11 +20,10 @@ struct Tail[T] where T: not Sized {
     var value: T;
 }
 
-// Legal: a borrowed param is passed by address, so it is behind a pointer.
-func byBorrow[T](x: T) where T: not Sized {}
-
-func byParam[T](consuming x: T) where T: not Sized {} // ERROR: 'T' may be unsized here ('where T: not Sized'), so it can only be used behind a pointer or as the last stored field
-
-func byMutating[T](mutating x: T) where T: not Sized {} // ERROR: 'T' may be unsized here ('where T: not Sized'), so it can only be used behind a pointer or as the last stored field
+func byParam[T](x: T) where T: not Sized {} // ERROR: 'T' may be unsized here ('where T: not Sized'), so it can only be used behind a pointer or as the last stored field
 
 func byReturn[T](p: Pointer[T]) -> T where T: not Sized { fatalError("unreachable") } // ERROR: 'T' may be unsized here ('where T: not Sized'), so it can only be used behind a pointer or as the last stored field
+
+// Legal: a reference-typed param is behind a pointer.
+func byRef[T](x: &T) where T: not Sized {}
+func byMutRef[T](x: &mutating T) where T: not Sized {}

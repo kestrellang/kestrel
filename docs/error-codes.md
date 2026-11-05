@@ -299,7 +299,7 @@ protocol/extension-target arguments, where-clause types).
 
 | Code | Message | Explanation |
 |---|---|---|
-| E480 | parameters are not reference-typed; spell the convention instead | **Permanent.** `x: T` borrows and `mutating x: T` mutably borrows — conventions are the only spelling. Covers function-type and closure parameters too. |
+| E480 | a reference-typed parameter must be written `x: &T` or `x: &mutating T` | `x: &T` borrows like `x: T`, `x: &mutating T` mutably borrows like `mutating x: T` (also in function types and closure params). Rejected when combined with a `mutating`/`consuming` keyword or written through a type alias. |
 | E481 | reference return types are not supported yet | Legal since stage 1; the code is retained for the positions still rejected. |
 | E482 | references cannot be stored in bindings | A `var`/`let` annotation may not be `&T`. An aggregate that *wraps* a reference is legal. |
 | E483 | references cannot be stored in fields | Struct/enum fields, including enum case payloads (payloads classify as Field, not Param). Legal since 2b except from STRICT entries. |

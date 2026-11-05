@@ -32,7 +32,7 @@ public struct SHA512: Digest {
         self.blocks = BlockBuffer(function: SHA512State(words: initialState), blockLength: 128);
     }
 
-    public mutating func update[S](bytes: S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         self.blocks.update(bytes.asUnsafeSlice());
     }
 

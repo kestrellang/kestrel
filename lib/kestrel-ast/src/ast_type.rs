@@ -183,6 +183,18 @@ pub enum AstType {
 }
 
 impl AstType {
+    /// A param type that spells its access mode (`&T` / `&mutating T`):
+    /// the pointee and whether it is mutating. A nested ref (`&&T`) is not
+    /// one — it stays, and is rejected as nesting (E487).
+    pub fn param_ref(&self) -> Option<(&AstType, bool)> {
+        match self {
+            AstType::Ref {
+                inner, mutating, ..
+            } if !matches!(**inner, AstType::Ref { .. }) => Some((inner, *mutating)),
+            _ => None,
+        }
+    }
+
     /// The types written inside an `any` type, in source order: the box
     /// (if named), each bound protocol, and each pinned associated type.
     /// Empty for every other variant. Shared by the AST walkers so none of

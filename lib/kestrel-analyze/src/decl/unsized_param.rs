@@ -10,8 +10,8 @@
 //!
 //! Checks declaration signatures: stored fields, computed fields, function /
 //! initializer / subscript parameters and return types, and enum payloads.
-//! A borrowed parameter (neither `mutating` nor `consuming`) is passed by
-//! address, so a bare `T` there is exempt too.
+//! A reference-typed parameter (`x: &T`, `x: &mutating T`) is behind a
+//! pointer, so a bare `T` there is exempt too.
 //! A field or subscript whose accessors are all `ref` / `mutating ref` /
 //! `modifying ref` only lends `&T`, so its declared type is behind a
 //! reference and exempt. Uses inside bodies are covered by the implicit `T: Sized` bound on every
@@ -119,7 +119,7 @@ impl DeclCheck for UnsizedParamAnalyzer {
 
 /// The declaration's signature types, each flagged with whether a bare
 /// unsized `T` is allowed there: the last stored field of a struct (an
-/// unsized tail) or a borrowed param (passed by address).
+/// unsized tail) or a reference-typed param (`s: &S`).
 pub(crate) fn signature_types(cx: &DeclContext<'_>) -> Vec<(HirTy, bool)> {
     let q = cx.query;
     let entity = cx.entity;
@@ -145,19 +145,16 @@ pub(crate) fn signature_types(cx: &DeclContext<'_>) -> Vec<(HirTy, bool)> {
             vec![(ty, is_tail)]
         },
         Some(kind) => {
-            // A borrowed param (no `mutating` / `consuming`) is passed by
-            // address, so a bare unsized `T` there is already behind a
-            // pointer: `func sum[S](s: S) where S: not Sized` takes a
-            // `Slice[T]` or a raw existential in place. Enum payloads are
-            // storage, never borrowed.
+            // A reference-typed param (`s: &S`, `s: &mutating S`) is behind
+            // a pointer: `func sum[S](s: &S) where S: not Sized` takes a
+            // `Slice[T]` or a raw existential in place. A plain `s: S`
+            // stays by value. Enum payloads are storage, never refs.
             let params = q
                 .get::<Callable>(entity)
                 .map(|c| c.params.clone())
                 .unwrap_or_default();
-            let borrowed = |i: usize| {
-                kind != &NodeKind::EnumCase
-                    && params.get(i).is_some_and(|p| !p.is_mut && !p.is_consuming)
-            };
+            let borrowed =
+                |i: usize| kind != &NodeKind::EnumCase && params.get(i).is_some_and(|p| p.by_ref);
             let mut out: Vec<(HirTy, bool)> = q
                 .query(LowerCallableTypes {
                     entity,

@@ -9,13 +9,13 @@
 module Test
 import std.collections.(Array, Sliceable)
 
-func total[S](s: S) -> Int64 where S: Sliceable[Int64], S: not Static, S: not Copyable, S: not Sized {
+func total[S](s: &S) -> Int64 where S: Sliceable[Int64], S: not Static, S: not Copyable, S: not Sized {
     var t: Int64 = 0;
     for x in s { t = t + x }
     t
 }
 
-func count(s: some Sliceable[Int64] and not Static and not Copyable and not Sized) -> Int64 {
+func count(s: &some Sliceable[Int64] and not Static and not Copyable and not Sized) -> Int64 {
     s.count
 }
 

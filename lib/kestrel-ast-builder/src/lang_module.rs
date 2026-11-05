@@ -228,6 +228,7 @@ fn seed_fn(world: &mut World, lang: Entity, name: &str, params: &[(&str, AstType
                     pattern: None,
                     is_mut: false,
                     is_consuming: false,
+                    by_ref: false,
                 })
                 .collect(),
             receiver: None,
@@ -290,6 +291,7 @@ fn seed_generic_fn_multi(
                     pattern: None,
                     is_mut: false,
                     is_consuming: false,
+                    by_ref: false,
                 })
                 .collect(),
             receiver: None,
