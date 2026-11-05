@@ -110,11 +110,11 @@ func textQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, c
     quads
 }
 
-/// `text` shading from `color` to `bottom`, over a soft violet shadow so it
+/// `text` shading from `color` to `bottom`, over a soft indigo shadow so it
 /// reads over bright sky.
 func gradientLabelQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, color color: Vec4, bottom bottom: Vec4) -> [OverlayQuad] {
     let offset = (scale * 0.5).ceil();
-    let shadow = Vec4(x: 0.26, y: 0.12, z: 0.38, w: color.w * 0.75);
+    let shadow = Vec4(x: 0.14, y: 0.14, z: 0.28, w: color.w * 0.75);
     var quads = textQuads(text, x: x + offset, y: y + offset, scale: scale, color: shadow, bottom: shadow);
     let lit = textQuads(text, x: x, y: y, scale: scale, color: color, bottom: bottom);
     quads.append(contentsOf: lit);

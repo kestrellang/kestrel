@@ -156,14 +156,14 @@ fn fbm(start: vec2f) -> f32 {
     return total;
 }
 
-// The sky's gradient along `dir`: pink at the horizon through lavender
-// to blue overhead, the glowing cloud sea below, and the sun's halo. Fog
+// The sky's gradient along `dir`: rose-cream at the horizon to blue
+// overhead, the glowing cloud sea below, and the sun's halo. Fog
 // fades the world into this, so far islands melt into the sky.
 fn skyGradient(dir: vec3f) -> vec3f {
     let horizon = u.fog.rgb;
     let zenith = u.zenith.rgb;
     let day = u.sunDir.w;
-    let middle = mix(horizon, zenith, 0.5) + vec3f(0.05, -0.03, 0.06) * day;
+    let middle = mix(horizon, zenith, 0.5) + vec3f(0.01, -0.01, 0.03) * day;
     let up = clamp(dir.y, 0.0, 1.0);
     var color = mix(horizon, middle, smoothstep(0.0, 0.18, up));
     color = mix(color, zenith, smoothstep(0.18, 0.6, up));
@@ -215,13 +215,12 @@ fn vs_sky(@builtin(vertex_index) vertex: u32) -> SkyOut {
     return out;
 }
 
-// Cotton candy clouds: drifting noise on a plane above, lit pink on the
-// sun's side, and a sea of puffs below.
+// Soft clouds: drifting noise on a plane above, warmed on the sun's side, and a sea of puffs below.
 fn clouds(dir: vec3f, color: vec3f) -> vec3f {
     let time = u.camera.w;
     let day = u.sunDir.w;
     let toSun = normalize(-u.sunDir.xyz);
-    let light = mix(vec3f(0.30, 0.22, 0.46), mix(vec3f(1.0, 0.80, 0.90), u.sunColor.rgb, 0.4), day);
+    let light = mix(vec3f(0.26, 0.24, 0.44), mix(vec3f(0.98, 0.90, 0.90), u.sunColor.rgb, 0.3), day);
     let bright = mix(vec3f(0.42, 0.34, 0.60), vec3f(1.0, 0.97, 1.0), day);
     if dir.y > 0.0 {
         let p = dir.xz / (dir.y + 0.08) * 1.6 + vec2f(time * 0.012, time * 0.005);
@@ -236,7 +235,7 @@ fn clouds(dir: vec3f, color: vec3f) -> vec3f {
     let p = dir.xz / (-dir.y + 0.04) * 0.7 + vec2f(time * 0.006, time * 0.003);
     let n = fbm(p);
     let puff = smoothstep(0.3, 0.75, n);
-    let shadow = mix(vec3f(0.28, 0.20, 0.42), vec3f(0.80, 0.70, 0.94), day);
+    let shadow = mix(vec3f(0.28, 0.20, 0.42), vec3f(0.80, 0.80, 0.92), day);
     let sea = mix(shadow, mix(light, bright, 0.6), puff);
     return mix(color, sea, smoothstep(0.0, 0.3, -dir.y) * 0.85);
 }
