@@ -4067,13 +4067,12 @@ _Defined in `lang/std/text/str.ks`._
 #### function `asByteSlice`
 
 ```kestrel
-public func asByteSlice() -> UnsafeSlice[UInt8]
+public func asByteSlice() -> &Slice[UInt8]
 ```
 
-Returns a non-owning `UnsafeSlice[UInt8]` view over this string's
-raw UTF-8 bytes — no copy, no allocation. The slice borrows the
-live string buffer, so it must not outlive the string (or any
-mutation of it). O(1).
+Returns a borrowed `Slice[UInt8]` view over this string's raw
+UTF-8 bytes — no copy, no allocation. The view borrows the live
+string buffer, so it can't outlive the string. O(1).
 
 Use this to hand the bytes to a sink (a socket, a hasher, an
 FFI call) without materializing an `Array[UInt8]` via `toBytes()`.

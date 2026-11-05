@@ -2306,7 +2306,7 @@ _Defined in `lang/std/core/protocols.ks`._
 #### function `write`
 
 ```kestrel
-mutating func write(UnsafeSlice[UInt8])
+mutating func write(Slice[UInt8])
 ```
 
 Mixes `bytes` into the running hash state.

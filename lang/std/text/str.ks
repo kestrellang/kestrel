@@ -5,8 +5,8 @@ module std.text
 import std.core.(Bool, Equatable, Comparable, Ordering, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Pointer, RawPointer, UnsafeSlice)
-import std.collections.(Array)
+import std.memory.(Pointer, RawPointer)
+import std.collections.(Array, Slice)
 import std.iter.(Iterable)
 import std.ffi.(memmem)
 import std.text.(Formattable, Formatter, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, CharsIterator, BytesView, CharsView, GraphemesView, LinesView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
@@ -119,16 +119,15 @@ extend Str {
         if n == 0 {
             return buffer
         }
-        // UnsafeSlice is a non-owning view over the live string buffer;
+        // asByteSlice() borrows the live string buffer;
         // append(contentsOf:) copies out of it in a single pass.
-        buffer.append(contentsOf: UnsafeSlice(pointer: slice._rawPtr().offset(by: slice.start), count: n));
+        buffer.append(contentsOf: self.asByteSlice());
         buffer
     }
 
-    /// Returns a non-owning `UnsafeSlice[UInt8]` view over this string's
-    /// raw UTF-8 bytes — no copy, no allocation. The slice borrows the
-    /// live string buffer, so it must not outlive the string (or any
-    /// mutation of it). O(1).
+    /// Returns a borrowed `Slice[UInt8]` view over this string's raw
+    /// UTF-8 bytes — no copy, no allocation. The view borrows the live
+    /// string buffer, so it can't outlive the string. O(1).
     ///
     /// Use this to hand the bytes to a sink (a socket, a hasher, an
     /// FFI call) without materializing an `Array[UInt8]` via `toBytes()`.
@@ -139,9 +138,9 @@ extend Str {
     /// let bytes = "Hi".asByteSlice();
     /// bytes.count;  // 2
     /// ```
-    public func asByteSlice() -> UnsafeSlice[UInt8] {
+    public func asByteSlice() -> &Slice[UInt8] {
         let slice = self.asSlice();
-        UnsafeSlice(pointer: slice._rawPtr().offset(by: slice.start), count: (slice.end - slice.start))
+        Slice.lend(start: slice._rawPtr().offset(by: slice.start), count: slice.end - slice.start)
     }
 
     // -- Iteration -----------------------------------------------------------

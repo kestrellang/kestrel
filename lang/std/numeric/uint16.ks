@@ -17,7 +17,7 @@ import std.core.(
 )
 import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(UnsafeSlice, Pointer)
-import std.collections.(Sliceable)
+import std.collections.(Sliceable, Slice)
 import std.numeric.(UInt8, Int64, UInt64)
 
 /// A 16-bit unsigned integer.
@@ -374,7 +374,7 @@ public struct UInt16:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(UnsafeSlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[UInt16]().size))
+        hasher.write(Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[UInt16]().size))
     }
 
     // ========================================================================

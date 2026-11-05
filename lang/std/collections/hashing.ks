@@ -4,7 +4,7 @@ module std.collections
 
 import std.core.(Hasher, Hashable, Defaultable)
 import std.numeric.(UInt8, UInt64, Int64)
-import std.memory.(UnsafeSlice)
+import std.collections.(Slice)
 
 // ============================================================================
 // DEFAULT HASHER
@@ -86,11 +86,11 @@ public struct DefaultHasher: Hasher, Defaultable {
     ///
     /// ```
     /// var h = DefaultHasher();
-    /// h.write(bytes: "hello".utf8Bytes());
-    /// h.write(bytes: " world".utf8Bytes());
-    /// // Equivalent to a single write of "hello world".utf8Bytes()
+    /// h.write("hello".asByteSlice());
+    /// h.write(" world".asByteSlice());
+    /// // Equivalent to a single write of "hello world".asByteSlice()
     /// ```
-    public mutating func write(bytes: UnsafeSlice[UInt8]) {
+    public mutating func write(bytes: Slice[UInt8]) {
         let count = bytes.count;
         let ptr = bytes.pointer;
         // FNV prime, reused as the per-byte multiplier.

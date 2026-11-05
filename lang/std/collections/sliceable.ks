@@ -8,7 +8,7 @@ import std.result.(Optional)
 import std.memory.(UnsafeSlice, UnsafeSliceIterator, Pointer)
 import std.iter.(Iterable)
 import std.text.(Formattable, Formatter, FormatOptions, StringBuilder, String)
-import std.collections.(Array)
+import std.collections.(Array, Slice)
 
 // ============================================================================
 // SLICE PROTOCOL
@@ -733,15 +733,15 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].prefix(3);  // UnsafeSlice[1, 2, 3]
+    /// [1, 2, 3, 4, 5].prefix(3);  // [1, 2, 3]
     /// [1, 2].prefix(0);            // empty slice
     /// ```
-    public func prefix(count: Int64) -> UnsafeSlice[T] {
+    public func prefix(count: Int64) -> &Slice[T] {
         let s = self.asUnsafeSlice();
         if count > s.count {
             fatalError("prefix: count exceeds length")
         }
-        UnsafeSlice(pointer: s.pointer, count: count)
+        Slice.lend(start: s.pointer, count: count)
     }
 
     /// Returns a slice over the last `count` elements. O(1).
@@ -753,14 +753,14 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].suffix(2);  // UnsafeSlice[4, 5]
+    /// [1, 2, 3, 4, 5].suffix(2);  // [4, 5]
     /// ```
-    public func suffix(count: Int64) -> UnsafeSlice[T] {
+    public func suffix(count: Int64) -> &Slice[T] {
         let s = self.asUnsafeSlice();
         if count > s.count {
             fatalError("suffix: count exceeds length")
         }
-        UnsafeSlice(pointer: s.pointer.offset(by: s.count - count), count: count)
+        Slice.lend(start: s.pointer.offset(by: s.count - count), count: count)
     }
 
     /// Returns a slice with the first `count` elements skipped. O(1).
@@ -774,14 +774,14 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].drop(first: 2);  // UnsafeSlice[3, 4, 5]
+    /// [1, 2, 3, 4, 5].drop(first: 2);  // [3, 4, 5]
     /// ```
-    public func drop(first count: Int64) -> UnsafeSlice[T] {
+    public func drop(first count: Int64) -> &Slice[T] {
         let s = self.asUnsafeSlice();
         if count > s.count {
             fatalError("drop(first:): count exceeds length")
         }
-        UnsafeSlice(pointer: s.pointer.offset(by: count), count: s.count - count)
+        Slice.lend(start: s.pointer.offset(by: count), count: s.count - count)
     }
 
     /// Returns a slice with the last `count` elements skipped. O(1).
@@ -795,14 +795,14 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].drop(last: 2);  // UnsafeSlice[1, 2, 3]
+    /// [1, 2, 3, 4, 5].drop(last: 2);  // [1, 2, 3]
     /// ```
-    public func drop(last count: Int64) -> UnsafeSlice[T] {
+    public func drop(last count: Int64) -> &Slice[T] {
         let s = self.asUnsafeSlice();
         if count > s.count {
             fatalError("drop(last:): count exceeds length")
         }
-        UnsafeSlice(pointer: s.pointer, count: s.count - count)
+        Slice.lend(start: s.pointer, count: s.count - count)
     }
 
     // -- Searching (predicate) -----------------------------------------------

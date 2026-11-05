@@ -131,7 +131,7 @@ public struct BLAKE2b {
 
         while offset + 128 < sl.count {
             self.incrementCounter(128);
-            BLAKE2b.compress(sl.drop(first: offset).prefix(128), self.state, self.t0, self.t1, false);
+            BLAKE2b.compress(sl.drop(first: offset).prefix(128).asUnsafeSlice(), self.state, self.t0, self.t1, false);
             offset = offset + 128;
         }
 

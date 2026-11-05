@@ -8,7 +8,7 @@ import std.numeric.(Int64, UInt64, UInt8)
 import std.memory.(UnsafeSlice)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
-import std.collections.(Sliceable)
+import std.collections.(Sliceable, Slice)
 
 /// Untyped pointer to raw memory — `void*` in C terms.
 ///
@@ -103,7 +103,7 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiply(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        hasher.write(UnsafeSlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
+        hasher.write(Slice.lend(start: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
     }
 }
 
@@ -341,7 +341,7 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiply(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        hasher.write(UnsafeSlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
+        hasher.write(Slice.lend(start: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
     }
 }
 

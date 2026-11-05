@@ -37,7 +37,7 @@ public struct BLAKE3: Digest {
             }
             var take = 1024 - self.chunk.count;
             if take > input.count - offset { take = input.count - offset; }
-            self.chunk.update(input.drop(first: offset).prefix(take));
+            self.chunk.update(input.drop(first: offset).prefix(take).asUnsafeSlice());
             offset = offset + take;
         }
     }
