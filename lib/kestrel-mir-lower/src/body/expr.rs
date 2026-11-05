@@ -388,7 +388,7 @@ impl OssaBodyCtx<'_, '_> {
                     && !self.ref_binding_vals.contains_key(&base_val)
                     && self.body.value(result).ownership == kestrel_mir::value::Ownership::Owned
                 {
-                    self.emit_end_borrow(base_val);
+                    self.end_ref(base_val);
                 }
                 result
             },
@@ -847,7 +847,7 @@ impl OssaBodyCtx<'_, '_> {
             && !self.ref_binding_vals.contains_key(&base_val)
             && self.body.value(result).ownership == kestrel_mir::value::Ownership::Owned
         {
-            self.emit_end_borrow(base_val);
+            self.end_ref(base_val);
         }
         result
     }
@@ -1358,7 +1358,7 @@ impl OssaBodyCtx<'_, '_> {
         let ptr_ty = self.ctx.module.ty_arena.pointer(pointee_ty);
         let addr = self.emit_op1(Op::PtrTo(pointee_ty), ref_val, ptr_ty);
         self.emit_store_assign(addr, rhs);
-        self.emit_end_borrow(ref_val);
+        self.end_ref(ref_val);
         self.emit_literal(Immediate::unit())
     }
 
