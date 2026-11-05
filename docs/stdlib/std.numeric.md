@@ -124,11 +124,11 @@ _Defined in `lang/std/numeric/float32.ks`._
 #### initializer `From Raw`
 
 ```kestrel
-init(raw: lang.f32)
+public init(raw: lang.f32)
 ```
 
-Wraps an existing `lang.f32` bit pattern. Internal; used
-by intrinsics.
+Wraps an existing `lang.f32` value. The FFI counterpart of
+`raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
@@ -1506,11 +1506,11 @@ _Defined in `lang/std/numeric/float64.ks`._
 #### initializer `From Raw`
 
 ```kestrel
-init(raw: lang.f64)
+public init(raw: lang.f64)
 ```
 
-Wraps an existing `lang.f64` bit pattern. Internal; used
-by intrinsics.
+Wraps an existing `lang.f64` value. The FFI counterpart of
+`raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
@@ -3077,11 +3077,11 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Raw`
 
 ```kestrel
-init(raw: lang.i16)
+public init(raw: lang.i16)
 ```
 
-Wraps an existing `lang.i16` without conversion. Internal
-constructor used by intrinsics; not part of the public API.
+Wraps an existing `lang.i16` without conversion. The FFI
+counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -4765,11 +4765,11 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Raw`
 
 ```kestrel
-init(raw: lang.i32)
+public init(raw: lang.i32)
 ```
 
-Wraps an existing `lang.i32` without conversion. Internal
-constructor used by intrinsics; not part of the public API.
+Wraps an existing `lang.i32` without conversion. The FFI
+counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -6397,11 +6397,11 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Raw`
 
 ```kestrel
-init(raw: lang.i64)
+public init(raw: lang.i64)
 ```
 
-Wraps an existing `lang.i64` without conversion. Internal
-constructor used by intrinsics; not part of the public API.
+Wraps an existing `lang.i64` without conversion. The FFI
+counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -8561,11 +8561,11 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Raw`
 
 ```kestrel
-init(raw: lang.i8)
+public init(raw: lang.i8)
 ```
 
-Wraps an existing `lang.i8` without conversion. Internal
-constructor used by intrinsics; not part of the public API.
+Wraps an existing `lang.i8` without conversion. The FFI
+counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -10698,11 +10698,11 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Raw`
 
 ```kestrel
-init(raw: lang.i16)
+public init(raw: lang.i16)
 ```
 
-Wraps an existing `lang.i16` without conversion. Internal
-constructor used by intrinsics; not part of the public API.
+Wraps an existing `lang.i16` without conversion. The FFI
+counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -12318,11 +12318,11 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Raw`
 
 ```kestrel
-init(raw: lang.i32)
+public init(raw: lang.i32)
 ```
 
-Wraps an existing `lang.i32` without conversion. Internal
-constructor used by intrinsics; not part of the public API.
+Wraps an existing `lang.i32` without conversion. The FFI
+counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -13910,11 +13910,11 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Raw`
 
 ```kestrel
-init(raw: lang.i64)
+public init(raw: lang.i64)
 ```
 
-Wraps an existing `lang.i64` without conversion. Internal
-constructor used by intrinsics; not part of the public API.
+Wraps an existing `lang.i64` without conversion. The FFI
+counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -15551,11 +15551,11 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Raw`
 
 ```kestrel
-init(raw: lang.i8)
+public init(raw: lang.i8)
 ```
 
-Wraps an existing `lang.i8` without conversion. Internal
-constructor used by intrinsics; not part of the public API.
+Wraps an existing `lang.i8` without conversion. The FFI
+counterpart of `raw`, for values coming back from intrinsics or C.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
