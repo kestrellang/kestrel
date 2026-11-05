@@ -40,16 +40,16 @@ func nsGetArgv() -> lang.ptr[lang.ptr[lang.ptr[lang.i8]]]
 public func getArgv() -> Array[String] {
     var result = [];
 
-    let argcPtr = nsGetArgc();
-    let argc = Int32(raw: lang.ptr_read(argcPtr));
+    let argcPtr = unsafe nsGetArgc();
+    let argc = Int32(raw: unsafe lang.ptr_read(argcPtr));
 
-    let argvPtrPtr = nsGetArgv();
-    let argvPtr: lang.ptr[lang.ptr[lang.i8]] = lang.ptr_read(argvPtrPtr);
+    let argvPtrPtr = unsafe nsGetArgv();
+    let argvPtr: lang.ptr[lang.ptr[lang.i8]] = unsafe lang.ptr_read(argvPtrPtr);
 
     let argcInt = Int64(from: argc);
     for i in 1..<argcInt {
         let byteOffset = i * 8; // ptr size
-        let argPtr: lang.ptr[lang.i8] = lang.ptr_read(lang.ptr_offset(argvPtr, byteOffset.raw));
+        let argPtr: lang.ptr[lang.i8] = unsafe lang.ptr_read(lang.ptr_offset(argvPtr, byteOffset.raw));
         let cstr = CString(raw: Pointer(raw: lang.cast_ptr[_, UInt8](argPtr)));
         let s = String(from: cstr);
         result.append(s);
