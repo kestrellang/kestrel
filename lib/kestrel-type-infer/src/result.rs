@@ -70,6 +70,10 @@ pub struct TypedBody {
     /// audit trail of the solver's passing-table decisions.
     pub kind_coercions: HashMap<HirExprId, (kestrel_ast::FnTypeKind, kestrel_ast::FnTypeKind)>,
 
+    /// A method call that calls a field's value (`s.callback(x)`): the type
+    /// of the value called (a function, or a subscriptable value).
+    pub field_callee_types: HashMap<HirExprId, ResolvedTy>,
+
     /// `for` loops whose iterable is already an `Iterator`: the loop's
     /// `Iterable.iter()` protocol call (keyed by its expr id) is not made —
     /// the iterable itself is CONSUMED as the loop's iterator. Decided once
@@ -194,6 +198,7 @@ impl Hash for TypedBody {
             opaque_concrete_type,
             indirection_peels,
             kind_coercions,
+            field_callee_types,
             direct_iterators,
             optional_ref_decays,
             ref_return_calls,
@@ -212,6 +217,7 @@ impl Hash for TypedBody {
         opaque_concrete_type.hash(state);
         hash_sorted(indirection_peels, state);
         hash_sorted(kind_coercions, state);
+        hash_sorted(field_callee_types, state);
         let mut direct: Vec<_> = direct_iterators.iter().map(|e| e.raw()).collect();
         direct.sort_unstable();
         direct.hash(state);
@@ -475,6 +481,11 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         local_types,
         resolutions,
         field_subscripts: ctx.field_subscripts.clone(),
+        field_callee_types: ctx
+            .field_callee_types
+            .iter()
+            .map(|(&id, &tv)| (id, resolve_to_concrete(ctx, tv)))
+            .collect(),
         promotions,
         type_args,
         errors: ctx.errors.clone(),
@@ -1088,6 +1099,7 @@ mod tests {
             opaque_concrete_type: None,
             indirection_peels: HashMap::default(),
             kind_coercions: HashMap::default(),
+            field_callee_types: HashMap::default(),
             direct_iterators: HashSet::default(),
             optional_ref_decays: HashSet::default(),
             ref_return_calls: HashMap::default(),

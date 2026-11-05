@@ -1,7 +1,9 @@
 // A safe wrapper over wgpu-native: owned handles that release themselves,
-// blocking adapter/device/readback calls, and errors as `WgpuError`.
+// blocking adapter/device/readback calls, and errors as `WgpuError`. This
+// file has the instance, adapter, device, buffers and compute; `render.ks`
+// has textures and rendering, `surface.ks` window surfaces.
 //
-// Callbacks are `@export(.C)` functions handed to C with `CFunction(f)`; the
+// Callbacks are `@export(.C)` functions handed to C as C function values; the
 // state they fill travels through the C API's `userdata1` pointer.
 
 module wgpu
@@ -24,6 +26,12 @@ public enum WgpuError {
     case Internal(String)
     /// Mapping a buffer for reading failed.
     case MapFailed(String)
+    /// The surface changed size or settings: configure it again.
+    case SurfaceOutdated(String)
+    /// The surface is gone: create a new one.
+    case SurfaceLost(String)
+    /// No frame became available in time; try again.
+    case SurfaceTimeout(String)
 
     /// The error's message from wgpu.
     public var message: String {
@@ -33,7 +41,10 @@ public enum WgpuError {
             .Validation(m) => m.clone(),
             .OutOfMemory(m) => m.clone(),
             .Internal(m) => m.clone(),
-            .MapFailed(m) => m.clone()
+            .MapFailed(m) => m.clone(),
+            .SurfaceOutdated(m) => m.clone(),
+            .SurfaceLost(m) => m.clone(),
+            .SurfaceTimeout(m) => m.clone()
         }
     }
 }
@@ -126,7 +137,7 @@ public enum PowerPreference {
 
 /// The entry point to wgpu: finds adapters.
 public struct Instance: not Copyable {
-    fileprivate var handle: raw.WGPUInstance
+    var handle: raw.WGPUInstance
 
     /// Create an instance with the default backends.
     public init() {
@@ -136,6 +147,15 @@ public struct Instance: not Copyable {
     /// Find an adapter, blocking until wgpu answers. `fallback` asks for a
     /// software adapter, such as lavapipe or WARP.
     public func requestAdapter(power power: PowerPreference = .Default, fallback fallback: Bool = false) -> Adapter throws WgpuError {
+        self.findAdapter(power, fallback, RawPointer.nullPointer())
+    }
+
+    /// Find an adapter that can present to `surface`.
+    public func requestAdapter(compatibleWith surface: Surface, power power: PowerPreference = .Default, fallback fallback: Bool = false) -> Adapter throws WgpuError {
+        self.findAdapter(power, fallback, surface.handle)
+    }
+
+    func findAdapter(power: PowerPreference, fallback: Bool, surface: RawPointer) -> Adapter throws WgpuError {
         let options = raw.WGPURequestAdapterOptions(
             nextInChain: Pointer.nullPointer(),
             featureLevel: raw.WGPUFeatureLevel_Core,
@@ -146,13 +166,13 @@ public struct Instance: not Copyable {
             },
             forceFallbackAdapter: if fallback { 1 } else { 0 },
             backendType: raw.WGPUBackendType_Undefined,
-            compatibleSurface: RawPointer.nullPointer()
+            compatibleSurface: surface
         );
         var r = Reply();
         let info = raw.WGPURequestAdapterCallbackInfo(
             nextInChain: Pointer.nullPointer(),
             mode: raw.WGPUCallbackMode_AllowProcessEvents,
-            callback: CFunction(onRequest),
+            callback: NullableCFunction(onRequest),
             userdata1: Pointer(to: r).asRaw(),
             userdata2: RawPointer.nullPointer()
         );
@@ -191,7 +211,7 @@ public struct AdapterInfo {
 
 /// A physical GPU (or a software one): creates devices.
 public struct Adapter: not Copyable {
-    fileprivate var handle: raw.WGPUAdapter
+    var handle: raw.WGPUAdapter
 
     /// The adapter's name and kind.
     public var info: AdapterInfo {
@@ -252,7 +272,7 @@ public struct Adapter: not Copyable {
         let info = raw.WGPURequestDeviceCallbackInfo(
             nextInChain: Pointer.nullPointer(),
             mode: raw.WGPUCallbackMode_AllowSpontaneous,
-            callback: CFunction(onRequest),
+            callback: NullableCFunction(onRequest),
             userdata1: Pointer(to: r).asRaw(),
             userdata2: RawPointer.nullPointer()
         );
@@ -283,7 +303,7 @@ public enum BufferUsage {
     case Storage
     case Indirect
 
-    fileprivate var bits: UInt64 {
+    var bits: UInt64 {
         match self {
             .MapRead => raw.WGPUBufferUsage_MapRead,
             .MapWrite => raw.WGPUBufferUsage_MapWrite,
@@ -300,8 +320,8 @@ public enum BufferUsage {
 
 /// A logical GPU and its queue: creates resources and runs work.
 public struct Device: not Copyable {
-    fileprivate var handle: raw.WGPUDevice
-    fileprivate var queue: raw.WGPUQueue
+    var handle: raw.WGPUDevice
+    var queue: raw.WGPUQueue
 
     /// Create a buffer of `size` bytes.
     public func createBuffer(size size: Int64, usage usage: [BufferUsage], label label: String = "") -> Buffer {
@@ -350,24 +370,22 @@ public struct Device: not Copyable {
         ComputePipeline(handle: unsafe raw.wgpuDeviceCreateComputePipeline(self.handle, descriptor))
     }
 
-    /// Bind resources to group `group` of `pipeline`, as
-    /// `buffer.binding(n)` gives them.
-    public func createBindGroup(pipeline pipeline: ComputePipeline, group group: Int64, entries bindings: [Binding], label label: String = "") -> BindGroup {
+    /// Bind resources to `layout`, as `buffer.binding(n)`,
+    /// `view.binding(n)` and `sampler.binding(n)` give them. Get the layout
+    /// from a pipeline with `bindGroupLayout(group)`.
+    public func createBindGroup(layout layout: BindGroupLayout, entries bindings: [Binding], label label: String = "") -> BindGroup {
         var entries: [raw.WGPUBindGroupEntry] = [];
         for b in bindings {
             entries.append(b.entry);
         }
-        let layout = unsafe raw.wgpuComputePipelineGetBindGroupLayout(pipeline.handle, UInt32(from: group));
         let descriptor = raw.WGPUBindGroupDescriptor(
             nextInChain: Pointer.nullPointer(),
             label: view(label),
-            layout: layout,
+            layout: layout.handle,
             entryCount: UInt64(from: entries.count),
             entries: entries.asPointer()
         );
-        let group = unsafe raw.wgpuDeviceCreateBindGroup(self.handle, descriptor);
-        unsafe raw.wgpuBindGroupLayoutRelease(layout);
-        BindGroup(handle: group)
+        BindGroup(handle: unsafe raw.wgpuDeviceCreateBindGroup(self.handle, descriptor))
     }
 
     /// Start recording commands.
@@ -375,10 +393,26 @@ public struct Device: not Copyable {
         CommandEncoder(handle: unsafe raw.wgpuDeviceCreateCommandEncoder(self.handle, RawPointer.nullPointer()))
     }
 
+    /// A buffer holding `data`, sized to fit it.
+    public func createBuffer[T](data data: [T], usage usage: [BufferUsage], label label: String = "") -> Buffer where T: FFISafe {
+        var all = usage.clone();
+        all.append(.CopyDst);
+        let buffer = self.createBuffer(size: Layout.array[T](data.count).size, usage: all, label: label);
+        self.write(buffer, data: data);
+        buffer
+    }
+
     /// Copy `data` into `buffer` at byte `offset`.
     public func write[T](buffer: Buffer, data data: [T], offset offset: Int64 = 0) where T: FFISafe {
         let size = Layout.array[T](data.count).size;
         unsafe raw.wgpuQueueWriteBuffer(self.queue, buffer.handle, UInt64(from: offset), data.asPointer().asRaw(), UInt64(from: size));
+    }
+
+    /// Copy one value, such as a uniform struct, into `buffer` at byte
+    /// `offset`.
+    public func write[T](buffer: Buffer, value value: T, offset offset: Int64 = 0) where T: FFISafe {
+        let size = Layout.of[T]().size;
+        unsafe raw.wgpuQueueWriteBuffer(self.queue, buffer.handle, UInt64(from: offset), Pointer(to: value).asRaw(), UInt64(from: size));
     }
 
     /// Run recorded commands.
@@ -399,7 +433,7 @@ public struct Device: not Copyable {
         let info = raw.WGPUBufferMapCallbackInfo(
             nextInChain: Pointer.nullPointer(),
             mode: raw.WGPUCallbackMode_AllowProcessEvents,
-            callback: CFunction(onMapped),
+            callback: NullableCFunction(onMapped),
             userdata1: Pointer(to: r).asRaw(),
             userdata2: RawPointer.nullPointer()
         );
@@ -430,7 +464,7 @@ public struct Device: not Copyable {
         let info = raw.WGPUPopErrorScopeCallbackInfo(
             nextInChain: Pointer.nullPointer(),
             mode: raw.WGPUCallbackMode_AllowSpontaneous,
-            callback: CFunction(onPopError),
+            callback: NullableCFunction(onPopError),
             userdata1: Pointer(to: r).asRaw(),
             userdata2: RawPointer.nullPointer()
         );
@@ -460,7 +494,7 @@ public struct Device: not Copyable {
 
 /// GPU memory.
 public struct Buffer: not Copyable {
-    fileprivate var handle: raw.WGPUBuffer
+    var handle: raw.WGPUBuffer
     /// The size in bytes.
     public let size: Int64
 
@@ -485,12 +519,12 @@ public struct Buffer: not Copyable {
 /// One resource of a bind group. It doesn't own the resource, which must
 /// outlive the bind group's creation.
 public struct Binding {
-    fileprivate var entry: raw.WGPUBindGroupEntry
+    var entry: raw.WGPUBindGroupEntry
 }
 
 /// A compiled shader.
 public struct ShaderModule: not Copyable {
-    fileprivate var handle: raw.WGPUShaderModule
+    var handle: raw.WGPUShaderModule
 
     deinit {
         unsafe raw.wgpuShaderModuleRelease(self.handle);
@@ -499,16 +533,30 @@ public struct ShaderModule: not Copyable {
 
 /// A compute shader ready to dispatch.
 public struct ComputePipeline: not Copyable {
-    fileprivate var handle: raw.WGPUComputePipeline
+    var handle: raw.WGPUComputePipeline
+
+    /// The layout of bind group `group`, inferred from the shader.
+    public func bindGroupLayout(group: Int64) -> BindGroupLayout {
+        BindGroupLayout(handle: unsafe raw.wgpuComputePipelineGetBindGroupLayout(self.handle, UInt32(from: group)))
+    }
 
     deinit {
         unsafe raw.wgpuComputePipelineRelease(self.handle);
     }
 }
 
+/// What a bind group holds, from a pipeline's `bindGroupLayout(group)`.
+public struct BindGroupLayout: not Copyable {
+    var handle: raw.WGPUBindGroupLayout
+
+    deinit {
+        unsafe raw.wgpuBindGroupLayoutRelease(self.handle);
+    }
+}
+
 /// Resources bound for a pipeline.
 public struct BindGroup: not Copyable {
-    fileprivate var handle: raw.WGPUBindGroup
+    var handle: raw.WGPUBindGroup
 
     deinit {
         unsafe raw.wgpuBindGroupRelease(self.handle);
@@ -519,7 +567,7 @@ public struct BindGroup: not Copyable {
 
 /// Records GPU commands.
 public struct CommandEncoder: not Copyable {
-    fileprivate var handle: raw.WGPUCommandEncoder
+    var handle: raw.WGPUCommandEncoder
 
     /// Record a compute pass: `body` sets pipelines and dispatches.
     public func computePass(body: (ComputePass) -> ()) {
@@ -545,7 +593,7 @@ public struct CommandEncoder: not Copyable {
 
 /// A compute pass being recorded.
 public struct ComputePass: not Copyable {
-    fileprivate var handle: raw.WGPUComputePassEncoder
+    var handle: raw.WGPUComputePassEncoder
 
     /// Use `pipeline` for the next dispatches.
     public func setPipeline(pipeline: ComputePipeline) {
@@ -569,7 +617,7 @@ public struct ComputePass: not Copyable {
 
 /// Recorded commands, ready to submit.
 public struct CommandBuffer: not Copyable {
-    fileprivate var handle: raw.WGPUCommandBuffer
+    var handle: raw.WGPUCommandBuffer
 
     deinit {
         unsafe raw.wgpuCommandBufferRelease(self.handle);

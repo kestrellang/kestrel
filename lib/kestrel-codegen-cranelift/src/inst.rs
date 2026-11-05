@@ -1644,6 +1644,7 @@ fn compile_call(
     match callee {
         Callee::Resolved(mono_id) => compile_resolved_call(fc, builder, *mono_id, args, result),
         Callee::Thin(func_val_id) => compile_thin_call(fc, builder, *func_val_id, args, result),
+        Callee::C(func_val_id) => compile_c_call(fc, builder, *func_val_id, args, result),
         Callee::Thick(closure_val_id) => {
             compile_thick_call(fc, builder, *closure_val_id, args, result)
         },
@@ -1838,7 +1839,6 @@ fn compile_thin_call(
     args: &[CallArg],
     result: Option<ValueId>,
 ) -> Result<bool, CodegenError> {
-    let ptr_ty = fc.ctx.ptr_ty;
     let func_ptr = fc.get_value(builder, func_val_id);
 
     // Infer types from the ValueId's type (FuncThin or Pointer(FuncThin))
@@ -1856,6 +1856,49 @@ fn compile_thin_call(
             "thin call on non-FuncThin".into(),
         ));
     };
+    emit_kestrel_indirect_call(fc, builder, func_ptr, &param_tys, ret_ty, args, result)
+}
+
+/// A call through a C function value: call its type's bridge (Kestrel ABI)
+/// with the address first; the bridge makes the C call.
+fn compile_c_call(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    func_val_id: ValueId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let func_ty = fc.body.values[func_val_id.index()].ty;
+    let Some(decl) = kestrel_codegen::c_abi::CDecl::of_func_c(&fc.ctx.module.ty_arena, func_ty)
+    else {
+        return Err(CodegenError::Unsupported("C call on non-FuncC".into()));
+    };
+    let param_tys = crate::c_bridge::call_bridge_params(func_ty, &decl);
+    let addr_arg = CallArg {
+        value: func_val_id,
+        convention: ParamConvention::Consuming,
+    };
+    let args: Vec<CallArg> = std::iter::once(addr_arg)
+        .chain(args.iter().cloned())
+        .collect();
+    let bridge = crate::c_bridge::call_bridge(fc.ctx, func_ty)?;
+    let fref = fc.ctx.cl_module.declare_func_in_func(bridge, builder.func);
+    let bridge_ptr = builder.ins().func_addr(fc.ctx.ptr_ty, fref);
+    emit_kestrel_indirect_call(fc, builder, bridge_ptr, &param_tys, decl.ret, &args, result)
+}
+
+/// Call `func_ptr`, a Kestrel-ABI function of `param_tys` and `ret_ty`.
+fn emit_kestrel_indirect_call(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    func_ptr: Value,
+    param_tys: &[(TyId, ParamConvention)],
+    ret_ty: TyId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let ptr_ty = fc.ctx.ptr_ty;
+    let arena = &fc.ctx.module.ty_arena;
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, arena, fc.ctx.module);
     let ret_mode = abi::return_mode(ret_repr);
@@ -1866,7 +1909,7 @@ fn compile_thin_call(
     if matches!(ret_mode, ReturnMode::Sret) {
         sig.params.push(AbiParam::new(ptr_ty));
     }
-    for (ty, convention) in &param_tys {
+    for (ty, convention) in param_tys {
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
         match abi::param_pass_mode(*convention, repr) {
             PassMode::ByVal(t) => sig.params.push(AbiParam::new(t)),

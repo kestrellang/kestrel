@@ -152,6 +152,27 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             }
         },
 
+        MirTy::FuncC {
+            params,
+            ret,
+            unsigned,
+        } => {
+            let sub_params: Vec<(TyId, ParamConvention)> = params
+                .iter()
+                .map(|&(t, conv)| (substitute(arena, t, subst), conv))
+                .collect();
+            let sub_ret = substitute(arena, ret, subst);
+            if sub_params != params || sub_ret != ret {
+                arena.intern(MirTy::FuncC {
+                    params: sub_params,
+                    ret: sub_ret,
+                    unsigned,
+                })
+            } else {
+                ty
+            }
+        },
+
         MirTy::FuncThick { kind, params, ret } => {
             let sub_params: Vec<(TyId, ParamConvention)> = params
                 .iter()

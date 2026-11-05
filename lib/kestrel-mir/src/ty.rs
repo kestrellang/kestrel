@@ -113,6 +113,15 @@ pub enum MirTy {
         params: Vec<(TyId, ParamConvention)>,
         ret: TyId,
     },
+    /// A C function's address (`@extern(.C) (A) -> R`): one pointer, called
+    /// with the C ABI. A `Borrow`/`MutBorrow` param is a C pointer, a
+    /// `Consuming` one passes by value. `unsigned` is parallel to `params`
+    /// plus one entry for `ret`: which small integers C zero-extends.
+    FuncC {
+        params: Vec<(TyId, ParamConvention)>,
+        ret: TyId,
+        unsigned: Vec<bool>,
+    },
     FuncThick {
         /// The closure tier (view vs owning). Part of the interned identity:
         /// mangling and witness matching are kind-exact.

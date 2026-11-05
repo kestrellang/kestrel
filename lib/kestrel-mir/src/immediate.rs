@@ -23,15 +23,17 @@ pub enum ImmediateKind {
         self_type: Option<TyId>,
     },
     MonoFunctionRef(MonoFuncId),
-    /// The C-ABI address of an `@export(.C)` or `@extern(.C)` function
-    /// (`CFunction(f)`): an export's wrapper, an import's C symbol. A
-    /// `lang.ptr[()]`. Mono rewrites it to [`ImmediateKind::MonoCFunctionRef`].
+    /// The C-ABI address of an `@export(.C)` or `@extern(.C)` function, named
+    /// where an `@extern(.C) (…) -> …` is expected: an export's wrapper, an
+    /// import's C symbol. `ty` is its `MirTy::FuncC`. Mono rewrites it to
+    /// [`ImmediateKind::MonoCFunctionRef`].
     CFunctionRef {
         func: Entity,
         type_args: Vec<TyId>,
         self_type: Option<TyId>,
+        ty: TyId,
     },
-    MonoCFunctionRef(MonoFuncId),
+    MonoCFunctionRef(MonoFuncId, TyId),
     /// The address of an existential function table: `template`
     /// (`MirModule::vtable_templates`) instantiated at `payload`. Mono
     /// rewrites it to [`ImmediateKind::MonoVTable`].
@@ -152,10 +154,7 @@ impl Immediate {
                 arena.pointer(i8)
             },
             ImmediateKind::Unit => arena.unit(),
-            ImmediateKind::CFunctionRef { .. } | ImmediateKind::MonoCFunctionRef(_) => {
-                let unit = arena.unit();
-                arena.pointer(unit)
-            },
+            ImmediateKind::CFunctionRef { ty, .. } | ImmediateKind::MonoCFunctionRef(_, ty) => *ty,
             ImmediateKind::NullPtr(ty) | ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) => {
                 *ty
             },

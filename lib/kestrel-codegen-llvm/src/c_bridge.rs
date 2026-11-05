@@ -5,15 +5,17 @@
 //! call; an `@export` gets an external C-ABI *export wrapper* that calls the
 //! Kestrel body. Both are always-inline, so the bridge folds into the caller.
 //! Keeping the C ABI out of ordinary call sites means a function value, a
-//! thunk or a witness that names an extern needs no special case.
+//! thunk or a witness that names an extern needs no special case. A call
+//! through a C function value (`Callee::C`) goes through a *call bridge*: an
+//! import thunk per C function type whose first Kestrel param is the address.
 
 use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::types::{AnyType, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue};
-use kestrel_codegen::c_abi::{self, CArg, CPrim, CRet, CSig, Piece};
-use kestrel_mir::mono::MonoFunction;
+use kestrel_codegen::c_abi::{CArg, CDecl, CPrim, CRet, CSig, Piece};
+use kestrel_mir::TyId;
 
 use crate::context::CodegenCtx;
 use crate::mem;
@@ -97,39 +99,32 @@ fn ext_attr(cx: &Context, scalar: ScalarTy, unsigned: bool) -> Option<Attribute>
         .then(|| enum_attr(cx, if unsigned { "zeroext" } else { "signext" }, 0))
 }
 
-/// Classify `func`'s C signature and lower it to an LLVM function type.
-pub fn c_fn_type<'ctx>(ctx: &mut CodegenCtx<'ctx>, func: &MonoFunction) -> CFnType<'ctx> {
+/// Classify `decl` and lower it to an LLVM function type.
+pub fn c_fn_type<'ctx>(ctx: &mut CodegenCtx<'ctx>, decl: &CDecl) -> CFnType<'ctx> {
     let cx = ctx.cx;
     let module = ctx.module;
     let arena = &module.ty_arena;
-    let params: Vec<_> = func.params.iter().map(|p| (p.ty, p.convention)).collect();
-    let sig = c_abi::classify(ctx.c_abi, &mut ctx.tc, arena, module, func.ret, &params);
-    let unsigned = |i: usize| {
-        func.extern_info
-            .as_ref()
-            .and_then(|e| e.unsigned_params.get(i).copied())
-            .unwrap_or(false)
-    };
+    let sig = decl.classify(ctx.c_abi, &mut ctx.tc, arena, module);
     let ptr: BasicTypeEnum = cx.ptr_type(inkwell::AddressSpace::default()).into();
 
     let mut types: Vec<BasicMetadataTypeEnum> = Vec::new();
     let mut attrs = Vec::new();
     if sig.ret == CRet::Sret {
-        let size = ctx.tc.repr(func.ret, arena, module).size();
+        let size = ctx.tc.repr(decl.ret, arena, module).size();
         attrs.push((
             AttributeLoc::Param(0),
             type_attr(cx, "sret", cx.i8_type().array_type(size as u32)),
         ));
         types.push(ptr.into());
     }
-    for (i, (carg, param)) in sig.params.iter().zip(&func.params).enumerate() {
+    for (i, (carg, &(param_ty, _))) in sig.params.iter().zip(&decl.params).enumerate() {
         let index = types.len() as u32;
         match carg {
             CArg::Ignore => {},
             CArg::Pointer | CArg::Indirect => types.push(ptr.into()),
             CArg::Direct => {
-                let scalar = ctx.tc.value_scalar(param.ty, arena, module);
-                if let Some(a) = ext_attr(cx, scalar, unsigned(i)) {
+                let scalar = ctx.tc.value_scalar(param_ty, arena, module);
+                if let Some(a) = ext_attr(cx, scalar, decl.unsigned_param(i)) {
                     attrs.push((AttributeLoc::Param(index), a));
                 }
                 types.push(scalar.llvm(cx).into());
@@ -155,9 +150,8 @@ pub fn c_fn_type<'ctx>(ctx: &mut CodegenCtx<'ctx>, func: &MonoFunction) -> CFnTy
     let fn_type = match &sig.ret {
         CRet::Void | CRet::Sret => cx.void_type().fn_type(&types, false),
         CRet::Direct => {
-            let scalar = ctx.tc.value_scalar(func.ret, arena, module);
-            let unsigned_ret = func.extern_info.as_ref().is_some_and(|e| e.unsigned_ret);
-            if let Some(a) = ext_attr(cx, scalar, unsigned_ret) {
+            let scalar = ctx.tc.value_scalar(decl.ret, arena, module);
+            if let Some(a) = ext_attr(cx, scalar, decl.unsigned_ret) {
                 attrs.push((AttributeLoc::Return, a));
             }
             scalar.llvm(cx).fn_type(&types, false)
@@ -267,12 +261,20 @@ fn unpack<'ctx>(
         .collect()
 }
 
-/// Define `thunk` (Kestrel ABI) as a call to the C function `c_fn`.
+/// What an import thunk calls: a declared C symbol, or (a call bridge) the
+/// address passed as its first Kestrel param.
+#[derive(Clone, Copy)]
+pub enum CTarget<'ctx> {
+    Symbol(FunctionValue<'ctx>),
+    FirstParam,
+}
+
+/// Define `thunk` (Kestrel ABI) as a call to the C function `target`.
 pub fn define_import_thunk<'ctx>(
     ctx: &mut CodegenCtx<'ctx>,
-    func: &MonoFunction,
+    decl: &CDecl,
     thunk: FunctionValue<'ctx>,
-    c_fn: FunctionValue<'ctx>,
+    target: CTarget<'ctx>,
     cty: &CFnType<'ctx>,
 ) {
     let cx = ctx.cx;
@@ -281,19 +283,21 @@ pub fn define_import_thunk<'ctx>(
     let builder = cx.create_builder();
     builder.position_at_end(cx.append_basic_block(thunk, "entry"));
 
-    let ret_repr = ctx.tc.repr(func.ret, &module.ty_arena, module);
+    let ret_repr = ctx.tc.repr(decl.ret, &module.ty_arena, module);
     let mut kparams = thunk.get_param_iter();
     let ksret = ret_repr
         .is_aggregate()
         .then(|| kparams.next().unwrap().into_pointer_value());
+    let fn_ptr =
+        matches!(target, CTarget::FirstParam).then(|| kparams.next().unwrap().into_pointer_value());
 
     let mut cargs: Vec<BasicMetadataValueEnum> = Vec::new();
     if cty.sig.ret == CRet::Sret {
         cargs.push(ksret.unwrap().into());
     }
-    for (carg, param) in cty.sig.params.iter().zip(&func.params) {
-        let repr = ctx.tc.repr(param.ty, &module.ty_arena, module);
-        if repr.is_zst() && param.convention == kestrel_mir::ParamConvention::Consuming {
+    for (carg, &(param_ty, convention)) in cty.sig.params.iter().zip(&decl.params) {
+        let repr = ctx.tc.repr(param_ty, &module.ty_arena, module);
+        if repr.is_zst() && convention == kestrel_mir::ParamConvention::Consuming {
             continue;
         }
         let kval = kparams.next().unwrap();
@@ -324,7 +328,13 @@ pub fn define_import_thunk<'ctx>(
         }
     }
 
-    let call = builder.build_call(c_fn, &cargs, "ccall").unwrap();
+    let call = match target {
+        CTarget::Symbol(c_fn) => builder.build_call(c_fn, &cargs, "ccall"),
+        CTarget::FirstParam => {
+            builder.build_indirect_call(cty.fn_type, fn_ptr.unwrap(), &cargs, "ccall")
+        },
+    }
+    .unwrap();
     cty.apply_to_call(call);
     match &cty.sig.ret {
         CRet::Void | CRet::Sret => {
@@ -353,7 +363,7 @@ pub fn define_import_thunk<'ctx>(
 /// Define `wrapper` (C ABI) as a call to the Kestrel function `body`.
 pub fn define_export_wrapper<'ctx>(
     ctx: &mut CodegenCtx<'ctx>,
-    func: &MonoFunction,
+    decl: &CDecl,
     wrapper: FunctionValue<'ctx>,
     body: FunctionValue<'ctx>,
     cty: &CFnType<'ctx>,
@@ -363,7 +373,7 @@ pub fn define_export_wrapper<'ctx>(
     let builder = cx.create_builder();
     builder.position_at_end(cx.append_basic_block(wrapper, "entry"));
 
-    let ret_repr = ctx.tc.repr(func.ret, &module.ty_arena, module);
+    let ret_repr = ctx.tc.repr(decl.ret, &module.ty_arena, module);
     let mut cparams = wrapper.get_param_iter();
     let csret = (cty.sig.ret == CRet::Sret).then(|| cparams.next().unwrap().into_pointer_value());
 
@@ -382,14 +392,14 @@ pub fn define_export_wrapper<'ctx>(
     if let Some(p) = ksret {
         kargs.push(p.into());
     }
-    for (carg, param) in cty.sig.params.iter().zip(&func.params) {
+    for (carg, &(param_ty, _)) in cty.sig.params.iter().zip(&decl.params) {
         match carg {
             CArg::Ignore => {},
             CArg::Direct | CArg::Pointer | CArg::Stack { .. } | CArg::Indirect => {
                 kargs.push(cparams.next().unwrap().into());
             },
             CArg::Split { pieces, array } => {
-                let size = ctx.tc.repr(param.ty, &module.ty_arena, module).size();
+                let size = ctx.tc.repr(param_ty, &module.ty_arena, module).size();
                 let vals: Vec<BasicValueEnum> = if *array && pieces.len() > 1 {
                     unpack(&builder, cparams.next().unwrap(), pieces.len())
                 } else {
@@ -441,4 +451,34 @@ pub fn define_export_wrapper<'ctx>(
             builder.build_return(Some(&v)).unwrap();
         },
     }
+}
+
+/// The call bridge for C function type `func_ty`: an always-inline
+/// Kestrel-ABI function `(address, params…) -> ret` that makes the C call.
+/// One per type, made on first use.
+pub fn call_bridge<'ctx>(ctx: &mut CodegenCtx<'ctx>, func_ty: TyId) -> FunctionValue<'ctx> {
+    if let Some(&f) = ctx.c_call_bridges.get(&func_ty) {
+        return f;
+    }
+    let module = ctx.module;
+    let decl = CDecl::of_func_c(&module.ty_arena, func_ty).expect("call bridge for a non-C type");
+    let mut kparams = vec![(func_ty, kestrel_mir::ParamConvention::Consuming)];
+    kparams.extend(decl.params.iter().copied());
+    let sig = crate::abi::build_signature_parts(
+        &kparams,
+        decl.ret,
+        &mut ctx.tc,
+        &module.ty_arena,
+        module,
+        ctx.cx,
+    );
+    let name = format!("c_call_bridge.{}", ctx.c_call_bridges.len());
+    let bridge = ctx
+        .llmod
+        .add_function(&name, sig, Some(inkwell::module::Linkage::Internal));
+    let cty = c_fn_type(ctx, &decl);
+    define_import_thunk(ctx, &decl, bridge, CTarget::FirstParam, &cty);
+    ctx.add_inline_attribute(bridge, kestrel_mir::item::function::InlineMode::Always);
+    ctx.c_call_bridges.insert(func_ty, bridge);
+    bridge
 }

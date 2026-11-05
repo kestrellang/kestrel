@@ -240,6 +240,16 @@ let saved: escaping () -> Int64 = { 7 };               // owns captures, may out
 
 The kind is part of type identity, so `Array[escaping () -> Int64]` and `Array[() -> Int64]` are different types. See [Closures](closures.md) for the full model.
 
+### C Function Types
+
+`@extern(.C) (A, B) -> R` is the address of a function with the C calling convention: one pointer, exactly a C function pointer. Naming an `@export(.C)` or `@extern(.C)` function where one is expected gives its C entry point; a closure has no C address. Calling one needs `unsafe`, and it is `FFISafe` when its params and return are. It is never null; for a callback C allows to be `NULL`, use `std.ffi.NullableCFunction[F]`. See [Callbacks](functions.md#callbacks).
+
+```kestrel
+type Compare = @extern(.C) (Pointer[Int32], Pointer[Int32]) -> Int32
+let cmp: Compare = compareInts;     // an @export(.C) function
+let order = unsafe cmp(a, b);       // a C call
+```
+
 ## Optional Types
 
 Optional types represent values that may or may not be present. `T?` is syntactic sugar for `Optional[T]`, an enum with cases `.Some(T)` and `.None`.

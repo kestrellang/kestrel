@@ -313,6 +313,7 @@ pub fn describe_fn_kind(kind: kestrel_ast::FnTypeKind) -> String {
     match kind {
         kestrel_ast::FnTypeKind::Normal => "a normal closure".into(),
         kestrel_ast::FnTypeKind::Escaping => "an 'escaping' closure".into(),
+        kestrel_ast::FnTypeKind::C => "a C function".into(),
         // `keyword()` is the single source of truth for the spelling.
         other => format!("a '{}' closure", other.keyword().unwrap_or("")),
     }
@@ -363,6 +364,9 @@ fn kind_mismatch_note(
             "an 'escaping' closure is shared (aliases may exist), so its calls are not exclusive"
                 .into()
         },
+        // Only a named `@export(.C)` / `@extern(.C)` function has a C address.
+        (_, C) => "a closure has no C address; name an '@export(.C)' function instead".into(),
+        (C, _) => "a C function can't be used as a Kestrel closure yet".into(),
         _ => "see the closure passing table in the language reference".into(),
     }
 }

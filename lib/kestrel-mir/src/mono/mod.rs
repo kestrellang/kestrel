@@ -753,10 +753,18 @@ fn substitute_immediate(
             type_args,
             self_type,
             ..
-        }
-        | ImmediateKind::CFunctionRef {
+        } => {
+            for ta in type_args.iter_mut() {
+                *ta = resolve(arena, *ta);
+            }
+            if let Some(st) = self_type {
+                *st = resolve(arena, *st);
+            }
+        },
+        ImmediateKind::CFunctionRef {
             type_args,
             self_type,
+            ty,
             ..
         } => {
             for ta in type_args.iter_mut() {
@@ -765,6 +773,7 @@ fn substitute_immediate(
             if let Some(st) = self_type {
                 *st = resolve(arena, *st);
             }
+            *ty = resolve(arena, *ty);
         },
         _ => {},
     }
@@ -895,10 +904,11 @@ fn rewrite_callees(
                     func,
                     type_args,
                     self_type,
+                    ty,
                 } => {
                     let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
                     if let Some(&mono_id) = func_id_map.get(&key) {
-                        value.kind = ImmediateKind::MonoCFunctionRef(mono_id);
+                        value.kind = ImmediateKind::MonoCFunctionRef(mono_id, *ty);
                     }
                 },
                 _ => {},

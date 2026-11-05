@@ -158,6 +158,14 @@ impl TyFunction {
             .filter_map(|e| e.into_token())
             .find(|t| !t.kind().is_trivia())
     }
+
+    /// The convention attribute of a C function type (`@extern(.C)`).
+    pub fn convention(&self) -> Option<Attribute> {
+        self.syntax()
+            .children()
+            .take_while(|n| n.kind() != SyntaxKind::TyList)
+            .find_map(Attribute::cast)
+    }
 }
 
 impl TypeAliasDeclaration {

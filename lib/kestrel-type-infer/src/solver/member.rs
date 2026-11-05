@@ -886,6 +886,7 @@ pub(super) fn solve_member(
                 });
             }
         }
+        ctx.field_callee_types.insert(expr, field_tv);
         // Dispatch via solve_call — handles both function calls and subscript calls
         return solve_call(ctx, field_tv, args, result, expr, span);
     }

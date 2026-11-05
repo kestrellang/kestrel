@@ -5,6 +5,8 @@
 //! comes from `UnsafetyOf`, the one query the witness rule and the LSP also
 //! read. A use is anything inference resolved to the declaration: a call, a
 //! property read, an initializer, a subscript, or naming it as a value.
+//! Calling a C function value (`@extern(.C) (…) -> …`) is unsafe too: the
+//! address came from C or a cast, and nothing checks what it points at.
 //!
 //! An unsafe context is the operand of `unsafe expr` or the body of
 //! `unsafe { … }`, and nothing else: the body of an `unsafe func` is not one.
@@ -16,13 +18,15 @@
 //!
 //! ### E640 — `unsafe_use` (Error, Correctness)
 //!
-//! **Message:** "{what} '{name}' is unsafe and requires an `unsafe` expression or block"
+//! **Message:** "{what} '{name}' is unsafe and requires an `unsafe` expression or block",
+//! or for a call through a C function value: "calling a C function value is
+//! unsafe and requires an `unsafe` expression or block"
 //!
 //! **Labels:**
 //! - Primary: the use
 //!   - Span source: `util::expr_span` on the referencing `HirExprId`
 //!   - Message: "unsafe use"
-//! - Secondary: the declaration
+//! - Secondary: the declaration (not for C function value calls)
 //!   - Span source: `util::entity_span` on the unsafe entity
 //!   - Message: "declared unsafe here" / "declared `@extern` here"
 //!
@@ -47,6 +51,7 @@ use kestrel_ast_builder::unsafety::{Unsafety, UnsafetyOf};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::*;
 use kestrel_span::Span;
+use kestrel_type_infer::result::ResolvedTy;
 
 use crate::body::restricted_use::display_name;
 use crate::context::BodyContext;
@@ -87,6 +92,15 @@ impl BodyCheck for UnsafeUseAnalyzer {
         let mut seen: HashSet<(Entity, usize, usize)> = HashSet::new();
         let mut diags = Vec::new();
         for (id, expr) in cx.hir.exprs.iter() {
+            if calls_c_value(cx, id, expr) {
+                let span = util::expr_span(cx.hir, id);
+                match innermost_region(regions, &span) {
+                    Some(region) => covered[region] = true,
+                    None if !span.is_synthetic() => diags.push(c_value_call(span)),
+                    None => {},
+                }
+                continue;
+            }
             let target = match expr {
                 HirExpr::Def(entity, ..) => Some(*entity),
                 _ => cx.typed.resolutions.get(&id).copied(),
@@ -128,6 +142,32 @@ impl BodyCheck for UnsafeUseAnalyzer {
         );
         diags
     }
+}
+
+/// A call through a C function value: `cb(x)` on a local or expression of
+/// C function type, or `s.cb(x)` on such a field. Calling a function by
+/// name is a direct call, safe unless the function itself is unsafe.
+fn calls_c_value(cx: &BodyContext<'_>, id: HirExprId, expr: &HirExpr) -> bool {
+    let callee_ty = match expr {
+        HirExpr::Call { callee, .. } => {
+            if let HirExpr::Def(entity, ..) = &cx.hir.exprs[*callee]
+                && cx.query.get::<kestrel_ast_builder::NodeKind>(*entity)
+                    == Some(&kestrel_ast_builder::NodeKind::Function)
+            {
+                return false;
+            }
+            cx.typed.expr_types.get(callee)
+        },
+        HirExpr::MethodCall { .. } => cx.typed.field_callee_types.get(&id),
+        _ => None,
+    };
+    matches!(
+        callee_ty,
+        Some(ResolvedTy::Function {
+            kind: kestrel_ast::FnTypeKind::C,
+            ..
+        })
+    )
 }
 
 /// The smallest region whose extent holds `span`: a use marks only the
@@ -174,6 +214,26 @@ fn unsafe_use(
         ),
         labels,
         notes: vec!["wrap the use in `unsafe` once you have checked its safety contract".into()],
+    }
+}
+
+fn c_value_call(span: Span) -> AnalyzeDiagnostic {
+    AnalyzeDiagnostic {
+        descriptor_id: "E640",
+        severity: Severity::Error,
+        message:
+            "calling a C function value is unsafe and requires an `unsafe` expression or block"
+                .into(),
+        labels: vec![DiagLabel {
+            span,
+            message: "unsafe call".into(),
+            is_primary: true,
+        }],
+        notes: vec![
+            "wrap the call in `unsafe` once you have checked the address is a live C function \
+             of this type"
+                .into(),
+        ],
     }
 }
 

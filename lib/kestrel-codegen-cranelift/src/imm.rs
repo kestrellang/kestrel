@@ -42,14 +42,14 @@ pub fn compile_immediate(
 
         ImmediateKind::MonoFunctionRef(mono_id) => compile_mono_func_ref(ctx, builder, *mono_id),
         // A C-callable address: the `@export` wrapper or `@extern` symbol.
-        ImmediateKind::MonoCFunctionRef(mono_id) => {
+        ImmediateKind::MonoCFunctionRef(mono_id, _) => {
             let func_id = ctx
                 .c_symbols
                 .get(&mono_id.index())
                 .copied()
                 .ok_or_else(|| {
                     CodegenError::Unsupported(format!(
-                        "CFunction of mono function {} with no C symbol",
+                        "C function value of mono function {} with no C symbol",
                         mono_id.index()
                     ))
                 })?;

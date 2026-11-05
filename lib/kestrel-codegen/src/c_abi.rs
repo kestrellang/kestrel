@@ -1,5 +1,5 @@
 //! How a value crosses the C boundary (`@extern` imports, `@export`
-//! definitions, `CFunction` calls). Kestrel's own ABI passes every aggregate by
+//! definitions, calls through C function values). Kestrel's own ABI passes every aggregate by
 //! pointer; C splits a small struct into registers, copies a large one onto
 //! the stack, or hands over a pointer to a copy, depending on the target.
 //!
@@ -11,7 +11,7 @@
 //! Supported: x86-64 System V and AArch64 AAPCS64 ([`CAbi`]). Any other
 //! target keeps the old pointer-passing behaviour.
 
-use kestrel_mir::mono::MonoModule;
+use kestrel_mir::mono::{MonoFunction, MonoModule};
 use kestrel_mir::{Layout, MirTy, ParamConvention, StructLayout, TyArena, TyId};
 pub use kestrel_target::CAbi;
 
@@ -112,6 +112,61 @@ impl CSig {
             .max()
             .unwrap_or(0)
             .next_multiple_of(8)
+    }
+}
+
+/// A C function's signature in MIR terms: what [`classify`] reads, plus which
+/// small integers C zero-extends. Built from an `@extern`/`@export` function
+/// or from a C function type (`MirTy::FuncC`), so both bridge alike.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CDecl {
+    pub params: Vec<(TyId, ParamConvention)>,
+    pub ret: TyId,
+    pub unsigned_params: Vec<bool>,
+    pub unsigned_ret: bool,
+}
+
+impl CDecl {
+    pub fn of_function(func: &MonoFunction) -> Self {
+        let ext = func.extern_info.as_ref();
+        Self {
+            params: func.params.iter().map(|p| (p.ty, p.convention)).collect(),
+            ret: func.ret,
+            unsigned_params: ext.map(|e| e.unsigned_params.clone()).unwrap_or_default(),
+            unsigned_ret: ext.is_some_and(|e| e.unsigned_ret),
+        }
+    }
+
+    /// The signature a `FuncC` type calls with; `None` for any other type.
+    pub fn of_func_c(arena: &TyArena, ty: TyId) -> Option<Self> {
+        let MirTy::FuncC {
+            params,
+            ret,
+            unsigned,
+        } = arena.get(ty)
+        else {
+            return None;
+        };
+        Some(Self {
+            params: params.clone(),
+            ret: *ret,
+            unsigned_params: unsigned[..params.len()].to_vec(),
+            unsigned_ret: unsigned.get(params.len()).copied().unwrap_or(false),
+        })
+    }
+
+    pub fn unsigned_param(&self, i: usize) -> bool {
+        self.unsigned_params.get(i).copied().unwrap_or(false)
+    }
+
+    pub fn classify<M: ScalarModel>(
+        &self,
+        abi: CAbi,
+        tc: &mut TypeCache<M>,
+        arena: &TyArena,
+        module: &MonoModule,
+    ) -> CSig {
+        classify(abi, tc, arena, module, self.ret, &self.params)
     }
 }
 
@@ -337,9 +392,10 @@ impl<M: ScalarModel> Classifier<'_, M> {
             MirTy::I64 => out.push(int(8)),
             MirTy::F32 => out.push(float(4)),
             MirTy::F64 => out.push(float(8)),
-            MirTy::Pointer(_) | MirTy::FuncThin { .. } | MirTy::Ref { .. } => {
-                out.push(int(self.tc.ptr_size))
-            },
+            MirTy::Pointer(_)
+            | MirTy::FuncThin { .. }
+            | MirTy::FuncC { .. }
+            | MirTy::Ref { .. } => out.push(int(self.tc.ptr_size)),
             MirTy::Tuple(elems) => {
                 let mut layout = StructLayout::new();
                 for &elem in elems {

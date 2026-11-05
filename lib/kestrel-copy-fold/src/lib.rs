@@ -62,7 +62,8 @@ pub enum CopyRequirement {
 /// `needs_drop` — see kestrel-mir/src/ty_query.rs).
 pub fn fn_kind_semantics(kind: kestrel_ast::FnTypeKind) -> CopySemantics {
     match kind {
-        kestrel_ast::FnTypeKind::Normal => CopySemantics::Copyable,
+        // A C function is a bare code address.
+        kestrel_ast::FnTypeKind::Normal | kestrel_ast::FnTypeKind::C => CopySemantics::Copyable,
         kestrel_ast::FnTypeKind::Mutating | kestrel_ast::FnTypeKind::Consuming => {
             CopySemantics::NotCopyable
         },

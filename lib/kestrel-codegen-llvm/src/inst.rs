@@ -1718,6 +1718,7 @@ fn compile_call<'ctx>(
     match callee {
         Callee::Resolved(mono_id) => compile_resolved_call(fc, builder, *mono_id, args, result),
         Callee::Thin(func_val_id) => compile_thin_call(fc, builder, *func_val_id, args, result),
+        Callee::C(func_val_id) => compile_c_call(fc, builder, *func_val_id, args, result),
         Callee::Thick(closure_val_id) => {
             compile_thick_call(fc, builder, *closure_val_id, args, result)
         },
@@ -1917,8 +1918,6 @@ fn compile_thin_call<'ctx>(
     args: &[CallArg],
     result: Option<ValueId>,
 ) -> Result<bool, CodegenError> {
-    let cx = fc.ctx.cx;
-    let ptr_scalar = fc.ctx.tc.ptr_scalar;
     let module: &'ctx MonoModule = fc.ctx.module;
 
     let func_ptr = fc.get_value(func_val_id).into_pointer_value();
@@ -1936,6 +1935,52 @@ fn compile_thin_call<'ctx>(
             "thin call on non-FuncThin".into(),
         ));
     };
+    emit_kestrel_indirect_call(fc, builder, func_ptr, &param_tys, ret_ty, args, result)
+}
+
+/// A call through a C function value: call its type's bridge (Kestrel ABI)
+/// with the address first; the bridge makes the C call and inlines away.
+fn compile_c_call<'ctx>(
+    fc: &mut FuncCompiler<'_, 'ctx>,
+    builder: &Builder<'ctx>,
+    func_val_id: ValueId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let module: &'ctx MonoModule = fc.ctx.module;
+    let func_ty = fc.body.values[func_val_id.index()].ty;
+    let MirTy::FuncC { params, ret, .. } = module.ty_arena.get(func_ty) else {
+        return Err(CodegenError::Unsupported("C call on non-FuncC".into()));
+    };
+    let addr = (func_ty, ParamConvention::Consuming);
+    let param_tys: Vec<_> = std::iter::once(addr)
+        .chain(params.iter().copied())
+        .collect();
+    let addr_arg = CallArg {
+        value: func_val_id,
+        convention: ParamConvention::Consuming,
+    };
+    let args: Vec<CallArg> = std::iter::once(addr_arg)
+        .chain(args.iter().cloned())
+        .collect();
+    let bridge = crate::c_bridge::call_bridge(fc.ctx, func_ty);
+    let bridge_ptr = bridge.as_global_value().as_pointer_value();
+    emit_kestrel_indirect_call(fc, builder, bridge_ptr, &param_tys, *ret, &args, result)
+}
+
+/// Call `func_ptr`, a Kestrel-ABI function of `param_tys` and `ret_ty`.
+fn emit_kestrel_indirect_call<'ctx>(
+    fc: &mut FuncCompiler<'_, 'ctx>,
+    builder: &Builder<'ctx>,
+    func_ptr: PointerValue<'ctx>,
+    param_tys: &[(TyId, ParamConvention)],
+    ret_ty: TyId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let cx = fc.ctx.cx;
+    let ptr_scalar = fc.ctx.tc.ptr_scalar;
+    let module: &'ctx MonoModule = fc.ctx.module;
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, &module.ty_arena, module);
     let ret_mode = abi::return_mode(ret_repr);
@@ -1945,7 +1990,7 @@ fn compile_thin_call<'ctx>(
     if matches!(ret_mode, ReturnMode::Sret) {
         params.push(ptr_scalar.llvm(cx).into());
     }
-    for (ty, convention) in &param_tys {
+    for (ty, convention) in param_tys {
         let repr = fc.ctx.tc.repr(*ty, &module.ty_arena, module);
         match abi::param_pass_mode(*convention, repr) {
             PassMode::ByVal(t) => params.push(t.llvm(cx).into()),

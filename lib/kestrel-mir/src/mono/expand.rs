@@ -1376,7 +1376,7 @@ fn remap_inst_operands(kind: &mut InstKind, remap: &HashMap<ValueId, ValueId>) {
                 arg.value = remap_value(arg.value, remap);
             }
             match callee {
-                Callee::Thin(v) | Callee::Thick(v) => {
+                Callee::Thin(v) | Callee::Thick(v) | Callee::C(v) => {
                     *v = remap_value(*v, remap);
                 },
                 _ => {},
@@ -1389,7 +1389,7 @@ fn remap_inst_operands(kind: &mut InstKind, remap: &HashMap<ValueId, ValueId>) {
                 *v = remap_value(*v, remap);
             }
             match callee {
-                Callee::Thin(v) | Callee::Thick(v) => {
+                Callee::Thin(v) | Callee::Thick(v) | Callee::C(v) => {
                     *v = remap_value(*v, remap);
                 },
                 _ => {},

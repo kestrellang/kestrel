@@ -371,8 +371,8 @@ fn check_callee(
                 });
             }
         },
-        Callee::Thin(_) | Callee::Thick(_) if site == CalleeSite::Call => {},
-        Callee::Thin(_) | Callee::Thick(_) => {
+        Callee::Thin(_) | Callee::Thick(_) | Callee::C(_) if site == CalleeSite::Call => {},
+        Callee::Thin(_) | Callee::Thick(_) | Callee::C(_) => {
             errors.push(MonoVerifyError {
                 user_facing: false,
                 func_idx: fi,
@@ -453,7 +453,7 @@ fn check_literal(
                 span: span.cloned(),
             });
         },
-        ImmediateKind::MonoFunctionRef(id) | ImmediateKind::MonoCFunctionRef(id) => {
+        ImmediateKind::MonoFunctionRef(id) | ImmediateKind::MonoCFunctionRef(id, _) => {
             if id.index() >= func_count {
                 errors.push(MonoVerifyError {
                     user_facing: false,

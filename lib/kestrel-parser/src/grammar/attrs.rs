@@ -26,7 +26,7 @@ pub(super) fn attribute_list(p: &mut Parser<'_>) {
     m.complete(p, K::AttributeList);
 }
 
-fn attribute(p: &mut Parser<'_>) {
+pub(super) fn attribute(p: &mut Parser<'_>) {
     let m = p.start();
     p.bump(K::At);
     p.expect(K::Identifier);

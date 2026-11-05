@@ -527,24 +527,49 @@ func addPoints(a: Vec2, b: Vec2) -> Vec2 { Vec2(x: a.x + b.x, y: a.y + b.y) }
 
 ### Callbacks
 
-To pass a function to a C API that takes a callback, wrap an `@export(.C)`
-function in `std.ffi.CFunction`. `CFunction[F]` has the layout of a C
-function pointer, so it can be an `@extern` argument or a field of an
-`FFISafe` struct, and `null` is C's `NULL`. A closure has no C address, so
-`CFunction(f)` must name an `@export(.C)` or `@extern(.C)` function (E646);
-pass closure state through the API's `void* userdata`.
+A C function type, `@extern(.C) (A) -> R`, is the address of a function C
+can call: exactly a C function pointer, so it can be an `@extern` argument
+or result, or a field of an `FFISafe` struct. Naming an `@export(.C)` or
+`@extern(.C)` function where one is expected gives its C entry point. An
+ordinary function has none (E646) and a closure has no address at all
+(E624); pass closure state through the API's `void* userdata`. A `&T`
+param is a C pointer, as in an `@extern` declaration.
 
 ```kestrel
 @export(.C, mangleName: "compare_ints")
 func compareInts(a: Pointer[Int32], b: Pointer[Int32]) -> Int32 { ... }
 
 @extern(.C, mangleName: "qsort")
-func qsort(base: RawPointer, count: UInt64, size: UInt64, compare: CFunction[(Pointer[Int32], Pointer[Int32]) -> Int32])
+func qsort(base: RawPointer, count: UInt64, size: UInt64, compare: @extern(.C) (Pointer[Int32], Pointer[Int32]) -> Int32)
 
-unsafe qsort(numbers.asPointer().asRaw(), count, 4, CFunction(compareInts));
+unsafe qsort(numbers.asPointer().asRaw(), count, 4, compareInts);
 ```
 
-Kestrel can't call through a `CFunction` yet; C decides when it runs.
+Kestrel calls a C function value with the C ABI, in `unsafe` (E640),
+since nothing checks that the address is a live function of that type:
+
+```kestrel
+@extern(.C, mangleName: "get_handler")
+func getHandler() -> @extern(.C) (Int64) -> Int64
+
+let handler = unsafe getHandler();
+let result = unsafe handler(42);
+```
+
+A C function type is never null. A callback C allows to be `NULL` is a
+`std.ffi.NullableCFunction[F]`: the same layout, with `null` for `NULL`
+and `function` (an `F?`) to read it back.
+
+```kestrel
+struct LogHooks: FFISafe {
+    var onLog: NullableCFunction[@extern(.C) (Int32, CString) -> ()];
+}
+
+let hooks = LogHooks(onLog: null);
+let withLog = LogHooks(onLog: NullableCFunction(logMessage));
+```
+
+A C function can't yet be used where a Kestrel closure type is expected.
 
 ## Visibility
 

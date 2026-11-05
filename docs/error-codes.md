@@ -566,6 +566,7 @@ See [language/unsafe.md](language/unsafe.md). An unsafe context is the operand o
 | Code | Message | Explanation |
 |---|---|---|
 | E640 | [extern function ]'{name}' is unsafe and requires an \`unsafe\` expression or block | A use (call, property read, initializer, subscript, or naming it as a value) of an `unsafe` declaration, a pointer-access `lang` intrinsic, or an `@extern` function without `safe: true`, outside an unsafe context. |
+| E640 | calling a C function value is unsafe and requires an \`unsafe\` expression or block | A call through a value of C function type (`@extern(.C) (…) -> …`) outside an unsafe context: nothing checks that its address is a live C function of that type. |
 | E641 | unnecessary \`unsafe\`: it covers no unsafe operation | **Warning.** The region contains no unsafe use. A use marks only the innermost `unsafe` around it, so an `unsafe` wrapping another one is reported too. |
 | E642 | '{name}' is unsafe, but the requirement it satisfies in protocol '{proto}' is not | Generic code calls the requirement without `unsafe`, so its witness can't need it. Mark the requirement `unsafe` or make the witness safe. |
 | E643 | '{proto}' is an unsafe protocol; write the conformance as \`unsafe {proto}\` | Conforming to an `unsafe protocol` vouches for its contract (e.g. `ArrayMatchable`'s in-bounds indices), so it is written `T: unsafe P`. |
@@ -578,7 +579,8 @@ See [language/functions.md](language/functions.md#callbacks).
 
 | Code | Message | Explanation |
 |---|---|---|
-| E646 | 'CFunction' needs a function declared '@export(.C)' or '@extern(.C)' | `CFunction(f)` takes the C address of `f`, so `f` must name a function with a C entry point. A closure or an ordinary function has none; mark it `@export(.C)`, or pass closure state through the C API's `userdata`. |
+| E646 | '{name}' has no C entry point; a C function type needs a function declared '@export(.C)' or '@extern(.C)' | A C function type `@extern(.C) (…) -> …` holds a C address, so only a function with a C entry point can be named as one. Mark the function `@export(.C)`. (A closure literal has no address at all; that is E624.) |
+| E646 | 'NullableCFunction' needs a C function type '@extern(.C) (…) -> …' | `NullableCFunction[F]` holds a C function pointer, so `F` must be a C function type. |
 
 ## E700–E710 — String & character literals, escapes, format specs
 

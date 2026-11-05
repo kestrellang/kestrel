@@ -191,7 +191,7 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
 /// Whether a C-boundary integer of type `ty` is unsigned: `Bool`, or a std
 /// integer conforming to `UnsignedInteger`. Decides zero- vs sign-extension
 /// of 8- and 16-bit arguments (`ExternInfo::unsigned_params`).
-fn is_unsigned_int(ctx: &LowerCtx, ty: TyId) -> bool {
+pub(crate) fn is_unsigned_int(ctx: &LowerCtx, ty: TyId) -> bool {
     use kestrel_hir::builtin::Builtin;
     use kestrel_mir::MirTy;
     let entity = match ctx.module.ty_arena.get(ty) {

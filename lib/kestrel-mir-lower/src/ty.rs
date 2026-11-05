@@ -38,7 +38,52 @@ pub(crate) fn to_mir_fn_kind(k: kestrel_ast::FnTypeKind) -> FnKind {
         kestrel_ast::FnTypeKind::Mutating => FnKind::Mutating,
         kestrel_ast::FnTypeKind::Consuming => FnKind::Consuming,
         kestrel_ast::FnTypeKind::Escaping => FnKind::Escaping,
+        kestrel_ast::FnTypeKind::C => unreachable!("C function types lower to MirTy::FuncC"),
     }
+}
+
+/// The MIR type of a function type of `kind`: a closure (`FuncThick`), or
+/// for `@extern(.C)` a C function address (`FuncC`), where a `&T` param
+/// becomes a pointer-passed `T`. Single point every function type lowers
+/// through.
+pub(crate) fn intern_fn_ty(
+    ctx: &mut LowerCtx,
+    kind: kestrel_ast::FnTypeKind,
+    params: Vec<(TyId, ParamConvention)>,
+    ret: TyId,
+) -> TyId {
+    if kind != kestrel_ast::FnTypeKind::C {
+        return ctx.intern(MirTy::FuncThick {
+            kind: to_mir_fn_kind(kind),
+            params,
+            ret,
+        });
+    }
+    let params: Vec<(TyId, ParamConvention)> = params
+        .into_iter()
+        .map(|(ty, conv)| match ctx.module.ty_arena.get(ty) {
+            MirTy::Ref { pointee, mutating } => (
+                *pointee,
+                if *mutating {
+                    ParamConvention::MutBorrow
+                } else {
+                    ParamConvention::Borrow
+                },
+            ),
+            _ => (ty, conv),
+        })
+        .collect();
+    let unsigned = params
+        .iter()
+        .map(|(ty, _)| *ty)
+        .chain([ret])
+        .map(|ty| crate::items::function_sig::is_unsigned_int(ctx, ty))
+        .collect();
+    ctx.intern(MirTy::FuncC {
+        params,
+        ret,
+        unsigned,
+    })
 }
 
 // === Public query wrappers ===
@@ -155,11 +200,7 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
                 })
                 .collect();
             let lowered_ret = lower_type(ctx, ret);
-            ctx.intern(MirTy::FuncThick {
-                kind: to_mir_fn_kind(*kind),
-                params: lowered_params,
-                ret: lowered_ret,
-            })
+            intern_fn_ty(ctx, *kind, lowered_params, lowered_ret)
         },
         HirTy::Param(entity, _) => {
             ctx.register_name(*entity);
@@ -286,11 +327,7 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
                 })
                 .collect();
             let lowered_ret = lower_resolved_ty_preserving(ctx, ret);
-            ctx.intern(MirTy::FuncThick {
-                kind: to_mir_fn_kind(*kind),
-                params: lowered_params,
-                ret: lowered_ret,
-            })
+            intern_fn_ty(ctx, *kind, lowered_params, lowered_ret)
         },
         ResolvedTy::Opaque {
             origin,
@@ -535,11 +572,7 @@ fn lower_type_replacing_opaque(ctx: &mut LowerCtx, ty: &HirTy, concrete: &Resolv
             } else {
                 lower_type(ctx, ret)
             };
-            ctx.intern(MirTy::FuncThick {
-                kind: to_mir_fn_kind(*kind),
-                params: lowered_params,
-                ret: lowered_ret,
-            })
+            intern_fn_ty(ctx, *kind, lowered_params, lowered_ret)
         },
         HirTy::AssocProjection { base, assoc, .. } if contains_opaque(base) => {
             let base_ty = lower_type_replacing_opaque(ctx, base, concrete);

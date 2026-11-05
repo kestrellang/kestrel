@@ -7,8 +7,8 @@
 
 use inkwell::context::Context;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, FunctionType};
-use kestrel_mir::TyArena;
 use kestrel_mir::mono::{MonoFunction, MonoModule};
+use kestrel_mir::{ParamConvention, TyArena, TyId};
 
 use crate::ty::{Llvm, TypeCache};
 
@@ -34,19 +34,32 @@ pub fn build_signature<'ctx>(
     module: &MonoModule,
     cx: &'ctx Context,
 ) -> FunctionType<'ctx> {
+    let kparams: Vec<_> = func.params.iter().map(|p| (p.ty, p.convention)).collect();
+    build_signature_parts(&kparams, func.ret, tc, arena, module, cx)
+}
+
+/// The Kestrel-ABI function type of `(type, convention)` params and `ret`.
+pub fn build_signature_parts<'ctx>(
+    kparams: &[(TyId, ParamConvention)],
+    ret: TyId,
+    tc: &mut TypeCache,
+    arena: &TyArena,
+    module: &MonoModule,
+    cx: &'ctx Context,
+) -> FunctionType<'ctx> {
     let ptr_scalar = tc.ptr_scalar;
     let mut params: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
 
-    let ret_repr = tc.repr(func.ret, arena, module);
+    let ret_repr = tc.repr(ret, arena, module);
     let ret_mode = return_mode(ret_repr);
 
     if matches!(ret_mode, ReturnMode::Sret) {
         params.push(ptr_scalar.llvm(cx).into());
     }
 
-    for param in &func.params {
-        let repr = tc.repr(param.ty, arena, module);
-        match param_pass_mode(param.convention, repr) {
+    for &(ty, convention) in kparams {
+        let repr = tc.repr(ty, arena, module);
+        match param_pass_mode(convention, repr) {
             PassMode::ByVal(t) => params.push(t.llvm(cx).into()),
             PassMode::ByRef => params.push(ptr_scalar.llvm(cx).into()),
             PassMode::Zst => {},

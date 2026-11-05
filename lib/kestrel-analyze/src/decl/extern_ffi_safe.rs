@@ -282,7 +282,21 @@ pub fn conforms_to_builtin_protocol(
                     })
                     .contains(&ffi_safe_entity)
         },
-        // Functions, type params, unresolved alias uses, projections — not FFI-safe
+        // A C function address conforms when everything it passes does; a
+        // `&T` param is a pointer, so its pointee is what crosses.
+        HirTy::Function {
+            kind: kestrel_ast::FnTypeKind::C,
+            params,
+            ret,
+            ..
+        } => params.iter().chain([ret.as_ref()]).all(|t| {
+            let t = match t {
+                HirTy::Ref { inner, .. } => inner.as_ref(),
+                other => other,
+            };
+            conforms_to_builtin_protocol(cx, t, ffi_safe_entity, tuples_propagate)
+        }),
+        // Closures, type params, unresolved alias uses, projections — not FFI-safe
         _ => false,
     }
 }

@@ -273,7 +273,7 @@ pub static REGISTRY: &[AttrDef] = &[
         ],
         needs_body: true,
         repeat_hint: None,
-        doc: "Defines a Kestrel function that C code can call, with the given calling convention, under the function's name or 'mangleName:'. Take its address for a C callback with 'CFunction(f)'.",
+        doc: "Defines a Kestrel function that C code can call, with the given calling convention, under the function's name or 'mangleName:'. Name it where a C function type '@extern(.C) (…) -> …' is expected to pass it to C as a callback.",
     },
     AttrDef {
         name: "extern",

@@ -266,6 +266,23 @@ fn mangle_type(
             out.push('E');
         },
 
+        // `X` for a C function; conventions matter (value vs pointer).
+        MirTy::FuncC { params, ret, .. } => {
+            let params = params.clone();
+            let ret = *ret;
+            out.push('X');
+            out.push_str(&params.len().to_string());
+            out.push('_');
+            for (p, conv) in &params {
+                if *conv != ParamConvention::Consuming {
+                    out.push('R');
+                }
+                mangle_type(arena, entity_names, *p, out);
+            }
+            mangle_type(arena, entity_names, ret, out);
+            out.push('E');
+        },
+
         MirTy::FuncThick { kind, params, ret } => {
             let params = params.clone();
             let ret = *ret;

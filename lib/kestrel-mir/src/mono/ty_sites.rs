@@ -183,7 +183,9 @@ pub(crate) fn for_each_ty_node(arena: &TyArena, ty: TyId, f: &mut impl FnMut(TyI
                 for_each_ty_node(arena, arg, f);
             }
         },
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret, .. } => {
+        MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
+        | MirTy::FuncThick { params, ret, .. } => {
             for &(p, _) in params {
                 for_each_ty_node(arena, p, f);
             }

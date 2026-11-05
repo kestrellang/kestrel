@@ -36,7 +36,7 @@ func run() -> () throws WgpuError {
 
     let shaderModule = device.createShaderModule(wgsl: shader, label: "double");
     let pipeline = device.createComputePipeline(shader: shaderModule, entryPoint: "main");
-    let group = device.createBindGroup(pipeline: pipeline, group: 0, entries: [data.binding(0)]);
+    let group = device.createBindGroup(layout: pipeline.bindGroupLayout(0), entries: [data.binding(0)]);
 
     let encoder = device.createCommandEncoder();
     encoder.computePass { (pass) in

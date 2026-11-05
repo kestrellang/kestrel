@@ -45,8 +45,10 @@ pub struct CodegenCtx<'ctx> {
     pub c_abi: kestrel_codegen::c_abi::CAbi,
     /// Per mono function crossing the C boundary, its C-ABI symbol: the
     /// imported C function of an `@extern`, the wrapper of an `@export`.
-    /// `CFunction` addresses take these.
+    /// C function values (`MonoCFunctionRef`) take these.
     pub c_symbols: HashMap<usize, FunctionValue<'ctx>>,
+    /// Call bridges for calls through C function values, per `FuncC` type.
+    pub c_call_bridges: HashMap<kestrel_mir::TyId, FunctionValue<'ctx>>,
     pub string_data: HashMap<String, GlobalValue<'ctx>>,
     pub static_data: HashMap<Entity, GlobalValue<'ctx>>,
     /// Existential function tables, indexed like `MonoModule::vtables`.
@@ -114,6 +116,7 @@ impl<'ctx> CodegenCtx<'ctx> {
             func_ids: vec![None; module.functions.len()],
             c_abi: target.c_abi(),
             c_symbols: HashMap::new(),
+            c_call_bridges: HashMap::new(),
             string_data: HashMap::new(),
             static_data: HashMap::new(),
             vtable_data: Vec::new(),
@@ -337,13 +340,14 @@ impl<'ctx> CodegenCtx<'ctx> {
             let Some(ext) = &func.extern_info else {
                 continue;
             };
-            let cty = crate::c_bridge::c_fn_type(self, func);
+            let decl = kestrel_codegen::c_abi::CDecl::of_function(func);
+            let cty = crate::c_bridge::c_fn_type(self, &decl);
             if ext.export {
                 let wrapper =
                     self.llmod
                         .add_function(&ext.symbol_name, cty.fn_type, Some(Linkage::External));
                 cty.apply_to_fn(wrapper);
-                crate::c_bridge::define_export_wrapper(self, func, wrapper, fn_value, &cty);
+                crate::c_bridge::define_export_wrapper(self, &decl, wrapper, fn_value, &cty);
                 self.c_symbols.insert(i, wrapper);
                 continue;
             }
@@ -354,7 +358,8 @@ impl<'ctx> CodegenCtx<'ctx> {
                 cty.apply_to_fn(f);
                 f
             });
-            crate::c_bridge::define_import_thunk(self, func, fn_value, c_fn, &cty);
+            let target = crate::c_bridge::CTarget::Symbol(c_fn);
+            crate::c_bridge::define_import_thunk(self, &decl, fn_value, target, &cty);
             self.add_inline_attribute(fn_value, InlineMode::Always);
             self.c_symbols.insert(i, c_fn);
         }
@@ -384,7 +389,7 @@ impl<'ctx> CodegenCtx<'ctx> {
     }
 
     /// `@inline` → `inlinehint` / `alwaysinline` / `noinline`.
-    fn add_inline_attribute(&self, fn_value: FunctionValue<'ctx>, mode: InlineMode) {
+    pub(crate) fn add_inline_attribute(&self, fn_value: FunctionValue<'ctx>, mode: InlineMode) {
         let name = match mode {
             InlineMode::Hint => "inlinehint",
             InlineMode::Always => "alwaysinline",

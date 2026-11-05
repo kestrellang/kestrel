@@ -31,8 +31,10 @@ pub struct CodegenCtx<'m> {
     pub c_abi: kestrel_codegen::c_abi::CAbi,
     /// Per mono function crossing the C boundary, its C-ABI symbol: the
     /// imported C function of an `@extern`, the wrapper of an `@export`.
-    /// `CFunction` addresses take these.
+    /// C function values (`MonoCFunctionRef`) take these.
     pub c_symbols: HashMap<usize, FuncId>,
+    /// Call bridges for calls through C function values, per `FuncC` type.
+    pub c_call_bridges: HashMap<kestrel_mir::TyId, FuncId>,
     pub string_data: HashMap<String, cranelift_module::DataId>,
     pub static_data: HashMap<Entity, cranelift_module::DataId>,
     /// Existential function tables, indexed like `MonoModule::vtables`.
@@ -88,6 +90,7 @@ impl<'m> CodegenCtx<'m> {
             func_ids: vec![None; module.functions.len()],
             c_abi: target.c_abi(),
             c_symbols: HashMap::new(),
+            c_call_bridges: HashMap::new(),
             string_data: HashMap::new(),
             static_data: HashMap::new(),
             vtable_data: Vec::new(),
@@ -102,6 +105,7 @@ impl<'m> CodegenCtx<'m> {
         self.define_c_bridges()?;
         self.define_all_vtables()?;
         self.define_all_functions()?;
+        crate::c_bridge::define_call_bridges(self)?;
         Ok(())
     }
 
@@ -346,17 +350,18 @@ impl<'m> CodegenCtx<'m> {
                 continue;
             };
             let kestrel_fn = self.func_ids[i].expect("function must be declared");
+            let decl = kestrel_codegen::c_abi::CDecl::of_function(func);
             if ext.export {
                 let wrapper = crate::c_bridge::define_export_wrapper(
                     self,
-                    func,
+                    &decl,
                     kestrel_fn,
                     &ext.symbol_name,
                 )?;
                 self.c_symbols.insert(i, wrapper);
                 continue;
             }
-            let (csig, sig) = crate::c_bridge::c_signature(self, func);
+            let (csig, sig) = crate::c_bridge::c_signature(self, &decl);
             let c_fn = match c_imports.get(&ext.symbol_name) {
                 Some(&id) => id,
                 None => {
@@ -371,7 +376,10 @@ impl<'m> CodegenCtx<'m> {
                     id
                 },
             };
-            crate::c_bridge::define_import_thunk(self, func, kestrel_fn, c_fn, &csig)?;
+            let target = crate::c_bridge::CTarget::Symbol(c_fn);
+            crate::c_bridge::define_import_thunk(
+                self, &decl, &func.name, kestrel_fn, target, &csig,
+            )?;
             self.c_symbols.insert(i, c_fn);
         }
         Ok(())

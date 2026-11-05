@@ -83,6 +83,7 @@ fn ty_contains_param(arena: &TyArena, ty: TyId) -> bool {
             args.iter().any(|&a| ty_contains_param(arena, a))
         },
         MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
         | MirTy::FuncThick {
             params,
             ret,
@@ -114,7 +115,9 @@ pub fn primitive_size_and_align(ty: &MirTy, target: &TargetConfig) -> Option<(u6
         MirTy::Pointer(_) => Some((target.pointer_size(), target.pointer_size())),
         // Ref's ABI is a raw pointer to the pointee (signature-only type).
         MirTy::Ref { .. } => Some((target.pointer_size(), target.pointer_size())),
-        MirTy::FuncThin { .. } => Some((target.pointer_size(), target.pointer_size())),
+        MirTy::FuncThin { .. } | MirTy::FuncC { .. } => {
+            Some((target.pointer_size(), target.pointer_size()))
+        },
         // View tier / bare: `{fn, env_ptr}`. Owning tier: `{fn, env_handle,
         // retain_fn, release_fn}` — the two extra words carry the type-erased
         // share/release operations (lockstep 9: layout ↔ both codegen `ty.rs`

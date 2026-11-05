@@ -258,6 +258,9 @@ pub enum Builtin {
     ArrayStruct,
     SliceStruct,
     ManuallyDropStruct,
+    /// `std.ffi.NullableCFunction[F]`: `F` must be a C function type
+    /// (`@extern(.C) (…) -> …`), checked by the analyzer (E646).
+    NullableCFunctionStruct,
 
     // ===== String interpolation =====
     DefaultStringInterpolation,
@@ -273,10 +276,6 @@ pub enum Builtin {
     /// bound (`let f = b.first`), so the binding owns a value and stops
     /// borrowing the place.
     DecayOptionalRef,
-    /// `@builtin(.CFunctionInit) init(_ function: F)` on `CFunction[F]`: the
-    /// compiler lowers `CFunction(f)` to the C-ABI address of `f`, which must
-    /// name an `@export(.C)` or `@extern(.C)` function (E646).
-    CFunctionInit,
     FormattableProtocol,
     FormattableFormatIntoMethod,
 
@@ -529,6 +528,7 @@ impl Builtin {
             Self::ArrayStruct => "ArrayStruct",
             Self::SliceStruct => "SliceStruct",
             Self::ManuallyDropStruct => "ManuallyDrop",
+            Self::NullableCFunctionStruct => "NullableCFunction",
 
             // String interpolation
             Self::DefaultStringInterpolation => "DefaultStringInterpolation",
@@ -541,7 +541,6 @@ impl Builtin {
             },
             Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
             Self::DecayOptionalRef => "DecayOptionalRef",
-            Self::CFunctionInit => "CFunctionInit",
             Self::FormatOptions => "FormatOptions",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
@@ -777,6 +776,7 @@ impl Builtin {
             "ArrayStruct" => Some(Self::ArrayStruct),
             "SliceStruct" => Some(Self::SliceStruct),
             "ManuallyDropStruct" => Some(Self::ManuallyDropStruct),
+            "NullableCFunctionStruct" => Some(Self::NullableCFunctionStruct),
 
             // String interpolation
             "DefaultStringInterpolation" => Some(Self::DefaultStringInterpolation),
@@ -789,7 +789,6 @@ impl Builtin {
             },
             "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
             "DecayOptionalRef" => Some(Self::DecayOptionalRef),
-            "CFunctionInit" => Some(Self::CFunctionInit),
             "FormatOptions" => Some(Self::FormatOptions),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
@@ -1026,7 +1025,10 @@ impl Builtin {
             | Self::ResultTypeOperator => BuiltinKind::TypeAlias,
 
             // Builtin structs
-            Self::ArrayStruct | Self::SliceStruct | Self::ManuallyDropStruct => BuiltinKind::Struct,
+            Self::ArrayStruct
+            | Self::SliceStruct
+            | Self::ManuallyDropStruct
+            | Self::NullableCFunctionStruct => BuiltinKind::Struct,
 
             // String interpolation
             Self::DefaultStringInterpolation | Self::FormatOptions => BuiltinKind::Struct,
@@ -1034,8 +1036,7 @@ impl Builtin {
             | Self::DefaultStringInterpolationAppendLiteral
             | Self::DefaultStringInterpolationAppendInterpolation
             | Self::DefaultStringInterpolationBuild
-            | Self::DecayOptionalRef
-            | Self::CFunctionInit => BuiltinKind::Function,
+            | Self::DecayOptionalRef => BuiltinKind::Function,
             Self::FormattableProtocol => BuiltinKind::protocol(),
             Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
             Self::EquatableProtocol
