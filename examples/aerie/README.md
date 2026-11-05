@@ -14,6 +14,14 @@ solid blocks touch it, and quads split along the brighter diagonal so the
 shading has no crease. `AERIE_BENCH=n` times chunk generation and meshing
 without a window.
 
+**Milestone 3** replaces the test island with an endless archipelago. A
+low-frequency noise mask decides where land is; each island floats at its own
+altitude with a keel underneath. Chunk columns (four 32³ chunks, 128 blocks
+tall) generate and mesh around the player within a few milliseconds per
+frame, nearest first, and are dropped once far away. Each chunk is meshed
+with a one-block border from its neighbors, so there are no seams, and
+chunks outside the camera's view are skipped.
+
 Controls: WASD to move, Space and Left Shift to rise and fall, arrow keys to
 look, Escape to quit. `AERIE_FRAMES=n` quits after n frames.
 
@@ -34,5 +42,8 @@ WGPU_NATIVE_DIR=~/wgpu-native flock run
 - `src/renderer.ks` — the wgpu side: surface, pipeline, atlas upload.
 - `src/shader.ks` — WGSL: expands each packed face into a quad.
 - `src/blocks.ks` — block ids, shapes and which atlas layer each face uses.
-- `src/chunk.ks` — 32³ chunks and the test island.
+- `src/chunk.ks` — 32³ chunks, padded chunks for meshing, the test island.
+- `src/noise.ks` — seeded 2D gradient noise.
+- `src/gen.ks` — the island generator.
+- `src/world.ks` — loaded chunks, keyed by position.
 - `src/mesh.ks` — face culling into packed `FaceInstance`s.
