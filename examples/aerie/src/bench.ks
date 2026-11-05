@@ -1,6 +1,6 @@
 module Aerie
 
-import sdl.(monotonicMs)
+import sdl.(monotonicUs)
 
 /// `AERIE_BENCH`: times generating and meshing without a window.
 struct Bench {
@@ -10,7 +10,7 @@ struct Bench {
     static func run(runs: Int64) {
         let generator = Generator(1);
         let (cx, cz) = columnOf(generator.spawnPoint());
-        let start = unsafe monotonicMs();
+        let start = unsafe monotonicUs();
         var world = World(1);
         for _ in 0..<runs {
             world = World(1);
@@ -18,13 +18,13 @@ struct Bench {
                 world.generateColumn(cx + i % 3 - 1, cz + i / 3 - 1);
             }
         }
-        let built = unsafe monotonicMs();
+        let built = unsafe monotonicUs();
         for _ in 0..<runs {
             for cy in 0..<worldChunksY {
                 let _ = world.padded(cx, cy, cz);
             }
         }
-        let padded = unsafe monotonicMs();
+        let padded = unsafe monotonicUs();
         var faces = 0;
         for _ in 0..<runs {
             faces = 0;
@@ -32,11 +32,11 @@ struct Bench {
                 faces = faces + world.padded(cx, cy, cz).mesh().count;
             }
         }
-        let meshed = unsafe monotonicMs();
+        let meshed = unsafe monotonicUs();
         // Per chunk: 9 columns of 4 chunks generated, 4 chunks meshed.
-        let generated = Float64(from: built - start) / Float64(from: runs * 9 * worldChunksY);
-        let pad = Float64(from: padded - built) / Float64(from: runs * worldChunksY);
-        let mesh = Float64(from: meshed - padded) / Float64(from: runs * worldChunksY);
+        let generated = Float64(from: built - start) / Float64(from: runs * 9 * worldChunksY) / 1000.0;
+        let pad = Float64(from: padded - built) / Float64(from: runs * worldChunksY) / 1000.0;
+        let mesh = Float64(from: meshed - padded) / Float64(from: runs * worldChunksY) / 1000.0;
         println("\(runs) runs, \(faces) faces in the spawn column");
         println("generate: \(generated) ms per chunk");
         println("pad:      \(pad) ms per chunk");
