@@ -284,6 +284,12 @@ pub(super) fn solve_assign_target(
             let pointee = *pointee;
             solve_coerce(ctx, value, pointee, expr, span)
         },
+        // An unsized place (`xs(1..<3) = ys`, a `Slice[T]`) has no value to
+        // overwrite as a whole (Rust's rule): reject it with its own error
+        // rather than a mismatch against the RHS.
+        TySlot::Resolved(_) if !super::conformance::solver_ty_is_sized(ctx, target, 0) => {
+            SolveResult::Error(InferError::UnsizedAssign { target, span })
+        },
         TySlot::Resolved(_) | TySlot::Unresolved { literal: Some(_) } => {
             solve_coerce(ctx, value, target, expr, span)
         },

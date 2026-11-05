@@ -414,6 +414,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::KindMismatch { .. } => "KindMismatch",
         InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
         InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
+        InferError::UnsizedAssign { .. } => "UnsizedAssign",
         InferError::OptionalChainNotConforming { .. } => "OptionalChainNotConforming",
         InferError::PipeFixIt { .. } => "PipeFixIt",
     }
@@ -612,6 +613,9 @@ fn format_error(err: &InferError) -> String {
         },
         InferError::RefInTypeArgument { .. } => {
             format!("RefInTypeArgument at {}:{}", span.file_id, span.start)
+        },
+        InferError::UnsizedAssign { .. } => {
+            format!("UnsizedAssign at {}:{}", span.file_id, span.start)
         },
     }
 }

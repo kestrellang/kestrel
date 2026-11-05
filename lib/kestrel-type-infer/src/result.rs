@@ -962,6 +962,7 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::RefInTypeArgument { .. } => {
             "a reference cannot be a generic type argument".into()
         },
+        InferError::UnsizedAssign { .. } => "a slice cannot be assigned as a whole".into(),
         InferError::ConventionMismatch { .. } => {
             "cannot pass a mutating closure where a non-mutating parameter is expected".into()
         },

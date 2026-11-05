@@ -259,7 +259,7 @@ Current allocations:
     `consuming as?` E148 by `body/type_test.rs`. E155 (the pre-M5 stub) is
     retired — don't reuse it. E157 (`?.` on a non-`OptionalChain` type) is a
     type-inference `InferError`; E158 (consume through `?.` on a place) is
-    `body/optional_chain.rs`. Next free E1xx: **E156**, then **E159**.
+    `body/optional_chain.rs`. E156 (assigning to an unsized place, `xs(1..<3) = ys`) is a type-inference `InferError`. Next free E1xx: **E159**.
   - E479: `ambiguous_where_clause_associated_type` (decl/generics.rs) — G29,
     `6ef0782c`. It is reported at the clause when the associated type in a
     where-clause equality (`Item.Out = X`) is declared by two or more of the
