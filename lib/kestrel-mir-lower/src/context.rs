@@ -161,6 +161,9 @@ impl<'w> LowerCtx<'w> {
     /// Uses the entity's Name + Callable param labels to construct a key
     /// that matches the witness table's binding keys.
     pub fn witness_method_key(&self, entity: Entity) -> WitnessMethodKey {
+        if self.world.get::<NodeKind>(entity) == Some(&NodeKind::RefAccessor) {
+            return self.witness_ref_key(entity);
+        }
         let name = self
             .world
             .get::<Name>(entity)
@@ -190,6 +193,22 @@ impl<'w> LowerCtx<'w> {
             .map(|p| self.witness_method_key(p))
             .unwrap_or_else(|| WitnessMethodKey::simple("unknown"));
         WitnessMethodKey::new(format!("{}.set", parent_key.name), parent_key.labels)
+    }
+
+    /// Build a WitnessMethodKey for a RefAccessor entity: `"{parent}.ref"` or
+    /// `"{parent}.mutref"`, with the parent's labels, like the setter key.
+    /// Witness tables bind the same keys (witness_lower.rs).
+    pub fn witness_ref_key(&self, accessor: Entity) -> WitnessMethodKey {
+        let parent_key = self
+            .world
+            .parent_of(accessor)
+            .map(|p| self.witness_method_key(p))
+            .unwrap_or_else(|| WitnessMethodKey::simple("unknown"));
+        let mutating = self.world.get::<MutatingAccessor>(accessor).is_some();
+        WitnessMethodKey::new(
+            ref_witness_name(&parent_key.name, mutating),
+            parent_key.labels,
+        )
     }
 
     /// Find a `NodeKind::Setter` child of a Field or Subscript entity.
@@ -230,6 +249,20 @@ impl<'w> LowerCtx<'w> {
     pub fn finish(self) -> MirModule {
         self.module
     }
+}
+
+/// The witness slot name of a place requirement's `ref` / `mutating ref`
+/// accessor: `"{member}.ref"` / `"{member}.mutref"`.
+pub fn ref_witness_name(member: &str, mutating: bool) -> String {
+    format!("{member}.{}", if mutating { "mutref" } else { "ref" })
+}
+
+/// The inverse of [`ref_witness_name`]: `(member, mutating)` for a ref
+/// accessor slot name, `None` for any other key.
+pub fn parse_ref_witness_name(name: &str) -> Option<(&str, bool)> {
+    name.strip_suffix(".mutref")
+        .map(|m| (m, true))
+        .or_else(|| name.strip_suffix(".ref").map(|m| (m, false)))
 }
 
 // === IsProtocolMethod query ===
