@@ -71,8 +71,8 @@ module Test
             let mulSatSix: std.numeric.UInt8 = 6;
             if mulSatNorm.isEqual(to: mulSatSix) == false { return 15 }
 
-            // Subtraction wrapping behavior: 0 - 1 wraps to 255
-            let wrapped = minVal.subtract(one);
+            // `subtractWrapping` wraps: 0 - 1 is 255 (plain `subtract` traps at -O0)
+            let wrapped = minVal.subtractWrapping(one);
             if wrapped.isEqual(to: maxVal) == false { return 16 }
 
             0
