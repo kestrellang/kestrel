@@ -8,17 +8,59 @@ import images.(Image, Rgba8)
 let depthFormat: TextureFormat = .Depth24Plus;
 let samples: Int64 = 4;
 let tileSize: Int64 = 16;
-let skyColor: Vec3 = Vec3(x: 0.70, y: 0.78, z: 0.90);
 
 /// What the shader's `Uniforms` holds, laid out the same way.
 struct Uniforms: FFISafe {
     var viewProj: Mat4
+    var lightViewProj: Mat4
     var sunDir: Vec4
     var camera: Vec4
     var fog: Vec4
+    var sky: Vec4
 }
 
-let uniformsSize: Int64 = 112;
+let uniformsSize: Int64 = 192;
+let shadowFormat: TextureFormat = .Depth32Float;
+let shadowSize: Int64 = 2048;
+/// Half the width of the square around the player that casts shadows.
+let shadowReach: Float32 = 72.0;
+
+/// The light at one time of day: where the sun is and how strong, the sky
+/// and fog colors, and the ambient light from the sky.
+struct Daylight {
+    var sun: Vec3
+    var strength: Float32
+    var sky: Vec3
+    var ambient: Vec3
+}
+
+/// `phase` runs 0 to 1 over a day: 0 is sunrise, 0.25 noon, 0.5 sunset,
+/// 0.75 midnight.
+func daylight(phase: Float32) -> Daylight {
+    let angle = phase * Float32.pi * 2.0;
+    // Up is +y; the sun crosses the sky from east to west, tilted south.
+    let up = angle.sin();
+    let sun = Vec3(x: -angle.cos(), y: -up, z: 0.35).normalized;
+    let day = (up * 3.0 + 0.3).clamp(0.0, 1.0);
+    // Dusk tints the sky warm just as the sun nears the horizon.
+    let dusk = (1.0 - (up * 4.0).abs()).clamp(0.0, 1.0);
+    let noonSky = Vec3(x: 0.70, y: 0.78, z: 0.90);
+    let nightSky = Vec3(x: 0.06, y: 0.07, z: 0.14);
+    let duskSky = Vec3(x: 0.86, y: 0.60, z: 0.55);
+    let sky = nightSky + (noonSky - nightSky) * day + (duskSky - noonSky) * (dusk * day * 0.6);
+    let ambient = Vec3(x: 0.10, y: 0.11, z: 0.20) + Vec3(x: 0.28, y: 0.32, z: 0.40) * day;
+    Daylight(sun: sun, strength: day, sky: sky, ambient: ambient)
+}
+
+/// The sun's view: an orthographic box around `center`, looking along
+/// `sun`, snapped to whole shadow texels so shadows don't shimmer as the
+/// player moves.
+func lightViewProjection(sun: Vec3, center: Vec3) -> Mat4 {
+    let texel = shadowReach * 2.0 / Float32(from: shadowSize);
+    let snapped = Vec3(x: (center.x / texel).floor() * texel, y: (center.y / texel).floor() * texel, z: (center.z / texel).floor() * texel);
+    let view = Mat4.lookAt(eye: snapped - sun * 150.0, target: snapped, up: Vec3.unitY);
+    Mat4.orthographic(left: -shadowReach, right: shadowReach, bottom: -shadowReach, top: shadowReach, near: 1.0, far: 300.0) * view
+}
 
 /// One overlay rectangle: `rect` is (x, y, width, height) in pixels from
 /// the top left; `tile.x` is an atlas layer to draw tinted by `color`, or
@@ -130,6 +172,9 @@ struct Renderer: not Copyable {
     var color: Texture
     var pipeline: RenderPipeline
     var bindGroup: BindGroup
+    var shadowMap: Texture
+    var shadowPipeline: RenderPipeline
+    var shadowGroup: BindGroup
     var chunkLayout: BindGroupLayout
     var uniformBuffer: Buffer
     var overlayPipeline: RenderPipeline
@@ -168,15 +213,26 @@ struct Renderer: not Copyable {
         // Nearest within a mip level keeps the pixel-art edges; linear
         // between levels keeps distant ground from sparkling.
         let atlasSampler = device.createSampler(filter: .Nearest, addressMode: .Repeat, mipmapFilter: .Some(.Linear), label: "block atlas");
+        let shadowMap = device.createTexture(width: shadowSize, height: shadowSize, format: shadowFormat, usage: [.RenderAttachment, .TextureBinding], label: "shadow map");
+        let shadowView = shadowMap.createView();
+        let shadowSampler = device.createSampler(filter: .Linear, compare: .Some(.LessEqual), label: "shadow");
         let uniformBuffer = device.createBuffer(size: uniformsSize, usage: [.Uniform, .CopyDst], label: "uniforms");
 
         let layout = device.createPipelineLayout(groups: [[
             BindingLayout.uniformBuffer(0, visibility: [.Vertex, .Fragment]),
             BindingLayout.texture(1, visibility: [.Fragment], dimension: .D2Array),
-            BindingLayout.sampler(2, visibility: [.Fragment])
+            BindingLayout.sampler(2, visibility: [.Fragment]),
+            BindingLayout.texture(3, visibility: [.Fragment], sampleType: .Depth),
+            BindingLayout.sampler(4, visibility: [.Fragment], kind: .Comparison)
         ], [
-            BindingLayout.uniformBuffer(0, visibility: [.Vertex])
+            BindingLayout.uniformBuffer(0, visibility: [.Vertex, .Fragment])
         ]], label: "blocks");
+        // The shadow pass can't bind the shadow map it draws into.
+        let shadowLayout = device.createPipelineLayout(groups: [[
+            BindingLayout.uniformBuffer(0, visibility: [.Vertex])
+        ], [
+            BindingLayout.uniformBuffer(0, visibility: [.Vertex, .Fragment])
+        ]], label: "shadow");
         let shaderModule = device.createShaderModule(wgsl: blockShader(), label: "blocks");
         let pipeline = device.createRenderPipeline(
             shader: shaderModule,
@@ -190,8 +246,19 @@ struct Renderer: not Copyable {
         );
         let bindGroup = device.createBindGroup(
             layout: layout.bindGroupLayout(0),
-            entries: [uniformBuffer.binding(0), atlasView.binding(1), atlasSampler.binding(2)]
+            entries: [uniformBuffer.binding(0), atlasView.binding(1), atlasSampler.binding(2), shadowView.binding(3), shadowSampler.binding(4)]
         );
+        // Depth only; the bias keeps lit faces from shadowing themselves.
+        let shadowPipeline = device.createRenderPipeline(
+            shader: shaderModule,
+            targets: [],
+            buffers: [VertexBufferLayout(packed: [.Uint32, .Uint32], stepMode: .Instance)],
+            vertexEntry: "vs_shadow",
+            depth: .Some(DepthTest(format: shadowFormat, depthBias: 2, depthBiasSlopeScale: 2.0)),
+            layout: .Some(shadowLayout.share()),
+            label: "shadow"
+        );
+        let shadowGroup = device.createBindGroup(layout: shadowLayout.bindGroupLayout(0), entries: [uniformBuffer.binding(0)]);
         // The overlay draws in the same pass, over everything: it keeps the
         // pass's depth format but never tests or writes depth.
         let overlayLayout = device.createPipelineLayout(groups: [[
@@ -220,6 +287,7 @@ struct Renderer: not Copyable {
         .Ok(Renderer(
             device: device, surface: surface, format: format, width: width, height: height,
             depth: depth, color: color, pipeline: pipeline, bindGroup: bindGroup,
+            shadowMap: shadowMap, shadowPipeline: shadowPipeline, shadowGroup: shadowGroup,
             chunkLayout: layout.bindGroupLayout(1), uniformBuffer: uniformBuffer,
             overlayPipeline: overlayPipeline, overlayGroup: overlayGroup, screenBuffer: screenBuffer, overlayBuffer: overlayBuffer,
             meshes: [], viewDistance: 160.0, drawnChunks: 0
@@ -236,18 +304,23 @@ struct Renderer: not Copyable {
     }
 
     /// Draw `faces` for chunk (cx, cy, cz), replacing any it had.
-    mutating func upload(cx: Int64, cy: Int64, cz: Int64, faces: [FaceInstance]) {
+    mutating func upload(cx: Int64, cy: Int64, cz: Int64, faces: [FaceInstance], lights: [Vec3]) {
         let key = chunkKey(cx, cy, cz);
         self.remove(where: { (k: Int64, x: Int64, z: Int64) in k == key });
         if faces.count == 0 {
             return;
         }
         let size = Float32(from: chunkSize);
-        let origin = self.device.createBuffer(
-            data: [Vec4(x: Float32(from: cx) * size, y: Float32(from: cy) * size, z: Float32(from: cz) * size, w: 0.0)],
-            usage: [.Uniform],
-            label: "chunk origin"
-        );
+        // The shader's `ChunkData`: the origin with the light count in w,
+        // then a fixed-size array of light positions.
+        var data = [Vec4(x: Float32(from: cx) * size, y: Float32(from: cy) * size, z: Float32(from: cz) * size, w: Float32(from: lights.count))];
+        for light in lights {
+            data.append(light.extended(w: 1.0));
+        }
+        while data.count < maxLights + 1 {
+            data.append(Vec4(x: 0.0, y: 0.0, z: 0.0, w: 0.0));
+        }
+        let origin = self.device.createBuffer(data: data, usage: [.Uniform], label: "chunk data");
         let group = self.device.createBindGroup(layout: self.chunkLayout, entries: [origin.binding(0)]);
         let buffer = self.device.createBuffer(data: faces, usage: [.Vertex], label: "chunk faces");
         self.meshes.append(RcBox(ChunkMesh(key: key, cx: cx, cy: cy, cz: cz, faces: buffer, faceCount: faces.count, origin: origin, group: group)));
@@ -268,16 +341,20 @@ struct Renderer: not Copyable {
 
     /// Draw one frame as seen through `view`, lit by a sun shining along
     /// `sun`.
-    mutating func draw(view: Mat4, eye eye: Vec3, sun sun: Vec3, overlay overlay: [OverlayQuad]) -> () throws WgpuError {
+    mutating func draw(view: Mat4, eye eye: Vec3, light light: Daylight, overlay overlay: [OverlayQuad]) -> () throws WgpuError {
         let aspect = Float32(from: self.width) / Float32(from: self.height);
         let projection = Mat4.perspective(fovY: radians(70.0), aspect: aspect, near: 0.1, far: self.viewDistance + 64.0);
         let viewProj = projection * view;
+        let lightViewProj = lightViewProjection(light.sun, eye);
         self.device.write(self.uniformBuffer, value: Uniforms(
             viewProj: viewProj,
-            sunDir: sun.extended(w: 0.0),
+            lightViewProj: lightViewProj,
+            sunDir: light.sun.extended(w: light.strength),
             camera: eye.extended(w: 1.0),
-            fog: skyColor.extended(w: self.viewDistance)
+            fog: light.sky.extended(w: self.viewDistance),
+            sky: light.ambient.extended(w: 0.0)
         ));
+        let shadowPlanes = frustumPlanes(lightViewProj);
         let planes = frustumPlanes(viewProj);
         self.device.write(self.screenBuffer, value: Vec4(x: Float32(from: self.width), y: Float32(from: self.height), z: 0.0, w: 0.0));
         var quads = overlay;
@@ -301,10 +378,11 @@ struct Renderer: not Copyable {
         let frameView = frame.texture.createView();
         let colorView = self.color.createView();
         let depthView = self.depth.createView();
-        let sky = Color(r: Float64(from: skyColor.x), g: Float64(from: skyColor.y), b: Float64(from: skyColor.z));
+        let sky = Color(r: Float64(from: light.sky.x), g: Float64(from: light.sky.y), b: Float64(from: light.sky.z));
         // Frustum-cull before the pass: only chunks the camera can see.
         let size = Float32(from: chunkSize);
         var visible: [Int64] = [];
+        var casters: [Int64] = [];
         var i: Int64 = 0;
         while i < self.meshes.count {
             let m = &self.meshes(i).value;
@@ -312,9 +390,22 @@ struct Renderer: not Copyable {
             if boxVisible(planes, low, low + Vec3(splat: size)) {
                 visible.append(i);
             }
+            if boxVisible(shadowPlanes, low, low + Vec3(splat: size)) {
+                casters.append(i);
+            }
             i = i + 1;
         }
+        let shadowView = self.shadowMap.createView();
         let encoder = self.device.createCommandEncoder();
+        encoder.renderPass(color: [], depth: shadowView.depthAttachment()) { (pass) in
+            pass.setPipeline(self.shadowPipeline);
+            pass.setBindGroup(0, self.shadowGroup);
+            for index in casters {
+                pass.setBindGroup(1, self.meshes(index).value.group);
+                pass.setVertexBuffer(0, self.meshes(index).value.faces);
+                pass.draw(vertices: 6, instances: self.meshes(index).value.faceCount);
+            }
+        };
         encoder.renderPass(color: [colorView.colorAttachment(resolvingInto: frameView, clear: .Some(sky))], depth: depthView.depthAttachment()) { (pass) in
             pass.setPipeline(self.pipeline);
             pass.setBindGroup(0, self.bindGroup);

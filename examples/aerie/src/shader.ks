@@ -6,16 +6,31 @@ func blockShader() -> String {
 "
 struct Uniforms {
     viewProj: mat4x4f,
+    lightViewProj: mat4x4f,
+    // xyz: the direction sunlight travels; w: how strong it is, 0 at night.
     sunDir: vec4f,
     camera: vec4f,
     // rgb: the fog color; w: the view distance, where fog is total.
     fog: vec4f,
+    // rgb: sky light from above; w: unused.
+    sky: vec4f,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
-// Where the chunk being drawn sits in the world.
-@group(1) @binding(0) var<uniform> chunkOrigin: vec4f;
 @group(0) @binding(1) var atlas: texture_2d_array<f32>;
 @group(0) @binding(2) var atlasSampler: sampler;
+@group(0) @binding(3) var shadowMap: texture_depth_2d;
+@group(0) @binding(4) var shadowSampler: sampler_comparison;
+
+// Per chunk: where it sits (xyz) and how many lights reach it (w), then
+// those lights' positions.
+struct ChunkData {
+    origin: vec4f,
+    lights: array<vec4f, \(maxLights)>,
+};
+@group(1) @binding(0) var<uniform> chunk: ChunkData;
+
+const LIGHT_RADIUS = \(lightRadius);
+const GLOWCAP_LAYER = \(Layer.Glowcap.index)u;
 
 // Four corners per face, counter-clockwise seen from outside, as offsets
 // inside the unit cell. Faces: east, west, up, down, south, north, then
@@ -49,7 +64,7 @@ fn vs_main(@builtin(vertex_index) vertex: u32, @location(0) packed: u32, @locati
     let cell = vec3f(f32(packed & 31u), f32((packed >> 5u) & 31u), f32((packed >> 10u) & 31u));
     let face = (packed >> 15u) & 15u;
     let corner = QUAD[vertex + select(0u, 6u, (shade & 256u) != 0u)];
-    let world = chunkOrigin.xyz + cell + CORNERS[face * 4u + corner];
+    let world = chunk.origin.xyz + cell + CORNERS[face * 4u + corner];
     var out: VertexOut;
     out.position = u.viewProj * vec4f(world, 1.0);
     out.world = world;
@@ -60,6 +75,49 @@ fn vs_main(@builtin(vertex_index) vertex: u32, @location(0) packed: u32, @locati
     let ao = f32((shade >> (corner * 2u)) & 3u);
     out.light = 0.45 + 0.55 * ao / 3.0;
     return out;
+}
+
+// The shadow pass: only depth, as the sun sees the blocks.
+@vertex
+fn vs_shadow(@builtin(vertex_index) vertex: u32, @location(0) packed: u32) -> @builtin(position) vec4f {
+    let cell = vec3f(f32(packed & 31u), f32((packed >> 5u) & 31u), f32((packed >> 10u) & 31u));
+    let face = (packed >> 15u) & 15u;
+    let world = chunk.origin.xyz + cell + CORNERS[face * 4u + QUAD[vertex]];
+    return u.lightViewProj * vec4f(world, 1.0);
+}
+
+// How much sun reaches `world`, 0 to 1: a 3x3 average of shadow map
+// comparisons. Outside the shadow map counts as lit.
+fn sunlight(world: vec3f, n: vec3f) -> f32 {
+    let light = u.lightViewProj * vec4f(world + n * 0.05, 1.0);
+    let uv = vec2f(light.x * 0.5 + 0.5, 0.5 - light.y * 0.5);
+    if any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) || light.z > 1.0 {
+        return 1.0;
+    }
+    let texel = 1.0 / vec2f(textureDimensions(shadowMap));
+    var lit = 0.0;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            lit += textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(f32(x), f32(y)) * texel, light.z);
+        }
+    }
+    return lit / 9.0;
+}
+
+// Light from nearby glowing blocks: a soft falloff to zero at
+// LIGHT_RADIUS. It passes through walls; it's cheap and reads as a glow.
+fn glow(world: vec3f, n: vec3f) -> f32 {
+    var total = 0.0;
+    let count = u32(chunk.origin.w);
+    for (var i = 0u; i < count; i++) {
+        let to = chunk.lights[i].xyz - world;
+        let d = length(to);
+        let falloff = clamp(1.0 - d / LIGHT_RADIUS, 0.0, 1.0);
+        // Faces turned away get a little, so corners don't go black.
+        let facing = select(0.35 + 0.65 * max(dot(n, to / max(d, 0.001)), 0.0), 1.0, d < 0.9);
+        total += falloff * falloff * facing;
+    }
+    return min(total, 1.4);
 }
 
 @fragment
@@ -74,10 +132,15 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let l = normalize(-u.sunDir.xyz);
     // Plants are lit from all sides alike, so their quads don't flicker
     // between light and dark as the sun moves.
-    let direct = select(max(dot(n, l), 0.0), 0.6, in.face >= 6u);
-    // A cool sky from above, warm bounce light from the cloud sea below.
-    let ambient = mix(vec3f(0.30, 0.25, 0.30), vec3f(0.38, 0.44, 0.58), n.y * 0.5 + 0.5);
-    var color = texel.rgb * (ambient * in.light + direct * vec3f(1.0, 0.90, 0.76) * 0.85 * mix(0.6, 1.0, in.light));
+    let facing = select(max(dot(n, l), 0.0), 0.6, in.face >= 6u);
+    let direct = facing * u.sunDir.w * sunlight(in.world, n);
+    // Sky light from above, and a dimmer bounce from the cloud sea below.
+    let ambient = u.sky.rgb * mix(0.45, 0.65, n.y * 0.5 + 0.5);
+    let glowColor = vec3f(0.45, 0.95, 0.85) * glow(in.world, n);
+    var color = texel.rgb * (ambient * in.light + glowColor * in.light + direct * vec3f(1.0, 0.90, 0.76) * 1.0 * mix(0.6, 1.0, in.light));
+    if in.layer == GLOWCAP_LAYER {
+        color = texel.rgb * 1.1;
+    }
     let distance = length(u.camera.xyz - in.world);
     // A light haze everywhere, closing in fully at the view distance so
     // chunks fade in instead of popping.
