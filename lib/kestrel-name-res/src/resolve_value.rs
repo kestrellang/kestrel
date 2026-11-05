@@ -808,6 +808,7 @@ mod tests {
                     pattern: None,
                     is_mut: false,
                     is_consuming: false,
+                    by_ref: false,
                 }],
                 receiver: None,
             },
