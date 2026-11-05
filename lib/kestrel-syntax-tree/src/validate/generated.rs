@@ -735,6 +735,7 @@ pub(super) static RULES: &[(K, R)] = &[
     (
         K::TyFunction,
         R::Seq(&[
+            R::Opt(&R::Kind(K::Attribute)),
             R::Opt(&R::Alt(&[
                 R::Kind(K::Mutating),
                 R::Kind(K::Consuming),

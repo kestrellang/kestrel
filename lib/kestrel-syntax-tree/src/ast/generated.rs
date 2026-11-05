@@ -2381,6 +2381,9 @@ pub struct TyFunction {
 }
 
 impl TyFunction {
+    pub fn attribute(&self) -> Option<Attribute> {
+        support::child(&self.syntax)
+    }
     pub fn mutating_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Mutating)
     }
