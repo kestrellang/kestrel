@@ -71,7 +71,8 @@ struct OverlayQuad: FFISafe {
     var tile: Vec4
 }
 
-let maxOverlayQuads: Int64 = 64;
+/// Text is one quad per run of lit dots, so a few lines take a thousand or more.
+let maxOverlayQuads: Int64 = 4096;
 let overlayQuadSize: Int64 = 48;
 
 /// A chunk's faces on the GPU, with its own small uniform holding where the
@@ -84,6 +85,10 @@ struct ChunkMesh: not Copyable {
     var cz: Int64
     var faces: Buffer
     var faceCount: Int64
+    /// Translucent faces; a one-face placeholder buffer when there are none,
+    /// since a buffer can't be empty.
+    var glass: Buffer
+    var glassCount: Int64
     var origin: Buffer
     var group: BindGroup
 }
@@ -171,6 +176,7 @@ struct Renderer: not Copyable {
     var depth: Texture
     var color: Texture
     var pipeline: RenderPipeline
+    var glassPipeline: RenderPipeline
     var bindGroup: BindGroup
     var shadowMap: Texture
     var shadowPipeline: RenderPipeline
@@ -244,6 +250,19 @@ struct Renderer: not Copyable {
             layout: .Some(layout.share()),
             label: "blocks"
         );
+        // Glass blends over the opaque world: tested against its depth but
+        // not written, so glass behind glass still shows.
+        let glassPipeline = device.createRenderPipeline(
+            shader: shaderModule,
+            targets: [ColorTarget(format: format, blend: .AlphaBlending)],
+            buffers: [VertexBufferLayout(packed: [.Uint32, .Uint32], stepMode: .Instance)],
+            fragmentEntry: "fs_glass",
+            cullMode: .Back,
+            depth: .Some(DepthTest(format: depthFormat, write: false)),
+            sampleCount: samples,
+            layout: .Some(layout.share()),
+            label: "glass"
+        );
         let bindGroup = device.createBindGroup(
             layout: layout.bindGroupLayout(0),
             entries: [uniformBuffer.binding(0), atlasView.binding(1), atlasSampler.binding(2), shadowView.binding(3), shadowSampler.binding(4)]
@@ -286,7 +305,7 @@ struct Renderer: not Copyable {
         let color = Renderer.makeColor(device, format, width, height);
         .Ok(Renderer(
             device: device, surface: surface, format: format, width: width, height: height,
-            depth: depth, color: color, pipeline: pipeline, bindGroup: bindGroup,
+            depth: depth, color: color, pipeline: pipeline, glassPipeline: glassPipeline, bindGroup: bindGroup,
             shadowMap: shadowMap, shadowPipeline: shadowPipeline, shadowGroup: shadowGroup,
             chunkLayout: layout.bindGroupLayout(1), uniformBuffer: uniformBuffer,
             overlayPipeline: overlayPipeline, overlayGroup: overlayGroup, screenBuffer: screenBuffer, overlayBuffer: overlayBuffer,
@@ -304,7 +323,7 @@ struct Renderer: not Copyable {
     }
 
     /// Draw `faces` for chunk (cx, cy, cz), replacing any it had.
-    mutating func upload(cx: Int64, cy: Int64, cz: Int64, faces: [FaceInstance], lights: [Vec3]) {
+    mutating func upload(cx: Int64, cy: Int64, cz: Int64, faces: ChunkFaces, lights: [Vec3]) {
         let key = chunkKey(cx, cy, cz);
         self.remove(where: { (k: Int64, x: Int64, z: Int64) in k == key });
         if faces.count == 0 {
@@ -322,8 +341,16 @@ struct Renderer: not Copyable {
         }
         let origin = self.device.createBuffer(data: data, usage: [.Uniform], label: "chunk data");
         let group = self.device.createBindGroup(layout: self.chunkLayout, entries: [origin.binding(0)]);
-        let buffer = self.device.createBuffer(data: faces, usage: [.Vertex], label: "chunk faces");
-        self.meshes.append(RcBox(ChunkMesh(key: key, cx: cx, cy: cy, cz: cz, faces: buffer, faceCount: faces.count, origin: origin, group: group)));
+        let opaque = if faces.opaque.count > 0 { faces.opaque } else { [FaceInstance(packed: 0, shade: 0)] };
+        let glass = if faces.glass.count > 0 { faces.glass } else { [FaceInstance(packed: 0, shade: 0)] };
+        self.meshes.append(RcBox(ChunkMesh(
+            key: key, cx: cx, cy: cy, cz: cz,
+            faces: self.device.createBuffer(data: opaque, usage: [.Vertex], label: "chunk faces"),
+            faceCount: faces.opaque.count,
+            glass: self.device.createBuffer(data: glass, usage: [.Vertex], label: "chunk glass"),
+            glassCount: faces.glass.count,
+            origin: origin, group: group
+        )));
     }
 
     /// Drop the meshes `test` picks, given each one's key and chunk x and z.
@@ -383,17 +410,29 @@ struct Renderer: not Copyable {
         let size = Float32(from: chunkSize);
         var visible: [Int64] = [];
         var casters: [Int64] = [];
+        // Visible chunks with glass, by squared distance to their middle.
+        var glassy: [(Float32, Int64)] = [];
         var i: Int64 = 0;
         while i < self.meshes.count {
             let m = &self.meshes(i).value;
             let low = Vec3(x: Float32(from: m.cx) * size, y: Float32(from: m.cy) * size, z: Float32(from: m.cz) * size);
             if boxVisible(planes, low, low + Vec3(splat: size)) {
                 visible.append(i);
+                if m.glassCount > 0 {
+                    glassy.append(((low + Vec3(splat: size * 0.5) - eye).lengthSquared, i));
+                }
             }
             if boxVisible(shadowPlanes, low, low + Vec3(splat: size)) {
                 casters.append(i);
             }
             i = i + 1;
+        }
+        // Blending needs back to front: far chunks first. Faces within a
+        // chunk aren't sorted, which only shows where glass overlaps glass.
+        glassy.sort(by: { (a: (Float32, Int64), b: (Float32, Int64)) in a.0 > b.0 });
+        var glassOrder: [Int64] = [];
+        for (_, index) in glassy {
+            glassOrder.append(index);
         }
         let shadowView = self.shadowMap.createView();
         let encoder = self.device.createCommandEncoder();
@@ -415,6 +454,12 @@ struct Renderer: not Copyable {
                 pass.setBindGroup(1, self.meshes(index).value.group);
                 pass.setVertexBuffer(0, self.meshes(index).value.faces);
                 pass.draw(vertices: 6, instances: self.meshes(index).value.faceCount);
+            }
+            pass.setPipeline(self.glassPipeline);
+            for index in glassOrder {
+                pass.setBindGroup(1, self.meshes(index).value.group);
+                pass.setVertexBuffer(0, self.meshes(index).value.glass);
+                pass.draw(vertices: 6, instances: self.meshes(index).value.glassCount);
             }
             if quadCount > 0 {
                 pass.setPipeline(self.overlayPipeline);

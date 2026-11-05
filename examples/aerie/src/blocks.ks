@@ -84,6 +84,15 @@ enum Block {
     }
 
     /// Whether the block glows, lighting what's around it.
+    /// Drawn see-through, blended over what's behind it after the solid
+    /// world, instead of alpha-tested.
+    var translucent: Bool {
+        match self {
+            .Cloudglass => true,
+            _ => false
+        }
+    }
+
     var emits: Bool {
         match self {
             .Glowcap => true,
