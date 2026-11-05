@@ -3,25 +3,25 @@ layer numbers and glyph widths the game needs to use it.
 
 The atlas is a column of 96x96 layers, loaded as one texture array:
 
-- sprites: a hotbar slot, a selected slot, a rounded panel (drawn in three
+- sprites: a hotbar slot, a selected slot, a wooden panel and button (drawn in three
   slices so it can stretch), a soft glow and a twinkle;
 - an icon per block: a little 3D cube built from the block atlas's faces
   (run tools/make_atlas.py first), or the sprite itself for plants;
-- a glyph per printable ASCII character, from Inter SemiBold (SIL Open
-  Font License), white with coverage as alpha, so text renders smooth at
-  any size and in any color.
-
-Needs Inter installed (Debian/Ubuntu: `apt install fonts-inter`).
+- the title logo, the pixel font's letters built from block textures;
+- a glyph per printable ASCII character from our own pixel font
+  (tools/pixel_font.py), white, so text can be drawn in any color.
 
 Run: python3 tools/make_ui.py   (from examples/aerie)
 """
 import random
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter
+
+import pixel_font
 
 CELL = 96
-FONT_PATH = "/usr/share/fonts/opentype/inter/Inter-SemiBold.otf"
-FONT_SIZE = 72
+# The font's "size": its full height, ascender to descender, in cell pixels.
+FONT_SIZE = pixel_font.ROWS * 4
 SUPER = 4  # supersampling for smooth edges
 
 # Block atlas layers (see `Layer` in src/blocks.ks).
@@ -172,59 +172,49 @@ def slot(frame_light, frame_dark, recess, gems=None):
 
 
 def logo(atlas, text, columns, rows):
-    """The title, built from the game's own blocks: driftstone letters
-    capped with moss, extruded downward into darker stone and outlined.
-    Returns `columns` x `rows` cells, left to right, top to bottom."""
+    """The title in the pixel font, each of its pixels a little block:
+    driftstone, with moss on any block open to the sky, set over a darker
+    stack of the same blocks for depth and outlined in ink. Returns
+    `columns` x `rows` cells, left to right, top to bottom."""
     w, h = CELL * columns, CELL * rows
-    font = ImageFont.truetype("/usr/share/fonts/opentype/inter/InterDisplay-Black.otf", int(h * 0.8))
-    mask = Image.new("L", (w, h), 0)
-    ImageDraw.Draw(mask).text((w / 2, h * 0.45), text, font=font, fill=255, anchor="mm")
-    mask = mask.point(lambda v: 255 if v > 110 else 0)
-
-    def tiled(layer, scale):
-        tile = atlas.crop((0, layer * 16, 16, layer * 16 + 16)).resize((16 * scale, 16 * scale), Image.NEAREST)
-        out = Image.new("RGBA", (w, h))
-        for y in range(0, h, tile.height):
-            for x in range(0, w, tile.width):
-                out.paste(tile, (x, y))
-        return out
-
-    stone = tiled(DRIFTSTONE, 4)
-    moss = tiled(MOSS_TOP, 4)
-    dark = Image.eval(stone, lambda v: int(v * 0.5)).convert("RGB").convert("RGBA")
-    # The extrusion: the letters stacked downward in shaded stone.
-    depth = 14
-    body = Image.new("L", (w, h), 0)
-    for d in range(1, depth + 1):
-        body.paste(255, (0, 0), ImageChops.offset(mask, d // 3, d))
-    body = ImageChops.lighter(body, mask)
-    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    # The outline: everything grown by a few pixels, in ink.
-    ring = body.filter(ImageFilter.MaxFilter(9))
-    out.paste(Image.new("RGBA", (w, h), INK), (0, 0), ring)
-    out.paste(dark, (0, 0), body)
-    out.paste(stone, (0, 0), mask)
-    # Moss on top: the band of each letter within a few pixels of open
-    # air above, ragged by column so it drips.
+    unit = 32
+    stone = atlas.crop((0, DRIFTSTONE * 16, 16, DRIFTSTONE * 16 + 16)).resize((unit, unit), Image.NEAREST)
+    moss = atlas.crop((0, MOSS_TOP * 16, 16, MOSS_TOP * 16 + 16)).resize((unit, unit), Image.NEAREST)
+    # The pixels of the text, as (column, row) cells.
+    cells = set()
+    pen = 0
+    for ch in text:
+        for y, row in enumerate(pixel_font.glyph(ch)):
+            for x, c in enumerate(row):
+                if c == "#":
+                    cells.add((pen + x, y))
+        pen += pixel_font.width(ch) + 1
+    span = (pen - 1) * unit
+    depth = (unit // 4, unit // 3)
+    left = (w - span - depth[0]) // 2
+    top = (h - 7 * unit - depth[1]) // 2
     rng = random.Random(9)
-    drips = [rng.choice([14, 16, 18, 20, 24, 28]) for _ in range(w // 4 + 1)]
-    m = mask.load()
-    grass = Image.new("L", (w, h), 0)
-    g = grass.load()
-    for x in range(w):
-        run = 0
-        for y in range(h):
-            if m[x, y]:
-                run += 1
-                if run <= drips[x // 4]:
-                    g[x, y] = 255
-            else:
-                run = 0
-    out.paste(moss, (0, 0), grass)
-    # A light lip along the very top of the moss.
-    lip = ImageChops.subtract(grass, ImageChops.offset(grass, 0, 4))
-    out.paste(Image.new("RGBA", (w, h), (226, 252, 230, 255)), (0, 0), lip)
-    return [out.crop((c * CELL, r * CELL, (c + 1) * CELL, (r + 1) * CELL)) for r in range(rows) for c in range(columns)]
+    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    shadow = Image.eval(stone, lambda v: int(v * 0.45)).convert("RGB").convert("RGBA")
+    for (cx, cy) in sorted(cells):
+        out.paste(shadow, (left + cx * unit + depth[0], top + cy * unit + depth[1]))
+    for (cx, cy) in sorted(cells):
+        x, y = left + cx * unit, top + cy * unit
+        out.paste(stone, (x, y))
+        if (cx, cy - 1) not in cells:
+            # Grass on top, a few pixels deep, ragged where it drips.
+            cap = moss.crop((0, 0, unit, 10))
+            out.paste(cap, (x, y))
+            for dx in range(0, unit, 2):
+                if rng.random() < 0.35:
+                    drip = rng.choice([2, 4, 6])
+                    out.paste(moss.crop((dx, 10, dx + 2, 10 + drip)), (x + dx, y + 10))
+            ImageDraw.Draw(out).rectangle((x, y, x + unit - 1, y + 1), fill=(226, 252, 230, 255))
+    ring = out.getchannel("A").filter(ImageFilter.MaxFilter(9))
+    outlined = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    outlined.paste(Image.new("RGBA", (w, h), INK), (0, 0), ring)
+    outlined = Image.alpha_composite(outlined, out)
+    return [outlined.crop((c * CELL, r * CELL, (c + 1) * CELL, (r + 1) * CELL)) for r in range(rows) for c in range(columns)]
 
 
 def glow():
@@ -303,22 +293,30 @@ def sprite_icon(atlas, layer):
     return tile.resize((80, 80), Image.NEAREST)
 
 
-def glyph(font, ch):
-    img = Image.new("L", (CELL, CELL), 0)
-    ascent, _ = font.getmetrics()
-    ImageDraw.Draw(img).text((GLYPH_PAD, 4 + ascent), ch, font=font, fill=255, anchor="ls")
-    out = Image.new("RGBA", (CELL, CELL), (255, 255, 255, 0))
-    out.putalpha(img)
-    return out
+def glyph(ch):
+    """A pixel-font glyph, white, each font pixel FONT_UNIT cell pixels,
+    its top-left GLYPH_PAD in and 4 down."""
+    img = Image.new("RGBA", (CELL, CELL), (255, 255, 255, 0))
+    d = ImageDraw.Draw(img)
+    for y, row in enumerate(pixel_font.glyph(ch)):
+        for x, c in enumerate(row):
+            if c == "#":
+                x0, y0 = GLYPH_PAD + x * FONT_UNIT, 4 + y * FONT_UNIT
+                d.rectangle((x0, y0, x0 + FONT_UNIT - 1, y0 + FONT_UNIT - 1), fill=(255, 255, 255, 255))
+    return img
 
 
-GLYPH_PAD = 12
-LOGO_COLUMNS, LOGO_ROWS = 6, 2
+# The pixel font (tools/pixel_font.py): each font pixel is this many cell
+# pixels, 24 to a cell like the other pixel art, so the glyphs snap to the
+# same grid.
+FONT_UNIT = 4
+GLYPH_PAD = 4
+LOGO_COLUMNS, LOGO_ROWS = 8, 3
+PIXEL_ART = {"Slot", "SlotSelected", "Panel", "Button"}
 
 
 def main():
     atlas = Image.open("assets/blocks.png").convert("RGBA")
-    font = ImageFont.truetype(FONT_PATH, FONT_SIZE)
     layers = [
         ("Slot", slot(STONE_MID, STONE_DARK, (40, 34, 58, 200))),
         ("SlotSelected", slot(GOLD_LIGHT, GOLD_DARK, (84, 66, 96, 190), gems=(150, 240, 230))),
@@ -340,8 +338,8 @@ def main():
     glyph_base = len(layers)
     advances = []
     for code in range(32, 127):
-        layers.append((None, glyph(font, chr(code))))
-        advances.append(font.getlength(chr(code)))
+        layers.append((None, glyph(chr(code))))
+        advances.append((pixel_font.width(chr(code)) + 1) * FONT_UNIT)
 
     sheet = Image.new("RGBA", (CELL, CELL * len(layers)), (0, 0, 0, 0))
     for i, (_, img) in enumerate(layers):
@@ -379,6 +377,13 @@ def main():
         "            " + ", ".join(f".{n} => {i}.0" for n, i in named),
         "        }",
         "    }",
+        "",
+        "    /// Drawn on the 24-pixel grid, so sampled crisp (see `pixelQuad`).",
+        "    var pixelArt: Bool {",
+        "        match self {",
+        "            " + ", ".join(f".{n} => {'true' if n in PIXEL_ART else 'false'}" for n, _ in named),
+        "        }",
+        "    }",
         "}",
         "",
         "/// The icon layer for block id `id` (1 and up).",
@@ -400,7 +405,7 @@ def main():
     for code, adv in zip(range(32, 127), advances):
         lines.append(f"        {code} => {adv:.2f},")
     lines += [
-        f"        _ => {font.getlength('?'):.2f}",
+        f"        _ => {(pixel_font.width('?') + 1) * FONT_UNIT:.2f}",
         "    }",
         "}",
         "",

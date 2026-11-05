@@ -472,7 +472,7 @@ struct Game: not Copyable {
         var overlay = if self.onTitle {
             titleScreen(w, h, self.resumed, self.seconds)
         } else {
-            hud(w, h, self.selected, self.player.gliding, self.seconds, captured: self.mouseCaptured)
+            hud(w, h, self.selected, self.player.gliding, self.seconds)
         };
         if self.noticeTime > 0.0 {
             let notice = noticeQuads(self.notice, fade: self.noticeTime.clamp(0.0, 1.0));
