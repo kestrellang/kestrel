@@ -625,7 +625,14 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
     // a ref-provider member's READ types `&T`, which would wrongly
     // classify the projection as SharedRef.
     if let Some(base) = util::accessor_place_mut_base(cx, expr_id) {
-        return classify_mutability(cx, base);
+        let class = classify_mutability(cx, base);
+        // A pointer-derived `ref` (`tmp.offset(by: i).value` on a
+        // `Pointer`) lends storage the receiver only points at, so a
+        // temporary receiver doesn't make the place a temporary.
+        if matches!(class, MutClass::Temporary) && pointer_derived_read(cx, expr_id) {
+            return MutClass::SharedRef;
+        }
+        return class;
     }
     // A field-subscript (`self.items(at: i)`: a subscript on a stored field,
     // method-call shaped) with a write provider is a projection of the
@@ -693,6 +700,23 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
         // Everything else is a temporary (call results, literals, if-exprs, etc.)
         _ => MutClass::Temporary,
     }
+}
+
+/// Does member expression `expr_id` read through a `ref` accessor whose
+/// result is pointer-derived (`kestrel_type_infer::RetRefPointerDerived`)?
+fn pointer_derived_read(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
+        return false;
+    };
+    cx.query
+        .query(kestrel_hir_lower::PlaceAccessors { entity: member })
+        .and_then(|info| info.ref_accessor)
+        .is_some_and(|entity| {
+            cx.query.query(kestrel_type_infer::RetRefPointerDerived {
+                entity,
+                root: cx.root,
+            })
+        })
 }
 
 /// A `&mutating` place is mutable, unless it is reached through a stored

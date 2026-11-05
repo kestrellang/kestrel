@@ -366,21 +366,40 @@ pub(crate) fn try_indirection_peel(
         return None;
     }
 
-    // The pointee accessors MIR replays: the protocol requirements' `ref` /
-    // `mutating ref`, dispatched through the wrapper's witness table. The
-    // write accessor exists only for a `MutableIndirection` conformer (None
-    // ⇒ read-only ⇒ writes are D2).
-    let read_method = crate::indirection_accessor(ctx.query_ctx, ctx.root, false)?;
-    let mut_method = ctx
+    // The pointee accessors MIR replays: the wrapper's own `value` accessors
+    // when it declares them (a direct call), else the protocol requirements'
+    // (witness dispatch: a stored `value`). The write accessor exists only
+    // for a `MutableIndirection` conformer (None ⇒ read-only ⇒ writes are D2).
+    let place = ctx
+        .resolver
+        .resolve_member(recv_kind, kestrel_hir::INDIRECTION_PLACE, &[])
+        .ok()
+        .map(|r| r.entity);
+    let accessor = |mutating: bool| {
+        place
+            .and_then(|p| {
+                ctx.query_ctx.children_of(p).iter().copied().find(|&c| {
+                    ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(c)
+                        == Some(&kestrel_ast_builder::NodeKind::RefAccessor)
+                        && ctx
+                            .query_ctx
+                            .has::<kestrel_ast_builder::MutatingAccessor>(c)
+                            == mutating
+                })
+            })
+            .or_else(|| crate::indirection_accessor(ctx.query_ctx, ctx.root, mutating))
+    };
+    let mutable = ctx
         .query_ctx
         .query(ResolveBuiltin {
             builtin: Builtin::MutableIndirection,
             root: ctx.root,
         })
-        .filter(|&mutable| {
+        .is_some_and(|mutable| {
             crate::conformance::type_satisfies(ctx.query_ctx, &w_hir, mutable, ctx.root)
-        })
-        .and_then(|_| crate::indirection_accessor(ctx.query_ctx, ctx.root, true));
+        });
+    let read_method = accessor(false)?;
+    let mut_method = if mutable { accessor(true) } else { None };
 
     // Pointee type = wrapper's `Indirection.Target`. Reuse the assoc-type
     // machinery via an `Associated` constraint on a fresh TyVar.
