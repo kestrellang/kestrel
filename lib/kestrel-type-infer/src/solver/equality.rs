@@ -866,7 +866,10 @@ pub(super) fn reconcile_closure_conventions(
 /// argument (`print("\(xs.first())")`), or a method receiver
 /// (`xs.first().map(f)`: `Optional`'s methods aren't written for a
 /// reference payload).
-pub(crate) fn optional_ref_decay_site(ctx: &InferCtx<'_>, expr: kestrel_hir::body::HirExprId) -> bool {
+pub(crate) fn optional_ref_decay_site(
+    ctx: &InferCtx<'_>,
+    expr: kestrel_hir::body::HirExprId,
+) -> bool {
     ctx.binding_init_exprs.contains(&expr)
         || ctx.call_arg_exprs.contains(&expr)
         || ctx.method_receiver_exprs.contains(&expr)
