@@ -1,22 +1,29 @@
 // A lit 3D scene: a checkerboard floor and a grid of spinning cubes drawn
-// with one instanced draw, lit by a slowly circling sun, with specular
-// highlights and distance fog. Fly with WASD, Space and Left Shift; look
-// with the arrow keys; Escape quits. `SCENE_FRAMES=n` quits after n frames.
+// with one instanced draw, lit by a slowly circling sun that casts soft
+// shadows, with specular highlights, distance fog and 4x multisampling. Fly
+// with WASD, Space and Left Shift; look with the arrow keys; Escape quits.
+// `SCENE_FRAMES=n` quits after n frames.
 //
-// It shows the parts of `wgpu` the cube example doesn't: a texture uploaded
-// from memory and read through a sampler, a second vertex buffer stepped per
-// instance, several draws from one buffer, and a bind group with a uniform
-// buffer, a texture and a sampler.
+// It shows the parts of `wgpu` the cube example doesn't:
+// - a mipmapped texture, uploaded from memory and filtered anisotropically;
+// - a second vertex buffer stepped per instance, and several draws from one
+//   vertex and index buffer;
+// - a shadow map: a depth-only pass from the sun with depth bias, read back
+//   through a comparison sampler;
+// - explicit pipeline layouts, since the shadow pass can't bind the shadow
+//   map it is drawing;
+// - multisampling, resolved into the window's frame.
 
 module Main
 
-import wgpu.(Instance, Device, SurfaceSource, Texture, TextureFormat, WgpuError, ColorTarget, VertexBufferLayout, VertexAttribute, VertexFormat, Color, DepthTest)
+import wgpu.(Instance, Device, Buffer, RenderPass, SurfaceSource, Texture, TextureFormat, WgpuError, ColorTarget, VertexBufferLayout, VertexAttribute, VertexFormat, Color, DepthTest, BindingLayout)
 import sdl.(SDLWindow, NativeWindow, Event, Key, monotonicMs)
 import linalg.(Vec2, Vec3, Vec4, Mat4, radians)
 
 let shader: String = "
 struct Uniforms {
     viewProj: mat4x4f,
+    lightViewProj: mat4x4f,
     lightDir: vec4f,
     camera: vec4f,
     fog: vec4f,
@@ -24,6 +31,8 @@ struct Uniforms {
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var tex: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
+@group(0) @binding(3) var shadowMap: texture_depth_2d;
+@group(0) @binding(4) var shadowSampler: sampler_comparison;
 
 struct VertexOut {
     @builtin(position) position: vec4f,
@@ -55,6 +64,32 @@ fn vs_main(
     return out;
 }
 
+// The shadow pass: only depth, as the sun sees the scene.
+@vertex
+fn vs_shadow(
+    @location(0) position: vec3f,
+    @location(3) m0: vec4f,
+    @location(4) m1: vec4f,
+    @location(5) m2: vec4f,
+    @location(6) m3: vec4f,
+) -> @builtin(position) vec4f {
+    return u.lightViewProj * mat4x4f(m0, m1, m2, m3) * vec4f(position, 1.0);
+}
+
+// How lit `world` is, 0 to 1: a 3x3 average of shadow map comparisons.
+fn sunlight(world: vec3f, n: vec3f) -> f32 {
+    let light = u.lightViewProj * vec4f(world + n * 0.04, 1.0);
+    let uv = vec2f(light.x * 0.5 + 0.5, 0.5 - light.y * 0.5);
+    let texel = 1.0 / vec2f(textureDimensions(shadowMap));
+    var lit = 0.0;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            lit += textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(f32(x), f32(y)) * texel, light.z);
+        }
+    }
+    return lit / 9.0;
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let n = normalize(in.normal);
@@ -64,7 +99,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     // The instance color's alpha says how much of the texture shows.
     let texel = textureSample(tex, samp, in.uv).rgb;
     let albedo = in.color.rgb * mix(vec3f(1.0), texel, in.color.a);
-    let diffuse = max(dot(n, l), 0.0);
+    let diffuse = max(dot(n, l), 0.0) * sunlight(in.world, n);
     let specular = pow(max(dot(n, h), 0.0), 48.0) * 0.35 * step(0.0, diffuse);
     // Warm light from below, cool from the sky above.
     let ambient = mix(vec3f(0.18, 0.15, 0.13), vec3f(0.30, 0.36, 0.48), n.y * 0.5 + 0.5);
@@ -92,6 +127,7 @@ struct InstanceData: FFISafe {
 /// What the shader's `Uniforms` holds, laid out the same way.
 struct Uniforms: FFISafe {
     var viewProj: Mat4
+    var lightViewProj: Mat4
     var lightDir: Vec4
     var camera: Vec4
     var fog: Vec4
@@ -146,16 +182,18 @@ func buildMesh() -> Mesh {
     addFace(mesh, center: Vec3.zero, normal: Vec3.unitY, u: Vec3.unitX * half, v: -Vec3.unitZ * half, tiles: floorSize / 2.0)
 }
 
-/// A 64x64 checkerboard of four 32-pixel tiles with darker grout lines,
+/// A `side` by `side` checkerboard of four tiles with darker grout lines,
 /// as RGBA bytes.
-func checkerboard() -> [UInt8] {
+func checkerboard(side: Int64) -> [UInt8] {
+    let tile = side / 2;
+    let groutWidth = side / 64;
     var pixels: [UInt8] = [];
     var y = 0;
-    while y < 64 {
+    while y < side {
         var x = 0;
-        while x < 64 {
-            let light = ((x / 32) + (y / 32)) % 2 == 0;
-            let grout = x % 32 == 0 or y % 32 == 0;
+        while x < side {
+            let light = ((x / tile) + (y / tile)) % 2 == 0;
+            let grout = x % tile < groutWidth or y % tile < groutWidth;
             let shade: UInt8 = if grout { 90 } else if light { 235 } else { 170 };
             pixels.append(shade);
             pixels.append(shade);
@@ -167,6 +205,8 @@ func checkerboard() -> [UInt8] {
     }
     pixels
 }
+
+let textureSide: Int64 = 256;
 
 let gridSide: Int64 = 7;
 let spacing: Float32 = 3.0;
@@ -278,6 +318,9 @@ struct Camera {
 }
 
 let depthFormat: TextureFormat = .Depth24Plus;
+let shadowFormat: TextureFormat = .Depth32Float;
+let shadowSize: Int64 = 2048;
+let samples: Int64 = 4;
 let fogColor: Vec3 = Vec3(x: 0.42, y: 0.52, z: 0.68);
 
 func surfaceSource(window: NativeWindow) -> SurfaceSource {
@@ -290,8 +333,32 @@ func surfaceSource(window: NativeWindow) -> SurfaceSource {
     }
 }
 
+/// The multisampled depth buffer for a `width` by `height` window.
 func makeDepth(device: Device, width: Int64, height: Int64) -> Texture {
-    device.createTexture(width: width, height: height, format: depthFormat, usage: [.RenderAttachment], label: "depth")
+    device.createTexture(width: width, height: height, format: depthFormat, usage: [.RenderAttachment], sampleCount: samples, label: "depth")
+}
+
+/// The multisampled color buffer, resolved into each frame.
+func makeColor(device: Device, format: TextureFormat, width: Int64, height: Int64) -> Texture {
+    device.createTexture(width: width, height: height, format: format, usage: [.RenderAttachment], sampleCount: samples, label: "color")
+}
+
+/// The sun's view: an orthographic box around the cubes, looking along
+/// `sun`.
+func lightViewProjection(sun: Vec3) -> Mat4 {
+    let view = Mat4.lookAt(eye: sun * -40.0, target: Vec3.zero, up: Vec3.unitY);
+    Mat4.orthographic(left: -22.0, right: 22.0, bottom: -22.0, top: 22.0, near: 1.0, far: 90.0) * view
+}
+
+/// Draw the floor, then the cubes, from the shared buffers.
+func drawScene(pass: RenderPass, vertices: Buffer, indices: Buffer, floor: Buffer, cubes: Buffer) {
+    pass.setVertexBuffer(0, vertices);
+    pass.setIndexBuffer(indices, format: .Uint16);
+    // The floor's indices come after the cube's in the shared buffer.
+    pass.setVertexBuffer(1, floor);
+    pass.drawIndexed(indices: floorIndexCount, firstIndex: cubeIndexCount);
+    pass.setVertexBuffer(1, cubes);
+    pass.drawIndexed(indices: cubeIndexCount, instances: gridSide * gridSide);
 }
 
 /// The per-instance buffer layout: four columns of the model matrix, then
@@ -319,6 +386,7 @@ func run() -> () throws WgpuError {
     var (width, height) = window.drawableSize;
     surface.configure(device: device, format: format, width: width, height: height);
     var depth = makeDepth(device, width, height);
+    var color = makeColor(device, format, width, height);
 
     // Geometry: one vertex and index buffer for both the cubes and the floor.
     let mesh = buildMesh();
@@ -329,28 +397,68 @@ func run() -> () throws WgpuError {
         usage: [.Vertex],
         label: "floor instance"
     );
-    let cubeCount = gridSide * gridSide;
-    let cubeBuffer = device.createBuffer(size: cubeCount * 80, usage: [.Vertex, .CopyDst], label: "cube instances");
-    let uniformBuffer = device.createBuffer(size: 112, usage: [.Uniform, .CopyDst], label: "uniforms");
+    let cubeBuffer = device.createBuffer(size: gridSide * gridSide * 80, usage: [.Vertex, .CopyDst], label: "cube instances");
+    let uniformBuffer = device.createBuffer(size: 176, usage: [.Uniform, .CopyDst], label: "uniforms");
 
-    // The floor texture, uploaded once.
-    let texture = device.createTexture(width: 64, height: 64, format: .RGBA8UnormSrgb, usage: [.TextureBinding, .CopyDst], label: "checkerboard");
-    device.write(texture: texture, data: checkerboard());
+    // The floor texture, uploaded once, with mipmaps so it stays smooth far
+    // away, and an anisotropic sampler so it stays sharp at a slant.
+    let texture = device.createTexture(
+        width: textureSide,
+        height: textureSide,
+        format: .RGBA8UnormSrgb,
+        usage: [.TextureBinding, .CopyDst, .RenderAttachment],
+        mipLevels: Texture.fullMipChain(width: textureSide, height: textureSide),
+        label: "checkerboard"
+    );
+    device.write(texture: texture, data: checkerboard(textureSide));
+    device.generateMipmaps(texture);
     let textureView = texture.createView();
-    let sampler = device.createSampler(filter: .Linear, addressMode: .Repeat, label: "repeat");
+    let sampler = device.createSampler(filter: .Linear, addressMode: .Repeat, anisotropy: 8, label: "floor");
+
+    // The shadow map, and a sampler that compares against it.
+    let shadowMap = device.createTexture(width: shadowSize, height: shadowSize, format: shadowFormat, usage: [.RenderAttachment, .TextureBinding], label: "shadow map");
+    let shadowView = shadowMap.createView();
+    let shadowSampler = device.createSampler(filter: .Linear, compare: .Some(.LessEqual), label: "shadow");
+
+    // Explicit layouts: the shadow pass sees only the uniforms, since it
+    // can't bind the shadow map it is drawing into.
+    let sceneLayout = device.createPipelineLayout(groups: [[
+        BindingLayout.uniformBuffer(0, visibility: [.Vertex, .Fragment]),
+        BindingLayout.texture(1, visibility: [.Fragment]),
+        BindingLayout.sampler(2, visibility: [.Fragment]),
+        BindingLayout.texture(3, visibility: [.Fragment], sampleType: .Depth),
+        BindingLayout.sampler(4, visibility: [.Fragment], kind: .Comparison)
+    ]], label: "scene");
+    let shadowLayout = device.createPipelineLayout(groups: [[BindingLayout.uniformBuffer(0, visibility: [.Vertex])]], label: "shadow");
 
     let shaderModule = device.createShaderModule(wgsl: shader, label: "scene");
+    let buffers = [VertexBufferLayout(packed: [.Float32x3, .Float32x3, .Float32x2]), instanceLayout()];
     let pipeline = device.createRenderPipeline(
         shader: shaderModule,
         targets: [ColorTarget(format: format)],
-        buffers: [VertexBufferLayout(packed: [.Float32x3, .Float32x3, .Float32x2]), instanceLayout()],
+        buffers: buffers,
         cullMode: .Back,
-        depth: .Some(DepthTest(format: depthFormat))
+        depth: .Some(DepthTest(format: depthFormat)),
+        sampleCount: samples,
+        layout: .Some(sceneLayout.share()),
+        label: "scene"
+    );
+    // Depth only; the bias keeps lit surfaces from shadowing themselves.
+    let shadowPipeline = device.createRenderPipeline(
+        shader: shaderModule,
+        targets: [],
+        buffers: buffers,
+        vertexEntry: "vs_shadow",
+        cullMode: .Back,
+        depth: .Some(DepthTest(format: shadowFormat, depthBias: 2, depthBiasSlopeScale: 2.0)),
+        layout: .Some(shadowLayout.share()),
+        label: "shadow"
     );
     let bindGroup = device.createBindGroup(
-        layout: pipeline.bindGroupLayout(0),
-        entries: [uniformBuffer.binding(0), textureView.binding(1), sampler.binding(2)]
+        layout: sceneLayout.bindGroupLayout(0),
+        entries: [uniformBuffer.binding(0), textureView.binding(1), sampler.binding(2), shadowView.binding(3), shadowSampler.binding(4)]
     );
+    let shadowBindGroup = device.createBindGroup(layout: shadowLayout.bindGroupLayout(0), entries: [uniformBuffer.binding(0)]);
 
     var camera = Camera(position: Vec3(x: 0.0, y: 5.0, z: 17.0), yaw: 0.0, pitch: -0.28);
     var controls = Controls();
@@ -375,6 +483,7 @@ func run() -> () throws WgpuError {
                     height = h;
                     surface.configure(device: device, format: format, width: width, height: height);
                     depth = makeDepth(device, width, height);
+                    color = makeColor(device, format, width, height);
                 },
                 _ => {}
             }
@@ -392,6 +501,7 @@ func run() -> () throws WgpuError {
         let sun = Vec3(x: sunAngle.cos(), y: -1.3, z: sunAngle.sin()).normalized;
         device.write(uniformBuffer, value: Uniforms(
             viewProj: projection * camera.view(),
+            lightViewProj: lightViewProjection(sun),
             lightDir: sun.extended(w: 0.0),
             camera: camera.position.extended(w: 1.0),
             fog: fogColor.extended(w: 0.018)
@@ -408,19 +518,19 @@ func run() -> () throws WgpuError {
             .Err(e) => { throw e }
         };
         let frameView = frame.texture.createView();
+        let colorView = color.createView();
         let depthView = depth.createView();
         let encoder = device.createCommandEncoder();
+        encoder.renderPass(color: [], depth: shadowView.depthAttachment()) { (pass) in
+            pass.setPipeline(shadowPipeline);
+            pass.setBindGroup(0, shadowBindGroup);
+            drawScene(pass, vertexBuffer, indexBuffer, floorInstance, cubeBuffer);
+        };
         let sky = Color(r: Float64(from: fogColor.x), g: Float64(from: fogColor.y), b: Float64(from: fogColor.z));
-        encoder.renderPass(color: [frameView.colorAttachment(clear: .Some(sky))], depth: depthView.depthAttachment()) { (pass) in
+        encoder.renderPass(color: [colorView.colorAttachment(resolvingInto: frameView, clear: .Some(sky))], depth: depthView.depthAttachment()) { (pass) in
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, bindGroup);
-            pass.setVertexBuffer(0, vertexBuffer);
-            pass.setIndexBuffer(indexBuffer, format: .Uint16);
-            // The floor's indices come after the cube's in the shared buffer.
-            pass.setVertexBuffer(1, floorInstance);
-            pass.drawIndexed(indices: floorIndexCount, firstIndex: cubeIndexCount);
-            pass.setVertexBuffer(1, cubeBuffer);
-            pass.drawIndexed(indices: cubeIndexCount, instances: cubeCount);
+            drawScene(pass, vertexBuffer, indexBuffer, floorInstance, cubeBuffer);
         };
         device.submit(encoder.finish());
         surface.present();

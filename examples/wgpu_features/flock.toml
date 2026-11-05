@@ -1,0 +1,8 @@
+[package]
+name = "wgpu_features"
+version = "0.1.0"
+description = "Checks multisampling, mipmaps, stencil, blending, layouts, indirect draws, bundles, queries and push constants on the GPU"
+
+[dependencies]
+wgpu = { path = "../../lang/wgpu" }
+linalg = { path = "../../lang/linalg" }

@@ -4,8 +4,9 @@
 // Structs pass to C by value with the C ABI, `&T` parameters are `const T*`,
 // and callbacks are C function types (`@extern(.C) (…) -> …`) filled with
 // `@export(.C)` functions. The callback fields C allows to be NULL are
-// `NullableCFunction`s. Only the subset the safe `wgpu` module uses is bound;
-// add more the same way.
+// `NullableCFunction`s. Only the subset the safe `wgpu` module uses is bound,
+// including the `wgpu.h` extras for push constants and native limits; add more
+// the same way.
 
 module wgpu.raw
 
@@ -29,6 +30,10 @@ public type WGPUSampler = RawPointer
 public type WGPURenderPipeline = RawPointer
 public type WGPURenderPassEncoder = RawPointer
 public type WGPUSurface = RawPointer
+public type WGPUPipelineLayout = RawPointer
+public type WGPUQuerySet = RawPointer
+public type WGPURenderBundle = RawPointer
+public type WGPURenderBundleEncoder = RawPointer
 
 // ===== Constants =====
 
@@ -637,6 +642,272 @@ public struct WGPUSurfaceTexture: FFISafe {
     public var status: UInt32
 }
 
+
+// ----- Textures, samplers, blending, stencil (full set) -----
+
+public let WGPUTextureFormat_R8Snorm: UInt32 = 2
+public let WGPUTextureFormat_R8Uint: UInt32 = 3
+public let WGPUTextureFormat_R8Sint: UInt32 = 4
+public let WGPUTextureFormat_R16Uint: UInt32 = 5
+public let WGPUTextureFormat_R16Sint: UInt32 = 6
+public let WGPUTextureFormat_R16Float: UInt32 = 7
+public let WGPUTextureFormat_RG8Unorm: UInt32 = 8
+public let WGPUTextureFormat_RG8Snorm: UInt32 = 9
+public let WGPUTextureFormat_RG8Uint: UInt32 = 10
+public let WGPUTextureFormat_RG8Sint: UInt32 = 11
+public let WGPUTextureFormat_R32Uint: UInt32 = 13
+public let WGPUTextureFormat_R32Sint: UInt32 = 14
+public let WGPUTextureFormat_RG16Uint: UInt32 = 15
+public let WGPUTextureFormat_RG16Sint: UInt32 = 16
+public let WGPUTextureFormat_RG16Float: UInt32 = 17
+public let WGPUTextureFormat_RGBA8Snorm: UInt32 = 20
+public let WGPUTextureFormat_RGBA8Uint: UInt32 = 21
+public let WGPUTextureFormat_RGBA8Sint: UInt32 = 22
+public let WGPUTextureFormat_RGB10A2Unorm: UInt32 = 26
+public let WGPUTextureFormat_RG11B10Ufloat: UInt32 = 27
+public let WGPUTextureFormat_RG32Float: UInt32 = 29
+public let WGPUTextureFormat_RG32Uint: UInt32 = 30
+public let WGPUTextureFormat_RG32Sint: UInt32 = 31
+public let WGPUTextureFormat_RGBA16Uint: UInt32 = 32
+public let WGPUTextureFormat_RGBA16Sint: UInt32 = 33
+public let WGPUTextureFormat_RGBA32Uint: UInt32 = 36
+public let WGPUTextureFormat_RGBA32Sint: UInt32 = 37
+public let WGPUTextureFormat_Stencil8: UInt32 = 38
+public let WGPUTextureFormat_Depth32FloatStencil8: UInt32 = 43
+
+public let WGPUTextureDimension_1D: UInt32 = 1
+public let WGPUTextureDimension_3D: UInt32 = 3
+public let WGPUTextureViewDimension_1D: UInt32 = 1
+public let WGPUTextureViewDimension_2D: UInt32 = 2
+public let WGPUTextureViewDimension_2DArray: UInt32 = 3
+public let WGPUTextureViewDimension_Cube: UInt32 = 4
+public let WGPUTextureViewDimension_CubeArray: UInt32 = 5
+public let WGPUTextureViewDimension_3D: UInt32 = 6
+public let WGPUTextureAspect_StencilOnly: UInt32 = 2
+public let WGPUTextureAspect_DepthOnly: UInt32 = 3
+
+public let WGPUBlendFactor_Src: UInt32 = 3
+public let WGPUBlendFactor_OneMinusSrc: UInt32 = 4
+public let WGPUBlendFactor_Dst: UInt32 = 7
+public let WGPUBlendFactor_OneMinusDst: UInt32 = 8
+public let WGPUBlendFactor_DstAlpha: UInt32 = 9
+public let WGPUBlendFactor_OneMinusDstAlpha: UInt32 = 10
+public let WGPUBlendFactor_SrcAlphaSaturated: UInt32 = 11
+public let WGPUBlendFactor_Constant: UInt32 = 12
+public let WGPUBlendFactor_OneMinusConstant: UInt32 = 13
+public let WGPUBlendOperation_Subtract: UInt32 = 2
+public let WGPUBlendOperation_ReverseSubtract: UInt32 = 3
+public let WGPUBlendOperation_Min: UInt32 = 4
+public let WGPUBlendOperation_Max: UInt32 = 5
+public let WGPUColorWriteMask_None: UInt64 = 0
+public let WGPUColorWriteMask_Red: UInt64 = 1
+public let WGPUColorWriteMask_Green: UInt64 = 2
+public let WGPUColorWriteMask_Blue: UInt64 = 4
+public let WGPUColorWriteMask_Alpha: UInt64 = 8
+
+public let WGPUStencilOperation_Zero: UInt32 = 2
+public let WGPUStencilOperation_Replace: UInt32 = 3
+public let WGPUStencilOperation_Invert: UInt32 = 4
+public let WGPUStencilOperation_IncrementClamp: UInt32 = 5
+public let WGPUStencilOperation_DecrementClamp: UInt32 = 6
+public let WGPUStencilOperation_IncrementWrap: UInt32 = 7
+public let WGPUStencilOperation_DecrementWrap: UInt32 = 8
+
+// ----- Layouts -----
+
+public let WGPUShaderStage_None: UInt64 = 0
+public let WGPUShaderStage_Vertex: UInt64 = 1
+public let WGPUShaderStage_Fragment: UInt64 = 2
+public let WGPUShaderStage_Compute: UInt64 = 4
+public let WGPUBufferBindingType_BindingNotUsed: UInt32 = 0
+public let WGPUBufferBindingType_Uniform: UInt32 = 2
+public let WGPUBufferBindingType_Storage: UInt32 = 3
+public let WGPUBufferBindingType_ReadOnlyStorage: UInt32 = 4
+public let WGPUSamplerBindingType_BindingNotUsed: UInt32 = 0
+public let WGPUSamplerBindingType_Filtering: UInt32 = 2
+public let WGPUSamplerBindingType_NonFiltering: UInt32 = 3
+public let WGPUSamplerBindingType_Comparison: UInt32 = 4
+public let WGPUTextureSampleType_BindingNotUsed: UInt32 = 0
+public let WGPUTextureSampleType_Float: UInt32 = 2
+public let WGPUTextureSampleType_UnfilterableFloat: UInt32 = 3
+public let WGPUTextureSampleType_Depth: UInt32 = 4
+public let WGPUTextureSampleType_Sint: UInt32 = 5
+public let WGPUTextureSampleType_Uint: UInt32 = 6
+public let WGPUStorageTextureAccess_BindingNotUsed: UInt32 = 0
+public let WGPUStorageTextureAccess_WriteOnly: UInt32 = 2
+public let WGPUStorageTextureAccess_ReadOnly: UInt32 = 3
+public let WGPUStorageTextureAccess_ReadWrite: UInt32 = 4
+
+// ----- Queries, features and limits -----
+
+public let WGPUQueryType_Occlusion: UInt32 = 1
+public let WGPUQueryType_Timestamp: UInt32 = 2
+public let WGPUBufferUsage_QueryResolve: UInt64 = 512
+public let WGPUFeatureName_DepthClipControl: UInt32 = 1
+public let WGPUFeatureName_Depth32FloatStencil8: UInt32 = 2
+public let WGPUFeatureName_TimestampQuery: UInt32 = 3
+public let WGPUFeatureName_IndirectFirstInstance: UInt32 = 9
+public let WGPUFeatureName_ShaderF16: UInt32 = 10
+public let WGPUFeatureName_Float32Filterable: UInt32 = 13
+/// wgpu.h: `WGPUNativeFeature_PushConstants`.
+public let WGPUNativeFeature_PushConstants: UInt32 = 196609
+/// wgpu.h: `WGPUSType_NativeLimits`.
+public let WGPUSType_NativeLimits: UInt32 = 196610
+/// wgpu.h: `WGPUSType_PipelineLayoutExtras`.
+public let WGPUSType_PipelineLayoutExtras: UInt32 = 196611
+/// `WGPU_LIMIT_U64_UNDEFINED`, and the `WGPU_*_UNDEFINED` u32 sentinels are
+/// `WGPU_U32_UNDEFINED`.
+public let WGPU_U64_UNDEFINED: UInt64 = 18446744073709551615
+
+// ===== Structs (full rendering) =====
+
+// ----- Layouts -----
+
+public struct WGPUBufferBindingLayout: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var kind: UInt32
+    public var hasDynamicOffset: UInt32
+    public var minBindingSize: UInt64
+}
+
+public struct WGPUSamplerBindingLayout: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var kind: UInt32
+}
+
+public struct WGPUTextureBindingLayout: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var sampleType: UInt32
+    public var viewDimension: UInt32
+    public var multisampled: UInt32
+}
+
+public struct WGPUStorageTextureBindingLayout: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var access: UInt32
+    public var format: UInt32
+    public var viewDimension: UInt32
+}
+
+public struct WGPUBindGroupLayoutEntry: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var binding: UInt32
+    public var visibility: UInt64
+    public var buffer: WGPUBufferBindingLayout
+    public var sampler: WGPUSamplerBindingLayout
+    public var texture: WGPUTextureBindingLayout
+    public var storageTexture: WGPUStorageTextureBindingLayout
+}
+
+public struct WGPUBindGroupLayoutDescriptor: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var label: WGPUStringView
+    public var entryCount: UInt64
+    public var entries: Pointer[WGPUBindGroupLayoutEntry]
+}
+
+public struct WGPUPipelineLayoutDescriptor: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var label: WGPUStringView
+    public var bindGroupLayoutCount: UInt64
+    public var bindGroupLayouts: Pointer[WGPUBindGroupLayout]
+}
+
+/// wgpu.h: one push constant range of a pipeline layout.
+public struct WGPUPushConstantRange: FFISafe {
+    public var stages: UInt64
+    public var start: UInt32
+    public var end: UInt32
+}
+
+/// wgpu.h: chained onto `WGPUPipelineLayoutDescriptor` for push constants.
+public struct WGPUPipelineLayoutExtras: FFISafe {
+    public var chain: WGPUChainedStruct
+    public var pushConstantRangeCount: UInt64
+    public var pushConstantRanges: Pointer[WGPUPushConstantRange]
+}
+
+// ----- Queries, bundles, features and limits -----
+
+public struct WGPUQuerySetDescriptor: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var label: WGPUStringView
+    public var kind: UInt32
+    public var count: UInt32
+}
+
+/// `WGPURenderPassTimestampWrites` and `WGPUComputePassTimestampWrites`,
+/// which share a layout.
+public struct WGPUPassTimestampWrites: FFISafe {
+    public var querySet: WGPUQuerySet
+    public var beginningOfPassWriteIndex: UInt32
+    public var endOfPassWriteIndex: UInt32
+}
+
+public struct WGPUComputePassDescriptor: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var label: WGPUStringView
+    public var timestampWrites: Pointer[WGPUPassTimestampWrites]
+}
+
+public struct WGPURenderBundleEncoderDescriptor: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var label: WGPUStringView
+    public var colorFormatCount: UInt64
+    public var colorFormats: Pointer[UInt32]
+    public var depthStencilFormat: UInt32
+    public var sampleCount: UInt32
+    public var depthReadOnly: UInt32
+    public var stencilReadOnly: UInt32
+}
+
+public struct WGPURenderBundleDescriptor: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var label: WGPUStringView
+}
+
+public struct WGPULimits: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var maxTextureDimension1D: UInt32
+    public var maxTextureDimension2D: UInt32
+    public var maxTextureDimension3D: UInt32
+    public var maxTextureArrayLayers: UInt32
+    public var maxBindGroups: UInt32
+    public var maxBindGroupsPlusVertexBuffers: UInt32
+    public var maxBindingsPerBindGroup: UInt32
+    public var maxDynamicUniformBuffersPerPipelineLayout: UInt32
+    public var maxDynamicStorageBuffersPerPipelineLayout: UInt32
+    public var maxSampledTexturesPerShaderStage: UInt32
+    public var maxSamplersPerShaderStage: UInt32
+    public var maxStorageBuffersPerShaderStage: UInt32
+    public var maxStorageTexturesPerShaderStage: UInt32
+    public var maxUniformBuffersPerShaderStage: UInt32
+    public var maxUniformBufferBindingSize: UInt64
+    public var maxStorageBufferBindingSize: UInt64
+    public var minUniformBufferOffsetAlignment: UInt32
+    public var minStorageBufferOffsetAlignment: UInt32
+    public var maxVertexBuffers: UInt32
+    public var maxBufferSize: UInt64
+    public var maxVertexAttributes: UInt32
+    public var maxVertexBufferArrayStride: UInt32
+    public var maxInterStageShaderVariables: UInt32
+    public var maxColorAttachments: UInt32
+    public var maxColorAttachmentBytesPerSample: UInt32
+    public var maxComputeWorkgroupStorageSize: UInt32
+    public var maxComputeInvocationsPerWorkgroup: UInt32
+    public var maxComputeWorkgroupSizeX: UInt32
+    public var maxComputeWorkgroupSizeY: UInt32
+    public var maxComputeWorkgroupSizeZ: UInt32
+    public var maxComputeWorkgroupsPerDimension: UInt32
+}
+
+/// wgpu.h: chained onto `WGPULimits` for wgpu-native's own limits.
+public struct WGPUNativeLimits: FFISafe {
+    public var chain: WGPUChainedStruct
+    public var maxPushConstantSize: UInt32
+    public var maxNonSamplerBindings: UInt32
+}
+
 // ===== Functions =====
 
 @extern(.C, mangleName: "wgpuCreateInstance")
@@ -804,3 +1075,101 @@ public func wgpuSurfacePresent(surface: WGPUSurface) -> UInt32
 public func wgpuSurfaceUnconfigure(surface: WGPUSurface)
 @extern(.C, mangleName: "wgpuSurfaceRelease")
 public func wgpuSurfaceRelease(surface: WGPUSurface)
+
+// ----- Layouts, queries, bundles, features (full set) -----
+
+@extern(.C, mangleName: "wgpuDeviceCreateBindGroupLayout")
+public func wgpuDeviceCreateBindGroupLayout(device: WGPUDevice, descriptor: &WGPUBindGroupLayoutDescriptor) -> WGPUBindGroupLayout
+@extern(.C, mangleName: "wgpuBindGroupLayoutAddRef")
+public func wgpuBindGroupLayoutAddRef(bindGroupLayout: WGPUBindGroupLayout)
+@extern(.C, mangleName: "wgpuDeviceCreatePipelineLayout")
+public func wgpuDeviceCreatePipelineLayout(device: WGPUDevice, descriptor: &WGPUPipelineLayoutDescriptor) -> WGPUPipelineLayout
+@extern(.C, mangleName: "wgpuPipelineLayoutAddRef")
+public func wgpuPipelineLayoutAddRef(pipelineLayout: WGPUPipelineLayout)
+@extern(.C, mangleName: "wgpuPipelineLayoutRelease")
+public func wgpuPipelineLayoutRelease(pipelineLayout: WGPUPipelineLayout)
+@extern(.C, mangleName: "wgpuDeviceCreateQuerySet")
+public func wgpuDeviceCreateQuerySet(device: WGPUDevice, descriptor: &WGPUQuerySetDescriptor) -> WGPUQuerySet
+@extern(.C, mangleName: "wgpuQuerySetGetCount")
+public func wgpuQuerySetGetCount(querySet: WGPUQuerySet) -> UInt32
+@extern(.C, mangleName: "wgpuQuerySetGetType")
+public func wgpuQuerySetGetType(querySet: WGPUQuerySet) -> UInt32
+@extern(.C, mangleName: "wgpuQuerySetRelease")
+public func wgpuQuerySetRelease(querySet: WGPUQuerySet)
+@extern(.C, mangleName: "wgpuCommandEncoderResolveQuerySet")
+public func wgpuCommandEncoderResolveQuerySet(commandEncoder: WGPUCommandEncoder, querySet: WGPUQuerySet, firstQuery: UInt32, queryCount: UInt32, destination: WGPUBuffer, destinationOffset: UInt64)
+@extern(.C, mangleName: "wgpuCommandEncoderWriteTimestamp")
+public func wgpuCommandEncoderWriteTimestamp(commandEncoder: WGPUCommandEncoder, querySet: WGPUQuerySet, queryIndex: UInt32)
+@extern(.C, mangleName: "wgpuCommandEncoderBeginComputePass")
+public func wgpuCommandEncoderBeginComputePassWith(commandEncoder: WGPUCommandEncoder, descriptor: &WGPUComputePassDescriptor) -> WGPUComputePassEncoder
+@extern(.C, mangleName: "wgpuCommandEncoderCopyBufferToTexture")
+public func wgpuCommandEncoderCopyBufferToTexture(commandEncoder: WGPUCommandEncoder, source: &WGPUTexelCopyBufferInfo, destination: &WGPUTexelCopyTextureInfo, copySize: &WGPUExtent3D)
+@extern(.C, mangleName: "wgpuCommandEncoderCopyTextureToTexture")
+public func wgpuCommandEncoderCopyTextureToTexture(commandEncoder: WGPUCommandEncoder, source: &WGPUTexelCopyTextureInfo, destination: &WGPUTexelCopyTextureInfo, copySize: &WGPUExtent3D)
+@extern(.C, mangleName: "wgpuTextureGetDepthOrArrayLayers")
+public func wgpuTextureGetDepthOrArrayLayers(texture: WGPUTexture) -> UInt32
+@extern(.C, mangleName: "wgpuTextureGetMipLevelCount")
+public func wgpuTextureGetMipLevelCount(texture: WGPUTexture) -> UInt32
+@extern(.C, mangleName: "wgpuTextureGetSampleCount")
+public func wgpuTextureGetSampleCount(texture: WGPUTexture) -> UInt32
+@extern(.C, mangleName: "wgpuTextureGetDimension")
+public func wgpuTextureGetDimension(texture: WGPUTexture) -> UInt32
+@extern(.C, mangleName: "wgpuAdapterHasFeature")
+public func wgpuAdapterHasFeature(adapter: WGPUAdapter, feature: UInt32) -> UInt32
+@extern(.C, mangleName: "wgpuDeviceHasFeature")
+public func wgpuDeviceHasFeature(device: WGPUDevice, feature: UInt32) -> UInt32
+@extern(.C, mangleName: "wgpuAdapterGetLimits")
+public func wgpuAdapterGetLimits(adapter: WGPUAdapter, limits: &mutating WGPULimits) -> UInt32
+@extern(.C, mangleName: "wgpuDeviceGetLimits")
+public func wgpuDeviceGetLimits(device: WGPUDevice, limits: &mutating WGPULimits) -> UInt32
+
+@extern(.C, mangleName: "wgpuRenderPassEncoderDrawIndirect")
+public func wgpuRenderPassEncoderDrawIndirect(renderPassEncoder: WGPURenderPassEncoder, indirectBuffer: WGPUBuffer, indirectOffset: UInt64)
+@extern(.C, mangleName: "wgpuRenderPassEncoderDrawIndexedIndirect")
+public func wgpuRenderPassEncoderDrawIndexedIndirect(renderPassEncoder: WGPURenderPassEncoder, indirectBuffer: WGPUBuffer, indirectOffset: UInt64)
+@extern(.C, mangleName: "wgpuRenderPassEncoderSetStencilReference")
+public func wgpuRenderPassEncoderSetStencilReference(renderPassEncoder: WGPURenderPassEncoder, reference: UInt32)
+@extern(.C, mangleName: "wgpuRenderPassEncoderSetBlendConstant")
+public func wgpuRenderPassEncoderSetBlendConstant(renderPassEncoder: WGPURenderPassEncoder, color: &WGPUColor)
+@extern(.C, mangleName: "wgpuRenderPassEncoderBeginOcclusionQuery")
+public func wgpuRenderPassEncoderBeginOcclusionQuery(renderPassEncoder: WGPURenderPassEncoder, queryIndex: UInt32)
+@extern(.C, mangleName: "wgpuRenderPassEncoderEndOcclusionQuery")
+public func wgpuRenderPassEncoderEndOcclusionQuery(renderPassEncoder: WGPURenderPassEncoder)
+@extern(.C, mangleName: "wgpuRenderPassEncoderExecuteBundles")
+public func wgpuRenderPassEncoderExecuteBundles(renderPassEncoder: WGPURenderPassEncoder, bundleCount: UInt64, bundles: Pointer[WGPURenderBundle])
+@extern(.C, mangleName: "wgpuComputePassEncoderDispatchWorkgroupsIndirect")
+public func wgpuComputePassEncoderDispatchWorkgroupsIndirect(computePassEncoder: WGPUComputePassEncoder, indirectBuffer: WGPUBuffer, indirectOffset: UInt64)
+
+@extern(.C, mangleName: "wgpuDeviceCreateRenderBundleEncoder")
+public func wgpuDeviceCreateRenderBundleEncoder(device: WGPUDevice, descriptor: &WGPURenderBundleEncoderDescriptor) -> WGPURenderBundleEncoder
+@extern(.C, mangleName: "wgpuRenderBundleEncoderSetPipeline")
+public func wgpuRenderBundleEncoderSetPipeline(renderBundleEncoder: WGPURenderBundleEncoder, pipeline: WGPURenderPipeline)
+@extern(.C, mangleName: "wgpuRenderBundleEncoderSetBindGroup")
+public func wgpuRenderBundleEncoderSetBindGroup(renderBundleEncoder: WGPURenderBundleEncoder, groupIndex: UInt32, group: WGPUBindGroup, dynamicOffsetCount: UInt64, dynamicOffsets: RawPointer)
+@extern(.C, mangleName: "wgpuRenderBundleEncoderSetVertexBuffer")
+public func wgpuRenderBundleEncoderSetVertexBuffer(renderBundleEncoder: WGPURenderBundleEncoder, slot: UInt32, buffer: WGPUBuffer, offset: UInt64, size: UInt64)
+@extern(.C, mangleName: "wgpuRenderBundleEncoderSetIndexBuffer")
+public func wgpuRenderBundleEncoderSetIndexBuffer(renderBundleEncoder: WGPURenderBundleEncoder, buffer: WGPUBuffer, format: UInt32, offset: UInt64, size: UInt64)
+@extern(.C, mangleName: "wgpuRenderBundleEncoderDraw")
+public func wgpuRenderBundleEncoderDraw(renderBundleEncoder: WGPURenderBundleEncoder, vertexCount: UInt32, instanceCount: UInt32, firstVertex: UInt32, firstInstance: UInt32)
+@extern(.C, mangleName: "wgpuRenderBundleEncoderDrawIndexed")
+public func wgpuRenderBundleEncoderDrawIndexed(renderBundleEncoder: WGPURenderBundleEncoder, indexCount: UInt32, instanceCount: UInt32, firstIndex: UInt32, baseVertex: Int32, firstInstance: UInt32)
+@extern(.C, mangleName: "wgpuRenderBundleEncoderDrawIndirect")
+public func wgpuRenderBundleEncoderDrawIndirect(renderBundleEncoder: WGPURenderBundleEncoder, indirectBuffer: WGPUBuffer, indirectOffset: UInt64)
+@extern(.C, mangleName: "wgpuRenderBundleEncoderDrawIndexedIndirect")
+public func wgpuRenderBundleEncoderDrawIndexedIndirect(renderBundleEncoder: WGPURenderBundleEncoder, indirectBuffer: WGPUBuffer, indirectOffset: UInt64)
+@extern(.C, mangleName: "wgpuRenderBundleEncoderFinish")
+public func wgpuRenderBundleEncoderFinish(renderBundleEncoder: WGPURenderBundleEncoder, descriptor: &WGPURenderBundleDescriptor) -> WGPURenderBundle
+@extern(.C, mangleName: "wgpuRenderBundleEncoderRelease")
+public func wgpuRenderBundleEncoderRelease(renderBundleEncoder: WGPURenderBundleEncoder)
+@extern(.C, mangleName: "wgpuRenderBundleRelease")
+public func wgpuRenderBundleRelease(renderBundle: WGPURenderBundle)
+
+// ----- wgpu.h push constants -----
+
+@extern(.C, mangleName: "wgpuRenderPassEncoderSetPushConstants")
+public func wgpuRenderPassEncoderSetPushConstants(encoder: WGPURenderPassEncoder, stages: UInt64, offset: UInt32, sizeBytes: UInt32, data: RawPointer)
+@extern(.C, mangleName: "wgpuComputePassEncoderSetPushConstants")
+public func wgpuComputePassEncoderSetPushConstants(encoder: WGPUComputePassEncoder, offset: UInt32, sizeBytes: UInt32, data: RawPointer)
+@extern(.C, mangleName: "wgpuRenderBundleEncoderSetPushConstants")
+public func wgpuRenderBundleEncoderSetPushConstants(encoder: WGPURenderBundleEncoder, stages: UInt64, offset: UInt32, sizeBytes: UInt32, data: RawPointer)

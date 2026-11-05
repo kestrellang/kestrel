@@ -246,13 +246,33 @@ public struct Adapter: not Copyable {
     }
 
     /// Create a device with the default limits, blocking until wgpu answers.
-    public func requestDevice(label label: String = "") -> Device throws WgpuError {
+    /// A device with `features` (check `supports(feature)` first). A
+    /// `maxPushConstantSize` above 0 also asks for `Feature.PushConstants`
+    /// with room for that many bytes.
+    public func requestDevice(label label: String = "", features features: [Feature] = [], maxPushConstantSize maxPushConstantSize: Int64 = 0) -> Device throws WgpuError {
+        var featureList: [UInt32] = [];
+        var hasPushConstants = false;
+        for f in features {
+            featureList.append(f.cValue);
+            hasPushConstants = hasPushConstants or f.cValue == raw.WGPUNativeFeature_PushConstants;
+        }
+        if maxPushConstantSize > 0 and not hasPushConstants {
+            featureList.append(raw.WGPUNativeFeature_PushConstants);
+        }
+        // Push constants are a wgpu-native limit, chained onto the standard
+        // ones (all left at their defaults).
+        var nativeLimits = raw.WGPUNativeLimits(
+            chain: raw.WGPUChainedStruct(next: Pointer.nullPointer(), sType: raw.WGPUSType_NativeLimits),
+            maxPushConstantSize: UInt32(from: maxPushConstantSize),
+            maxNonSamplerBindings: raw.WGPU_U32_UNDEFINED
+        );
+        var limits = undefinedLimits(Pointer(to: nativeLimits).cast[raw.WGPUChainedStruct]());
         let descriptor = raw.WGPUDeviceDescriptor(
             nextInChain: Pointer.nullPointer(),
             label: view(label),
-            requiredFeatureCount: 0,
-            requiredFeatures: Pointer.nullPointer(),
-            requiredLimits: RawPointer.nullPointer(),
+            requiredFeatureCount: UInt64(from: featureList.count),
+            requiredFeatures: featureList.asPointer(),
+            requiredLimits: if maxPushConstantSize > 0 { Pointer(to: limits).asRaw() } else { RawPointer.nullPointer() },
             defaultQueue: raw.WGPUQueueDescriptor(nextInChain: Pointer.nullPointer(), label: noString()),
             deviceLostCallbackInfo: raw.WGPUDeviceLostCallbackInfo(
                 nextInChain: Pointer.nullPointer(),
@@ -302,6 +322,8 @@ public enum BufferUsage {
     case Uniform
     case Storage
     case Indirect
+    /// A destination for `CommandEncoder.resolve(querySet)`.
+    case QueryResolve
 
     var bits: UInt64 {
         match self {
@@ -313,7 +335,8 @@ public enum BufferUsage {
             .Vertex => raw.WGPUBufferUsage_Vertex,
             .Uniform => raw.WGPUBufferUsage_Uniform,
             .Storage => raw.WGPUBufferUsage_Storage,
-            .Indirect => raw.WGPUBufferUsage_Indirect
+            .Indirect => raw.WGPUBufferUsage_Indirect,
+            .QueryResolve => raw.WGPUBufferUsage_QueryResolve
         }
     }
 }
@@ -354,11 +377,16 @@ public struct Device: not Copyable {
 
     /// Create a compute pipeline running `entryPoint` of `shader`, with its
     /// bind group layouts inferred from the shader.
-    public func createComputePipeline(shader shader: ShaderModule, entryPoint entryPoint: String, label label: String = "") -> ComputePipeline {
+    /// Bind group layouts come from `layout`, or are inferred from the
+    /// shader when it is `None`.
+    public func createComputePipeline(shader shader: ShaderModule, entryPoint entryPoint: String, layout layout: PipelineLayout? = .None, label label: String = "") -> ComputePipeline {
         let descriptor = raw.WGPUComputePipelineDescriptor(
             nextInChain: Pointer.nullPointer(),
             label: view(label),
-            layout: RawPointer.nullPointer(),
+            layout: match layout {
+                .Some(l) => l.handle,
+                .None => RawPointer.nullPointer()
+            },
             compute: raw.WGPUProgrammableStageDescriptor(
                 nextInChain: Pointer.nullPointer(),
                 shaderModule: shader.handle,
@@ -498,14 +526,16 @@ public struct Buffer: not Copyable {
     /// The size in bytes.
     public let size: Int64
 
-    /// The whole buffer at `@binding(index)`, for `Device.createBindGroup`.
-    public func binding(index: Int64) -> Binding {
+    /// The buffer at `@binding(index)`, for `Device.createBindGroup`: from
+    /// byte `offset`, for `size` bytes or the rest of it. A dynamic binding's
+    /// `size` is one element's; `setBindGroup` picks which.
+    public func binding(index: Int64, offset offset: Int64 = 0, size size: Int64? = .None) -> Binding {
         Binding(entry: raw.WGPUBindGroupEntry(
             nextInChain: Pointer.nullPointer(),
             binding: UInt32(from: index),
             buffer: self.handle,
-            offset: 0,
-            size: UInt64(from: self.size),
+            offset: UInt64(from: offset),
+            size: UInt64(from: size ?? (self.size - offset)),
             sampler: RawPointer.nullPointer(),
             textureView: RawPointer.nullPointer()
         ))
@@ -576,6 +606,19 @@ public struct CommandEncoder: not Copyable {
         unsafe raw.wgpuComputePassEncoderEnd(pass.handle);
     }
 
+    /// Record a compute pass that writes `timestamps` at its start and end.
+    public func computePass(timestamps timestamps: PassTimestamps, body: (ComputePass) -> ()) {
+        var writes = timestamps.cValue;
+        let descriptor = raw.WGPUComputePassDescriptor(
+            nextInChain: Pointer.nullPointer(),
+            label: noString(),
+            timestampWrites: Pointer(to: writes)
+        );
+        let pass = ComputePass(handle: unsafe raw.wgpuCommandEncoderBeginComputePassWith(self.handle, descriptor));
+        body(pass);
+        unsafe raw.wgpuComputePassEncoderEnd(pass.handle);
+    }
+
     /// Copy `size` bytes from `source` to `destination`.
     public func copy(from source: Buffer, to destination: Buffer, size size: Int64) {
         unsafe raw.wgpuCommandEncoderCopyBufferToBuffer(self.handle, source.handle, 0, destination.handle, 0, UInt64(from: size));
@@ -600,14 +643,29 @@ public struct ComputePass: not Copyable {
         unsafe raw.wgpuComputePassEncoderSetPipeline(self.handle, pipeline.handle);
     }
 
-    /// Bind `bindGroup` at `index`.
-    public func setBindGroup(index: Int64, bindGroup: BindGroup) {
-        unsafe raw.wgpuComputePassEncoderSetBindGroup(self.handle, UInt32(from: index), bindGroup.handle, 0, RawPointer.nullPointer());
+    /// Bind `bindGroup` at `index`, with one byte offset per dynamic
+    /// binding, in binding order.
+    public func setBindGroup(index: Int64, bindGroup: BindGroup, dynamicOffsets dynamicOffsets: [Int64] = []) {
+        let offsets = dynamicOffsetArray(dynamicOffsets);
+        unsafe raw.wgpuComputePassEncoderSetBindGroup(self.handle, UInt32(from: index), bindGroup.handle, UInt64(from: offsets.count), offsets.asPointer().asRaw());
+    }
+
+    /// Set push constants (see `Feature.PushConstants`) from `value`,
+    /// starting `offset` bytes in.
+    public func setPushConstants[T](value value: T, offset offset: Int64 = 0) where T: FFISafe {
+        let size = Layout.of[T]().size;
+        unsafe raw.wgpuComputePassEncoderSetPushConstants(self.handle, UInt32(from: offset), UInt32(from: size), Pointer(to: value).asRaw());
     }
 
     /// Run `x * y * z` workgroups.
     public func dispatch(x: Int64, y y: Int64 = 1, z z: Int64 = 1) {
         unsafe raw.wgpuComputePassEncoderDispatchWorkgroups(self.handle, UInt32(from: x), UInt32(from: y), UInt32(from: z));
+    }
+
+    /// Run the workgroup counts (three `UInt32`s) read from `buffer`, made
+    /// with `.Indirect`, at `offset`.
+    public func dispatchIndirect(buffer: Buffer, offset offset: Int64 = 0) {
+        unsafe raw.wgpuComputePassEncoderDispatchWorkgroupsIndirect(self.handle, buffer.handle, UInt64(from: offset));
     }
 
     deinit {
