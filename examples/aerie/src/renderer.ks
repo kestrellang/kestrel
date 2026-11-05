@@ -47,8 +47,8 @@ func blend(a: Vec3, b: Vec3, t: Float32) -> Vec3 {
 }
 
 /// `phase` runs 0 to 1 over a day: 0 is sunrise, 0.25 noon, 0.5 sunset,
-/// 0.75 midnight. The palette is cotton candy: a pink horizon under baby
-/// blue by day, peach and violet at dusk, deep indigo at night.
+/// 0.75 midnight. The palette is soft pastel: a pale rose-cream horizon
+/// under baby blue by day, apricot at dusk, deep indigo at night.
 func daylight(phase: Float32) -> Daylight {
     let angle = phase * Float32.pi * 2.0;
     // Up is +y; the sun crosses the sky from east to west, tilted south.
@@ -57,11 +57,11 @@ func daylight(phase: Float32) -> Daylight {
     let day = (up * 3.0 + 0.3).clamp(0.0, 1.0);
     // Dusk warms everything just as the sun nears the horizon.
     let dusk = (1.0 - (up * 4.0).abs()).clamp(0.0, 1.0) * (up * 4.0 + 1.5).clamp(0.0, 1.0);
-    let horizon = blend(blend(Vec3(x: 0.22, y: 0.14, z: 0.36), Vec3(x: 1.00, y: 0.80, z: 0.88), day), Vec3(x: 1.00, y: 0.60, z: 0.62), dusk * 0.8);
-    let zenith = blend(blend(Vec3(x: 0.04, y: 0.04, z: 0.15), Vec3(x: 0.56, y: 0.74, z: 0.98), day), Vec3(x: 0.50, y: 0.44, z: 0.86), dusk * 0.7);
-    let sunColor = blend(Vec3(x: 1.00, y: 0.92, z: 0.90), Vec3(x: 1.00, y: 0.62, z: 0.56), dusk);
-    // Lavender sky light, so shadows read violet rather than grey.
-    let ambient = blend(Vec3(x: 0.14, y: 0.12, z: 0.28), Vec3(x: 0.56, y: 0.50, z: 0.66), day);
+    let horizon = blend(blend(Vec3(x: 0.16, y: 0.15, z: 0.32), Vec3(x: 0.93, y: 0.89, z: 0.92), day), Vec3(x: 1.00, y: 0.74, z: 0.60), dusk * 0.7);
+    let zenith = blend(blend(Vec3(x: 0.04, y: 0.04, z: 0.15), Vec3(x: 0.52, y: 0.70, z: 0.96), day), Vec3(x: 0.46, y: 0.48, z: 0.80), dusk * 0.6);
+    let sunColor = blend(Vec3(x: 1.00, y: 0.92, z: 0.90), Vec3(x: 1.00, y: 0.70, z: 0.52), dusk);
+    // Cool sky light, so shadows read blue-grey.
+    let ambient = blend(Vec3(x: 0.12, y: 0.13, z: 0.26), Vec3(x: 0.54, y: 0.54, z: 0.64), day);
     Daylight(sun: sun, strength: day, horizon: horizon, zenith: zenith, sunColor: sunColor, ambient: ambient, night: 1.0 - day)
 }
 

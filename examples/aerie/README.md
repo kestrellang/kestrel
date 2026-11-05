@@ -54,11 +54,11 @@ SDL2's Emscripten port; saves go to IndexedDB. The game code is shared;
 `src/platform.ks` holds the few desktop and web differences.
 
 **Milestone 8** makes it dreamy. The sky is drawn as its own pass: a
-cotton candy gradient (pink horizon, lavender, baby blue overhead), drifting
-clouds lit pink on the sun's side, a sea of puffs below the islands, the
+soft pastel gradient (rose-cream horizon, baby blue overhead), drifting
+clouds warmed on the sun's side, a sea of puffs below the islands, the
 sun and its halo, and the moon and twinkling stars at night. Fog fades the
 world into that same gradient, sunlight warms to peach at dusk and shadows
-are lavender. Every block texture is redrawn at 16x16 (`tools/make_atlas.py`),
+are cool blue-grey. Every block texture is redrawn at 16x16 (`tools/make_atlas.py`),
 the hotbar is a frosted tray with numbered slots and the selected block's
 name, and the title screen has an outlined, bobbing name with twinkles.
 
