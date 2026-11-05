@@ -26,12 +26,17 @@ struct Uniforms {
 @group(0) @binding(4) var shadowSampler: sampler_comparison;
 
 // Per chunk: where it sits (xyz) and how many lights reach it (w), then
-// those lights' positions.
+// those lights' positions. Every chunk's data shares one buffer; each face
+// carries its chunk's slot in the top half of `shade`.
 struct ChunkData {
     origin: vec4f,
     lights: array<vec4f, MAX_LIGHTS>,
 };
-@group(1) @binding(0) var<uniform> chunk: ChunkData;
+@group(1) @binding(0) var<storage, read> chunks: array<ChunkData>;
+
+fn chunkSlot(shade: u32) -> u32 {
+    return shade >> 16u;
+}
 
 
 // Four corners per face, counter-clockwise seen from outside, as offsets
@@ -66,6 +71,7 @@ struct VertexOut {
     @location(2) @interpolate(flat) layer: u32,
     @location(3) @interpolate(flat) face: u32,
     @location(4) light: f32,
+    @location(5) @interpolate(flat) slot: u32,
 };
 
 @vertex
@@ -73,8 +79,10 @@ fn vs_main(@builtin(vertex_index) vertex: u32, @location(0) packed: u32, @locati
     let cell = vec3f(f32(packed & 31u), f32((packed >> 5u) & 31u), f32((packed >> 10u) & 31u));
     let face = (packed >> 15u) & 15u;
     let corner = QUAD[vertex + select(0u, 6u, (shade & 256u) != 0u)];
-    let world = chunk.origin.xyz + cell + faceCorner(face, corner);
+    let slot = chunkSlot(shade);
+    let world = chunks[slot].origin.xyz + cell + faceCorner(face, corner);
     var out: VertexOut;
+    out.slot = slot;
     out.position = u.viewProj * vec4f(world, 1.0);
     out.world = world;
     out.uv = UVS[corner];
@@ -88,10 +96,10 @@ fn vs_main(@builtin(vertex_index) vertex: u32, @location(0) packed: u32, @locati
 
 // The shadow pass: only depth, as the sun sees the blocks.
 @vertex
-fn vs_shadow(@builtin(vertex_index) vertex: u32, @location(0) packed: u32) -> @builtin(position) vec4f {
+fn vs_shadow(@builtin(vertex_index) vertex: u32, @location(0) packed: u32, @location(1) shade: u32) -> @builtin(position) vec4f {
     let cell = vec3f(f32(packed & 31u), f32((packed >> 5u) & 31u), f32((packed >> 10u) & 31u));
     let face = (packed >> 15u) & 15u;
-    let world = chunk.origin.xyz + cell + faceCorner(face, QUAD[vertex]);
+    let world = chunks[chunkSlot(shade)].origin.xyz + cell + faceCorner(face, QUAD[vertex]);
     return u.lightViewProj * vec4f(world, 1.0);
 }
 
@@ -117,16 +125,17 @@ fn sunlight(world: vec3f, n: vec3f) -> f32 {
 // LIGHT_RADIUS, colored by each light's kind (`Block.glow`): glowcaps' cool
 // cyan or the lairs' ember red. It passes through walls; it's cheap and
 // reads as a glow.
-fn glow(world: vec3f, n: vec3f) -> vec3f {
+fn glow(world: vec3f, n: vec3f, slot: u32) -> vec3f {
     var total = vec3f(0.0);
-    let count = u32(chunk.origin.w);
+    let count = u32(chunks[slot].origin.w);
     for (var i = 0u; i < count; i++) {
-        let to = chunk.lights[i].xyz - world;
+        let light = chunks[slot].lights[i];
+        let to = light.xyz - world;
         let d = length(to);
         let falloff = clamp(1.0 - d / LIGHT_RADIUS, 0.0, 1.0);
         // Faces turned away get a little, so corners don't go black.
         let facing = select(0.35 + 0.65 * max(dot(n, to / max(d, 0.001)), 0.0), 1.0, d < 0.9);
-        let tint = select(vec3f(0.55, 0.95, 0.90), vec3f(1.0, 0.42, 0.16) * 1.3, chunk.lights[i].w > 1.5);
+        let tint = select(vec3f(0.55, 0.95, 0.90), vec3f(1.0, 0.42, 0.16) * 1.3, light.w > 1.5);
         total += tint * falloff * falloff * facing;
     }
     return min(total, vec3f(1.6));
@@ -206,7 +215,7 @@ fn shade(in: VertexOut, texel: vec4f) -> vec4f {
     // Plants are lit from all sides alike, so their quads don't flicker
     // between light and dark as the sun moves.
     let facing = select(max(dot(n, l), 0.0), 0.6, in.face >= 6u);
-    var color = lit(in.world, n, facing, in.light, glow(in.world, n), texel.rgb);
+    var color = lit(in.world, n, facing, in.light, glow(in.world, n, in.slot), texel.rgb);
     // Glowing blocks light themselves.
     if in.layer == GLOWCAP_LAYER || in.layer == EMBERCORE_LAYER || in.layer == HEXBLOOM_LAYER {
         color = texel.rgb * 1.15;
