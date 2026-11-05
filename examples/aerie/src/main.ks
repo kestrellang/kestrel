@@ -11,14 +11,16 @@
 //
 // The world is saved to `world.aerie`, or the path in `AERIE_SAVE`
 // (`AERIE_SAVE=none` turns saving off). `AERIE_FRAMES=n` quits after n
-// frames; `AERIE_BENCH=n` times chunk generation and meshing over n runs
-// instead of opening a window.
+// frames and prints the frame rate and where frame time went;
+// `AERIE_VSYNC=0` draws without waiting for the display. `AERIE_BENCH=n`
+// times chunk generation and meshing over n runs instead of opening a
+// window.
 //
 // Run from this folder, so `assets/blocks.png` resolves.
 
 module Aerie
 
-import sdl.(SDLWindow, Event, monotonicMs)
+import sdl.(SDLWindow, Event, monotonicUs)
 
 /// The desktop driver: an SDL window and a `while` loop feeding the game
 /// events and frames. In a browser the same loop runs, handing control
@@ -31,7 +33,7 @@ func run() -> Int64 {
     }
     var window = SDLWindow(title: "Kestrelcraft", width: 1280, height: 720);
     let (width, height) = window.drawableSize;
-    let renderer = match Renderer.create(window.nativeWindow, width: width, height: height) {
+    let renderer = match Renderer.create(window.nativeWindow, width: width, height: height, presentMode: settings.presentMode) {
         .Ok(r) => r,
         .Err(e) => {
             println("wgpu error: \(e.message)");
@@ -41,7 +43,8 @@ func run() -> Int64 {
     let file = settings.savePath.map({ (path: String) in SaveFile(path: path) });
     let save = match file { .Some(f) => f.load(), .None => .None };
     var game = Game(renderer, settings: settings, seed: 1, save: save);
-    var last = unsafe monotonicMs();
+    let start = unsafe monotonicUs();
+    var last = start;
     var frames = 0;
     var captured = false;
     while game.running {
@@ -58,8 +61,8 @@ func run() -> Int64 {
             captured = game.mouseCaptured;
             window.setRelativeMouseMode(captured);
         }
-        let now = unsafe monotonicMs();
-        if let .Err(e) = game.frame(Float32(from: now - last) / 1000.0) {
+        let now = unsafe monotonicUs();
+        if let .Err(e) = game.frame(Float32(from: now - last) / 1000000.0) {
             println("wgpu error: \(e.message)");
             return 1;
         }
@@ -78,16 +81,17 @@ func run() -> Int64 {
         }
     }
     if let .Some(f) = file { let _ = f.write(game.save()); }
-    report(game, frames: frames);
+    report(game, frames: frames, seconds: milliseconds(unsafe monotonicUs() - start) / 1000.0);
     0
 }
 
-/// What a run did, for checking a headless or scripted run.
-func report(game: Game, frames frames: Int64) {
+/// What a run of `seconds` did, for checking a headless or scripted run.
+func report(game: Game, frames frames: Int64, seconds seconds: Float64) {
     let meshes = game.renderer.chunks.meshes.count;
     let (drawn, draws) = (game.renderer.drawnChunks, game.renderer.chunkDraws);
     println("drew \(frames) frames; \(game.world.chunks.count) chunks loaded, \(meshes) meshes, \(drawn) drawn in \(draws) draws, \(game.flock.birds.count) birds");
     let p = game.player.position;
+    println("\(Float64(from: frames) / seconds) fps; \(game.profile.summary())");
     println("player at (\(p.x), \(p.y), \(p.z)), on ground: \(game.player.onGround)");
 }
 

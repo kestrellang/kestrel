@@ -22,6 +22,8 @@ struct Game: not Copyable {
     var sky: Sky
     var autosave: Autosave
     var fps: FpsCounter
+    /// Where frame time goes, for the run's report.
+    var profile: FrameProfile
     var notice: Notice
     /// Seconds since the game started.
     var seconds: Float32
@@ -49,6 +51,7 @@ struct Game: not Copyable {
         self.sky = Sky(timeOfDay: settings.startTime ?? 0.1);
         self.autosave = Autosave();
         self.fps = FpsCounter();
+        self.profile = FrameProfile();
         self.notice = Notice();
         self.seconds = 0.0;
         self.onTitle = not settings.skipTitle;
@@ -107,11 +110,14 @@ struct Game: not Copyable {
 
     /// Advance the game by `dt` seconds and draw it.
     mutating func frame(dt: Float32) -> () throws WgpuError {
+        self.profile.begin();
         self.seconds = self.seconds + dt;
         if not self.onTitle {
             self.play(dt);
         }
+        self.profile.mark(.Update);
         self.stream();
+        self.profile.mark(.Stream);
         self.flock.update(dt, center: self.player.position, reach: self.renderer.viewDistance.clamp(32.0, 96.0), generator: self.world.generator, time: self.seconds);
         let view = self.view();
         self.widenView(dt);
@@ -119,13 +125,18 @@ struct Game: not Copyable {
         self.fps.count(dt, toggle: self.controls.fpsPressed);
         self.notice.update(dt);
         self.controls.clearPresses();
+        self.profile.mark(.Update);
         let (models, casters) = self.models();
         let hud = Hud(self.renderer.width, self.renderer.height);
         let icons = if self.onTitle { [] } else { hud.icons(self.hotbar, time: self.seconds) };
+        let overlay = self.overlay();
+        self.profile.mark(.Scene);
         try self.renderer.draw(Scene(
             view: view.view(), eye: view.position, light: self.sky.daylight, time: self.seconds,
-            models: models, casters: casters, overlay: self.overlay(), icons: icons
+            models: models, casters: casters, overlay: overlay, icons: icons
         ));
+        self.profile.mark(.Draw);
+        self.profile.end();
         .Ok(())
     }
 

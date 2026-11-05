@@ -89,6 +89,10 @@ public func getTicks() -> UInt32
 @extern(.C, mangleName: "Kestrel_MonotonicMs")
 public func monotonicMs() -> Int64
 
+/// The monotonic clock in microseconds; needs no `SDL_Init`.
+@extern(.C, mangleName: "Kestrel_MonotonicUs")
+public func monotonicUs() -> Int64
+
 // SDL_INIT_VIDEO
 let sdlInitVideo: UInt32 = UInt32(intLiteral: 0x20);
 
