@@ -107,7 +107,7 @@ public struct CString: FFISafe {
             return 0
         }
         var len = 0;
-        while self.raw.offset(by: len).read() != 0 {
+        while unsafe self.raw.offset(by: len).read() != 0 {
             len = len + 1;
         }
         len
@@ -127,7 +127,7 @@ public struct CString: FFISafe {
     /// etc.) is undefined behaviour.
     public func free() {
         if not self.raw.isNull {
-            std.ffi.free(self.raw.asRaw());
+            unsafe std.ffi.free(self.raw.asRaw());
         }
     }
 }
@@ -162,16 +162,16 @@ extend String {
         let byteLen = self.bytes.count;
         let totalSize = byteLen + 1;
 
-        let rawPtr = malloc(totalSize);
+        let rawPtr = unsafe malloc(totalSize);
         let ptr = rawPtr.cast[UInt8]();
 
         if ptr.isNull == false {
             if byteLen > 0 {
                 let srcPtr = RawPointer(raw: self.bytes.asRaw());
-                 memcpy(rawPtr, srcPtr, byteLen);
+                 unsafe memcpy(rawPtr, srcPtr, byteLen);
             }
 
-            ptr.offset(by: byteLen).write(0);
+            unsafe ptr.offset(by: byteLen).write(0);
         }
 
         return CString(raw: ptr);

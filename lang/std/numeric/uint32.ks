@@ -374,7 +374,7 @@ public struct UInt32:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(UnsafeSlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[UInt32]().size))
+        hasher.write(unsafe UnsafeSlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[UInt32]().size))
     }
 
     // ========================================================================
@@ -706,7 +706,7 @@ public struct UInt32:
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
         while i < 4 {
-            result.append(ptr.offset(by: i).read());
+            result.append(unsafe ptr.offset(by: i).read());
             i = i + 1
         }
         result
@@ -756,7 +756,7 @@ public struct UInt32:
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
         while i < 4 {
-            ptr.offset(by: i).write(bytes(unchecked: i));
+            unsafe ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }
         self.raw = value.raw;

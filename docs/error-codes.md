@@ -25,6 +25,7 @@ the type checker, and the code is assigned in one place,
 - [E615–E618 — Entry point](#e615e618--entry-point)
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
 - [E624–E626 — Closure kinds](#e624e626--closure-kinds)
+- [E640–E645 — `unsafe`](#e640e645--unsafe)
 - [E700–E710 — String & character literals, escapes, format specs](#e700e710--string--character-literals-escapes-format-specs)
 - [E800–E811 — Syntax](#e800e811--syntax)
 - [E900–E999 — Attributes & derives](#e900e999--attributes--derives)
@@ -556,6 +557,19 @@ func each(action: mutating (Int64) -> ()) { }
 
 func eachOk(mutating action: mutating (Int64) -> ()) { }   // ok
 ```
+
+## E640–E645 — `unsafe`
+
+See [language/unsafe.md](language/unsafe.md). An unsafe context is the operand of `unsafe expr` or the body of `unsafe { … }`; the body of an `unsafe func` is not one.
+
+| Code | Message | Explanation |
+|---|---|---|
+| E640 | [extern function ]'{name}' is unsafe and requires an \`unsafe\` expression or block | A use (call, property read, initializer, subscript, or naming it as a value) of an `unsafe` declaration, a pointer-access `lang` intrinsic, or an `@extern` function without `safe: true`, outside an unsafe context. |
+| E641 | unnecessary \`unsafe\`: it covers no unsafe operation | **Warning.** The region contains no unsafe use. A use marks only the innermost `unsafe` around it, so an `unsafe` wrapping another one is reported too. |
+| E642 | '{name}' is unsafe, but the requirement it satisfies in protocol '{proto}' is not | Generic code calls the requirement without `unsafe`, so its witness can't need it. Mark the requirement `unsafe` or make the witness safe. |
+| E643 | '{proto}' is an unsafe protocol; write the conformance as \`unsafe {proto}\` | Conforming to an `unsafe protocol` vouches for its contract (e.g. `ArrayMatchable`'s in-bounds indices), so it is written `T: unsafe P`. |
+| E644 | '{proto}' is not an unsafe protocol; \`unsafe\` here has no effect | **Warning.** `unsafe P` on a safe protocol. |
+| E645 | only a computed property can be \`unsafe\` | `unsafe` on a stored field. Unsafe fields aren't supported; keep the field private and expose an `unsafe` computed property. |
 
 ## E700–E710 — String & character literals, escapes, format specs
 

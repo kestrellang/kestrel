@@ -122,7 +122,7 @@ public struct Buffer: Writable, Cloneable {
     public mutating func write(from buf: UnsafeSlice[UInt8]) -> Result[Int64, IoError] {
         var i: Int64 = 0;
         while i < buf.count {
-            self.data.append(buf.pointer.offset(by: i).read());
+            self.data.append(unsafe buf.pointer.offset(by: i).read());
             i = i + 1
         }
         .Ok(buf.count)
@@ -197,7 +197,7 @@ public struct Buffer: Writable, Cloneable {
 public func writeAll[W](mutating writer: W, from buf: UnsafeSlice[UInt8]) -> Result[(), IoError] where W: Writable, W: not Copyable {
     var written: Int64 = 0;
     while written < buf.count {
-        let remaining = UnsafeSlice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
+        let remaining = unsafe UnsafeSlice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
         let n = try writer.write(from: remaining);
         if n == 0 {
             return .Err(brokenPipe())
@@ -211,7 +211,7 @@ public func writeAll[W](mutating writer: W, from buf: UnsafeSlice[UInt8]) -> Res
 public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), IoError] where W: Writable, W: not Copyable {
     var buf = Array[UInt8](capacity: 1);
     buf.append(byte);
-    let slice = UnsafeSlice(pointer: buf.asPointer(), count: 1);
+    let slice = unsafe UnsafeSlice(pointer: buf.asPointer(), count: 1);
     writeAll(writer, from: slice)
 }
 

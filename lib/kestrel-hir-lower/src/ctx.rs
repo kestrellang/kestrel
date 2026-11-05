@@ -57,6 +57,8 @@ pub(crate) struct LowerCtx<'a> {
     pub while_conditions: Vec<HirExprId>,
     /// Every `|>` lowered so far (`HirBody::pipes`).
     pub pipes: Vec<kestrel_hir::body::PipeSite>,
+    /// Every `unsafe` region lowered so far (`HirBody::unsafe_regions`).
+    pub unsafe_regions: Vec<Span>,
 
     /// Stack of active loop labels (innermost last). `None` = unlabeled loop.
     /// Used to validate break/continue labels during lowering.
@@ -112,6 +114,7 @@ impl<'a> LowerCtx<'a> {
             scopes: vec![HashMap::new()], // start with one scope for params
             guard_stmts: Vec::new(),
             pipes: Vec::new(),
+            unsafe_regions: Vec::new(),
             while_conditions: Vec::new(),
             loop_labels: Vec::new(),
             local_depths: HashMap::new(),

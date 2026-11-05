@@ -86,12 +86,12 @@ extend Slice[T] {
         var hi: Int64 = raw.count - 1;
         while true {
             while lo < raw.count {
-                let matches = predicate(p.offset(by: lo).value);
+                let matches = predicate(unsafe p.offset(by: lo).value);
                 if matches == false { break };
                 lo = lo + 1
             }
             while hi >= 0 {
-                let matches = predicate(p.offset(by: hi).value);
+                let matches = predicate(unsafe p.offset(by: hi).value);
                 if matches { break };
                 hi = hi - 1
             }
@@ -154,9 +154,9 @@ fileprivate func swapRaw[T](s: UnsafeSlice[T], i: Int64, j: Int64) {
     let a = s.pointer.offset(by: i);
     let b = s.pointer.offset(by: j);
     // Move, not `read()`: `write` drops nothing, so a copy leaked.
-    let t = a.take();
-    a.write(b.take());
-    b.write(t)
+    let t = unsafe a.take();
+    unsafe a.write(b.take());
+    unsafe b.write(t)
 }
 
 /// Reverses `[lo, hi)` (unchecked).

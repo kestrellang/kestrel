@@ -26,20 +26,20 @@ public struct InputManager: not Copyable {
     var initialized: Bool
 
     public init() {
-        initTerminal();
+        unsafe initTerminal();
         self.initialized = true;
     }
 
     deinit {
         if self.initialized {
-            restoreTerminal();
+            unsafe restoreTerminal();
         }
     }
 
     // Poll for the next key (non-blocking)
     // Returns .None if no key is available
     public mutating func poll() -> Optional[Key] {
-        let code = checkKey();
+        let code = unsafe checkKey();
         if code == -1 {
             return .None
         }
@@ -49,10 +49,10 @@ public struct InputManager: not Copyable {
     // Drain all pending keys into an array
     public mutating func drainAll() -> Array[Key] {
         var keys = Array[Key]();
-        var code = checkKey();
+        var code = unsafe checkKey();
         while code != -1 {
             keys.append(keyFromCode(code));
-            code = checkKey();
+            code = unsafe checkKey();
         }
         keys
     }

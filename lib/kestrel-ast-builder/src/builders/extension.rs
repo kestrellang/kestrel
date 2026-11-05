@@ -101,7 +101,7 @@ fn introduce_rhs_free_type_params(
 
     for item in &conformances {
         let proto_ty = match item {
-            ConformanceItem::Positive(ty, _) => ty,
+            ConformanceItem::Positive(ty, ..) => ty,
             ConformanceItem::Negative(ty, _) => ty,
         };
         let AstType::Named { segments, .. } = proto_ty else {

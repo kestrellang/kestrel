@@ -558,8 +558,9 @@ pub struct Conformances(pub Vec<ConformanceItem>);
 /// A single conformance entry.
 #[derive(Clone, Debug)]
 pub enum ConformanceItem {
-    /// `T: Protocol`
-    Positive(AstType, SyntaxNodePtr),
+    /// `T: Protocol`. The flag is `T: unsafe Protocol`: the conformer
+    /// vouches for an unsafe protocol's contract.
+    Positive(AstType, SyntaxNodePtr, bool),
     /// `T: not Protocol`
     Negative(AstType, SyntaxNodePtr),
 }
@@ -621,6 +622,13 @@ pub struct DerivedFrom {
 /// Marker: enum has indirect representation.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IsIndirect;
+
+/// Marker: `unsafe` was written on this declaration (or it is an unsafe
+/// `lang` intrinsic). Read through [`crate::unsafety::UnsafetyOf`], which
+/// also covers `@extern` functions; on a protocol it means conformances must
+/// be written `unsafe P` (see [`crate::unsafety::is_unsafe_protocol`]).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct IsUnsafe;
 
 /// Marker: this is a compiler-intrinsic entity (lang module type or function).
 /// Codegen handles these specially — they don't have real bodies or layouts.

@@ -16,7 +16,7 @@ extend RefRange: Iterator {
 
     mutating func next() -> Optional[&Int64] {
         if self.idx >= self.count { return .None; }
-        let r = &self.base.offset(by: self.idx).value;
+        let r = &unsafe self.base.offset(by: self.idx).value;
         self.idx = self.idx + 1;
         let o: Optional[&Int64] = .Some(r);
         o
@@ -26,7 +26,7 @@ extend RefRange: Iterator {
 @main
 func main() {
     let mem = SystemAllocator().allocate(Layout.array[Int64](1)).unwrap().cast[Int64]();
-    mem.write(1);
+    unsafe mem.write(1);
     for x in RefRange(base: mem, idx: 0, count: 1) {
         x = 5; // ERROR(E208)
     }

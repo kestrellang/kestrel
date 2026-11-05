@@ -36,6 +36,9 @@ pub fn build_protocol(
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
+    if node.unsafe_modifier().is_some() {
+        world.set(entity, IsUnsafe);
+    }
     set_documentation(world, entity, syntax);
     set_conformances(world, entity, node, file_id);
     set_where_clause(world, entity, node, file_id);

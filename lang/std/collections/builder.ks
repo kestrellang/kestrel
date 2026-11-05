@@ -86,11 +86,11 @@ public struct ArrayBuilder[T] {
             // Move (`take`), not `read()`: the old buffer is freed without
             // dropping its elements, so a copy here leaked one per grow.
             for i in 0..<self.len {
-                newPtr.offset(by: i).write(self.ptr.offset(by: i).take())
+                unsafe newPtr.offset(by: i).write(self.ptr.offset(by: i).take())
             }
             if self.cap > 0 {
                 let oldLayout = Layout.array[T](self.cap);
-                allocator.deallocate(self.ptr.asRaw(), oldLayout)
+                unsafe allocator.deallocate(self.ptr.asRaw(), oldLayout)
             }
             self.ptr = newPtr;
             self.cap = newCap
@@ -104,7 +104,7 @@ public struct ArrayBuilder[T] {
     /// Appends a single element.
     public mutating func append(element: T) {
         self.grow(self.len + 1);
-        self.ptr.offset(by: self.len).write(element);
+        unsafe self.ptr.offset(by: self.len).write(element);
         self.len = self.len + 1
     }
 
@@ -115,7 +115,7 @@ public struct ArrayBuilder[T] {
         self.grow(self.len + n);
         let src = slice.pointer;
         for i in 0..<n {
-            self.ptr.offset(by: self.len + i).write(src.offset(by: i).read())
+            unsafe self.ptr.offset(by: self.len + i).write(src.offset(by: i).read())
         }
         self.len = self.len + n
     }
@@ -175,12 +175,12 @@ public struct ArrayBuilder[T] {
         if self.cap > 0 {
             var i: Int64 = 0;
             while i < self.len {
-                self.ptr.offset(by: i).dropInPlace();
+                unsafe self.ptr.offset(by: i).dropInPlace();
                 i = i + 1
             };
             let layout = Layout.array[T](self.cap);
             var allocator = SystemAllocator();
-            allocator.deallocate(self.ptr.asRaw(), layout)
+            unsafe allocator.deallocate(self.ptr.asRaw(), layout)
         }
     }
 }

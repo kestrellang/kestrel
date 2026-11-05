@@ -627,7 +627,7 @@ fn resolve_assoc_type_static_member(
     // 1. Direct conformances on the TypeAlias (e.g. `type Item: Addable`)
     if let Some(conformances) = ctx.get::<Conformances>(assoc_type) {
         for item in &conformances.0 {
-            let ConformanceItem::Positive(ast_type, _) = item else {
+            let ConformanceItem::Positive(ast_type, ..) = item else {
                 continue;
             };
             if let Some(proto) = resolve_protocol_from_ast(ctx, ast_type, context, root) {

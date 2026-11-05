@@ -139,7 +139,7 @@ public struct Cursor: Readable, Cloneable {
         }
         var i: Int64 = 0;
         while i < n {
-            raw.pointer.offset(by: i).write(self.data(unchecked: self.position + i));
+            unsafe raw.pointer.offset(by: i).write(self.data(unchecked: self.position + i));
             i = i + 1
         }
         self.position = self.position + n;

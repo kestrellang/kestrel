@@ -32,6 +32,19 @@
 //!
 //! ### E469 -- `wrong_parameter_convention` (Error, Correctness)
 //! **Message:** "parameter '{param}' of method '{name}' has the wrong convention for protocol '{proto}'"
+//!
+//! ### E642 -- `unsafe_witness_for_safe_requirement` (Error, Correctness)
+//! **Message:** "'{name}' is unsafe, but the requirement it satisfies in protocol '{proto}' is not"
+//! Generic code calls the requirement without `unsafe`, so its witness must
+//! not need it. Primary label: the witness (`util::entity_span`).
+//!
+//! ### E643 -- `missing_unsafe_conformance` (Error, Correctness)
+//! **Message:** "'{proto}' is an unsafe protocol; write the conformance as `unsafe {proto}`"
+//! Primary label: the conformance item (its `ConformanceItem` syntax range).
+//!
+//! ### E644 -- `unnecessary_unsafe_conformance` (Warning, Usage)
+//! **Message:** "'{proto}' is not an unsafe protocol; `unsafe` here has no effect"
+//! Primary label: the conformance item.
 
 use std::collections::{HashMap, HashSet};
 
@@ -40,6 +53,7 @@ use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
+use kestrel_ast_builder::unsafety::{UnsafetyOf, is_unsafe_protocol};
 use kestrel_ast_builder::{
     Callable, ConformanceItem, Conformances, ExtensionTarget, InitEffect, MutatingRead, NodeKind,
     QualifiedTarget, ReceiverKind, Settable, TypeAnnotation, TypeParams, WhereClause,
@@ -134,6 +148,24 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E642",
+        name: "unsafe_witness_for_safe_requirement",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E643",
+        name: "missing_unsafe_conformance",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E644",
+        name: "unnecessary_unsafe_conformance",
+        default_severity: Severity::Warning,
+        category: Category::Usage,
+    },
 ];
 
 pub struct ConformanceCompletenessAnalyzer;
@@ -203,7 +235,7 @@ fn check_type_conformances(
     };
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(protocol) = resolve_conformance(cx, ast_ty, conforming_entity) else {
@@ -212,6 +244,7 @@ fn check_type_conformances(
         if cx.query.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
             continue;
         }
+        check_conformance_unsafety(cx, item, protocol, conforming_entity, diags);
 
         let proto_param_subs =
             build_proto_param_subs(cx, entity, protocol, ast_ty, conforming_entity);
@@ -242,7 +275,7 @@ pub(crate) fn declared_instantiations(
         .0
         .iter()
         .filter_map(|item| {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
+            let ConformanceItem::Positive(ast_ty, ..) = item else {
                 return None;
             };
             let protocol = resolve_conformance(cx, ast_ty, decl)?;
@@ -268,7 +301,7 @@ fn check_extension_conformances(
     };
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(protocol) = resolve_conformance(cx, ast_ty, extension) else {
@@ -277,6 +310,7 @@ fn check_extension_conformances(
         if cx.query.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
             continue;
         }
+        check_conformance_unsafety(cx, item, protocol, extension, diags);
 
         let proto_param_subs = build_proto_param_subs(cx, target, protocol, ast_ty, extension);
         check_protocol_requirements(cx, target, protocol, extension, &proto_param_subs, diags);
@@ -495,6 +529,7 @@ fn check_protocol_requirements(
                 }
 
                 if let Some(impl_method) = matched_impl {
+                    check_witness_unsafety(cx, child, impl_method, &name, &proto_name, diags);
                     // Init return types are derived from the effect ((), ()?, () throws E),
                     // so skip the structural return type check — check_init_effect validates
                     // effect compatibility instead. Without this skip, widening (non-failable
@@ -531,6 +566,7 @@ fn check_protocol_requirements(
             Some(NodeKind::Field) => {
                 // Required property — check if provided with matching type
                 if let Some(&field_entity) = provided.fields.get(name.as_str()) {
+                    check_witness_unsafety(cx, child, field_entity, &name, &proto_name, diags);
                     // Setter requirement: if the protocol declares `{ get set }`
                     // the impl must also be settable (either a `var` stored
                     // property or a computed property with a `set` accessor).
@@ -662,7 +698,7 @@ fn check_associated_type_conflicts(
 
     let mut by_name: HashMap<String, Vec<(Entity, Entity)>> = HashMap::new();
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(parent_protocol) = resolve_conformance(cx, ast_ty, protocol) else {
@@ -745,7 +781,7 @@ fn collect_declared_associated_types(
         return;
     };
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(parent_protocol) = resolve_conformance(cx, ast_ty, protocol) else {
@@ -1770,7 +1806,7 @@ fn entity_conforms_to(cx: &CompilationContext<'_>, entity: Entity, protocol: Ent
     let context = cx.query.parent_of(entity).unwrap_or(cx.root);
     let mut seeds: Vec<Entity> = Vec::new();
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let AstType::Named { segments, .. } = ast_ty else {
@@ -2219,7 +2255,7 @@ fn find_conformance_declaration(
             continue;
         };
         for item in &conformances.0 {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
+            let ConformanceItem::Positive(ast_ty, ..) = item else {
                 continue;
             };
             if resolve_conformance(cx, ast_ty, decl) == Some(target_proto) {
@@ -2507,4 +2543,97 @@ fn check_ambiguous_method_satisfaction(
             }
         }
     }
+}
+
+fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
+    DESCRIPTORS
+        .iter()
+        .find(|d| d.id == id)
+        .expect("conformance_completeness descriptor")
+}
+
+/// E643 / E644: an unsafe protocol's conformance must say `unsafe P`, and a
+/// safe protocol's should not.
+fn check_conformance_unsafety(
+    cx: &CompilationContext<'_>,
+    item: &ConformanceItem,
+    protocol: Entity,
+    decl: Entity,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let ConformanceItem::Positive(_, syntax, written_unsafe) = item else {
+        return;
+    };
+    let needs_unsafe = is_unsafe_protocol(cx.query, protocol);
+    if needs_unsafe == *written_unsafe {
+        return;
+    }
+    let proto = util::entity_name(cx.query, protocol);
+    let (d, message, label) = if needs_unsafe {
+        (
+            descriptor("E643"),
+            format!("'{proto}' is an unsafe protocol; write the conformance as `unsafe {proto}`"),
+            "conformance to an unsafe protocol",
+        )
+    } else {
+        (
+            descriptor("E644"),
+            format!("'{proto}' is not an unsafe protocol; `unsafe` here has no effect"),
+            "unnecessary `unsafe`",
+        )
+    };
+    let decl_span = util::entity_span(cx.query, decl);
+    let range = syntax.text_range();
+    let span = kestrel_span::Span::new(
+        decl_span.file_id,
+        usize::from(range.start())..usize::from(range.end()),
+    );
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message,
+        labels: vec![DiagLabel {
+            span,
+            message: label.into(),
+            is_primary: true,
+        }],
+        notes: vec![],
+    });
+}
+
+/// E642: a witness may not need `unsafe` when its requirement doesn't —
+/// generic code reaches the witness through the safe requirement.
+fn check_witness_unsafety(
+    cx: &CompilationContext<'_>,
+    requirement: Entity,
+    witness: Entity,
+    name: &str,
+    proto_name: &str,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let unsafe_of = |entity| cx.query.query(UnsafetyOf { entity }).is_some();
+    if !unsafe_of(witness) || unsafe_of(requirement) {
+        return;
+    }
+    let d = descriptor("E642");
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message: format!(
+            "'{name}' is unsafe, but the requirement it satisfies in protocol '{proto_name}' is not"
+        ),
+        labels: vec![
+            DiagLabel {
+                span: util::entity_span(cx.query, witness),
+                message: "unsafe witness".into(),
+                is_primary: true,
+            },
+            DiagLabel {
+                span: util::entity_span(cx.query, requirement),
+                message: "safe requirement".into(),
+                is_primary: false,
+            },
+        ],
+        notes: vec!["mark the requirement `unsafe`, or make the witness safe".into()],
+    });
 }

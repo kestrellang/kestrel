@@ -46,6 +46,11 @@ pub struct HirBody {
     /// Every `|>` in the body, with what its right side was. Type inference
     /// rewords a failed pipe's errors into a fix-it from this.
     pub pipes: Vec<PipeSite>,
+    /// Source extent of every `unsafe expr` / `unsafe { … }` in the body,
+    /// in source order. The wrapper itself lowers to its operand, so HIR is
+    /// unchanged for every other pass; the unsafe-use analyzer reads these
+    /// to decide which uses are inside an unsafe context (a lexical rule).
+    pub unsafe_regions: Vec<Span>,
 }
 
 /// One `lhs |> rhs` (`SugarKind::Pipe`), as HIR lowering saw its right side.
@@ -95,6 +100,7 @@ impl HirBody {
             guard_stmts: Vec::new(),
             while_conditions: Vec::new(),
             pipes: Vec::new(),
+            unsafe_regions: Vec::new(),
         }
     }
 

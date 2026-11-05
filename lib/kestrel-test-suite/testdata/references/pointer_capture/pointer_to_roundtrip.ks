@@ -15,10 +15,10 @@ import std.numeric.(Int64)
 func main() -> lang.i64 {
     let x: Int64 = 42;
     let p = Pointer(to: x);
-    if p.read() != 42 { return 1; }
+    if unsafe p.read() != 42 { return 1; }
 
     // A second capture of the same place reads the same value.
     let q = Pointer(to: x);
-    if q.read() != 42 { return 2; }
+    if unsafe q.read() != 42 { return 2; }
     0
 }

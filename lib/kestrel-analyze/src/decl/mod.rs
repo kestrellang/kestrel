@@ -41,5 +41,6 @@ pub mod static_context;
 pub mod static_value_type;
 pub mod subscript;
 pub mod type_alias_validation;
+pub mod unsafe_field;
 pub mod unsized_param;
 pub mod visibility;

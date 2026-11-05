@@ -105,7 +105,7 @@ public struct StringBuilder: Cloneable, Formatter {
     /// Appends a raw byte. Caller must ensure UTF-8 validity.
     internal mutating func appendByte(byte: UInt8) {
         self.grow(self.len + 1);
-        self.ptr.offset(by: self.len).write(byte);
+        unsafe self.ptr.offset(by: self.len).write(byte);
         self.len = self.len + 1
     }
 

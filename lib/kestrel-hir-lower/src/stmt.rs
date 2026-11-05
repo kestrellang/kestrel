@@ -127,7 +127,13 @@ impl LowerCtx<'_> {
         // desugared temp would dangle) reject with E209 but still lower
         // as a Borrow so downstream diagnostics stay typed.
         let borrow_init = syn.value.as_ref().and_then(|v| {
-            let unary = unwrap_expr(v);
+            let mut unary = unwrap_expr(v);
+            // `let r = unsafe &p.value;`: the borrow is the `unsafe` operand.
+            let mut unsafe_region = None;
+            if unary.kind() == SyntaxKind::ExprUnsafe {
+                unsafe_region = Some(self.span(&unary));
+                unary = unwrap_expr(&first_expr(&unary)?);
+            }
             if unary.kind() != SyntaxKind::ExprUnary {
                 return None;
             }
@@ -136,6 +142,7 @@ impl LowerCtx<'_> {
                 UnaryOp::BorrowMutating => true,
                 _ => return None,
             };
+            self.unsafe_regions.extend(unsafe_region);
             let uspan = self.span(&unary);
             let operand = ExprSrc::or_error(first_expr(&unary), &uspan);
             Some((unary, operand, mutating, uspan))

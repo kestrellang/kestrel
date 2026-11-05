@@ -121,7 +121,7 @@ extend Str {
         }
         // UnsafeSlice is a non-owning view over the live string buffer;
         // append(contentsOf:) copies out of it in a single pass.
-        buffer.append(contentsOf: UnsafeSlice(pointer: slice._rawPtr().offset(by: slice.start), count: n));
+        buffer.append(contentsOf: unsafe UnsafeSlice(pointer: slice._rawPtr().offset(by: slice.start), count: n));
         buffer
     }
 
@@ -141,7 +141,7 @@ extend Str {
     /// ```
     public func asByteSlice() -> UnsafeSlice[UInt8] {
         let slice = self.asSlice();
-        UnsafeSlice(pointer: slice._rawPtr().offset(by: slice.start), count: (slice.end - slice.start))
+        unsafe UnsafeSlice(pointer: slice._rawPtr().offset(by: slice.start), count: (slice.end - slice.start))
     }
 
     // -- Iteration -----------------------------------------------------------
@@ -295,7 +295,7 @@ extend Str {
         if subLen > myLen { return .None }
         let base = slice._rawPtr().offset(by: slice.start).asRaw();
         let needle = sub._rawPtr().offset(by: sub.start).asRaw();
-        let result = memmem(base, myLen, needle, subLen);
+        let result = unsafe memmem(base, myLen, needle, subLen);
         if result.isNull {
             .None
         } else {
@@ -332,7 +332,7 @@ extend Str {
         while myLen - i >= subLen {
             let base = myPtr.offset(by: slice.start + i).asRaw();
             let remaining = myLen - i;
-            let result = memmem(base, remaining, needlePtr, subLen);
+            let result = unsafe memmem(base, remaining, needlePtr, subLen);
             if result.isNull {
                 break
             }
@@ -403,7 +403,7 @@ extend Str {
         var realStart: Int64 = 0;
         var startDone: Bool = false;
         while realStart < myLen and startDone == false {
-            let byte = basePtr.offset(by: realStart).read();
+            let byte = unsafe basePtr.offset(by: realStart).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isWs = lang.i1_or(lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13)), lang.i32_eq(v, 12));
             if Bool(boolLiteral: isWs) {
@@ -416,7 +416,7 @@ extend Str {
         var endDone: Bool = false;
         while endPos > realStart and endDone == false {
             let idx = endPos - 1;
-            let byte = basePtr.offset(by: idx).read();
+            let byte = unsafe basePtr.offset(by: idx).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isWs = lang.i1_or(lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13)), lang.i32_eq(v, 12));
             if Bool(boolLiteral: isWs) {
@@ -445,7 +445,7 @@ extend Str {
         var realStart: Int64 = 0;
         var done: Bool = false;
         while realStart < myLen and done == false {
-            let byte = basePtr.offset(by: realStart).read();
+            let byte = unsafe basePtr.offset(by: realStart).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isWs = lang.i1_or(lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13)), lang.i32_eq(v, 12));
             if Bool(boolLiteral: isWs) {
@@ -475,7 +475,7 @@ extend Str {
         var done: Bool = false;
         while endPos > 0 and done == false {
             let idx = endPos - 1;
-            let byte = basePtr.offset(by: idx).read();
+            let byte = unsafe basePtr.offset(by: idx).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isWs = lang.i1_or(lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13)), lang.i32_eq(v, 12));
             if Bool(boolLiteral: isWs) {
@@ -614,7 +614,7 @@ extend Str {
         var hasUpperAscii = false;
         var i: Int64 = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             if byte > 127 {
                 var result = String();
                 for c in self.chars.iter() {
@@ -637,7 +637,7 @@ extend Str {
         var result = String(capacity: myLen);
         i = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isUpper = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
             if Bool(boolLiteral: isUpper) {
@@ -669,7 +669,7 @@ extend Str {
         var hasLowerAscii = false;
         var i: Int64 = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             if byte > 127 {
                 var result = String();
                 for c in self.chars.iter() {
@@ -692,7 +692,7 @@ extend Str {
         var result = String(capacity: myLen);
         i = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isLower = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
             if Bool(boolLiteral: isLower) {
@@ -760,7 +760,7 @@ extend Str {
         var result = String(capacity: myLen);
         var i: Int64 = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isUpper = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
             if Bool(boolLiteral: isUpper) {
@@ -791,7 +791,7 @@ extend Str {
         var result = String(capacity: myLen);
         var i: Int64 = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isLower = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
             if Bool(boolLiteral: isLower) {
@@ -844,8 +844,8 @@ extend Str {
         }
         var i: Int64 = 0;
         while i < a.count {
-            var x = a.pointer.offset(by: i).read();
-            var y = b.pointer.offset(by: i).read();
+            var x = unsafe a.pointer.offset(by: i).read();
+            var y = unsafe b.pointer.offset(by: i).read();
             // Fold A–Z (0x41–0x5A) to lower case; leave everything else.
             if x >= 65 and x <= 90 { x = x + 32 };
             if y >= 65 and y <= 90 { y = y + 32 };
@@ -911,7 +911,7 @@ extend Str {
         var i: Int64 = 0;
         while myLen - i >= patternLen {
             let base = myPtr.offset(by: i).asRaw();
-            let r = memmem(base, myLen - i, patternPtr.asRaw(), patternLen);
+            let r = unsafe memmem(base, myLen - i, patternPtr.asRaw(), patternLen);
             if r.isNull {
                 break
             }
@@ -932,7 +932,7 @@ extend Str {
         i = 0;
         while myLen - i >= patternLen {
             let base = myPtr.offset(by: i).asRaw();
-            let r = memmem(base, myLen - i, patternPtr.asRaw(), patternLen);
+            let r = unsafe memmem(base, myLen - i, patternPtr.asRaw(), patternLen);
             if r.isNull {
                 break
             }

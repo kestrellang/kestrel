@@ -241,28 +241,28 @@ public struct Renderer {
     var raw: lang.ptr[lang.i8]
 
     public func clear(color: Color) {
-        sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
-        sdlRenderClear(self.raw);
+        unsafe sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
+        unsafe sdlRenderClear(self.raw);
     }
 
     public func setColor(color: Color) {
-        sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
+        unsafe sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
     }
 
     public func fill(rect: Rectangle, color: Color) {
-        sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
-        sdlFillRect(self.raw, rect.x, rect.y, rect.width, rect.height);
+        unsafe sdlSetRenderDrawColor(self.raw, color.r, color.g, color.b, color.a);
+        unsafe sdlFillRect(self.raw, rect.x, rect.y, rect.width, rect.height);
     }
 
     // Use after a single `setColor` to avoid a per-rect syscall when
     // drawing many same-colored rects (e.g. a tile grid).
     public func fillRect(rect: Rectangle) {
-        sdlFillRect(self.raw, rect.x, rect.y, rect.width, rect.height);
+        unsafe sdlFillRect(self.raw, rect.x, rect.y, rect.width, rect.height);
     }
 
     public func drawText(text: String, x: Int64, y: Int64, scale: Int64) {
         let cstr = text.toCString();
-        sdlDrawText(self.raw, cstr, x, y, scale);
+        unsafe sdlDrawText(self.raw, cstr, x, y, scale);
         cstr.free();
     }
 }
@@ -273,20 +273,20 @@ public struct SDLApp : not Copyable {
     var eventBuffer: Array[Int8]
 
     public init(title title: String, width width: Int64, height height: Int64) {
-        if sdlInit(sdlInitVideo) < 0 {
+        if unsafe sdlInit(sdlInitVideo) < 0 {
             fatalError("SDL Init failed");
         }
 
         let titleCStr = title.toCString();
-        let win = sdlCreateWindow(titleCStr, width, height);
+        let win = unsafe sdlCreateWindow(titleCStr, width, height);
         titleCStr.free();
 
-        if isNull(win) != 0 {
+        if unsafe isNull(win) != 0 {
             fatalError("Window creation failed");
         }
 
-        let ren = sdlCreateRenderer(win);
-        if isNull(ren) != 0 {
+        let ren = unsafe sdlCreateRenderer(win);
+        if unsafe isNull(ren) != 0 {
             fatalError("Renderer creation failed");
         }
 
@@ -296,38 +296,38 @@ public struct SDLApp : not Copyable {
     }
 
     deinit {
-        sdlDestroyRenderer(self.rendererPtr);
-        sdlDestroyWindow(self.window);
-        sdlQuit();
+        unsafe sdlDestroyRenderer(self.rendererPtr);
+        unsafe sdlDestroyWindow(self.window);
+        unsafe sdlQuit();
     }
 
     public mutating func pollEvent() -> Event? {
         let eventPtr = lang.cast_ptr[_, lang.i8](self.eventBuffer.asPointer().asRaw().raw);
 
-        guard sdlPollEvent(eventPtr) != 0 else {
+        guard unsafe sdlPollEvent(eventPtr) != 0 else {
             return null;
         }
 
-        let eventType = sdlGetEventType(eventPtr);
+        let eventType = unsafe sdlGetEventType(eventPtr);
 
         match eventType {
             sdlEventQuit => .Some(Event.Quit),
             sdlEventKeyDown => {
-                let code = sdlGetKeyScancode(eventPtr);
+                let code = unsafe sdlGetKeyScancode(eventPtr);
                 .Some(Event.KeyDown(scancodeToKey(code)))
             },
             sdlEventKeyUp => {
-                let code = sdlGetKeyScancode(eventPtr);
+                let code = unsafe sdlGetKeyScancode(eventPtr);
                 .Some(Event.KeyUp(scancodeToKey(code)))
             },
             sdlEventMouseMotion => {
-                let mx = sdlGetMouseX(eventPtr);
-                let my = sdlGetMouseY(eventPtr);
+                let mx = unsafe sdlGetMouseX(eventPtr);
+                let my = unsafe sdlGetMouseY(eventPtr);
                 .Some(Event.MouseMove(Int64(from: mx), Int64(from: my)))
             },
             sdlEventMouseButtonDown => {
-                let mx = sdlGetMouseX(eventPtr);
-                let my = sdlGetMouseY(eventPtr);
+                let mx = unsafe sdlGetMouseX(eventPtr);
+                let my = unsafe sdlGetMouseY(eventPtr);
                 .Some(Event.MouseDown(Int64(from: mx), Int64(from: my)))
             },
             _ => null
@@ -337,11 +337,11 @@ public struct SDLApp : not Copyable {
     public func render(body: (Renderer) -> ()) {
         let renderer = Renderer(raw: self.rendererPtr);
         body(renderer);
-        sdlRenderPresent(self.rendererPtr);
+        unsafe sdlRenderPresent(self.rendererPtr);
     }
 
     public func delay(ms: Milliseconds) {
-        sdlDelay(ms.value);
+        unsafe sdlDelay(ms.value);
     }
 }
 

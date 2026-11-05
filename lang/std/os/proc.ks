@@ -61,7 +61,7 @@ func libc_exit(code: Int32)
 /// ```
 public func spawn(command: String) -> Result[Int32, IoError] {
     let ccmd = command.toCString();
-    let rawStatus = libc_system(ccmd.raw.asRaw());
+    let rawStatus = unsafe libc_system(ccmd.raw.asRaw());
     ccmd.free();
     if rawStatus < 0 {
         return .Err(IoError.last())
@@ -90,7 +90,7 @@ public func spawn(command: String) -> Result[Int32, IoError] {
 public func captureOutput(command: String) -> Result[String, IoError] {
     let ccmd = command.toCString();
     let modeStr = "r".toCString();
-    let stream = libc_popen(ccmd.raw.asRaw(), modeStr.raw.asRaw());
+    let stream = unsafe libc_popen(ccmd.raw.asRaw(), modeStr.raw.asRaw());
     ccmd.free();
     modeStr.free();
 
@@ -100,10 +100,10 @@ public func captureOutput(command: String) -> Result[String, IoError] {
 
     var output = String();
     let bufSize: Int32 = 1024;
-    let buf = malloc(Int64(from: bufSize));
+    let buf = unsafe malloc(Int64(from: bufSize));
 
     while true {
-        let line = libc_fgets(buf, bufSize, stream);
+        let line = unsafe libc_fgets(buf, bufSize, stream);
         if line.isNull {
             break
         }
@@ -111,8 +111,8 @@ public func captureOutput(command: String) -> Result[String, IoError] {
         output = output + String(from: cstr)
     }
 
-    free(buf);
-     libc_pclose(stream);
+    unsafe free(buf);
+     unsafe libc_pclose(stream);
 
     .Ok(trimEnd(output))
 }
@@ -132,7 +132,7 @@ public func captureOutput(command: String) -> Result[String, IoError] {
 /// exit(0);   // success — does not return
 /// ```
 public func exit(code: Int32) {
-    libc_exit(code)
+    unsafe libc_exit(code)
 }
 
 /// Strips a trailing run of ASCII whitespace (space, tab, LF, CR) from `s`.

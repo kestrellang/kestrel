@@ -221,7 +221,7 @@ public struct SystemRandom: RandomNumberGenerator, Defaultable {
     /// in the (effectively impossible) case that `getentropy` fails.
     public mutating func nextUInt64() -> UInt64 {
         var value: UInt64 = 0;
-        let rc = libc_getentropy(Pointer(to: value).asRaw(), 8);
+        let rc = unsafe libc_getentropy(Pointer(to: value).asRaw(), 8);
         if rc != 0 {
             fatalError("SystemRandom: getentropy failed");
         }

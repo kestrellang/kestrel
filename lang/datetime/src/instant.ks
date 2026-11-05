@@ -16,7 +16,7 @@ public struct Instant: Equatable, Comparable, Hashable, Formattable, Cloneable {
     public static func now() -> Instant {
         var s: Int64 = 0;
         var n: Int64 = 0;
-        kestrel_clock_gettime(Pointer(to: s), Pointer(to: n));
+        unsafe kestrel_clock_gettime(Pointer(to: s), Pointer(to: n));
         Instant(secondsSinceEpoch: s, nanoseconds: n)
     }
 
@@ -55,20 +55,20 @@ public struct Instant: Equatable, Comparable, Hashable, Formattable, Cloneable {
     // --- Conversion ---
 
     public func toDate(in zone: TimeZone) -> Date {
-        let offset = Int64(from: kestrel_tz_offset(zone.id, self.secs));
+        let offset = Int64(from: unsafe kestrel_tz_offset(zone.id, self.secs));
         let localSecs = self.secs + offset;
         dateFromEpochDay(floorDiv(localSecs, 86400))
     }
 
     public func toTime(in zone: TimeZone) -> Time {
-        let offset = Int64(from: kestrel_tz_offset(zone.id, self.secs));
+        let offset = Int64(from: unsafe kestrel_tz_offset(zone.id, self.secs));
         let localSecs = self.secs + offset;
         let secOfDay = floorMod(localSecs, 86400);
         Time.fromNanos(secOfDay * Time.NANOS_PER_SECOND + self.nanos)
     }
 
     public func toDateTime(in zone: TimeZone) -> DateTime {
-        let offset = Int64(from: kestrel_tz_offset(zone.id, self.secs));
+        let offset = Int64(from: unsafe kestrel_tz_offset(zone.id, self.secs));
         let localSecs = self.secs + offset;
         DateTime.fromEpochSecs(localSecs, self.nanos)
     }

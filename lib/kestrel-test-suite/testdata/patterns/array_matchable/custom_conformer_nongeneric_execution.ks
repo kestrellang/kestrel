@@ -21,7 +21,7 @@ struct Trio {
     var c: Int64
 }
 
-extend Trio: ArrayMatchable {
+extend Trio: unsafe ArrayMatchable {
     type Element = Int64
     type Rest = UnsafeSlice[Int64]
     public func matchLength() -> Int64 { 3 }
@@ -29,7 +29,7 @@ extend Trio: ArrayMatchable {
         if index == 0 { self.a } else if index == 1 { self.b } else { self.c }
     }
     public func matchSlice(from: Int64, to: Int64) -> UnsafeSlice[Int64] {
-        UnsafeSlice(pointer: Pointer(to: self.a).offset(by: from), count: to - from)
+        unsafe UnsafeSlice(pointer: Pointer(to: self.a).offset(by: from), count: to - from)
     }
 }
 

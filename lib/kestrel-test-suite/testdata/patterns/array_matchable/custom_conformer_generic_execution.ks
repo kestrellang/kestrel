@@ -17,7 +17,7 @@ struct Bag[T] {
     var items: Array[T]
 }
 
-extend Bag[T]: ArrayMatchable {
+extend Bag[T]: unsafe ArrayMatchable {
     type Element = T
     type Rest = &Slice[T]
     public func matchLength() -> Int64 { self.items.count }

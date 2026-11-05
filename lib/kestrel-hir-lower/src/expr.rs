@@ -358,6 +358,19 @@ impl LowerCtx<'_> {
                 let operand = ExprSrc::or_error(first_expr(node), &span);
                 self.desugar_try(&operand, &span)
             },
+            // `unsafe` adds no HIR node: the operand lowers in place and the
+            // region is recorded for the unsafe-use analyzer.
+            SyntaxKind::ExprUnsafe => {
+                self.unsafe_regions.push(span.clone());
+                let operand = ExprSrc::or_error(first_expr(node), &span);
+                self.lower_expr_src(&operand)
+            },
+            SyntaxKind::ExprUnsafeBlock => {
+                self.unsafe_regions.push(span.clone());
+                let body = BlockSyntax::of(code_block(node), self.file_id);
+                let body = self.lower_block(&body);
+                self.alloc_expr(HirExpr::Block { body, span })
+            },
             SyntaxKind::ExprClosure => self.lower_closure(node, &span),
             SyntaxKind::ExprMatch => self.lower_match(node, &span),
             SyntaxKind::ExprCast => self.desugar_cast(node, &span),

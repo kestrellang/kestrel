@@ -14,111 +14,111 @@ module std.numeric
 // Trigonometric
 
 /// `sin(x)` — sine of `x` in radians.
-@extern(.C, mangleName: "sin")
+@extern(.C, mangleName: "sin", safe: true)
 func libm_sin(x: lang.f64) -> lang.f64
 
 /// `cos(x)` — cosine of `x` in radians.
-@extern(.C, mangleName: "cos")
+@extern(.C, mangleName: "cos", safe: true)
 func libm_cos(x: lang.f64) -> lang.f64
 
 /// `tan(x)` — tangent of `x` in radians.
-@extern(.C, mangleName: "tan")
+@extern(.C, mangleName: "tan", safe: true)
 func libm_tan(x: lang.f64) -> lang.f64
 
 /// `asin(x)` — arc sine, result in `[-π/2, π/2]`. NaN outside `[-1, 1]`.
-@extern(.C, mangleName: "asin")
+@extern(.C, mangleName: "asin", safe: true)
 func libm_asin(x: lang.f64) -> lang.f64
 
 /// `acos(x)` — arc cosine, result in `[0, π]`. NaN outside `[-1, 1]`.
-@extern(.C, mangleName: "acos")
+@extern(.C, mangleName: "acos", safe: true)
 func libm_acos(x: lang.f64) -> lang.f64
 
 /// `atan(x)` — arc tangent, result in `[-π/2, π/2]`.
-@extern(.C, mangleName: "atan")
+@extern(.C, mangleName: "atan", safe: true)
 func libm_atan(x: lang.f64) -> lang.f64
 
 /// `atan2(y, x)` — angle of point `(x, y)` from positive x-axis, in `[-π, π]`.
-@extern(.C, mangleName: "atan2")
+@extern(.C, mangleName: "atan2", safe: true)
 func libm_atan2(y: lang.f64, x: lang.f64) -> lang.f64
 
 // Hyperbolic
 
 /// `sinh(x)` — hyperbolic sine.
-@extern(.C, mangleName: "sinh")
+@extern(.C, mangleName: "sinh", safe: true)
 func libm_sinh(x: lang.f64) -> lang.f64
 
 /// `cosh(x)` — hyperbolic cosine.
-@extern(.C, mangleName: "cosh")
+@extern(.C, mangleName: "cosh", safe: true)
 func libm_cosh(x: lang.f64) -> lang.f64
 
 /// `tanh(x)` — hyperbolic tangent.
-@extern(.C, mangleName: "tanh")
+@extern(.C, mangleName: "tanh", safe: true)
 func libm_tanh(x: lang.f64) -> lang.f64
 
 /// `asinh(x)` — inverse hyperbolic sine.
-@extern(.C, mangleName: "asinh")
+@extern(.C, mangleName: "asinh", safe: true)
 func libm_asinh(x: lang.f64) -> lang.f64
 
 /// `acosh(x)` — inverse hyperbolic cosine. NaN for `x < 1`.
-@extern(.C, mangleName: "acosh")
+@extern(.C, mangleName: "acosh", safe: true)
 func libm_acosh(x: lang.f64) -> lang.f64
 
 /// `atanh(x)` — inverse hyperbolic tangent. `±inf` at `±1`, NaN outside `(-1, 1)`.
-@extern(.C, mangleName: "atanh")
+@extern(.C, mangleName: "atanh", safe: true)
 func libm_atanh(x: lang.f64) -> lang.f64
 
 // Exponential and Logarithmic
 
 /// `exp(x)` — `e^x`.
-@extern(.C, mangleName: "exp")
+@extern(.C, mangleName: "exp", safe: true)
 func libm_exp(x: lang.f64) -> lang.f64
 
 /// `exp2(x)` — `2^x`.
-@extern(.C, mangleName: "exp2")
+@extern(.C, mangleName: "exp2", safe: true)
 func libm_exp2(x: lang.f64) -> lang.f64
 
 /// `expm1(x)` — `e^x - 1`, accurate for small `x`.
-@extern(.C, mangleName: "expm1")
+@extern(.C, mangleName: "expm1", safe: true)
 func libm_expm1(x: lang.f64) -> lang.f64
 
 /// `log(x)` — natural logarithm. NaN for negatives, `-inf` at zero.
-@extern(.C, mangleName: "log")
+@extern(.C, mangleName: "log", safe: true)
 func libm_log(x: lang.f64) -> lang.f64
 
 /// `log2(x)` — base-2 logarithm.
-@extern(.C, mangleName: "log2")
+@extern(.C, mangleName: "log2", safe: true)
 func libm_log2(x: lang.f64) -> lang.f64
 
 /// `log10(x)` — base-10 logarithm.
-@extern(.C, mangleName: "log10")
+@extern(.C, mangleName: "log10", safe: true)
 func libm_log10(x: lang.f64) -> lang.f64
 
 /// `log1p(x)` — `ln(1 + x)`, accurate for small `x`.
-@extern(.C, mangleName: "log1p")
+@extern(.C, mangleName: "log1p", safe: true)
 func libm_log1p(x: lang.f64) -> lang.f64
 
 // Power and Root
 
 /// `pow(base, exp)` — `base^exp`. NaN for negative `base` with non-integer `exp`.
-@extern(.C, mangleName: "pow")
+@extern(.C, mangleName: "pow", safe: true)
 func libm_pow(base: lang.f64, exp: lang.f64) -> lang.f64
 
 /// `cbrt(x)` — cube root, defined for negatives.
-@extern(.C, mangleName: "cbrt")
+@extern(.C, mangleName: "cbrt", safe: true)
 func libm_cbrt(x: lang.f64) -> lang.f64
 
 /// `hypot(x, y)` — `sqrt(x² + y²)` without intermediate overflow.
-@extern(.C, mangleName: "hypot")
+@extern(.C, mangleName: "hypot", safe: true)
 func libm_hypot(x: lang.f64, y: lang.f64) -> lang.f64
 
 // IEEE 754 Operations
 
 /// `remainder(x, y)` — IEEE 754 remainder using round-to-nearest division.
-@extern(.C, mangleName: "remainder")
+@extern(.C, mangleName: "remainder", safe: true)
 func libm_remainder(x: lang.f64, y: lang.f64) -> lang.f64
 
 /// `nextafter(x, y)` — next representable `f64` value from `x` toward `y`.
-@extern(.C, mangleName: "nextafter")
+@extern(.C, mangleName: "nextafter", safe: true)
 func libm_nextafter(x: lang.f64, y: lang.f64) -> lang.f64
 
 // ============================================================================
@@ -128,109 +128,109 @@ func libm_nextafter(x: lang.f64, y: lang.f64) -> lang.f64
 // Trigonometric
 
 /// `sinf(x)` — `f32` sine.
-@extern(.C, mangleName: "sinf")
+@extern(.C, mangleName: "sinf", safe: true)
 func libm_sinf(x: lang.f32) -> lang.f32
 
 /// `cosf(x)` — `f32` cosine.
-@extern(.C, mangleName: "cosf")
+@extern(.C, mangleName: "cosf", safe: true)
 func libm_cosf(x: lang.f32) -> lang.f32
 
 /// `tanf(x)` — `f32` tangent.
-@extern(.C, mangleName: "tanf")
+@extern(.C, mangleName: "tanf", safe: true)
 func libm_tanf(x: lang.f32) -> lang.f32
 
 /// `asinf(x)` — `f32` arc sine.
-@extern(.C, mangleName: "asinf")
+@extern(.C, mangleName: "asinf", safe: true)
 func libm_asinf(x: lang.f32) -> lang.f32
 
 /// `acosf(x)` — `f32` arc cosine.
-@extern(.C, mangleName: "acosf")
+@extern(.C, mangleName: "acosf", safe: true)
 func libm_acosf(x: lang.f32) -> lang.f32
 
 /// `atanf(x)` — `f32` arc tangent.
-@extern(.C, mangleName: "atanf")
+@extern(.C, mangleName: "atanf", safe: true)
 func libm_atanf(x: lang.f32) -> lang.f32
 
 /// `atan2f(y, x)` — `f32` two-argument arc tangent.
-@extern(.C, mangleName: "atan2f")
+@extern(.C, mangleName: "atan2f", safe: true)
 func libm_atan2f(y: lang.f32, x: lang.f32) -> lang.f32
 
 // Hyperbolic
 
 /// `sinhf(x)` — `f32` hyperbolic sine.
-@extern(.C, mangleName: "sinhf")
+@extern(.C, mangleName: "sinhf", safe: true)
 func libm_sinhf(x: lang.f32) -> lang.f32
 
 /// `coshf(x)` — `f32` hyperbolic cosine.
-@extern(.C, mangleName: "coshf")
+@extern(.C, mangleName: "coshf", safe: true)
 func libm_coshf(x: lang.f32) -> lang.f32
 
 /// `tanhf(x)` — `f32` hyperbolic tangent.
-@extern(.C, mangleName: "tanhf")
+@extern(.C, mangleName: "tanhf", safe: true)
 func libm_tanhf(x: lang.f32) -> lang.f32
 
 /// `asinhf(x)` — `f32` inverse hyperbolic sine.
-@extern(.C, mangleName: "asinhf")
+@extern(.C, mangleName: "asinhf", safe: true)
 func libm_asinhf(x: lang.f32) -> lang.f32
 
 /// `acoshf(x)` — `f32` inverse hyperbolic cosine.
-@extern(.C, mangleName: "acoshf")
+@extern(.C, mangleName: "acoshf", safe: true)
 func libm_acoshf(x: lang.f32) -> lang.f32
 
 /// `atanhf(x)` — `f32` inverse hyperbolic tangent.
-@extern(.C, mangleName: "atanhf")
+@extern(.C, mangleName: "atanhf", safe: true)
 func libm_atanhf(x: lang.f32) -> lang.f32
 
 // Exponential and Logarithmic
 
 /// `expf(x)` — `f32` `e^x`.
-@extern(.C, mangleName: "expf")
+@extern(.C, mangleName: "expf", safe: true)
 func libm_expf(x: lang.f32) -> lang.f32
 
 /// `exp2f(x)` — `f32` `2^x`.
-@extern(.C, mangleName: "exp2f")
+@extern(.C, mangleName: "exp2f", safe: true)
 func libm_exp2f(x: lang.f32) -> lang.f32
 
 /// `expm1f(x)` — `f32` `e^x - 1`.
-@extern(.C, mangleName: "expm1f")
+@extern(.C, mangleName: "expm1f", safe: true)
 func libm_expm1f(x: lang.f32) -> lang.f32
 
 /// `logf(x)` — `f32` natural log.
-@extern(.C, mangleName: "logf")
+@extern(.C, mangleName: "logf", safe: true)
 func libm_logf(x: lang.f32) -> lang.f32
 
 /// `log2f(x)` — `f32` base-2 log.
-@extern(.C, mangleName: "log2f")
+@extern(.C, mangleName: "log2f", safe: true)
 func libm_log2f(x: lang.f32) -> lang.f32
 
 /// `log10f(x)` — `f32` base-10 log.
-@extern(.C, mangleName: "log10f")
+@extern(.C, mangleName: "log10f", safe: true)
 func libm_log10f(x: lang.f32) -> lang.f32
 
 /// `log1pf(x)` — `f32` `ln(1 + x)`.
-@extern(.C, mangleName: "log1pf")
+@extern(.C, mangleName: "log1pf", safe: true)
 func libm_log1pf(x: lang.f32) -> lang.f32
 
 // Power and Root
 
 /// `powf(base, exp)` — `f32` power.
-@extern(.C, mangleName: "powf")
+@extern(.C, mangleName: "powf", safe: true)
 func libm_powf(base: lang.f32, exp: lang.f32) -> lang.f32
 
 /// `cbrtf(x)` — `f32` cube root.
-@extern(.C, mangleName: "cbrtf")
+@extern(.C, mangleName: "cbrtf", safe: true)
 func libm_cbrtf(x: lang.f32) -> lang.f32
 
 /// `hypotf(x, y)` — `f32` hypotenuse.
-@extern(.C, mangleName: "hypotf")
+@extern(.C, mangleName: "hypotf", safe: true)
 func libm_hypotf(x: lang.f32, y: lang.f32) -> lang.f32
 
 // IEEE 754 Operations
 
 /// `remainderf(x, y)` — `f32` IEEE 754 remainder.
-@extern(.C, mangleName: "remainderf")
+@extern(.C, mangleName: "remainderf", safe: true)
 func libm_remainderf(x: lang.f32, y: lang.f32) -> lang.f32
 
 /// `nextafterf(x, y)` — `f32` next representable value.
-@extern(.C, mangleName: "nextafterf")
+@extern(.C, mangleName: "nextafterf", safe: true)
 func libm_nextafterf(x: lang.f32, y: lang.f32) -> lang.f32

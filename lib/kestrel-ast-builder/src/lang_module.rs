@@ -62,8 +62,47 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     seed_pointer_ops(world, lang);
     seed_string_ops(world, lang);
     seed_misc_ops(world, lang);
+    mark_unsafe_intrinsics(world, lang);
 
     lang
+}
+
+/// Intrinsics that read, write or drop through a pointer. Using one needs an
+/// unsafe context; making, offsetting, casting or comparing a pointer does
+/// not. Read through `UnsafetyOf`, like any `unsafe func`.
+pub const UNSAFE_INTRINSICS: &[&str] = &[
+    "ptr_read",
+    "ptr_take",
+    "ptr_write",
+    "ptr_ref",
+    "ptr_mut_ref",
+    "ptr_mut_borrow",
+    "drop_in_place",
+    "clone_val_into",
+    "sizeof_val",
+    "alignof_val",
+];
+
+fn mark_unsafe_intrinsics(world: &mut World, lang: Entity) {
+    let unsafe_fns: Vec<Entity> = world
+        .children_of(lang)
+        .iter()
+        .copied()
+        .filter(|&e| {
+            world.get::<NodeKind>(e) == Some(&NodeKind::Function)
+                && world
+                    .get::<Name>(e)
+                    .is_some_and(|n| UNSAFE_INTRINSICS.contains(&n.0.as_str()))
+        })
+        .collect();
+    debug_assert_eq!(
+        unsafe_fns.len(),
+        UNSAFE_INTRINSICS.len(),
+        "every listed intrinsic is seeded"
+    );
+    for e in unsafe_fns {
+        world.set(e, IsUnsafe);
+    }
 }
 
 // ===== Type seeding =====

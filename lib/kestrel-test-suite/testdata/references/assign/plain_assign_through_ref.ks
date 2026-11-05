@@ -14,7 +14,7 @@ import std.numeric.(Int64)
 struct Tracked {
     var tag: Int64
     var drops: Pointer[Int64]
-    deinit { self.drops.write(self.drops.read() + 1); }
+    deinit { unsafe self.drops.write(self.drops.read() + 1); }
 }
 
 @main
@@ -32,19 +32,19 @@ func main() -> lang.i64 {
     // the overwritten element deinits exactly once, at the store
     // (delta-based: literal construction has its own temp deinit)
     let drops = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    drops.write(0);
+    unsafe drops.write(0);
     var ts = [Tracked(tag: 1, drops: drops)];
-    let baseline = drops.read();
+    let baseline = unsafe drops.read();
     ts(0) = Tracked(tag: 2, drops: drops);
-    if drops.read() != baseline + 1 { return 5; }
+    if unsafe drops.read() != baseline + 1 { return 5; }
     // read back through a borrowed view — no element copy, no extra deinit
     if ts(0).tag != 2 { return 6; }
-    if drops.read() != baseline + 1 { return 7; }
+    if unsafe drops.read() != baseline + 1 { return 7; }
 
     // Pointer bridge getter as the place
     let cell = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    cell.write(7);
-    cell.mutatingValue = 42;
-    if cell.read() != 42 { return 8; }
+    unsafe cell.write(7);
+    unsafe cell.mutatingValue = 42;
+    if unsafe cell.read() != 42 { return 8; }
     0
 }

@@ -104,6 +104,9 @@ pub enum ParsedAttr {
     Extern {
         abi: Abi,
         mangle_name: Option<String>,
+        /// `safe: true`: calling it needs no `unsafe` (the declaration
+        /// vouches for the C function's contract).
+        safe: bool,
     },
     /// The builtin and its name as written (`.AddOperatorProtocol` and
     /// `Addable` are one builtin).

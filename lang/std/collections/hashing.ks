@@ -97,7 +97,7 @@ public struct DefaultHasher: Hasher, Defaultable {
         let mult = 1099511628211;
         var i: Int64 = 0;
         while i < count {
-            let byte = ptr.offset(by: i).read();
+            let byte = unsafe ptr.offset(by: i).read();
             self.state = self.state.bitwiseXor(UInt64(from: byte));
             self.state = self.state.multiply(mult);
             // Per-byte avalanche: mix high bits down so adjacent

@@ -207,6 +207,7 @@ impl QueryFn for LowerBodyWithSourceMap {
             guard_stmts: lower.guard_stmts,
             while_conditions: lower.while_conditions,
             pipes: lower.pipes,
+            unsafe_regions: lower.unsafe_regions,
         };
         Some(Arc::new(LoweredBody {
             body: Arc::new(body),

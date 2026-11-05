@@ -14,7 +14,7 @@ import std.numeric.(Int64)
 
 // Param storage is caller-owned — out of the lint's claim.
 func fromParam(x: Int64) -> &Int64 {
-    Pointer(to: x).value
+    unsafe Pointer(to: x).value
 }
 
 // Stored-pointer chain: validity is the field pointer's contract (the
@@ -22,7 +22,7 @@ func fromParam(x: Int64) -> &Int64 {
 struct Holder {
     var p: Pointer[Int64]
     func view() -> &Int64 {
-        self.p.value
+        unsafe self.p.value
     }
 }
 
@@ -31,5 +31,5 @@ struct Holder {
 func varPointer() -> &Int64 {
     var x = 1;
     var p = Pointer(to: x);
-    p.value
+    unsafe p.value
 }

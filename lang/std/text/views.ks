@@ -67,7 +67,7 @@ public struct BytesIterator: Iterator {
         if self.index < self.length {
             let rawOffset: lang.i64 = self.index.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-            let signedByte: lang.i8 = lang.ptr_read(bytePtr);
+            let signedByte: lang.i8 = unsafe lang.ptr_read(bytePtr);
             self.index = self.index + 1;
             .Some(UInt8(raw: signedByte))
         } else {
@@ -196,7 +196,7 @@ public struct BytesView: Iterable, Cloneable {
     fileprivate func _readByteRaw(index index: Int64) -> UInt8 {
         let rawOffset: lang.i64 = index.raw;
         let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-        let signedByte: lang.i8 = lang.ptr_read(bytePtr);
+        let signedByte: lang.i8 = unsafe lang.ptr_read(bytePtr);
         UInt8(raw: signedByte)
     }
 
@@ -206,7 +206,7 @@ public struct BytesView: Iterable, Cloneable {
     /// from a sub-view cut mid-codepoint) is replaced with U+FFFD,
     /// so the result is always a well-formed `String`.
     public func toString() -> String {
-        String(fromUtf8Lossy: UnsafeSlice(
+        String(fromUtf8Lossy: unsafe UnsafeSlice(
             pointer: self.slice._rawPtr().offset(by: self.slice.start),
             count: self.length
         ))
@@ -371,7 +371,7 @@ public struct CharsView: Iterable, Cloneable {
             // Count leading bytes only (not continuation bytes 10xxxxxx)
             let rawOffset: lang.i64 = i.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-            let signedByte: lang.i8 = lang.ptr_read(bytePtr);
+            let signedByte: lang.i8 = unsafe lang.ptr_read(bytePtr);
             let byteVal: lang.i32 = lang.cast_i8_i32(signedByte);
             if lang.i32_ne(lang.i32_and(byteVal, 0xC0), 0x80) {
                 n = n + 1
@@ -795,7 +795,7 @@ public struct LinesIterator: Iterator {
         while self.byteIndex < self.length and foundNewline == false {
             let rawOffset: lang.i64 = self.byteIndex.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-            let byte: lang.i8 = lang.ptr_read(bytePtr);
+            let byte: lang.i8 = unsafe lang.ptr_read(bytePtr);
             let byteVal: lang.i32 = lang.cast_i8_i32(byte);
             let unsignedByte: lang.i32 = lang.i32_and(byteVal, 0xFF);
 
@@ -810,7 +810,7 @@ public struct LinesIterator: Iterator {
                 if self.byteIndex < self.length {
                     let nextOffset: lang.i64 = self.byteIndex.raw;
                     let nextBytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, nextOffset);
-                    let nextByte: lang.i8 = lang.ptr_read(nextBytePtr);
+                    let nextByte: lang.i8 = unsafe lang.ptr_read(nextBytePtr);
                     let nextByteVal: lang.i32 = lang.cast_i8_i32(nextByte);
                     let nextUnsigned: lang.i32 = lang.i32_and(nextByteVal, 0xFF);
                     if Bool(boolLiteral: lang.i32_eq(nextUnsigned, 10)) {
@@ -983,7 +983,7 @@ public struct LinesView: Iterable, Cloneable {
         while bi < self.length {
             let rawOffset: lang.i64 = bi.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-            let byte: lang.i8 = lang.ptr_read(bytePtr);
+            let byte: lang.i8 = unsafe lang.ptr_read(bytePtr);
             let byteVal: lang.i32 = lang.cast_i8_i32(byte);
             let unsignedByte: lang.i32 = lang.i32_and(byteVal, 0xFF);
             if Bool(boolLiteral: lang.i32_eq(unsignedByte, 10)) {
@@ -998,7 +998,7 @@ public struct LinesView: Iterable, Cloneable {
                 if bi < self.length {
                     let nextOffset: lang.i64 = bi.raw;
                     let nextBytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, nextOffset);
-                    let nextByte: lang.i8 = lang.ptr_read(nextBytePtr);
+                    let nextByte: lang.i8 = unsafe lang.ptr_read(nextBytePtr);
                     let nextByteVal: lang.i32 = lang.cast_i8_i32(nextByte);
                     let nextUnsigned: lang.i32 = lang.i32_and(nextByteVal, 0xFF);
                     if Bool(boolLiteral: lang.i32_eq(nextUnsigned, 10)) {
@@ -3141,7 +3141,7 @@ extend LineIndex {
         while remaining > 0 and offset < length {
             let rawOffset: lang.i64 = offset.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](rawPtr, rawOffset);
-            let byte: lang.i8 = lang.ptr_read(bytePtr);
+            let byte: lang.i8 = unsafe lang.ptr_read(bytePtr);
             let byteVal: lang.i32 = lang.cast_i8_i32(byte);
             let unsignedByte: lang.i32 = lang.i32_and(byteVal, 0xFF);
 
@@ -3153,7 +3153,7 @@ extend LineIndex {
                 if offset < length {
                     let nextOffset: lang.i64 = offset.raw;
                     let nextBytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](rawPtr, nextOffset);
-                    let nextByte: lang.i8 = lang.ptr_read(nextBytePtr);
+                    let nextByte: lang.i8 = unsafe lang.ptr_read(nextBytePtr);
                     let nextByteVal: lang.i32 = lang.cast_i8_i32(nextByte);
                     let nextUnsigned: lang.i32 = lang.i32_and(nextByteVal, 0xFF);
                     if Bool(boolLiteral: lang.i32_eq(nextUnsigned, 10)) {
@@ -3264,7 +3264,7 @@ public struct IndexedLinesIterator: Iterator {
         while self.byteIndex < self.length and foundNewline == false {
             let rawOffset: lang.i64 = self.byteIndex.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-            let byte: lang.i8 = lang.ptr_read(bytePtr);
+            let byte: lang.i8 = unsafe lang.ptr_read(bytePtr);
             let byteVal: lang.i32 = lang.cast_i8_i32(byte);
             let unsignedByte: lang.i32 = lang.i32_and(byteVal, 0xFF);
 
@@ -3278,7 +3278,7 @@ public struct IndexedLinesIterator: Iterator {
                 if self.byteIndex < self.length {
                     let nextOffset: lang.i64 = self.byteIndex.raw;
                     let nextBytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, nextOffset);
-                    let nextByte: lang.i8 = lang.ptr_read(nextBytePtr);
+                    let nextByte: lang.i8 = unsafe lang.ptr_read(nextBytePtr);
                     let nextByteVal: lang.i32 = lang.cast_i8_i32(nextByte);
                     let nextUnsigned: lang.i32 = lang.i32_and(nextByteVal, 0xFF);
                     if Bool(boolLiteral: lang.i32_eq(nextUnsigned, 10)) {
@@ -3365,7 +3365,7 @@ public struct ReversedCharsIterator: Iterator {
         while i > 0 {
             let rawOffset: lang.i64 = i.raw;
             let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, rawOffset);
-            let signedByte: lang.i8 = lang.ptr_read(bytePtr);
+            let signedByte: lang.i8 = unsafe lang.ptr_read(bytePtr);
             let v: lang.i32 = lang.cast_i8_i32(signedByte);
             if lang.i32_ne(lang.i32_and(v, 0xC0), 0x80) {
                 break
@@ -3546,7 +3546,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
             let base = self.sourcePtr.offset(by: self.index).asRaw();
             let sepSlice = self.separator.asSlice();
             let needle = sepSlice._rawPtr().offset(by: sepSlice.start).asRaw();
-            let result = memmem(base, remaining, needle, sepLen);
+            let result = unsafe memmem(base, remaining, needle, sepLen);
             if result.isNull == false {
                 let diff: lang.i64 = lang.i64_sub(result.address.raw, base.address.raw);
                 let matchIndex = self.index + Int64(intLiteral: diff);

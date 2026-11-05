@@ -91,7 +91,7 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
         let result: RawPointer? = allocator.allocate(layout);
         if let .Some(rawPtr) = result {
             self.ptr = rawPtr.cast[RcBoxStorage[T]]();
-            self.ptr.write(RcBoxStorage(refCount: 1, value: value));
+            unsafe self.ptr.write(RcBoxStorage(refCount: 1, value: value));
         } else {
             fatalError("RcBox allocation failed")
         }
@@ -116,7 +116,7 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
     /// The payload, read-only. Writes go through `mutatingValue`, because
     /// every handle onto this storage sees them.
     public var value: &T {
-        self.valuePtr().value
+        unsafe self.valuePtr().value
     }
 
     /// The payload for writing, through a shared handle: no fork, and every
@@ -128,7 +128,7 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
     //
     // Must stay a direct pointer-peel chain: see `sharedMutRef`.
     public var mutatingValue: &mutating T {
-        self.valuePtr().mutatingValue
+        unsafe self.valuePtr().mutatingValue
     }
 
     // Byte offset of `value` inside the storage block `[refCount: Int64,
@@ -137,7 +137,7 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
     // `alignof_val` reads at runtime, so it is right for an over-aligned or
     // unsized payload too.
     fileprivate func payloadOffset() -> Int64 {
-        Int64(intLiteral: lang.alignof_val(self.ptr.raw))
+        Int64(intLiteral: unsafe lang.alignof_val(self.ptr.raw))
     }
 
     /// `true` when no other clone is sharing storage. The litmus test for
@@ -149,7 +149,7 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
     public var refCount: Int64 {
         // The refcount is the block's first field; read it directly, so
         // this works whatever (and however sized) the payload is.
-        self.ptr.asRaw().cast[Int64]().read()
+        unsafe self.ptr.asRaw().cast[Int64]().read()
     }
 
     /// Bumps the refcount and returns a second `RcBox` pointing at the
@@ -157,8 +157,8 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
     /// the value; the next mutation should test `isUnique`.
     public func clone() -> RcBox[T] {
         let rcPtr = self.ptr.asRaw().cast[Int64]();
-        let count = rcPtr.read();
-        rcPtr.write(count + 1);
+        let count = unsafe rcPtr.read();
+        unsafe rcPtr.write(count + 1);
         RcBox(inner: self.ptr)
     }
 
@@ -166,18 +166,18 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
     // Called from deinit; not exposed publicly.
     private func release() {
         let rcPtr = self.ptr.asRaw().cast[Int64]();
-        let count = rcPtr.read();
+        let count = unsafe rcPtr.read();
         let newCount = count - 1;
 
         if newCount == 0 {
             // Drop the value field in-place at the heap address, then free the block.
             // Measured from the block itself so an unsized payload works too.
-            let layout = Layout.ofValue(at: self.ptr);
-            self.valuePtr().dropInPlace();
+            let layout = unsafe Layout.ofValue(at: self.ptr);
+            unsafe self.valuePtr().dropInPlace();
             var allocator = SystemAllocator();
-            allocator.deallocate(self.ptr.asRaw(), layout)
+            unsafe allocator.deallocate(self.ptr.asRaw(), layout)
         } else {
-            rcPtr.write(newCount)
+            unsafe rcPtr.write(newCount)
         }
     }
 
@@ -194,7 +194,7 @@ extend RcBox[T] where T: Copyable {
     /// types when `isUnique` is `false` — splits off a private
     /// copy so the caller can mutate without affecting other clones.
     public func deepClone() -> RcBox[T] {
-        let copy: T = self.valuePtr().value;
+        let copy: T = unsafe self.valuePtr().value;
         RcBox(copy)
     }
 }
@@ -205,13 +205,13 @@ extend RcBox[T] where T: Copyable {
 // function table (`lang.clone_val_into`).
 extend RcBox[T] where T: Cloneable {
     public func fork() -> RcBox[T] {
-        let layout = Layout.ofValue(at: self.ptr);
+        let layout = unsafe Layout.ofValue(at: self.ptr);
         var allocator = SystemAllocator();
         let result: RawPointer? = allocator.allocate(layout);
         if let .Some(raw) = result {
-            raw.cast[Int64]().write(1);
+            unsafe raw.cast[Int64]().write(1);
             let fresh: RcBox[T] = RcBox(inner: raw.cast[RcBoxStorage[T]]().withMetadata(of: self.ptr));
-            lang.clone_val_into(self.valuePtr().raw, fresh.valuePtr().raw);
+            unsafe lang.clone_val_into(self.valuePtr().raw, fresh.valuePtr().raw);
             return fresh
         }
         fatalError("RcBox allocation failed")
@@ -225,8 +225,8 @@ extend RcBox[T] where T: Cloneable {
 // lazy).
 extend RcBox[T]: MutableIndirection {
     type Target = T
-    public func pointeeRef() -> &T { self.valuePtr().value }
-    public mutating func pointeeMutRef() -> &mutating T { self.valuePtr().mutatingValue }
+    public func pointeeRef() -> &T { unsafe self.valuePtr().value }
+    public mutating func pointeeMutRef() -> &mutating T { unsafe self.valuePtr().mutatingValue }
 }
 
 // The shared-ownership contract (docs/design/shared-box.md). Most of it is
@@ -254,7 +254,7 @@ extend RcBox[T]: SharedBox {
     // all-returns-must-qualify). Hoisting the pointer into a `let`, wrapping it
     // in a helper, or adding a second return path loses the provenance and the
     // method starts failing E495. Do not refactor.
-    public func sharedMutRef() -> &mutating T { self.valuePtr().mutatingValue }
+    public func sharedMutRef() -> &mutating T { unsafe self.valuePtr().mutatingValue }
 
     /// Do the two handles point at the same storage block? Compares raw
     /// storage addresses, the same way `Pointer.isEqual(to:)` does — payload

@@ -584,7 +584,7 @@ func main() {
     var game = Game();
 
     for _ in game {
-        usleep(16667);
+        unsafe usleep(16667);
     }
 
 }

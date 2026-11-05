@@ -1996,7 +1996,7 @@ impl WorldResolver<'_> {
         };
 
         for item in &conformances.0 {
-            if let ConformanceItem::Positive(ast_ty, _) = item
+            if let ConformanceItem::Positive(ast_ty, ..) = item
                 && let Some(resolved) = self.resolve_type_entity(ast_ty)
                 && resolved == protocol
             {
@@ -2117,7 +2117,7 @@ impl WorldResolver<'_> {
     ) -> Option<Vec<HirTy>> {
         let conformances = self.ctx.get::<Conformances>(from_protocol)?;
         for item in &conformances.0 {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
+            let ConformanceItem::Positive(ast_ty, ..) = item else {
                 continue;
             };
             let Some(resolved) = self.resolve_type_entity(ast_ty) else {
@@ -2450,7 +2450,7 @@ impl WorldResolver<'_> {
         // Check Conformances on the TypeAlias itself (e.g., `type Iter: Iterator`)
         if let Some(conformances) = self.ctx.get::<Conformances>(alias_entity) {
             for item in &conformances.0 {
-                if let ConformanceItem::Positive(ast_ty, _) = item
+                if let ConformanceItem::Positive(ast_ty, ..) = item
                     && let Some(proto) = self.resolve_type_entity(ast_ty)
                     && self.ctx.get::<NodeKind>(proto) == Some(&NodeKind::Protocol)
                     && visited.insert(proto)

@@ -38,7 +38,7 @@ func libc_getenv(name: RawPointer) -> RawPointer
 /// ```
 public func getenv(name: String) -> Optional[String] {
     let cname = name.toCString();
-    let result = libc_getenv(cname.raw.asRaw());
+    let result = unsafe libc_getenv(cname.raw.asRaw());
     cname.free();
 
     if result.isNull {

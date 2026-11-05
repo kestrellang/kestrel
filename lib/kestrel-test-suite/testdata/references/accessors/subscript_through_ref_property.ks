@@ -29,9 +29,9 @@ func main() -> Int64 {
     print("read \(p.value(1)) \(p.mutatingValue(1)) \(q.value(1)) \(q.value(0)) ");
     p.mutatingValue(1) = 77;
     print("write \(x.b) ");
-    let m = &mutating p.mutatingValue;
+    let m = &mutating unsafe p.mutatingValue;
     m(1) += 10;
-    p.mutatingValue.a = 5;
+    unsafe p.mutatingValue.a = 5;
     m.a += 10;
     print("\(x.b) a \(x.a)\n");
     0

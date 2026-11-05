@@ -17,27 +17,27 @@ module Test
 
             // Write to and read from the allocated memory
             let typedPtr = ptr.cast[std.numeric.Int64]();
-            typedPtr.write(12345);
-            if typedPtr.read() != 12345 { return 3 }
+            unsafe typedPtr.write(12345);
+            if unsafe typedPtr.read() != 12345 { return 3 }
 
             // Write at an offset
-            typedPtr.offset(by: 1).write(67890);
-            if typedPtr.offset(by: 1).read() != 67890 { return 4 }
+            unsafe typedPtr.offset(by: 1).write(67890);
+            if unsafe typedPtr.offset(by: 1).read() != 67890 { return 4 }
 
             // Test reallocate
             let newLayout = std.memory.Layout(size: 128, alignment: 8);
-            let reallocResult = alloc.reallocate(ptr, layout, newLayout);
+            let reallocResult = unsafe alloc.reallocate(ptr, layout, newLayout);
             if reallocResult.isNone() { return 5 }
             let newPtr = reallocResult.unwrap();
             if newPtr.isNull { return 6 }
 
             // Data should be preserved after realloc
             let newTyped = newPtr.cast[std.numeric.Int64]();
-            if newTyped.read() != 12345 { return 7 }
-            if newTyped.offset(by: 1).read() != 67890 { return 8 }
+            if unsafe newTyped.read() != 12345 { return 7 }
+            if unsafe newTyped.offset(by: 1).read() != 67890 { return 8 }
 
             // Test deallocate
-            alloc.deallocate(newPtr, newLayout);
+            unsafe alloc.deallocate(newPtr, newLayout);
 
             // Test Layout.of
             let i64Layout = std.memory.Layout.of[std.numeric.Int64]();
@@ -63,15 +63,15 @@ module Test
             if alignedResult.isNone() { return 15 }
             let aligned = alignedResult.unwrap();
             if aligned.address % 64 != 0 { return 16 }
-            aligned.cast[std.numeric.Int64]().write(777);
+            unsafe aligned.cast[std.numeric.Int64]().write(777);
 
             let grownLayout = std.memory.Layout(size: 128, alignment: 64);
-            let grownResult = alloc.reallocate(aligned, alignedLayout, grownLayout);
+            let grownResult = unsafe alloc.reallocate(aligned, alignedLayout, grownLayout);
             if grownResult.isNone() { return 17 }
             let grown = grownResult.unwrap();
             if grown.address % 64 != 0 { return 18 }
-            if grown.cast[std.numeric.Int64]().read() != 777 { return 19 }
-            alloc.deallocate(grown, grownLayout);
+            if unsafe grown.cast[std.numeric.Int64]().read() != 777 { return 19 }
+            unsafe alloc.deallocate(grown, grownLayout);
 
             if std.memory.Layout.arrayChecked[std.numeric.Int64](-1).isSome() { return 20 }
             if std.memory.Layout.arrayChecked[std.numeric.Int64](std.numeric.Int64.maxValue).isSome() { return 21 }

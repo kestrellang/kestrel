@@ -35,8 +35,8 @@ func main() -> lang.i64 {
 
     // Pointer[Point].read() — the `-> T where T: Copyable` method directly.
     let p = SystemAllocator().allocate(Layout.of[Point]()).unwrap().cast[Point]();
-    p.write(Point(x: 10, y: 20));
-    let r = p.read();
+    unsafe p.write(Point(x: 10, y: 20));
+    let r = unsafe p.read();
     if r.x != 10 { return 3; }
     if r.y != 20 { return 4; }
     0

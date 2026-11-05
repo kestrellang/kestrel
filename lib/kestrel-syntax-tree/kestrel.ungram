@@ -57,7 +57,7 @@ ExtensionBody =
   '{' Item* '}'
 
 ProtocolDeclaration =
-  AttributeList? Visibility 'protocol' Name TypeParameterList?
+  AttributeList? Visibility UnsafeModifier? 'protocol' Name TypeParameterList?
   ConformanceList? WhereClause? ProtocolBody
 
 ProtocolBody =
@@ -90,12 +90,12 @@ EnumCaseParameter =
   (Name ':')? Ty
 
 FunctionDeclaration =
-  AttributeList? Visibility StaticModifier? ('mutating' | 'consuming')?
+  AttributeList? Visibility StaticModifier? UnsafeModifier? ('mutating' | 'consuming')?
   'func' Name TypeParameterList? ParameterList ReturnType? WhereClause?
   FunctionBody?
 
 InitializerDeclaration =
-  AttributeList? Visibility 'init' TypeParameterList? ParameterList
+  AttributeList? Visibility UnsafeModifier? 'init' TypeParameterList? ParameterList
   InitEffect? WhereClause? FunctionBody?
 
 InitEffect =
@@ -109,7 +109,7 @@ FunctionBody =
 | '=' Expression
 
 SubscriptDeclaration =
-  AttributeList? Visibility StaticModifier? 'subscript' TypeParameterList?
+  AttributeList? Visibility StaticModifier? UnsafeModifier? 'subscript' TypeParameterList?
   ParameterList FailableMarker? ReturnType WhereClause? SubscriptBody
 
 // `?` after a subscript's parameters or a property's name: a failable
@@ -121,7 +121,7 @@ SubscriptBody =
   CodeBlock | PropertyAccessors
 
 FieldDeclaration =
-  AttributeList? Visibility StaticModifier? LazyModifier? ('let' | 'var') Name
+  AttributeList? Visibility StaticModifier? UnsafeModifier? LazyModifier? ('let' | 'var') Name
   FailableMarker? ':' Ty
   (PropertyAccessors ('=' Expression)? | '=' Expression PropertyAccessors?)? ';'?
 
@@ -184,6 +184,10 @@ AliasedType =
 StaticModifier =
   'static'
 
+// `unsafe` on a declaration: using it needs an unsafe context.
+UnsafeModifier =
+  'unsafe'
+
 Visibility =
   ('public' | 'private' | 'internal' | 'fileprivate')?
 
@@ -234,7 +238,11 @@ ConformanceList =
   ':' ConformanceItem (',' ConformanceItem)* ','?
 
 ConformanceItem =
-  NegativeConformance | Ty
+  NegativeConformance | UnsafeConformance | Ty
+
+// `unsafe P`: the conformer vouches for an unsafe protocol's contract.
+UnsafeConformance =
+  'unsafe' Ty
 
 NegativeConformance =
   'not' (Ty | Path TypeArgumentList?)
@@ -422,6 +430,8 @@ Expr =
 | ExprReturn
 | ExprThrow
 | ExprTry
+| ExprUnsafe
+| ExprUnsafeBlock
 | ExprClosure
 | ExprMatch
 | ExprCast
@@ -557,6 +567,14 @@ ExprThrow =
 
 ExprTry =
   'try' Expression
+
+// `unsafe expr`: the operand is an unsafe context. Binds like `try`.
+ExprUnsafe =
+  'unsafe' Expression
+
+// `unsafe { ... }`: a block that is an unsafe context (not a closure).
+ExprUnsafeBlock =
+  'unsafe' CodeBlock
 
 // `consuming` is only accepted directly before a cast.
 ExprCast =

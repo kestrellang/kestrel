@@ -22,13 +22,13 @@ struct W {
     var p: Pointer[P]
 
     var value: P {
-        ref { println("  ref"); self.p.value }
-        mutating ref { println("  mutating ref"); self.p.mutatingValue }
+        ref { println("  ref"); unsafe self.p.value }
+        mutating ref { println("  mutating ref"); unsafe self.p.mutatingValue }
     }
 
     subscript(at i: Int64) -> P {
-        ref { println("  ref"); self.p.value }
-        mutating ref { println("  mutating ref"); self.p.mutatingValue }
+        ref { println("  ref"); unsafe self.p.value }
+        mutating ref { println("  mutating ref"); unsafe self.p.mutatingValue }
     }
 }
 

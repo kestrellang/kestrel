@@ -18,7 +18,7 @@ struct Item: Cloneable {
         // payload-clone, never `{ self }` (the aliasing footgun)
         Item(name: self.name.clone(), cell: self.cell)
     }
-    deinit { self.cell.write(self.cell.read() - 1); }
+    deinit { unsafe self.cell.write(self.cell.read() - 1); }
 
     func tag() -> String { self.name }
     consuming func consume() -> Int64 { 7 }
@@ -33,7 +33,7 @@ func run(counter: Pointer[Int64]) -> Int64 {
     let b = Box(item: Item(name: "x", cell: counter));
     if b.peek().consume() != 7 { return 1; }
     // exactly the copy deinit'd so far: 10 - 1 == 9
-    if counter.read() != 9 { return 2; }
+    if unsafe counter.read() != 9 { return 2; }
     // the original is alive and untouched
     if b.peek().tag() != "x" { return 3; }
     0
@@ -42,12 +42,12 @@ func run(counter: Pointer[Int64]) -> Int64 {
 @main
 func main() -> lang.i64 {
     let counter = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    counter.write(10);
+    unsafe counter.write(10);
 
     let status = run(counter);
     if status != 0 { return status.raw; }
 
     // the original deinit'd at `run` scope exit: 9 - 1 == 8
-    if counter.read() != 8 { return 4; }
+    if unsafe counter.read() != 8 { return 4; }
     0
 }

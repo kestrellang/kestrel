@@ -103,7 +103,7 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiply(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        hasher.write(UnsafeSlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
+        hasher.write(unsafe UnsafeSlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
     }
 }
 
@@ -200,8 +200,8 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     /// Bit-copies `T` out of the address — `T.deinit` does not run. This is
     /// a copy, so it requires `T: Copyable`; for non-Copyable pointees use
     /// `value` (borrow) or `take` (consuming read-out).
-    public func read() -> T where T: Copyable {
-        lang.ptr_read(self._raw)
+    public unsafe func read() -> T where T: Copyable {
+        unsafe lang.ptr_read(self._raw)
     }
 
     /// Moves `T` out of the address bitwise — a *consuming* read-out. Unlike
@@ -218,8 +218,8 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     /// take the pointee must not be read or dropped until the slot is
     /// re-initialised (e.g. via `write`). Taking the same slot twice without
     /// an intervening write double-owns the value and will double-free.
-    public func take() -> T where T: Sized {
-        lang.ptr_take(self._raw)
+    public unsafe func take() -> T where T: Sized {
+        unsafe lang.ptr_take(self._raw)
     }
 
     /// Borrowed view of the pointee — no copy, no clone, no `T: Copyable`
@@ -235,8 +235,8 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     ///   not verify the pointee's lifetime. Using it after the storage is
     ///   freed is undefined behavior — the same trust point as `read()`,
     ///   returning a view instead of a copy.
-    public var value: &T {
-        lang.ptr_ref(self._raw)
+    public unsafe var value: &T {
+        unsafe lang.ptr_ref(self._raw)
     }
 
     /// Mutable borrowed view of the pointee. Mutating methods and
@@ -253,8 +253,8 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     /// - Writing through a pointer into storage shared by a COW container
     ///   (`Array`, `String`, `Dictionary`) is visible through every copy,
     ///   breaking value semantics. Make the storage unique first.
-    public var mutatingValue: &mutating T {
-        lang.ptr_mut_ref(self._raw)
+    public unsafe var mutatingValue: &mutating T {
+        unsafe lang.ptr_mut_ref(self._raw)
     }
 
     /// Writes `value` through the pointer, without dropping the old pointee.
@@ -266,23 +266,23 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     /// `deinit`. If the pointer was captured with `Pointer(to:)` from a
     /// `let` place, writing is the documented const-cast footgun — the
     /// compiler does not stop it.
-    public func write(consuming value: T) where T: Sized {
-        lang.ptr_write(self._raw, value)
+    public unsafe func write(consuming value: T) where T: Sized {
+        unsafe lang.ptr_write(self._raw, value)
     }
 
     /// Replaces an INITIALIZED pointee: runs the old value's destructor in
     /// place, then writes `value`. Use this — not `write` — to overwrite a
     /// live slot; `write` is for uninitialized (or moved-out) storage and
     /// drops nothing, so overwriting a live heap value with it leaks.
-    public func assign(consuming value: T) where T: Sized {
-        lang.drop_in_place(self._raw);
-        lang.ptr_write(self._raw, value)
+    public unsafe func assign(consuming value: T) where T: Sized {
+        unsafe lang.drop_in_place(self._raw);
+        unsafe lang.ptr_write(self._raw, value)
     }
 
     /// Runs T's destructor at this address without copying the value to stack.
     /// The pointer remains valid but the pointee is left in a destroyed state.
-    public func dropInPlace() {
-        lang.drop_in_place(self._raw)
+    public unsafe func dropInPlace() {
+        unsafe lang.drop_in_place(self._raw)
     }
 
     /// Strides the pointer by `n` *elements* (multiplied by `sizeof[T]`).
@@ -341,7 +341,7 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiply(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        hasher.write(UnsafeSlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
+        hasher.write(unsafe UnsafeSlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
     }
 }
 
@@ -374,7 +374,7 @@ public struct UnsafeSlice[T] {
     /// @name From Pointer
     /// Builds a slice from an existing pointer and element count. The
     /// caller is responsible for ensuring `count` elements live at `pointer`.
-    public init(pointer pointer: Pointer[T], count count: Int64) {
+    public unsafe init(pointer pointer: Pointer[T], count count: Int64) {
         self.ptr = pointer;
         self.len = count;
     }
@@ -400,7 +400,7 @@ public struct UnsafeSlice[T] {
     /// First element, or `.None` for an empty slice.
     public func first() -> Optional[T] {
         if self.len > 0 {
-            .Some(self.ptr.read())
+            .Some(unsafe self.ptr.read())
         } else {
             .None
         }
@@ -409,7 +409,7 @@ public struct UnsafeSlice[T] {
     /// Last element, or `.None` for an empty slice.
     public func last() -> Optional[T] {
         if self.len > 0 {
-            .Some(self.ptr.offset(by: self.len - 1).read())
+            .Some(unsafe self.ptr.offset(by: self.len - 1).read())
         } else {
             .None
         }
@@ -448,16 +448,16 @@ extend UnsafeSlice[T]: Equatable where T: Equatable { }
 
 /// `ArrayMatchable` conformance: array patterns over raw memory. `..rest`
 /// binds a narrower `UnsafeSlice` (no lifetime tracking, like the slice).
-extend UnsafeSlice[T]: ArrayMatchable {
+extend UnsafeSlice[T]: unsafe ArrayMatchable {
     type Element = T
     type Rest = UnsafeSlice[T]
 
     public func matchLength() -> Int64 { self.len }
 
-    public func matchGet(index: Int64) -> T { self.ptr.offset(by: index).read() }
+    public func matchGet(index: Int64) -> T { unsafe self.ptr.offset(by: index).read() }
 
     public func matchSlice(from: Int64, to: Int64) -> UnsafeSlice[T] {
-        UnsafeSlice(pointer: self.ptr.offset(by: from), count: to - from)
+        unsafe UnsafeSlice(pointer: self.ptr.offset(by: from), count: to - from)
     }
 }
 
@@ -483,7 +483,7 @@ public struct UnsafeSliceIterator[T]: Iterator {
     /// Yields the next element, or `.None` when the count reaches zero.
     public mutating func next() -> Optional[T] {
         if self.remaining > 0 {
-            let value = self.ptr.read();
+            let value = unsafe self.ptr.read();
             self.ptr = self.ptr.offset(by: 1);
             self.remaining = self.remaining - 1;
             .Some(value)
@@ -524,7 +524,7 @@ public struct RefSliceIterator[T]: Iterator {
     /// the count reaches zero.
     public mutating func next() -> Optional[&T] {
         if self.remaining > 0 {
-            let r = &self.ptr.value;
+            let r = unsafe &self.ptr.value;
             self.ptr = self.ptr.offset(by: 1);
             self.remaining = self.remaining - 1;
             let o: Optional[&T] = .Some(r);
@@ -568,7 +568,7 @@ public struct MutRefSliceIterator[T]: Iterator {
     /// `.None` when the count reaches zero.
     public mutating func next() -> Optional[&mutating T] {
         if self.remaining > 0 {
-            let r = &mutating self.ptr.mutatingValue;
+            let r = unsafe &mutating self.ptr.mutatingValue;
             self.ptr = self.ptr.offset(by: 1);
             self.remaining = self.remaining - 1;
             let o: Optional[&mutating T] = .Some(r);
@@ -584,8 +584,8 @@ public struct MutRefSliceIterator[T]: Iterator {
 // under the protocol's names. Works for any `T` (Copyable or not).
 extend Pointer[T]: MutableIndirection {
     type Target = T
-    public func pointeeRef() -> &T { self.value }
-    public mutating func pointeeMutRef() -> &mutating T { self.mutatingValue }
+    public func pointeeRef() -> &T { unsafe self.value }
+    public mutating func pointeeMutRef() -> &mutating T { unsafe self.mutatingValue }
 }
 
 
@@ -615,7 +615,7 @@ public func swap[T](mutating a: T, mutating b: T) where T: not Copyable, T: not 
     if pa.address == pb.address {
         return
     }
-    let tmp = pa.take();
-    pa.write(pb.take());
-    pb.write(tmp)
+    let tmp = unsafe pa.take();
+    unsafe pa.write(pb.take());
+    unsafe pb.write(tmp)
 }

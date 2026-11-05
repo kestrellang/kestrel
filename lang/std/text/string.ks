@@ -24,7 +24,7 @@ func _memcpyBytes(dst dst: Pointer[UInt8], src src: Pointer[UInt8], n n: Int64) 
     if n <= 0 {
         return
     }
-     memcpy(dst.asRaw(), src.asRaw(), n);
+     unsafe memcpy(dst.asRaw(), src.asRaw(), n);
 }
 
 /// Byte-wise equality of two regions via libc `memcmp`. Caller ensures
@@ -33,7 +33,7 @@ func _bytesEqual(a a: Pointer[UInt8], b b: Pointer[UInt8], n n: Int64) -> Bool {
     if n <= 0 {
         return true
     }
-    memcmp(a.asRaw(), b.asRaw(), n) == 0
+    unsafe memcmp(a.asRaw(), b.asRaw(), n) == 0
 }
 
 /// Allocates a typed `Pointer[UInt8]` of `layout` bytes, panicking on
@@ -50,7 +50,7 @@ func _textAlloc(layout: Layout) -> Pointer[UInt8] {
 /// Frees a buffer previously returned by `_textAlloc`.
 func _textDealloc(ptr: Pointer[UInt8], layout: Layout) {
     var allocator = SystemAllocator();
-    allocator.deallocate(ptr.asRaw(), layout)
+    unsafe allocator.deallocate(ptr.asRaw(), layout)
 }
 
 /// Lexicographic byte-wise comparison via libc `memcmp`. Returns the
@@ -59,7 +59,7 @@ func _bytesCompare(a a: Pointer[UInt8], b b: Pointer[UInt8], n n: Int64) -> Orde
     if n <= 0 {
         return .Equal
     }
-    let r = memcmp(a.asRaw(), b.asRaw(), n);
+    let r = unsafe memcmp(a.asRaw(), b.asRaw(), n);
     if r < 0 {
         .Less
     } else if r > 0 {
@@ -281,7 +281,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         let byteLen = Int64(intLiteral: length);
         if byteLen > 0 {
             let newPtr = _textAlloc(Layout.array[UInt8](byteLen));
-             memcpy(newPtr.asRaw(), RawPointer(raw: ptr), byteLen);
+             unsafe memcpy(newPtr.asRaw(), RawPointer(raw: ptr), byteLen);
             self.storage = CowBox(StringStorage(
                 ptr: newPtr,
                 len: byteLen,
@@ -563,7 +563,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     internal mutating func appendByte(byte: UInt8) {
         self.grow(self.len() + 1);
         let s = &mutating self.storage.value;
-        s.ptr.offset(by: s.len).write(byte);
+        unsafe s.ptr.offset(by: s.len).write(byte);
         s.len = s.len + 1
     }
 
@@ -682,12 +682,12 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         let myLen = self.len();
         let s = &mutating self.storage.value;
         for i in 0..<myLen {
-            let byte = s.ptr.offset(by: i).read();
+            let byte = unsafe s.ptr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             // A-Z: 65-90 -> a-z: 97-122
             let isUppercase = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
             if Bool(boolLiteral: isUppercase) {
-                s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_add(v, 32))))
+                unsafe s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_add(v, 32))))
             }
         }
     }
@@ -697,12 +697,12 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         let myLen = self.len();
         let s = &mutating self.storage.value;
         for i in 0..<myLen {
-            let byte = s.ptr.offset(by: i).read();
+            let byte = unsafe s.ptr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             // a-z: 97-122 -> A-Z: 65-90
             let isLowercase = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
             if Bool(boolLiteral: isLowercase) {
-                s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_sub(v, 32))))
+                unsafe s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_sub(v, 32))))
             }
         }
     }
@@ -850,7 +850,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Sends the whole buffer in a single `write` so the hasher gets
     /// to choose how to consume it.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(UnsafeSlice(pointer: self.ptr(), count: self.len()))
+        hasher.write(unsafe UnsafeSlice(pointer: self.ptr(), count: self.len()))
     }
 
     /// Returns a shallow clone — storage is shared until either side mutates.

@@ -967,7 +967,7 @@ mod tests {
                 .0
                 .iter()
                 .map(|c| match c {
-                    ConformanceItem::Positive(ty, _) => format!("+{}", type_name(ty)),
+                    ConformanceItem::Positive(ty, ..) => format!("+{}", type_name(ty)),
                     ConformanceItem::Negative(ty, _) => format!("-{}", type_name(ty)),
                 })
                 .collect();

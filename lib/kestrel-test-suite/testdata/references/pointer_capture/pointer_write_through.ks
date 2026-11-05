@@ -16,11 +16,11 @@ import std.numeric.(Int64)
 func main() -> lang.i64 {
     var x: Int64 = 5;
     let p = Pointer(to: x);
-    p.write(100);
+    unsafe p.write(100);
     if x != 100 { return 1; }
 
     // Writing through `mutatingValue` hits the same place.
-    p.mutatingValue = 7;
+    unsafe p.mutatingValue = 7;
     if x != 7 { return 2; }
     0
 }

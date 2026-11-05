@@ -191,7 +191,7 @@ fn gather_protocol_instantiations(
         };
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(resolved) = resolve_conformance_entity(ctx, ast_ty, entity, root) else {
@@ -343,7 +343,7 @@ fn declared_conformance_protocols(
         .0
         .iter()
         .filter_map(|item| {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
+            let ConformanceItem::Positive(ast_ty, ..) = item else {
                 return None;
             };
             resolve_conformance_entity(ctx, ast_ty, entity, root)
@@ -405,7 +405,7 @@ where
             return false;
         };
         conformances.0.iter().any(|item| {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
+            let ConformanceItem::Positive(ast_ty, ..) = item else {
                 return false;
             };
             let Some(declared) = resolve_conformance_entity(ctx, ast_ty, parent, root) else {
@@ -507,7 +507,7 @@ mod tests {
     }
 
     fn positive(name: &str) -> ConformanceItem {
-        ConformanceItem::Positive(named_ast(name), fake_syntax())
+        ConformanceItem::Positive(named_ast(name), fake_syntax(), false)
     }
 
     fn spawn_protocol(world: &mut World, parent: Entity, name: &str) -> Entity {

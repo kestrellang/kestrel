@@ -1732,7 +1732,7 @@ pub(super) fn find_extension_conformance_protocol(
 ) -> Option<Entity> {
     let confs = ctx.get::<kestrel_ast_builder::Conformances>(extension)?;
     for item in &confs.0 {
-        let kestrel_ast_builder::ConformanceItem::Positive(ast_ty, _) = item else {
+        let kestrel_ast_builder::ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let kestrel_ast_builder::AstType::Named { segments, .. } = ast_ty else {
@@ -1838,7 +1838,7 @@ pub(super) fn positive_conformances_to(
             continue;
         };
         for item in &confs.0 {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
+            let ConformanceItem::Positive(ast_ty, ..) = item else {
                 continue;
             };
             let kestrel_ast_builder::AstType::Named { segments, .. } = ast_ty else {

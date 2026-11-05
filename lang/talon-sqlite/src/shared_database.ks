@@ -45,12 +45,12 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
     public init(path: String) throws SqliteError {
         var dbRaw = RawPointer.nullPointer();
         let cpath = path.toCString();
-        let result = ffi.sqlite3_open(cpath.raw.asRaw(), Pointer(to: dbRaw).asRaw());
+        let result = unsafe ffi.sqlite3_open(cpath.raw.asRaw(), Pointer(to: dbRaw).asRaw());
         cpath.free();
 
         if result != ffi.SQLITE_OK() {
             if not dbRaw.isNull {
-                 ffi.sqlite3_close(dbRaw);
+                 unsafe ffi.sqlite3_close(dbRaw);
             }
             throw SqliteError.Error("failed to open database: " + path);
         }
@@ -60,10 +60,10 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
         let rawPtr = allocator.allocate(layout);
         if let .Some(p) = rawPtr {
             self.ptr = p.cast[SharedDbStorage]();
-            self.ptr.write(SharedDbStorage(refCount: 1, db: dbRaw));
+            unsafe self.ptr.write(SharedDbStorage(refCount: 1, db: dbRaw));
             self.cache = RcBox([:]);
         } else {
-             ffi.sqlite3_close(dbRaw);
+             unsafe ffi.sqlite3_close(dbRaw);
             fatalError("SharedDatabase allocation failed")
         }
     }
@@ -76,26 +76,26 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
     }
 
     public func clone() -> SharedDatabase {
-        var storage = self.ptr.read();
+        var storage = unsafe self.ptr.read();
         storage.refCount = storage.refCount + 1;
-        self.ptr.write(storage);
+        unsafe self.ptr.write(storage);
         SharedDatabase(inner: self.ptr, cache: self.cache.clone())
     }
 
     public func execute(sql: SQL) -> () throws SqliteError {
-        executeCachedOnDb(self.ptr.read().db, self.cache, sql)
+        executeCachedOnDb(unsafe self.ptr.read().db, self.cache, sql)
     }
 
     public func query[R](sql: SQL) -> Array[R] throws SqliteError where R: FromRow {
-        queryCachedOnDb[R](self.ptr.read().db, self.cache, sql)
+        queryCachedOnDb[R](unsafe self.ptr.read().db, self.cache, sql)
     }
 
     public func lastInsertRowId() -> Int64 {
-        lastInsertRowIdOnDb(self.ptr.read().db)
+        lastInsertRowIdOnDb(unsafe self.ptr.read().db)
     }
 
     public func transaction(body: (Transaction) -> () throws SqliteError) -> () throws SqliteError {
-        let dbRaw = self.ptr.read().db;
+        let dbRaw = unsafe self.ptr.read().db;
         try execRawOnDb(dbRaw, "BEGIN");
         let tx = Transaction(db: dbRaw);
         match body(tx) {
@@ -108,7 +108,7 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
     }
 
     private func release() {
-        var storage = self.ptr.read();
+        var storage = unsafe self.ptr.read();
         storage.refCount = storage.refCount - 1;
 
         if storage.refCount == 0 {
@@ -116,13 +116,13 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
             // the cache is still alive (its RcBox field drops after this body).
             finalizeCachedStmts(self.cache);
             if not storage.db.isNull {
-                 ffi.sqlite3_close(storage.db);
+                 unsafe ffi.sqlite3_close(storage.db);
             }
             let layout = Layout.of[SharedDbStorage]();
             var allocator = SystemAllocator();
-            allocator.deallocate(self.ptr.asRaw(), layout)
+            unsafe allocator.deallocate(self.ptr.asRaw(), layout)
         } else {
-            self.ptr.write(storage)
+            unsafe self.ptr.write(storage)
         }
     }
 

@@ -245,16 +245,23 @@ pub fn set_conformances(
         .conformance_items()
         .filter_map(|item| {
             let syntax = SyntaxNodePtr::new(item.syntax());
-            match item.negative_conformance() {
-                Some(neg) => Some(ConformanceItem::Negative(
+            if let Some(neg) = item.negative_conformance() {
+                return Some(ConformanceItem::Negative(
                     lower_opt_type(neg.ty(), file_id)?,
                     syntax,
-                )),
-                None => Some(ConformanceItem::Positive(
-                    lower_opt_type(item.ty(), file_id)?,
-                    syntax,
-                )),
+                ));
             }
+            // `unsafe P` nests its type one level down.
+            let unsafe_item = item.unsafe_conformance();
+            let ty = match &unsafe_item {
+                Some(u) => u.ty(),
+                None => item.ty(),
+            };
+            Some(ConformanceItem::Positive(
+                lower_opt_type(ty, file_id)?,
+                syntax,
+                unsafe_item.is_some(),
+            ))
         })
         .collect();
     if !items.is_empty() {

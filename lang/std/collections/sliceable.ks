@@ -84,30 +84,30 @@ extend Int64: SeqIndex[T] {
         if self < 0 or self >= slice.count {
             fatalError("Index out of bounds")
         }
-        slice.pointer.offset(by: self).read()
+        unsafe slice.pointer.offset(by: self).read()
     }
 
     public func readSeqChecked(from slice: UnsafeSlice[T]) -> T? {
         if self >= 0 and self < slice.count {
-            .Some(slice.pointer.offset(by: self).read())
+            .Some(unsafe slice.pointer.offset(by: self).read())
         } else {
             .None
         }
     }
 
     public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> T {
-        slice.pointer.offset(by: self).read()
+        unsafe slice.pointer.offset(by: self).read()
     }
 
     public func writeSeq(to slice: UnsafeSlice[T], with value: T) {
         if self < 0 or self >= slice.count {
             fatalError("Index out of bounds")
         }
-        slice.pointer.offset(by: self).assign(value)
+        unsafe slice.pointer.offset(by: self).assign(value)
     }
 
     public func writeSeqUnchecked(to slice: UnsafeSlice[T], with value: T) {
-        slice.pointer.offset(by: self).assign(value)
+        unsafe slice.pointer.offset(by: self).assign(value)
     }
 }
 
@@ -120,21 +120,21 @@ extend Range[Int64]: SeqIndex[T] {
         if start < 0 or end > slice.count or start > end {
             fatalError("Range out of bounds")
         }
-        UnsafeSlice(pointer: slice.pointer.offset(by: start), count: end - start)
+        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: end - start)
     }
 
     public func readSeqChecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T]? {
         let start = self.start;
         let end = self.end;
         if start >= 0 and end <= slice.count and start <= end {
-            .Some(UnsafeSlice(pointer: slice.pointer.offset(by: start), count: end - start))
+            .Some(unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: end - start))
         } else {
             .None
         }
     }
 
     public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        UnsafeSlice(pointer: slice.pointer.offset(by: self.start), count: self.end - self.start)
+        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: self.start), count: self.end - self.start)
     }
 
     public func writeSeq(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
@@ -149,7 +149,7 @@ extend Range[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
+            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -162,7 +162,7 @@ extend Range[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
+            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -177,14 +177,14 @@ extend ClosedRange[Int64]: SeqIndex[T] {
         if start < 0 or endExclusive > slice.count or start > endExclusive {
             fatalError("Range out of bounds")
         }
-        UnsafeSlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
+        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
     }
 
     public func readSeqChecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T]? {
         let start = self.start;
         let endExclusive = self.end + 1;
         if start >= 0 and endExclusive <= slice.count and start <= endExclusive {
-            .Some(UnsafeSlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start))
+            .Some(unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start))
         } else {
             .None
         }
@@ -193,7 +193,7 @@ extend ClosedRange[Int64]: SeqIndex[T] {
     public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
         let start = self.start;
         let endExclusive = self.end + 1;
-        UnsafeSlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
+        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
     }
 
     public func writeSeq(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
@@ -208,7 +208,7 @@ extend ClosedRange[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
+            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -221,7 +221,7 @@ extend ClosedRange[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
+            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -237,14 +237,14 @@ extend RangeFrom[Int64]: SeqIndex[T] {
         if start < 0 or start > len {
             fatalError("Index out of bounds")
         }
-        UnsafeSlice(pointer: slice.pointer.offset(by: start), count: len - start)
+        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: len - start)
     }
 
     public func readSeqChecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T]? {
         let start = self.start;
         let len = slice.count;
         if start >= 0 and start <= len {
-            .Some(UnsafeSlice(pointer: slice.pointer.offset(by: start), count: len - start))
+            .Some(unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: len - start))
         } else {
             .None
         }
@@ -252,7 +252,7 @@ extend RangeFrom[Int64]: SeqIndex[T] {
 
     public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
         let start = self.start;
-        UnsafeSlice(pointer: slice.pointer.offset(by: start), count: slice.count - start)
+        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: slice.count - start)
     }
 
     public func writeSeq(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
@@ -267,7 +267,7 @@ extend RangeFrom[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
+            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -280,7 +280,7 @@ extend RangeFrom[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
+            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -295,20 +295,20 @@ extend RangeUpTo[Int64]: SeqIndex[T] {
         if end < 0 or end > slice.count {
             fatalError("Index out of bounds")
         }
-        UnsafeSlice(pointer: slice.pointer, count: end)
+        unsafe UnsafeSlice(pointer: slice.pointer, count: end)
     }
 
     public func readSeqChecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T]? {
         let end = self.end;
         if end >= 0 and end <= slice.count {
-            .Some(UnsafeSlice(pointer: slice.pointer, count: end))
+            .Some(unsafe UnsafeSlice(pointer: slice.pointer, count: end))
         } else {
             .None
         }
     }
 
     public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        UnsafeSlice(pointer: slice.pointer, count: self.end)
+        unsafe UnsafeSlice(pointer: slice.pointer, count: self.end)
     }
 
     public func writeSeq(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
@@ -321,7 +321,7 @@ extend RangeUpTo[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < end {
-            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
+            unsafe slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -333,7 +333,7 @@ extend RangeUpTo[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < end {
-            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
+            unsafe slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -348,20 +348,20 @@ extend RangeThrough[Int64]: SeqIndex[T] {
         if endExclusive < 0 or endExclusive > slice.count {
             fatalError("Index out of bounds")
         }
-        UnsafeSlice(pointer: slice.pointer, count: endExclusive)
+        unsafe UnsafeSlice(pointer: slice.pointer, count: endExclusive)
     }
 
     public func readSeqChecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T]? {
         let endExclusive = self.end + 1;
         if endExclusive >= 0 and endExclusive <= slice.count {
-            .Some(UnsafeSlice(pointer: slice.pointer, count: endExclusive))
+            .Some(unsafe UnsafeSlice(pointer: slice.pointer, count: endExclusive))
         } else {
             .None
         }
     }
 
     public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        UnsafeSlice(pointer: slice.pointer, count: self.end + 1)
+        unsafe UnsafeSlice(pointer: slice.pointer, count: self.end + 1)
     }
 
     public func writeSeq(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
@@ -374,7 +374,7 @@ extend RangeThrough[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < endExclusive {
-            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
+            unsafe slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -386,7 +386,7 @@ extend RangeThrough[Int64]: SeqIndex[T] {
         }
         var i = 0;
         while i < endExclusive {
-            slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
+            unsafe slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -407,7 +407,7 @@ extend Int64: SeqClampable[T] {
         var idx = self;
         if idx < 0 { idx = 0 }
         if idx >= len { idx = len - 1 }
-        .Some(slice.pointer.offset(by: idx).read())
+        .Some(unsafe slice.pointer.offset(by: idx).read())
     }
 
     public func writeSeqClamped(to slice: UnsafeSlice[T], with value: T?) {
@@ -419,7 +419,7 @@ extend Int64: SeqClampable[T] {
             var idx = self;
             if idx < 0 { idx = 0 }
             if idx >= len { idx = len - 1 }
-            slice.pointer.offset(by: idx).assign(v)
+            unsafe slice.pointer.offset(by: idx).assign(v)
         }
     }
 }
@@ -434,7 +434,7 @@ extend Range[Int64]: SeqClampable[T] {
         if start < 0 { start = 0 }
         if end > len { end = len }
         if start > end { start = end }
-        UnsafeSlice(pointer: slice.pointer.offset(by: start), count: end - start)
+        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: end - start)
     }
 
     public func writeSeqClamped(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
@@ -450,7 +450,7 @@ extend Range[Int64]: SeqClampable[T] {
         }
         var i = 0;
         while i < rangeLen {
-            slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
+            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
             i = i + 1;
         }
     }
@@ -470,7 +470,7 @@ extend Int64: SeqWrappable[T] {
         }
         var idx = self % len;
         if idx < 0 { idx = idx + len }
-        .Some(slice.pointer.offset(by: idx).read())
+        .Some(unsafe slice.pointer.offset(by: idx).read())
     }
 
     public func writeSeqWrapped(to slice: UnsafeSlice[T], with value: T?) {
@@ -481,7 +481,7 @@ extend Int64: SeqWrappable[T] {
             }
             var idx = self % len;
             if idx < 0 { idx = idx + len }
-            slice.pointer.offset(by: idx).assign(v)
+            unsafe slice.pointer.offset(by: idx).assign(v)
         }
     }
 }
@@ -622,7 +622,7 @@ extend Sliceable[T] {
     public func first() -> T? {
         let s = self.asUnsafeSlice();
         if s.count > 0 {
-            .Some(s.pointer.read())
+            .Some(unsafe s.pointer.read())
         } else {
             .None
         }
@@ -642,7 +642,7 @@ extend Sliceable[T] {
     public func last() -> T? {
         let s = self.asUnsafeSlice();
         if s.count > 0 {
-            .Some(s.pointer.offset(by: s.count - 1).read())
+            .Some(unsafe s.pointer.offset(by: s.count - 1).read())
         } else {
             .None
         }
@@ -667,7 +667,7 @@ extend Sliceable[T] {
             return .None
         }
         let index = Int64(from: rng.nextUInt64(below: UInt64(from: s.count)));
-        .Some(s.pointer.offset(by: index).read())
+        .Some(unsafe s.pointer.offset(by: index).read())
     }
 
     /// A uniformly random element using OS entropy, or `.None` for an
@@ -741,7 +741,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("prefix: count exceeds length")
         }
-        UnsafeSlice(pointer: s.pointer, count: count)
+        unsafe UnsafeSlice(pointer: s.pointer, count: count)
     }
 
     /// Returns a slice over the last `count` elements. O(1).
@@ -760,7 +760,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("suffix: count exceeds length")
         }
-        UnsafeSlice(pointer: s.pointer.offset(by: s.count - count), count: count)
+        unsafe UnsafeSlice(pointer: s.pointer.offset(by: s.count - count), count: count)
     }
 
     /// Returns a slice with the first `count` elements skipped. O(1).
@@ -781,7 +781,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("drop(first:): count exceeds length")
         }
-        UnsafeSlice(pointer: s.pointer.offset(by: count), count: s.count - count)
+        unsafe UnsafeSlice(pointer: s.pointer.offset(by: count), count: s.count - count)
     }
 
     /// Returns a slice with the last `count` elements skipped. O(1).
@@ -802,7 +802,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("drop(last:): count exceeds length")
         }
-        UnsafeSlice(pointer: s.pointer, count: s.count - count)
+        unsafe UnsafeSlice(pointer: s.pointer, count: s.count - count)
     }
 
     // -- Searching (predicate) -----------------------------------------------
@@ -822,7 +822,7 @@ extend Sliceable[T] {
         let s = self.asUnsafeSlice();
         let myPtr = s.pointer;
         for i in 0..<s.count {
-            if predicate(myPtr.offset(by: i).read()) {
+            if predicate(unsafe myPtr.offset(by: i).read()) {
                 return .Some(i)
             }
         }
@@ -846,7 +846,7 @@ extend Sliceable[T] {
         let myPtr = s.pointer;
         var i = s.count - 1;
         while i >= 0 {
-            if predicate(myPtr.offset(by: i).read()) {
+            if predicate(unsafe myPtr.offset(by: i).read()) {
                 return .Some(i)
             }
             i = i - 1
@@ -865,7 +865,7 @@ extend Sliceable[T] {
         let s = self.asUnsafeSlice();
         let myPtr = s.pointer;
         for i in 0..<s.count {
-            let elem = myPtr.offset(by: i).read();
+            let elem = unsafe myPtr.offset(by: i).read();
             if predicate(elem) {
                 return .Some(elem)
             }
@@ -888,7 +888,7 @@ extend Sliceable[T] {
         let myPtr = s.pointer;
         var i = s.count - 1;
         while i >= 0 {
-            let elem = myPtr.offset(by: i).read();
+            let elem = unsafe myPtr.offset(by: i).read();
             if predicate(elem) {
                 return .Some(elem)
             }
@@ -914,7 +914,7 @@ extend Sliceable[T] {
         let s = self.asUnsafeSlice();
         let myPtr = s.pointer;
         for i in 0..<s.count {
-            if predicate(myPtr.offset(by: i).read()) == false {
+            if predicate(unsafe myPtr.offset(by: i).read()) == false {
                 return false
             }
         }
@@ -936,7 +936,7 @@ extend Sliceable[T] {
         let s = self.asUnsafeSlice();
         let myPtr = s.pointer;
         for i in 0..<s.count {
-            if predicate(myPtr.offset(by: i).read()) {
+            if predicate(unsafe myPtr.offset(by: i).read()) {
                 return true
             }
         }
@@ -955,7 +955,7 @@ extend Sliceable[T] {
         let myPtr = s.pointer;
         var result: Int64 = 0;
         for i in 0..<s.count {
-            if predicate(myPtr.offset(by: i).read()) {
+            if predicate(unsafe myPtr.offset(by: i).read()) {
                 result = result + 1
             }
         }
@@ -982,7 +982,7 @@ extend Sliceable[T] {
         var b = ArrayBuilder[U](capacity: s.count);
         let p = s.pointer;
         for i in 0..<s.count {
-            b.append(transform(p.offset(by: i).read()))
+            b.append(transform(unsafe p.offset(by: i).read()))
         }
         b.build()
     }
@@ -1000,7 +1000,7 @@ extend Sliceable[T] {
         var b = ArrayBuilder[T]();
         let p = s.pointer;
         for i in 0..<s.count {
-            let elem = p.offset(by: i).read();
+            let elem = unsafe p.offset(by: i).read();
             if predicate(elem) {
                 b.append(elem)
             }
@@ -1021,7 +1021,7 @@ extend Sliceable[T] {
         var b = ArrayBuilder[U]();
         let p = s.pointer;
         for i in 0..<s.count {
-            if let .Some(value) = transform(p.offset(by: i).read()) {
+            if let .Some(value) = transform(unsafe p.offset(by: i).read()) {
                 b.append(value)
             }
         }
@@ -1041,7 +1041,7 @@ extend Sliceable[T] {
         var b = ArrayBuilder[U]();
         let p = s.pointer;
         for i in 0..<s.count {
-            let inner = transform(p.offset(by: i).read());
+            let inner = transform(unsafe p.offset(by: i).read());
             for j in 0..<inner.count {
                 b.append(inner(unchecked: j))
             }
@@ -1072,7 +1072,7 @@ extend Sliceable[T] where T: Equatable {
             return false
         }
         for i in 0..<a.count {
-            if a.pointer.offset(by: i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
+            if unsafe a.pointer.offset(by: i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
                 return false
             }
         }
@@ -1093,7 +1093,7 @@ extend Sliceable[T] where T: Equatable {
         let s = self.asUnsafeSlice();
         let myPtr = s.pointer;
         for i in 0..<s.count {
-            if myPtr.offset(by: i).read().isEqual(to: element) {
+            if unsafe myPtr.offset(by: i).read().isEqual(to: element) {
                 return true
             }
         }
@@ -1141,7 +1141,7 @@ extend Sliceable[T] where T: Equatable {
             return false
         }
         for i in 0..<b.count {
-            if a.pointer.offset(by: i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
+            if unsafe a.pointer.offset(by: i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
                 return false
             }
         }
@@ -1166,7 +1166,7 @@ extend Sliceable[T] where T: Equatable {
         }
         let offset = a.count - b.count;
         for i in 0..<b.count {
-            if a.pointer.offset(by: offset + i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
+            if unsafe a.pointer.offset(by: offset + i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
                 return false
             }
         }
@@ -1195,9 +1195,9 @@ extend Sliceable[T] where T: Comparable {
             return .None
         }
         let myPtr = s.pointer;
-        var result = myPtr.read();
+        var result = unsafe myPtr.read();
         for i in 1..<s.count {
-            let elem = myPtr.offset(by: i).read();
+            let elem = unsafe myPtr.offset(by: i).read();
             if elem < result {
                 result = elem
             }
@@ -1221,9 +1221,9 @@ extend Sliceable[T] where T: Comparable {
             return .None
         }
         let myPtr = s.pointer;
-        var result = myPtr.read();
+        var result = unsafe myPtr.read();
         for i in 1..<s.count {
-            let elem = myPtr.offset(by: i).read();
+            let elem = unsafe myPtr.offset(by: i).read();
             if elem > result {
                 result = elem
             }
@@ -1251,7 +1251,7 @@ extend Sliceable[T] where T: Comparable {
         }
         let myPtr = s.pointer;
         for i in 1..<s.count {
-            if myPtr.offset(by: i).read() < myPtr.offset(by: i - 1).read() {
+            if unsafe myPtr.offset(by: i).read() < unsafe myPtr.offset(by: i - 1).read() {
                 return false
             }
         }
@@ -1280,7 +1280,7 @@ extend Sliceable[T] where T: Comparable {
         var hi: Int64 = s.count;
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
-            let midVal = myPtr.offset(by: mid).read();
+            let midVal = unsafe myPtr.offset(by: mid).read();
             if midVal < element {
                 lo = mid + 1
             } else if midVal > element {
@@ -1307,7 +1307,7 @@ extend Sliceable[T] where T: Comparable {
         copy.reserveCapacity(s.count);
         let myPtr = s.pointer;
         for i in 0..<s.count {
-            copy.append(myPtr.offset(by: i).read())
+            copy.append(unsafe myPtr.offset(by: i).read())
         }
         copy.sort(by: { (a, b) in a < b });
         copy
@@ -1334,7 +1334,7 @@ extend Sliceable[T] where T: Hashable {
         let s = self.asUnsafeSlice();
         let myPtr = s.pointer;
         for i in 0..<s.count {
-            let elem = myPtr.offset(by: i).read();
+            let elem = unsafe myPtr.offset(by: i).read();
             var found = false;
             for j in 0..<result.count {
                 if result(unchecked: j).isEqual(to: elem) {
@@ -1370,7 +1370,7 @@ extend Sliceable[T] where T: Formattable {
             if i > 0 {
                 writer.append(", ")
             }
-            myPtr.offset(by: i).read().format(into: writer, options)
+            unsafe myPtr.offset(by: i).read().format(into: writer, options)
         }
         writer.append(char: ']')
     }

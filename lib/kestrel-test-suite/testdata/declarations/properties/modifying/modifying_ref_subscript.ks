@@ -15,17 +15,17 @@ struct Slots {
     subscript(i: Int64) -> Int64 {
         modifying ref {
             self.reads += 1;
-            self.p.offset(by: i).value
+            unsafe self.p.offset(by: i).value
         }
-        mutating ref { self.p.offset(by: i).mutatingValue }
+        mutating ref { unsafe self.p.offset(by: i).mutatingValue }
     }
 }
 
 @main
 func main() -> lang.i64 {
     let p = SystemAllocator().allocate(Layout.array[Int64](4)).unwrap().cast[Int64]();
-    p.write(10);
-    p.offset(by: 1).write(20);
+    unsafe p.write(10);
+    unsafe p.offset(by: 1).write(20);
     var s = Slots(p: p, reads: 0);
     if s(0) != 10 { return 1; }
     if s(1) != 20 { return 2; }

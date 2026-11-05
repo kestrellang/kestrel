@@ -88,6 +88,9 @@ pub fn build_subscript(
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
+    if node.unsafe_modifier().is_some() {
+        world.set(entity, IsUnsafe);
+    }
     set_documentation(world, entity, syntax);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);

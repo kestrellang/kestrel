@@ -236,7 +236,7 @@ pub(crate) fn resolve_inherited_protocol_member(
     let conformances = ctx.get::<Conformances>(protocol)?;
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_type, _) = item else {
+        let ConformanceItem::Positive(ast_type, ..) = item else {
             continue;
         };
 

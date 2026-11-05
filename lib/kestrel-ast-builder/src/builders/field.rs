@@ -155,6 +155,9 @@ pub fn build_field(
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
+    if node.unsafe_modifier().is_some() {
+        world.set(entity, IsUnsafe);
+    }
     set_documentation(world, entity, syntax);
 }
 

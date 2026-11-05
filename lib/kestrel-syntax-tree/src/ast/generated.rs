@@ -158,6 +158,9 @@ impl ProtocolDeclaration {
     pub fn visibility(&self) -> Option<Visibility> {
         support::child(&self.syntax)
     }
+    pub fn unsafe_modifier(&self) -> Option<UnsafeModifier> {
+        support::child(&self.syntax)
+    }
     pub fn protocol_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Protocol)
     }
@@ -299,6 +302,9 @@ impl FunctionDeclaration {
     pub fn static_modifier(&self) -> Option<StaticModifier> {
         support::child(&self.syntax)
     }
+    pub fn unsafe_modifier(&self) -> Option<UnsafeModifier> {
+        support::child(&self.syntax)
+    }
     pub fn mutating_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Mutating)
     }
@@ -356,6 +362,9 @@ impl SubscriptDeclaration {
     pub fn static_modifier(&self) -> Option<StaticModifier> {
         support::child(&self.syntax)
     }
+    pub fn unsafe_modifier(&self) -> Option<UnsafeModifier> {
+        support::child(&self.syntax)
+    }
     pub fn subscript_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Subscript)
     }
@@ -405,6 +414,9 @@ impl FieldDeclaration {
         support::child(&self.syntax)
     }
     pub fn static_modifier(&self) -> Option<StaticModifier> {
+        support::child(&self.syntax)
+    }
+    pub fn unsafe_modifier(&self) -> Option<UnsafeModifier> {
         support::child(&self.syntax)
     }
     pub fn lazy_modifier(&self) -> Option<LazyModifier> {
@@ -519,6 +531,9 @@ impl InitializerDeclaration {
         support::child(&self.syntax)
     }
     pub fn visibility(&self) -> Option<Visibility> {
+        support::child(&self.syntax)
+    }
+    pub fn unsafe_modifier(&self) -> Option<UnsafeModifier> {
         support::child(&self.syntax)
     }
     pub fn init_token(&self) -> Option<SyntaxToken> {
@@ -835,6 +850,30 @@ impl Visibility {
 impl AstNode for Visibility {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::Visibility
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `UnsafeModifier` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnsafeModifier {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl UnsafeModifier {
+    pub fn unsafe_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Unsafe)
+    }
+}
+
+impl AstNode for UnsafeModifier {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::UnsafeModifier
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -1958,6 +1997,9 @@ impl ConformanceItem {
     pub fn negative_conformance(&self) -> Option<NegativeConformance> {
         support::child(&self.syntax)
     }
+    pub fn unsafe_conformance(&self) -> Option<UnsafeConformance> {
+        support::child(&self.syntax)
+    }
     pub fn ty(&self) -> Option<Ty> {
         support::child(&self.syntax)
     }
@@ -1999,6 +2041,33 @@ impl NegativeConformance {
 impl AstNode for NegativeConformance {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::NegativeConformance
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `UnsafeConformance` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnsafeConformance {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl UnsafeConformance {
+    pub fn unsafe_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Unsafe)
+    }
+    pub fn ty(&self) -> Option<Ty> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for UnsafeConformance {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::UnsafeConformance
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -3934,6 +4003,60 @@ impl AstNode for ExprTry {
     }
 }
 
+/// `ExprUnsafe` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprUnsafe {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprUnsafe {
+    pub fn unsafe_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Unsafe)
+    }
+    pub fn expression(&self) -> Option<Expression> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ExprUnsafe {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprUnsafe
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ExprUnsafeBlock` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprUnsafeBlock {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprUnsafeBlock {
+    pub fn unsafe_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Unsafe)
+    }
+    pub fn code_block(&self) -> Option<CodeBlock> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ExprUnsafeBlock {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprUnsafeBlock
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
 /// `ExprClosure` node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExprClosure {
@@ -5455,7 +5578,7 @@ impl From<Expression> for Condition {
     }
 }
 
-/// One of: ExprInteger, ExprFloat, ExprString, ExprRawString, ExprChar, ExprBool, ExprNull, ExprUnit, ExprInterpolatedString, ExprArray, ExprDictionary, ExprTuple, ExprGrouping, ExprPath, ExprTupleIndex, ExprImplicitMemberAccess, ExprUnary, ExprPostfix, ExprBinary, ExprAssignment, ExprCompoundAssignment, ExprCall, ExprIf, ExprWhile, ExprFor, ExprLoop, ExprBreak, ExprContinue, ExprReturn, ExprThrow, ExprTry, ExprClosure, ExprMatch, ExprCast, ExprTypeTest, ExprPlaceholder, ExprPlaceholderUse, ExprOptionalBind, ExprOptionalChain.
+/// One of: ExprInteger, ExprFloat, ExprString, ExprRawString, ExprChar, ExprBool, ExprNull, ExprUnit, ExprInterpolatedString, ExprArray, ExprDictionary, ExprTuple, ExprGrouping, ExprPath, ExprTupleIndex, ExprImplicitMemberAccess, ExprUnary, ExprPostfix, ExprBinary, ExprAssignment, ExprCompoundAssignment, ExprCall, ExprIf, ExprWhile, ExprFor, ExprLoop, ExprBreak, ExprContinue, ExprReturn, ExprThrow, ExprTry, ExprUnsafe, ExprUnsafeBlock, ExprClosure, ExprMatch, ExprCast, ExprTypeTest, ExprPlaceholder, ExprPlaceholderUse, ExprOptionalBind, ExprOptionalChain.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
     ExprInteger(ExprInteger),
@@ -5489,6 +5612,8 @@ pub enum Expr {
     ExprReturn(ExprReturn),
     ExprThrow(ExprThrow),
     ExprTry(ExprTry),
+    ExprUnsafe(ExprUnsafe),
+    ExprUnsafeBlock(ExprUnsafeBlock),
     ExprClosure(ExprClosure),
     ExprMatch(ExprMatch),
     ExprCast(ExprCast),
@@ -5534,6 +5659,8 @@ impl AstNode for Expr {
                 | SyntaxKind::ExprReturn
                 | SyntaxKind::ExprThrow
                 | SyntaxKind::ExprTry
+                | SyntaxKind::ExprUnsafe
+                | SyntaxKind::ExprUnsafeBlock
                 | SyntaxKind::ExprClosure
                 | SyntaxKind::ExprMatch
                 | SyntaxKind::ExprCast
@@ -5583,6 +5710,8 @@ impl AstNode for Expr {
             SyntaxKind::ExprReturn => Expr::ExprReturn(ExprReturn { syntax }),
             SyntaxKind::ExprThrow => Expr::ExprThrow(ExprThrow { syntax }),
             SyntaxKind::ExprTry => Expr::ExprTry(ExprTry { syntax }),
+            SyntaxKind::ExprUnsafe => Expr::ExprUnsafe(ExprUnsafe { syntax }),
+            SyntaxKind::ExprUnsafeBlock => Expr::ExprUnsafeBlock(ExprUnsafeBlock { syntax }),
             SyntaxKind::ExprClosure => Expr::ExprClosure(ExprClosure { syntax }),
             SyntaxKind::ExprMatch => Expr::ExprMatch(ExprMatch { syntax }),
             SyntaxKind::ExprCast => Expr::ExprCast(ExprCast { syntax }),
@@ -5629,6 +5758,8 @@ impl AstNode for Expr {
             Expr::ExprReturn(it) => &it.syntax,
             Expr::ExprThrow(it) => &it.syntax,
             Expr::ExprTry(it) => &it.syntax,
+            Expr::ExprUnsafe(it) => &it.syntax,
+            Expr::ExprUnsafeBlock(it) => &it.syntax,
             Expr::ExprClosure(it) => &it.syntax,
             Expr::ExprMatch(it) => &it.syntax,
             Expr::ExprCast(it) => &it.syntax,
@@ -5824,6 +5955,18 @@ impl From<ExprThrow> for Expr {
 impl From<ExprTry> for Expr {
     fn from(node: ExprTry) -> Expr {
         Expr::ExprTry(node)
+    }
+}
+
+impl From<ExprUnsafe> for Expr {
+    fn from(node: ExprUnsafe) -> Expr {
+        Expr::ExprUnsafe(node)
+    }
+}
+
+impl From<ExprUnsafeBlock> for Expr {
+    fn from(node: ExprUnsafeBlock) -> Expr {
+        Expr::ExprUnsafeBlock(node)
     }
 }
 

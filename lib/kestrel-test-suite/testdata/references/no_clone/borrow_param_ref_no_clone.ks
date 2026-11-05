@@ -15,7 +15,7 @@ struct Tracked: Cloneable {
     var payload: String
     var clones: Pointer[Int64]
     func clone() -> Tracked {
-        self.clones.write(self.clones.read() + 1);
+        unsafe self.clones.write(self.clones.read() + 1);
         Tracked(payload: self.payload.clone(), clones: self.clones)
     }
     func size() -> Int64 { self.payload.bytes.count }
@@ -26,12 +26,12 @@ func describe(t: Tracked) -> Int64 { t.size() }
 @main
 func main() -> lang.i64 {
     let clones = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    clones.write(0);
+    unsafe clones.write(0);
 
     let arr = [Tracked(payload: "alpha", clones: clones)];
-    let baseline = clones.read();
+    let baseline = unsafe clones.read();
 
     if describe(arr(0)) != 5 { return 1; }
-    if clones.read() != baseline { return 2; }
+    if unsafe clones.read() != baseline { return 2; }
     0
 }

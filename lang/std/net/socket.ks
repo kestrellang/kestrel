@@ -261,11 +261,11 @@ extend TcpStream {
         }
         // ai_family = AF_INET (2) at offset 4
         let hintsPtr = hints.asPointer();
-        hintsPtr.offset(by: 4).cast[Int32]().write(libc.AF_INET());
+        unsafe hintsPtr.offset(by: 4).cast[Int32]().write(libc.AF_INET());
         // ai_socktype = SOCK_STREAM (1) at offset 8
-        hintsPtr.offset(by: 8).cast[Int32]().write(libc.SOCK_STREAM());
+        unsafe hintsPtr.offset(by: 8).cast[Int32]().write(libc.SOCK_STREAM());
         // ai_protocol = IPPROTO_TCP (6) at offset 12
-        hintsPtr.offset(by: 12).cast[Int32]().write(libc.IPPROTO_TCP());
+        unsafe hintsPtr.offset(by: 12).cast[Int32]().write(libc.IPPROTO_TCP());
 
         // Null-terminate host and port strings for C
         var hostBuf = Array[UInt8]();
@@ -302,11 +302,11 @@ extend TcpStream {
         // ai_family at offset 4, ai_socktype at offset 8, ai_protocol at offset 12
         // ai_addrlen at offset 16, ai_addr offset is platform-specific
         let infoPtr = resultPtr;
-        let family = infoPtr.offset(by: 4).cast[Int32]().read();
-        let socktype = infoPtr.offset(by: 8).cast[Int32]().read();
-        let proto = infoPtr.offset(by: 12).cast[Int32]().read();
-        let addrlen = infoPtr.offset(by: 16).cast[Int32]().read();
-        let addrPtr = infoPtr.offset(by: AI_ADDR_OFFSET()).cast[Pointer[UInt8]]().read();
+        let family = unsafe infoPtr.offset(by: 4).cast[Int32]().read();
+        let socktype = unsafe infoPtr.offset(by: 8).cast[Int32]().read();
+        let proto = unsafe infoPtr.offset(by: 12).cast[Int32]().read();
+        let addrlen = unsafe infoPtr.offset(by: 16).cast[Int32]().read();
+        let addrPtr = unsafe infoPtr.offset(by: AI_ADDR_OFFSET()).cast[Pointer[UInt8]]().read();
 
         // Create socket
         let fd = libc.socket(family, socktype, proto);

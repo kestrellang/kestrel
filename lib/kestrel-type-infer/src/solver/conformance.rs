@@ -72,7 +72,7 @@ pub(super) fn direct_param_bound_protocols(ctx: &InferCtx<'_>, param: Entity) ->
     };
     let mut protocols = Vec::new();
     for item in &confs.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let kestrel_ast_builder::AstType::Named { segments, .. } = ast_ty else {

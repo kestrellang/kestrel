@@ -301,7 +301,8 @@ fn build_member_groups(
     for &source in &sources {
         if let Some(conformances) = world.get::<Conformances>(source) {
             for item in &conformances.0 {
-                let kestrel_ast_builder::ConformanceItem::Positive(conformance_ty, _) = item else {
+                let kestrel_ast_builder::ConformanceItem::Positive(conformance_ty, ..) = item
+                else {
                     continue;
                 };
                 let Some(protocol) =

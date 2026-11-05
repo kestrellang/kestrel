@@ -15,8 +15,8 @@ import std.numeric.(Int64)
 
 struct Resource: not Copyable {
     var cell: Pointer[Int64]
-    func value() -> Int64 { self.cell.read() }
-    deinit { self.cell.write(self.cell.read() - 1); }
+    func value() -> Int64 { unsafe self.cell.read() }
+    deinit { unsafe self.cell.write(self.cell.read() - 1); }
 }
 
 // The scope whose exit must run exactly one deinit.
@@ -25,7 +25,7 @@ func captureAndObserve(counter: Pointer[Int64]) -> Int64 {
     let p = Pointer(to: r);
     // The capture borrowed `r` without consuming it: reading the field
     // through the pointer sees the live, not-yet-deinit'd resource.
-    let observed = p.value.value();
+    let observed = unsafe p.value.value();
     if observed != 10 { return 1; }
     // `r` is still usable directly after the capture (not moved).
     if r.value() != 10 { return 2; }
@@ -35,12 +35,12 @@ func captureAndObserve(counter: Pointer[Int64]) -> Int64 {
 @main
 func main() -> lang.i64 {
     let counter = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    counter.write(10);
+    unsafe counter.write(10);
 
     let status = captureAndObserve(counter);
     if status != 0 { return status.raw; }
 
     // Exactly one deinit ran, at `captureAndObserve` scope exit: 10 - 1 == 9.
-    if counter.read() != 9 { return 3; }
+    if unsafe counter.read() != 9 { return 3; }
     0
 }

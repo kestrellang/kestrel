@@ -81,7 +81,7 @@ public protocol RangeMatchable[Bound = Self] {
 /// invariants don't hold. `Array[T]`, `Slice[T]` and `UnsafeSlice[T]` are
 /// the canonical conformers.
 @builtin(.ArrayMatchable)
-public protocol ArrayMatchable {
+public unsafe protocol ArrayMatchable {
     type Element
     /// What `..rest` binds: the view `matchSlice` returns (`&Slice[T]` for
     /// arrays and slices).

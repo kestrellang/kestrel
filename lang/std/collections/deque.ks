@@ -64,7 +64,7 @@ struct DequeStorage[T]: Cloneable {
             for i in 0..<self.len {
                 var phys = self.head + i;
                 if phys >= self.cap { phys = phys - self.cap; }
-                newPtr.offset(by: i).write(self.ptr.offset(by: phys).read());
+                unsafe newPtr.offset(by: i).write(self.ptr.offset(by: phys).read());
             }
             DequeStorage(ptr: newPtr, len: self.len, cap: self.cap, head: 0)
         } else {
@@ -87,12 +87,12 @@ struct DequeStorage[T]: Cloneable {
             while i < self.len {
                 var phys = self.head + i;
                 if phys >= self.cap { phys = phys - self.cap; };
-                self.ptr.offset(by: phys).dropInPlace();
+                unsafe self.ptr.offset(by: phys).dropInPlace();
                 i = i + 1
             };
             let layout = Layout.array[T](self.cap);
             var allocator = SystemAllocator();
-            allocator.deallocate(self.ptr.asRaw(), layout)
+            unsafe allocator.deallocate(self.ptr.asRaw(), layout)
         }
     }
 }
@@ -153,7 +153,7 @@ public struct DequeIterator[T]: Iterator {
     /// ```
     public mutating func next() -> T? {
         if self.remaining <= 0 { return .None; }
-        let value = self.ptr.offset(by: self.pos).read();
+        let value = unsafe self.ptr.offset(by: self.pos).read();
         self.pos = self.pos + 1;
         if self.pos >= self.cap { self.pos = 0; }
         self.remaining = self.remaining - 1;
@@ -368,10 +368,10 @@ public struct Deque[T]: Iterable, Cloneable {
             for i in 0..<s.len {
                 var phys = s.head + i;
                 if phys >= s.cap { phys = phys - s.cap; }
-                newPtr.offset(by: i).write(s.ptr.offset(by: phys).take());
+                unsafe newPtr.offset(by: i).write(s.ptr.offset(by: phys).take());
             }
             if s.cap > 0 {
-                allocator.deallocate(s.ptr.asRaw(), Layout.array[T](s.cap))
+                unsafe allocator.deallocate(s.ptr.asRaw(), Layout.array[T](s.cap))
             }
             s.ptr = newPtr;
             s.cap = newCap;
@@ -419,7 +419,7 @@ public struct Deque[T]: Iterable, Cloneable {
         for i in 0..<s.len {
             var phys = s.head + i;
             if phys >= s.cap { phys = phys - s.cap; }
-            s.ptr.offset(by: phys).dropInPlace()
+            unsafe s.ptr.offset(by: phys).dropInPlace()
         }
         s.len = 0;
         s.head = 0
@@ -447,7 +447,7 @@ public struct Deque[T]: Iterable, Cloneable {
         let s = &mutating self.storage.value;
         var tail = s.head + s.len;
         if tail >= s.cap { tail = tail - s.cap; }
-        s.ptr.offset(by: tail).write(element);
+        unsafe s.ptr.offset(by: tail).write(element);
         s.len = s.len + 1
     }
 
@@ -469,7 +469,7 @@ public struct Deque[T]: Iterable, Cloneable {
         let s = &mutating self.storage.value;
         s.head = s.head - 1;
         if s.head < 0 { s.head = s.cap - 1; }
-        s.ptr.offset(by: s.head).write(element);
+        unsafe s.ptr.offset(by: s.head).write(element);
         s.len = s.len + 1
     }
 
@@ -495,7 +495,7 @@ public struct Deque[T]: Iterable, Cloneable {
         if self.len() == 0 { return .None; }
         let s = &mutating self.storage.value;
         // Moved out: the slot leaves the live range, so nothing drops it.
-        let v = s.ptr.offset(by: s.head).take();
+        let v = unsafe s.ptr.offset(by: s.head).take();
         s.head = s.head + 1;
         if s.head >= s.cap { s.head = 0; }
         s.len = s.len - 1;
@@ -523,7 +523,7 @@ public struct Deque[T]: Iterable, Cloneable {
         var tail = s.head + s.len;
         if tail >= s.cap { tail = tail - s.cap; }
         // Moved out: the slot leaves the live range, so nothing drops it.
-        .Some(s.ptr.offset(by: tail).take())
+        .Some(unsafe s.ptr.offset(by: tail).take())
     }
 
     // ========================================================================
@@ -543,7 +543,7 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public func first() -> T? {
         if self.len() == 0 { return .None; }
-        .Some(self.rawPtr().offset(by: self.head()).read())
+        .Some(unsafe self.rawPtr().offset(by: self.head()).read())
     }
 
     /// Returns the back element without removing it, or `.None` if empty.
@@ -561,7 +561,7 @@ public struct Deque[T]: Iterable, Cloneable {
         if self.len() == 0 { return .None; }
         var tail = self.head() + self.len() - 1;
         if tail >= self.cap() { tail = tail - self.cap(); }
-        .Some(self.rawPtr().offset(by: tail).read())
+        .Some(unsafe self.rawPtr().offset(by: tail).read())
     }
 
     /// @name Indexed
@@ -593,7 +593,7 @@ public struct Deque[T]: Iterable, Cloneable {
             var phys = self.head() + index;
             let myCap = self.cap();
             if phys >= myCap { phys = phys - myCap; }
-            self.rawPtr().offset(by: phys).read()
+            unsafe self.rawPtr().offset(by: phys).read()
         }
         set {
             if index < 0 or index >= self.len() {
@@ -603,7 +603,7 @@ public struct Deque[T]: Iterable, Cloneable {
             var phys = s.head + index;
             if phys >= s.cap { phys = phys - s.cap; }
             // `assign` drops the element it replaces.
-            s.ptr.offset(by: phys).assign(newValue)
+            unsafe s.ptr.offset(by: phys).assign(newValue)
         }
     }
 
@@ -626,8 +626,8 @@ public struct Deque[T]: Iterable, Cloneable {
         let myLen = self.len();
         if myLen == 0 {
             return (
-                UnsafeSlice(pointer: Pointer[T].nullPointer(), count: 0),
-                UnsafeSlice(pointer: Pointer[T].nullPointer(), count: 0)
+                unsafe UnsafeSlice(pointer: Pointer[T].nullPointer(), count: 0),
+                unsafe UnsafeSlice(pointer: Pointer[T].nullPointer(), count: 0)
             )
         }
         let myHead = self.head();
@@ -636,14 +636,14 @@ public struct Deque[T]: Iterable, Cloneable {
         let tailEnd = myHead + myLen;
         if tailEnd <= myCap {
             return (
-                UnsafeSlice(pointer: myPtr.offset(by: myHead), count: myLen),
-                UnsafeSlice(pointer: myPtr, count: 0)
+                unsafe UnsafeSlice(pointer: myPtr.offset(by: myHead), count: myLen),
+                unsafe UnsafeSlice(pointer: myPtr, count: 0)
             )
         }
         let firstLen = myCap - myHead;
         return (
-            UnsafeSlice(pointer: myPtr.offset(by: myHead), count: firstLen),
-            UnsafeSlice(pointer: myPtr, count: myLen - firstLen)
+            unsafe UnsafeSlice(pointer: myPtr.offset(by: myHead), count: firstLen),
+            unsafe UnsafeSlice(pointer: myPtr, count: myLen - firstLen)
         )
     }
 

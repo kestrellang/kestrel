@@ -25,8 +25,8 @@ func main() -> lang.i64 {
 
     // Pointer bridge getter as the place
     let cell = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    cell.write(40);
-    cell.mutatingValue += 2;
-    if cell.read() != 42 { return 5; }
+    unsafe cell.write(40);
+    unsafe cell.mutatingValue += 2;
+    if unsafe cell.read() != 42 { return 5; }
     0
 }

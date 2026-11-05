@@ -105,7 +105,7 @@ module Test
             // Test pointer property
             let ptr = slice.pointer;
             if ptr.isNull { return 32 }
-            if ptr.read() != 10 { return 33 }
+            if unsafe ptr.read() != 10 { return 33 }
 
             0
         }

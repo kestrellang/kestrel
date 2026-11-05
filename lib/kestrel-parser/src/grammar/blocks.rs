@@ -56,7 +56,7 @@ impl BlockFlavor {
     fn is_stmt_like(self, kind: K) -> bool {
         let top = matches!(
             kind,
-            K::ExprIf | K::ExprWhile | K::ExprLoop | K::ExprFor | K::ExprMatch
+            K::ExprIf | K::ExprWhile | K::ExprLoop | K::ExprFor | K::ExprMatch | K::ExprUnsafeBlock
         );
         match self {
             Self::Top | Self::GuardElseTop => top,
@@ -123,6 +123,7 @@ fn at_stmt_boundary(p: &Parser<'_>) -> bool {
         K::Continue,
         K::Throw,
         K::Try,
+        K::Unsafe,
     ])
 }
 

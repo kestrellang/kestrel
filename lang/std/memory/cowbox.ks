@@ -69,10 +69,10 @@ public struct CowBox[T]: Cloneable where T: Cloneable, T: not Sized, T: not Stat
     /// (`c.value.len = 0`, a `mutating` argument, a mutating method) forks a
     /// shared box first, so other copies never see the change.
     public var value: T {
-        ref { self.inner.valuePtr().value }
+        ref { unsafe self.inner.valuePtr().value }
         mutating ref {
             self.ensureUnique();
-            self.inner.valuePtr().mutatingValue
+            unsafe self.inner.valuePtr().mutatingValue
         }
     }
 
@@ -95,7 +95,7 @@ public struct CowBox[T]: Cloneable where T: Cloneable, T: not Sized, T: not Stat
 // existential's table carries its size and clone.
 extend CowBox[T]: Indirection {
     type Target = T
-    public func pointeeRef() -> &T { self.valuePtr().value }
+    public func pointeeRef() -> &T { unsafe self.valuePtr().value }
 }
 
 // `any[CowBox] P`: the struct's `init(consuming:)` is the witness.
@@ -104,6 +104,6 @@ extend CowBox[T]: ExistentialBox {}
 extend CowBox[T]: MutableIndirection where T: Cloneable {
     public mutating func pointeeMutRef() -> &mutating T {
         self.ensureUnique();
-        self.valuePtr().mutatingValue
+        unsafe self.valuePtr().mutatingValue
     }
 }

@@ -246,7 +246,7 @@ func sendAllBytes[S](mutating stream: S, buf: [UInt8]) -> () throws IoError wher
     while sent < len {
         let ptr = buf.asPointer().offset(by: sent);
         let remaining = len - sent;
-        let slice = UnsafeSlice(pointer: ptr, count: remaining);
+        let slice = unsafe UnsafeSlice(pointer: ptr, count: remaining);
         let n = try stream.write(from: slice);
         if n == 0 {
             throw IoError(code: 32)

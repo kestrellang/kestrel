@@ -136,30 +136,30 @@ func libc_lseek(fd: Int32, offset: Int64, whence: Int32) -> Int64
 
 /// Opens a file. Returns file descriptor or -1 on error.
 public func open(path: Pointer[UInt8], flags: Int32, mode: Int32) -> Fd {
-    libc_open(path.asRaw(), flags, mode)
+    unsafe libc_open(path.asRaw(), flags, mode)
 }
 
 /// Closes a file descriptor. Returns 0 on success, -1 on error.
 public func close(fd: Int32) -> Int32 {
-    libc_close(fd)
+    unsafe libc_close(fd)
 }
 
 /// Reads from a file descriptor. Returns bytes read, 0 on EOF, -1 on error.
 public func read(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64 {
-    libc_read(fd, buf.asRaw(), count)
+    unsafe libc_read(fd, buf.asRaw(), count)
 }
 
 /// Writes to a file descriptor. Returns bytes written or -1 on error.
 public func write(fd: Int32, buf: Pointer[UInt8], count: Int64) -> Int64 {
-    libc_write(fd, buf.asRaw(), count)
+    unsafe libc_write(fd, buf.asRaw(), count)
 }
 
 /// Seeks to a position in a file. Returns new position or -1 on error.
 public func lseek(fd: Int32, offset: Int64, whence: Int32) -> Int64 {
-    libc_lseek(fd, offset, whence)
+    unsafe libc_lseek(fd, offset, whence)
 }
 
 /// Returns the current errno value.
 public func errno() -> Int32 {
-    __errno_ptr().read()
+    unsafe __errno_ptr().read()
 }

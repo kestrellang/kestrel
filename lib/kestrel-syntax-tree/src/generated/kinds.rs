@@ -439,6 +439,15 @@ pub enum SyntaxKind {
     WillSetClause,
     /// didSet { ... } property observer
     DidSetClause,
+    Unsafe,
+    /// unsafe before func/init/subscript/var/protocol: callers must vouch for its contract
+    UnsafeModifier,
+    /// unsafe expr - the operand is an unsafe context
+    ExprUnsafe,
+    /// unsafe { ... } - a block that is an unsafe context
+    ExprUnsafeBlock,
+    /// unsafe P in a conformance list: the conformer vouches for P's contract
+    UnsafeConformance,
     /// Not a syntax kind — the end-of-enum marker. Its discriminant is the
     /// variant count, which lets `syntax_kind_table_round_trips` prove `ALL`
     /// complete. Never construct it.
@@ -732,6 +741,11 @@ impl SyntaxKind {
         SyntaxKind::ModifyingRefClause,
         SyntaxKind::WillSetClause,
         SyntaxKind::DidSetClause,
+        SyntaxKind::Unsafe,
+        SyntaxKind::UnsafeModifier,
+        SyntaxKind::ExprUnsafe,
+        SyntaxKind::ExprUnsafeBlock,
+        SyntaxKind::UnsafeConformance,
     ];
 }
 
@@ -850,6 +864,7 @@ impl From<Token> for SyntaxKind {
             Token::Is => SyntaxKind::Is,
             Token::AsQuestion => SyntaxKind::AsQuestion,
             Token::PipeGreater => SyntaxKind::PipeGreater,
+            Token::Unsafe => SyntaxKind::Unsafe,
         }
     }
 }

@@ -122,7 +122,7 @@ impl QueryFn for ResolvedConformances {
         let mut items = Vec::new();
         for item in &conformances.0 {
             let (polarity, ast_ty) = match item {
-                ConformanceItem::Positive(ast_ty, _) => {
+                ConformanceItem::Positive(ast_ty, ..) => {
                     (ConformancePolarity::Positive, ast_ty.clone())
                 },
                 ConformanceItem::Negative(ast_ty, _) => {

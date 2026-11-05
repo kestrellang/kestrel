@@ -20,6 +20,6 @@ func main() -> lang.i64 {
     let raw = result.unwrap();
     let typed: std.memory.Pointer[Res] = raw.cast[Res]();
     if typed.isNull { return 2 }
-    alloc.deallocate(raw, layout);
+    unsafe alloc.deallocate(raw, layout);
     0
 }

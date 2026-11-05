@@ -21,11 +21,11 @@ struct Cell: SharedMut {
 
     public init(v: Int64) {
         self.storage = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-        self.storage.write(v);
+        unsafe self.storage.write(v);
     }
 
     public func sharedAccess() -> &mutating Int64 {
-        self.storage.mutatingValue
+        unsafe self.storage.mutatingValue
     }
 }
 

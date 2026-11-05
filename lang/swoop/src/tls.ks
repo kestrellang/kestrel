@@ -124,7 +124,7 @@ public struct TlsStream: Readable, Writable, Cloneable {
         let raw = buf.asUnsafeSlice();
         let ssl = self.conn.value.ssl;
         let count32 = if raw.count > 2147483647 { 2147483647 } else { Int32(from: raw.count) };
-        let n = Int32(raw: libc_SSL_read(
+        let n = Int32(raw: unsafe libc_SSL_read(
             ssl,
             lang.cast_ptr[_, lang.i8](raw.pointer.raw),
             count32.raw
@@ -138,7 +138,7 @@ public struct TlsStream: Readable, Writable, Cloneable {
     public mutating func write(from buf: UnsafeSlice[UInt8]) -> Int64 throws IoError {
         let ssl = self.conn.value.ssl;
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
-        let n = Int32(raw: libc_SSL_write(
+        let n = Int32(raw: unsafe libc_SSL_write(
             ssl,
             lang.cast_ptr[_, lang.i8](buf.pointer.raw),
             count32.raw
@@ -158,11 +158,11 @@ public struct TlsStream: Readable, Writable, Cloneable {
         if self.conn.isUnique {
             let h = &self.conn.value;
             // SSL_free and SSL_CTX_free are no-ops on null in LibreSSL
-             libc_SSL_shutdown(h.ssl);
-            libc_SSL_free(h.ssl);
-            libc_SSL_CTX_free(h.ctx);
+             unsafe libc_SSL_shutdown(h.ssl);
+            unsafe libc_SSL_free(h.ssl);
+            unsafe libc_SSL_CTX_free(h.ctx);
             if h.fd >= 0 {
-                 posix_close(h.fd.raw);
+                 unsafe posix_close(h.fd.raw);
             }
         }
     }
@@ -178,40 +178,40 @@ extend TlsStream {
         // One-time init (safe to call multiple times)
         // OPENSSL_INIT_LOAD_SSL_STRINGS (0x00200000) | OPENSSL_INIT_LOAD_CRYPTO_STRINGS (0x00000002)
         let initOpts: Int64 = 2097154;
-         libc_OPENSSL_init_ssl(initOpts.raw, lang.ptr_null[lang.i8]());
+         unsafe libc_OPENSSL_init_ssl(initOpts.raw, lang.ptr_null[lang.i8]());
 
         // TCP connect, then take ownership of the fd
         var tcpStream = try TcpStream.connect(host, port);
         let fd = tcpStream.detachFd();
 
         // Create SSL_CTX
-        let method = libc_TLS_client_method();
-        let ctx = libc_SSL_CTX_new(method);
+        let method = unsafe libc_TLS_client_method();
+        let ctx = unsafe libc_SSL_CTX_new(method);
         if lang.ptr_is_null(ctx) {
-             posix_close(fd.raw);
+             unsafe posix_close(fd.raw);
             throw IoError(code: 1)
         }
 
         // Load system CA certificates and enable peer verification
-         libc_SSL_CTX_set_default_verify_paths(ctx);
+         unsafe libc_SSL_CTX_set_default_verify_paths(ctx);
         let verifyMode = SSL_VERIFY_PEER();
-        libc_SSL_CTX_set_verify(ctx, verifyMode.raw, lang.ptr_null[lang.i8]());
+        unsafe libc_SSL_CTX_set_verify(ctx, verifyMode.raw, lang.ptr_null[lang.i8]());
 
         // Create SSL
-        let ssl = libc_SSL_new(ctx);
+        let ssl = unsafe libc_SSL_new(ctx);
         if lang.ptr_is_null(ssl) {
-            libc_SSL_CTX_free(ctx);
-             posix_close(fd.raw);
+            unsafe libc_SSL_CTX_free(ctx);
+             unsafe posix_close(fd.raw);
             throw IoError(code: 2)
         }
 
         // Attach socket fd
-         libc_SSL_set_fd(ssl, fd.raw);
+         unsafe libc_SSL_set_fd(ssl, fd.raw);
 
         // Set SNI hostname (null-terminated)
         var hostBuf = stringToBytes(host);
         hostBuf.append(0);
-         libc_SSL_ctrl(
+         unsafe libc_SSL_ctrl(
             ssl,
             SSL_CTRL_SET_TLSEXT_HOSTNAME().raw,
             0,
@@ -219,11 +219,11 @@ extend TlsStream {
         );
 
         // TLS handshake
-        let connectResult = Int32(raw: libc_SSL_connect(ssl));
+        let connectResult = Int32(raw: unsafe libc_SSL_connect(ssl));
         if connectResult != 1 {
-            libc_SSL_free(ssl);
-            libc_SSL_CTX_free(ctx);
-             posix_close(fd.raw);
+            unsafe libc_SSL_free(ssl);
+            unsafe libc_SSL_CTX_free(ctx);
+             unsafe posix_close(fd.raw);
             throw IoError(code: connectResult)
         }
 

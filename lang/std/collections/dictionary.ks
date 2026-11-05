@@ -159,7 +159,7 @@ public struct DictionaryIterator[K, V]: Iterator {
     /// ```
     public mutating func next() -> (K, V)? {
         while self.index < self.capacity {
-            let bucket = self.buckets.offset(by: self.index).read();
+            let bucket = unsafe self.buckets.offset(by: self.index).read();
             self.index = self.index + 1;
             match bucket {
                 .Occupied(key, value, _) => return .Some((key, value)),
@@ -242,7 +242,7 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hashable, H: Hasher, H: De
             let newBuckets = rawPtr.cast[Bucket[K, V]]();
             // Copy buckets
             for i in 0..<self.cap {
-                newBuckets.offset(by: i).write(self.buckets.offset(by: i).read());
+                unsafe newBuckets.offset(by: i).write(self.buckets.offset(by: i).read());
             }
             DictionaryStorage(
                 buckets: newBuckets,
@@ -273,12 +273,12 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hashable, H: Hasher, H: De
         if self.cap > 0 {
             var i: Int64 = 0;
             while i < self.cap {
-                self.buckets.offset(by: i).dropInPlace();
+                unsafe self.buckets.offset(by: i).dropInPlace();
                 i = i + 1
             };
             let layout = Layout.array[Bucket[K, V]](self.cap);
             var allocator = SystemAllocator();
-            allocator.deallocate(self.buckets.asRaw(), layout)
+            unsafe allocator.deallocate(self.buckets.asRaw(), layout)
         }
     }
 }
@@ -429,7 +429,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 let newBuckets = rawPtr.cast[Bucket[K, V]]();
                 // Initialize all buckets as empty
                 for i in 0..<actualCap {
-                    newBuckets.offset(by: i).write(.Empty);
+                    unsafe newBuckets.offset(by: i).write(.Empty);
                 }
                 self.storage = CowBox(DictionaryStorage(
                     buckets: newBuckets,
@@ -666,7 +666,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         get {
             let maybeIndex = self.findEntry(key);
             if let .Some(index) = maybeIndex {
-                let bucket = self.buckets().offset(by: index).read();
+                let bucket = unsafe self.buckets().offset(by: index).read();
                 match bucket {
                     .Occupied(_, value, _) => .Some(value),
                     _ => .None
@@ -772,7 +772,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         var i: Int64 = 0;
 
         while i < myCap {
-            let bucket = myBuckets.offset(by: index).read();
+            let bucket = unsafe myBuckets.offset(by: index).read();
             match bucket {
                 .Empty => return .None,
                 .Occupied(k, _, _) => {
@@ -808,7 +808,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         var i: Int64 = 0;
 
         while i < myCap {
-            let bucket = myBuckets.offset(by: index).read();
+            let bucket = unsafe myBuckets.offset(by: index).read();
             match bucket {
                 .Occupied(_, _, _) => {},
                 _ => return .Some(index)
@@ -869,23 +869,23 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             fatalError("Dictionary resize failed")
         }
         for i in 0..<newCap {
-            newBuckets.offset(by: i).write(.Empty);
+            unsafe newBuckets.offset(by: i).write(.Empty);
         }
 
         // Move every live entry into the new table (linear probing). The
         // old buckets are left moved-out, so freeing them drops nothing.
         let newCapU: UInt64 = UInt64(from: newCap);
         for i in 0..<s.cap {
-            if let .Occupied(key, value, hashValue) = s.buckets.offset(by: i).take() {
+            if let .Occupied(key, value, hashValue) = unsafe s.buckets.offset(by: i).take() {
                 var slotIndex: Int64 = Int64(from: hashValue.modulo(newCapU));
-                while not bucketIsEmpty(newBuckets.offset(by: slotIndex).value) {
+                while not bucketIsEmpty(unsafe newBuckets.offset(by: slotIndex).value) {
                     slotIndex = (slotIndex + 1) % newCap
                 }
-                newBuckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue))
+                unsafe newBuckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue))
             }
         }
         if s.cap > 0 {
-            allocator.deallocate(s.buckets.asRaw(), Layout.array[Bucket[K, V]](s.cap))
+            unsafe allocator.deallocate(s.buckets.asRaw(), Layout.array[Bucket[K, V]](s.cap))
         }
         s.buckets = newBuckets;
         s.cap = newCap
@@ -937,12 +937,12 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             let myBuckets = self.buckets();
             // Move the old entry out: `write` overwrites without dropping,
             // so a `read()` copy here leaked the replaced key and value.
-            let oldBucket = myBuckets.offset(by: index).take();
+            let oldBucket = unsafe myBuckets.offset(by: index).take();
             let oldValue: V? = match oldBucket {
                 .Occupied(_, v, _) => .Some(v),
                 _ => .None
             };
-            myBuckets.offset(by: index).write(.Occupied(key, value, hashValue));
+            unsafe myBuckets.offset(by: index).write(.Occupied(key, value, hashValue));
             return oldValue
         }
 
@@ -954,7 +954,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let maybeSlot = self.findEmptySlot(hashValue);
         if let .Some(slotIndex) = maybeSlot {
             let s = &mutating self.storage.value;
-            s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
+            unsafe s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
             s.len = s.len + 1
         } else {
             fatalError("Dictionary insert failed - no empty slot")
@@ -983,9 +983,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             self.makeUnique();
             let s = &mutating self.storage.value;
             // Moved out (not `read()`): the tombstone write drops nothing.
-            let bucket = s.buckets.offset(by: index).take();
+            let bucket = unsafe s.buckets.offset(by: index).take();
             // Mark as deleted (tombstone)
-            s.buckets.offset(by: index).write(.Deleted);
+            unsafe s.buckets.offset(by: index).write(.Deleted);
             s.len = s.len - 1;
             return match bucket {
                 .Occupied(_, v, _) => .Some(v),
@@ -1018,9 +1018,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             self.makeUnique();
             let s = &mutating self.storage.value;
             // Moved out (not `read()`): the tombstone write drops nothing.
-            let bucket = s.buckets.offset(by: index).take();
+            let bucket = unsafe s.buckets.offset(by: index).take();
             // Mark as deleted (tombstone)
-            s.buckets.offset(by: index).write(.Deleted);
+            unsafe s.buckets.offset(by: index).write(.Deleted);
             s.len = s.len - 1;
             return match bucket {
                 .Occupied(k, v, _) => .Some((k, v)),
@@ -1048,7 +1048,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let s = &mutating self.storage.value;
         // `assign` drops the entry it replaces; `write` leaked them.
         for i in 0..<s.cap {
-            s.buckets.offset(by: i).assign(.Empty);
+            unsafe s.buckets.offset(by: i).assign(.Empty);
         }
         s.len = 0
     }
@@ -1106,12 +1106,12 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             self.makeUnique();
             let myBuckets = self.buckets();
             // Moved out and written back below: `write` drops nothing.
-            let bucket = myBuckets.offset(by: index).take();
+            let bucket = unsafe myBuckets.offset(by: index).take();
             match bucket {
                 .Occupied(k, v, h) => {
                     var value = v;
                     let result = body(value);
-                    myBuckets.offset(by: index).write(.Occupied(k, value, h));
+                    unsafe myBuckets.offset(by: index).write(.Occupied(k, value, h));
                     return .Some(result)
                 },
                 // Unreachable: findEntry only returns occupied slots.
@@ -1231,7 +1231,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         var keysToRemove = Array[K]();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
                     if not predicate(key, value) {
@@ -1362,7 +1362,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let myBuckets = self.buckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
                     if predicate(key, value) {
@@ -1394,7 +1394,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let myBuckets = self.buckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
                     if predicate(key, value) {
@@ -1424,7 +1424,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let myBuckets = self.buckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
                     if not predicate(key, value) {
@@ -1472,7 +1472,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let myBuckets = self.buckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
                     if predicate(key, value) {
@@ -1509,7 +1509,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let myBuckets = self.buckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
                      result.insert( key, transform(value));
@@ -1541,7 +1541,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let myBuckets = self.buckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
                     if let .Some(transformed) = transform(value) {
@@ -1573,7 +1573,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let myBuckets = self.buckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
                     if predicate(key, value) {
@@ -1700,7 +1700,7 @@ extend Dictionary[K, V, H]: Equatable where K: Hashable, V: Equatable, H: Hasher
         let selfCap = self.capacity;
         let selfBuckets = self.getBuckets();
         for i in 0..<selfCap {
-            let bucket = selfBuckets.offset(by: i).read();
+            let bucket = unsafe selfBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
                     let otherValue = other(key);
@@ -1739,7 +1739,7 @@ extend Dictionary[K, V, H] where K: Hashable, V: Equatable, H: Hasher, H: Defaul
         let myBuckets = self.getBuckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(_, v, _) => {
                     if v.isEqual(to: value) {
@@ -1769,7 +1769,7 @@ extend Dictionary[K, V, H] where K: Hashable, V: Equatable, H: Hasher, H: Defaul
         let myBuckets = self.getBuckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(k, v, _) => {
                     if v.isEqual(to: value) {
@@ -1800,7 +1800,7 @@ extend Dictionary[K, V, H] where K: Hashable, V: Equatable, H: Hasher, H: Defaul
         let myBuckets = self.getBuckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(k, v, _) => {
                     if v.isEqual(to: value) {
@@ -1837,7 +1837,7 @@ extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Fo
         let myBuckets = self.getBuckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
                     if first {
@@ -1881,7 +1881,7 @@ extend Dictionary[K, V, H] where K: Hashable, H: Hasher, H: Defaultable {
         let myBuckets = self.getBuckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
                      result.insert( key, value);
@@ -1915,7 +1915,7 @@ extend Dictionary[K, V, H] where K: Hashable, V: Addable, V.Output = V, V: Defau
         let myBuckets = self.getBuckets();
 
         for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
+            let bucket = unsafe myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(_, value, _) => {
                     result = result + value;

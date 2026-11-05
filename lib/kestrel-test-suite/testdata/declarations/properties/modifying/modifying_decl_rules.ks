@@ -19,8 +19,8 @@ struct TwoGets {
 struct RefAndModifyingRef {
     var p: Pointer[Int64]
     subscript(i: Int64) -> Int64 { // ERROR(E619): duplicate read provider
-        ref { self.p.value }
-        modifying ref { self.p.value }
+        ref { unsafe self.p.value }
+        modifying ref { unsafe self.p.value }
     }
 }
 

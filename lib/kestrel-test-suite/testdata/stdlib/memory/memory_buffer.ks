@@ -16,17 +16,17 @@ module Test
             if buf.pointer.isNull { return 2 }
 
             // Test write(unchecked:value:) and read(unchecked:)
-            buf.write(unchecked: 0, 42);
-            buf.write(unchecked: 1, 99);
-            buf.write(unchecked: 2, 77);
-            if buf.read(unchecked: 0) != 42 { return 3 }
-            if buf.read(unchecked: 1) != 99 { return 4 }
-            if buf.read(unchecked: 2) != 77 { return 5 }
+            unsafe buf.write(unchecked: 0, 42);
+            unsafe buf.write(unchecked: 1, 99);
+            unsafe buf.write(unchecked: 2, 77);
+            if unsafe buf.read(unchecked: 0) != 42 { return 3 }
+            if unsafe buf.read(unchecked: 1) != 99 { return 4 }
+            if unsafe buf.read(unchecked: 2) != 77 { return 5 }
 
             // Test write(at:value:) with bounds checking
             let ok1 = buf.write(at: 5, 55);
             if ok1 == false { return 6 }
-            if buf.read(unchecked: 5) != 55 { return 7 }
+            if unsafe buf.read(unchecked: 5) != 55 { return 7 }
 
             // Test write(at:value:) out of bounds
             let oob = buf.write(at: 100, 0);
@@ -69,13 +69,13 @@ module Test
             buf.resize(to: 20);
             if buf.capacity != 20 { return 21 }
             // Data should be preserved after resize
-            if buf.read(unchecked: 0) != 42 { return 22 }
-            if buf.read(unchecked: 1) != 99 { return 23 }
-            if buf.read(unchecked: 2) != 77 { return 24 }
+            if unsafe buf.read(unchecked: 0) != 42 { return 22 }
+            if unsafe buf.read(unchecked: 1) != 99 { return 23 }
+            if unsafe buf.read(unchecked: 2) != 77 { return 24 }
 
             // Can write to the expanded region
-            buf.write(unchecked: 15, 123);
-            if buf.read(unchecked: 15) != 123 { return 25 }
+            unsafe buf.write(unchecked: 15, 123);
+            if unsafe buf.read(unchecked: 15) != 123 { return 25 }
 
             0
         }

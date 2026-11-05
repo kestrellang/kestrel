@@ -258,6 +258,7 @@ pub static REGISTRY: &[AttrDef] = &[
                 what: "a calling convention: '@extern(.C)'",
             },
             labeled("mangleName", ParamKind::Str, "a symbol name"),
+            labeled("safe", ParamKind::Bool, "'true' or 'false'"),
         ],
         repeatable: false,
         phase: AttrPhase::Lowering,
@@ -267,7 +268,7 @@ pub static REGISTRY: &[AttrDef] = &[
         }],
         needs_body: false,
         repeat_hint: None,
-        doc: "Declares a function implemented outside Kestrel, called with the given calling convention.",
+        doc: "Declares a function implemented outside Kestrel, called with the given calling convention. Calling it needs `unsafe` unless the declaration says `safe: true`.",
     },
     AttrDef {
         name: "fileconstant",

@@ -179,7 +179,7 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
     }
 
     func _readByte(at offset: Int64) -> UInt8 {
-        self._rawPtr().offset(by: offset).read()
+        unsafe self._rawPtr().offset(by: offset).read()
     }
 
     // -- Iteration -----------------------------------------------------------
@@ -242,7 +242,7 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
     }
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(UnsafeSlice(pointer: self._rawPtr().offset(by: self.start), count: (self.end - self.start)))
+        hasher.write(unsafe UnsafeSlice(pointer: self._rawPtr().offset(by: self.start), count: (self.end - self.start)))
     }
 
     public func clone() -> StringSlice {

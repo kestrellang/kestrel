@@ -477,7 +477,7 @@ fn seed_refinement_closure(
         return;
     };
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let kestrel_ast::AstType::Named { segments, .. } = ast_ty else {
@@ -576,7 +576,7 @@ fn protocols_declared_on_extension(
         .0
         .iter()
         .filter_map(|item| {
-            let kestrel_ast_builder::ConformanceItem::Positive(ast_ty, _) = item else {
+            let kestrel_ast_builder::ConformanceItem::Positive(ast_ty, ..) = item else {
                 return None;
             };
             let kestrel_ast::AstType::Named { segments, .. } = ast_ty else {

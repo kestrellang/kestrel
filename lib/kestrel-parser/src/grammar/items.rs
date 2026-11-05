@@ -63,7 +63,7 @@ impl Ctx {
 }
 
 const VISIBILITY: &[K] = &[K::Public, K::Private, K::Internal, K::Fileprivate];
-const MODIFIERS: &[K] = &[K::Static, K::Mutating, K::Consuming, K::Indirect];
+const MODIFIERS: &[K] = &[K::Static, K::Unsafe, K::Mutating, K::Consuming, K::Indirect];
 
 /// Tokens that can begin an item (or its header).
 fn at_item_start(p: &Parser<'_>) -> bool {
@@ -248,6 +248,15 @@ fn opt_static(p: &mut Parser<'_>) {
     }
 }
 
+/// `UnsafeModifier` node, if `unsafe` is next.
+fn opt_unsafe(p: &mut Parser<'_>) {
+    if p.at(K::Unsafe) {
+        let m = p.start();
+        p.bump(K::Unsafe);
+        m.complete(p, K::UnsafeModifier);
+    }
+}
+
 /// `ParameterList`: `( param, … )`.
 fn parameter_list(p: &mut Parser<'_>) {
     let m = p.start();
@@ -381,6 +390,9 @@ fn type_decl(p: &mut Parser<'_>, kw: K) {
         p.bump(K::Indirect);
         i.complete(p, K::IndirectModifier);
     }
+    if kw == K::Protocol {
+        opt_unsafe(p);
+    }
     stray_modifiers(p);
     p.expect(kw);
     name(p);
@@ -435,6 +447,7 @@ fn init_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     visibility(p);
+    opt_unsafe(p);
     stray_modifiers(p);
     p.expect(K::Init);
     opt_type_parameter_list(p);
@@ -466,12 +479,13 @@ fn deinit_decl(p: &mut Parser<'_>) {
     m.complete(p, K::DeinitDeclaration);
 }
 
-/// `static? (mutating|consuming)? func name[T](params) (-> R)? (where …)? body?`
+/// `static? unsafe? (mutating|consuming)? func name[T](params) (-> R)? (where …)? body?`
 fn function_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     visibility(p);
     opt_static(p);
+    opt_unsafe(p);
     if p.at_any(&[K::Mutating, K::Consuming]) {
         p.bump_any();
     }
@@ -499,6 +513,7 @@ fn subscript_decl(p: &mut Parser<'_>) {
     attribute_list(p);
     visibility(p);
     opt_static(p);
+    opt_unsafe(p);
     stray_modifiers(p);
     p.expect(K::Subscript);
     opt_type_parameter_list(p);
@@ -522,6 +537,7 @@ fn field_decl(p: &mut Parser<'_>) {
     attribute_list(p);
     visibility(p);
     opt_static(p);
+    opt_unsafe(p);
     stray_modifiers(p);
     if at_lazy_modifier(p, 0) {
         let l = p.start();
