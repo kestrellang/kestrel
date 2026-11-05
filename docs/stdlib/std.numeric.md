@@ -2829,9 +2829,10 @@ A 16-bit signed integer.
 
 Int16 is the 16-bit member of the integer family. The same surface
 area is provided across all widths; switch widths to trade range for memory
-or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-`*Checked` variants for overflow detection or `*Saturating` to clamp to
-`minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+`*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+that holds in every build. The type is `FFISafe` and lays out as a single
 `lang.i16` so it can cross C boundaries unchanged.
 
 ### Examples
@@ -2858,6 +2859,71 @@ to the corresponding C type.
 _Defined in `lang/std/numeric/int16.ks`._
 
 ### Members
+
+#### initializer `Bit Pattern`
+
+```kestrel
+public init(bitPattern: UInt16)
+```
+
+Reinterprets the bits of a same-width `UInt16` as `Int16`. Never traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int32)
+```
+
+Converts from `Int32`, saturating to `Int16.minValue` / `Int16.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int64)
+```
+
+Converts from `Int64`, saturating to `Int16.minValue` / `Int16.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt16)
+```
+
+Converts from `UInt16`, saturating to `Int16.minValue` / `Int16.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt32)
+```
+
+Converts from `UInt32`, saturating to `Int16.minValue` / `Int16.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt64)
+```
+
+Converts from `UInt64`, saturating to `Int16.minValue` / `Int16.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### initializer `Default`
 
@@ -2914,8 +2980,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 public init(from: Int8)
 ```
 
-Converts from `Int8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int8`. Lossless: every `Int8` fits in `Int16`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -2925,8 +2990,13 @@ _Defined in `lang/std/numeric/int16.ks`._
 public init(from: Int32)
 ```
 
-Converts from `Int32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int32`, trapping when the value doesn't fit in
+`Int16`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -2936,8 +3006,13 @@ _Defined in `lang/std/numeric/int16.ks`._
 public init(from: Int64)
 ```
 
-Converts from `Int64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int64`, trapping when the value doesn't fit in
+`Int16`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -2947,8 +3022,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 public init(from: UInt8)
 ```
 
-Converts from `UInt8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt8`. Lossless: every `UInt8` fits in `Int16`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -2958,8 +3032,13 @@ _Defined in `lang/std/numeric/int16.ks`._
 public init(from: UInt16)
 ```
 
-Converts from `UInt16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt16`, trapping when the value doesn't fit in
+`Int16`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -2969,8 +3048,13 @@ _Defined in `lang/std/numeric/int16.ks`._
 public init(from: UInt32)
 ```
 
-Converts from `UInt32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt32`, trapping when the value doesn't fit in
+`Int16`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -2980,8 +3064,13 @@ _Defined in `lang/std/numeric/int16.ks`._
 public init(from: UInt64)
 ```
 
-Converts from `UInt64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt64`, trapping when the value doesn't fit in
+`Int16`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3055,6 +3144,61 @@ Int16(parsing: "z", radix: 36);      // Some(35)
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int32)
+```
+
+Converts from `Int32` keeping only the low bits, reinterpreted as
+`Int16`. Never traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int64)
+```
+
+Converts from `Int64` keeping only the low bits, reinterpreted as
+`Int16`. Never traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt16)
+```
+
+Converts from `UInt16` keeping only the low bits, reinterpreted as
+`Int16`. Never traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt32)
+```
+
+Converts from `UInt32` keeping only the low bits, reinterpreted as
+`Int16`. Never traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt64)
+```
+
+Converts from `UInt64` keeping only the low bits, reinterpreted as
+`Int16`. Never traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### function `absChecked`
 
 ```kestrel
@@ -3076,13 +3220,34 @@ Absolute value that returns `maxValue` instead of wrapping `minValue`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### function `absWrapping`
+
+```kestrel
+public func absWrapping() -> Int16
+```
+
+`|self|`, with `minValue.absWrapping()` wrapping to `minValue`.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### function `addChecked`
 
 ```kestrel
 public func addChecked(Int16) -> Int16?
 ```
 
-Wrapping addition that returns `None` instead of overflowing.
+`self + other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `addOverflowing`
+
+```kestrel
+public func addOverflowing(Int16) -> (Int16, Bool)
+```
+
+`self + other` plus whether it overflowed. The value is the
+wrapped result, as from `addWrapping`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3093,6 +3258,17 @@ public func addSaturating(Int16) -> Int16
 ```
 
 Addition that clamps to `maxValue`/`minValue` instead of wrapping.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `addWrapping`
+
+```kestrel
+public func addWrapping(Int16) -> Int16
+```
+
+`self + other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3196,6 +3372,17 @@ of arithmetic.
 ##### Safety
 
 UB when `other == 0`, or signed `minValue / -1`.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `divideWrapping`
+
+```kestrel
+public func divideWrapping(Int16) -> Int16
+```
+
+`self / other`, with `minValue / -1` wrapping to `minValue`.
+Still traps on division by zero.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3362,7 +3549,18 @@ _Defined in `lang/std/numeric/int16.ks`._
 public func multiplyChecked(Int16) -> Int16?
 ```
 
-Wrapping multiplication that returns `None` instead of overflowing.
+`self * other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `multiplyOverflowing`
+
+```kestrel
+public func multiplyOverflowing(Int16) -> (Int16, Bool)
+```
+
+`self * other` plus whether it overflowed. The value is the
+wrapped result, as from `multiplyWrapping`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3374,6 +3572,17 @@ public func multiplySaturating(Int16) -> Int16
 
 Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
 The clamp direction follows the algebraic sign of the would-be result.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `multiplyWrapping`
+
+```kestrel
+public func multiplyWrapping(Int16) -> Int16
+```
+
+`self * other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3397,23 +3606,69 @@ Negation that returns `maxValue` instead of wrapping `minValue`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### function `negateWrapping`
+
+```kestrel
+public func negateWrapping() -> Int16
+```
+
+`-self`, with `-minValue` wrapping back to `minValue`.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### function `pow`
 
 ```kestrel
 public func pow(Int64) -> Int16
 ```
 
-Raises `self` to `exponent` via binary exponentiation. Wraps on
-overflow. Negative exponents return zero (integer truncation of
-the would-be fraction).
+Raises `self` to `exponent` via binary exponentiation.
+
+##### Errors
+
+Panics on a negative exponent, and on overflow when overflow checks
+are on (wraps when off); see `powChecked`,
+`powWrapping` and `powSaturating`.
 
 ##### Examples
 
 ```
 (2).pow(10);  // 1024
 (3).pow(4);   // 81
-(5).pow(-1);  // 0
 ```
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `powChecked`
+
+```kestrel
+public func powChecked(Int64) -> Int16?
+```
+
+`self` raised to `exponent`, or `None` on overflow or a negative
+exponent.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `powSaturating`
+
+```kestrel
+public func powSaturating(Int64) -> Int16
+```
+
+`self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+overflow. A negative exponent traps.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `powWrapping`
+
+```kestrel
+public func powWrapping(Int64) -> Int16
+```
+
+`self` raised to `exponent`, wrapping on overflow. A negative
+exponent traps.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3523,7 +3778,18 @@ _Defined in `lang/std/numeric/int16.ks`._
 public func subtractChecked(Int16) -> Int16?
 ```
 
-Wrapping subtraction that returns `None` instead of overflowing.
+`self - other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `subtractOverflowing`
+
+```kestrel
+public func subtractOverflowing(Int16) -> (Int16, Bool)
+```
+
+`self - other` plus whether it overflowed. The value is the
+wrapped result, as from `subtractWrapping`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3534,6 +3800,17 @@ public func subtractSaturating(Int16) -> Int16
 ```
 
 Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `subtractWrapping`
+
+```kestrel
+public func subtractWrapping(Int16) -> Int16
+```
+
+`self - other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3597,9 +3874,8 @@ _Defined in `lang/std/numeric/int16.ks`._
 public func abs() -> Int16
 ```
 
-Absolute value. Wraps at the minimum value
-(`Int16.minValue.abs() == Int16.minValue`); use
-`absChecked` if that's a problem.
+Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
+`absChecked` or `absSaturating` there.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3623,7 +3899,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 public func predecessor() -> Int16
 ```
 
-Predecessor — `self - 1`. Wraps at `minValue`.
+Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3633,7 +3909,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 public func successor() -> Int16
 ```
 
-Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
 integer ranges.
 
 _Defined in `lang/std/numeric/int16.ks`._
@@ -3872,8 +4148,13 @@ _Defined in `lang/std/numeric/int16.ks`._
 public consuming func add(consuming Int16) -> Int16
 ```
 
-`self + other`, wrapping on overflow. Use `addChecked` to detect or
-`addSaturating` to clamp.
+`self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+`addSaturating` or `addOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int16` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3895,7 +4176,13 @@ _Defined in `lang/std/numeric/int16.ks`._
 public consuming func subtract(consuming Int16) -> Int16
 ```
 
-`self - other`, wrapping on overflow.
+`self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+`subtractSaturating` or `subtractOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int16` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3907,7 +4194,13 @@ _Defined in `lang/std/numeric/int16.ks`._
 public consuming func multiply(consuming Int16) -> Int16
 ```
 
-`self * other`, wrapping on overflow.
+`self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+`multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int16` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3930,7 +4223,8 @@ public consuming func divide(consuming Int16) -> Int16
 ```
 
 Truncating integer division (`self / other`). For signed types,
-`minValue / -1` wraps; use `divideChecked` to detect.
+`minValue / -1` traps when overflow checks are on (and wraps
+when off); use `divideWrapping` or `divideChecked`.
 
 ##### Errors
 
@@ -3964,9 +4258,9 @@ _Defined in `lang/std/numeric/int16.ks`._
 public consuming func negate() -> Int16
 ```
 
-Two's-complement negation. Wraps at the minimum value:
-`Int16.minValue.negate() == Int16.minValue`. Use
-`negateChecked` to surface the overflow.
+Two's-complement negation. Traps at the minimum value, which has
+no positive counterpart, when overflow checks are on (wraps when off); use `negateWrapping`, `negateChecked` or
+`negateSaturating` there.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -4235,6 +4529,8 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Convertible`
 
+### Implements `LossyConvertible`
+
 ### Implements `Exitable`
 
 #### function `report`
@@ -4255,9 +4551,10 @@ A 32-bit signed integer.
 
 Int32 is the 32-bit member of the integer family. The same surface
 area is provided across all widths; switch widths to trade range for memory
-or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-`*Checked` variants for overflow detection or `*Saturating` to clamp to
-`minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+`*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+that holds in every build. The type is `FFISafe` and lays out as a single
 `lang.i32` so it can cross C boundaries unchanged.
 
 ### Examples
@@ -4284,6 +4581,49 @@ to the corresponding C type.
 _Defined in `lang/std/numeric/int32.ks`._
 
 ### Members
+
+#### initializer `Bit Pattern`
+
+```kestrel
+public init(bitPattern: UInt32)
+```
+
+Reinterprets the bits of a same-width `UInt32` as `Int32`. Never traps.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int64)
+```
+
+Converts from `Int64`, saturating to `Int32.minValue` / `Int32.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt32)
+```
+
+Converts from `UInt32`, saturating to `Int32.minValue` / `Int32.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt64)
+```
+
+Converts from `UInt64`, saturating to `Int32.minValue` / `Int32.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### initializer `Default`
 
@@ -4340,8 +4680,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 public init(from: Int8)
 ```
 
-Converts from `Int8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int8`. Lossless: every `Int8` fits in `Int32`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4351,8 +4690,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 public init(from: Int16)
 ```
 
-Converts from `Int16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int16`. Lossless: every `Int16` fits in `Int32`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4362,8 +4700,13 @@ _Defined in `lang/std/numeric/int32.ks`._
 public init(from: Int64)
 ```
 
-Converts from `Int64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int64`, trapping when the value doesn't fit in
+`Int32`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int32.minValue...Int32.maxValue`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4373,8 +4716,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 public init(from: UInt8)
 ```
 
-Converts from `UInt8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt8`. Lossless: every `UInt8` fits in `Int32`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4384,8 +4726,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 public init(from: UInt16)
 ```
 
-Converts from `UInt16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt16`. Lossless: every `UInt16` fits in `Int32`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4395,8 +4736,13 @@ _Defined in `lang/std/numeric/int32.ks`._
 public init(from: UInt32)
 ```
 
-Converts from `UInt32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt32`, trapping when the value doesn't fit in
+`Int32`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int32.minValue...Int32.maxValue`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4406,8 +4752,13 @@ _Defined in `lang/std/numeric/int32.ks`._
 public init(from: UInt64)
 ```
 
-Converts from `UInt64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt64`, trapping when the value doesn't fit in
+`Int32`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int32.minValue...Int32.maxValue`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4481,6 +4832,39 @@ Int32(parsing: "z", radix: 36);      // Some(35)
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int64)
+```
+
+Converts from `Int64` keeping only the low bits, reinterpreted as
+`Int32`. Never traps.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt32)
+```
+
+Converts from `UInt32` keeping only the low bits, reinterpreted as
+`Int32`. Never traps.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt64)
+```
+
+Converts from `UInt64` keeping only the low bits, reinterpreted as
+`Int32`. Never traps.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### function `absChecked`
 
 ```kestrel
@@ -4502,13 +4886,34 @@ Absolute value that returns `maxValue` instead of wrapping `minValue`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### function `absWrapping`
+
+```kestrel
+public func absWrapping() -> Int32
+```
+
+`|self|`, with `minValue.absWrapping()` wrapping to `minValue`.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### function `addChecked`
 
 ```kestrel
 public func addChecked(Int32) -> Int32?
 ```
 
-Wrapping addition that returns `None` instead of overflowing.
+`self + other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `addOverflowing`
+
+```kestrel
+public func addOverflowing(Int32) -> (Int32, Bool)
+```
+
+`self + other` plus whether it overflowed. The value is the
+wrapped result, as from `addWrapping`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4519,6 +4924,17 @@ public func addSaturating(Int32) -> Int32
 ```
 
 Addition that clamps to `maxValue`/`minValue` instead of wrapping.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `addWrapping`
+
+```kestrel
+public func addWrapping(Int32) -> Int32
+```
+
+`self + other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4622,6 +5038,17 @@ of arithmetic.
 ##### Safety
 
 UB when `other == 0`, or signed `minValue / -1`.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `divideWrapping`
+
+```kestrel
+public func divideWrapping(Int32) -> Int32
+```
+
+`self / other`, with `minValue / -1` wrapping to `minValue`.
+Still traps on division by zero.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4788,7 +5215,18 @@ _Defined in `lang/std/numeric/int32.ks`._
 public func multiplyChecked(Int32) -> Int32?
 ```
 
-Wrapping multiplication that returns `None` instead of overflowing.
+`self * other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `multiplyOverflowing`
+
+```kestrel
+public func multiplyOverflowing(Int32) -> (Int32, Bool)
+```
+
+`self * other` plus whether it overflowed. The value is the
+wrapped result, as from `multiplyWrapping`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4800,6 +5238,17 @@ public func multiplySaturating(Int32) -> Int32
 
 Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
 The clamp direction follows the algebraic sign of the would-be result.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `multiplyWrapping`
+
+```kestrel
+public func multiplyWrapping(Int32) -> Int32
+```
+
+`self * other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4823,23 +5272,69 @@ Negation that returns `maxValue` instead of wrapping `minValue`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### function `negateWrapping`
+
+```kestrel
+public func negateWrapping() -> Int32
+```
+
+`-self`, with `-minValue` wrapping back to `minValue`.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### function `pow`
 
 ```kestrel
 public func pow(Int64) -> Int32
 ```
 
-Raises `self` to `exponent` via binary exponentiation. Wraps on
-overflow. Negative exponents return zero (integer truncation of
-the would-be fraction).
+Raises `self` to `exponent` via binary exponentiation.
+
+##### Errors
+
+Panics on a negative exponent, and on overflow when overflow checks
+are on (wraps when off); see `powChecked`,
+`powWrapping` and `powSaturating`.
 
 ##### Examples
 
 ```
 (2).pow(10);  // 1024
 (3).pow(4);   // 81
-(5).pow(-1);  // 0
 ```
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `powChecked`
+
+```kestrel
+public func powChecked(Int64) -> Int32?
+```
+
+`self` raised to `exponent`, or `None` on overflow or a negative
+exponent.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `powSaturating`
+
+```kestrel
+public func powSaturating(Int64) -> Int32
+```
+
+`self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+overflow. A negative exponent traps.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `powWrapping`
+
+```kestrel
+public func powWrapping(Int64) -> Int32
+```
+
+`self` raised to `exponent`, wrapping on overflow. A negative
+exponent traps.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4949,7 +5444,18 @@ _Defined in `lang/std/numeric/int32.ks`._
 public func subtractChecked(Int32) -> Int32?
 ```
 
-Wrapping subtraction that returns `None` instead of overflowing.
+`self - other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `subtractOverflowing`
+
+```kestrel
+public func subtractOverflowing(Int32) -> (Int32, Bool)
+```
+
+`self - other` plus whether it overflowed. The value is the
+wrapped result, as from `subtractWrapping`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4960,6 +5466,17 @@ public func subtractSaturating(Int32) -> Int32
 ```
 
 Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `subtractWrapping`
+
+```kestrel
+public func subtractWrapping(Int32) -> Int32
+```
+
+`self - other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5023,9 +5540,8 @@ _Defined in `lang/std/numeric/int32.ks`._
 public func abs() -> Int32
 ```
 
-Absolute value. Wraps at the minimum value
-(`Int32.minValue.abs() == Int32.minValue`); use
-`absChecked` if that's a problem.
+Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
+`absChecked` or `absSaturating` there.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5049,7 +5565,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 public func predecessor() -> Int32
 ```
 
-Predecessor — `self - 1`. Wraps at `minValue`.
+Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5059,7 +5575,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 public func successor() -> Int32
 ```
 
-Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
 integer ranges.
 
 _Defined in `lang/std/numeric/int32.ks`._
@@ -5298,8 +5814,13 @@ _Defined in `lang/std/numeric/int32.ks`._
 public consuming func add(consuming Int32) -> Int32
 ```
 
-`self + other`, wrapping on overflow. Use `addChecked` to detect or
-`addSaturating` to clamp.
+`self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+`addSaturating` or `addOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int32` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5321,7 +5842,13 @@ _Defined in `lang/std/numeric/int32.ks`._
 public consuming func subtract(consuming Int32) -> Int32
 ```
 
-`self - other`, wrapping on overflow.
+`self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+`subtractSaturating` or `subtractOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int32` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5333,7 +5860,13 @@ _Defined in `lang/std/numeric/int32.ks`._
 public consuming func multiply(consuming Int32) -> Int32
 ```
 
-`self * other`, wrapping on overflow.
+`self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+`multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int32` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5356,7 +5889,8 @@ public consuming func divide(consuming Int32) -> Int32
 ```
 
 Truncating integer division (`self / other`). For signed types,
-`minValue / -1` wraps; use `divideChecked` to detect.
+`minValue / -1` traps when overflow checks are on (and wraps
+when off); use `divideWrapping` or `divideChecked`.
 
 ##### Errors
 
@@ -5390,9 +5924,9 @@ _Defined in `lang/std/numeric/int32.ks`._
 public consuming func negate() -> Int32
 ```
 
-Two's-complement negation. Wraps at the minimum value:
-`Int32.minValue.negate() == Int32.minValue`. Use
-`negateChecked` to surface the overflow.
+Two's-complement negation. Traps at the minimum value, which has
+no positive counterpart, when overflow checks are on (wraps when off); use `negateWrapping`, `negateChecked` or
+`negateSaturating` there.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5661,6 +6195,8 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Convertible`
 
+### Implements `LossyConvertible`
+
 ### Implements `Exitable`
 
 #### function `report`
@@ -5681,9 +6217,10 @@ A 64-bit signed integer.
 
 Int64 is the 64-bit member of the integer family. The same surface
 area is provided across all widths; switch widths to trade range for memory
-or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-`*Checked` variants for overflow detection or `*Saturating` to clamp to
-`minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+`*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+that holds in every build. The type is `FFISafe` and lays out as a single
 `lang.i64` so it can cross C boundaries unchanged.
 
 ### Examples
@@ -5710,6 +6247,27 @@ to the corresponding C type.
 _Defined in `lang/std/numeric/int64.ks`._
 
 ### Members
+
+#### initializer `Bit Pattern`
+
+```kestrel
+public init(bitPattern: UInt64)
+```
+
+Reinterprets the bits of a same-width `UInt64` as `Int64`. Never traps.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt64)
+```
+
+Converts from `UInt64`, saturating to `Int64.minValue` / `Int64.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### initializer `Default`
 
@@ -5766,8 +6324,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 public init(from: Int8)
 ```
 
-Converts from `Int8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int8`. Lossless: every `Int8` fits in `Int64`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5777,8 +6334,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 public init(from: Int16)
 ```
 
-Converts from `Int16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int16`. Lossless: every `Int16` fits in `Int64`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5788,8 +6344,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 public init(from: Int32)
 ```
 
-Converts from `Int32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int32`. Lossless: every `Int32` fits in `Int64`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5799,8 +6354,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 public init(from: UInt8)
 ```
 
-Converts from `UInt8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt8`. Lossless: every `UInt8` fits in `Int64`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5810,8 +6364,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 public init(from: UInt16)
 ```
 
-Converts from `UInt16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt16`. Lossless: every `UInt16` fits in `Int64`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5821,8 +6374,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 public init(from: UInt32)
 ```
 
-Converts from `UInt32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt32`. Lossless: every `UInt32` fits in `Int64`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5832,8 +6384,13 @@ _Defined in `lang/std/numeric/int64.ks`._
 public init(from: UInt64)
 ```
 
-Converts from `UInt64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt64`, trapping when the value doesn't fit in
+`Int64`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int64.minValue...Int64.maxValue`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5907,6 +6464,17 @@ Int64(parsing: "z", radix: 36);      // Some(35)
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt64)
+```
+
+Converts from `UInt64` keeping only the low bits, reinterpreted as
+`Int64`. Never traps.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### function `absChecked`
 
 ```kestrel
@@ -5928,13 +6496,34 @@ Absolute value that returns `maxValue` instead of wrapping `minValue`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### function `absWrapping`
+
+```kestrel
+public func absWrapping() -> Int64
+```
+
+`|self|`, with `minValue.absWrapping()` wrapping to `minValue`.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### function `addChecked`
 
 ```kestrel
 public func addChecked(Int64) -> Int64?
 ```
 
-Wrapping addition that returns `None` instead of overflowing.
+`self + other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `addOverflowing`
+
+```kestrel
+public func addOverflowing(Int64) -> (Int64, Bool)
+```
+
+`self + other` plus whether it overflowed. The value is the
+wrapped result, as from `addWrapping`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -5945,6 +6534,17 @@ public func addSaturating(Int64) -> Int64
 ```
 
 Addition that clamps to `maxValue`/`minValue` instead of wrapping.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `addWrapping`
+
+```kestrel
+public func addWrapping(Int64) -> Int64
+```
+
+`self + other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6048,6 +6648,17 @@ of arithmetic.
 ##### Safety
 
 UB when `other == 0`, or signed `minValue / -1`.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `divideWrapping`
+
+```kestrel
+public func divideWrapping(Int64) -> Int64
+```
+
+`self / other`, with `minValue / -1` wrapping to `minValue`.
+Still traps on division by zero.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6214,7 +6825,18 @@ _Defined in `lang/std/numeric/int64.ks`._
 public func multiplyChecked(Int64) -> Int64?
 ```
 
-Wrapping multiplication that returns `None` instead of overflowing.
+`self * other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `multiplyOverflowing`
+
+```kestrel
+public func multiplyOverflowing(Int64) -> (Int64, Bool)
+```
+
+`self * other` plus whether it overflowed. The value is the
+wrapped result, as from `multiplyWrapping`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6226,6 +6848,17 @@ public func multiplySaturating(Int64) -> Int64
 
 Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
 The clamp direction follows the algebraic sign of the would-be result.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `multiplyWrapping`
+
+```kestrel
+public func multiplyWrapping(Int64) -> Int64
+```
+
+`self * other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6249,23 +6882,69 @@ Negation that returns `maxValue` instead of wrapping `minValue`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### function `negateWrapping`
+
+```kestrel
+public func negateWrapping() -> Int64
+```
+
+`-self`, with `-minValue` wrapping back to `minValue`.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### function `pow`
 
 ```kestrel
 public func pow(Int64) -> Int64
 ```
 
-Raises `self` to `exponent` via binary exponentiation. Wraps on
-overflow. Negative exponents return zero (integer truncation of
-the would-be fraction).
+Raises `self` to `exponent` via binary exponentiation.
+
+##### Errors
+
+Panics on a negative exponent, and on overflow when overflow checks
+are on (wraps when off); see `powChecked`,
+`powWrapping` and `powSaturating`.
 
 ##### Examples
 
 ```
 (2).pow(10);  // 1024
 (3).pow(4);   // 81
-(5).pow(-1);  // 0
 ```
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `powChecked`
+
+```kestrel
+public func powChecked(Int64) -> Int64?
+```
+
+`self` raised to `exponent`, or `None` on overflow or a negative
+exponent.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `powSaturating`
+
+```kestrel
+public func powSaturating(Int64) -> Int64
+```
+
+`self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+overflow. A negative exponent traps.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `powWrapping`
+
+```kestrel
+public func powWrapping(Int64) -> Int64
+```
+
+`self` raised to `exponent`, wrapping on overflow. A negative
+exponent traps.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6393,7 +7072,18 @@ _Defined in `lang/std/numeric/int64.ks`._
 public func subtractChecked(Int64) -> Int64?
 ```
 
-Wrapping subtraction that returns `None` instead of overflowing.
+`self - other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `subtractOverflowing`
+
+```kestrel
+public func subtractOverflowing(Int64) -> (Int64, Bool)
+```
+
+`self - other` plus whether it overflowed. The value is the
+wrapped result, as from `subtractWrapping`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6404,6 +7094,17 @@ public func subtractSaturating(Int64) -> Int64
 ```
 
 Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `subtractWrapping`
+
+```kestrel
+public func subtractWrapping(Int64) -> Int64
+```
+
+`self - other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6467,9 +7168,8 @@ _Defined in `lang/std/numeric/int64.ks`._
 public func abs() -> Int64
 ```
 
-Absolute value. Wraps at the minimum value
-(`Int64.minValue.abs() == Int64.minValue`); use
-`absChecked` if that's a problem.
+Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
+`absChecked` or `absSaturating` there.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6493,7 +7193,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 public func predecessor() -> Int64
 ```
 
-Predecessor — `self - 1`. Wraps at `minValue`.
+Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6503,7 +7203,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 public func successor() -> Int64
 ```
 
-Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
 integer ranges.
 
 _Defined in `lang/std/numeric/int64.ks`._
@@ -6742,8 +7442,13 @@ _Defined in `lang/std/numeric/int64.ks`._
 public consuming func add(consuming Int64) -> Int64
 ```
 
-`self + other`, wrapping on overflow. Use `addChecked` to detect or
-`addSaturating` to clamp.
+`self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+`addSaturating` or `addOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int64` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6765,7 +7470,13 @@ _Defined in `lang/std/numeric/int64.ks`._
 public consuming func subtract(consuming Int64) -> Int64
 ```
 
-`self - other`, wrapping on overflow.
+`self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+`subtractSaturating` or `subtractOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int64` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6777,7 +7488,13 @@ _Defined in `lang/std/numeric/int64.ks`._
 public consuming func multiply(consuming Int64) -> Int64
 ```
 
-`self * other`, wrapping on overflow.
+`self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+`multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int64` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6800,7 +7517,8 @@ public consuming func divide(consuming Int64) -> Int64
 ```
 
 Truncating integer division (`self / other`). For signed types,
-`minValue / -1` wraps; use `divideChecked` to detect.
+`minValue / -1` traps when overflow checks are on (and wraps
+when off); use `divideWrapping` or `divideChecked`.
 
 ##### Errors
 
@@ -6834,9 +7552,9 @@ _Defined in `lang/std/numeric/int64.ks`._
 public consuming func negate() -> Int64
 ```
 
-Two's-complement negation. Wraps at the minimum value:
-`Int64.minValue.negate() == Int64.minValue`. Use
-`negateChecked` to surface the overflow.
+Two's-complement negation. Traps at the minimum value, which has
+no positive counterpart, when overflow checks are on (wraps when off); use `negateWrapping`, `negateChecked` or
+`negateSaturating` there.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -7104,6 +7822,8 @@ Builds a partial range `..=self` (through self, inclusive).
 _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Convertible`
+
+### Implements `LossyConvertible`
 
 ### Implements `SliceIndex`
 
@@ -7559,9 +8279,10 @@ A 8-bit signed integer.
 
 Int8 is the 8-bit member of the integer family. The same surface
 area is provided across all widths; switch widths to trade range for memory
-or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-`*Checked` variants for overflow detection or `*Saturating` to clamp to
-`minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+`*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+that holds in every build. The type is `FFISafe` and lays out as a single
 `lang.i8` so it can cross C boundaries unchanged.
 
 ### Examples
@@ -7588,6 +8309,93 @@ to the corresponding C type.
 _Defined in `lang/std/numeric/int8.ks`._
 
 ### Members
+
+#### initializer `Bit Pattern`
+
+```kestrel
+public init(bitPattern: UInt8)
+```
+
+Reinterprets the bits of a same-width `UInt8` as `Int8`. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int16)
+```
+
+Converts from `Int16`, saturating to `Int8.minValue` / `Int8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int32)
+```
+
+Converts from `Int32`, saturating to `Int8.minValue` / `Int8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int64)
+```
+
+Converts from `Int64`, saturating to `Int8.minValue` / `Int8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt8)
+```
+
+Converts from `UInt8`, saturating to `Int8.minValue` / `Int8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt16)
+```
+
+Converts from `UInt16`, saturating to `Int8.minValue` / `Int8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt32)
+```
+
+Converts from `UInt32`, saturating to `Int8.minValue` / `Int8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt64)
+```
+
+Converts from `UInt64`, saturating to `Int8.minValue` / `Int8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### initializer `Default`
 
@@ -7644,8 +8452,13 @@ _Defined in `lang/std/numeric/int8.ks`._
 public init(from: Int16)
 ```
 
-Converts from `Int16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int16`, trapping when the value doesn't fit in
+`Int8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7655,8 +8468,13 @@ _Defined in `lang/std/numeric/int8.ks`._
 public init(from: Int32)
 ```
 
-Converts from `Int32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int32`, trapping when the value doesn't fit in
+`Int8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7666,8 +8484,13 @@ _Defined in `lang/std/numeric/int8.ks`._
 public init(from: Int64)
 ```
 
-Converts from `Int64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int64`, trapping when the value doesn't fit in
+`Int8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7677,8 +8500,13 @@ _Defined in `lang/std/numeric/int8.ks`._
 public init(from: UInt8)
 ```
 
-Converts from `UInt8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt8`, trapping when the value doesn't fit in
+`Int8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7688,8 +8516,13 @@ _Defined in `lang/std/numeric/int8.ks`._
 public init(from: UInt16)
 ```
 
-Converts from `UInt16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt16`, trapping when the value doesn't fit in
+`Int8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7699,8 +8532,13 @@ _Defined in `lang/std/numeric/int8.ks`._
 public init(from: UInt32)
 ```
 
-Converts from `UInt32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt32`, trapping when the value doesn't fit in
+`Int8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7710,8 +8548,13 @@ _Defined in `lang/std/numeric/int8.ks`._
 public init(from: UInt64)
 ```
 
-Converts from `UInt64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt64`, trapping when the value doesn't fit in
+`Int8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `Int8.minValue...Int8.maxValue`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7785,6 +8628,83 @@ Int8(parsing: "z", radix: 36);      // Some(35)
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int16)
+```
+
+Converts from `Int16` keeping only the low bits, reinterpreted as
+`Int8`. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int32)
+```
+
+Converts from `Int32` keeping only the low bits, reinterpreted as
+`Int8`. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int64)
+```
+
+Converts from `Int64` keeping only the low bits, reinterpreted as
+`Int8`. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt8)
+```
+
+Converts from `UInt8` keeping only the low bits, reinterpreted as
+`Int8`. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt16)
+```
+
+Converts from `UInt16` keeping only the low bits, reinterpreted as
+`Int8`. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt32)
+```
+
+Converts from `UInt32` keeping only the low bits, reinterpreted as
+`Int8`. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt64)
+```
+
+Converts from `UInt64` keeping only the low bits, reinterpreted as
+`Int8`. Never traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### function `absChecked`
 
 ```kestrel
@@ -7806,13 +8726,34 @@ Absolute value that returns `maxValue` instead of wrapping `minValue`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### function `absWrapping`
+
+```kestrel
+public func absWrapping() -> Int8
+```
+
+`|self|`, with `minValue.absWrapping()` wrapping to `minValue`.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### function `addChecked`
 
 ```kestrel
 public func addChecked(Int8) -> Int8?
 ```
 
-Wrapping addition that returns `None` instead of overflowing.
+`self + other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `addOverflowing`
+
+```kestrel
+public func addOverflowing(Int8) -> (Int8, Bool)
+```
+
+`self + other` plus whether it overflowed. The value is the
+wrapped result, as from `addWrapping`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7823,6 +8764,17 @@ public func addSaturating(Int8) -> Int8
 ```
 
 Addition that clamps to `maxValue`/`minValue` instead of wrapping.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `addWrapping`
+
+```kestrel
+public func addWrapping(Int8) -> Int8
+```
+
+`self + other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -7926,6 +8878,17 @@ of arithmetic.
 ##### Safety
 
 UB when `other == 0`, or signed `minValue / -1`.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `divideWrapping`
+
+```kestrel
+public func divideWrapping(Int8) -> Int8
+```
+
+`self / other`, with `minValue / -1` wrapping to `minValue`.
+Still traps on division by zero.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8092,7 +9055,18 @@ _Defined in `lang/std/numeric/int8.ks`._
 public func multiplyChecked(Int8) -> Int8?
 ```
 
-Wrapping multiplication that returns `None` instead of overflowing.
+`self * other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `multiplyOverflowing`
+
+```kestrel
+public func multiplyOverflowing(Int8) -> (Int8, Bool)
+```
+
+`self * other` plus whether it overflowed. The value is the
+wrapped result, as from `multiplyWrapping`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8104,6 +9078,17 @@ public func multiplySaturating(Int8) -> Int8
 
 Multiplication that clamps to `maxValue`/`minValue` instead of wrapping.
 The clamp direction follows the algebraic sign of the would-be result.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `multiplyWrapping`
+
+```kestrel
+public func multiplyWrapping(Int8) -> Int8
+```
+
+`self * other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8127,23 +9112,69 @@ Negation that returns `maxValue` instead of wrapping `minValue`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### function `negateWrapping`
+
+```kestrel
+public func negateWrapping() -> Int8
+```
+
+`-self`, with `-minValue` wrapping back to `minValue`.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### function `pow`
 
 ```kestrel
 public func pow(Int64) -> Int8
 ```
 
-Raises `self` to `exponent` via binary exponentiation. Wraps on
-overflow. Negative exponents return zero (integer truncation of
-the would-be fraction).
+Raises `self` to `exponent` via binary exponentiation.
+
+##### Errors
+
+Panics on a negative exponent, and on overflow when overflow checks
+are on (wraps when off); see `powChecked`,
+`powWrapping` and `powSaturating`.
 
 ##### Examples
 
 ```
 (2).pow(10);  // 1024
 (3).pow(4);   // 81
-(5).pow(-1);  // 0
 ```
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `powChecked`
+
+```kestrel
+public func powChecked(Int64) -> Int8?
+```
+
+`self` raised to `exponent`, or `None` on overflow or a negative
+exponent.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `powSaturating`
+
+```kestrel
+public func powSaturating(Int64) -> Int8
+```
+
+`self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+overflow. A negative exponent traps.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `powWrapping`
+
+```kestrel
+public func powWrapping(Int64) -> Int8
+```
+
+`self` raised to `exponent`, wrapping on overflow. A negative
+exponent traps.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8253,7 +9284,18 @@ _Defined in `lang/std/numeric/int8.ks`._
 public func subtractChecked(Int8) -> Int8?
 ```
 
-Wrapping subtraction that returns `None` instead of overflowing.
+`self - other`, or `None` on overflow.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `subtractOverflowing`
+
+```kestrel
+public func subtractOverflowing(Int8) -> (Int8, Bool)
+```
+
+`self - other` plus whether it overflowed. The value is the
+wrapped result, as from `subtractWrapping`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8264,6 +9306,17 @@ public func subtractSaturating(Int8) -> Int8
 ```
 
 Subtraction that clamps to `maxValue`/`minValue` instead of wrapping.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `subtractWrapping`
+
+```kestrel
+public func subtractWrapping(Int8) -> Int8
+```
+
+`self - other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8327,9 +9380,8 @@ _Defined in `lang/std/numeric/int8.ks`._
 public func abs() -> Int8
 ```
 
-Absolute value. Wraps at the minimum value
-(`Int8.minValue.abs() == Int8.minValue`); use
-`absChecked` if that's a problem.
+Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
+`absChecked` or `absSaturating` there.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8353,7 +9405,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 public func predecessor() -> Int8
 ```
 
-Predecessor — `self - 1`. Wraps at `minValue`.
+Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8363,7 +9415,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 public func successor() -> Int8
 ```
 
-Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
 integer ranges.
 
 _Defined in `lang/std/numeric/int8.ks`._
@@ -8602,8 +9654,13 @@ _Defined in `lang/std/numeric/int8.ks`._
 public consuming func add(consuming Int8) -> Int8
 ```
 
-`self + other`, wrapping on overflow. Use `addChecked` to detect or
-`addSaturating` to clamp.
+`self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+`addSaturating` or `addOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int8` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8625,7 +9682,13 @@ _Defined in `lang/std/numeric/int8.ks`._
 public consuming func subtract(consuming Int8) -> Int8
 ```
 
-`self - other`, wrapping on overflow.
+`self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+`subtractSaturating` or `subtractOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int8` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8637,7 +9700,13 @@ _Defined in `lang/std/numeric/int8.ks`._
 public consuming func multiply(consuming Int8) -> Int8
 ```
 
-`self * other`, wrapping on overflow.
+`self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+`multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `Int8` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8660,7 +9729,8 @@ public consuming func divide(consuming Int8) -> Int8
 ```
 
 Truncating integer division (`self / other`). For signed types,
-`minValue / -1` wraps; use `divideChecked` to detect.
+`minValue / -1` traps when overflow checks are on (and wraps
+when off); use `divideWrapping` or `divideChecked`.
 
 ##### Errors
 
@@ -8694,9 +9764,9 @@ _Defined in `lang/std/numeric/int8.ks`._
 public consuming func negate() -> Int8
 ```
 
-Two's-complement negation. Wraps at the minimum value:
-`Int8.minValue.negate() == Int8.minValue`. Use
-`negateChecked` to surface the overflow.
+Two's-complement negation. Traps at the minimum value, which has
+no positive counterpart, when overflow checks are on (wraps when off); use `negateWrapping`, `negateChecked` or
+`negateSaturating` there.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8964,6 +10034,8 @@ Builds a partial range `..=self` (through self, inclusive).
 _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Convertible`
+
+### Implements `LossyConvertible`
 
 ### Implements `Exitable`
 
@@ -9361,9 +10433,10 @@ A 16-bit unsigned integer.
 
 UInt16 is the 16-bit member of the integer family. The same surface
 area is provided across all widths; switch widths to trade range for memory
-or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-`*Checked` variants for overflow detection or `*Saturating` to clamp to
-`minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+`*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+that holds in every build. The type is `FFISafe` and lays out as a single
 `lang.i16` so it can cross C boundaries unchanged.
 
 ### Examples
@@ -9390,6 +10463,82 @@ to the corresponding C type.
 _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Members
+
+#### initializer `Bit Pattern`
+
+```kestrel
+public init(bitPattern: Int16)
+```
+
+Reinterprets the bits of a same-width `Int16` as `UInt16`. Never traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int8)
+```
+
+Converts from `Int8`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int16)
+```
+
+Converts from `Int16`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int32)
+```
+
+Converts from `Int32`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int64)
+```
+
+Converts from `Int64`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt32)
+```
+
+Converts from `UInt32`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt64)
+```
+
+Converts from `UInt64`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### initializer `Default`
 
@@ -9446,8 +10595,13 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public init(from: Int8)
 ```
 
-Converts from `Int8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int8`, trapping when the value doesn't fit in
+`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9457,8 +10611,13 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public init(from: Int16)
 ```
 
-Converts from `Int16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int16`, trapping when the value doesn't fit in
+`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9468,8 +10627,13 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public init(from: Int32)
 ```
 
-Converts from `Int32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int32`, trapping when the value doesn't fit in
+`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9479,8 +10643,13 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public init(from: Int64)
 ```
 
-Converts from `Int64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int64`, trapping when the value doesn't fit in
+`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9490,8 +10659,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public init(from: UInt8)
 ```
 
-Converts from `UInt8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt8`. Lossless: every `UInt8` fits in `UInt16`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9501,8 +10669,13 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public init(from: UInt32)
 ```
 
-Converts from `UInt32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt32`, trapping when the value doesn't fit in
+`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9512,8 +10685,13 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public init(from: UInt64)
 ```
 
-Converts from `UInt64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt64`, trapping when the value doesn't fit in
+`UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9589,6 +10767,72 @@ let m = UInt16(parsing: "101010", radix: 2);   // Some(42)
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int8)
+```
+
+Converts from `Int8` keeping only the low bits, reinterpreted as
+`UInt16`. Never traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int16)
+```
+
+Converts from `Int16` keeping only the low bits, reinterpreted as
+`UInt16`. Never traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int32)
+```
+
+Converts from `Int32` keeping only the low bits, reinterpreted as
+`UInt16`. Never traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int64)
+```
+
+Converts from `Int64` keeping only the low bits, reinterpreted as
+`UInt16`. Never traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt32)
+```
+
+Converts from `UInt32` keeping only the low bits, reinterpreted as
+`UInt16`. Never traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt64)
+```
+
+Converts from `UInt64` keeping only the low bits, reinterpreted as
+`UInt16`. Never traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -9599,6 +10843,17 @@ Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### function `addOverflowing`
+
+```kestrel
+public func addOverflowing(UInt16) -> (UInt16, Bool)
+```
+
+`self + other` plus whether it overflowed. The value is the
+wrapped result, as from `addWrapping`.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### function `addSaturating`
 
 ```kestrel
@@ -9606,6 +10861,17 @@ public func addSaturating(UInt16) -> UInt16
 ```
 
 Addition that clamps to `maxValue` on overflow.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### function `addWrapping`
+
+```kestrel
+public func addWrapping(UInt16) -> UInt16
+```
+
+`self + other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9869,6 +11135,17 @@ Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### function `multiplyOverflowing`
+
+```kestrel
+public func multiplyOverflowing(UInt16) -> (UInt16, Bool)
+```
+
+`self * other` plus whether it overflowed. The value is the
+wrapped result, as from `multiplyWrapping`.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### function `multiplySaturating`
 
 ```kestrel
@@ -9879,23 +11156,70 @@ Multiplication that clamps to `maxValue` on overflow.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### function `multiplyWrapping`
+
+```kestrel
+public func multiplyWrapping(UInt16) -> UInt16
+```
+
+`self * other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### function `pow`
 
 ```kestrel
 public func pow(Int64) -> UInt16
 ```
 
-Raises `self` to `exponent` via binary exponentiation. Wraps on
-overflow. Negative exponents return zero (integer truncation of
-the would-be fraction).
+Raises `self` to `exponent` via binary exponentiation.
+
+##### Errors
+
+Panics on a negative exponent, and on overflow when overflow checks
+are on (wraps when off); see `powChecked`,
+`powWrapping` and `powSaturating`.
 
 ##### Examples
 
 ```
 (2).pow(10);  // 1024
 (3).pow(4);   // 81
-(5).pow(-1);  // 0
 ```
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### function `powChecked`
+
+```kestrel
+public func powChecked(Int64) -> UInt16?
+```
+
+`self` raised to `exponent`, or `None` on overflow or a negative
+exponent.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### function `powSaturating`
+
+```kestrel
+public func powSaturating(Int64) -> UInt16
+```
+
+`self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+overflow. A negative exponent traps.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### function `powWrapping`
+
+```kestrel
+public func powWrapping(Int64) -> UInt16
+```
+
+`self` raised to `exponent`, wrapping on overflow. A negative
+exponent traps.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10010,6 +11334,17 @@ Subtraction that returns `None` on underflow (`other > self`).
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### function `subtractOverflowing`
+
+```kestrel
+public func subtractOverflowing(UInt16) -> (UInt16, Bool)
+```
+
+`self - other` plus whether it overflowed. The value is the
+wrapped result, as from `subtractWrapping`.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### function `subtractSaturating`
 
 ```kestrel
@@ -10018,6 +11353,17 @@ public func subtractSaturating(UInt16) -> UInt16
 
 Subtraction that clamps to `0` on underflow (unsigned types cannot
 represent negative results).
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### function `subtractWrapping`
+
+```kestrel
+public func subtractWrapping(UInt16) -> UInt16
+```
+
+`self - other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10095,7 +11441,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public func predecessor() -> UInt16
 ```
 
-Predecessor — `self - 1`. Wraps at `minValue`.
+Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10105,7 +11451,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public func successor() -> UInt16
 ```
 
-Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
 integer ranges.
 
 _Defined in `lang/std/numeric/uint16.ks`._
@@ -10336,8 +11682,13 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public consuming func add(consuming UInt16) -> UInt16
 ```
 
-`self + other`, wrapping on overflow. Use `addChecked` to detect or
-`addSaturating` to clamp.
+`self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+`addSaturating` or `addOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt16` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10359,7 +11710,13 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public consuming func subtract(consuming UInt16) -> UInt16
 ```
 
-`self - other`, wrapping on overflow.
+`self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+`subtractSaturating` or `subtractOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt16` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10371,7 +11728,13 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public consuming func multiply(consuming UInt16) -> UInt16
 ```
 
-`self * other`, wrapping on overflow.
+`self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+`multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt16` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10685,6 +12048,8 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Convertible`
 
+### Implements `LossyConvertible`
+
 ### Implements `Exitable`
 
 #### function `report`
@@ -10705,9 +12070,10 @@ A 32-bit unsigned integer.
 
 UInt32 is the 32-bit member of the integer family. The same surface
 area is provided across all widths; switch widths to trade range for memory
-or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-`*Checked` variants for overflow detection or `*Saturating` to clamp to
-`minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+`*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+that holds in every build. The type is `FFISafe` and lays out as a single
 `lang.i32` so it can cross C boundaries unchanged.
 
 ### Examples
@@ -10734,6 +12100,71 @@ to the corresponding C type.
 _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Members
+
+#### initializer `Bit Pattern`
+
+```kestrel
+public init(bitPattern: Int32)
+```
+
+Reinterprets the bits of a same-width `Int32` as `UInt32`. Never traps.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int8)
+```
+
+Converts from `Int8`, saturating to `UInt32.minValue` / `UInt32.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int16)
+```
+
+Converts from `Int16`, saturating to `UInt32.minValue` / `UInt32.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int32)
+```
+
+Converts from `Int32`, saturating to `UInt32.minValue` / `UInt32.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int64)
+```
+
+Converts from `Int64`, saturating to `UInt32.minValue` / `UInt32.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt64)
+```
+
+Converts from `UInt64`, saturating to `UInt32.minValue` / `UInt32.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### initializer `Default`
 
@@ -10790,8 +12221,13 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public init(from: Int8)
 ```
 
-Converts from `Int8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int8`, trapping when the value doesn't fit in
+`UInt32`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt32.minValue...UInt32.maxValue`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10801,8 +12237,13 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public init(from: Int16)
 ```
 
-Converts from `Int16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int16`, trapping when the value doesn't fit in
+`UInt32`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt32.minValue...UInt32.maxValue`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10812,8 +12253,13 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public init(from: Int32)
 ```
 
-Converts from `Int32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int32`, trapping when the value doesn't fit in
+`UInt32`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt32.minValue...UInt32.maxValue`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10823,8 +12269,13 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public init(from: Int64)
 ```
 
-Converts from `Int64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int64`, trapping when the value doesn't fit in
+`UInt32`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt32.minValue...UInt32.maxValue`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10834,8 +12285,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public init(from: UInt8)
 ```
 
-Converts from `UInt8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt8`. Lossless: every `UInt8` fits in `UInt32`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10845,8 +12295,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public init(from: UInt16)
 ```
 
-Converts from `UInt16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt16`. Lossless: every `UInt16` fits in `UInt32`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10856,8 +12305,13 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public init(from: UInt64)
 ```
 
-Converts from `UInt64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt64`, trapping when the value doesn't fit in
+`UInt32`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt32.minValue...UInt32.maxValue`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -10933,6 +12387,61 @@ let m = UInt32(parsing: "101010", radix: 2);   // Some(42)
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int8)
+```
+
+Converts from `Int8` keeping only the low bits, reinterpreted as
+`UInt32`. Never traps.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int16)
+```
+
+Converts from `Int16` keeping only the low bits, reinterpreted as
+`UInt32`. Never traps.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int32)
+```
+
+Converts from `Int32` keeping only the low bits, reinterpreted as
+`UInt32`. Never traps.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int64)
+```
+
+Converts from `Int64` keeping only the low bits, reinterpreted as
+`UInt32`. Never traps.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt64)
+```
+
+Converts from `UInt64` keeping only the low bits, reinterpreted as
+`UInt32`. Never traps.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -10943,6 +12452,17 @@ Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### function `addOverflowing`
+
+```kestrel
+public func addOverflowing(UInt32) -> (UInt32, Bool)
+```
+
+`self + other` plus whether it overflowed. The value is the
+wrapped result, as from `addWrapping`.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### function `addSaturating`
 
 ```kestrel
@@ -10950,6 +12470,17 @@ public func addSaturating(UInt32) -> UInt32
 ```
 
 Addition that clamps to `maxValue` on overflow.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### function `addWrapping`
+
+```kestrel
+public func addWrapping(UInt32) -> UInt32
+```
+
+`self + other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11213,6 +12744,17 @@ Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### function `multiplyOverflowing`
+
+```kestrel
+public func multiplyOverflowing(UInt32) -> (UInt32, Bool)
+```
+
+`self * other` plus whether it overflowed. The value is the
+wrapped result, as from `multiplyWrapping`.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### function `multiplySaturating`
 
 ```kestrel
@@ -11223,23 +12765,70 @@ Multiplication that clamps to `maxValue` on overflow.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### function `multiplyWrapping`
+
+```kestrel
+public func multiplyWrapping(UInt32) -> UInt32
+```
+
+`self * other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### function `pow`
 
 ```kestrel
 public func pow(Int64) -> UInt32
 ```
 
-Raises `self` to `exponent` via binary exponentiation. Wraps on
-overflow. Negative exponents return zero (integer truncation of
-the would-be fraction).
+Raises `self` to `exponent` via binary exponentiation.
+
+##### Errors
+
+Panics on a negative exponent, and on overflow when overflow checks
+are on (wraps when off); see `powChecked`,
+`powWrapping` and `powSaturating`.
 
 ##### Examples
 
 ```
 (2).pow(10);  // 1024
 (3).pow(4);   // 81
-(5).pow(-1);  // 0
 ```
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### function `powChecked`
+
+```kestrel
+public func powChecked(Int64) -> UInt32?
+```
+
+`self` raised to `exponent`, or `None` on overflow or a negative
+exponent.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### function `powSaturating`
+
+```kestrel
+public func powSaturating(Int64) -> UInt32
+```
+
+`self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+overflow. A negative exponent traps.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### function `powWrapping`
+
+```kestrel
+public func powWrapping(Int64) -> UInt32
+```
+
+`self` raised to `exponent`, wrapping on overflow. A negative
+exponent traps.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11354,6 +12943,17 @@ Subtraction that returns `None` on underflow (`other > self`).
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### function `subtractOverflowing`
+
+```kestrel
+public func subtractOverflowing(UInt32) -> (UInt32, Bool)
+```
+
+`self - other` plus whether it overflowed. The value is the
+wrapped result, as from `subtractWrapping`.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### function `subtractSaturating`
 
 ```kestrel
@@ -11362,6 +12962,17 @@ public func subtractSaturating(UInt32) -> UInt32
 
 Subtraction that clamps to `0` on underflow (unsigned types cannot
 represent negative results).
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### function `subtractWrapping`
+
+```kestrel
+public func subtractWrapping(UInt32) -> UInt32
+```
+
+`self - other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11439,7 +13050,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public func predecessor() -> UInt32
 ```
 
-Predecessor — `self - 1`. Wraps at `minValue`.
+Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11449,7 +13060,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public func successor() -> UInt32
 ```
 
-Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
 integer ranges.
 
 _Defined in `lang/std/numeric/uint32.ks`._
@@ -11680,8 +13291,13 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public consuming func add(consuming UInt32) -> UInt32
 ```
 
-`self + other`, wrapping on overflow. Use `addChecked` to detect or
-`addSaturating` to clamp.
+`self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+`addSaturating` or `addOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt32` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11703,7 +13319,13 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public consuming func subtract(consuming UInt32) -> UInt32
 ```
 
-`self - other`, wrapping on overflow.
+`self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+`subtractSaturating` or `subtractOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt32` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11715,7 +13337,13 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public consuming func multiply(consuming UInt32) -> UInt32
 ```
 
-`self * other`, wrapping on overflow.
+`self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+`multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt32` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -12029,6 +13657,8 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Convertible`
 
+### Implements `LossyConvertible`
+
 ### Implements `Exitable`
 
 #### function `report`
@@ -12049,9 +13679,10 @@ A 64-bit unsigned integer.
 
 UInt64 is the 64-bit member of the integer family. The same surface
 area is provided across all widths; switch widths to trade range for memory
-or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-`*Checked` variants for overflow detection or `*Saturating` to clamp to
-`minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+`*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+that holds in every build. The type is `FFISafe` and lays out as a single
 `lang.i64` so it can cross C boundaries unchanged.
 
 ### Examples
@@ -12078,6 +13709,60 @@ to the corresponding C type.
 _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Members
+
+#### initializer `Bit Pattern`
+
+```kestrel
+public init(bitPattern: Int64)
+```
+
+Reinterprets the bits of a same-width `Int64` as `UInt64`. Never traps.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int8)
+```
+
+Converts from `Int8`, saturating to `UInt64.minValue` / `UInt64.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int16)
+```
+
+Converts from `Int16`, saturating to `UInt64.minValue` / `UInt64.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int32)
+```
+
+Converts from `Int32`, saturating to `UInt64.minValue` / `UInt64.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int64)
+```
+
+Converts from `Int64`, saturating to `UInt64.minValue` / `UInt64.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### initializer `Default`
 
@@ -12134,8 +13819,13 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public init(from: Int8)
 ```
 
-Converts from `Int8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int8`, trapping when the value doesn't fit in
+`UInt64`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12145,8 +13835,13 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public init(from: Int16)
 ```
 
-Converts from `Int16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int16`, trapping when the value doesn't fit in
+`UInt64`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12156,8 +13851,13 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public init(from: Int32)
 ```
 
-Converts from `Int32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int32`, trapping when the value doesn't fit in
+`UInt64`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12167,8 +13867,13 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public init(from: Int64)
 ```
 
-Converts from `Int64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int64`, trapping when the value doesn't fit in
+`UInt64`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt64.minValue...UInt64.maxValue`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12178,8 +13883,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public init(from: UInt8)
 ```
 
-Converts from `UInt8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt8`. Lossless: every `UInt8` fits in `UInt64`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12189,8 +13893,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public init(from: UInt16)
 ```
 
-Converts from `UInt16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt16`. Lossless: every `UInt16` fits in `UInt64`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12200,8 +13903,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public init(from: UInt32)
 ```
 
-Converts from `UInt32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt32`. Lossless: every `UInt32` fits in `UInt64`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12277,6 +13979,50 @@ let m = UInt64(parsing: "101010", radix: 2);   // Some(42)
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int8)
+```
+
+Converts from `Int8` keeping only the low bits, reinterpreted as
+`UInt64`. Never traps.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int16)
+```
+
+Converts from `Int16` keeping only the low bits, reinterpreted as
+`UInt64`. Never traps.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int32)
+```
+
+Converts from `Int32` keeping only the low bits, reinterpreted as
+`UInt64`. Never traps.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int64)
+```
+
+Converts from `Int64` keeping only the low bits, reinterpreted as
+`UInt64`. Never traps.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -12287,6 +14033,17 @@ Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### function `addOverflowing`
+
+```kestrel
+public func addOverflowing(UInt64) -> (UInt64, Bool)
+```
+
+`self + other` plus whether it overflowed. The value is the
+wrapped result, as from `addWrapping`.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### function `addSaturating`
 
 ```kestrel
@@ -12294,6 +14051,17 @@ public func addSaturating(UInt64) -> UInt64
 ```
 
 Addition that clamps to `maxValue` on overflow.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### function `addWrapping`
+
+```kestrel
+public func addWrapping(UInt64) -> UInt64
+```
+
+`self + other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12557,6 +14325,17 @@ Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### function `multiplyOverflowing`
+
+```kestrel
+public func multiplyOverflowing(UInt64) -> (UInt64, Bool)
+```
+
+`self * other` plus whether it overflowed. The value is the
+wrapped result, as from `multiplyWrapping`.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### function `multiplySaturating`
 
 ```kestrel
@@ -12567,23 +14346,70 @@ Multiplication that clamps to `maxValue` on overflow.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### function `multiplyWrapping`
+
+```kestrel
+public func multiplyWrapping(UInt64) -> UInt64
+```
+
+`self * other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### function `pow`
 
 ```kestrel
 public func pow(Int64) -> UInt64
 ```
 
-Raises `self` to `exponent` via binary exponentiation. Wraps on
-overflow. Negative exponents return zero (integer truncation of
-the would-be fraction).
+Raises `self` to `exponent` via binary exponentiation.
+
+##### Errors
+
+Panics on a negative exponent, and on overflow when overflow checks
+are on (wraps when off); see `powChecked`,
+`powWrapping` and `powSaturating`.
 
 ##### Examples
 
 ```
 (2).pow(10);  // 1024
 (3).pow(4);   // 81
-(5).pow(-1);  // 0
 ```
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### function `powChecked`
+
+```kestrel
+public func powChecked(Int64) -> UInt64?
+```
+
+`self` raised to `exponent`, or `None` on overflow or a negative
+exponent.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### function `powSaturating`
+
+```kestrel
+public func powSaturating(Int64) -> UInt64
+```
+
+`self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+overflow. A negative exponent traps.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### function `powWrapping`
+
+```kestrel
+public func powWrapping(Int64) -> UInt64
+```
+
+`self` raised to `exponent`, wrapping on overflow. A negative
+exponent traps.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12707,6 +14533,17 @@ Subtraction that returns `None` on underflow (`other > self`).
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### function `subtractOverflowing`
+
+```kestrel
+public func subtractOverflowing(UInt64) -> (UInt64, Bool)
+```
+
+`self - other` plus whether it overflowed. The value is the
+wrapped result, as from `subtractWrapping`.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### function `subtractSaturating`
 
 ```kestrel
@@ -12715,6 +14552,17 @@ public func subtractSaturating(UInt64) -> UInt64
 
 Subtraction that clamps to `0` on underflow (unsigned types cannot
 represent negative results).
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### function `subtractWrapping`
+
+```kestrel
+public func subtractWrapping(UInt64) -> UInt64
+```
+
+`self - other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12792,7 +14640,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public func predecessor() -> UInt64
 ```
 
-Predecessor — `self - 1`. Wraps at `minValue`.
+Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12802,7 +14650,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public func successor() -> UInt64
 ```
 
-Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
 integer ranges.
 
 _Defined in `lang/std/numeric/uint64.ks`._
@@ -13033,8 +14881,13 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public consuming func add(consuming UInt64) -> UInt64
 ```
 
-`self + other`, wrapping on overflow. Use `addChecked` to detect or
-`addSaturating` to clamp.
+`self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+`addSaturating` or `addOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt64` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -13056,7 +14909,13 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public consuming func subtract(consuming UInt64) -> UInt64
 ```
 
-`self - other`, wrapping on overflow.
+`self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+`subtractSaturating` or `subtractOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt64` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -13068,7 +14927,13 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public consuming func multiply(consuming UInt64) -> UInt64
 ```
 
-`self * other`, wrapping on overflow.
+`self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+`multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt64` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -13382,6 +15247,8 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Convertible`
 
+### Implements `LossyConvertible`
+
 ### Implements `Exitable`
 
 #### function `report`
@@ -13402,9 +15269,10 @@ A 8-bit unsigned integer.
 
 UInt8 is the 8-bit member of the integer family. The same surface
 area is provided across all widths; switch widths to trade range for memory
-or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-`*Checked` variants for overflow detection or `*Saturating` to clamp to
-`minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+`*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+that holds in every build. The type is `FFISafe` and lays out as a single
 `lang.i8` so it can cross C boundaries unchanged.
 
 ### Examples
@@ -13431,6 +15299,93 @@ to the corresponding C type.
 _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Members
+
+#### initializer `Bit Pattern`
+
+```kestrel
+public init(bitPattern: Int8)
+```
+
+Reinterprets the bits of a same-width `Int8` as `UInt8`. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int8)
+```
+
+Converts from `Int8`, saturating to `UInt8.minValue` / `UInt8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int16)
+```
+
+Converts from `Int16`, saturating to `UInt8.minValue` / `UInt8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int32)
+```
+
+Converts from `Int32`, saturating to `UInt8.minValue` / `UInt8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: Int64)
+```
+
+Converts from `Int64`, saturating to `UInt8.minValue` / `UInt8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt16)
+```
+
+Converts from `UInt16`, saturating to `UInt8.minValue` / `UInt8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt32)
+```
+
+Converts from `UInt32`, saturating to `UInt8.minValue` / `UInt8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Clamping`
+
+```kestrel
+public init(clamping: UInt64)
+```
+
+Converts from `UInt64`, saturating to `UInt8.minValue` / `UInt8.maxValue`
+when the value doesn't fit.
+
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### initializer `Default`
 
@@ -13487,8 +15442,13 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public init(from: Int8)
 ```
 
-Converts from `Int8`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int8`, trapping when the value doesn't fit in
+`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13498,8 +15458,13 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public init(from: Int16)
 ```
 
-Converts from `Int16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int16`, trapping when the value doesn't fit in
+`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13509,8 +15474,13 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public init(from: Int32)
 ```
 
-Converts from `Int32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int32`, trapping when the value doesn't fit in
+`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13520,8 +15490,13 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public init(from: Int64)
 ```
 
-Converts from `Int64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `Int64`, trapping when the value doesn't fit in
+`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13531,8 +15506,13 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public init(from: UInt16)
 ```
 
-Converts from `UInt16`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt16`, trapping when the value doesn't fit in
+`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13542,8 +15522,13 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public init(from: UInt32)
 ```
 
-Converts from `UInt32`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt32`, trapping when the value doesn't fit in
+`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13553,8 +15538,13 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public init(from: UInt64)
 ```
 
-Converts from `UInt64`. Narrowing conversions truncate the high
-bits; signed→unsigned reinterprets the bit pattern.
+Converts from `UInt64`, trapping when the value doesn't fit in
+`UInt8`. Use `init(truncating:)` or `init(clamping:)` when
+out-of-range values are expected.
+
+##### Errors
+
+Panics when `other` is outside `UInt8.minValue...UInt8.maxValue`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13630,6 +15620,83 @@ let m = UInt8(parsing: "101010", radix: 2);   // Some(42)
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int8)
+```
+
+Converts from `Int8` keeping only the low bits, reinterpreted as
+`UInt8`. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int16)
+```
+
+Converts from `Int16` keeping only the low bits, reinterpreted as
+`UInt8`. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int32)
+```
+
+Converts from `Int32` keeping only the low bits, reinterpreted as
+`UInt8`. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: Int64)
+```
+
+Converts from `Int64` keeping only the low bits, reinterpreted as
+`UInt8`. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt16)
+```
+
+Converts from `UInt16` keeping only the low bits, reinterpreted as
+`UInt8`. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt32)
+```
+
+Converts from `UInt32` keeping only the low bits, reinterpreted as
+`UInt8`. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+public init(truncating: UInt64)
+```
+
+Converts from `UInt64` keeping only the low bits, reinterpreted as
+`UInt8`. Never traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### function `addChecked`
 
 ```kestrel
@@ -13640,6 +15707,17 @@ Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### function `addOverflowing`
+
+```kestrel
+public func addOverflowing(UInt8) -> (UInt8, Bool)
+```
+
+`self + other` plus whether it overflowed. The value is the
+wrapped result, as from `addWrapping`.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### function `addSaturating`
 
 ```kestrel
@@ -13647,6 +15725,17 @@ public func addSaturating(UInt8) -> UInt8
 ```
 
 Addition that clamps to `maxValue` on overflow.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### function `addWrapping`
+
+```kestrel
+public func addWrapping(UInt8) -> UInt8
+```
+
+`self + other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13910,6 +15999,17 @@ Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### function `multiplyOverflowing`
+
+```kestrel
+public func multiplyOverflowing(UInt8) -> (UInt8, Bool)
+```
+
+`self * other` plus whether it overflowed. The value is the
+wrapped result, as from `multiplyWrapping`.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### function `multiplySaturating`
 
 ```kestrel
@@ -13920,23 +16020,70 @@ Multiplication that clamps to `maxValue` on overflow.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### function `multiplyWrapping`
+
+```kestrel
+public func multiplyWrapping(UInt8) -> UInt8
+```
+
+`self * other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### function `pow`
 
 ```kestrel
 public func pow(Int64) -> UInt8
 ```
 
-Raises `self` to `exponent` via binary exponentiation. Wraps on
-overflow. Negative exponents return zero (integer truncation of
-the would-be fraction).
+Raises `self` to `exponent` via binary exponentiation.
+
+##### Errors
+
+Panics on a negative exponent, and on overflow when overflow checks
+are on (wraps when off); see `powChecked`,
+`powWrapping` and `powSaturating`.
 
 ##### Examples
 
 ```
 (2).pow(10);  // 1024
 (3).pow(4);   // 81
-(5).pow(-1);  // 0
 ```
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### function `powChecked`
+
+```kestrel
+public func powChecked(Int64) -> UInt8?
+```
+
+`self` raised to `exponent`, or `None` on overflow or a negative
+exponent.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### function `powSaturating`
+
+```kestrel
+public func powSaturating(Int64) -> UInt8
+```
+
+`self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+overflow. A negative exponent traps.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### function `powWrapping`
+
+```kestrel
+public func powWrapping(Int64) -> UInt8
+```
+
+`self` raised to `exponent`, wrapping on overflow. A negative
+exponent traps.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14051,6 +16198,17 @@ Subtraction that returns `None` on underflow (`other > self`).
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### function `subtractOverflowing`
+
+```kestrel
+public func subtractOverflowing(UInt8) -> (UInt8, Bool)
+```
+
+`self - other` plus whether it overflowed. The value is the
+wrapped result, as from `subtractWrapping`.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### function `subtractSaturating`
 
 ```kestrel
@@ -14059,6 +16217,17 @@ public func subtractSaturating(UInt8) -> UInt8
 
 Subtraction that clamps to `0` on underflow (unsigned types cannot
 represent negative results).
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### function `subtractWrapping`
+
+```kestrel
+public func subtractWrapping(UInt8) -> UInt8
+```
+
+`self - other`, wrapping around on overflow (two's complement).
+For hashes, checksums and RNGs where wrap-around is the intent.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14136,7 +16305,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public func predecessor() -> UInt8
 ```
 
-Predecessor — `self - 1`. Wraps at `minValue`.
+Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14146,7 +16315,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public func successor() -> UInt8
 ```
 
-Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
 integer ranges.
 
 _Defined in `lang/std/numeric/uint8.ks`._
@@ -14377,8 +16546,13 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public consuming func add(consuming UInt8) -> UInt8
 ```
 
-`self + other`, wrapping on overflow. Use `addChecked` to detect or
-`addSaturating` to clamp.
+`self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+`addSaturating` or `addOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt8` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14400,7 +16574,13 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public consuming func subtract(consuming UInt8) -> UInt8
 ```
 
-`self - other`, wrapping on overflow.
+`self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+`subtractSaturating` or `subtractOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt8` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14412,7 +16592,13 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public consuming func multiply(consuming UInt8) -> UInt8
 ```
 
-`self * other`, wrapping on overflow.
+`self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+`multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+
+##### Errors
+
+Panics when the result doesn't fit in `UInt8` and overflow checks are
+on (the default at `-O0`). With checks off it wraps.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14725,6 +16911,8 @@ Builds a partial range `..=self` (through self, inclusive).
 _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Convertible`
+
+### Implements `LossyConvertible`
 
 ### Implements `Exitable`
 

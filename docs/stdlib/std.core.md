@@ -2481,6 +2481,52 @@ Returns the less-than-or-equal result as `Output` — typically `Bool`.
 
 _Defined in `lang/std/core/comparison.ks`._
 
+## protocol `LossyConvertible`
+
+```kestrel
+public protocol LossyConvertible[From]
+```
+
+Protocol for the explicit lossy forms of a conversion, for sources
+where `init(from:)` would trap because the value may not fit.
+
+Each integer type conforms once per source it can't always hold, so
+`Int8(truncating: x)` and `Int8(clamping: x)` work for every wider or
+differently-signed `x`.
+
+### Examples
+
+```
+let big: Int64 = 300;
+Int8(truncating: big);   // 44  (low 8 bits)
+Int8(clamping: big);     // 127
+```
+
+_Defined in `lang/std/core/convertible.ks`._
+
+### Members
+
+#### initializer `Clamping`
+
+```kestrel
+init(clamping: From)
+```
+
+Converts `value`, saturating to `Self`'s minimum or maximum when it
+doesn't fit. Never traps.
+
+_Defined in `lang/std/core/convertible.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+init(truncating: From)
+```
+
+Keeps the low bits of `value`, reinterpreted as `Self`. Never traps.
+
+_Defined in `lang/std/core/convertible.ks`._
+
 ## protocol `Matchable`
 
 ```kestrel
