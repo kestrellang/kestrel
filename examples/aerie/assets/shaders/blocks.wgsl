@@ -103,8 +103,9 @@ fn vs_shadow(@builtin(vertex_index) vertex: u32, @location(0) packed: u32, @loca
     return u.lightViewProj * vec4f(world, 1.0);
 }
 
-// How much sun reaches `world`, 0 to 1: a 5x5 average of filtered shadow
-// map comparisons, for soft, steady edges. Outside the map counts as lit.
+// How much sun reaches `world`, 0 to 1: an average of filtered shadow map
+// comparisons SHADOW_FILTER texels around it, for soft, steady edges.
+// Outside the map counts as lit.
 fn sunlight(world: vec3f, n: vec3f) -> f32 {
     let light = u.lightViewProj * vec4f(world + n * 0.05, 1.0);
     let uv = vec2f(light.x * 0.5 + 0.5, 0.5 - light.y * 0.5);
@@ -113,12 +114,13 @@ fn sunlight(world: vec3f, n: vec3f) -> f32 {
     }
     let texel = 1.0 / vec2f(textureDimensions(shadowMap));
     var lit = 0.0;
-    for (var y = -2; y <= 2; y++) {
-        for (var x = -2; x <= 2; x++) {
+    for (var y = -SHADOW_FILTER; y <= SHADOW_FILTER; y++) {
+        for (var x = -SHADOW_FILTER; x <= SHADOW_FILTER; x++) {
             lit += textureSampleCompareLevel(shadowMap, shadowSampler, uv + vec2f(f32(x), f32(y)) * texel, light.z);
         }
     }
-    return lit / 25.0;
+    let side = f32(SHADOW_FILTER * 2 + 1);
+    return lit / (side * side);
 }
 
 // Light from nearby glowing blocks: a soft falloff to zero at

@@ -1,6 +1,6 @@
 module Aerie
 
-import wgpu.(Device, Buffer, BindGroup, RenderPipeline, RenderPass, TextureView, Sampler, TextureFormat, ColorTarget, VertexBufferLayout, DepthTest, BindingLayout)
+import wgpu.(Device, Buffer, BindGroup, RenderPipeline, RenderPass, ShaderModule, TextureView, Sampler, ColorTarget, VertexBufferLayout, DepthTest, BindingLayout)
 import linalg.(Vec4)
 
 /// One overlay rectangle: `rect` is (x, y, width, height) in pixels from
@@ -28,7 +28,7 @@ struct OverlayPass: not Copyable {
     var buffer: Buffer
 
     /// `blocks` and `ui` are the block and interface atlases.
-    static func create(device: Device, format format: TextureFormat, encode encode: Bool, blocks blocks: TextureView, blockSampler blockSampler: Sampler, ui ui: TextureView, uiSampler uiSampler: Sampler) -> OverlayPass {
+    static func create(device: Device, shader: ShaderModule, target target: DrawTarget, blocks blocks: TextureView, blockSampler blockSampler: Sampler, ui ui: TextureView, uiSampler uiSampler: Sampler) -> OverlayPass {
         let layout = device.createPipelineLayout(groups: [[
             BindingLayout.uniformBuffer(0, visibility: [.Vertex]),
             BindingLayout.texture(1, visibility: [.Fragment], dimension: .D2Array),
@@ -36,13 +36,12 @@ struct OverlayPass: not Copyable {
             BindingLayout.texture(3, visibility: [.Fragment], dimension: .D2Array),
             BindingLayout.sampler(4, visibility: [.Fragment])
         ]], label: "overlay");
-        let shader = device.createShaderModule(wgsl: loadShader("overlay", encode: encode), label: "overlay");
         let pipeline = device.createRenderPipeline(
             shader: shader,
-            targets: [ColorTarget(format: format, blend: .AlphaBlending)],
+            targets: [ColorTarget(format: target.format, blend: .AlphaBlending)],
             buffers: [VertexBufferLayout(packed: [.Float32x4, .Float32x4, .Float32x4], stepMode: .Instance)],
             depth: .Some(DepthTest(format: depthFormat, compare: .Always, write: false)),
-            sampleCount: samples,
+            sampleCount: target.samples,
             layout: .Some(layout.share()),
             label: "overlay"
         );

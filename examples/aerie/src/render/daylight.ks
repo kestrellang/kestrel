@@ -2,9 +2,8 @@ module Aerie
 
 import linalg.(Vec3, Mat4)
 
-/// The shadow map's size in texels, and half the width of the square
-/// around the player it covers, in blocks.
-let shadowSize: Int64 = 2048;
+/// Half the width of the square around the player the shadow map covers,
+/// in blocks.
 let shadowReach: Float32 = 72.0;
 
 /// The light at one time of day: where the sun is and how strong, the
@@ -60,9 +59,10 @@ struct Daylight {
     /// looking along the sun. The box moves in whole shadow texels of the sun's own view, so
     /// shadows don't shimmer as the player walks: snapping in world axes
     /// wouldn't line up with the map's texels, since the sun looks at an angle.
-    func shadowView(center: Vec3) -> Mat4 {
+    /// `mapSize` is the shadow map's size in texels.
+    func shadowView(center: Vec3, mapSize mapSize: Int64) -> Mat4 {
         let sun = self.sun;
-        let texel = shadowReach * 2.0 / Float32(from: shadowSize);
+        let texel = shadowReach * 2.0 / Float32(from: mapSize);
         // A view that only turns to face along `sun`; `center` in its axes.
         let f = sun.normalized;
         let view = Mat4.lookAt(eye: Vec3(x: 0.0, y: 0.0, z: 0.0) - f, target: Vec3(x: 0.0, y: 0.0, z: 0.0), up: Vec3.unitY);

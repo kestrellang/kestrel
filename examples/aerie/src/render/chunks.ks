@@ -1,6 +1,6 @@
 module Aerie
 
-import wgpu.(Device, Buffer, BindGroup, RenderPipeline, RenderPass, ShaderModule, PipelineLayout, TextureFormat, ColorTarget, VertexBufferLayout, DepthTest)
+import wgpu.(Device, Buffer, BindGroup, RenderPipeline, RenderPass, ShaderModule, PipelineLayout, ColorTarget, VertexBufferLayout, DepthTest)
 import linalg.(Vec3, Vec4)
 
 // Every chunk's faces share one big vertex buffer, and every chunk's data
@@ -156,15 +156,15 @@ struct ChunkPass: not Copyable {
 
     /// `layout` and `shadowLayout` are the block and shadow pipelines'
     /// layouts; group 1 of each is the chunk data.
-    static func create(device: Device, shader: ShaderModule, format format: TextureFormat, layout layout: PipelineLayout, shadowLayout shadowLayout: PipelineLayout) -> ChunkPass {
+    static func create(device: Device, shader: ShaderModule, target target: DrawTarget, layout layout: PipelineLayout, shadowLayout shadowLayout: PipelineLayout) -> ChunkPass {
         let buffers = [VertexBufferLayout(packed: [.Uint32, .Uint32], stepMode: .Instance)];
         let pipeline = device.createRenderPipeline(
             shader: shader,
-            targets: [ColorTarget(format: format)],
+            targets: [ColorTarget(format: target.format)],
             buffers: buffers,
             cullMode: .Back,
             depth: .Some(DepthTest(format: depthFormat)),
-            sampleCount: samples,
+            sampleCount: target.samples,
             layout: .Some(layout.share()),
             label: "blocks"
         );
@@ -172,12 +172,12 @@ struct ChunkPass: not Copyable {
         // glass behind glass still shows.
         let glassPipeline = device.createRenderPipeline(
             shader: shader,
-            targets: [ColorTarget(format: format, blend: .AlphaBlending)],
+            targets: [ColorTarget(format: target.format, blend: .AlphaBlending)],
             buffers: buffers,
             fragmentEntry: "fs_glass",
             cullMode: .Back,
             depth: .Some(DepthTest(format: depthFormat, write: false)),
-            sampleCount: samples,
+            sampleCount: target.samples,
             layout: .Some(layout.share()),
             label: "glass"
         );

@@ -1,6 +1,6 @@
 module Aerie
 
-import wgpu.(Device, Buffer, BindGroup, RenderPipeline, RenderPass, ShaderModule, PipelineLayout, TextureFormat, ColorTarget, VertexBufferLayout, DepthTest, BindingLayout)
+import wgpu.(Device, Buffer, BindGroup, RenderPipeline, RenderPass, ShaderModule, PipelineLayout, ColorTarget, VertexBufferLayout, DepthTest, BindingLayout)
 import linalg.(Vec3, Vec4)
 
 /// One textured box anywhere in the world, at any angle: the model
@@ -75,18 +75,18 @@ struct ModelPass: not Copyable {
     var buffer: Buffer
 
     /// `layout` is the world's group 0 alone, as the sky uses.
-    static func create(device: Device, shader: ShaderModule, format format: TextureFormat, layout layout: PipelineLayout) -> ModelPass {
+    static func create(device: Device, shader: ShaderModule, target target: DrawTarget, layout layout: PipelineLayout) -> ModelPass {
         let buffers = [VertexBufferLayout(packed: [.Float32x4, .Float32x4, .Float32x4, .Float32x4], stepMode: .Instance)];
         // Both faces are drawn: a mirrored wing turns its boxes inside out.
         let pipeline = device.createRenderPipeline(
             shader: shader,
             // Blended, for the cracks' soft lips; birds are opaque.
-            targets: [ColorTarget(format: format, blend: .AlphaBlending)],
+            targets: [ColorTarget(format: target.format, blend: .AlphaBlending)],
             buffers: buffers,
             vertexEntry: "vs_model",
             fragmentEntry: "fs_model",
             depth: .Some(DepthTest(format: depthFormat)),
-            sampleCount: samples,
+            sampleCount: target.samples,
             layout: .Some(layout.share()),
             label: "models"
         );

@@ -100,9 +100,19 @@ hold left click to break, right click to place, the wheel or 1 to 9 for the
 hotbar, F to fly (Space and Left Shift to rise and sink), Z to show frames per
 second, Escape to free the mouse (and again to save and quit), Enter or a
 click to leave the title screen. The world also saves itself every minute.
-`AERIE_FRAMES=n` quits after n
-frames. `AERIE_VIEW=n` sets the view distance to n chunks (2 to 16, default 5); fog
+`AERIE_VIEW=n` sets the view distance to n chunks (2 to 16, default 5); fog
 only covers the last quarter of it, so chunks fade in at the edge.
+`AERIE_QUALITY=low|medium|high` trades looks for speed on slower GPUs:
+`low` turns off multisampling and halves the shadow map, `medium` keeps
+multisampling but softens shadows with fewer taps (default `high`).
+
+To measure, `AERIE_FRAMES=n` quits after n frames and prints the frame
+rate, the average and worst milliseconds spent updating, loading land
+(`stream`), gathering the scene and drawing, how many frames took over
+16.7 ms, and each render pass's GPU time where the GPU can time it (Apple
+GPUs report the main pass unreliably). `AERIE_VSYNC=0` stops waiting for
+the display, and `AERIE_TOUR=n` flies east at n blocks a second so land
+keeps loading. Loading is paced to stay under 4 ms a frame.
 
 ## Running
 

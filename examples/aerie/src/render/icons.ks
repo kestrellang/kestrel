@@ -1,6 +1,6 @@
 module Aerie
 
-import wgpu.(Device, Buffer, BindGroup, RenderPipeline, RenderPass, ShaderModule, TextureFormat, ColorTarget, VertexBufferLayout, DepthTest, BindingLayout)
+import wgpu.(Device, Buffer, BindGroup, RenderPipeline, RenderPass, ShaderModule, ColorTarget, VertexBufferLayout, DepthTest, BindingLayout)
 import linalg.(Vec4)
 
 /// At most this many icon boxes at once: two per block on the hotbar is
@@ -17,18 +17,18 @@ struct IconPass: not Copyable {
     var buffer: Buffer
 
     /// `shader` is the block shader; group 0 is the world's bindings.
-    static func create(device: Device, shader: ShaderModule, format format: TextureFormat) -> IconPass {
+    static func create(device: Device, shader: ShaderModule, target target: DrawTarget) -> IconPass {
         let layout = device.createPipelineLayout(groups: [worldBindings(), [
             BindingLayout.uniformBuffer(0, visibility: [.Vertex])
         ]], label: "icons");
         let pipeline = device.createRenderPipeline(
             shader: shader,
-            targets: [ColorTarget(format: format, blend: .AlphaBlending)],
+            targets: [ColorTarget(format: target.format, blend: .AlphaBlending)],
             buffers: [VertexBufferLayout(packed: [.Float32x4, .Float32x4, .Float32x4, .Float32x4], stepMode: .Instance)],
             vertexEntry: "vs_icon",
             fragmentEntry: "fs_icon",
             depth: .Some(DepthTest(format: depthFormat)),
-            sampleCount: samples,
+            sampleCount: target.samples,
             layout: .Some(layout.share()),
             label: "icons"
         );
