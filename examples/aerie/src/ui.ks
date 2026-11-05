@@ -10,31 +10,38 @@ let uiCell: Float32 = 96.0;
 let uiFontSize: Float32 = 72.0;
 let uiGlyphPad: Float32 = 12.0;
 
+/// The title logo: this many cells across and down, from this layer,
+/// left to right then top to bottom.
+let uiLogoLayer: Float32 = 24.0;
+let uiLogoColumns: Int64 = 6;
+let uiLogoRows: Int64 = 2;
+
 /// A sprite in the interface atlas.
 enum UISprite {
     case Slot
     case SlotSelected
     case Panel
+    case Button
     case Glow
     case Twinkle
 
     var layer: Float32 {
         match self {
-            .Slot => 0.0, .SlotSelected => 1.0, .Panel => 2.0, .Glow => 3.0, .Twinkle => 4.0
+            .Slot => 0.0, .SlotSelected => 1.0, .Panel => 2.0, .Button => 3.0, .Glow => 4.0, .Twinkle => 5.0
         }
     }
 }
 
 /// The icon layer for block id `id` (1 and up).
 func uiIconLayer(id: UInt16) -> Float32 {
-    Float32(from: Int64(from: id) - 1 + 5)
+    Float32(from: Int64(from: id) - 1 + 6)
 }
 
 /// The glyph layer for an ASCII byte; anything unprintable shows as `?`.
 func uiGlyphLayer(byte: UInt8) -> Float32 {
     let code = Int64(from: byte);
     let printable = if code >= 32 and code <= 126 { code } else { 63 };
-    Float32(from: printable - 32 + 23)
+    Float32(from: printable - 32 + 36)
 }
 
 /// How far the pen moves after a byte, in font pixels at `uiFontSize`.

@@ -94,13 +94,18 @@ func centeredLabel(text: String, width width: Float32, y y: Float32, size size: 
     labelQuads(text, x: ((width - textWidth(text, size)) * 0.5).floor(), y: y, size: size, color: color)
 }
 
-/// `text` centered on `width` on a frosted pill, for lines that sit over
+/// `text` centered on `width` on a wooden board, for lines that sit over
 /// bright sky.
 func pillLabel(text: String, width width: Float32, y y: Float32, size size: Float32, color color: Vec4) -> [OverlayQuad] {
+    boardLabel(text, width: width, y: y, size: size, color: color, board: .Panel)
+}
+
+/// `text` centered on `width` on `board`, a sliced sprite.
+func boardLabel(text: String, width width: Float32, y y: Float32, size size: Float32, color color: Vec4, board board: UISprite) -> [OverlayQuad] {
     let textW = textWidth(text, size);
-    let height = (size * 1.9).floor();
-    let pad = (size * 1.1).floor();
-    var quads = slicedSprite(.Panel, ((width - textW) * 0.5 - pad).floor(), (y - (height - size * 0.95) * 0.5).floor(), textW + pad * 2.0, height, white);
+    let height = (size * 2.0).floor();
+    let pad = (size * 1.3).floor();
+    var quads = slicedSprite(board, ((width - textW) * 0.5 - pad).floor(), (y - (height - size * 0.95) * 0.5).floor(), textW + pad * 2.0, height, white);
     quads.append(contentsOf: centeredLabel(text, width: width, y: y, size: size, color: color));
     quads
 }
@@ -135,16 +140,17 @@ func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool, time: Floa
         quads.append(contentsOf: centeredLabel("Click to look around", width: w, y: cy + 28.0, size: 20.0, color: white));
     }
 
-    // The hotbar: a frosted tray of rounded slots, each with a little 3D
-    // block. The selected slot rises with a warm glow, its block bobbing,
-    // and its name floats above.
-    let slot: Float32 = 60.0;
-    let gap: Float32 = 6.0;
+    // The hotbar: a wooden tray of stone slots, each with a little 3D
+    // block. The selected slot turns gold and rises with a warm glow, its
+    // block bobbing, and its name floats above. Slots are a whole multiple
+    // of the sprites' 24 pixels, so the pixel art stays crisp.
+    let slot: Float32 = 72.0;
+    let gap: Float32 = 4.0;
     let count = Float32(from: hotbar.count);
     let total = count * slot + (count - 1.0) * gap;
     let left = ((w - total) * 0.5).floor();
     let top = h - slot - 22.0;
-    quads.append(contentsOf: slicedSprite(.Panel, left - 12.0, top - 10.0, total + 24.0, slot + 20.0, white));
+    quads.append(contentsOf: slicedSprite(.Panel, left - 22.0, top - 12.0, total + 44.0, slot + 24.0, white));
     var i: Int64 = 0;
     while i < hotbar.count {
         let chosen = i == selected;
@@ -153,18 +159,18 @@ func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool, time: Floa
         if chosen {
             let lift: Float32 = 6.0;
             quads.append(sprite(.Glow, x - 30.0, top - lift - 30.0, slot + 60.0, slot + 60.0, Vec4(x: 1.0, y: 0.86, z: 0.55, w: 0.45)));
-            quads.append(sprite(.SlotSelected, x - 6.0, top - lift - 6.0, slot + 12.0, slot + 12.0, white));
+            quads.append(sprite(.SlotSelected, x, top - lift, slot, slot, white));
             let bob = ((time * 3.0).sin() * 2.0).floor();
-            quads.append(uiQuad(uiIconLayer(block.id), x + 4.0, top - lift + 2.0 + bob, slot - 8.0, slot - 8.0, white));
+            quads.append(uiQuad(uiIconLayer(block.id), x + 10.0, top - lift + 9.0 + bob, slot - 20.0, slot - 20.0, white));
         } else {
             quads.append(sprite(.Slot, x, top, slot, slot, white));
-            quads.append(uiQuad(uiIconLayer(block.id), x + 8.0, top + 8.0, slot - 16.0, slot - 16.0, white));
+            quads.append(uiQuad(uiIconLayer(block.id), x + 14.0, top + 14.0, slot - 28.0, slot - 28.0, white));
         }
-        let number = labelQuads("\(i + 1)", x: x + 7.0, y: top + 5.0 - if chosen { 6.0 } else { 0.0 }, size: 13.0, color: faded(white, if chosen { 0.95 } else { 0.7 }));
+        let number = labelQuads("\(i + 1)", x: x + 9.0, y: top + 7.0 - if chosen { 6.0 } else { 0.0 }, size: 13.0, color: faded(white, if chosen { 0.95 } else { 0.7 }));
         quads.append(contentsOf: number);
         i = i + 1;
     }
-    quads.append(contentsOf: pillLabel(hotbar(selected).name, width: w, y: top - 50.0, size: 20.0, color: white));
+    quads.append(contentsOf: pillLabel(hotbar(selected).name, width: w, y: top - 54.0, size: 20.0, color: white));
     quads
 }
 
@@ -174,19 +180,32 @@ func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [
     let w = Float32(from: width);
     let h = Float32(from: height);
     var quads: [OverlayQuad] = [];
-    let size = (w / 9.0).floor().clamp(64.0, 160.0);
-    let title = "Aerie";
-    let titleWidth = textWidth(title, size);
+    // The logo: stone letters capped with moss, drawn from the game's own
+    // blocks (see tools/make_ui.py), three times as wide as tall.
+    let columns = Float32(from: uiLogoColumns);
+    let rows = Float32(from: uiLogoRows);
+    let logoWidth = (w * 0.62).clamp(360.0, 1100.0).floor();
+    let cell = (logoWidth / columns).floor();
+    let size = cell * rows * 0.62;
+    let titleWidth = cell * columns;
     let titleLeft = ((w - titleWidth) * 0.5).floor();
-    let bob = (time * 1.3).sin() * size * 0.04;
-    let titleTop = (h * 0.22 + bob).floor();
-    // A wide soft glow behind the name, so it reads over any sky.
-    quads.append(sprite(.Glow, w * 0.5 - size * 3.0, titleTop - size * 1.1, size * 6.0, size * 3.0, Vec4(x: 0.16, y: 0.18, z: 0.36, w: 0.45)));
-    // A dropped copy gives the letters depth, then the outlined name.
-    quads.append(contentsOf: textQuads(title, x: titleLeft + size * 0.035, y: titleTop + size * 0.06, size: size, color: faded(ink, 0.55)));
-    quads.append(contentsOf: outlinedQuads(title, x: titleLeft, y: titleTop, size: size, color: white, rim: Vec4(x: 0.36, y: 0.42, z: 0.68, w: 1.0)));
+    let bob = (time * 1.3).sin() * cell * 0.05;
+    let logoTop = (h * 0.12 + bob).floor();
+    let titleTop = logoTop + cell * rows * 0.14;
+    // A wide soft glow behind it, so it reads over any sky.
+    quads.append(sprite(.Glow, w * 0.5 - titleWidth * 0.75, logoTop - cell * 0.6, titleWidth * 1.5, cell * rows + cell * 1.2, Vec4(x: 0.16, y: 0.18, z: 0.36, w: 0.4)));
+    var r: Int64 = 0;
+    while r < uiLogoRows {
+        var c: Int64 = 0;
+        while c < uiLogoColumns {
+            let layer = uiLogoLayer + Float32(from: r * uiLogoColumns + c);
+            quads.append(uiQuad(layer, titleLeft + Float32(from: c) * cell, logoTop + Float32(from: r) * cell, cell, cell, white));
+            c = c + 1;
+        }
+        r = r + 1;
+    }
     // Twinkles around the name, each on its own beat.
-    let spots: [(Float32, Float32, Float32)] = [(-0.06, 0.15, 0.0), (1.05, 0.25, 1.7), (0.22, -0.12, 3.1), (0.84, -0.08, 4.4), (0.5, 1.02, 2.3), (-0.02, 0.85, 5.2), (1.08, 0.82, 0.9)];
+    let spots: [(Float32, Float32, Float32)] = [(0.08, 0.15, 0.0), (0.95, 0.2, 1.7), (0.25, -0.12, 3.1), (0.78, -0.1, 4.4), (0.5, 1.05, 2.3), (0.1, 0.9, 5.2), (0.92, 0.88, 0.9)];
     for (fx, fy, phase) in spots {
         let beat = (time * 2.2 + phase).sin() * 0.5 + 0.5;
         let s = size * (0.18 + beat * 0.22);
@@ -195,14 +214,19 @@ func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [
         quads.append(sprite(.Twinkle, x - s * 0.5, y - s * 0.5, s, s, Vec4(x: 1.0, y: 0.97, z: 0.88, w: 0.4 + beat * 0.6)));
     }
     let small = (size * 0.2).floor().clamp(18.0, 30.0);
-    quads.append(contentsOf: pillLabel("Islands above the cloud sea", width: w, y: (titleTop + size * 1.2).floor(), size: small, color: Vec4(x: 0.92, y: 0.95, z: 1.0, w: 1.0)));
+    quads.append(contentsOf: pillLabel("Islands above the cloud sea", width: w, y: (logoTop + cell * rows + small * 0.6).floor(), size: small, color: Vec4(x: 0.92, y: 0.95, z: 1.0, w: 1.0)));
     // Bound first: an `if` directly inside an array literal crashes the
     // compiler (array_literal_if_expression_owned_element.ks).
     let prompt = if resumed { "Press Enter or click to continue" } else { "Press Enter or click to begin" };
-    let pulse = 0.8 + 0.2 * (time * 3.0).sin();
-    quads.append(contentsOf: pillLabel(prompt, width: w, y: (h * 0.64).floor(), size: small * 1.15, color: Vec4(x: 1.0, y: 0.97, z: 0.90, w: pulse)));
+    // The prompt on a warm wooden button, with a glow that breathes.
+    let pulse = 0.5 + 0.5 * (time * 3.0).sin();
+    let promptSize = (small * 1.15).floor();
+    let promptY = (h * 0.64).floor();
+    let promptW = textWidth(prompt, promptSize) + promptSize * 2.6;
+    quads.append(sprite(.Glow, w * 0.5 - promptW * 0.7, promptY - promptSize * 2.2, promptW * 1.4, promptSize * 5.0, Vec4(x: 1.0, y: 0.82, z: 0.5, w: 0.15 + pulse * 0.2)));
+    quads.append(contentsOf: boardLabel(prompt, width: w, y: promptY, size: promptSize, color: white, board: .Button));
     // The controls, on a frosted strip along the bottom.
-    let controls = "WASD move    Mouse look    Left click break    Right click place    Wheel or 1-9 pick    Space jump, hold to glide    P save";
+    let controls = "WASD move    Mouse look    Hold left click break    Right click place    Wheel or 1-9 pick    Space jump, hold to glide    P save";
     quads.append(contentsOf: pillLabel(controls, width: w, y: h - 46.0, size: 16.0, color: faded(white, 0.92)));
     quads
 }
