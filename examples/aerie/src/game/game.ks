@@ -61,6 +61,10 @@ struct Game: not Copyable {
         if let .Some(s) = save {
             self.restore(s);
         }
+        // A measured run times the GPU too.
+        if settings.maxFrames > 0 {
+            self.renderer.gpuTimer.start(self.renderer.device);
+        }
     }
 
     /// Pick up where `state` left off. A time of day set at startup wins.

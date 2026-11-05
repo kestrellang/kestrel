@@ -1,6 +1,6 @@
 module Aerie
 
-import wgpu.(Instance, Device, Surface, PresentMode, Buffer, BindGroup, RenderPipeline, Texture, TextureFormat, WgpuError, ColorTarget, Color, DepthTest, BindingLayout, ViewRange, PipelineLayout)
+import wgpu.(RenderPassDescriptor, Feature, Instance, Device, Surface, PresentMode, Buffer, BindGroup, RenderPipeline, Texture, TextureFormat, WgpuError, ColorTarget, Color, DepthTest, BindingLayout, ViewRange, PipelineLayout)
 import sdl.(NativeWindow)
 import linalg.(Vec3, Vec4, Mat4, radians)
 
@@ -92,6 +92,8 @@ struct Renderer: not Copyable {
     /// many draw calls they took.
     var drawnChunks: Int64
     var chunkDraws: Int64
+    /// GPU time per pass, once `gpuTimer.start` is called.
+    var gpuTimer: GpuTimer
 
     /// The multisampled depth buffer for the current size.
     static func makeDepth(device: Device, width: Int64, height: Int64) -> Texture {
@@ -108,7 +110,9 @@ struct Renderer: not Copyable {
         let surface = instance.createSurface(surfaceSource(window));
         let adapter = try instance.requestAdapter(compatibleWith: surface);
         println("adapter: \(adapter.info.name)");
-        let device = try adapter.requestDevice(label: "aerie");
+        // Timestamps cost nothing until a run asks to time the GPU.
+        let features = if adapter.supports(.TimestampQuery) { [Feature.TimestampQuery] } else { [] };
+        let device = try adapter.requestDevice(label: "aerie", features: features);
         let format = surface.preferredFormat(adapter);
         surface.configure(device: device, format: format, width: width, height: height, presentMode: presentMode);
 
@@ -160,7 +164,7 @@ struct Renderer: not Copyable {
             depth: depth, color: color, skyPipeline: skyPipeline, worldGroup: worldGroup,
             shadowMap: shadowMap, shadowGroup: shadowGroup, uniformBuffer: uniformBuffer,
             chunks: chunks, models: models, overlay: overlay, icons: icons,
-            viewDistance: 160.0, fieldOfView: baseFieldOfView, drawnChunks: 0, chunkDraws: 0
+            viewDistance: 160.0, fieldOfView: baseFieldOfView, drawnChunks: 0, chunkDraws: 0, gpuTimer: GpuTimer()
         ))
     }
 
@@ -211,11 +215,12 @@ struct Renderer: not Copyable {
         let shadowView = self.shadowMap.createView();
         let sky = Color(r: Float64(from: light.horizon.x), g: Float64(from: light.horizon.y), b: Float64(from: light.horizon.z));
         let encoder = self.device.createCommandEncoder();
-        encoder.renderPass(color: [], depth: shadowView.depthAttachment()) { (pass) in
+        encoder.renderPass(RenderPassDescriptor(color: [], depth: .Some(shadowView.depthAttachment()), timestamps: self.gpuTimer.timestamps(.Shadow))) { (pass) in
             self.chunks.drawShadows(pass, list: list, uniforms: self.shadowGroup);
             self.models.drawShadows(pass, count: shadowBoxes, group: self.shadowGroup);
         };
-        encoder.renderPass(color: [colorView.colorAttachment(resolvingInto: frameView, clear: .Some(sky))], depth: depthView.depthAttachment()) { (pass) in
+        let target = colorView.colorAttachment(resolvingInto: frameView, clear: .Some(sky));
+        encoder.renderPass(RenderPassDescriptor(color: [target], depth: .Some(depthView.depthAttachment()), timestamps: self.gpuTimer.timestamps(.Main))) { (pass) in
             pass.setPipeline(self.skyPipeline);
             pass.setBindGroup(0, self.worldGroup);
             pass.draw(vertices: 3);
@@ -229,6 +234,7 @@ struct Renderer: not Copyable {
         self.chunkDraws = list.opaque.count;
         self.device.submit(encoder.finish());
         self.surface.present();
+        try self.gpuTimer.collect(self.device);
         .Ok(())
     }
 

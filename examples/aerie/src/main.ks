@@ -92,6 +92,7 @@ func report(game: Game, frames frames: Int64, seconds seconds: Float64) {
     println("drew \(frames) frames; \(game.world.chunks.count) chunks loaded, \(meshes) meshes, \(drawn) drawn in \(draws) draws, \(game.flock.birds.count) birds");
     let p = game.player.position;
     println("\(Float64(from: frames) / seconds) fps; \(game.profile.summary())");
+    println(game.renderer.gpuTimer.summary());
     println("player at (\(p.x), \(p.y), \(p.z)), on ground: \(game.player.onGround)");
 }
 
