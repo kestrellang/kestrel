@@ -1,9 +1,31 @@
 module Aerie
 
+/// WGSL for `toSurface`, which every fragment shader's output goes
+/// through. Shading is in linear color, and an sRGB surface encodes it on
+/// write; a browser's canvas offers no sRGB format, so there `encode` is
+/// true and the shader applies the sRGB curve itself. Without it, the
+/// browser build comes out too dark and too contrasty.
+func surfaceWGSL(encode: Bool) -> String {
+"
+const ENCODE_SRGB = \(encode);
+fn toSurface(c: vec4f) -> vec4f {
+    if !ENCODE_SRGB {
+        return c;
+    }
+    let rgb = clamp(c.rgb, vec3f(0.0), vec3f(1.0));
+    let low = rgb * 12.92;
+    let high = 1.055 * pow(rgb, vec3f(1.0 / 2.4)) - 0.055;
+    return vec4f(select(high, low, rgb <= vec3f(0.0031308)), c.a);
+}
+"
+}
+
 /// The block shader. Each instance is one face from `meshChunk`; the vertex
 /// shader picks the face's corners from a table by `vertex_index`.
-func blockShader() -> String {
+/// `encode`: see `surfaceWGSL`.
+func blockShader(encode: Bool) -> String {
 "
+\(surfaceWGSL(encode))
 struct Uniforms {
     viewProj: mat4x4f,
     lightViewProj: mat4x4f,
@@ -257,7 +279,7 @@ fn fs_model(in: ModelOut) -> @location(0) vec4f {
     }
     let n = normalize(in.normal);
     let facing = max(dot(n, normalize(-u.sunDir.xyz)), 0.0);
-    return vec4f(fogged(in.world, lit(in.world, n, facing, 1.0, vec3f(0.0), texel.rgb)), texel.a);
+    return toSurface(vec4f(fogged(in.world, lit(in.world, n, facing, 1.0, vec3f(0.0), texel.rgb)), texel.a));
 }
 
 // The sky: one triangle covering the screen, behind everything.
@@ -326,7 +348,7 @@ fn fs_sky(in: SkyOut) -> @location(0) vec4f {
     color = mix(color, u.sunColor.rgb * 0.3 + vec3f(0.85), smoothstep(0.9988, 0.9993, s));
     color = mix(color, vec3f(0.96, 0.92, 1.0), smoothstep(0.9993, 0.9996, -s) * night);
     color = clouds(dir, color);
-    return vec4f(color, 1.0);
+    return toSurface(vec4f(color, 1.0));
 }
 
 @fragment
@@ -336,13 +358,13 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     if texel.a < 0.3 {
         discard;
     }
-    return vec4f(shade(in, texel).rgb, 1.0);
+    return toSurface(vec4f(shade(in, texel).rgb, 1.0));
 }
 
 // Translucent faces, blended over the opaque world by their alpha.
 @fragment
 fn fs_glass(in: VertexOut) -> @location(0) vec4f {
-    return shade(in, textureSample(atlas, atlasSampler, in.uv, in.layer));
+    return toSurface(shade(in, textureSample(atlas, atlasSampler, in.uv, in.layer)));
 }
 "
 }
@@ -350,7 +372,9 @@ fn fs_glass(in: VertexOut) -> @location(0) vec4f {
 /// The 2D overlay: screen-space rectangles in pixels, each a solid color,
 /// a tinted block tile, or a tinted layer of the interface atlas (sprites, block icons and font glyphs),
 /// smooth or, for pixel art, crisp.
-let overlayShader: String = "
+func overlayShader(encode: Bool) -> String {
+"
+\(surfaceWGSL(encode))
 struct Screen {
     size: vec4f,
 };
@@ -397,8 +421,9 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let crisp = textureSampleLevel(ui, uiSampler, snapped, layer, 0.0);
     let texel = select(select(block, sprite, in.source == 1), crisp, in.source == 2);
     if in.layer < 0 {
-        return in.color;
+        return toSurface(in.color);
     }
-    return vec4f(texel.rgb * in.color.rgb, texel.a * in.color.a);
+    return toSurface(vec4f(texel.rgb * in.color.rgb, texel.a * in.color.a));
 }
-";
+"
+}
