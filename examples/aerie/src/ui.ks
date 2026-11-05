@@ -6,9 +6,12 @@ module Aerie
 /// Each layer is this many pixels square.
 let uiCellSize: Int64 = 96;
 let uiCell: Float32 = 96.0;
-/// The font's pixel size inside a glyph layer, and where its glyphs start.
+/// The font's pixel size inside a glyph layer, and how far in from the
+/// layer's top left corner its glyphs start.
 let uiFontSize: Float32 = 36.0;
 let uiGlyphPad: Float32 = 4.0;
+/// Rows of font pixels in a line, ascenders to descenders.
+let uiFontRows: Float32 = 9.0;
 
 /// The title logo: this many cells across and down, from this layer,
 /// left to right then top to bottom.

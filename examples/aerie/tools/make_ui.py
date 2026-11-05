@@ -302,7 +302,7 @@ def glyph(ch):
     for y, row in enumerate(pixel_font.glyph(ch)):
         for x, c in enumerate(row):
             if c == "#":
-                x0, y0 = GLYPH_PAD + x * FONT_UNIT, 4 + y * FONT_UNIT
+                x0, y0 = GLYPH_PAD + x * FONT_UNIT, GLYPH_PAD + y * FONT_UNIT
                 d.rectangle((x0, y0, x0 + FONT_UNIT - 1, y0 + FONT_UNIT - 1), fill=(255, 255, 255, 255))
     return img
 
@@ -357,9 +357,12 @@ def main():
         "/// Each layer is this many pixels square.",
         f"let uiCellSize: Int64 = {CELL};",
         f"let uiCell: Float32 = {CELL}.0;",
-        "/// The font's pixel size inside a glyph layer, and where its glyphs start.",
+        "/// The font's pixel size inside a glyph layer, and how far in from the",
+        "/// layer's top left corner its glyphs start.",
         f"let uiFontSize: Float32 = {FONT_SIZE}.0;",
         f"let uiGlyphPad: Float32 = {GLYPH_PAD}.0;",
+        "/// Rows of font pixels in a line, ascenders to descenders.",
+        f"let uiFontRows: Float32 = {pixel_font.ROWS}.0;",
         "",
         "/// The title logo: this many cells across and down, from this layer,",
         "/// left to right then top to bottom.",

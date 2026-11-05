@@ -1,5 +1,7 @@
 module Aerie
 
+import linalg.(Vec3)
+
 /// One column of an island: solid from `bottom` to `top` inclusive, or
 /// empty when `top < bottom`. `strength` is how far inside an island the
 /// column is, 0 at the shore to 1 deep inland. `lair` is whether the column
@@ -254,4 +256,17 @@ func placeTower(chunk: Chunk, x: Int64, y: Int64, z: Int64, height: Int64) -> Ch
         dy = dy + 1;
     }
     out
+}
+
+/// A spot a little above and behind the island nearest the origin.
+func spawnPoint(generator: Generator) -> Vec3 {
+    var r: Int64 = 0;
+    while r < 2000 {
+        let c = generator.column(r, r / 2);
+        if c.top >= c.bottom and c.strength > 0.6 {
+            return Vec3(x: Float32(from: r) + 0.5, y: Float32(from: c.top + 2), z: Float32(from: r / 2) + 0.5);
+        }
+        r = r + 4;
+    }
+    Vec3(x: 0.0, y: 90.0, z: 0.0)
 }

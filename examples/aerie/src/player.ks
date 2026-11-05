@@ -1,6 +1,6 @@
 module Aerie
 
-import linalg.(Vec3)
+import linalg.(Vec3, Mat4)
 
 /// Half the player's width, their height, and their eyes' height, in blocks.
 let playerHalfWidth: Float32 = 0.3;
@@ -235,4 +235,24 @@ func raycast(world: World, origin: Vec3, direction: Vec3, reach: Float32) -> Ray
         }
     }
     .None
+}
+
+/// A view from `position`, turned `yaw` radians from looking down -z and
+/// tilted `pitch` radians up.
+struct Camera {
+    var position: Vec3
+    var yaw: Float32
+    var pitch: Float32
+
+    var forward: Vec3 {
+        Vec3(
+            x: self.yaw.sin() * self.pitch.cos(),
+            y: self.pitch.sin(),
+            z: -self.yaw.cos() * self.pitch.cos()
+        )
+    }
+
+    func view() -> Mat4 {
+        Mat4.lookAt(eye: self.position, target: self.position + self.forward, up: Vec3.unitY)
+    }
 }

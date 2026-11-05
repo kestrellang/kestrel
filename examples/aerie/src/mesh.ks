@@ -141,7 +141,7 @@ func meshChunk(chunk: Padded) -> ChunkFaces {
     faces
 }
 
-/// `cubeCorners` as WGSL `vec3f(...)` entries, for the shader's table.
+/// `cubeCorners` as WGSL `vec3f(...)` entries, for the shaders' CUBE_CORNERS.
 func cubeCornersWGSL() -> String {
     var out = "";
     for face in cubeCorners {
