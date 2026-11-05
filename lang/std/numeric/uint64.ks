@@ -1,5 +1,6 @@
 // UInt64 - 64-bit unsigned integer
-// Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/integer.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 module std.numeric
 
@@ -160,9 +161,9 @@ public struct UInt64:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.i64` without conversion. Internal
-    /// constructor used by intrinsics; not part of the public API.
-    init(raw value: lang.i64) {
+    /// Wraps an existing `lang.i64` without conversion. The FFI
+    /// counterpart of `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.i64) {
         self.raw = value
     }
 
@@ -659,7 +660,6 @@ public struct UInt64:
         .Some(self.divide(other))
     }
 
-
     // ========================================================================
     // ARITHMETIC (Saturating - Clamps to Bounds)
     // ========================================================================
@@ -691,7 +691,6 @@ public struct UInt64:
             .None => UInt64.maxValue
         }
     }
-
 
     // ========================================================================
     // ARITHMETIC (Extended)

@@ -1,5 +1,6 @@
 // Int32 - 32-bit signed integer
-// Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/integer.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 module std.numeric
 
@@ -159,9 +160,9 @@ public struct Int32:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.i32` without conversion. Internal
-    /// constructor used by intrinsics; not part of the public API.
-    init(raw value: lang.i32) {
+    /// Wraps an existing `lang.i32` without conversion. The FFI
+    /// counterpart of `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.i32) {
         self.raw = value
     }
 
@@ -693,7 +694,6 @@ public struct Int32:
         .Some(self.absWrapping())
     }
 
-
     // ========================================================================
     // ARITHMETIC (Saturating - Clamps to Bounds)
     // ========================================================================
@@ -747,7 +747,6 @@ public struct Int32:
             self.abs()
         }
     }
-
 
     // ========================================================================
     // ARITHMETIC (Extended)

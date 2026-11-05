@@ -1,5 +1,6 @@
 // Float32 - 32-bit floating point (single precision)
-// Generated from float.ks.template - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/float.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 // ============================================================================
 // FLOAT32
@@ -205,9 +206,9 @@ public struct Float32:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.f32` bit pattern. Internal; used
-    /// by intrinsics.
-    init(raw value: lang.f32) {
+    /// Wraps an existing `lang.f32` value. The FFI counterpart of
+    /// `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.f32) {
         self.raw = value
     }
 

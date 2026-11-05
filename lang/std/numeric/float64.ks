@@ -1,5 +1,6 @@
 // Float64 - 64-bit floating point (double precision)
-// Generated from float.ks.template - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/float.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 // ============================================================================
 // FLOAT64
@@ -205,9 +206,9 @@ public struct Float64:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.f64` bit pattern. Internal; used
-    /// by intrinsics.
-    init(raw value: lang.f64) {
+    /// Wraps an existing `lang.f64` value. The FFI counterpart of
+    /// `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.f64) {
         self.raw = value
     }
 
