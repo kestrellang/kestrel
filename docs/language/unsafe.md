@@ -71,17 +71,17 @@ These `lang` intrinsics are unsafe: `ptr_read`, `ptr_take`, `ptr_write`, `ptr_re
 
 ### `@extern` functions
 
-Every `@extern` function is unsafe by default, because the compiler can't check what the foreign code does. When a function is safe for every argument, such as a libm math function, say so with `safe: true`:
+Every `@extern` function is unsafe to call, because the compiler can't check what the foreign code does. There is no opt-out. To offer a safe API over a C function, wrap it in a Kestrel function whose body checks the contract and uses `unsafe`:
 
 ```kestrel
-@extern(.C, mangleName: "sqrt", safe: true)
-func sqrt(x: lang.f64) -> lang.f64
+@extern(.C, mangleName: "sqrt")
+func libm_sqrt(x: lang.f64) -> lang.f64
 
-@extern(.C, mangleName: "free")
-func free(ptr: lang.ptr[lang.u8])
-
-let r = sqrt(2.0);       // fine
-unsafe free(buffer);     // needs `unsafe`
+extend Float64 {
+    public func squareRoot() -> Float64 {
+        Float64(raw: unsafe libm_sqrt(self.raw))
+    }
+}
 ```
 
 ## Unsafe Protocols

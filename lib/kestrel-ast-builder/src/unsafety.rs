@@ -14,7 +14,7 @@ use crate::components::{IsUnsafe, NodeKind};
 pub enum Unsafety {
     /// `unsafe` written on the declaration, or an unsafe `lang` intrinsic.
     Declared,
-    /// An `@extern` function without `safe: true`.
+    /// An `@extern` function: the compiler can't check foreign code.
     Extern,
 }
 
@@ -41,7 +41,7 @@ impl QueryFn for UnsafetyOf {
             return Some(Unsafety::Declared);
         }
         attrs_of(ctx, entity)
-            .is_unsafe_extern()
+            .is_extern()
             .then_some(Unsafety::Extern)
     }
 }

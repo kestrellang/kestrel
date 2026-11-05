@@ -566,7 +566,7 @@ public struct Float32:
 
     /// Real cube root. Defined for negatives — `(-8.0).cbrt() == -2.0`.
     public func cbrt() -> Float32 {
-        Float32(raw: libm_cbrtf(self.raw))
+        Float32(raw: unsafe libm_cbrtf(self.raw))
     }
 
     /// Hypotenuse — `sqrt(self² + other²)`, computed via libm in a way that
@@ -578,7 +578,7 @@ public struct Float32:
     /// (3.0).hypot(4.0);  // 5.0
     /// ```
     public func hypot(other: Float32) -> Float32 {
-        Float32(raw: libm_hypotf(self.raw, other.raw))
+        Float32(raw: unsafe libm_hypotf(self.raw, other.raw))
     }
 
     // ========================================================================
@@ -586,14 +586,14 @@ public struct Float32:
     // ========================================================================
 
     /// `e^self` via libm. `(-inf).exp()` is `0.0`; `(inf).exp()` is `inf`.
-    public func exp() -> Float32 { Float32(raw: libm_expf(self.raw)) }
+    public func exp() -> Float32 { Float32(raw: unsafe libm_expf(self.raw)) }
 
     /// `2^self`. Useful for binary scaling.
-    public func exp2() -> Float32 { Float32(raw: libm_exp2f(self.raw)) }
+    public func exp2() -> Float32 { Float32(raw: unsafe libm_exp2f(self.raw)) }
 
     /// `e^self - 1`, computed without the cancellation that hurts
     /// `self.exp() - 1.0` for small `self`.
-    public func expm1() -> Float32 { Float32(raw: libm_expm1f(self.raw)) }
+    public func expm1() -> Float32 { Float32(raw: unsafe libm_expm1f(self.raw)) }
 
     /// Natural logarithm. Negatives return NaN; zero returns `-inf`.
     ///
@@ -605,17 +605,17 @@ public struct Float32:
     /// (0.0).ln();           // -inf
     /// (-1.0).ln();          //  nan
     /// ```
-    public func ln() -> Float32 { Float32(raw: libm_logf(self.raw)) }
+    public func ln() -> Float32 { Float32(raw: unsafe libm_logf(self.raw)) }
 
     /// `ln(1 + self)`, accurate for small `self` where `(1.0 + self).ln()`
     /// would lose digits.
-    public func ln1p() -> Float32 { Float32(raw: libm_log1pf(self.raw)) }
+    public func ln1p() -> Float32 { Float32(raw: unsafe libm_log1pf(self.raw)) }
 
     /// Base-2 logarithm.
-    public func log2() -> Float32 { Float32(raw: libm_log2f(self.raw)) }
+    public func log2() -> Float32 { Float32(raw: unsafe libm_log2f(self.raw)) }
 
     /// Base-10 logarithm.
-    public func log10() -> Float32 { Float32(raw: libm_log10f(self.raw)) }
+    public func log10() -> Float32 { Float32(raw: unsafe libm_log10f(self.raw)) }
 
     /// Logarithm with arbitrary base, computed as `self.ln() / base.ln()`.
     /// Pick `log2` or `log10` directly when you can — they avoid the second
@@ -635,7 +635,7 @@ public struct Float32:
     /// (-2.0).pow(0.5);   // nan
     /// ```
     public func pow(exponent: Float32) -> Float32 {
-        Float32(raw: libm_powf(self.raw, exponent.raw))
+        Float32(raw: unsafe libm_powf(self.raw, exponent.raw))
     }
 
     /// Integer-exponent power via repeated squaring. Faster and more accurate
@@ -669,25 +669,25 @@ public struct Float32:
     // ========================================================================
 
     /// Sine of `self` in radians.
-    public func sin() -> Float32 { Float32(raw: libm_sinf(self.raw)) }
+    public func sin() -> Float32 { Float32(raw: unsafe libm_sinf(self.raw)) }
 
     /// Cosine of `self` in radians.
-    public func cos() -> Float32 { Float32(raw: libm_cosf(self.raw)) }
+    public func cos() -> Float32 { Float32(raw: unsafe libm_cosf(self.raw)) }
 
     /// Tangent of `self` in radians. Diverges to ±large near `π/2 + kπ`.
-    public func tan() -> Float32 { Float32(raw: libm_tanf(self.raw)) }
+    public func tan() -> Float32 { Float32(raw: unsafe libm_tanf(self.raw)) }
 
     /// Arc sine, result in radians on `[-π/2, π/2]`. Returns NaN outside
     /// `[-1.0, 1.0]`.
-    public func asin() -> Float32 { Float32(raw: libm_asinf(self.raw)) }
+    public func asin() -> Float32 { Float32(raw: unsafe libm_asinf(self.raw)) }
 
     /// Arc cosine, result in radians on `[0, π]`. Returns NaN outside
     /// `[-1.0, 1.0]`.
-    public func acos() -> Float32 { Float32(raw: libm_acosf(self.raw)) }
+    public func acos() -> Float32 { Float32(raw: unsafe libm_acosf(self.raw)) }
 
     /// Arc tangent, result in radians on `[-π/2, π/2]`. For full-quadrant
     /// recovery use `atan2`.
-    public func atan() -> Float32 { Float32(raw: libm_atanf(self.raw)) }
+    public func atan() -> Float32 { Float32(raw: unsafe libm_atanf(self.raw)) }
 
     /// Two-argument arctangent — angle of the point `(x, self)` measured
     /// from the positive x-axis, on `[-π, π]`. Disambiguates quadrant where
@@ -701,7 +701,7 @@ public struct Float32:
     /// (-1.0).atan2(-1.0);  // -3π/4  (Q3)
     /// (-1.0).atan2(1.0);   // -π/4   (Q4)
     /// ```
-    public func atan2(x: Float32) -> Float32 { Float32(raw: libm_atan2f(self.raw, x.raw)) }
+    public func atan2(x: Float32) -> Float32 { Float32(raw: unsafe libm_atan2f(self.raw, x.raw)) }
 
     /// Sine and cosine in one call. Implemented via two libm calls today;
     /// kept for ergonomics and as a future optimisation point.
@@ -720,22 +720,22 @@ public struct Float32:
     // ========================================================================
 
     /// Hyperbolic sine.
-    public func sinh() -> Float32 { Float32(raw: libm_sinhf(self.raw)) }
+    public func sinh() -> Float32 { Float32(raw: unsafe libm_sinhf(self.raw)) }
 
     /// Hyperbolic cosine.
-    public func cosh() -> Float32 { Float32(raw: libm_coshf(self.raw)) }
+    public func cosh() -> Float32 { Float32(raw: unsafe libm_coshf(self.raw)) }
 
     /// Hyperbolic tangent. Saturates at ±1 for large magnitudes.
-    public func tanh() -> Float32 { Float32(raw: libm_tanhf(self.raw)) }
+    public func tanh() -> Float32 { Float32(raw: unsafe libm_tanhf(self.raw)) }
 
     /// Inverse hyperbolic sine. Defined on all real inputs.
-    public func asinh() -> Float32 { Float32(raw: libm_asinhf(self.raw)) }
+    public func asinh() -> Float32 { Float32(raw: unsafe libm_asinhf(self.raw)) }
 
     /// Inverse hyperbolic cosine. Returns NaN for inputs less than `1.0`.
-    public func acosh() -> Float32 { Float32(raw: libm_acoshf(self.raw)) }
+    public func acosh() -> Float32 { Float32(raw: unsafe libm_acoshf(self.raw)) }
 
     /// Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
-    public func atanh() -> Float32 { Float32(raw: libm_atanhf(self.raw)) }
+    public func atanh() -> Float32 { Float32(raw: unsafe libm_atanhf(self.raw)) }
 
     // ========================================================================
     // IEEE 754 OPERATIONS
@@ -762,19 +762,19 @@ public struct Float32:
     /// Next representable value greater than `self`. `+inf` and `nan` are
     /// fixed points; the largest finite value steps up to `+inf`.
     public func nextUp() -> Float32 {
-        Float32(raw: libm_nextafterf(self.raw, lang.f32_infinity()))
+        Float32(raw: unsafe libm_nextafterf(self.raw, lang.f32_infinity()))
     }
 
     /// Next representable value less than `self`. Mirror of `nextUp`.
     public func nextDown() -> Float32 {
-        Float32(raw: libm_nextafterf(self.raw, lang.f32_neg(lang.f32_infinity())))
+        Float32(raw: unsafe libm_nextafterf(self.raw, lang.f32_neg(lang.f32_infinity())))
     }
 
     /// IEEE 754 remainder — uses round-to-nearest division, not truncation.
     /// Differs from `%`: `(5.0).remainder(dividingBy: 3.0)` is `-1.0`, not
     /// `2.0`.
     public func remainder(dividingBy other: Float32) -> Float32 {
-        Float32(raw: libm_remainderf(self.raw, other.raw))
+        Float32(raw: unsafe libm_remainderf(self.raw, other.raw))
     }
 
     // ========================================================================

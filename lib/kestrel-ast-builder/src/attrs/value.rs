@@ -104,9 +104,6 @@ pub enum ParsedAttr {
     Extern {
         abi: Abi,
         mangle_name: Option<String>,
-        /// `safe: true`: calling it needs no `unsafe` (the declaration
-        /// vouches for the C function's contract).
-        safe: bool,
     },
     /// `@export(.C, mangleName:)`: a Kestrel body C calls by symbol.
     Export {
