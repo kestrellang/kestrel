@@ -1163,3 +1163,33 @@ fn is_ptr_ref_intrinsic_call(
         Some("ptr_ref" | "ptr_mut_ref")
     )
 }
+
+/// The accessor an `Indirection` peel lends the pointee through: the `ref` of
+/// `Indirection`'s `value` requirement, or (`mutating`) the `mutating ref` of
+/// `MutableIndirection`'s. Calls to it dispatch through the wrapper's witness
+/// table, so any conformer works: a type's own ref accessors or a stored
+/// field.
+pub fn indirection_accessor(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    mutating: bool,
+) -> Option<Entity> {
+    use kestrel_ast_builder::{MutatingAccessor, Name, NodeKind};
+    use kestrel_hir::Builtin;
+    let builtin = if mutating {
+        Builtin::MutableIndirection
+    } else {
+        Builtin::Indirection
+    };
+    let protocol = ctx.query(kestrel_name_res::ResolveBuiltin { builtin, root })?;
+    let place = ctx.children_of(protocol).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::Field)
+            && ctx
+                .get::<Name>(c)
+                .is_some_and(|n| n.0 == kestrel_hir::INDIRECTION_PLACE)
+    })?;
+    ctx.children_of(place).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::RefAccessor)
+            && ctx.has::<MutatingAccessor>(c) == mutating
+    })
+}

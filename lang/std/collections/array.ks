@@ -211,7 +211,7 @@ struct ArrayStorage[T]: Cloneable {
 /// # Indexing
 ///
 /// The default subscript `arr(i)` panics on out-of-bounds. Variants exist
-/// for every common policy: `arr(checked: i)` returns `T?`,
+/// for every common policy: `arr(checked: i)` lends `Optional[&T]`,
 /// `arr(unchecked: i)` skips the bounds check (UB on OOB),
 /// `arr(wrapped: i)` wraps with modulo (and supports negative indices),
 /// and `arr(clamped: i)` clamps to `[0, count-1]`. Range arguments use the
@@ -597,10 +597,13 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
         mutating ref { I.lendMutatingUnchecked(index, self.asMutableSlice()) }
     }
 
-    /// Like `xs(index)`, but `.None` instead of a panic when out of range.
-    /// An element comes back as a copy; a range as a lent slice.
-    public subscript[I](checked index: I) -> I.SliceCheckedOutput where I: SliceIndex[T] {
-        get { I.lendChecked(index, self.asSlice()) }
+    /// Like `xs(index)`, but the place may not exist: `.None` instead of a
+    /// panic when out of range. Reading copies the element out (`T?`) or
+    /// lends the slice; `if let .Some(&mutating v) = xs(checked: i)` writes
+    /// in place.
+    public subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendChecked(index, self.asSlice()) }
+        mutating ref { I.lendMutatingChecked(index, self.asMutableSlice()) }
     }
 
     /// Like `xs(index)`, with the index or range clamped into the array. A

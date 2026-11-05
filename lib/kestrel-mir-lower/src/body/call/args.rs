@@ -531,6 +531,13 @@ impl OssaBodyCtx<'_, '_> {
         protocol: Entity,
         method: &WitnessMethodKey,
     ) -> Option<Entity> {
+        // A ref accessor slot (`value.ref`) names the requirement's
+        // RefAccessor child, which carries the ref return.
+        if let Some((member, mutating)) = crate::context::parse_ref_witness_name(&method.name) {
+            let key = WitnessMethodKey::new(member.to_string(), method.labels.clone());
+            let parent = self.find_protocol_method_entity(protocol, &key)?;
+            return self.ctx.find_ref_accessor_child(parent, mutating);
+        }
         let members = self
             .ctx
             .query

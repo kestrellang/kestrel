@@ -3,7 +3,7 @@
 // backends: cranelift,llvm
 
 // Wrapper-wins (R2) + explicit pointee reach (R3): `rc.clone()` is RcBox's
-// own clone (shares storage), NOT the pointee's. `rc.pointeeRef().clone()`
+// own clone (shares storage), NOT the pointee's. `rc.value.clone()`
 // forces Account's clone (an independent copy). Distinguished by whether a
 // later mutation through `rc` is observed.
 module Test
@@ -23,7 +23,7 @@ struct Account: Cloneable {
 func main() -> lang.i64 {
     var rc = RcBox(Account(balance: 1));
     let shared = rc.clone();               // RcBox.clone — wrapper wins, shares storage
-    let deep = rc.pointeeRef().clone();     // Account.clone — independent copy
+    let deep = rc.value.clone();     // Account.clone — independent copy
     rc.deposit(10);                         // mutate the shared heap value
     if rc.balance != 11 { return 1; }
     if shared.balance != 11 { return 2; }   // shares storage -> sees the write

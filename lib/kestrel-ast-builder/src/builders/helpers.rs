@@ -475,12 +475,14 @@ pub fn declared_accessors(acc: &kestrel_syntax_tree::ast::PropertyAccessors) -> 
 /// accessor has a RETURN type — the SYNTHESIZED `&T` / `&mutating T`
 /// wrapping the parent's declared type. The user writes `-> T`; a ref type
 /// never appears in source (declared `-> &T` subscripts stay E481). The
-/// `MutatingAccessor` marker distinguishes the two kinds.
+/// `MutatingAccessor` marker distinguishes the two kinds. A bodyless clause
+/// (`clause_body: None`) is a protocol requirement: the child carries the
+/// signature only, and conformers' accessors witness it.
 pub fn spawn_ref_accessor(
     world: &mut World,
     parent: Entity,
     clause: &SyntaxNode,
-    clause_body: &SyntaxNode,
+    clause_body: Option<&SyntaxNode>,
     params: Vec<AstParam>,
     receiver: Option<ReceiverKind>,
     mutating: bool,
@@ -499,7 +501,9 @@ pub fn spawn_ref_accessor(
         world.set(acc, EnclosingContainer(container));
     }
     world.set(acc, Callable { params, receiver });
-    world.set(acc, Valued(SyntaxNodePtr::new(clause_body)));
+    if let Some(body) = clause_body {
+        world.set(acc, Valued(SyntaxNodePtr::new(body)));
+    }
     if mutating {
         world.set(acc, MutatingAccessor);
     }

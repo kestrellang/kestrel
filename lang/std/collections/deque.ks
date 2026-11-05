@@ -530,7 +530,7 @@ public struct Deque[T]: Iterable, Cloneable {
     // ELEMENT ACCESS
     // ========================================================================
 
-    /// Returns the front element without removing it, or `.None` if empty.
+    /// Lends the front element without removing it, or `.None` if empty.
     ///
     /// O(1). The removing counterpart is `popFront()`.
     ///
@@ -541,12 +541,13 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d.first();  // .Some(10)
     /// Deque[Int64]().first();  // .None
     /// ```
-    public func first() -> T? {
-        if self.len() == 0 { return .None; }
-        .Some(self.rawPtr().offset(by: self.head()).read())
+    public func first() -> Optional[&T] {
+        let phys = self.physicalIndex(0);
+        if phys < 0 { return .None; }
+        .Some(self.rawPtr().offset(by: phys).value)
     }
 
-    /// Returns the back element without removing it, or `.None` if empty.
+    /// Lends the back element without removing it, or `.None` if empty.
     ///
     /// O(1). The removing counterpart is `popBack()`.
     ///
@@ -557,11 +558,10 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d.last();  // .Some(30)
     /// Deque[Int64]().last();  // .None
     /// ```
-    public func last() -> T? {
-        if self.len() == 0 { return .None; }
-        var tail = self.head() + self.len() - 1;
-        if tail >= self.cap() { tail = tail - self.cap(); }
-        .Some(self.rawPtr().offset(by: tail).read())
+    public func last() -> Optional[&T] {
+        let phys = self.physicalIndex(self.len() - 1);
+        if phys < 0 { return .None; }
+        .Some(self.rawPtr().offset(by: phys).value)
     }
 
     /// @name Indexed
@@ -586,25 +586,52 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d(1);  // 99
     /// ```
     public subscript(index: Int64) -> T {
-        get {
-            if index < 0 or index >= self.len() {
-                fatalError("Deque: index out of bounds")
-            }
-            var phys = self.head() + index;
-            let myCap = self.cap();
-            if phys >= myCap { phys = phys - myCap; }
-            self.rawPtr().offset(by: phys).read()
+        ref {
+            let phys = self.physicalIndex(index);
+            if phys < 0 { fatalError("Deque: index out of bounds") }
+            self.rawPtr().offset(by: phys).value
         }
-        set {
-            if index < 0 or index >= self.len() {
-                fatalError("Deque: index out of bounds")
-            }
-            let s = &mutating self.storage.value;
-            var phys = s.head + index;
-            if phys >= s.cap { phys = phys - s.cap; }
-            // `assign` drops the element it replaces.
-            s.ptr.offset(by: phys).assign(newValue)
+        mutating ref {
+            // Unique the storage (COW) before locating the slot: a copy
+            // re-bases the ring to `head == 0`.
+            self.storage.ensureUnique();
+            let phys = self.physicalIndex(index);
+            if phys < 0 { fatalError("Deque: index out of bounds") }
+            self.rawPtr().offset(by: phys).mutatingValue
         }
+    }
+
+    /// Like `d(index)`, but the place may not exist: `.None` instead of a
+    /// panic when out of range. `if let .Some(&mutating v) = d(checked: i)`
+    /// writes in place.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var d = Deque[Int64](from: [10, 20]);
+    /// d(checked: 1);  // .Some(20)
+    /// d(checked: 5);  // .None
+    /// ```
+    public subscript(checked index: Int64)? -> T {
+        ref {
+            let phys = self.physicalIndex(index);
+            if phys < 0 { return null; }
+            .Some(self.rawPtr().offset(by: phys).value)
+        }
+        mutating ref {
+            self.storage.ensureUnique();
+            let phys = self.physicalIndex(index);
+            if phys < 0 { return null; }
+            .Some(self.rawPtr().offset(by: phys).mutatingValue)
+        }
+    }
+
+    /// The ring-buffer offset of logical `index`, or `-1` when out of range.
+    fileprivate func physicalIndex(index: Int64) -> Int64 {
+        if index < 0 or index >= self.len() { return -1; }
+        let phys = self.head() + index;
+        if phys >= self.cap() { return phys - self.cap(); }
+        phys
     }
 
     /// Returns the two contiguous slices that make up the ring buffer.

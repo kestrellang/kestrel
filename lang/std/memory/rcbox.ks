@@ -113,10 +113,13 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
         self.ptr.asRaw().offset(by: self.payloadOffset()).cast[T]().withMetadata(of: self.ptr)
     }
 
-    /// The payload, read-only. Writes go through `mutatingValue`, because
-    /// every handle onto this storage sees them.
-    public var value: &T {
-        self.valuePtr().value
+    /// The payload, in place. A write through it (`rc.value.x = 1`, or a
+    /// member write through the peel) needs a `var` handle, and every handle
+    /// onto this storage sees it; `mutatingValue` writes through a `let`
+    /// handle.
+    public var value: T {
+        ref { self.valuePtr().value }
+        mutating ref { self.valuePtr().mutatingValue }
     }
 
     /// The payload for writing, through a shared handle: no fork, and every
@@ -218,28 +221,24 @@ extend RcBox[T] where T: Cloneable {
     }
 }
 
-// Transparent member access: `rc.field` reaches the boxed value via the
-// heap pointee. `pointeeRef`/`pointeeMutRef` are `&T`/`&mutating T` views into
-// the shared storage, never a copy. The
-// wrapper still wins name clashes (`rc.clone()` is RcBox.clone, the peel is
-// lazy).
+// Transparent member access: `rc.field` reaches the boxed value through
+// `value`, a view into the shared storage, never a copy. The wrapper still
+// wins name clashes (`rc.clone()` is RcBox.clone, the peel is lazy).
 extend RcBox[T]: MutableIndirection {
     type Target = T
-    public func pointeeRef() -> &T { self.valuePtr().value }
-    public mutating func pointeeMutRef() -> &mutating T { self.valuePtr().mutatingValue }
 }
 
 // The shared-ownership contract (docs/design/shared-box.md). Most of it is
 // already here: `init(consuming value: T)`, `clone()`, `isUnique` and
-// `deinit` on the struct, `Target`/`pointeeRef()` on the `MutableIndirection`
+// `deinit` on the struct, `Target`/`value` on the `MutableIndirection`
 // extension above — `Target` is inherited through that conformance and must
 // NOT be redeclared here. Only the two genuinely new operations live below.
 extend RcBox[T]: SharedBox {
     /// Mutable access to the value through a *shared* handle: non-`mutating`
     /// receiver, no copy-on-write barrier, every clone observes the write.
-    /// This is `pointeeMutRef` without the fork — the interior-mutability
-    /// primitive escaping closures and (later) classes are built on. COW
-    /// clients must keep using `CowBox`, which forks first.
+    /// This is `value`'s `mutating ref` on a shared handle: the
+    /// interior-mutability primitive escaping closures and (later) classes
+    /// are built on. COW clients must keep using `CowBox`, which forks first.
     ///
     /// # Safety
     ///

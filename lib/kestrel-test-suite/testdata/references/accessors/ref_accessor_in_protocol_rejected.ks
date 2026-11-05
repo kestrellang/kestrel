@@ -1,9 +1,9 @@
 // test: diagnostics
 // stdlib: true
 
-// Scope restriction (stage 1.5): ref accessors are legal only on
-// concrete inherent declarations — rejected in protocols and protocol
-// extensions (witness ref-returns are out of scope).
+// A protocol may require `ref` / `mutating ref` with bodyless clauses
+// (protocol_ref_requirement.ks), but ref accessor BODIES stay concrete-only:
+// rejected in protocols and protocol extensions.
 module Test
 
 import std.memory.(Pointer)

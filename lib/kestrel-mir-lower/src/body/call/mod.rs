@@ -203,7 +203,7 @@ impl OssaBodyCtx<'_, '_> {
             self.prepare_closure_arg_snapshots(Some((receiver_expr, recv_conv)), args, &arg_convs);
             // Indirection method peel: `wrapper.method()` where the wrapper has
             // no `method` → dispatch to the pointee, reached via
-            // `pointeeRef()` / `pointeeMutRef()`. A mutating method (recv_conv
+            // `value`'s `ref` / `mutating ref`. A mutating method (recv_conv
             // == MutBorrow) peels through the mutating accessor. `receiver_ty`
             // is retargeted to the pointee so the callee's type args resolve
             // against the pointee, not the wrapper.
@@ -601,8 +601,12 @@ impl OssaBodyCtx<'_, '_> {
         {
             return self.lower_expr(receiver_expr);
         }
-        let receiver_ty = self.resolve_expr_type(receiver_expr);
+        let mut receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
+        // `xs.first() ?? 0`: the operator works on the copied-out `Optional[T]`.
+        if self.decays_optional_ref(receiver_expr) {
+            receiver_ty = self.decayed_optional_ty(receiver_ty);
+        }
 
         self.ctx.register_name(protocol);
         let method_type_args = self.resolve_type_args(expr_id);

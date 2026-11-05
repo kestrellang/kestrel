@@ -608,7 +608,8 @@ extend Sliceable[T] {
 
     // -- Element access ------------------------------------------------------
 
-    /// First element, or `.None` for an empty collection. O(1).
+    /// Lends the first element in place, or `.None` for an empty collection.
+    /// O(1). A binding (`let f = xs.first()`) copies it out.
     ///
     /// Read-only — to remove the first element from an `Array`, use
     /// `popFirst()`.
@@ -619,16 +620,14 @@ extend Sliceable[T] {
     /// [1, 2, 3].first();  // Some(1)
     /// [].first();          // None
     /// ```
-    public func first() -> T? {
+    public func first() -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        if s.count > 0 {
-            .Some(s.pointer.read())
-        } else {
-            .None
-        }
+        if s.count == 0 { return .None; }
+        .Some(s.pointer.value)
     }
 
-    /// Last element, or `.None` for an empty collection. O(1).
+    /// Lends the last element in place, or `.None` for an empty collection.
+    /// O(1).
     ///
     /// Read-only — to remove the last element from an `Array`, use
     /// `pop()`.
@@ -639,13 +638,10 @@ extend Sliceable[T] {
     /// [1, 2, 3].last();  // Some(3)
     /// [].last();          // None
     /// ```
-    public func last() -> T? {
+    public func last() -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        if s.count > 0 {
-            .Some(s.pointer.offset(by: s.count - 1).read())
-        } else {
-            .None
-        }
+        if s.count == 0 { return .None; }
+        .Some(s.pointer.offset(by: s.count - 1).value)
     }
 
     /// A uniformly random element drawn from `rng`, or `.None` for an
@@ -854,43 +850,36 @@ extend Sliceable[T] {
         .None
     }
 
-    /// First element matching `predicate`, or `None`. O(n).
+    /// Lends the first element matching `predicate`, or `None`. O(n).
     ///
     /// # Examples
     ///
     /// ```
     /// [1, 2, 3, 4, 5].first(where: { it > 3 });  // Some(4)
     /// ```
-    public func first(where predicate: (T) -> Bool) -> T? {
+    public func first(where predicate: (T) -> Bool) -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        let myPtr = s.pointer;
         for i in 0..<s.count {
-            let elem = myPtr.offset(by: i).read();
-            if predicate(elem) {
-                return .Some(elem)
+            if predicate(s.pointer.offset(by: i).value) {
+                return .Some(s.pointer.offset(by: i).value)
             }
         }
         .None
     }
 
-    /// Last element matching `predicate`, or `None`. O(n).
+    /// Lends the last element matching `predicate`, or `None`. O(n).
     ///
     /// # Examples
     ///
     /// ```
     /// [1, 2, 3, 2, 1].last(where: { it > 1 });  // Some(2)
     /// ```
-    public func last(where predicate: (T) -> Bool) -> T? {
+    public func last(where predicate: (T) -> Bool) -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        if s.count == 0 {
-            return .None
-        }
-        let myPtr = s.pointer;
         var i = s.count - 1;
         while i >= 0 {
-            let elem = myPtr.offset(by: i).read();
-            if predicate(elem) {
-                return .Some(elem)
+            if predicate(s.pointer.offset(by: i).value) {
+                return .Some(s.pointer.offset(by: i).value)
             }
             i = i - 1
         }
@@ -1179,7 +1168,7 @@ extend Sliceable[T] where T: Equatable {
 // ============================================================================
 
 extend Sliceable[T] where T: Comparable {
-    /// Smallest element, or `None` if empty. O(n).
+    /// Lends the smallest element, or `None` if empty. O(n).
     ///
     /// Ties go to the first occurrence.
     ///
@@ -1189,23 +1178,18 @@ extend Sliceable[T] where T: Comparable {
     /// [3, 1, 4].min();  // Some(1)
     /// [].min();          // None
     /// ```
-    public func min() -> T? {
+    public func min() -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        if s.count == 0 {
-            return .None
-        }
-        let myPtr = s.pointer;
-        var result = myPtr.read();
+        if s.count == 0 { return .None; }
+        // Track the winner's index so nothing is copied.
+        var best = 0;
         for i in 1..<s.count {
-            let elem = myPtr.offset(by: i).read();
-            if elem < result {
-                result = elem
-            }
+            if s.pointer.offset(by: i).value < s.pointer.offset(by: best).value { best = i; }
         }
-        .Some(result)
+        .Some(s.pointer.offset(by: best).value)
     }
 
-    /// Largest element, or `None` if empty. O(n).
+    /// Lends the largest element, or `None` if empty. O(n).
     ///
     /// Ties go to the first occurrence.
     ///
@@ -1215,20 +1199,14 @@ extend Sliceable[T] where T: Comparable {
     /// [3, 1, 4].max();  // Some(4)
     /// [].max();          // None
     /// ```
-    public func max() -> T? {
+    public func max() -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        if s.count == 0 {
-            return .None
-        }
-        let myPtr = s.pointer;
-        var result = myPtr.read();
+        if s.count == 0 { return .None; }
+        var best = 0;
         for i in 1..<s.count {
-            let elem = myPtr.offset(by: i).read();
-            if elem > result {
-                result = elem
-            }
+            if s.pointer.offset(by: i).value > s.pointer.offset(by: best).value { best = i; }
         }
-        .Some(result)
+        .Some(s.pointer.offset(by: best).value)
     }
 
     /// `true` if elements are in non-decreasing order. O(n).
