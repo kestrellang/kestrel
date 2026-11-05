@@ -354,3 +354,45 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
 fn fs_glass(in: VertexOut) -> @location(0) vec4f {
     return toSurface(shade(in, textureSample(atlas, atlasSampler, in.uv, in.layer)));
 }
+
+// Hotbar icons: model boxes laid out in screen pixels (x right, y down, z
+// toward the viewer), drawn over the HUD. They test and write depth just
+// in front of the near plane, so they hide their own back faces but sit
+// over the whole world.
+struct IconScreen {
+    // xy: the window's size in pixels.
+    size: vec4f,
+};
+@group(1) @binding(0) var<uniform> iconScreen: IconScreen;
+
+const ICON_DEPTH = 0.0005;
+// Light from up, left and in front, so every icon shows a bright top, a
+// mid side and a darker side.
+const ICON_LIGHT = vec3f(-0.45, 0.8, 0.55);
+
+@vertex
+fn vs_icon(@builtin(vertex_index) vertex: u32, @location(0) center: vec4f, @location(1) ax: vec4f, @location(2) ay: vec4f, @location(3) az: vec4f) -> ModelOut {
+    let face = vertex / 6u;
+    let p = modelCorner(vertex, center.xyz, ax.xyz, ay.xyz, az.xyz);
+    let n = NORMALS[face];
+    var out: ModelOut;
+    let size = iconScreen.size.xy;
+    out.position = vec4f(p.x / size.x * 2.0 - 1.0, 1.0 - p.y / size.y * 2.0, ICON_DEPTH - p.z * 0.000001, 1.0);
+    out.world = p;
+    out.uv = UVS[QUAD[vertex % 6u]];
+    out.layer = u32(select(select(center.w, ay.w, face == 3u), ax.w, face == 2u));
+    // Back to y up for lighting.
+    let pixelNormal = ax.xyz * n.x + ay.xyz * n.y + az.xyz * n.z;
+    out.normal = normalize(vec3f(pixelNormal.x, -pixelNormal.y, pixelNormal.z));
+    return out;
+}
+
+@fragment
+fn fs_icon(in: ModelOut) -> @location(0) vec4f {
+    let texel = textureSample(atlas, atlasSampler, in.uv, in.layer);
+    if texel.a < 0.3 {
+        discard;
+    }
+    let light = 0.55 + 0.5 * max(dot(normalize(in.normal), normalize(ICON_LIGHT)), 0.0);
+    return toSurface(vec4f(texel.rgb * light, texel.a));
+}

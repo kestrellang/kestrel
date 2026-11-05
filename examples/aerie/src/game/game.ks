@@ -120,7 +120,12 @@ struct Game: not Copyable {
         self.notice.update(dt);
         self.controls.clearPresses();
         let (models, casters) = self.models();
-        try self.renderer.draw(view.view(), eye: view.position, light: self.sky.daylight, time: self.seconds, models: models, casters: casters, overlay: self.overlay());
+        let hud = Hud(self.renderer.width, self.renderer.height);
+        let icons = if self.onTitle { [] } else { hud.icons(self.hotbar, time: self.seconds) };
+        try self.renderer.draw(Scene(
+            view: view.view(), eye: view.position, light: self.sky.daylight, time: self.seconds,
+            models: models, casters: casters, overlay: self.overlay(), icons: icons
+        ));
         .Ok(())
     }
 

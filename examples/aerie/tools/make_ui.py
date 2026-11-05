@@ -5,9 +5,8 @@ The atlas is a column of 96x96 layers, loaded as one texture array:
 
 - sprites: a hotbar slot, a selected slot, a wooden panel and button (drawn in three
   slices so it can stretch), a soft glow and a twinkle;
-- an icon per block: a little 3D cube built from the block atlas's faces
-  (run tools/make_atlas.py first), or the sprite itself for plants;
-- the title logo, the pixel font's letters built from block textures;
+- the title logo, the pixel font's letters built from block textures
+  (run tools/make_atlas.py first);
 - a glyph per printable ASCII character from our own pixel font
   (tools/pixel_font.py), white, so text can be drawn in any color.
 
@@ -28,30 +27,6 @@ SUPER = 4  # supersampling for smooth edges
 DRIFTSTONE, LOAM, MOSS_TOP, MOSS_SIDE, BARK, RINGS, EMBERLEAF, CLOUDGLASS, \
     SKYIRON, GLOWCAP, SAILCLOTH, FEATHERTHATCH, PLANKS, ASHROCK, SCORCH_TOP, \
     SCORCH_SIDE, DARKBRICK, EMBERCORE, DEADWOOD, DEAD_RINGS, GLOOMLEAF, HEXBLOOM = range(22)
-
-# Icons in block id order (id 1 first): (top, side) layers, or one layer
-# for a plant drawn flat.
-ICONS = [
-    ("Driftstone", (DRIFTSTONE, DRIFTSTONE)),
-    ("Loam", (LOAM, LOAM)),
-    ("Mossloam", (MOSS_TOP, MOSS_SIDE)),
-    ("Emberwood", (RINGS, BARK)),
-    ("Emberleaf", (EMBERLEAF, EMBERLEAF)),
-    ("Cloudglass", (CLOUDGLASS, CLOUDGLASS)),
-    ("Skyiron", (SKYIRON, SKYIRON)),
-    ("Glowcap", GLOWCAP),
-    ("Sailcloth", (SAILCLOTH, SAILCLOTH)),
-    ("Featherthatch", (FEATHERTHATCH, FEATHERTHATCH)),
-    ("Planks", (PLANKS, PLANKS)),
-    ("Ashrock", (ASHROCK, ASHROCK)),
-    ("Scorchloam", (SCORCH_TOP, SCORCH_SIDE)),
-    ("Darkbrick", (DARKBRICK, DARKBRICK)),
-    ("Embercore", (EMBERCORE, EMBERCORE)),
-    ("Deadwood", (DEAD_RINGS, DEADWOOD)),
-    ("Gloomleaf", (GLOOMLEAF, GLOOMLEAF)),
-    ("Hexbloom", HEXBLOOM),
-]
-
 
 def rounded(fill, outline, width, radius, glow=None, inset=0):
     """A rounded square sprite, drawn large and scaled down."""
@@ -244,56 +219,6 @@ def twinkle():
     return img
 
 
-def face_texel(atlas, layer, s, t):
-    """The block atlas texel at (s, t), each 0 to 1, of `layer`."""
-    x = min(15, max(0, int(s * 16)))
-    y = min(15, max(0, int(t * 16)))
-    return atlas.getpixel((x, layer * 16 + y))
-
-
-def cube_icon(atlas, top, side):
-    """An isometric cube: the top face, and the two front faces shaded
-    darker, drawn supersampled for clean edges."""
-    big = CELL * SUPER
-    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    cx = big / 2
-    a, b, h = 40 * SUPER, 20 * SUPER, 44 * SUPER
-    y0 = 5 * SUPER
-    px = img.load()
-    for y in range(big):
-        for x in range(big):
-            fx = (x + 0.5 - cx) / a
-            fy = y + 0.5 - y0
-            # Top face (w = 1): u - v = fx, u + v = fy / b.
-            u = (fy / b + fx) / 2
-            v = (fy / b - fx) / 2
-            if 0 <= u < 1 and 0 <= v < 1:
-                c = face_texel(atlas, top, u, v)
-                px[x, y] = (c[0], c[1], c[2], c[3])
-                continue
-            # Left front face (v = 1).
-            u = fx + 1
-            if 0 <= u < 1:
-                w = 1 - (fy - (u + 1) * b) / h
-                if 0 <= w < 1:
-                    c = face_texel(atlas, side, u, 1 - w)
-                    px[x, y] = (int(c[0] * 0.80), int(c[1] * 0.80), int(c[2] * 0.84), c[3])
-                    continue
-            # Right front face (u = 1).
-            v = 1 - fx
-            if 0 <= v < 1:
-                w = 1 - (fy - (1 + v) * b) / h
-                if 0 <= w < 1:
-                    c = face_texel(atlas, side, 1 - v, 1 - w)
-                    px[x, y] = (int(c[0] * 0.62), int(c[1] * 0.62), int(c[2] * 0.70), c[3])
-    return img.resize((CELL, CELL), Image.LANCZOS)
-
-
-def sprite_icon(atlas, layer):
-    tile = atlas.crop((0, layer * 16, 16, layer * 16 + 16))
-    return tile.resize((80, 80), Image.NEAREST)
-
-
 def glyph(ch):
     """A pixel-font glyph, white, each font pixel FONT_UNIT cell pixels,
     its top-left GLYPH_PAD in and 4 down."""
@@ -326,13 +251,6 @@ def main():
         ("Glow", glow()),
         ("Twinkle", twinkle()),
     ]
-    for name, faces in ICONS:
-        if isinstance(faces, tuple):
-            icon = cube_icon(atlas, *faces)
-        else:
-            icon = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
-            icon.paste(sprite_icon(atlas, faces), (8, 8))
-        layers.append(("Icon" + name, icon))
     logo_base = len(layers)
     for cell in logo(atlas, "Kestrelcraft", LOGO_COLUMNS, LOGO_ROWS):
         layers.append((None, cell))
@@ -347,7 +265,7 @@ def main():
         sheet.paste(img, (0, i * CELL))
     sheet.save("assets/ui.png")
 
-    named = [(n, i) for i, (n, _) in enumerate(layers) if n and not n.startswith("Icon")]
+    named = [(n, i) for i, (n, _) in enumerate(layers) if n]
     lines = [
         "module Aerie",
         "",
@@ -388,11 +306,6 @@ def main():
         "            " + ", ".join(f".{n} => {'true' if n in PIXEL_ART else 'false'}" for n, _ in named),
         "        }",
         "    }",
-        "}",
-        "",
-        "/// The icon layer for block id `id` (1 and up).",
-        "func uiIconLayer(id: UInt16) -> Float32 {",
-        f"    Float32(from: Int64(from: id) - 1 + {len(named)})",
         "}",
         "",
         "/// The glyph layer for an ASCII byte; anything unprintable shows as `?`.",
