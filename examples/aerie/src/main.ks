@@ -1,9 +1,12 @@
 // Aerie: a voxel sandbox on floating islands above a cloud sea.
 //
-// Milestone 1 draws a hand-built test island from the block atlas with a
-// fly camera: WASD, Space and Left Shift to move, arrow keys to look,
-// Escape to quit. `AERIE_FRAMES=n` quits after n frames; `AERIE_BENCH=n`
-// times chunk generation and meshing over n runs instead of opening a window.
+// Walk with WASD, look with the arrow keys, jump with Space and hold it
+// while falling to glide. Q breaks the block you look at, E places the
+// selected one, 1 to 8 pick from the hotbar, F toggles flying (Space and
+// Left Shift to rise and sink). Escape quits.
+//
+// `AERIE_FRAMES=n` quits after n frames; `AERIE_BENCH=n` times chunk
+// generation and meshing over n runs instead of opening a window.
 //
 // Run from this folder, so `assets/blocks.png` resolves.
 
@@ -103,6 +106,8 @@ func run() -> Int64 {
         }
     }
     println("drew \(frames) frames; \(game.world.chunks.count) chunks loaded, \(game.renderer.meshes.count) meshes, \(game.renderer.drawnChunks) drawn");
+    let p = game.player.position;
+    println("player at (\(p.x), \(p.y), \(p.z)), on ground: \(game.player.onGround)");
     0
 }
 

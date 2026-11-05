@@ -20,6 +20,18 @@ struct Uniforms: FFISafe {
 
 let uniformsSize: Int64 = 112;
 
+/// One overlay rectangle: `rect` is (x, y, width, height) in pixels from
+/// the top left; `tile.x` is an atlas layer to draw tinted by `color`, or
+/// negative for a plain `color` fill.
+struct OverlayQuad: FFISafe {
+    var rect: Vec4
+    var color: Vec4
+    var tile: Vec4
+}
+
+let maxOverlayQuads: Int64 = 64;
+let overlayQuadSize: Int64 = 48;
+
 /// A chunk's faces on the GPU, with its own small uniform holding where the
 /// chunk sits in the world (bind group 1). A bind group per chunk, rather
 /// than push constants, keeps this portable to WebGPU in a browser.
@@ -120,6 +132,10 @@ struct Renderer: not Copyable {
     var bindGroup: BindGroup
     var chunkLayout: BindGroupLayout
     var uniformBuffer: Buffer
+    var overlayPipeline: RenderPipeline
+    var overlayGroup: BindGroup
+    var screenBuffer: Buffer
+    var overlayBuffer: Buffer
     /// Boxed, since arrays hold only copyable values; dropping the last box
     /// frees the chunk's GPU buffers.
     var meshes: [RcBox[ChunkMesh]]
@@ -176,12 +192,36 @@ struct Renderer: not Copyable {
             layout: layout.bindGroupLayout(0),
             entries: [uniformBuffer.binding(0), atlasView.binding(1), atlasSampler.binding(2)]
         );
+        // The overlay draws in the same pass, over everything: it keeps the
+        // pass's depth format but never tests or writes depth.
+        let overlayLayout = device.createPipelineLayout(groups: [[
+            BindingLayout.uniformBuffer(0, visibility: [.Vertex]),
+            BindingLayout.texture(1, visibility: [.Fragment], dimension: .D2Array),
+            BindingLayout.sampler(2, visibility: [.Fragment])
+        ]], label: "overlay");
+        let overlayModule = device.createShaderModule(wgsl: overlayShader, label: "overlay");
+        let overlayPipeline = device.createRenderPipeline(
+            shader: overlayModule,
+            targets: [ColorTarget(format: format, blend: .AlphaBlending)],
+            buffers: [VertexBufferLayout(packed: [.Float32x4, .Float32x4, .Float32x4], stepMode: .Instance)],
+            depth: .Some(DepthTest(format: depthFormat, compare: .Always, write: false)),
+            sampleCount: samples,
+            layout: .Some(overlayLayout.share()),
+            label: "overlay"
+        );
+        let screenBuffer = device.createBuffer(size: 16, usage: [.Uniform, .CopyDst], label: "screen");
+        let overlayGroup = device.createBindGroup(
+            layout: overlayLayout.bindGroupLayout(0),
+            entries: [screenBuffer.binding(0), atlasView.binding(1), atlasSampler.binding(2)]
+        );
+        let overlayBuffer = device.createBuffer(size: maxOverlayQuads * overlayQuadSize, usage: [.Vertex, .CopyDst], label: "overlay");
         let depth = Renderer.makeDepth(device, width, height);
         let color = Renderer.makeColor(device, format, width, height);
         .Ok(Renderer(
             device: device, surface: surface, format: format, width: width, height: height,
             depth: depth, color: color, pipeline: pipeline, bindGroup: bindGroup,
             chunkLayout: layout.bindGroupLayout(1), uniformBuffer: uniformBuffer,
+            overlayPipeline: overlayPipeline, overlayGroup: overlayGroup, screenBuffer: screenBuffer, overlayBuffer: overlayBuffer,
             meshes: [], viewDistance: 160.0, drawnChunks: 0
         ))
     }
@@ -228,7 +268,7 @@ struct Renderer: not Copyable {
 
     /// Draw one frame as seen through `view`, lit by a sun shining along
     /// `sun`.
-    mutating func draw(view: Mat4, eye eye: Vec3, sun sun: Vec3) -> () throws WgpuError {
+    mutating func draw(view: Mat4, eye eye: Vec3, sun sun: Vec3, overlay overlay: [OverlayQuad]) -> () throws WgpuError {
         let aspect = Float32(from: self.width) / Float32(from: self.height);
         let projection = Mat4.perspective(fovY: radians(70.0), aspect: aspect, near: 0.1, far: self.viewDistance + 64.0);
         let viewProj = projection * view;
@@ -239,6 +279,15 @@ struct Renderer: not Copyable {
             fog: skyColor.extended(w: self.viewDistance)
         ));
         let planes = frustumPlanes(viewProj);
+        self.device.write(self.screenBuffer, value: Vec4(x: Float32(from: self.width), y: Float32(from: self.height), z: 0.0, w: 0.0));
+        var quads = overlay;
+        while quads.count > maxOverlayQuads {
+            let _ = quads.pop();
+        }
+        let quadCount = quads.count;
+        if quadCount > 0 {
+            self.device.write(self.overlayBuffer, data: quads);
+        }
 
         let frame = match self.surface.currentTexture() {
             .Ok(f) => f,
@@ -275,6 +324,12 @@ struct Renderer: not Copyable {
                 pass.setBindGroup(1, self.meshes(index).value.group);
                 pass.setVertexBuffer(0, self.meshes(index).value.faces);
                 pass.draw(vertices: 6, instances: self.meshes(index).value.faceCount);
+            }
+            if quadCount > 0 {
+                pass.setPipeline(self.overlayPipeline);
+                pass.setBindGroup(0, self.overlayGroup);
+                pass.setVertexBuffer(0, self.overlayBuffer);
+                pass.draw(vertices: 6, instances: quadCount);
             }
         };
         let drawn = visible.count;

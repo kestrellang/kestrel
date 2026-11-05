@@ -22,8 +22,17 @@ frame, nearest first, and are dropped once far away. Each chunk is meshed
 with a one-block border from its neighbors, so there are no seams, and
 chunks outside the camera's view are skipped.
 
-Controls: WASD to move, Space and Left Shift to rise and fall, arrow keys to
-look, Escape to quit. `AERIE_FRAMES=n` quits after n frames.
+**Milestone 4** makes it playable. You walk with gravity and collision,
+jump, and hold jump while falling to open the wing-cloak and glide: you sink
+slowly and sail forward at 10 blocks a second. Q breaks the block under the
+crosshair and E places the hotbar's selected block (1 to 8); each edit
+re-meshes the chunks it touches. F toggles free flying. Falling into the
+cloud sea puts you back at the spawn island.
+
+Controls: WASD to walk, arrow keys to look, Space to jump (hold to glide),
+Q to break, E to place, 1 to 8 for the hotbar, F to fly (Space and Left
+Shift to rise and sink), Escape to quit. `AERIE_FRAMES=n` quits after n
+frames.
 
 ## Running
 
@@ -46,4 +55,5 @@ WGPU_NATIVE_DIR=~/wgpu-native flock run
 - `src/noise.ks` — seeded 2D gradient noise.
 - `src/gen.ks` — the island generator.
 - `src/world.ks` — loaded chunks, keyed by position.
+- `src/player.ks` — movement, collision, gliding and block raycasts.
 - `src/mesh.ks` — face culling into packed `FaceInstance`s.
