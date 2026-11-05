@@ -285,3 +285,17 @@ fn entity_name(module: &MonoModule, entity: Entity) -> &str {
         .map(|s| s.as_str())
         .unwrap_or("?")
 }
+
+/// A `@guaranteed` extract of a stored REF slot (a `&T` field, tuple element
+/// or payload) whose result is POINTEE-typed: does the backend load the
+/// stored address out of the slot? A thin ref slot holds the pointee's
+/// address, so yes. A fat ref slot (`&Slice[T]`, `&rawany P`) holds the two
+/// words a fat pointee value is represented by the address of, so the slot
+/// address IS the result. A REF-typed result (clone/drop shim projections)
+/// always keeps the slot address.
+pub fn ref_slot_loads_pointee(module: &MonoModule, slot_ty: TyId, result_ty: TyId) -> bool {
+    let arena = &module.ty_arena;
+    matches!(arena.get(slot_ty), MirTy::Ref { .. })
+        && !matches!(arena.get(result_ty), MirTy::Ref { .. })
+        && !module.is_fat(slot_ty)
+}

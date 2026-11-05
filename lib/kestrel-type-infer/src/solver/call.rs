@@ -95,7 +95,7 @@ pub(super) fn solve_call(
             // Ref-aware: a direct callee's Function type carries `ret: &T`
             // (intrinsics like lang.ptr_ref); the result may already be
             // pinned to the pointee by an earlier return-position coerce.
-            bind_call_result(ctx, result, ret, expr, span);
+            bind_call_result(ctx, result, ret, expr, span, true);
             if let Some(err) = conv_err {
                 ctx.report_error(err);
             }
@@ -346,7 +346,13 @@ pub(crate) fn binding_plan_for(
 ///   and only ever see owned types);
 /// - a result already pinned to a non-ref (an early Coerce ran before the
 ///   member resolved — `let x: Int = late.peek()`) unifies with the pointee
-///   instead of erroring.
+///   instead of erroring;
+/// - a BINDING keeps the ref when the pointee is unsized (`Slice[T]`):
+///   there is no value to copy out;
+/// - a call ARGUMENT decays (`call_arg_exprs`), unless its param is a ref
+///   (a memberwise init of a ref field): a generic param must not adopt the
+///   pending ref (`m(s(i))`). Only calls and subscripts (`args_decay`) — a
+///   ref-typed stored field read stays the ref it is.
 ///
 /// Consequence: a ref-returning call's recorded type is `&T` in the common
 /// solve order but `T` in the pinned/scrutinee orders — consumers key
@@ -357,9 +363,25 @@ pub(super) fn bind_call_result(
     ret_tv: TyVar,
     expr: kestrel_hir::body::HirExprId,
     span: Span,
+    args_decay: bool,
 ) {
     ctx.call_return_tvs.insert(expr, ret_tv);
     let rr = ctx.resolve(ret_tv);
+    // A return not known yet (`-> I.Ref` before `I` resolves) may still turn
+    // out a ref: an unannotated binding decides once it does (the deferred
+    // decay). An annotated one (`let a: Int64 = pick()`) must flow its type
+    // into the return now — that is how `T` gets inferred.
+    if matches!(ctx.slot(rr), TySlot::Unresolved { literal: None })
+        && ctx.binding_init_exprs.contains(&expr)
+        && matches!(
+            ctx.slot(ctx.resolve(result)),
+            TySlot::Unresolved { literal: None }
+        )
+        && !ctx.annotated_init_exprs.contains(&expr)
+    {
+        ctx.equal_decayed(ret_tv, result, span);
+        return;
+    }
     if matches!(ctx.slot(rr), TySlot::Resolved(TyKind::Ref { .. })) {
         kestrel_debug::ktrace!(
             "arm-decay",
@@ -377,10 +399,29 @@ pub(super) fn bind_call_result(
             ctx.slot(ctx.resolve(result)),
             TySlot::Resolved(k) if !matches!(k, TyKind::Ref { .. })
         );
+        // An unsized pointee (`let mid = xs(1..<3)`, a `Slice[T]`) has no
+        // value to copy out: the binding keeps the reference. A pointee not
+        // yet resolved (`I.SliceOutput` before `I` is known) decides later:
+        // the deferred decay keeps the ref only if it turns out unsized
+        // (`apply_ref_decay_defaults`).
+        if ctx.binding_init_exprs.contains(&expr) && !pinned_non_ref {
+            match super::pointee_sizedness(ctx, pointee) {
+                None => {
+                    ctx.equal_decayed(ret_tv, result, span);
+                    return;
+                },
+                Some(false) => {
+                    ctx.equal(result, ret_tv, span);
+                    return;
+                },
+                Some(true) => {},
+            }
+        }
         if ctx.scrutinee_exprs.contains(&expr)
             || ctx.binding_init_exprs.contains(&expr)
             || ctx.assign_target_exprs.contains(&expr)
             || ctx.always_decay_exprs.contains(&expr)
+            || (args_decay && ctx.call_arg_exprs.contains(&expr) && !arg_targets_ref(ctx, expr))
             || pinned_non_ref
         {
             ctx.equal(result, pointee, span);
@@ -388,6 +429,14 @@ pub(super) fn bind_call_result(
         }
     }
     ctx.equal(result, ret_tv, span);
+}
+
+/// Is the argument `expr` already coerced into a ref-typed param?
+fn arg_targets_ref(ctx: &InferCtx<'_>, expr: kestrel_hir::body::HirExprId) -> bool {
+    ctx.constraints.iter().any(|c| {
+        matches!(c, Constraint::Coerce { expr: e, to, .. } if *e == expr
+            && matches!(ctx.slot(ctx.resolve(*to)), TySlot::Resolved(TyKind::Ref { .. })))
+    })
 }
 
 pub(super) fn emit_resolved_call(
@@ -574,10 +623,10 @@ pub(super) fn emit_resolved_call(
             let final_ty = wrap_init_call_result(ctx, entity, parent_ty, &subs, &span);
             ctx.equal(result, final_ty, span);
         } else {
-            bind_call_result(ctx, result, ret_tv, expr, span);
+            bind_call_result(ctx, result, ret_tv, expr, span, true);
         }
     } else {
-        bind_call_result(ctx, result, ret_tv, expr, span);
+        bind_call_result(ctx, result, ret_tv, expr, span, true);
     }
 
     SolveResult::Solved

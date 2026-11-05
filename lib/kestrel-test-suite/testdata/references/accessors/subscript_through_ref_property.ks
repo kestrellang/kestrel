@@ -26,7 +26,7 @@ func main() -> Int64 {
     let p = Pointer(to: x);
     var xs: Array[Int64] = [4, 5];
     let q = Pointer(to: xs);
-    print("read \(p.value(1)) \(p.mutatingValue(1)) \(q.value(1)) \(q.value(at: 0)) ");
+    print("read \(p.value(1)) \(p.mutatingValue(1)) \(q.value(1)) \(q.value(0)) ");
     p.mutatingValue(1) = 77;
     print("write \(x.b) ");
     let m = &mutating p.mutatingValue;

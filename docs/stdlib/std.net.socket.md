@@ -3,7 +3,7 @@
 ## struct `TcpListener`
 
 ```kestrel
-public struct TcpListener { /* private fields */ }
+public struct TcpListener: not Copyable { /* private fields */ }
 ```
 
 A bound, listening TCP server socket.
@@ -34,7 +34,8 @@ A single `Int32` field — the listening socket fd.
 
 ### Memory Model
 
-Owns its fd; closed on drop.
+Owns its fd; closed on drop. `not Copyable`: a copy would close the
+same fd twice. Move it, or borrow it to call `accept()`.
 
 _Defined in `lang/std/net/socket.ks`._
 
@@ -148,7 +149,9 @@ A single `RcBox[Int32]` holding the file descriptor; `-1` means
 Reference-counted shared ownership of the fd. Cloning is a refcount
 bump (the same socket), and `close(2)` runs exactly once — when the
 last handle drops. This is a shared handle, not a `dup(2)`; use
-`dup(2)` explicitly if you need an independent fd.
+`dup(2)` explicitly if you need an independent fd. Marked
+`@observabledrop`: since the last drop closes the socket, the compiler
+keeps every copy alive until the end of its scope.
 
 _Defined in `lang/std/net/socket.ks`._
 
@@ -236,7 +239,7 @@ _Defined in `lang/std/net/socket.ks`._
 #### function `read`
 
 ```kestrel
-public mutating func read(into: ArraySlice[UInt8]) -> Result[Int64, IoError]
+public mutating func read(into: mutating Slice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Reads up to `buf.count` bytes into `buf`. Returns the byte count actually read.
@@ -269,7 +272,7 @@ _Defined in `lang/std/net/socket.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(from: ArraySlice[UInt8]) -> Result[Int64, IoError]
+public mutating func write(from: UnsafeSlice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Writes up to `buf.count` bytes from `buf`. Returns the byte count actually written.

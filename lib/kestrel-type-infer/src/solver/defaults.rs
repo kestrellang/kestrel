@@ -81,11 +81,40 @@ pub(crate) fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
     apply_ref_decay_defaults_into(ctx, None)
 }
 
+/// Is a ref's pointee known to be unsized (`Slice[T]`)? A binding of such a
+/// ref keeps the reference: there is no value to copy out.
+pub(crate) fn pointee_is_unsized(ctx: &InferCtx<'_>, pointee: TyVar) -> bool {
+    pointee_sizedness(ctx, pointee) == Some(false)
+}
+
+/// Whether a ref's pointee is sized, or `None` while it is unresolved.
+pub(crate) fn pointee_sizedness(ctx: &InferCtx<'_>, pointee: TyVar) -> Option<bool> {
+    if matches!(ctx.slot(ctx.resolve(pointee)), TySlot::Unresolved { .. }) {
+        return None;
+    }
+    Some(super::conformance::solver_ty_is_sized(ctx, pointee, 0))
+}
+
 /// [`apply_ref_decay_defaults`], restricted to coercions whose target is
 /// `only` when given: the checker needs one binding's type NOW (its use as
 /// a receiver, bidi D3), and the copy-out decay is that binding's default.
 pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option<TyVar>) -> bool {
     let only = only.map(|t| ctx.resolve(t));
+    // The stalled binding may still be waiting on its initializer's result
+    // (`let got = items(0)`: the call's deferred decay targets the result,
+    // and the binding's Coerce waits on it), so that result counts too.
+    let wanted: Vec<TyVar> = only.map_or(Vec::new(), |o| {
+        let mut w = vec![o];
+        w.extend(ctx.constraints.iter().filter_map(|c| match c {
+            Constraint::Coerce { from, to, expr, .. }
+                if ctx.resolve(*to) == o && ctx.binding_init_exprs.contains(expr) =>
+            {
+                Some(ctx.resolve(*from))
+            },
+            _ => None,
+        }));
+        w
+    });
     let mut decays: Vec<(TyVar, TyVar)> = Vec::new();
     // Bound `Optional[&T]` initializers: (target, Optional entity, T, expr).
     let mut optional_decays = Vec::new();
@@ -100,27 +129,49 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
             // so no annotation can still be coming for it.
             && matches!(ctx.slot(ctx.resolve(*to)), TySlot::Unresolved { literal: None })
         {
-            optional_decays.push((*to, optional, pointee, *expr));
+            // An unsized payload (`Optional[&Slice[T]]`) has no value to copy
+            // out, so the binding keeps the reference.
+            match pointee_sizedness(ctx, pointee) {
+                Some(true) => optional_decays.push((*to, optional, pointee, *expr)),
+                Some(false) => decays.push((*to, ctx.resolve(*from))),
+                None => {},
+            }
             continue;
         }
-        let (from, to) = match c {
-            Constraint::Coerce { from, to, .. } => (from, to),
+        let (from, to, binds) = match c {
+            Constraint::Coerce { from, to, expr, .. } => {
+                (from, to, ctx.binding_init_exprs.contains(expr))
+            },
             // Arm results / tuple-literal elements wait on the same race.
-            Constraint::EqualDecayed { value, target, .. } => (value, target),
+            Constraint::EqualDecayed { value, target, .. } => (value, target, true),
             _ => continue,
         };
         let fr = ctx.resolve(*from);
         let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(fr) else {
             continue;
         };
-        if only.is_some_and(|o| ctx.resolve(*to) != o) {
+        if only.is_some() && !wanted.contains(&ctx.resolve(*to)) {
             continue;
         }
         if matches!(
             ctx.slot(ctx.resolve(*to)),
             TySlot::Unresolved { literal: None }
         ) {
-            decays.push((*to, *pointee));
+            // An unsized pointee (`&Slice[T]`) has no value to copy out, so a
+            // binding keeps the reference. A generic argument still takes the
+            // pointee (`String(fromUtf8: buf(0..<n))` binds `S = Slice[UInt8]`):
+            // it is passed by borrow, so nothing is copied.
+            // A binding whose pointee is still unresolved (`let s = xs(0..<2)`
+            // before the literal defaults pick the range's type) waits: it
+            // may yet be unsized. A stalled receiver (`only`) needs the type
+            // now, and takes the pointee.
+            let pointee = *pointee;
+            let target = match (binds, pointee_sizedness(ctx, pointee)) {
+                (true, None) if only.is_none() => continue,
+                (true, Some(false)) => fr,
+                _ => pointee,
+            };
+            decays.push((*to, target));
         }
     }
     let mut progress = false;

@@ -141,6 +141,11 @@ pub struct InferCtx<'a> {
     /// would defeat the coerce-side decay arm).
     pub(crate) binding_init_exprs: HashSet<HirExprId>,
 
+    /// The `binding_init_exprs` whose binding has a type annotation: its type
+    /// flows into the initializer (a generic return infers from it), so a
+    /// not-yet-known return never waits on the deferred decay.
+    pub(crate) annotated_init_exprs: HashSet<HirExprId>,
+
     /// HirExprIds that are an `Assign`'s TARGET. A `&mutating T`-returning
     /// target (`arr.mutableAt(index: i) = v`) types as the POINTEE so the
     /// value's Coerce just works — order-independently (the value side may
@@ -158,6 +163,14 @@ pub struct InferCtx<'a> {
     /// bidirectional back-flow (annotation → arms/elements, literal
     /// defaulting, ExpressibleByArrayLiteral targeting) is untouched.
     pub(crate) always_decay_exprs: HashSet<HirExprId>,
+
+    /// HirExprIds that are a call's ARGUMENT. Params never carry ref types
+    /// (E480), so an argument's value type is the POINTEE: a ref-returning
+    /// call here binds its result to the pointee in `bind_call_result`,
+    /// before a generic param (`m(s(i))`, `I` of the outer subscript) can
+    /// adopt the pending ref wholesale. The place itself still reaches MIR
+    /// through `ref_return_calls`.
+    pub(crate) call_arg_exprs: HashSet<HirExprId>,
 
     /// Check-mode leaves whose type comes from their OWN pending constraint
     /// (a call, method call or operator — bidi §2.1 synth). While
@@ -474,9 +487,11 @@ impl<'a> InferCtx<'a> {
             mutating_scrutinee_exprs: HashSet::default(),
             assign_target_exprs: HashSet::default(),
             always_decay_exprs: HashSet::default(),
+            call_arg_exprs: HashSet::default(),
             direct_callee_exprs: HashSet::default(),
             type_callee_calls: HashSet::default(),
             binding_init_exprs: HashSet::default(),
+            annotated_init_exprs: HashSet::default(),
             synth_pending_exprs: HashSet::default(),
             optional_chain_leaves: HashSet::default(),
             chain_modes: HashMap::default(),

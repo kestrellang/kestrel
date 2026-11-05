@@ -64,7 +64,10 @@ impl OssaBodyCtx<'_, '_> {
     /// Unconditionally non-Copyable scrutinees already move via
     /// `emit_copy_value`; genuinely-Copyable scrutinees keep the copy (they may
     /// be read after the match), so both route through `lower_expr` unchanged.
-    fn lower_match_scrutinee(&mut self, scrutinee_expr: HirExprId) -> ValueId {
+    /// Returns the scrutinee and whether it is an ADDRESS (place mode): a
+    /// non-copyable ref result can't be copied out, so it is pinned as an
+    /// address like a place-mode scrutinee and its view ends here.
+    fn lower_match_scrutinee(&mut self, scrutinee_expr: HirExprId) -> (ValueId, bool) {
         let expr = self.hir.exprs[scrutinee_expr].clone();
         if let HirExpr::Local(hir_local, _) = &expr
             && !self.is_var_local(hir_local)
@@ -72,7 +75,7 @@ impl OssaBodyCtx<'_, '_> {
             let val = self.map_local(*hir_local);
             let vdef = self.body.value(val);
             if vdef.ownership == Ownership::Owned && self.copy_behavior_is_mono_dependent(vdef.ty) {
-                return self.emit_move_value(val);
+                return (self.emit_move_value(val), false);
             }
         }
         let val = self.lower_expr(scrutinee_expr);
@@ -84,17 +87,52 @@ impl OssaBodyCtx<'_, '_> {
         // better be the binding's LAST use, or the branch terminator
         // reports the binding E497 (bindings never cross blocks).
         if self.ref_results.contains(&val) {
-            // A non-copyable pointee cannot be copied out: match through the
-            // view itself, like a borrowed parameter (arm bindings are then
-            // views into the referent).
+            // A non-copyable pointee cannot be copied out. A named ref
+            // binding matches through the view itself, like a borrowed
+            // parameter; a call result (`xs(1) is A`, an `any P` element)
+            // is pinned as an address so no view reaches the branches.
             if !self.is_copy_type(self.body.value(val).ty) {
-                return val;
+                if self.ref_binding_vals.contains_key(&val) {
+                    return (val, false);
+                }
+                return (self.pin_view_address(val), true);
             }
             let owned = self.emit_copy_value(val);
             self.end_ref_if_single_use(val);
-            return owned;
+            return (owned, false);
         }
-        val
+        (val, false)
+    }
+
+    /// The raw address of `view`, rooted where the viewed storage lives;
+    /// the view itself ends here unless a named binding owns it.
+    fn pin_view_address(&mut self, view: ValueId) -> ValueId {
+        let pointee = self.body.value(view).ty;
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
+        let addr = self.emit_op1(Op::PtrTo(pointee), view, ptr_ty);
+        // The address lives where the viewed storage lives: inherit its
+        // provenance root (as `FieldAddr` does). Otherwise it self-roots
+        // `Local` and a `&mutating` payload binder on a `mutating` receiver
+        // (`match self { .Some(&mutating v) => .Some(v), … }`) fails E494
+        // "borrows local" when returned.
+        let view_root = self.body.value(view).root;
+        self.stamp_root(addr, view_root);
+        // The view's job is done — the address stays valid while the
+        // underlying storage lives (var slot / pinned temp / borrowed
+        // receiver). Named bindings keep their own lifecycle.
+        if !self.ref_binding_vals.contains_key(&view) {
+            let src = self.body.value(view).borrow_source;
+            self.emit_end_borrow(view);
+            // A sub-borrow of a ref call result (`xs(1) is A`) was that
+            // ref's single use: end it too, or it reaches the decision
+            // tree's first branch (E497), as a direct call's arg does.
+            if let Some(src) = src
+                && self.ref_results.contains(&src)
+            {
+                self.end_ref_if_single_use(src);
+            }
+        }
+        addr
     }
 
     /// Place-mode scrutinee: evaluate the scrutinee as a PLACE and pin its
@@ -124,23 +162,7 @@ impl OssaBodyCtx<'_, '_> {
         let view = self
             .prepare_call_arg_for_expr(scrutinee_expr, convention)
             .value;
-        let pointee = self.body.value(view).ty;
-        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
-        let addr = self.emit_op1(Op::PtrTo(pointee), view, ptr_ty);
-        // The address lives where the viewed storage lives: inherit its
-        // provenance root (as `FieldAddr` does). Otherwise it self-roots
-        // `Local` and a `&mutating` payload binder on a `mutating` receiver
-        // (`match self { .Some(&mutating v) => .Some(v), … }`) fails E494
-        // "borrows local" when returned.
-        let view_root = self.body.value(view).root;
-        self.stamp_root(addr, view_root);
-        // The view's job is done — the address stays valid while the
-        // underlying storage lives (var slot / pinned temp / borrowed
-        // receiver). Named bindings keep their own lifecycle.
-        if !self.ref_binding_vals.contains_key(&view) {
-            self.emit_end_borrow(view);
-        }
-        addr
+        self.pin_view_address(view)
     }
 
     pub fn lower_match(
@@ -192,9 +214,15 @@ impl OssaBodyCtx<'_, '_> {
             (mode, _) => mode,
         };
         let saved_match_moves = std::mem::replace(&mut self.active_match_moves, part_moves);
-        let scrutinee_val = match place_mode {
-            Some(mutating) => self.lower_match_scrutinee_place(scrutinee_expr, mutating),
-            None => self.lower_match_scrutinee(scrutinee_expr),
+        let (scrutinee_val, place_mode) = match place_mode {
+            Some(mutating) => (
+                self.lower_match_scrutinee_place(scrutinee_expr, mutating),
+                place_mode,
+            ),
+            None => match self.lower_match_scrutinee(scrutinee_expr) {
+                (val, true) => (val, Some(false)),
+                (val, false) => (val, None),
+            },
         };
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
 

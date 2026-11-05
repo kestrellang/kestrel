@@ -14,7 +14,7 @@ import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RawPointer
 import std.ffi.(memcpy)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
-import std.collections.(Sliceable, ArraySlice)
+import std.collections.(Sliceable, Slice, SliceIndex, SliceClampable)
 
 /// Forward iterator over an `Array[T]`: an `UnsafeSliceIterator[T]` cursor plus
 /// a share of the array's storage.
@@ -561,49 +561,59 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
         UnsafeSlice(pointer: self.ptr(), count: self.len())
     }
 
-    /// In-place element access (stage-1.5 place accessors): reads borrow
-    /// the element — no copy, no clone, no `T: Cloneable` requirement —
-    /// and writes, `+=`, and mutating methods go through the element's
-    /// address. Binding the read (`let x = arr(at: i)`) stores an owned
-    /// copy instead (binding decay). Panics if out of bounds, like
-    /// `arr(index)`.
-    ///
-    /// The mutating accessor ensures unique (COW) storage BEFORE the
-    /// place is fabricated, so writes through it never touch a sibling
-    /// copy's buffer. Copying `self` inside the same expression that
-    /// uses the place (`f(arr(at: 0), arr)` with a mutating first arg)
-    /// re-shares the buffer and can make the write observable through
-    /// the copy — accepted stage-1 behavior, recorded in the references
-    /// semantics.
-    ///
-    /// The unlabeled subscripts (`arr(i)`, `arr(1..<3)`, `checked:`,
-    /// `unchecked:`, `clamped:`, `wrapped:`) live in `array_slice.ks` and
-    /// keep get/set semantics; `at:` is the labeled in-place form.
-    public func atProbe(index index: Int64) -> T {
-        self.asUnsafeSlice()(unchecked: index)
+    /// The elements as a slice, in place. Valid until the array next
+    /// reallocates or is dropped.
+    public func asSlice() -> &Slice[T] {
+        Slice.lend(start: self.ptr(), count: self.len())
     }
 
-    public subscript(at index: Int64) -> T {
-        ref {
-            // Hoisted: `or`'s short-circuit RHS is a closure, and a
-            // closure capturing Cloneable `self` deep-clones the array.
-            let count = self.len();
-            if index < 0 or index >= count {
-                fatalError("Array(at:): index out of bounds");
-            }
-            self.ptr().offset(by: index).value
-        }
-        mutating ref {
-            let count = self.len();
-            if index < 0 or index >= count {
-                fatalError("Array(at:): index out of bounds");
-            }
-            self.makeUnique();
-            self.ptr().offset(by: index).mutatingValue
-        }
+    /// The elements as a writable slice, in place. Runs the copy-on-write
+    /// check first, so writes never reach a copy's buffer. The slice can
+    /// change elements, never the array's length.
+    public mutating func asMutableSlice() -> &mutating Slice[T] {
+        self.makeUnique();
+        Slice.lendMutating(start: self.ptr(), count: self.len())
     }
 
-    // All other subscripts: array_slice.ks
+    /// Element access and sub-slicing, in place: `xs(2)` is a reference to
+    /// an element (`let x = xs(2)` binds a copy), `xs(1..<3)` a `Slice` of
+    /// the array's elements. Writes (`xs(0) = v`, `xs(0) += 1`,
+    /// `xs(0..<2).sort()`) run the copy-on-write check first. Panics when
+    /// the index or range doesn't fit.
+    ///
+    /// Copying the array inside the same expression that uses the place
+    /// (`f(xs(0), xs)` with a mutating first argument) re-shares the buffer,
+    /// so the write can show through the copy: accepted stage-1 behavior,
+    /// recorded in the references semantics.
+    public subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lend(index, self.asSlice()) }
+        mutating ref { I.lendMutating(index, self.asMutableSlice()) }
+    }
+
+    /// Like `xs(index)`, without the bounds check (undefined behavior when
+    /// out of range).
+    public subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendUnchecked(index, self.asSlice()) }
+        mutating ref { I.lendMutatingUnchecked(index, self.asMutableSlice()) }
+    }
+
+    /// Like `xs(index)`, but `.None` instead of a panic when out of range.
+    /// An element comes back as a copy; a range as a lent slice.
+    public subscript[I](checked index: I) -> I.SliceCheckedOutput where I: SliceIndex[T] {
+        get { I.lendChecked(index, self.asSlice()) }
+    }
+
+    /// Like `xs(index)`, with the index or range clamped into the array. A
+    /// clamped element of an empty array is `.None`.
+    public subscript[I](clamped index: I) -> I.SliceClampedOutput where I: SliceClampable[T] {
+        get { I.lendClamped(index, self.asSlice()) }
+    }
+
+    /// A copy of the element at `index` modulo `count` (negative indices
+    /// count from the end), or `.None` for an empty array.
+    public subscript(wrapped index: Int64) -> T? {
+        get { self.asSlice()(wrapped: index) }
+    }
 
     /// COW write barrier — deep-copies storage if shared.
     public mutating func ensureUnique() {
@@ -714,7 +724,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// arr.append(contentsOf: [3, 4]);  // [1, 2, 3, 4]
     /// arr.append(contentsOf: []);      // [1, 2, 3, 4]  — no-op
     /// ```
-    public mutating func append(contentsOf other: some Sliceable[T] and not Static) {
+    public mutating func append(contentsOf other: some Sliceable[T] and not Static and not Copyable and not Sized) {
         let sl = other.asUnsafeSlice();
         let otherLen = sl.count;
         if otherLen == 0 {
@@ -1509,8 +1519,8 @@ extend Array[T] where T: Equatable {
 extend Array[T]: ArrayMatchable {
     /// `ArrayMatchable` element type — what the pattern bindings extract.
     type Element = T
-    /// `..rest` binds a narrower slice of the same array.
-    type Rest = ArraySlice[T]
+    /// `..rest` binds a slice of the array's elements.
+    type Rest = &Slice[T]
 
     /// Pattern-matcher hook returning the array's `count`.
     ///
@@ -1536,7 +1546,7 @@ extend Array[T]: ArrayMatchable {
     ///
     /// Used to bind `..rest` segments. The matcher guarantees the
     /// indices are in range.
-    public func matchSlice(from: Int64, to: Int64) -> ArraySlice[T] {
+    public func matchSlice(from: Int64, to: Int64) -> &Slice[T] {
         self(from..<to)
     }
 }

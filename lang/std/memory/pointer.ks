@@ -355,8 +355,9 @@ extend Pointer: FFISafe where T: FFISafe {}
 /// storage, and the compiler doesn't check it: keeping one past its source,
 /// or past the source's next change, is a use-after-free. Use it for FFI,
 /// `Buffer`s and other memory that isn't an `Array`, and inside one call.
-/// To view part of an `Array`, use the checked `ArraySlice`
-/// (`xs(1..<3)`), which the compiler keeps from outliving the array.
+/// To view part of an `Array`, use `xs(1..<3)`, a `&Slice[T]` the
+/// compiler keeps from outliving the array (it is still invalidated when
+/// the array reallocates).
 ///
 /// # Examples
 ///

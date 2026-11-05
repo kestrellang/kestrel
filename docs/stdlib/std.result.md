@@ -52,25 +52,6 @@ Borrows the contained value without consuming this optional.
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `clone`
-
-```kestrel
-public func clone() -> Optional[T]
-```
-
-Returns an independent copy. For value types this is a shallow
-copy of the payload; for COW types, the underlying buffer is
-shared until first mutation.
-
-##### Examples
-
-```
-let opt = Some([1, 2, 3]);
-let copy = opt.clone();   // independent copy
-```
-
-_Defined in `lang/std/result/optional.ks`._
-
 #### function `contains`
 
 ```kestrel
@@ -360,7 +341,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `replace`
 
 ```kestrel
-public mutating func replace(T) -> Optional[T]
+public mutating func replace(consuming T) -> Optional[T]
 ```
 
 Stores `value` and returns whatever was there before. Mirror of
@@ -621,6 +602,29 @@ hasher, then defers to `T.hash` for the payload.
 
 _Defined in `lang/std/result/optional.ks`._
 
+### Implements `Cloneable`
+
+_Conditional: `where T: Copyable`._
+
+#### function `clone`
+
+```kestrel
+public func clone() -> Optional[T] where T: Copyable
+```
+
+Returns an independent copy. For value types this is a shallow
+copy of the payload; for COW types, the underlying buffer is
+shared until first mutation.
+
+##### Examples
+
+```
+let opt = Some([1, 2, 3]);
+let copy = opt.clone();   // independent copy
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
 ### Implements `Tryable`
 
 #### typealias `Output`
@@ -731,6 +735,46 @@ public consuming func coalesce(() -> T) -> T
 Returns the wrapped value or evaluates `default()`. The default is
 only invoked on `None`, which is what makes `??` cheap on the
 happy path.
+
+_Defined in `lang/std/result/optional.ks`._
+
+### Implements `OptionalChain`
+
+#### typealias `Wrapped`
+
+```kestrel
+type Wrapped = T
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
+#### function `chainBorrow`
+
+```kestrel
+public func chainBorrow() -> Optional[&T]
+```
+
+A borrow of the wrapped value, for read-only chains.
+
+_Defined in `lang/std/result/optional.ks`._
+
+#### function `chainMutate`
+
+```kestrel
+public mutating func chainMutate() -> Optional[&mutating T]
+```
+
+A mutable borrow of the wrapped value, for chains that mutate it.
+
+_Defined in `lang/std/result/optional.ks`._
+
+#### function `chainTake`
+
+```kestrel
+public consuming func chainTake() -> Optional[T]
+```
+
+The wrapped value itself, for chains on a temporary.
 
 _Defined in `lang/std/result/optional.ks`._
 
@@ -1301,6 +1345,46 @@ only invoked on `.Err`; the error value is dropped.
 
 _Defined in `lang/std/result/result.ks`._
 
+### Implements `OptionalChain`
+
+#### typealias `Wrapped`
+
+```kestrel
+type Wrapped = T
+```
+
+_Defined in `lang/std/result/result.ks`._
+
+#### function `chainBorrow`
+
+```kestrel
+public func chainBorrow() -> Optional[&T]
+```
+
+A borrow of the `.Ok` value, for read-only chains.
+
+_Defined in `lang/std/result/result.ks`._
+
+#### function `chainMutate`
+
+```kestrel
+public mutating func chainMutate() -> Optional[&mutating T]
+```
+
+A mutable borrow of the `.Ok` value, for chains that mutate it.
+
+_Defined in `lang/std/result/result.ks`._
+
+#### function `chainTake`
+
+```kestrel
+public consuming func chainTake() -> Optional[T]
+```
+
+The `.Ok` value itself, for chains on a temporary.
+
+_Defined in `lang/std/result/result.ks`._
+
 ### Implements `Equatable`
 
 _Conditional: `where T: Equatable, E: Equatable`._
@@ -1392,4 +1476,16 @@ alias. Write the sugar in user code; this exists so the operator can
 resolve to a concrete type.
 
 _Defined in `lang/std/result/result.ks`._
+
+## function `decayOptionalRef`
+
+```kestrel
+public func decayOptionalRef[T](Optional[&T]) -> Optional[T]
+```
+
+Copies the payload out of a lent `Optional[&T]`. The compiler calls this
+when such a value is bound (`let f = b.first`): the binding owns a copy
+and stops borrowing the place, the same way binding a `&T` copies.
+
+_Defined in `lang/std/result/optional.ks`._
 

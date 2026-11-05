@@ -799,7 +799,7 @@ public struct Int8:
     /// @name From Bytes
     /// Reassembles a `Int8` from 1 bytes in native byte order.
     /// Returns `null` if the input is not exactly 1 bytes long.
-    public init[S](fromBytes fromBytes: S)? where S: Sliceable[UInt8], S: not Static {
+    public init[S](fromBytes fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         let bytes = fromBytes.asUnsafeSlice();
         if bytes.count != 1 {
             return null
@@ -817,7 +817,7 @@ public struct Int8:
     /// @name From Bytes Big Endian
     /// Reassembles a `Int8` from 1 bytes in big-endian order.
     /// Returns `null` if the input is not exactly 1 bytes long.
-    public init[S](fromBytesBigEndian fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static {
+    public init[S](fromBytesBigEndian fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         let bytes = fromBytesBigEndian.asUnsafeSlice();
         if bytes.count != 1 {
             return null
@@ -835,7 +835,7 @@ public struct Int8:
     /// @name From Bytes Little Endian
     /// Reassembles a `Int8` from 1 bytes in little-endian order.
     /// Returns `null` if the input is not exactly 1 bytes long.
-    public init[S](fromBytesLittleEndian fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static {
+    public init[S](fromBytesLittleEndian fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         let bytes = fromBytesLittleEndian.asUnsafeSlice();
         if bytes.count != 1 {
             return null

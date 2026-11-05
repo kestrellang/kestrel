@@ -25,7 +25,7 @@ import std.collections.(Array)
 /// # Examples
 ///
 /// ```
-/// func sum[S](s: S) -> Int64 where S: Sliceable[Int64], S: not Static {
+/// func sum[S](s: S) -> Int64 where S: Sliceable[Int64], S: not Static, S: not Copyable, S: not Sized {
 ///     var total: Int64 = 0;
 ///     for elem in s { total = total + elem }
 ///     total
@@ -522,9 +522,8 @@ extend RangeThrough[Int64]: SeqRange {
 // UNIFIED SUBSCRIPTS
 // ============================================================================
 
-// Read-only here: a `Sliceable` may be a view that must not be written through
-// (`ArraySlice`). Writable collections (`Array`, `MutableArraySlice`,
-// `UnsafeSlice`) declare their own get/set subscripts, which take precedence.
+// Read-only here. `Array`, `Slice` and `UnsafeSlice` declare their own
+// subscripts (in-place places for `Array` and `Slice`), which take precedence.
 extend Sliceable[T] {
     public subscript[I](index: I) -> I.SeqOutput where I: SeqIndex[T] {
         get { index.readSeq(from: self.asUnsafeSlice()) }
@@ -1135,7 +1134,7 @@ extend Sliceable[T] where T: Equatable {
     /// [1, 2, 3].starts(with: [2, 3]);     // false
     /// [1, 2, 3].starts(with: []);          // true (vacuous)
     /// ```
-    public func starts(with prefix: some Sliceable[T] and not Static) -> Bool {
+    public func starts(with prefix: some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool {
         let a = self.asUnsafeSlice();
         let b = prefix.asUnsafeSlice();
         if b.count > a.count {
@@ -1159,7 +1158,7 @@ extend Sliceable[T] where T: Equatable {
     /// [1, 2, 3].ends(with: [1, 2]);  // false
     /// [1, 2, 3].ends(with: []);       // true (vacuous)
     /// ```
-    public func ends(with suffix: some Sliceable[T] and not Static) -> Bool {
+    public func ends(with suffix: some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool {
         let a = self.asUnsafeSlice();
         let b = suffix.asUnsafeSlice();
         if b.count > a.count {

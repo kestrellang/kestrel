@@ -23,9 +23,9 @@ protocol Slot {
 extend Int64: Slot {
     type Ref = &V
     type MutRef = &mutating V
-    func read(w: W) -> &V { w.items(at: self) }
+    func read(w: W) -> &V { w.items(self) }
     func write(mutating w: W) -> &mutating V {
-        let r = &mutating w.items(at: self);
+        let r = &mutating w.items(self);
         r
     }
 }
@@ -50,6 +50,6 @@ func main() -> Int64 {
     let before = fetch(0, w);
     put(0, w).n = 9;
     put(0, w).n += 1;
-    print(" write \(before.n + 6) \(fetch(0, w).n) \(w.items(at: 0).n)\n");
+    print(" write \(before.n + 6) \(fetch(0, w).n) \(w.items(0).n)\n");
     0
 }

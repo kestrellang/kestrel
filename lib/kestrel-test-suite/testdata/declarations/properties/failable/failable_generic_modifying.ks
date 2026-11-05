@@ -24,7 +24,7 @@ struct Queue[T] {
     subscript(checked i: Int64)? -> T {
         ref {
             if i < 0 or i >= self.items.count { return null; }
-            let r = &self.items(at: i);
+            let r = &self.items(i);
             .Some(r)
         }
     }

@@ -18,7 +18,7 @@ public struct BLAKE2b512: Digest {
         self.core = BLAKE2b(validLength: 64);
     }
 
-    public mutating func update[S](bytes: S) where S: Sliceable[UInt8], S: not Static {
+    public mutating func update[S](bytes: S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         self.core.update(bytes);
     }
 
@@ -40,7 +40,7 @@ public struct BLAKE2b256: Digest {
         self.core = BLAKE2b(validLength: 32);
     }
 
-    public mutating func update[S](bytes: S) where S: Sliceable[UInt8], S: not Static {
+    public mutating func update[S](bytes: S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         self.core.update(bytes);
     }
 
@@ -87,7 +87,7 @@ public struct BLAKE2b {
 
     /// One-shot hash with a chosen output length, or null unless
     /// `outputLength` is between 1 and 64.
-    public static func hash(bytes: some Sliceable[UInt8] and not Static, outputLength outputLength: Int64) -> DigestOutput? {
+    public static func hash(bytes: some Sliceable[UInt8] and not Static and not Copyable and not Sized, outputLength outputLength: Int64) -> DigestOutput? {
         guard let some hasher = BLAKE2b(outputLength: outputLength) else { return null; }
         var h = hasher;
         h.update(bytes);
@@ -111,7 +111,7 @@ public struct BLAKE2b {
         h
     }
 
-    public mutating func update[S](bytes: S) where S: Sliceable[UInt8], S: not Static {
+    public mutating func update[S](bytes: S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         let sl = bytes.asUnsafeSlice();
         var offset: Int64 = 0;
 

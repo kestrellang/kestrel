@@ -331,7 +331,7 @@ TyResult =
   Ty 'throws' error:Ty
 
 TySome =
-  'some' Ty ('and' Ty)* ('and' NegativeConformance)?
+  'some' Ty ('and' Ty)* ('and' NegativeConformance)*
 
 // `any` is contextual (the leading 'ident'), so `any(where:)` stays a
 // method name. The optional list holds one unapplied box type.

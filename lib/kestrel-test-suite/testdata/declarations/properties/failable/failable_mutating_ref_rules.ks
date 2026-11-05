@@ -13,19 +13,19 @@ struct Bag {
     var first?: Int64 {
         ref {
             if self.items.count == 0 { return null; }
-            let r = &self.items(at: 0);
+            let r = &self.items(0);
             .Some(r)
         }
         mutating ref {
             if self.items.count == 0 { return null; }
-            let r = &mutating self.items(at: 0);
+            let r = &mutating self.items(0);
             .Some(r)
         }
     }
     var last?: Int64 {
         ref {
             if self.items.count == 0 { return null; }
-            let r = &self.items(at: self.items.count - 1);
+            let r = &self.items(self.items.count - 1);
             .Some(r)
         }
     }

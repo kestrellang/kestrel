@@ -2486,8 +2486,8 @@ impl TySome {
     pub fn and_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::And)
     }
-    pub fn negative_conformance(&self) -> Option<NegativeConformance> {
-        support::child(&self.syntax)
+    pub fn negative_conformances(&self) -> AstChildren<NegativeConformance> {
+        support::children(&self.syntax)
     }
 }
 

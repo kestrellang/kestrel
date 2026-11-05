@@ -80,7 +80,7 @@ Owning, allocator-parameterised contiguous storage.
 `Buffer` is the building block underneath `Array`, `String`, and any
 other COW/growable collection. It owns its allocation, deallocates on
 drop, and is `not Copyable` to keep ownership unique. For a non-owning
-view see `Slice`; for a refcounted owning wrapper see `RcBox`.
+view see `Sliceable`; for a refcounted owning wrapper see `RcBox`.
 
 ### Examples
 
@@ -743,7 +743,7 @@ element-by-element, advancing a typed pointer.
 
 ### Representation
 
-A `Pointer[T]` plus a remaining count. No `Slice` indirection — the
+A `Pointer[T]` plus a remaining count. No `Sliceable` indirection — the
 iterator is what `LiteralSlice` hands out instead of exposing its
 pointer directly.
 
@@ -2029,8 +2029,9 @@ The slice does **not** track or extend the lifetime of the underlying
 storage, and the compiler doesn't check it: keeping one past its source,
 or past the source's next change, is a use-after-free. Use it for FFI,
 `Buffer`s and other memory that isn't an `Array`, and inside one call.
-To view part of an `Array`, use the checked `ArraySlice`
-(`xs(1..<3)`), which the compiler keeps from outliving the array.
+To view part of an `Array`, use `xs(1..<3)`, a `&Slice[T]` the
+compiler keeps from outliving the array (it is still invalidated when
+the array reallocates).
 
 ### Examples
 
@@ -2113,7 +2114,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 public subscript[I](I) -> I.SeqOutput where I: SeqIndex[T] { get set }
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### subscript `subscript`
 
@@ -2121,7 +2122,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public subscript[I](unchecked: I) -> I.SeqOutput where I: SeqIndex[T] { get set }
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### subscript `subscript`
 
@@ -2129,7 +2130,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public subscript[I](clamped: I) -> I.SeqClampedOutput where I: SeqClampable[T] { get set }
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### subscript `subscript`
 
@@ -2137,9 +2138,9 @@ _Defined in `lang/std/collections/slice.ks`._
 public subscript[I](wrapped: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] { get set }
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
-### Implements `Slice`
+### Implements `Sliceable`
 
 #### function `asUnsafeSlice`
 

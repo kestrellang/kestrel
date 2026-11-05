@@ -6,7 +6,7 @@
 module swoop.tls
 
 import std.io.error.(IoError)
-import std.collections.(MutableArraySlice)
+import std.collections.(Slice)
 import std.memory.(RcBox)
 import http.wire.(stringToBytes)
 
@@ -120,8 +120,8 @@ public struct TlsStream: Readable, Writable, Cloneable {
         TlsStream(conn: self.conn.clone())
     }
 
-    public mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Int64 throws IoError {
-        let raw = buf.asUnsafeMutableSlice();
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Int64 throws IoError {
+        let raw = buf.asUnsafeSlice();
         let ssl = self.conn.value.ssl;
         let count32 = if raw.count > 2147483647 { 2147483647 } else { Int32(from: raw.count) };
         let n = Int32(raw: libc_SSL_read(

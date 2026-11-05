@@ -31,8 +31,8 @@ public struct PBKDF2[H] where H: Digest {
     /// (2³² − 1) × digest size (RFC 8018 §5.2) — past that the 32-bit
     /// block index would wrap.
     public static func deriveKey(
-        password: some Sliceable[UInt8] and not Static,
-        salt salt: some Sliceable[UInt8] and not Static,
+        password: some Sliceable[UInt8] and not Static and not Copyable and not Sized,
+        salt salt: some Sliceable[UInt8] and not Static and not Copyable and not Sized,
         iterations iterations: Int64,
         length length: Int64
     ) -> SymmetricKey throws CryptoError {

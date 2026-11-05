@@ -763,7 +763,7 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Kind(K::Some),
             R::Kind(K::Ty),
             R::Rep(&R::Seq(&[R::Kind(K::And), R::Kind(K::Ty)])),
-            R::Opt(&R::Seq(&[R::Kind(K::And), R::Kind(K::NegativeConformance)])),
+            R::Rep(&R::Seq(&[R::Kind(K::And), R::Kind(K::NegativeConformance)])),
         ]),
     ),
     (

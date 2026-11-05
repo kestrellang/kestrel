@@ -23,7 +23,7 @@ struct B {
     var first?: S {
         ref {
             if self.xs.isEmpty { return null; }
-            let r = &self.xs(at: 0);
+            let r = &self.xs(0);
             .Some(r)
         }
     }
@@ -42,8 +42,8 @@ func main() -> lang.i64 {
     println("unannotated");
     let f = b.first;
     println("write after bind");
-    b.xs(at: 0).n = 9;
-    b.xs(at: 0).n = 1;
+    b.xs(0).n = 9;
+    b.xs(0).n = 1;
     println("annotated");
     let a: S? = b.first;
     println("ref kept");

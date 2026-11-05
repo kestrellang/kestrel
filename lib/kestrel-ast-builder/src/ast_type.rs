@@ -86,16 +86,16 @@ fn lower_kind(kind: &ast::TyKind, file_id: usize) -> Option<AstType> {
             span,
         },
         K::TySome(s) => {
-            // Positive bounds are the direct `Ty` children; the negative
-            // bound (`and not Copyable`) sits in a NegativeConformance.
+            // Positive bounds are the direct `Ty` children; each negative
+            // bound (`and not Copyable`) sits in its own NegativeConformance.
             let bounds = lower_types(s.types(), file_id);
             if bounds.is_empty() {
                 return None;
             }
             let negative = s
-                .negative_conformance()
-                .and_then(|n| lower_opt_type(n.ty(), file_id))
-                .map(Box::new);
+                .negative_conformances()
+                .filter_map(|n| lower_opt_type(n.ty(), file_id))
+                .collect();
             AstType::Some {
                 bounds,
                 negative,

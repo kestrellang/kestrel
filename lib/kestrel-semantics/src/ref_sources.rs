@@ -33,6 +33,10 @@ pub enum RefShape<T> {
     Tuple(Vec<T>),
     /// A raw pointer to `T`: may reach a `T`, but carries no reference.
     Pointer(T),
+    /// An unsized run of `T` elements in place (`lang.slice[T]`, the tail of
+    /// `Slice[T]`). A reference to it reaches elements that some holder
+    /// keeps behind a `Pointer[T]` (an `Array`'s storage).
+    Elements(T),
     /// Generic, opaque, existential or closure: may hold or carry anything.
     Opaque,
     /// A primitive or other type holding nothing else.
@@ -45,6 +49,11 @@ pub trait RefSourceLayer {
     fn shape(&mut self, ty: &Self::Ty) -> RefShape<Self::Ty>;
     /// Structural equality (used for leaves).
     fn same(&self, a: &Self::Ty, b: &Self::Ty) -> bool;
+    /// `Pointer[elem]`, when the layer can name it: what a reference to
+    /// [`RefShape::Elements`] borrows from.
+    fn pointer_to(&mut self, _elem: &Self::Ty) -> Option<Self::Ty> {
+        None
+    }
 }
 
 /// Per argument: may a call returning `result` hand back a borrow of it?
@@ -110,6 +119,13 @@ fn ref_pointees<L: RefSourceLayer>(
         },
         RefShape::Tuple(elems) => elems.iter().all(|e| ref_pointees(layer, e, out, expanding)),
         RefShape::Opaque => false,
+        RefShape::Elements(elem) => match layer.pointer_to(&elem) {
+            Some(p) => {
+                out.push(p);
+                true
+            },
+            None => false,
+        },
         RefShape::Pointer(_) | RefShape::Leaf => true,
     }
 }
@@ -148,8 +164,11 @@ fn may_hold<L: RefSourceLayer>(
             expanding.remove(&entity);
             found
         },
-        RefShape::Ref(inner) | RefShape::Pointer(inner) => {
+        RefShape::Ref(inner) | RefShape::Elements(inner) => {
             may_hold(layer, &inner, target, expanding)
+        },
+        RefShape::Pointer(inner) => {
+            layer.same(ty, target) || may_hold(layer, &inner, target, expanding)
         },
         RefShape::Tuple(elems) => {
             layer.same(ty, target) || elems.iter().any(|e| may_hold(layer, e, target, expanding))

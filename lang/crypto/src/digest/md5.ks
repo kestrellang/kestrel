@@ -25,7 +25,7 @@ public struct MD5: Digest {
         self.blocks = BlockBuffer(function: MD5State(words: initial), blockLength: 64);
     }
 
-    public mutating func update[S](bytes: S) where S: Sliceable[UInt8], S: not Static {
+    public mutating func update[S](bytes: S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         self.blocks.update(bytes.asUnsafeSlice());
     }
 

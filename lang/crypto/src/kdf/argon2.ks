@@ -23,8 +23,8 @@ public struct Argon2id {
     /// `.InvalidIterationCount` below 1 iteration; `.InvalidLength` if
     /// `length` is below 4 or the salt is shorter than 8 bytes.
     public static func deriveKey(
-        password: some Sliceable[UInt8] and not Static,
-        salt salt: some Sliceable[UInt8] and not Static,
+        password: some Sliceable[UInt8] and not Static and not Copyable and not Sized,
+        salt salt: some Sliceable[UInt8] and not Static and not Copyable and not Sized,
         memory memory: Int64,
         iterations iterations: Int64,
         parallelism parallelism: Int64,

@@ -155,11 +155,12 @@ pub enum AstType {
     /// Inferred type `_`
     Inferred(Span),
     /// Opaque type, e.g. `some P`, `some P and Q`, `some P and not Copyable`.
-    /// `negative` is the trailing `not <path>` bound; only `Copyable` is
-    /// legal there — validated at HIR lowering, where the path resolves.
+    /// `negative` holds the trailing `not <path>` bounds; only the implicit
+    /// builtins (`Copyable`, `Static`, `Sized`) are legal there — validated
+    /// at HIR lowering, where the paths resolve.
     Some {
         bounds: Vec<AstType>,
-        negative: Option<Box<AstType>>,
+        negative: Vec<AstType>,
         span: Span,
     },
     /// Boxed existential, e.g. `any P`, `any[UniqueBox] P and Q`,

@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Range, ClosedRange, RangeFrom, RangeUpTo, RangeThrough, fatalError)
+import std.core.(Bool, Equatable, ArrayMatchable, Range, ClosedRange, RangeFrom, RangeUpTo, RangeThrough, fatalError)
 import std.numeric.(Int64)
 import std.result.(Optional)
 import std.memory.(UnsafeSlice, UnsafeSliceIterator, Pointer)
@@ -118,7 +118,7 @@ extend Slice[T] {
 extend Slice[T] where T: Copyable {
     /// Overwrites every element with the matching element of `other`.
     /// Panics if the counts differ.
-    public mutating func assign(from other: some Sliceable[T] and not Static) {
+    public mutating func assign(from other: some Sliceable[T] and not Static and not Copyable and not Sized) {
         let src = other.asUnsafeSlice();
         let n = self.count;
         if src.count != n {
@@ -158,6 +158,51 @@ extend Slice[T]: Sliceable[T], Iterable {
     public func iter() -> UnsafeSliceIterator[T] {
         self.asUnsafeSlice().iter()
     }
+}
+
+extend Slice[T] {
+    /// The first `count` elements. Panics if `count > self.count`.
+    public func prefix(count: Int64) -> &Slice[T] { self(..<count) }
+
+    /// The last `count` elements. Panics if `count > self.count`.
+    public func suffix(count: Int64) -> &Slice[T] { self((self.count - count)..) }
+
+    /// Everything after the first `count` elements.
+    public func drop(first count: Int64) -> &Slice[T] { self(count..) }
+
+    /// Everything before the last `count` elements.
+    public func drop(last count: Int64) -> &Slice[T] { self(..<(self.count - count)) }
+}
+
+extend Array[T] {
+    /// See `Slice.prefix(count:)`.
+    public func prefix(count: Int64) -> &Slice[T] { self(..<count) }
+
+    /// See `Slice.suffix(count:)`.
+    public func suffix(count: Int64) -> &Slice[T] { self((self.count - count)..) }
+
+    /// See `Slice.drop(first:)`.
+    public func drop(first count: Int64) -> &Slice[T] { self(count..) }
+
+    /// See `Slice.drop(last:)`.
+    public func drop(last count: Int64) -> &Slice[T] { self(..<(self.count - count)) }
+}
+
+/// Element-wise equality (`isEqual` comes from `extend Sliceable[T] where
+/// T: Equatable`).
+extend Slice[T]: Equatable where T: Equatable { }
+
+/// `ArrayMatchable` conformance so a slice can appear in array patterns.
+/// `..rest` binds a narrower slice of the same elements.
+extend Slice[T]: ArrayMatchable {
+    type Element = T
+    type Rest = &Slice[T]
+
+    public func matchLength() -> Int64 { self.count }
+
+    public func matchGet(index: Int64) -> T { self.pointer.offset(by: index).read() }
+
+    public func matchSlice(from: Int64, to: Int64) -> &Slice[T] { self(unchecked: from..<to) }
 }
 
 // ============================================================================

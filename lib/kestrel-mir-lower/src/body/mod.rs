@@ -2506,8 +2506,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // Use the slot's declared type when known (the field type), else the
         // value's own type. Only carry when that type actually carries an escape.
         let ty = slot_ty.unwrap_or(vty);
-        if self.ctx.module.escape_carry(ty).any() {
+        let carry = self.ctx.module.escape_carry(ty);
+        if carry.any() {
             let convs = self.current_param_convs();
+            // A consuming parameter's owning closure MOVED into the aggregate
+            // (`View(slice: s, predicate: predicate)`) is owned by it, not
+            // borrowed from the dying parameter: it carries no frame-bound
+            // storage, so it must not taint a sibling ref field with E496.
+            let moved_consuming = matches!(vroot, RootProvenance::Param(i)
+                if convs.get(i as usize) == Some(&kestrel_mir::ParamConvention::Consuming))
+                && self.body.value(v).ownership == Ownership::Owned;
+            if moved_consuming && !carry.any_ref && !carry.view_closure {
+                return;
+            }
             *taint = Some(match *taint {
                 None => vroot,
                 Some(t) => t.join(vroot, &convs),

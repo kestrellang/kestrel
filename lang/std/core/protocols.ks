@@ -78,13 +78,13 @@ public protocol RangeMatchable[Bound = Self] {
 /// compiler has already verified. A conformer may assume `0 <= index <
 /// matchLength()` and `0 <= from <= to <= matchLength()` and skip its
 /// own bounds checks; the conformance is unsafe to satisfy if those
-/// invariants don't hold. `Array[T]`, `ArraySlice[T]` and `UnsafeSlice[T]`
-/// are the canonical conformers.
+/// invariants don't hold. `Array[T]`, `Slice[T]` and `UnsafeSlice[T]` are
+/// the canonical conformers.
 @builtin(.ArrayMatchable)
 public protocol ArrayMatchable {
     type Element
-    /// What `..rest` binds: the view `matchSlice` returns (`ArraySlice[T]`
-    /// for arrays and array slices).
+    /// What `..rest` binds: the view `matchSlice` returns (`&Slice[T]` for
+    /// arrays and slices).
     type Rest
 
     /// Total number of elements available to match.

@@ -263,35 +263,43 @@ fn lower_structural_type(
                 .iter()
                 .map(|b| lower_bound_type(ctx, owner, root, b))
                 .collect();
-            // The legal negative bounds are the implicit builtins: `Copyable`
-            // and `Static` (`some Slice[T] and not Static` takes a borrowing
-            // slice; the param desugar turns it into a where-clause bound).
-            // Recovery keeps the flag set so a bad negative doesn't cascade
-            // into "underlier must be Copyable".
-            let not_copyable = match negative {
-                None => false,
-                Some(neg) if negative_bound_is(ctx, owner, root, neg, Builtin::Static) => false,
-                Some(neg) => {
-                    if !negative_bound_is(ctx, owner, root, neg, Builtin::Copyable) {
-                        let neg_span = ast_type_span(neg);
-                        ctx.accumulate(
-                            Diagnostic::error()
-                                .with_code("E140")
-                                .with_message("negative bound on an opaque type must be 'Copyable' or 'Static'")
-                                .with_labels(vec![
-                                    Label::primary(neg_span.file_id, neg_span.range())
-                                        .with_message("only 'not Copyable' and 'not Static' are supported here"),
-                                ])
-                                .with_notes(vec![
-                                    "`not` is only legal on builtin protocols with implicit \
-                                     conformance (e.g. `Copyable`)"
-                                        .into(),
-                                ]),
-                        );
-                    }
-                    true
-                },
-            };
+            // The legal negative bounds are the implicit builtins: `Copyable`,
+            // `Static` and `Sized` (`some Sliceable[T] and not Static and not
+            // Sized` takes a borrowed slice view; the param desugar turns each
+            // into a where-clause bound). Only `not Copyable` changes the
+            // opaque itself. Recovery sets the flag so a bad negative doesn't
+            // cascade into "underlier must be Copyable".
+            let mut not_copyable = false;
+            for neg in negative {
+                if [Builtin::Static, Builtin::Sized]
+                    .into_iter()
+                    .any(|b| negative_bound_is(ctx, owner, root, neg, b))
+                {
+                    continue;
+                }
+                not_copyable = true;
+                if negative_bound_is(ctx, owner, root, neg, Builtin::Copyable) {
+                    continue;
+                }
+                let neg_span = ast_type_span(neg);
+                ctx.accumulate(
+                    Diagnostic::error()
+                        .with_code("E140")
+                        .with_message(
+                            "negative bound on an opaque type must be 'Copyable', 'Static' or 'Sized'",
+                        )
+                        .with_labels(vec![
+                            Label::primary(neg_span.file_id, neg_span.range()).with_message(
+                                "only 'not Copyable', 'not Static' and 'not Sized' are supported here",
+                            ),
+                        ])
+                        .with_notes(vec![
+                            "`not` is only legal on builtin protocols with implicit \
+                             conformance (e.g. `Copyable`)"
+                                .into(),
+                        ]),
+                );
+            }
             HirTy::Opaque {
                 bounds: hir_bounds,
                 not_copyable,

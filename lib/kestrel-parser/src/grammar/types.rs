@@ -367,7 +367,8 @@ fn any_type(p: &mut Parser<'_>) -> CompletedMarker {
     m.complete(p, K::Ty)
 }
 
-/// `some P and Q and not Copyable`.
+/// `some P and Q and not Copyable and not Sized`: negative bounds trail
+/// the positive ones.
 fn some_type(p: &mut Parser<'_>) -> CompletedMarker {
     let m = p.start();
     let s = p.start();
@@ -380,7 +381,7 @@ fn some_type(p: &mut Parser<'_>) -> CompletedMarker {
             p.bump(K::Not);
             some_bound(p);
             n.complete(p, K::NegativeConformance);
-            break;
+            continue;
         }
         p.bump(K::And);
         some_bound(p);

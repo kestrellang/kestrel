@@ -1388,7 +1388,8 @@ pub(super) fn solve_member(
         Some(_) if wraps_ref => ctx.ref_ty(ret_tv, false),
         _ => ret_tv,
     };
-    bind_call_result(ctx, result, ret_tv, expr, span.clone());
+    let args_decay = !matches!(resolution.kind, crate::resolve::MemberKind::Field { .. });
+    bind_call_result(ctx, result, ret_tv, expr, span.clone(), args_decay);
 
     SolveResult::Solved
 }

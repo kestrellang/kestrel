@@ -1347,6 +1347,9 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                 // may solve while its initializer is being generated.
                 if !named_ref {
                     ctx.binding_init_exprs.insert(*val);
+                    if ty.is_some() {
+                        ctx.annotated_init_exprs.insert(*val);
+                    }
                 }
                 // An annotated binding is a check: the annotation is pushed
                 // into introduction forms (arms, elements, block tails).
@@ -1375,13 +1378,20 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                     // An unannotated binding is a value context (bidi §9: "an
                     // unannotated `let` decays"): a ref initializer whose type
                     // is already known gives the binding its pointee here,
-                    // instead of the end-of-body ref-decay default.
+                    // instead of the end-of-body ref-decay default. An
+                    // unsized pointee (`let s = xs.asSlice()`, a `Slice[T]`)
+                    // has no value to copy out: the binding keeps the ref.
                     if ty.is_none()
                         && let TySlot::Resolved(TyKind::Ref { pointee, .. }) =
                             ctx.slot(ctx.resolve(val_tv))
                     {
                         let pointee = *pointee;
-                        let _ = unify::unify(ctx, local_tv, pointee);
+                        let target = if crate::solver::pointee_is_unsized(ctx, pointee) {
+                            val_tv
+                        } else {
+                            pointee
+                        };
+                        let _ = unify::unify(ctx, local_tv, target);
                     }
                     // Value flows to the binding (allows promotion)
                     ctx.coerce_because(val_tv, local_tv, *val, span.clone(), reason);
@@ -2050,6 +2060,7 @@ fn wrap_init_result(
 fn gen_call_args(ctx: &mut InferCtx<'_>, hir: &HirBody, args: &[HirCallArg]) -> Vec<CallArg> {
     args.iter()
         .map(|arg| {
+            ctx.call_arg_exprs.insert(arg.value);
             let ty = gen_expr(ctx, hir, arg.value);
             CallArg {
                 label: arg.label.clone(),
@@ -2244,6 +2255,11 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     // A binding initialized from a ref (`let s = r`) takes its copy-out
     // decay — the default the relax loop would give it at body end.
     if receiver_open(ctx, recv) && crate::solver::apply_ref_decay_defaults_into(ctx, Some(recv)) {
+        settle_left(ctx);
+    }
+    // The receiver may be reached THROUGH such a binding (`pair.0` of
+    // `let pair = pairs(i)`): settle every pending decay to the left.
+    if receiver_open(ctx, recv) && crate::solver::apply_ref_decay_defaults_into(ctx, None) {
         settle_left(ctx);
     }
     if !receiver_open(ctx, recv) {
@@ -2477,6 +2493,11 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
             // A deferred value flow into it (an argument into a protocol
             // argument, a binding's initializer).
             Constraint::Coerce { from, to, .. } if produced_by(to) => inputs.push(*from),
+            // A deferred ref decay (`let got = xs(0)` while the index's
+            // literal still decides the element type).
+            Constraint::EqualDecayed { value, target, .. } if produced_by(target) => {
+                inputs.push(*value)
+            },
             Constraint::Equal { a, b, .. } if produced_by(a) => inputs.push(*b),
             Constraint::Equal { a, b, .. } if produced_by(b) => inputs.push(*a),
             _ => {},
@@ -2612,6 +2633,7 @@ fn gen_call_args_phased(
     let args = args
         .iter()
         .map(|arg| {
+            ctx.call_arg_exprs.insert(arg.value);
             let ty = if is_closure_literal(hir, arg.value) {
                 let placeholder = ctx.fresh();
                 // The call's own coercion treats it as the closure literal it

@@ -5,7 +5,7 @@ module std.net.socket
 import std.numeric.(Int64, Int32, UInt8, UInt16)
 import std.result.(Result)
 import std.memory.(UnsafeSlice, Pointer, RcBox)
-import std.collections.(Array, MutableArraySlice)
+import std.collections.(Array, Slice)
 import std.text.(String)
 import std.core.(Bool)
 import std.net.libc
@@ -152,8 +152,8 @@ public struct TcpStream: Readable, Writable, Cloneable {
     ///
     /// Returns `Err(IoError)` from the captured `errno` if `recv`
     /// returns `-1`.
-    public mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let raw = buf.asUnsafeMutableSlice();
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        let raw = buf.asUnsafeSlice();
         let n = libc.recv(self.conn.value, raw.pointer, raw.count, 0);
         if n < 0 {
             return .Err(IoError.last())
