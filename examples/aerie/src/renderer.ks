@@ -136,6 +136,15 @@ struct ChunkMesh: not Copyable {
     var group: BindGroup
 }
 
+/// Whether the surface encodes linear color to sRGB as it's written.
+func isSrgb(format: TextureFormat) -> Bool {
+    match format {
+        .RGBA8UnormSrgb => true,
+        .BGRA8UnormSrgb => true,
+        _ => false
+    }
+}
+
 /// The six planes of a view-projection's frustum, each as (a, b, c, d)
 /// with the inside where ax + by + cz + d >= 0.
 func frustumPlanes(m: Mat4) -> [Vec4] {
@@ -286,7 +295,8 @@ struct Renderer: not Copyable {
         ], [
             BindingLayout.uniformBuffer(0, visibility: [.Vertex, .Fragment])
         ]], label: "shadow");
-        let shaderModule = device.createShaderModule(wgsl: blockShader(), label: "blocks");
+        let encode = not isSrgb(format);
+        let shaderModule = device.createShaderModule(wgsl: blockShader(encode), label: "blocks");
         let pipeline = device.createRenderPipeline(
             shader: shaderModule,
             targets: [ColorTarget(format: format)],
@@ -381,7 +391,7 @@ struct Renderer: not Copyable {
             BindingLayout.texture(3, visibility: [.Fragment], dimension: .D2Array),
             BindingLayout.sampler(4, visibility: [.Fragment])
         ]], label: "overlay");
-        let overlayModule = device.createShaderModule(wgsl: overlayShader, label: "overlay");
+        let overlayModule = device.createShaderModule(wgsl: overlayShader(encode), label: "overlay");
         let overlayPipeline = device.createRenderPipeline(
             shader: overlayModule,
             targets: [ColorTarget(format: format, blend: .AlphaBlending)],
