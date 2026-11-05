@@ -155,23 +155,13 @@ pub fn compile_function(
 
     let call_conv = ctx.isa.default_call_conv();
 
-    let sig = if func.extern_info.is_some() {
-        crate::abi::build_extern_signature(
-            func,
-            &mut ctx.tc,
-            &ctx.module.ty_arena,
-            ctx.module,
-            call_conv,
-        )
-    } else {
-        crate::abi::build_signature(
-            func,
-            &mut ctx.tc,
-            &ctx.module.ty_arena,
-            ctx.module,
-            call_conv,
-        )
-    };
+    let sig = crate::abi::build_signature(
+        func,
+        &mut ctx.tc,
+        &ctx.module.ty_arena,
+        ctx.module,
+        call_conv,
+    );
 
     let ptr_ty = ctx.ptr_ty;
 

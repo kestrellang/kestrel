@@ -38,6 +38,7 @@ pub enum AnalyzerId {
     TypeTest,
     RestrictedUse,
     UnsafeUse,
+    CFunction,
     PackedFieldBorrow,
     OptionalChain,
 
@@ -126,6 +127,7 @@ impl AnalyzerId {
             AnalyzerId::TypeTest => "type_test",
             AnalyzerId::RestrictedUse => "restricted_use",
             AnalyzerId::UnsafeUse => "unsafe_use",
+            AnalyzerId::CFunction => "c_function",
             AnalyzerId::PackedFieldBorrow => "packed_field_borrow",
             AnalyzerId::OptionalChain => "optional_chain",
             AnalyzerId::FunctionBody => "function_body",

@@ -41,6 +41,12 @@ pub struct CodegenCtx<'ctx> {
     pub ptr_size: u64,
 
     pub func_ids: Vec<Option<FunctionValue<'ctx>>>,
+    /// The target's C struct-passing rules (`kestrel_codegen::c_abi`).
+    pub c_abi: kestrel_codegen::c_abi::CAbi,
+    /// Per mono function crossing the C boundary, its C-ABI symbol: the
+    /// imported C function of an `@extern`, the wrapper of an `@export`.
+    /// `CFunction` addresses take these.
+    pub c_symbols: HashMap<usize, FunctionValue<'ctx>>,
     pub string_data: HashMap<String, GlobalValue<'ctx>>,
     pub static_data: HashMap<Entity, GlobalValue<'ctx>>,
     /// Existential function tables, indexed like `MonoModule::vtables`.
@@ -106,6 +112,8 @@ impl<'ctx> CodegenCtx<'ctx> {
             tc,
             ptr_size,
             func_ids: vec![None; module.functions.len()],
+            c_abi: target.c_abi(),
+            c_symbols: HashMap::new(),
             string_data: HashMap::new(),
             static_data: HashMap::new(),
             vtable_data: Vec::new(),
@@ -318,25 +326,37 @@ impl<'ctx> CodegenCtx<'ctx> {
     // -- Functions --
 
     fn declare_all_functions(&mut self) -> Result<(), CodegenError> {
-        // Extern imports sharing a symbol must share one FunctionValue. Local
-        // functions always get a unique (mono-suffixed) name.
-        let mut extern_declared: HashMap<String, FunctionValue<'ctx>> = HashMap::new();
+        // Imports sharing a symbol share one C declaration; each mono extern
+        // still gets its own Kestrel-ABI thunk around it.
+        let mut c_imports: HashMap<String, FunctionValue<'ctx>> = HashMap::new();
         for i in 0..self.module.functions.len() {
-            let ext_symbol = self.module.functions[i]
-                .extern_info
-                .as_ref()
-                .map(|e| e.symbol_name.clone());
-            if let Some(sym) = &ext_symbol
-                && let Some(&existing) = extern_declared.get(sym)
-            {
-                self.func_ids[i] = Some(existing);
+            let fn_value = self.declare_function(i)?;
+            self.func_ids[i] = Some(fn_value);
+            let module: &'ctx MonoModule = self.module;
+            let func = &module.functions[i];
+            let Some(ext) = &func.extern_info else {
+                continue;
+            };
+            let cty = crate::c_bridge::c_fn_type(self, func);
+            if ext.export {
+                let wrapper =
+                    self.llmod
+                        .add_function(&ext.symbol_name, cty.fn_type, Some(Linkage::External));
+                cty.apply_to_fn(wrapper);
+                crate::c_bridge::define_export_wrapper(self, func, wrapper, fn_value, &cty);
+                self.c_symbols.insert(i, wrapper);
                 continue;
             }
-            let fn_value = self.declare_function(i)?;
-            if let Some(sym) = ext_symbol {
-                extern_declared.insert(sym, fn_value);
-            }
-            self.func_ids[i] = Some(fn_value);
+            let c_fn = *c_imports.entry(ext.symbol_name.clone()).or_insert_with(|| {
+                let f =
+                    self.llmod
+                        .add_function(&ext.symbol_name, cty.fn_type, Some(Linkage::External));
+                cty.apply_to_fn(f);
+                f
+            });
+            crate::c_bridge::define_import_thunk(self, func, fn_value, c_fn, &cty);
+            self.add_inline_attribute(fn_value, InlineMode::Always);
+            self.c_symbols.insert(i, c_fn);
         }
         Ok(())
     }
@@ -347,19 +367,16 @@ impl<'ctx> CodegenCtx<'ctx> {
         let is_main = self.is_main_function(func);
         let cx = self.cx;
 
-        let (fn_type, linkage, name) = if let Some(ext) = &func.extern_info {
-            let sig = abi::build_extern_signature(func, &mut self.tc, &module.ty_arena, module, cx);
-            (sig, Linkage::External, ext.symbol_name.clone())
-        } else if is_main {
-            let sig = abi::build_signature(func, &mut self.tc, &module.ty_arena, module, cx);
-            (sig, Linkage::External, "main".to_string())
+        // Every function, an `@extern` thunk included, has the Kestrel ABI.
+        let sig = abi::build_signature(func, &mut self.tc, &module.ty_arena, module, cx);
+        let (linkage, name) = if is_main {
+            (Linkage::External, "main".to_string())
         } else {
-            let sig = abi::build_signature(func, &mut self.tc, &module.ty_arena, module, cx);
             // Mono suffix guarantees a unique LLVM symbol within the module.
-            (sig, Linkage::Internal, format!("{}.mono{}", func.name, idx))
+            (Linkage::Internal, format!("{}.mono{}", func.name, idx))
         };
 
-        let fn_value = self.llmod.add_function(&name, fn_type, Some(linkage));
+        let fn_value = self.llmod.add_function(&name, sig, Some(linkage));
         if let Some(mode) = func.inline {
             self.add_inline_attribute(fn_value, mode);
         }

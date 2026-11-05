@@ -27,6 +27,8 @@ pub struct TestCompiler {
     is_executable: bool,
     /// Entities for test files (not stdlib files).
     test_files: Vec<(String, Entity)>,
+    /// C files compiled and linked into the test binary (`// c-source:`).
+    c_sources: Vec<std::path::PathBuf>,
     /// Cached results for lazy evaluation.
     infer_result: OnceCell<InferSummary>,
     analyze_result: OnceCell<AnalyzeSummary>,
@@ -40,6 +42,7 @@ impl TestCompiler {
             has_stdlib: false,
             is_executable: false,
             test_files: Vec::new(),
+            c_sources: Vec::new(),
             infer_result: OnceCell::new(),
             analyze_result: OnceCell::new(),
         }
@@ -52,6 +55,7 @@ impl TestCompiler {
             has_stdlib: true,
             is_executable: false,
             test_files: Vec::new(),
+            c_sources: Vec::new(),
             infer_result: OnceCell::new(),
             analyze_result: OnceCell::new(),
         }
@@ -171,6 +175,11 @@ impl TestCompiler {
         from_codespan_diagnostics(&self.compiler.mono_warnings(), &self.source_map())
     }
 
+    /// Link `path` (a C file) into the binary `run` builds.
+    pub fn add_c_source(&mut self, path: std::path::PathBuf) {
+        self.c_sources.push(path);
+    }
+
     /// Compile, link, and run on the env-default backend.
     pub fn run(&self) -> Result<RunResult, String> {
         self.run_on(runner::Backend::default_from_env())
@@ -179,7 +188,7 @@ impl TestCompiler {
     /// Compile, link, and run on a specific backend (`// backends:` trials).
     pub fn run_on(&self, backend: runner::Backend) -> Result<RunResult, String> {
         self.infer();
-        runner::compile_and_run(&self.compiler, backend)
+        runner::compile_and_run(&self.compiler, backend, &self.c_sources)
     }
 
     /// Access the underlying compiler.

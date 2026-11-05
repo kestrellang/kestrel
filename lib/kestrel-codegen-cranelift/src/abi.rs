@@ -3,7 +3,7 @@ use cranelift_codegen::isa::CallConv;
 use kestrel_mir::TyArena;
 use kestrel_mir::mono::MonoModule;
 
-use crate::ty::{Cranelift, TypeCache, TypeRepr};
+use crate::ty::{Cranelift, TypeCache};
 
 pub type PassMode = kestrel_codegen::PassMode<Cranelift>;
 pub type ReturnMode = kestrel_codegen::ReturnMode<Cranelift>;
@@ -38,38 +38,6 @@ pub fn build_signature(
     match ret_mode {
         ReturnMode::Direct(t) => sig.returns.push(AbiParam::new(t)),
         ReturnMode::Sret | ReturnMode::Void => {},
-    }
-
-    sig
-}
-
-pub fn build_extern_signature(
-    func: &kestrel_mir::mono::MonoFunction,
-    tc: &mut TypeCache,
-    arena: &TyArena,
-    module: &MonoModule,
-    call_conv: CallConv,
-) -> ir::Signature {
-    let ptr_ty = tc.ptr_scalar;
-    let mut sig = ir::Signature::new(call_conv);
-
-    let ret_repr = tc.repr(func.ret, arena, module);
-
-    if ret_repr.is_aggregate() {
-        sig.params.push(AbiParam::new(ptr_ty));
-    }
-
-    for param in &func.params {
-        let repr = tc.repr(param.ty, arena, module);
-        match repr {
-            TypeRepr::Scalar(t) => sig.params.push(AbiParam::new(t)),
-            TypeRepr::Aggregate { .. } => sig.params.push(AbiParam::new(ptr_ty)),
-            TypeRepr::Zst => {},
-        }
-    }
-
-    if let TypeRepr::Scalar(t) = ret_repr {
-        sig.returns.push(AbiParam::new(t));
     }
 
     sig

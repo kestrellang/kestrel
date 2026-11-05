@@ -46,6 +46,7 @@ pub mod string_escape;
 pub mod integer_literal_range;
 
 // Uses of `@deprecated` / `@unavailable` declarations (E908, E913)
+pub mod c_function;
 pub mod restricted_use;
 pub mod unsafe_use;
 

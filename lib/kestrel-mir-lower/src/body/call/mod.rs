@@ -33,7 +33,55 @@ impl OssaBodyCtx<'_, '_> {
             return val;
         }
 
+        if let Some(val) = self.try_cfunction_init(expr_id, callee_expr, args) {
+            return val;
+        }
+
         self.emit_resolved_call(expr_id, callee_expr, args)
+    }
+
+    /// `CFunction(f)` (`@builtin(.CFunctionInit)`): the C-ABI address of the
+    /// `@export(.C)` / `@extern(.C)` function `f` names, as the struct's one
+    /// `lang.ptr[()]` field. `None` when `f` names no such function, which
+    /// the analyzer reports (E646).
+    fn try_cfunction_init(
+        &mut self,
+        expr_id: HirExprId,
+        callee_expr: HirExprId,
+        args: &[HirCallArg],
+    ) -> Option<ValueId> {
+        // An init call resolves on the call expression itself.
+        let init = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&expr_id).copied())
+            .or_else(|| self.resolve_callee_entity_from_expr(callee_expr))?;
+        let builtin = self
+            .ctx
+            .query
+            .query(kestrel_name_res::EntityBuiltin { entity: init });
+        if builtin != Some(kestrel_hir::builtin::Builtin::CFunctionInit) {
+            return None;
+        }
+        let func = self.resolve_callee_entity_from_expr(args.first()?.value);
+        kestrel_debug::ktrace!(
+            "cfunction",
+            "CFunction({:?}) names {:?}",
+            self.hir.exprs[args[0].value],
+            func
+        );
+        let func = func?;
+        let attrs = kestrel_ast_builder::attrs::attrs_of(&self.ctx.query, func);
+        if !attrs.is_extern() && !attrs.is_export() {
+            return None;
+        }
+        let address = self.emit_literal(Immediate::new(kestrel_mir::ImmediateKind::CFunctionRef {
+            func,
+            type_args: Vec::new(),
+            self_type: None,
+        }));
+        let ty = self.resolve_expr_type(expr_id);
+        Some(self.emit_struct(ty, vec![(FieldIdx::new(0), address)]))
     }
 
     pub fn lower_method_call_expr(

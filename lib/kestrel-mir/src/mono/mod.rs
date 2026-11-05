@@ -753,6 +753,11 @@ fn substitute_immediate(
             type_args,
             self_type,
             ..
+        }
+        | ImmediateKind::CFunctionRef {
+            type_args,
+            self_type,
+            ..
         } => {
             for ta in type_args.iter_mut() {
                 *ta = resolve(arena, *ta);
@@ -872,17 +877,31 @@ fn rewrite_callees(
             for (_, callee) in inst.kind.callees_mut() {
                 rewrite_callee(callee, func_id_map, functions);
             }
-            if let InstKind::Literal { value, .. } = &mut inst.kind
-                && let ImmediateKind::FunctionRef {
+            let InstKind::Literal { value, .. } = &mut inst.kind else {
+                continue;
+            };
+            match &value.kind {
+                ImmediateKind::FunctionRef {
                     func,
                     type_args,
                     self_type,
-                } = &value.kind
-            {
-                let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
-                if let Some(&mono_id) = func_id_map.get(&key) {
-                    value.kind = ImmediateKind::MonoFunctionRef(mono_id);
-                }
+                } => {
+                    let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                    if let Some(&mono_id) = func_id_map.get(&key) {
+                        value.kind = ImmediateKind::MonoFunctionRef(mono_id);
+                    }
+                },
+                ImmediateKind::CFunctionRef {
+                    func,
+                    type_args,
+                    self_type,
+                } => {
+                    let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                    if let Some(&mono_id) = func_id_map.get(&key) {
+                        value.kind = ImmediateKind::MonoCFunctionRef(mono_id);
+                    }
+                },
+                _ => {},
             }
         }
     }
@@ -2001,6 +2020,7 @@ mod tests {
             extern_info: Some(crate::item::function::ExternInfo {
                 calling_convention: crate::item::function::CallingConvention::C,
                 symbol_name: "malloc".into(),
+                ..crate::item::function::ExternInfo::c("malloc")
             }),
             is_main: false,
             provides_protocol_default: false,

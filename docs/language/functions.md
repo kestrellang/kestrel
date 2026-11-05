@@ -476,10 +476,29 @@ func free(ptr: Ptr)  // Void return
 2. **FFI Safety**: All parameter and return types must conform to `FFISafe` protocol
 3. **No Body**: Extern functions cannot have a body
 4. **No Generics**: Extern functions cannot be generic
-5. **Parameter Modes**: Parameters are implicitly `consuming` (passed by value)
-   - Cannot use `mutating` on extern function parameters
-   - Can optionally write `consuming` explicitly
+5. **Parameter Modes**: A plain parameter `x: T` (or `consuming x: T`) is
+   passed to C by value. A reference parameter is a C pointer: `x: &T` is
+   `const T*` and `x: &mutating T` is `T*`. `mutating x: T` is an error
+   (E611); write `x: &mutating T`.
 6. **Mangling**: Use `mangleName:` to specify the C symbol name
+
+Structs follow the platform's C ABI (x86-64 System V and AArch64 AAPCS64),
+so a C function that takes or returns a struct by value can be bound
+directly. Small integers (`Int8`, `UInt16`, `Bool`, …) are sign- or
+zero-extended the way C expects.
+
+```kestrel
+struct Vec2: FFISafe { var x: Float32; var y: Float32 }
+
+@extern(.C, mangleName: "vec2_length")
+func length(v: Vec2) -> Float32               // struct by value
+
+@extern(.C, mangleName: "vec2_normalize")
+func normalize(v: &mutating Vec2)             // `Vec2*`
+
+@extern(.C, mangleName: "vec2_print")
+func print(v: &Vec2)                          // `const Vec2*`
+```
 
 ```kestrel
 // ERROR: Cannot have body
@@ -490,10 +509,42 @@ func bad(x: MyInt) -> MyInt { x }
 @extern(.C)
 func generic[T](x: T) -> T
 
-// ERROR: mutating not allowed
+// ERROR (E611): write `x: &mutating MyInt` for a `MyInt*`
 @extern(.C)
 func mutate(mutating x: MyInt) -> MyInt
 ```
+
+## Exported Functions
+
+`@export(.C)` gives a Kestrel function a C entry point, so C code can call
+it. The same parameter rules as `@extern` apply. `mangleName:` sets the C
+symbol, which otherwise is the function's name.
+
+```kestrel
+@export(.C, mangleName: "add_points")
+func addPoints(a: Vec2, b: Vec2) -> Vec2 { Vec2(x: a.x + b.x, y: a.y + b.y) }
+```
+
+### Callbacks
+
+To pass a function to a C API that takes a callback, wrap an `@export(.C)`
+function in `std.ffi.CFunction`. `CFunction[F]` has the layout of a C
+function pointer, so it can be an `@extern` argument or a field of an
+`FFISafe` struct, and `null` is C's `NULL`. A closure has no C address, so
+`CFunction(f)` must name an `@export(.C)` or `@extern(.C)` function (E646);
+pass closure state through the API's `void* userdata`.
+
+```kestrel
+@export(.C, mangleName: "compare_ints")
+func compareInts(a: Pointer[Int32], b: Pointer[Int32]) -> Int32 { ... }
+
+@extern(.C, mangleName: "qsort")
+func qsort(base: RawPointer, count: UInt64, size: UInt64, compare: CFunction[(Pointer[Int32], Pointer[Int32]) -> Int32])
+
+unsafe qsort(numbers.asPointer().asRaw(), count, 4, CFunction(compareInts));
+```
+
+Kestrel can't call through a `CFunction` yet; C decides when it runs.
 
 ## Visibility
 

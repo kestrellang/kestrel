@@ -963,6 +963,12 @@ fn fmt_immediate(
         ImmediateKind::MonoFunctionRef(id) => {
             format!("mono_func_ref @mono({})", id.index())
         },
+        ImmediateKind::CFunctionRef { func, .. } => {
+            format!("c_func_ref {}", module.resolve_name(*func))
+        },
+        ImmediateKind::MonoCFunctionRef(id) => {
+            format!("mono_c_func_ref @mono({})", id.index())
+        },
         ImmediateKind::NullPtr(ty) => {
             format!("null_ptr {}", fmt_ty(*ty, arena, module))
         },

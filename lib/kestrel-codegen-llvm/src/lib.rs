@@ -13,6 +13,7 @@
 //! `Op::PtrToAddress`/`Op::PtrFromAddress` boundaries.
 
 pub mod abi;
+pub mod c_bridge;
 pub mod context;
 pub mod error;
 pub mod func;

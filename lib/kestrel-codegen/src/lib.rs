@@ -8,6 +8,7 @@
 //! `-O0` (Cranelift) and `-O1`/`-O2` (LLVM) disagree about the same type.
 
 pub mod abi;
+pub mod c_abi;
 pub mod layout;
 pub mod repr;
 

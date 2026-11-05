@@ -273,6 +273,10 @@ pub enum Builtin {
     /// bound (`let f = b.first`), so the binding owns a value and stops
     /// borrowing the place.
     DecayOptionalRef,
+    /// `@builtin(.CFunctionInit) init(_ function: F)` on `CFunction[F]`: the
+    /// compiler lowers `CFunction(f)` to the C-ABI address of `f`, which must
+    /// name an `@export(.C)` or `@extern(.C)` function (E646).
+    CFunctionInit,
     FormattableProtocol,
     FormattableFormatIntoMethod,
 
@@ -537,6 +541,7 @@ impl Builtin {
             },
             Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
             Self::DecayOptionalRef => "DecayOptionalRef",
+            Self::CFunctionInit => "CFunctionInit",
             Self::FormatOptions => "FormatOptions",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
@@ -784,6 +789,7 @@ impl Builtin {
             },
             "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
             "DecayOptionalRef" => Some(Self::DecayOptionalRef),
+            "CFunctionInit" => Some(Self::CFunctionInit),
             "FormatOptions" => Some(Self::FormatOptions),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
@@ -1028,7 +1034,8 @@ impl Builtin {
             | Self::DefaultStringInterpolationAppendLiteral
             | Self::DefaultStringInterpolationAppendInterpolation
             | Self::DefaultStringInterpolationBuild
-            | Self::DecayOptionalRef => BuiltinKind::Function,
+            | Self::DecayOptionalRef
+            | Self::CFunctionInit => BuiltinKind::Function,
             Self::FormattableProtocol => BuiltinKind::protocol(),
             Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
             Self::EquatableProtocol

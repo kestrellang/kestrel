@@ -10,7 +10,7 @@ use inkwell::types::{BasicMetadataTypeEnum, BasicType, FunctionType};
 use kestrel_mir::TyArena;
 use kestrel_mir::mono::{MonoFunction, MonoModule};
 
-use crate::ty::{Llvm, TypeCache, TypeRepr};
+use crate::ty::{Llvm, TypeCache};
 
 pub type PassMode = kestrel_codegen::PassMode<Llvm>;
 pub type ReturnMode = kestrel_codegen::ReturnMode<Llvm>;
@@ -53,37 +53,5 @@ pub fn build_signature<'ctx>(
         }
     }
 
-    finish_fn_type(cx, ret_mode, &params)
-}
-
-pub fn build_extern_signature<'ctx>(
-    func: &MonoFunction,
-    tc: &mut TypeCache,
-    arena: &TyArena,
-    module: &MonoModule,
-    cx: &'ctx Context,
-) -> FunctionType<'ctx> {
-    let ptr_scalar = tc.ptr_scalar;
-    let mut params: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
-
-    let ret_repr = tc.repr(func.ret, arena, module);
-
-    if ret_repr.is_aggregate() {
-        params.push(ptr_scalar.llvm(cx).into());
-    }
-
-    for param in &func.params {
-        let repr = tc.repr(param.ty, arena, module);
-        match repr {
-            TypeRepr::Scalar(t) => params.push(t.llvm(cx).into()),
-            TypeRepr::Aggregate { .. } => params.push(ptr_scalar.llvm(cx).into()),
-            TypeRepr::Zst => {},
-        }
-    }
-
-    let ret_mode = match ret_repr {
-        TypeRepr::Scalar(t) => ReturnMode::Direct(t),
-        _ => ReturnMode::Void,
-    };
     finish_fn_type(cx, ret_mode, &params)
 }

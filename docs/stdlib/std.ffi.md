@@ -1,5 +1,85 @@
 # std.ffi
 
+## struct `CFunction`
+
+```kestrel
+public struct CFunction[F] where F: not Copyable, F: not Static { /* private fields */ }
+```
+
+The C-callable address of a function of type `F`.
+
+Make one from an `@export(.C)` function (or an `@extern(.C)` one) with
+`CFunction(f)`, and pass it to C wherever a C function pointer goes:
+as an `@extern` argument or in an `FFISafe` struct field. It has exactly
+the layout of a C function pointer, and C's `NULL` is the `null` literal.
+
+Making one is safe. The C side decides when it is called; Kestrel can't
+call through it yet.
+
+### Examples
+
+```
+@export(.C, mangleName: "compare_ints")
+func compareInts(a: Pointer[()], b: Pointer[()]) -> Int32 { ... }
+
+let cmp = CFunction(compareInts)   // CFunction[(Pointer[()], Pointer[()]) -> Int32]
+unsafe qsort(base, count, 8, cmp)
+```
+
+A closure carries no C address, so `f` must name the function directly
+(E646). Pass a closure's state through the C API's `void* userdata`.
+
+_Defined in `lang/std/ffi/cfunction.ks`._
+
+### Members
+
+#### initializer `From Function`
+
+```kestrel
+public init(F)
+```
+
+The C-callable address of `f`, which must name an `@export(.C)` or
+`@extern(.C)` function: an export's C entry point, an import's C
+symbol.
+
+_Defined in `lang/std/ffi/cfunction.ks`._
+
+#### initializer `Null Literal`
+
+```kestrel
+public init()
+```
+
+C's `NULL` function pointer (`null`), for an optional callback left
+unset.
+
+_Defined in `lang/std/ffi/cfunction.ks`._
+
+#### field `isNull`
+
+```kestrel
+public var isNull: Bool { get }
+```
+
+Whether this is `null`.
+
+_Defined in `lang/std/ffi/cfunction.ks`._
+
+#### field `pointer`
+
+```kestrel
+public var pointer: Pointer[()] { get }
+```
+
+The address as an untyped pointer.
+
+_Defined in `lang/std/ffi/cfunction.ks`._
+
+### Implements `FFISafe`
+
+### Implements `ExpressibleByNullLiteral`
+
 ## struct `CString`
 
 ```kestrel

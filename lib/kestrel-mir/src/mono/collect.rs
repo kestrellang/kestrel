@@ -476,6 +476,11 @@ impl<'a> CollectionContext<'a> {
             func,
             type_args,
             self_type,
+        }
+        | ImmediateKind::CFunctionRef {
+            func,
+            type_args,
+            self_type,
         } = imm
         {
             if !self.functions.contains_key(func) {

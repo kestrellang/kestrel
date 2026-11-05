@@ -1,19 +1,20 @@
 //! # Extern FFI Safe Analyzer
 //!
-//! Validates extern function constraints and FFISafe conformance:
+//! Validates the C boundary of `@extern` imports and `@export` definitions:
 //! - Parameter and return types must conform to FFISafe
 //! - Cannot be generic (no stable ABI for generics)
-//! - Cannot have a body (implemented externally)
-//! - Parameters cannot use mutating access mode (must be consuming)
+//! - An `@extern` cannot have a body (implemented externally)
+//! - A param is a C value (`x: T`, `consuming x: T`) or a C pointer
+//!   (`x: &T`, `x: &mutating T`); `mutating x: T` is neither
 //!
 //! ## Diagnostics
 //!
 //! - E605: type does not conform to FFISafe
-//! - E609: extern function cannot be generic
+//! - E609: extern/export function cannot be generic
 //! - E610: extern function cannot have a body
-//! - E611: extern parameter must use consuming access mode
+//! - E611: parameter is neither a value nor a reference
 //!
-//! E612 (`@extern` requires a calling convention) is reported by the
+//! E612 (`@extern`/`@export` requires a calling convention) is reported by the
 //! `AttributeValidation` analyzer, from the attribute registry.
 
 use crate::context::DeclContext;
@@ -73,9 +74,14 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
         // `mentions`: the FFI rules hold for a malformed `@extern` too; its
         // argument errors (E612, E903) are AttributeValidation's.
-        if !attrs_of(cx.query, cx.entity).mentions("extern") {
+        let attrs = attrs_of(cx.query, cx.entity);
+        let kind = if attrs.mentions("extern") {
+            "extern"
+        } else if attrs.mentions("export") {
+            "export"
+        } else {
             return vec![];
-        }
+        };
 
         let span = util::entity_span(cx.query, cx.entity);
         let mut diags = Vec::new();
@@ -90,7 +96,7 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: "E609",
                 severity: Severity::Error,
-                message: "@extern functions cannot be generic".into(),
+                message: format!("@{kind} functions cannot be generic"),
                 labels: vec![DiagLabel {
                     span,
                     message: "generic functions cannot have a stable ABI".into(),
@@ -103,7 +109,7 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
 
         // Extern functions cannot have a body — skip FFISafe checks if so,
         // since the function is already structurally invalid
-        if cx.query.get::<Valued>(cx.entity).is_some() {
+        if kind == "extern" && cx.query.get::<Valued>(cx.entity).is_some() {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: "E610",
                 severity: Severity::Error,
@@ -118,23 +124,28 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
             return diags;
         }
 
-        // Extern parameters cannot use mutating access mode (must be consuming)
+        // A C param is a value (`x: T`, `consuming x: T`) or a pointer
+        // (`x: &T` / `x: &mutating T`). `mutating x: T` has no C spelling.
         if let Some(callable) = cx.query.get::<Callable>(cx.entity) {
             for param in &callable.params {
-                if param.is_mut && !param.is_consuming {
+                if param.is_mut && !param.is_consuming && !param.by_ref {
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: "E611",
                         severity: Severity::Error,
                         message: format!(
-                            "@extern function parameter '{}' must use consuming access mode",
+                            "@{kind} function parameter '{}' must be passed by value (consuming) or by reference (&T)",
                             param.name
                         ),
                         labels: vec![DiagLabel {
                             span: span.clone(),
-                            message: "extern functions receive values, not references".into(),
+                            message: "C receives a value or a pointer, not a mutating borrow"
+                                .into(),
                             is_primary: true,
                         }],
-                        notes: vec![],
+                        notes: vec![format!(
+                            "write '{}: &mutating T' to pass a pointer C may write through",
+                            param.name
+                        )],
                     });
                 }
             }

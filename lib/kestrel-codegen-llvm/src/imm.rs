@@ -44,6 +44,22 @@ pub fn compile_immediate<'ctx>(
 
         ImmediateKind::MonoFunctionRef(mono_id) => compile_mono_func_ref(fc, builder, *mono_id),
 
+        // A C-callable address: the `@export` wrapper or `@extern` symbol.
+        ImmediateKind::MonoCFunctionRef(mono_id) => {
+            let f = fc
+                .ctx
+                .c_symbols
+                .get(&mono_id.index())
+                .copied()
+                .ok_or_else(|| {
+                    CodegenError::Unsupported(format!(
+                        "CFunction of mono function {} with no C symbol",
+                        mono_id.index()
+                    ))
+                })?;
+            Ok(f.as_global_value().as_pointer_value().into())
+        },
+
         // The address of an existential function table.
         ImmediateKind::MonoVTable(id) => {
             Ok(fc.ctx.vtable_data[id.index()].as_pointer_value().into())
@@ -54,7 +70,7 @@ pub fn compile_immediate<'ctx>(
             Ok(mem::null_ptr(cx).into())
         },
 
-        ImmediateKind::FunctionRef { .. } => {
+        ImmediateKind::FunctionRef { .. } | ImmediateKind::CFunctionRef { .. } => {
             debug_assert!(false, "unresolved FunctionRef in codegen");
             Ok(mem::null_ptr(cx).into())
         },

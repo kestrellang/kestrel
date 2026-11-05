@@ -7,7 +7,7 @@
 //! stage: a second copy is how layout and codegen drift apart.
 
 use std::str::FromStr;
-use target_lexicon::{OperatingSystem, PointerWidth, Triple, Vendor};
+use target_lexicon::{Architecture, OperatingSystem, PointerWidth, Triple, Vendor};
 
 /// The target being compiled for.
 #[derive(Debug, Clone)]
@@ -64,6 +64,29 @@ impl TargetConfig {
     pub fn os(&self) -> Option<Os> {
         self.os
     }
+
+    /// The C calling convention's rules for passing structs by value.
+    pub fn c_abi(&self) -> CAbi {
+        match self.triple.architecture {
+            Architecture::X86_64 if self.triple.operating_system != OperatingSystem::Windows => {
+                CAbi::SysV64
+            },
+            Architecture::Aarch64(_) => CAbi::Aapcs64,
+            _ => CAbi::Other,
+        }
+    }
+}
+
+/// Which C ABI rules decide how a struct crosses an `@extern`/`@export` call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CAbi {
+    /// x86-64 System V (Linux, macOS on Intel).
+    SysV64,
+    /// AArch64 AAPCS64 (Linux, Apple silicon).
+    Aapcs64,
+    /// Anything else: structs pass by pointer and return through a hidden
+    /// pointer, which is right for no real C ABI but keeps the old behaviour.
+    Other,
 }
 
 impl Default for TargetConfig {
