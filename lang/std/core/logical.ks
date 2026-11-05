@@ -22,6 +22,7 @@ public protocol And[Other = Self] {
     type Output
 
     /// Returns `self and other()`. The closure runs only if needed.
+    @sugarOnly
     @builtin(.LogicalAndOperatorMethod)
     func logicalAnd(other: () -> Other) -> Output
 }
@@ -35,6 +36,7 @@ public protocol Or[Other = Self] {
     type Output
 
     /// Returns `self or other()`. The closure runs only if needed.
+    @sugarOnly
     @builtin(.LogicalOrOperatorMethod)
     func logicalOr(other: () -> Other) -> Output
 }
@@ -45,6 +47,7 @@ public protocol Not {
     type Output
 
     /// Returns `not self`.
+    @sugarOnly
     @builtin(.LogicalNotOperatorMethod)
     func logicalNot() -> Output
 }
@@ -58,5 +61,6 @@ public protocol Not {
 @builtin(.BooleanConditional)
 public protocol BooleanConditional {
     /// Returns the underlying truth value as a primitive `i1`.
+    @sugarOnly
     func boolValue() -> lang.i1
 }

@@ -821,6 +821,9 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::MemberNotVisible { receiver, name, .. } => {
             format!("{}.{} not visible", describe_tyvar(ctx, *receiver), name)
         },
+        InferError::SugarOnlyMember { receiver, name, .. } => {
+            format!("{}.{} is sugar-only", describe_tyvar(ctx, *receiver), name)
+        },
         InferError::MemberIsStatic { receiver, name, .. } => {
             format!(
                 "'{}' is a static member of '{}' and cannot be used on an instance",

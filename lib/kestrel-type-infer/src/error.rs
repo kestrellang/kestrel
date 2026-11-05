@@ -66,6 +66,15 @@ pub enum InferError {
         span: Span,
     },
 
+    /// The member is (or implements) a `@sugarOnly` requirement of
+    /// `protocol`, and is named outside that protocol's module.
+    SugarOnlyMember {
+        receiver: TyVar,
+        name: String,
+        protocol: String,
+        span: Span,
+    },
+
     /// Member exists but is static — cannot be accessed on an instance.
     MemberIsStatic {
         receiver: TyVar,
@@ -459,6 +468,11 @@ impl InferError {
                 vis_label(visibility)
             )),
 
+            Self::SugarOnlyMember { name, protocol, .. } => labeled(
+                format!("'{name}' can only be used through its syntax"),
+                format!("'{name}' is a sugar-only requirement of '{protocol}'"),
+            ),
+
             Self::MemberIsStatic { name, .. } => labeled(
                 format!("'{name}' is a static member and cannot be used on an instance"),
                 format!("use the type name to call '{name}'"),
@@ -790,7 +804,7 @@ impl InferError {
             | Self::NoMatchingOverload { .. }
             | Self::TypeArgCountMismatch { .. } => "E113",
             Self::LiteralNotAccepted { .. } => "E114",
-            Self::MemberNotVisible { .. } => "E115",
+            Self::MemberNotVisible { .. } | Self::SugarOnlyMember { .. } => "E115",
             Self::MemberIsStatic { .. }
             | Self::InstanceMethodAsStatic { .. }
             | Self::TypeParamAsValue { .. }
@@ -817,6 +831,7 @@ impl InferError {
             },
             Self::NoMember { receiver, .. }
             | Self::MemberNotVisible { receiver, .. }
+            | Self::SugarOnlyMember { receiver, .. }
             | Self::MemberIsStatic { receiver, .. } => vec![*receiver],
             Self::AmbiguousMember { receiver, .. } => receiver.iter().copied().collect(),
             Self::NoAssociatedType { container, .. } => vec![*container],
@@ -832,6 +847,7 @@ impl InferError {
             | Self::NoMember { span, .. }
             | Self::AmbiguousMember { span, .. }
             | Self::MemberNotVisible { span, .. }
+            | Self::SugarOnlyMember { span, .. }
             | Self::MemberIsStatic { span, .. }
             | Self::NoAssociatedType { span, .. }
             | Self::InfiniteType { span }
@@ -905,5 +921,39 @@ impl Reason {
         if !span.is_synthetic() {
             r.secondary.push((span.clone(), text.into()));
         }
+    }
+}
+
+/// The error for naming a `@sugarOnly` `requirement` (or a witness of it) as
+/// `name` outside its protocol's module.
+pub(crate) fn sugar_only_error(
+    qctx: &kestrel_hecs::QueryContext<'_>,
+    requirement: kestrel_hecs::Entity,
+    name: &str,
+    receiver: TyVar,
+    span: &Span,
+) -> InferError {
+    let protocol = qctx
+        .parent_of(requirement)
+        .and_then(|p| qctx.get::<kestrel_ast_builder::Name>(p))
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    // A nameless init reads better with its labels: `init(intLiteral:)`.
+    let name = match qctx.get::<kestrel_ast_builder::Callable>(requirement) {
+        Some(c) if name == "init" => {
+            let labels: String = c
+                .params
+                .iter()
+                .map(|p| format!("{}:", p.label.as_deref().unwrap_or("_")))
+                .collect();
+            format!("init({labels})")
+        },
+        _ => name.to_string(),
+    };
+    InferError::SugarOnlyMember {
+        receiver,
+        name,
+        protocol,
+        span: span.clone(),
     }
 }

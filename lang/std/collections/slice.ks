@@ -220,10 +220,15 @@ public protocol SliceIndex[T] {
     /// What `checked:` gives: a copy of the element (`T?`), or a lent
     /// slice (`Optional[&Slice[T]]`).
     type SliceCheckedOutput
+    @sugarOnly
     static func lend(consuming index: Self, base: Slice[T]) -> &SliceOutput
+    @sugarOnly
     static func lendMutating(consuming index: Self, mutating base: Slice[T]) -> &mutating SliceOutput
+    @sugarOnly
     static func lendUnchecked(consuming index: Self, base: Slice[T]) -> &SliceOutput
+    @sugarOnly
     static func lendMutatingUnchecked(consuming index: Self, mutating base: Slice[T]) -> &mutating SliceOutput
+    @sugarOnly
     static func lendChecked(consuming index: Self, base: Slice[T]) -> SliceCheckedOutput
 }
 
@@ -232,6 +237,7 @@ public protocol SliceIndex[T] {
 /// `.None` for an empty slice.
 public protocol SliceClampable[T] {
     type SliceClampedOutput
+    @sugarOnly
     static func lendClamped(consuming index: Self, base: Slice[T]) -> SliceClampedOutput
 }
 

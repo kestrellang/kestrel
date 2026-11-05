@@ -25,6 +25,7 @@ public protocol ForceUnwrap {
     type Output
 
     /// Returns the contained value, or traps if it is absent.
+    @sugarOnly
     @builtin(.ForceUnwrapOperatorMethod)
     consuming func forceUnwrap() -> Output
 }

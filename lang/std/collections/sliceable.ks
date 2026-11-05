@@ -46,22 +46,31 @@ public protocol Sliceable[T]: Iterable {
 
 public protocol SeqIndex[T] {
     type SeqOutput
+    @sugarOnly
     func readSeq(from slice: UnsafeSlice[T]) -> SeqOutput
+    @sugarOnly
     func readSeqChecked(from slice: UnsafeSlice[T]) -> SeqOutput?
+    @sugarOnly
     func readSeqUnchecked(from slice: UnsafeSlice[T]) -> SeqOutput
+    @sugarOnly
     func writeSeq(to slice: UnsafeSlice[T], with value: SeqOutput)
+    @sugarOnly
     func writeSeqUnchecked(to slice: UnsafeSlice[T], with value: SeqOutput)
 }
 
 public protocol SeqClampable[T] {
     type SeqClampedOutput
+    @sugarOnly
     func readSeqClamped(from slice: UnsafeSlice[T]) -> SeqClampedOutput
+    @sugarOnly
     func writeSeqClamped(to slice: UnsafeSlice[T], with value: SeqClampedOutput)
 }
 
 public protocol SeqWrappable[T] {
     type SeqWrappedOutput
+    @sugarOnly
     func readSeqWrapped(from slice: UnsafeSlice[T]) -> SeqWrappedOutput
+    @sugarOnly
     func writeSeqWrapped(to slice: UnsafeSlice[T], with value: SeqWrappedOutput)
 }
 

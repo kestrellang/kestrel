@@ -23,9 +23,9 @@ module Test
             let cmp3 = a.compare(a2);
             if cmp3 != std.core.Ordering.Equal { return 5 }
 
-            // ---- matches() ----
-            if a.matches(a2) == false { return 6 }
-            if a.matches(b) { return 7 }
+            // ---- matches(), reached through patterns ----
+            match a2 { 'a' => {}, _ => { return 6 } }
+            match a { 'b' => { return 7 }, _ => {} }
 
             0
         }
