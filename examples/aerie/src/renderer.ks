@@ -53,7 +53,12 @@ func daylight(phase: Float32) -> Daylight {
     let angle = phase * Float32.pi * 2.0;
     // Up is +y; the sun crosses the sky from east to west, tilted south.
     let up = angle.sin();
-    let sun = Vec3(x: -angle.cos(), y: -up, z: 0.35).normalized;
+    // The sun moves in steps of a fifth of a degree, about one every 0.3 s
+    // of play: each new direction re-rasterizes every shadow edge, so a
+    // sun that turned every frame would make shadows crawl.
+    let steps: Float32 = 1800.0;
+    let stepped = (phase * steps).floor() / steps * Float32.pi * 2.0;
+    let sun = Vec3(x: -stepped.cos(), y: -stepped.sin(), z: 0.35).normalized;
     let day = (up * 3.0 + 0.3).clamp(0.0, 1.0);
     // Dusk warms everything just as the sun nears the horizon.
     let dusk = (1.0 - (up * 4.0).abs()).clamp(0.0, 1.0) * (up * 4.0 + 1.5).clamp(0.0, 1.0);
@@ -66,13 +71,22 @@ func daylight(phase: Float32) -> Daylight {
 }
 
 /// The sun's view: an orthographic box around `center`, looking along
-/// `sun`, snapped to whole shadow texels so shadows don't shimmer as the
-/// player moves.
+/// `sun`. The box moves in whole shadow texels of the sun's own view, so
+/// shadows don't shimmer as the player walks: snapping in world axes
+/// wouldn't line up with the map's texels, since the sun looks at an angle.
 func lightViewProjection(sun: Vec3, center: Vec3) -> Mat4 {
     let texel = shadowReach * 2.0 / Float32(from: shadowSize);
-    let snapped = Vec3(x: (center.x / texel).floor() * texel, y: (center.y / texel).floor() * texel, z: (center.z / texel).floor() * texel);
-    let view = Mat4.lookAt(eye: snapped - sun * 150.0, target: snapped, up: Vec3.unitY);
-    Mat4.orthographic(left: -shadowReach, right: shadowReach, bottom: -shadowReach, top: shadowReach, near: 1.0, far: 300.0) * view
+    // A view that only turns to face along `sun`; `center` in its axes.
+    let f = sun.normalized;
+    let view = Mat4.lookAt(eye: Vec3(x: 0.0, y: 0.0, z: 0.0) - f, target: Vec3(x: 0.0, y: 0.0, z: 0.0), up: Vec3.unitY);
+    let side = f.cross(Vec3.unitY).normalized;
+    let up = side.cross(f);
+    let x = (side.dot(center) / texel).floor() * texel;
+    let y = (up.dot(center) / texel).floor() * texel;
+    // Distance along the view, which looks down its -z: the eye sits one
+    // unit behind the origin.
+    let depth = f.dot(center) + 1.0;
+    Mat4.orthographic(left: x - shadowReach, right: x + shadowReach, bottom: y - shadowReach, top: y + shadowReach, near: depth - 150.0, far: depth + 150.0) * view
 }
 
 /// One overlay rectangle: `rect` is (x, y, width, height) in pixels from
