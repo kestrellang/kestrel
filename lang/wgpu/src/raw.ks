@@ -1,6 +1,11 @@
 // Raw bindings of wgpu-native's `webgpu.h` (v27) and `wgpu.h`: the C API one
 // to one, with no shim. Names match the header so it doubles as the docs.
 //
+// On Emscripten the same names bind Dawn's `webgpu.h` (the `emdawnwebgpu`
+// port). Where Dawn's enum values or struct layouts differ, an
+// `@platform(.Emscripten)` twin follows the native definition; twin structs
+// keep the native initializer, so callers don't change.
+//
 // Structs pass to C by value with the C ABI, `&T` parameters are `const T*`,
 // and callbacks are C function types (`@extern(.C) (…) -> …`) filled with
 // `@export(.C)` functions. The callback fields C allows to be NULL are
@@ -43,7 +48,13 @@ public let WGPU_STRLEN: UInt64 = 18446744073709551615
 public let WGPU_WHOLE_SIZE: UInt64 = 18446744073709551615
 
 public let WGPUCallbackMode_WaitAnyOnly: UInt32 = 1
+@platform(.Linux, .Darwin)
 public let WGPUCallbackMode_AllowProcessEvents: UInt32 = 2
+/// In a browser, callbacks only run when the program yields to the event
+/// loop, so "when events are processed" and "spontaneously" coincide; the
+/// wait loops yield (see `yieldToHost`) and Dawn fires the callback then.
+@platform(.Emscripten)
+public let WGPUCallbackMode_AllowProcessEvents: UInt32 = 3
 public let WGPUCallbackMode_AllowSpontaneous: UInt32 = 3
 
 public let WGPUSType_ShaderSourceWGSL: UInt32 = 2
@@ -106,24 +117,63 @@ public let WGPUTextureUsage_RenderAttachment: UInt64 = 16
 
 public let WGPUTextureFormat_Undefined: UInt32 = 0
 public let WGPUTextureFormat_R8Unorm: UInt32 = 1
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_R32Float: UInt32 = 12
+@platform(.Emscripten)
+public let WGPUTextureFormat_R32Float: UInt32 = 14
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGBA8Unorm: UInt32 = 18
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGBA8Unorm: UInt32 = 22
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGBA8UnormSrgb: UInt32 = 19
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGBA8UnormSrgb: UInt32 = 23
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_BGRA8Unorm: UInt32 = 23
+@platform(.Emscripten)
+public let WGPUTextureFormat_BGRA8Unorm: UInt32 = 27
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_BGRA8UnormSrgb: UInt32 = 24
+@platform(.Emscripten)
+public let WGPUTextureFormat_BGRA8UnormSrgb: UInt32 = 28
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGBA16Float: UInt32 = 34
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGBA16Float: UInt32 = 40
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGBA32Float: UInt32 = 35
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGBA32Float: UInt32 = 41
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_Depth16Unorm: UInt32 = 39
+@platform(.Emscripten)
+public let WGPUTextureFormat_Depth16Unorm: UInt32 = 45
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_Depth24Plus: UInt32 = 40
+@platform(.Emscripten)
+public let WGPUTextureFormat_Depth24Plus: UInt32 = 46
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_Depth24PlusStencil8: UInt32 = 41
+@platform(.Emscripten)
+public let WGPUTextureFormat_Depth24PlusStencil8: UInt32 = 47
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_Depth32Float: UInt32 = 42
+@platform(.Emscripten)
+public let WGPUTextureFormat_Depth32Float: UInt32 = 48
 
 public let WGPUTextureDimension_2D: UInt32 = 2
 public let WGPUTextureViewDimension_Undefined: UInt32 = 0
 public let WGPUTextureAspect_All: UInt32 = 1
 
+@platform(.Linux, .Darwin)
 public let WGPUVertexStepMode_Vertex: UInt32 = 2
+@platform(.Emscripten)
+public let WGPUVertexStepMode_Vertex: UInt32 = 1
+@platform(.Linux, .Darwin)
 public let WGPUVertexStepMode_Instance: UInt32 = 3
+@platform(.Emscripten)
+public let WGPUVertexStepMode_Instance: UInt32 = 2
 
 public let WGPUVertexFormat_Uint8x4: UInt32 = 3
 public let WGPUVertexFormat_Unorm8x4: UInt32 = 9
@@ -304,6 +354,7 @@ public struct WGPUDeviceDescriptor: FFISafe {
     public var uncapturedErrorCallbackInfo: WGPUUncapturedErrorCallbackInfo
 }
 
+@platform(.Linux, .Darwin)
 public struct WGPUAdapterInfo: FFISafe {
     public var nextInChain: RawPointer
     public var vendor: WGPUStringView
@@ -314,6 +365,36 @@ public struct WGPUAdapterInfo: FFISafe {
     public var adapterType: UInt32
     public var vendorID: UInt32
     public var deviceID: UInt32
+}
+
+@platform(.Emscripten)
+public struct WGPUAdapterInfo: FFISafe {
+    public var nextInChain: RawPointer
+    public var vendor: WGPUStringView
+    public var architecture: WGPUStringView
+    public var device: WGPUStringView
+    public var description: WGPUStringView
+    public var backendType: UInt32
+    public var adapterType: UInt32
+    public var vendorID: UInt32
+    public var deviceID: UInt32
+    public var subgroupMinSize: UInt32
+    public var subgroupMaxSize: UInt32
+
+    /// The native fields; Dawn-only fields take their defaults.
+    public init(nextInChain nextInChain: RawPointer, vendor vendor: WGPUStringView, architecture architecture: WGPUStringView, device device: WGPUStringView, description description: WGPUStringView, backendType backendType: UInt32, adapterType adapterType: UInt32, vendorID vendorID: UInt32, deviceID deviceID: UInt32) {
+        self.nextInChain = nextInChain;
+        self.vendor = vendor;
+        self.architecture = architecture;
+        self.device = device;
+        self.description = description;
+        self.backendType = backendType;
+        self.adapterType = adapterType;
+        self.vendorID = vendorID;
+        self.deviceID = deviceID;
+        self.subgroupMinSize = 0;
+        self.subgroupMaxSize = 0;
+    }
 }
 
 public struct WGPUShaderSourceWGSL: FFISafe {
@@ -442,17 +523,53 @@ public struct WGPUTexelCopyBufferInfo: FFISafe {
 
 // ----- Render pipelines -----
 
+@platform(.Linux, .Darwin)
 public struct WGPUVertexAttribute: FFISafe {
     public var format: UInt32
     public var offset: UInt64
     public var shaderLocation: UInt32
 }
 
+@platform(.Emscripten)
+public struct WGPUVertexAttribute: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var format: UInt32
+    public var offset: UInt64
+    public var shaderLocation: UInt32
+
+    /// The native fields; Dawn-only fields take their defaults.
+    public init(format format: UInt32, offset offset: UInt64, shaderLocation shaderLocation: UInt32) {
+        self.nextInChain = Pointer.nullPointer();
+        self.format = format;
+        self.offset = offset;
+        self.shaderLocation = shaderLocation;
+    }
+}
+
+@platform(.Linux, .Darwin)
 public struct WGPUVertexBufferLayout: FFISafe {
     public var stepMode: UInt32
     public var arrayStride: UInt64
     public var attributeCount: UInt64
     public var attributes: Pointer[WGPUVertexAttribute]
+}
+
+@platform(.Emscripten)
+public struct WGPUVertexBufferLayout: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var stepMode: UInt32
+    public var arrayStride: UInt64
+    public var attributeCount: UInt64
+    public var attributes: Pointer[WGPUVertexAttribute]
+
+    /// The native fields; Dawn-only fields take their defaults.
+    public init(stepMode stepMode: UInt32, arrayStride arrayStride: UInt64, attributeCount attributeCount: UInt64, attributes attributes: Pointer[WGPUVertexAttribute]) {
+        self.nextInChain = Pointer.nullPointer();
+        self.stepMode = stepMode;
+        self.arrayStride = arrayStride;
+        self.attributeCount = attributeCount;
+        self.attributes = attributes;
+    }
 }
 
 public struct WGPUVertexState: FFISafe {
@@ -560,6 +677,7 @@ public struct WGPURenderPassColorAttachment: FFISafe {
     public var clearValue: WGPUColor
 }
 
+@platform(.Linux, .Darwin)
 public struct WGPURenderPassDepthStencilAttachment: FFISafe {
     public var view: WGPUTextureView
     public var depthLoadOp: UInt32
@@ -570,6 +688,34 @@ public struct WGPURenderPassDepthStencilAttachment: FFISafe {
     public var stencilStoreOp: UInt32
     public var stencilClearValue: UInt32
     public var stencilReadOnly: UInt32
+}
+
+@platform(.Emscripten)
+public struct WGPURenderPassDepthStencilAttachment: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var view: WGPUTextureView
+    public var depthLoadOp: UInt32
+    public var depthStoreOp: UInt32
+    public var depthClearValue: Float32
+    public var depthReadOnly: UInt32
+    public var stencilLoadOp: UInt32
+    public var stencilStoreOp: UInt32
+    public var stencilClearValue: UInt32
+    public var stencilReadOnly: UInt32
+
+    /// The native fields; Dawn-only fields take their defaults.
+    public init(view view: WGPUTextureView, depthLoadOp depthLoadOp: UInt32, depthStoreOp depthStoreOp: UInt32, depthClearValue depthClearValue: Float32, depthReadOnly depthReadOnly: UInt32, stencilLoadOp stencilLoadOp: UInt32, stencilStoreOp stencilStoreOp: UInt32, stencilClearValue stencilClearValue: UInt32, stencilReadOnly stencilReadOnly: UInt32) {
+        self.nextInChain = Pointer.nullPointer();
+        self.view = view;
+        self.depthLoadOp = depthLoadOp;
+        self.depthStoreOp = depthStoreOp;
+        self.depthClearValue = depthClearValue;
+        self.depthReadOnly = depthReadOnly;
+        self.stencilLoadOp = stencilLoadOp;
+        self.stencilStoreOp = stencilStoreOp;
+        self.stencilClearValue = stencilClearValue;
+        self.stencilReadOnly = stencilReadOnly;
+    }
 }
 
 public struct WGPURenderPassDescriptor: FFISafe {
@@ -600,6 +746,14 @@ public struct WGPUSurfaceSourceWaylandSurface: FFISafe {
     public var display: RawPointer
     public var surface: RawPointer
 }
+
+/// Emscripten: draw into the `<canvas>` a CSS selector names.
+public struct WGPUEmscriptenSurfaceSourceCanvasHTMLSelector: FFISafe {
+    public var chain: WGPUChainedStruct
+    public var selector: WGPUStringView
+}
+
+public let WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector: UInt32 = 262144
 
 public struct WGPUSurfaceSourceMetalLayer: FFISafe {
     public var chain: WGPUChainedStruct
@@ -648,32 +802,110 @@ public struct WGPUSurfaceTexture: FFISafe {
 public let WGPUTextureFormat_R8Snorm: UInt32 = 2
 public let WGPUTextureFormat_R8Uint: UInt32 = 3
 public let WGPUTextureFormat_R8Sint: UInt32 = 4
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_R16Uint: UInt32 = 5
+@platform(.Emscripten)
+public let WGPUTextureFormat_R16Uint: UInt32 = 7
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_R16Sint: UInt32 = 6
+@platform(.Emscripten)
+public let WGPUTextureFormat_R16Sint: UInt32 = 8
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_R16Float: UInt32 = 7
+@platform(.Emscripten)
+public let WGPUTextureFormat_R16Float: UInt32 = 9
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RG8Unorm: UInt32 = 8
+@platform(.Emscripten)
+public let WGPUTextureFormat_RG8Unorm: UInt32 = 10
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RG8Snorm: UInt32 = 9
+@platform(.Emscripten)
+public let WGPUTextureFormat_RG8Snorm: UInt32 = 11
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RG8Uint: UInt32 = 10
+@platform(.Emscripten)
+public let WGPUTextureFormat_RG8Uint: UInt32 = 12
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RG8Sint: UInt32 = 11
+@platform(.Emscripten)
+public let WGPUTextureFormat_RG8Sint: UInt32 = 13
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_R32Uint: UInt32 = 13
+@platform(.Emscripten)
+public let WGPUTextureFormat_R32Uint: UInt32 = 15
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_R32Sint: UInt32 = 14
+@platform(.Emscripten)
+public let WGPUTextureFormat_R32Sint: UInt32 = 16
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RG16Uint: UInt32 = 15
+@platform(.Emscripten)
+public let WGPUTextureFormat_RG16Uint: UInt32 = 19
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RG16Sint: UInt32 = 16
+@platform(.Emscripten)
+public let WGPUTextureFormat_RG16Sint: UInt32 = 20
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RG16Float: UInt32 = 17
+@platform(.Emscripten)
+public let WGPUTextureFormat_RG16Float: UInt32 = 21
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGBA8Snorm: UInt32 = 20
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGBA8Snorm: UInt32 = 24
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGBA8Uint: UInt32 = 21
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGBA8Uint: UInt32 = 25
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGBA8Sint: UInt32 = 22
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGBA8Sint: UInt32 = 26
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGB10A2Unorm: UInt32 = 26
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGB10A2Unorm: UInt32 = 30
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RG11B10Ufloat: UInt32 = 27
+@platform(.Emscripten)
+public let WGPUTextureFormat_RG11B10Ufloat: UInt32 = 31
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RG32Float: UInt32 = 29
+@platform(.Emscripten)
+public let WGPUTextureFormat_RG32Float: UInt32 = 33
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RG32Uint: UInt32 = 30
+@platform(.Emscripten)
+public let WGPUTextureFormat_RG32Uint: UInt32 = 34
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RG32Sint: UInt32 = 31
+@platform(.Emscripten)
+public let WGPUTextureFormat_RG32Sint: UInt32 = 35
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGBA16Uint: UInt32 = 32
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGBA16Uint: UInt32 = 38
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGBA16Sint: UInt32 = 33
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGBA16Sint: UInt32 = 39
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGBA32Uint: UInt32 = 36
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGBA32Uint: UInt32 = 42
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_RGBA32Sint: UInt32 = 37
+@platform(.Emscripten)
+public let WGPUTextureFormat_RGBA32Sint: UInt32 = 43
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_Stencil8: UInt32 = 38
+@platform(.Emscripten)
+public let WGPUTextureFormat_Stencil8: UInt32 = 44
+@platform(.Linux, .Darwin)
 public let WGPUTextureFormat_Depth32FloatStencil8: UInt32 = 43
+@platform(.Emscripten)
+public let WGPUTextureFormat_Depth32FloatStencil8: UInt32 = 49
 
 public let WGPUTextureDimension_1D: UInt32 = 1
 public let WGPUTextureDimension_3D: UInt32 = 3
@@ -743,12 +975,30 @@ public let WGPUStorageTextureAccess_ReadWrite: UInt32 = 4
 public let WGPUQueryType_Occlusion: UInt32 = 1
 public let WGPUQueryType_Timestamp: UInt32 = 2
 public let WGPUBufferUsage_QueryResolve: UInt64 = 512
+@platform(.Linux, .Darwin)
 public let WGPUFeatureName_DepthClipControl: UInt32 = 1
+@platform(.Emscripten)
+public let WGPUFeatureName_DepthClipControl: UInt32 = 2
+@platform(.Linux, .Darwin)
 public let WGPUFeatureName_Depth32FloatStencil8: UInt32 = 2
+@platform(.Emscripten)
+public let WGPUFeatureName_Depth32FloatStencil8: UInt32 = 3
+@platform(.Linux, .Darwin)
 public let WGPUFeatureName_TimestampQuery: UInt32 = 3
+@platform(.Emscripten)
+public let WGPUFeatureName_TimestampQuery: UInt32 = 9
+@platform(.Linux, .Darwin)
 public let WGPUFeatureName_IndirectFirstInstance: UInt32 = 9
+@platform(.Emscripten)
+public let WGPUFeatureName_IndirectFirstInstance: UInt32 = 10
+@platform(.Linux, .Darwin)
 public let WGPUFeatureName_ShaderF16: UInt32 = 10
+@platform(.Emscripten)
+public let WGPUFeatureName_ShaderF16: UInt32 = 11
+@platform(.Linux, .Darwin)
 public let WGPUFeatureName_Float32Filterable: UInt32 = 13
+@platform(.Emscripten)
+public let WGPUFeatureName_Float32Filterable: UInt32 = 14
 /// wgpu.h: `WGPUNativeFeature_PushConstants`.
 public let WGPUNativeFeature_PushConstants: UInt32 = 196609
 /// wgpu.h: `WGPUSType_NativeLimits`.
@@ -789,6 +1039,7 @@ public struct WGPUStorageTextureBindingLayout: FFISafe {
     public var viewDimension: UInt32
 }
 
+@platform(.Linux, .Darwin)
 public struct WGPUBindGroupLayoutEntry: FFISafe {
     public var nextInChain: Pointer[WGPUChainedStruct]
     public var binding: UInt32
@@ -799,6 +1050,30 @@ public struct WGPUBindGroupLayoutEntry: FFISafe {
     public var storageTexture: WGPUStorageTextureBindingLayout
 }
 
+@platform(.Emscripten)
+public struct WGPUBindGroupLayoutEntry: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var binding: UInt32
+    public var visibility: UInt64
+    public var bindingArraySize: UInt32
+    public var buffer: WGPUBufferBindingLayout
+    public var sampler: WGPUSamplerBindingLayout
+    public var texture: WGPUTextureBindingLayout
+    public var storageTexture: WGPUStorageTextureBindingLayout
+
+    /// The native fields; Dawn-only fields take their defaults.
+    public init(nextInChain nextInChain: Pointer[WGPUChainedStruct], binding binding: UInt32, visibility visibility: UInt64, buffer buffer: WGPUBufferBindingLayout, sampler sampler: WGPUSamplerBindingLayout, texture texture: WGPUTextureBindingLayout, storageTexture storageTexture: WGPUStorageTextureBindingLayout) {
+        self.nextInChain = nextInChain;
+        self.binding = binding;
+        self.visibility = visibility;
+        self.bindingArraySize = 0;
+        self.buffer = buffer;
+        self.sampler = sampler;
+        self.texture = texture;
+        self.storageTexture = storageTexture;
+    }
+}
+
 public struct WGPUBindGroupLayoutDescriptor: FFISafe {
     public var nextInChain: Pointer[WGPUChainedStruct]
     public var label: WGPUStringView
@@ -806,11 +1081,30 @@ public struct WGPUBindGroupLayoutDescriptor: FFISafe {
     public var entries: Pointer[WGPUBindGroupLayoutEntry]
 }
 
+@platform(.Linux, .Darwin)
 public struct WGPUPipelineLayoutDescriptor: FFISafe {
     public var nextInChain: Pointer[WGPUChainedStruct]
     public var label: WGPUStringView
     public var bindGroupLayoutCount: UInt64
     public var bindGroupLayouts: Pointer[WGPUBindGroupLayout]
+}
+
+@platform(.Emscripten)
+public struct WGPUPipelineLayoutDescriptor: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var label: WGPUStringView
+    public var bindGroupLayoutCount: UInt64
+    public var bindGroupLayouts: Pointer[WGPUBindGroupLayout]
+    public var immediateSize: UInt32
+
+    /// The native fields; Dawn-only fields take their defaults.
+    public init(nextInChain nextInChain: Pointer[WGPUChainedStruct], label label: WGPUStringView, bindGroupLayoutCount bindGroupLayoutCount: UInt64, bindGroupLayouts bindGroupLayouts: Pointer[WGPUBindGroupLayout]) {
+        self.nextInChain = nextInChain;
+        self.label = label;
+        self.bindGroupLayoutCount = bindGroupLayoutCount;
+        self.bindGroupLayouts = bindGroupLayouts;
+        self.immediateSize = 0;
+    }
 }
 
 /// wgpu.h: one push constant range of a pipeline layout.
@@ -838,10 +1132,27 @@ public struct WGPUQuerySetDescriptor: FFISafe {
 
 /// `WGPURenderPassTimestampWrites` and `WGPUComputePassTimestampWrites`,
 /// which share a layout.
+@platform(.Linux, .Darwin)
 public struct WGPUPassTimestampWrites: FFISafe {
     public var querySet: WGPUQuerySet
     public var beginningOfPassWriteIndex: UInt32
     public var endOfPassWriteIndex: UInt32
+}
+
+@platform(.Emscripten)
+public struct WGPUPassTimestampWrites: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var querySet: WGPUQuerySet
+    public var beginningOfPassWriteIndex: UInt32
+    public var endOfPassWriteIndex: UInt32
+
+    /// The native fields; Dawn-only fields take their defaults.
+    public init(querySet querySet: WGPUQuerySet, beginningOfPassWriteIndex beginningOfPassWriteIndex: UInt32, endOfPassWriteIndex endOfPassWriteIndex: UInt32) {
+        self.nextInChain = Pointer.nullPointer();
+        self.querySet = querySet;
+        self.beginningOfPassWriteIndex = beginningOfPassWriteIndex;
+        self.endOfPassWriteIndex = endOfPassWriteIndex;
+    }
 }
 
 public struct WGPUComputePassDescriptor: FFISafe {
@@ -866,6 +1177,7 @@ public struct WGPURenderBundleDescriptor: FFISafe {
     public var label: WGPUStringView
 }
 
+@platform(.Linux, .Darwin)
 public struct WGPULimits: FFISafe {
     public var nextInChain: Pointer[WGPUChainedStruct]
     public var maxTextureDimension1D: UInt32
@@ -899,6 +1211,80 @@ public struct WGPULimits: FFISafe {
     public var maxComputeWorkgroupSizeY: UInt32
     public var maxComputeWorkgroupSizeZ: UInt32
     public var maxComputeWorkgroupsPerDimension: UInt32
+}
+
+@platform(.Emscripten)
+public struct WGPULimits: FFISafe {
+    public var nextInChain: Pointer[WGPUChainedStruct]
+    public var maxTextureDimension1D: UInt32
+    public var maxTextureDimension2D: UInt32
+    public var maxTextureDimension3D: UInt32
+    public var maxTextureArrayLayers: UInt32
+    public var maxBindGroups: UInt32
+    public var maxBindGroupsPlusVertexBuffers: UInt32
+    public var maxBindingsPerBindGroup: UInt32
+    public var maxDynamicUniformBuffersPerPipelineLayout: UInt32
+    public var maxDynamicStorageBuffersPerPipelineLayout: UInt32
+    public var maxSampledTexturesPerShaderStage: UInt32
+    public var maxSamplersPerShaderStage: UInt32
+    public var maxStorageBuffersPerShaderStage: UInt32
+    public var maxStorageTexturesPerShaderStage: UInt32
+    public var maxUniformBuffersPerShaderStage: UInt32
+    public var maxUniformBufferBindingSize: UInt64
+    public var maxStorageBufferBindingSize: UInt64
+    public var minUniformBufferOffsetAlignment: UInt32
+    public var minStorageBufferOffsetAlignment: UInt32
+    public var maxVertexBuffers: UInt32
+    public var maxBufferSize: UInt64
+    public var maxVertexAttributes: UInt32
+    public var maxVertexBufferArrayStride: UInt32
+    public var maxInterStageShaderVariables: UInt32
+    public var maxColorAttachments: UInt32
+    public var maxColorAttachmentBytesPerSample: UInt32
+    public var maxComputeWorkgroupStorageSize: UInt32
+    public var maxComputeInvocationsPerWorkgroup: UInt32
+    public var maxComputeWorkgroupSizeX: UInt32
+    public var maxComputeWorkgroupSizeY: UInt32
+    public var maxComputeWorkgroupSizeZ: UInt32
+    public var maxComputeWorkgroupsPerDimension: UInt32
+    public var maxImmediateSize: UInt32
+
+    /// The native fields; Dawn-only fields take their defaults.
+    public init(nextInChain nextInChain: Pointer[WGPUChainedStruct], maxTextureDimension1D maxTextureDimension1D: UInt32, maxTextureDimension2D maxTextureDimension2D: UInt32, maxTextureDimension3D maxTextureDimension3D: UInt32, maxTextureArrayLayers maxTextureArrayLayers: UInt32, maxBindGroups maxBindGroups: UInt32, maxBindGroupsPlusVertexBuffers maxBindGroupsPlusVertexBuffers: UInt32, maxBindingsPerBindGroup maxBindingsPerBindGroup: UInt32, maxDynamicUniformBuffersPerPipelineLayout maxDynamicUniformBuffersPerPipelineLayout: UInt32, maxDynamicStorageBuffersPerPipelineLayout maxDynamicStorageBuffersPerPipelineLayout: UInt32, maxSampledTexturesPerShaderStage maxSampledTexturesPerShaderStage: UInt32, maxSamplersPerShaderStage maxSamplersPerShaderStage: UInt32, maxStorageBuffersPerShaderStage maxStorageBuffersPerShaderStage: UInt32, maxStorageTexturesPerShaderStage maxStorageTexturesPerShaderStage: UInt32, maxUniformBuffersPerShaderStage maxUniformBuffersPerShaderStage: UInt32, maxUniformBufferBindingSize maxUniformBufferBindingSize: UInt64, maxStorageBufferBindingSize maxStorageBufferBindingSize: UInt64, minUniformBufferOffsetAlignment minUniformBufferOffsetAlignment: UInt32, minStorageBufferOffsetAlignment minStorageBufferOffsetAlignment: UInt32, maxVertexBuffers maxVertexBuffers: UInt32, maxBufferSize maxBufferSize: UInt64, maxVertexAttributes maxVertexAttributes: UInt32, maxVertexBufferArrayStride maxVertexBufferArrayStride: UInt32, maxInterStageShaderVariables maxInterStageShaderVariables: UInt32, maxColorAttachments maxColorAttachments: UInt32, maxColorAttachmentBytesPerSample maxColorAttachmentBytesPerSample: UInt32, maxComputeWorkgroupStorageSize maxComputeWorkgroupStorageSize: UInt32, maxComputeInvocationsPerWorkgroup maxComputeInvocationsPerWorkgroup: UInt32, maxComputeWorkgroupSizeX maxComputeWorkgroupSizeX: UInt32, maxComputeWorkgroupSizeY maxComputeWorkgroupSizeY: UInt32, maxComputeWorkgroupSizeZ maxComputeWorkgroupSizeZ: UInt32, maxComputeWorkgroupsPerDimension maxComputeWorkgroupsPerDimension: UInt32) {
+        self.nextInChain = nextInChain;
+        self.maxTextureDimension1D = maxTextureDimension1D;
+        self.maxTextureDimension2D = maxTextureDimension2D;
+        self.maxTextureDimension3D = maxTextureDimension3D;
+        self.maxTextureArrayLayers = maxTextureArrayLayers;
+        self.maxBindGroups = maxBindGroups;
+        self.maxBindGroupsPlusVertexBuffers = maxBindGroupsPlusVertexBuffers;
+        self.maxBindingsPerBindGroup = maxBindingsPerBindGroup;
+        self.maxDynamicUniformBuffersPerPipelineLayout = maxDynamicUniformBuffersPerPipelineLayout;
+        self.maxDynamicStorageBuffersPerPipelineLayout = maxDynamicStorageBuffersPerPipelineLayout;
+        self.maxSampledTexturesPerShaderStage = maxSampledTexturesPerShaderStage;
+        self.maxSamplersPerShaderStage = maxSamplersPerShaderStage;
+        self.maxStorageBuffersPerShaderStage = maxStorageBuffersPerShaderStage;
+        self.maxStorageTexturesPerShaderStage = maxStorageTexturesPerShaderStage;
+        self.maxUniformBuffersPerShaderStage = maxUniformBuffersPerShaderStage;
+        self.maxUniformBufferBindingSize = maxUniformBufferBindingSize;
+        self.maxStorageBufferBindingSize = maxStorageBufferBindingSize;
+        self.minUniformBufferOffsetAlignment = minUniformBufferOffsetAlignment;
+        self.minStorageBufferOffsetAlignment = minStorageBufferOffsetAlignment;
+        self.maxVertexBuffers = maxVertexBuffers;
+        self.maxBufferSize = maxBufferSize;
+        self.maxVertexAttributes = maxVertexAttributes;
+        self.maxVertexBufferArrayStride = maxVertexBufferArrayStride;
+        self.maxInterStageShaderVariables = maxInterStageShaderVariables;
+        self.maxColorAttachments = maxColorAttachments;
+        self.maxColorAttachmentBytesPerSample = maxColorAttachmentBytesPerSample;
+        self.maxComputeWorkgroupStorageSize = maxComputeWorkgroupStorageSize;
+        self.maxComputeInvocationsPerWorkgroup = maxComputeInvocationsPerWorkgroup;
+        self.maxComputeWorkgroupSizeX = maxComputeWorkgroupSizeX;
+        self.maxComputeWorkgroupSizeY = maxComputeWorkgroupSizeY;
+        self.maxComputeWorkgroupSizeZ = maxComputeWorkgroupSizeZ;
+        self.maxComputeWorkgroupsPerDimension = maxComputeWorkgroupsPerDimension;
+        self.maxImmediateSize = WGPU_U32_UNDEFINED;
+    }
 }
 
 /// wgpu.h: chained onto `WGPULimits` for wgpu-native's own limits.
@@ -947,8 +1333,33 @@ public func wgpuDevicePopErrorScope(device: WGPUDevice, callbackInfo: WGPUPopErr
 @extern(.C, mangleName: "wgpuDeviceRelease")
 public func wgpuDeviceRelease(device: WGPUDevice)
 /// From `wgpu.h`: process the device's work, blocking when `wait` is 1.
+@platform(.Linux, .Darwin)
 @extern(.C, mangleName: "wgpuDevicePoll")
 public func wgpuDevicePoll(device: WGPUDevice, wait: UInt32, submissionIndex: RawPointer) -> UInt32
+
+/// A browser has no blocking poll: yield to the event loop so the GPU's
+/// promises resolve, and report the queue as not known to be empty.
+@platform(.Emscripten)
+public unsafe func wgpuDevicePoll(device: WGPUDevice, wait: UInt32, submissionIndex: RawPointer) -> UInt32 {
+    let _ = yieldToHost();
+    0
+}
+
+/// Let the host run: a turn of the browser's event loop on Emscripten
+/// (needs `-sASYNCIFY`). True if that can make progress on pending
+/// callbacks; natively there's nothing to yield to.
+@platform(.Linux, .Darwin)
+public func yieldToHost() -> Bool { false }
+
+@platform(.Emscripten)
+public func yieldToHost() -> Bool {
+    unsafe emscripten_sleep(1);
+    true
+}
+
+@platform(.Emscripten)
+@extern(.C, mangleName: "emscripten_sleep")
+func emscripten_sleep(ms: UInt32)
 
 @extern(.C, mangleName: "wgpuQueueWriteBuffer")
 public func wgpuQueueWriteBuffer(queue: WGPUQueue, buffer: WGPUBuffer, bufferOffset: UInt64, data: RawPointer, size: UInt64)
@@ -1167,9 +1578,26 @@ public func wgpuRenderBundleRelease(renderBundle: WGPURenderBundle)
 
 // ----- wgpu.h push constants -----
 
+@platform(.Linux, .Darwin)
 @extern(.C, mangleName: "wgpuRenderPassEncoderSetPushConstants")
 public func wgpuRenderPassEncoderSetPushConstants(encoder: WGPURenderPassEncoder, stages: UInt64, offset: UInt32, sizeBytes: UInt32, data: RawPointer)
+@platform(.Linux, .Darwin)
 @extern(.C, mangleName: "wgpuComputePassEncoderSetPushConstants")
 public func wgpuComputePassEncoderSetPushConstants(encoder: WGPUComputePassEncoder, offset: UInt32, sizeBytes: UInt32, data: RawPointer)
+@platform(.Linux, .Darwin)
 @extern(.C, mangleName: "wgpuRenderBundleEncoderSetPushConstants")
 public func wgpuRenderBundleEncoderSetPushConstants(encoder: WGPURenderBundleEncoder, stages: UInt64, offset: UInt32, sizeBytes: UInt32, data: RawPointer)
+
+// WebGPU in browsers has no push constants (wgpu-native's extension).
+@platform(.Emscripten)
+public unsafe func wgpuRenderPassEncoderSetPushConstants(encoder: WGPURenderPassEncoder, stages: UInt64, offset: UInt32, sizeBytes: UInt32, data: RawPointer) {
+    fatalError("push constants are not available in browser WebGPU")
+}
+@platform(.Emscripten)
+public unsafe func wgpuComputePassEncoderSetPushConstants(encoder: WGPUComputePassEncoder, offset: UInt32, sizeBytes: UInt32, data: RawPointer) {
+    fatalError("push constants are not available in browser WebGPU")
+}
+@platform(.Emscripten)
+public unsafe func wgpuRenderBundleEncoderSetPushConstants(encoder: WGPURenderBundleEncoder, stages: UInt64, offset: UInt32, sizeBytes: UInt32, data: RawPointer) {
+    fatalError("push constants are not available in browser WebGPU")
+}

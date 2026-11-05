@@ -15,6 +15,9 @@ public enum SurfaceSource {
     case MetalLayer(RawPointer)
     /// A Windows window: the `HINSTANCE` and the `HWND`.
     case Windows(RawPointer, RawPointer)
+    /// A browser `<canvas>`, by CSS selector such as `"#canvas"`
+    /// (Emscripten builds only).
+    case Canvas(String)
 }
 
 /// How presented frames line up with the display's refresh.
@@ -116,9 +119,15 @@ public struct Surface: not Copyable {
     }
 
     /// Show the frame drawn since `currentTexture()`.
+    @platform(.Linux, .Darwin)
     public func present() {
         unsafe raw.wgpuSurfacePresent(self.handle);
     }
+
+    /// A browser shows the canvas's frame by itself once the program yields
+    /// to the event loop, so there's nothing to do here.
+    @platform(.Emscripten)
+    public func present() {}
 
     deinit {
         unsafe raw.wgpuSurfaceRelease(self.handle);
@@ -127,6 +136,7 @@ public struct Surface: not Copyable {
 
 extend Instance {
     /// A surface drawing into the window `source`, which must outlive it.
+    @platform(.Linux, .Darwin)
     public func createSurface(source: SurfaceSource, label label: String = "") -> Surface {
         var xlib = raw.WGPUSurfaceSourceXlibWindow(
             chain: raw.WGPUChainedStruct(next: Pointer.nullPointer(), sType: raw.WGPUSType_SurfaceSourceXlibWindow),
@@ -166,9 +176,26 @@ extend Instance {
                 windows.hinstance = hinstance;
                 windows.hwnd = hwnd;
                 Pointer(to: windows).cast[raw.WGPUChainedStruct]()
-            }
+            },
+            .Canvas(_) => fatalError("a canvas surface needs an Emscripten build")
         };
         let descriptor = raw.WGPUSurfaceDescriptor(nextInChain: chain, label: view(label));
+        Surface(handle: unsafe raw.wgpuInstanceCreateSurface(self.handle, descriptor))
+    }
+
+    /// A surface drawing into the `<canvas>` `source` names; the only
+    /// source a browser has.
+    @platform(.Emscripten)
+    public func createSurface(source: SurfaceSource, label label: String = "") -> Surface {
+        let selector = match source {
+            .Canvas(s) => s,
+            _ => fatalError("browser builds draw only into a canvas (SurfaceSource.Canvas)")
+        };
+        var canvas = raw.WGPUEmscriptenSurfaceSourceCanvasHTMLSelector(
+            chain: raw.WGPUChainedStruct(next: Pointer.nullPointer(), sType: raw.WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector),
+            selector: view(selector)
+        );
+        let descriptor = raw.WGPUSurfaceDescriptor(nextInChain: Pointer(to: canvas).cast[raw.WGPUChainedStruct](), label: view(label));
         Surface(handle: unsafe raw.wgpuInstanceCreateSurface(self.handle, descriptor))
     }
 }

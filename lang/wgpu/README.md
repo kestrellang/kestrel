@@ -27,6 +27,10 @@ WGPU_NATIVE_DIR=~/wgpu-native flock build
 
 Without a GPU, a software Vulkan driver works. On Debian or Ubuntu, `apt install mesa-vulkan-drivers` provides lavapipe.
 
+### In a browser
+
+The package also builds for `wasm64-unknown-emscripten`, against the browser's WebGPU through Dawn's `emdawnwebgpu` port: link with `--link-arg=--use-port=emdawnwebgpu --link-arg=-sDEFAULT_TO_CXX --link-arg=-sASYNCIFY`. Make the surface with `SurfaceSource.Canvas("#canvas")`. Waiting for the GPU yields to the browser instead of blocking, `present()` does nothing (the browser shows the frame when control returns to it), and push constants, a wgpu-native extension, are unavailable. `examples/aerie/web/build.sh` is a complete example.
+
 ## Usage
 
 From `examples/wgpu_compute`, which doubles a list of numbers on the GPU:

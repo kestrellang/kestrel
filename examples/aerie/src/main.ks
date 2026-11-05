@@ -24,7 +24,7 @@ import std.io.file.(readFileBytes, writeFileBytes)
 func savePath() -> String? {
     match getenv("AERIE_SAVE") {
         .Some(path) => if path == "none" { .None } else { .Some(path) },
-        .None => .Some("world.aerie")
+        .None => .Some(defaultSavePath())
     }
 }
 
@@ -57,6 +57,7 @@ func writeSave(path: String, state: SaveState) -> Bool {
     let packed = Zlib.compress(bytes);
     match writeFileBytes(path, packed) {
         .Ok(_) => {
+            persistSaves();
             println("saved \(state.chunks.count) changed chunks to \(path) (\(packed.count) bytes)");
             true
         },
@@ -162,6 +163,7 @@ func run() -> Int64 {
             }
         }
         frames = frames + 1;
+        endFrame();
         if maxFrames > 0 and frames >= maxFrames {
             game.running = false;
         }
