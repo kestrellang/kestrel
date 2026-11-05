@@ -53,6 +53,7 @@ public protocol SeqIndex[T] {
     func writeSeqUnchecked(to slice: UnsafeSlice[T], with value: SeqOutput)
 }
 
+/// A range that `xs(within: range)` clamps into the sequence.
 public protocol SeqClampable[T] {
     type SeqClampedOutput
     func readSeqClamped(from slice: UnsafeSlice[T]) -> SeqClampedOutput
@@ -396,30 +397,31 @@ extend RangeThrough[Int64]: SeqIndex[T] {
 // SeqClampable CONFORMANCES
 // ============================================================================
 
-extend Int64: SeqClampable[T] {
-    type SeqClampedOutput = T?
-
-    public func readSeqClamped(from slice: UnsafeSlice[T]) -> T? {
-        let len = slice.count;
+extend UnsafeSlice[T] {
+    /// `xs(clamped: index)`: the element at `index` saturated into
+    /// `[0, count)`, or `.None` when empty.
+    fileprivate func readClampedAt(index: Int64) -> T? {
+        let len = self.count;
         if len == 0 {
             return .None
         }
-        var idx = self;
+        var idx = index;
         if idx < 0 { idx = 0 }
         if idx >= len { idx = len - 1 }
-        .Some(slice.pointer.offset(by: idx).read())
+        .Some(self.pointer.offset(by: idx).read())
     }
 
-    public func writeSeqClamped(to slice: UnsafeSlice[T], with value: T?) {
+    /// Writes `value` (when `.Some`) where `readClampedAt(index)` reads.
+    fileprivate func writeClampedAt(index: Int64, value: T?) {
         if let .Some(v) = value {
-            let len = slice.count;
+            let len = self.count;
             if len == 0 {
                 return
             }
-            var idx = self;
+            var idx = index;
             if idx < 0 { idx = 0 }
             if idx >= len { idx = len - 1 }
-            slice.pointer.offset(by: idx).assign(v)
+            self.pointer.offset(by: idx).assign(v)
         }
     }
 }
@@ -537,8 +539,12 @@ extend Sliceable[T] {
         get { index.readSeqUnchecked(from: self.asUnsafeSlice()) }
     }
 
-    public subscript[I](clamped index: I) -> I.SeqClampedOutput where I: SeqClampable[T] {
-        get { index.readSeqClamped(from: self.asUnsafeSlice()) }
+    public subscript(clamped index: Int64) -> T? {
+        get { self.asUnsafeSlice().readClampedAt(index) }
+    }
+
+    public subscript[I](within range: I) -> I.SeqClampedOutput where I: SeqClampable[T] {
+        get { range.readSeqClamped(from: self.asUnsafeSlice()) }
     }
 
     public subscript[I](wrapped index: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] {
@@ -558,9 +564,14 @@ extend UnsafeSlice[T] {
         set { index.writeSeqUnchecked(to: self, with: newValue) }
     }
 
-    public subscript[I](clamped index: I) -> I.SeqClampedOutput where I: SeqClampable[T] {
-        get { index.readSeqClamped(from: self) }
-        set { index.writeSeqClamped(to: self, with: newValue) }
+    public subscript(clamped index: Int64) -> T? {
+        get { self.readClampedAt(index) }
+        set { self.writeClampedAt(index, newValue) }
+    }
+
+    public subscript[I](within range: I) -> I.SeqClampedOutput where I: SeqClampable[T] {
+        get { range.readSeqClamped(from: self) }
+        set { range.writeSeqClamped(to: self, with: newValue) }
     }
 
     public subscript[I](wrapped index: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] {

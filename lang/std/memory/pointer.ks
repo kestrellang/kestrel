@@ -393,7 +393,7 @@ public struct UnsafeSlice[T] {
     public var pointer: Pointer[T] { self.ptr }
 
     // subscript(index:), subscript(checked:), subscript(unchecked:),
-    // subscript(clamped:), subscript(wrapped:): provided by extend Sliceable[T]
+    // subscript(clamped:), subscript(within:), subscript(wrapped:): provided by extend Sliceable[T]
 
     /// Forward iterator over the elements.
     public func iter() -> UnsafeSliceIterator[T] {

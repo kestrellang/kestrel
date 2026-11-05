@@ -31,7 +31,7 @@ func main() -> Int64 {
     print("count \(s.count) first \(s(0)) sum \(sum(s)) max \(s.max())\n");
     let t = &s(1..<4);
     print("sub \(t.count) \(t(0)) \(sum(t)) \(sum(t(1..))) \(sum(s(..=1)))\n");
-    let c = &s(clamped: 3..<99);
+    let c = &s(within: 3..<99);
     let e = &s(0..<0);
     print("checked \(s(checked: 9)) \(s(checked: 1)) clamped \(sum(c)) \(s(clamped: 99)) \(e(clamped: 0)) wrapped \(s(wrapped: -1))\n");
     let m = &mutating Slice.lendMutating(start: p, count: 5);

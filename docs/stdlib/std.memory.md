@@ -2066,7 +2066,15 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.SeqClampedOutput where I: SeqClampable[T] { get set }
+public subscript(clamped: Int64) -> T? { get set }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](within: I) -> I.SeqClampedOutput where I: SeqClampable[T] { get set }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._

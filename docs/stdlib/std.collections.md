@@ -34,15 +34,12 @@ let pivot = names.partition(by: { (n) in n.count > 3 });
 ### Indexing
 
 The default subscript `arr(i)` panics on out-of-bounds. Variants exist
-for every common policy: `arr(checked: i)` lends `Optional[&T]`,
-`arr(unchecked: i)` skips the bounds check (UB on OOB),
-`arr(wrapped: i)` wraps with modulo (and supports negative indices),
-and `arr(clamped: i)` clamps to `[0, count-1]`. Range arguments use the
-same labels — `arr(0..<3)`, `arr(checked: r)`, `arr(unchecked: r)`,
-`arr(clamped: r)` — dispatched through the unified `SeqIndex[T]`,
-`SeqClampable[T]`, and `SeqWrappable[T]` protocols. `Int64` and range
-types share each label; the result type varies (`T?` vs `UnsafeSlice[T]`
-for `clamped:`).
+for every common policy, each an in-place place: `arr(checked: i)` is
+`.None` when out of range, `arr(unchecked: i)` skips the bounds check
+(UB on OOB), `arr(wrapped: i)` wraps with modulo (negative indices count
+from the end), and `arr(clamped: i)` saturates into `[0, count-1]`.
+Ranges take `arr(0..<3)`, `arr(checked: r)` and `arr(unchecked: r)`,
+and `arr(within: r)` lends the part of `r` inside the array.
 
 ### Capacity & Reallocation
 
@@ -1250,11 +1247,22 @@ _Defined in `lang/std/collections/array.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.SliceClampedOutput where I: SliceClampable[T] { get }
+public subscript(clamped: Int64) -> T? { ref mutating ref }
 ```
 
-Like `xs(index)`, with the index or range clamped into the array. A
-clamped element of an empty array is `.None`.
+The element at `index` saturated into `0..<count`, in place, or
+`.None` for an empty array.
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
+```
+
+The part of `range` that lies within the array, in place (always
+valid, possibly empty).
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -4658,6 +4666,8 @@ _Defined in `lang/std/collections/views.ks`._
 public protocol SeqClampable[T]
 ```
 
+A range that `xs(within: range)` clamps into the sequence.
+
 _Defined in `lang/std/collections/sliceable.ks`._
 
 ### Members
@@ -6253,6 +6263,16 @@ long as the slice is used.
 
 _Defined in `lang/std/collections/slice.ks`._
 
+#### function `lendClamped`
+
+```kestrel
+internal func lendClamped(consuming Int64) -> Optional[&T]
+```
+
+Lends the element `xs(clamped: index)` names.
+
+_Defined in `lang/std/collections/slice.ks`._
+
 #### function `lendMutating`
 
 ```kestrel
@@ -6260,6 +6280,16 @@ public static func lendMutating(start: consuming Pointer[T], count: consuming In
 ```
 
 Like `lend(start:count:)`, for writing through.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingClamped`
+
+```kestrel
+internal mutating func lendMutatingClamped(consuming Int64) -> Optional[&mutating T]
+```
+
+Like `lendClamped`, lent mutably.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6472,11 +6502,22 @@ _Defined in `lang/std/collections/slice.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.SliceClampedOutput where I: SliceClampable[T] { get }
+public subscript(clamped: Int64) -> T? { ref mutating ref }
 ```
 
-Like `self(index)`, with the index or range clamped into the slice.
-A clamped element of an empty slice is `.None`.
+The element at `index` saturated into `0..<count`, in place, or
+`.None` for an empty slice.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
+```
+
+The part of `range` that lies within the slice, in place (always
+valid, possibly empty).
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6630,26 +6671,24 @@ _Defined in `lang/std/collections/slice.ks`._
 public protocol SliceClampable[T]
 ```
 
-The clamped form of `SliceIndex`: a range is clamped into the slice and
-lent; an element index is clamped into `0..<count` and copied out, or
-`.None` for an empty slice.
+A range that `xs(within: range)` clamps into the slice and lends.
 
 _Defined in `lang/std/collections/slice.ks`._
 
 ### Members
 
-#### typealias `SliceClampedOutput`
+#### function `lendMutatingWithin`
 
 ```kestrel
-type SliceClampedOutput
+static func lendMutatingWithin(consuming Self, mutating Slice[T]) -> &mutating Slice[T]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
 
-#### function `lendClamped`
+#### function `lendWithin`
 
 ```kestrel
-static func lendClamped(consuming Self, Slice[T]) -> SliceClampedOutput
+static func lendWithin(consuming Self, Slice[T]) -> &Slice[T]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -7453,7 +7492,15 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.SeqClampedOutput where I: SeqClampable[T] { get }
+public subscript(clamped: Int64) -> T? { get }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](within: I) -> I.SeqClampedOutput where I: SeqClampable[T] { get }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
