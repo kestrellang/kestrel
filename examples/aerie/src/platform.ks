@@ -45,18 +45,20 @@ func persistSaves() {
 }
 
 /// The end of a frame. The desktop loop runs on; a browser must get control
-/// back to show the frame and deliver input (needs `-sASYNCIFY`).
+/// back to show the frame and deliver input (needs `-sASYNCIFY`). It
+/// resumes on the next animation frame (`web/frame.js`), so frames keep
+/// time with the display.
 @platform(.Linux, .Darwin)
 func endFrame() {}
 
 @platform(.Emscripten)
 func endFrame() {
-    unsafe emscripten_sleep(0);
+    unsafe aerie_wait_frame();
 }
 
 @platform(.Emscripten)
-@extern(.C, mangleName: "emscripten_sleep")
-func emscripten_sleep(ms: UInt32)
+@extern(.C, mangleName: "aerie_wait_frame")
+func aerie_wait_frame()
 
 @platform(.Emscripten)
 @extern(.C, mangleName: "emscripten_run_script")

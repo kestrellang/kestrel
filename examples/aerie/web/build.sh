@@ -39,5 +39,6 @@ cd "$aerie"  # so --preload-file's `assets` path matches the desktop layout
     --link-arg=-lidbfs.js \
     --link-arg=--preload-file=assets \
     --link-arg=--shell-file="$here/shell.html" \
+    --link-arg=--js-library="$here/frame.js" \
     --link-arg=--post-js="$here/wasm64_fixes.js"
 echo "built $out/index.html"
