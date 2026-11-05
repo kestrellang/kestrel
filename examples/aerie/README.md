@@ -1,6 +1,7 @@
-# Aerie
+# Kestrelcraft
 
-A voxel sandbox on floating islands above a cloud sea, drawn with `lang/wgpu`.
+Kestrelcraft (developed here as Aerie: the folder, module and binary keep
+that name) is a voxel sandbox on floating islands above a cloud sea, drawn with `lang/wgpu`.
 The block art is original: `tools/make_atlas.py` draws every 16x16 tile from a
 fixed seed and a small pastel palette into `assets/blocks.png`, and the game
 loads it with `lang/images`.
@@ -86,9 +87,12 @@ holding: cracks spread over it for its `Block.hardness` in seconds (a
 glowcap pops at once, skyiron takes two and a half), drawn by the same
 pipeline.
 
-Controls: WASD to walk, the mouse or arrow keys to look, Space to jump (hold to glide),
-hold left click or Q to break, right click or E to place, the wheel or 1 to 9 for the hotbar, T to skip time, P to save, - and = to shrink or grow the view distance, F to fly (Space and Left
-Shift to rise and sink), Escape to free the mouse (and again to save and quit), Enter or a click to leave the title screen. `AERIE_FRAMES=n` quits after n
+Controls: WASD to walk, the mouse to look, Space to jump (hold to glide),
+hold left click to break, right click to place, the wheel or 1 to 9 for the
+hotbar, F to fly (Space and Left Shift to rise and sink), Z to show frames per
+second, Escape to free the mouse (and again to save and quit), Enter or a
+click to leave the title screen. The world also saves itself every minute.
+`AERIE_FRAMES=n` quits after n
 frames. `AERIE_VIEW=n` sets the view distance to n chunks (2 to 16, default 5); fog
 only covers the last quarter of it, so chunks fade in at the edge.
 

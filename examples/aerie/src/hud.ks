@@ -142,6 +142,15 @@ func noticeQuads(text: String, fade fade: Float32) -> [OverlayQuad] {
     quads
 }
 
+/// Frames per second, in the top left on a small board.
+func fpsQuads(fps: Int64) -> [OverlayQuad] {
+    let text = "\(fps) FPS";
+    let size: Float32 = 18.0;
+    var quads = slicedSprite(.Panel, 14.0, 14.0, textWidth(text, size) + 44.0, 40.0, white);
+    quads.append(contentsOf: labelQuads(text, x: 36.0, y: 25.0, size: size, color: white));
+    quads
+}
+
 /// The crosshair, the hotbar and the selected block's name for a `width`
 /// by `height` screen, `time` seconds in.
 func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool, time: Float32) -> [OverlayQuad] {
@@ -196,11 +205,11 @@ func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [
     let w = Float32(from: width);
     let h = Float32(from: height);
     var quads: [OverlayQuad] = [];
-    // The logo: stone letters capped with moss, drawn from the game's own
-    // blocks (see tools/make_ui.py), three times as wide as tall.
+    // The logo: the pixel font's letters, each pixel a driftstone block
+    // capped with moss where open to the sky (see tools/make_ui.py).
     let columns = Float32(from: uiLogoColumns);
     let rows = Float32(from: uiLogoRows);
-    let logoWidth = (w * 0.62).clamp(360.0, 1100.0).floor();
+    let logoWidth = (w * 0.8).clamp(360.0, 1500.0).floor();
     let cell = (logoWidth / columns).floor();
     let size = cell * rows * 0.62;
     let titleWidth = cell * columns;
@@ -238,12 +247,9 @@ func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [
     let pulse = 0.5 + 0.5 * (time * 3.0).sin();
     // Big: it's the one thing to press.
     let promptSize = crispSize(small * 1.7);
-    let promptY = (h * 0.72).floor();
+    let promptY = (h * 0.68).floor();
     let promptW = textWidth(prompt, promptSize) + promptSize * 3.4;
     quads.append(sprite(.Glow, w * 0.5 - promptW * 0.7, promptY - promptSize * 2.2, promptW * 1.4, promptSize * 5.0, Vec4(x: 1.0, y: 0.82, z: 0.5, w: 0.15 + pulse * 0.2)));
     quads.append(contentsOf: boardLabel(prompt, width: w, y: promptY, size: promptSize, color: white, board: .Button, roomy: 1.3));
-    // The controls, on a frosted strip along the bottom.
-    let controls = "WASD move   Mouse look   Hold left click break   Right click place   Wheel or 1-9 pick   Space jump, hold to glide   P save";
-    quads.append(contentsOf: pillLabel(controls, width: w, y: h - 46.0, size: 18.0, color: faded(white, 0.92)));
     quads
 }
