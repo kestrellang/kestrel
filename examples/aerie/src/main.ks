@@ -33,7 +33,7 @@ func run() -> Int64 {
     }
     var window = SDLWindow(title: "Kestrelcraft", width: 1280, height: 720);
     let (width, height) = window.drawableSize;
-    let renderer = match Renderer.create(window.nativeWindow, width: width, height: height, presentMode: settings.presentMode) {
+    let renderer = match Renderer.create(window.nativeWindow, width: width, height: height, graphics: settings.graphics) {
         .Ok(r) => r,
         .Err(e) => {
             println("wgpu error: \(e.message)");

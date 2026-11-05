@@ -7,7 +7,8 @@ import wgpu.(PresentMode)
 /// 1), `AERIE_PLAY=1` (skip the title), `AERIE_SAVE` (a save path, or
 /// `none`), `AERIE_FRAMES` (quit after n frames), `AERIE_VSYNC=0` (draw as fast
 /// as possible, to measure frame rate), `AERIE_TOUR=n` (fly straight
-/// east at n blocks a second, to measure loading while moving) and `AERIE_BENCH` (time generation
+/// east at n blocks a second, to measure loading while moving),
+/// `AERIE_QUALITY` (`low`, `medium` or `high`, the default) and `AERIE_BENCH` (time generation
 /// and meshing over n runs instead of playing).
 struct Settings {
     /// How many chunk columns around the player are loaded and drawn.
@@ -19,6 +20,7 @@ struct Settings {
     var maxFrames: Int64
     /// Wait for the display's refresh before showing each frame.
     var vsync: Bool
+    var quality: Quality
     /// Blocks per second to fly east on its own, or 0 to play normally.
     var tourSpeed: Float32
     var benchRuns: Int64?
@@ -33,6 +35,7 @@ struct Settings {
             savePath: if save == "none" { .None } else { .Some(save) },
             maxFrames: Int64(parsing: getenv("AERIE_FRAMES") ?? "") ?? 0,
             vsync: (getenv("AERIE_VSYNC") ?? "1") != "0",
+            quality: Quality.named(getenv("AERIE_QUALITY") ?? "") ?? .High,
             tourSpeed: Float32(parsing: getenv("AERIE_TOUR") ?? "") ?? 0.0,
             benchRuns: match getenv("AERIE_BENCH") {
                 .Some(runs) => .Some(Int64(parsing: runs) ?? 10),
@@ -44,6 +47,8 @@ struct Settings {
     /// How far chunks are drawn, in blocks.
     var viewDistance: Float32 { Float32(from: self.viewRadius * chunkSize) }
 
-    /// How the renderer should show frames.
-    var presentMode: PresentMode { if self.vsync { .Fifo } else { .Immediate } }
+    /// How the renderer should look and show frames.
+    var graphics: Graphics {
+        Graphics(presentMode: if self.vsync { .Fifo } else { .Immediate }, quality: self.quality)
+    }
 }

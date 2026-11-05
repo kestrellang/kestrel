@@ -1,13 +1,11 @@
 module Aerie
 
-import wgpu.(RenderPassDescriptor, Feature, Instance, Device, Surface, PresentMode, Buffer, BindGroup, RenderPipeline, Texture, TextureFormat, WgpuError, ColorTarget, Color, DepthTest, BindingLayout, ViewRange, PipelineLayout)
+import wgpu.(RenderPassDescriptor, Feature, Instance, Device, Surface, PresentMode, Buffer, BindGroup, RenderPipeline, Texture, TextureView, TextureFormat, WgpuError, ColorTarget, ColorAttachment, Color, DepthTest, BindingLayout, ViewRange, PipelineLayout)
 import sdl.(NativeWindow)
 import linalg.(Vec3, Vec4, Mat4, radians)
 
 let depthFormat: TextureFormat = .Depth24Plus;
 let shadowFormat: TextureFormat = .Depth32Float;
-/// Multisampling: samples per pixel.
-let samples: Int64 = 4;
 /// The usual vertical field of view, in degrees; it widens with speed.
 let baseFieldOfView: Float32 = 70.0;
 /// The block atlas's tiles are this many pixels square.
@@ -63,13 +61,15 @@ struct Renderer: not Copyable {
     var instance: Instance
     var device: Device
     var surface: Surface
-    var format: TextureFormat
-    /// How frames reach the screen: vsynced, or as fast as they're drawn.
-    var presentMode: PresentMode
+    /// What the main pass draws into.
+    var target: DrawTarget
+    var graphics: Graphics
     var width: Int64
     var height: Int64
     var depth: Texture
-    var color: Texture
+    /// The multisampled color buffer, resolved into each frame; None
+    /// without multisampling, when the pass draws straight to the frame.
+    var colorView: TextureView?
     /// The sky, drawn first behind everything: gradient, sun, stars, clouds.
     var skyPipeline: RenderPipeline
     /// Bind group 0 of the world, the sky and models.
@@ -95,17 +95,21 @@ struct Renderer: not Copyable {
     /// GPU time per pass, once `gpuTimer.start` is called.
     var gpuTimer: GpuTimer
 
-    /// The multisampled depth buffer for the current size.
-    static func makeDepth(device: Device, width: Int64, height: Int64) -> Texture {
-        device.createTexture(width: width, height: height, format: depthFormat, usage: [.RenderAttachment], sampleCount: samples, label: "depth")
+    /// The depth buffer for `target` at the current size.
+    static func makeDepth(device: Device, target: DrawTarget, width: Int64, height: Int64) -> Texture {
+        device.createTexture(width: width, height: height, format: depthFormat, usage: [.RenderAttachment], sampleCount: target.samples, label: "depth")
     }
 
-    /// The multisampled color buffer, resolved into each frame.
-    static func makeColor(device: Device, format: TextureFormat, width: Int64, height: Int64) -> Texture {
-        device.createTexture(width: width, height: height, format: format, usage: [.RenderAttachment], sampleCount: samples, label: "color")
+    /// The multisampled color buffer for `target`, or None when it isn't
+    /// multisampled.
+    static func makeColor(device: Device, target: DrawTarget, width: Int64, height: Int64) -> TextureView? {
+        guard target.samples > 1 else {
+            return .None;
+        }
+        .Some(device.createTexture(width: width, height: height, format: target.format, usage: [.RenderAttachment], sampleCount: target.samples, label: "color").createView())
     }
 
-    static func create(window: NativeWindow, width width: Int64, height height: Int64, presentMode presentMode: PresentMode) -> Renderer throws WgpuError {
+    static func create(window: NativeWindow, width width: Int64, height height: Int64, graphics graphics: Graphics) -> Renderer throws WgpuError {
         let instance = Instance();
         let surface = instance.createSurface(surfaceSource(window));
         let adapter = try instance.requestAdapter(compatibleWith: surface);
@@ -113,8 +117,9 @@ struct Renderer: not Copyable {
         // Timestamps cost nothing until a run asks to time the GPU.
         let features = if adapter.supports(.TimestampQuery) { [Feature.TimestampQuery] } else { [] };
         let device = try adapter.requestDevice(label: "aerie", features: features);
-        let format = surface.preferredFormat(adapter);
-        surface.configure(device: device, format: format, width: width, height: height, presentMode: presentMode);
+        let quality = graphics.quality;
+        let target = DrawTarget(format: surface.preferredFormat(adapter), samples: quality.samples);
+        surface.configure(device: device, format: target.format, width: width, height: height, presentMode: graphics.presentMode);
 
         let atlas = Atlas.load(device, "assets/blocks.png", tileSize: tileSize);
         let atlasView = atlas.createView(range: ViewRange(dimension: .Some(.D2Array)), label: "block atlas");
@@ -125,7 +130,7 @@ struct Renderer: not Copyable {
         let uiView = ui.createView(range: ViewRange(dimension: .Some(.D2Array)), label: "interface atlas");
         // Smooth: the interface atlas holds font glyphs and drawn sprites.
         let uiSampler = device.createSampler(filter: .Linear, mipmapFilter: .Some(.Linear), label: "interface atlas");
-        let shadowMap = device.createTexture(width: shadowSize, height: shadowSize, format: shadowFormat, usage: [.RenderAttachment, .TextureBinding], label: "shadow map");
+        let shadowMap = device.createTexture(width: quality.shadowSize, height: quality.shadowSize, format: shadowFormat, usage: [.RenderAttachment, .TextureBinding], label: "shadow map");
         let shadowView = shadowMap.createView();
         let shadowSampler = device.createSampler(filter: .Linear, compare: .Some(.LessEqual), label: "shadow");
         let uniformBuffer = device.createBuffer(size: Layout.of[Uniforms]().size, usage: [.Uniform, .CopyDst], label: "uniforms");
@@ -136,15 +141,16 @@ struct Renderer: not Copyable {
         let shadowLayout = device.createPipelineLayout(groups: [[
             BindingLayout.uniformBuffer(0, visibility: [.Vertex])
         ], chunkBindings()], label: "shadow");
-        let encode = not format.isSrgb;
-        let shader = device.createShaderModule(wgsl: loadShader("blocks", encode: encode), label: "blocks");
+        let header = shaderHeader(target, quality: quality);
+        let shader = device.createShaderModule(wgsl: loadShader("blocks", header: header), label: "blocks");
+        let overlayShader = device.createShaderModule(wgsl: loadShader("overlay", header: header), label: "overlay");
         let skyPipeline = device.createRenderPipeline(
             shader: shader,
-            targets: [ColorTarget(format: format)],
+            targets: [ColorTarget(format: target.format)],
             vertexEntry: "vs_sky",
             fragmentEntry: "fs_sky",
             depth: .Some(DepthTest(format: depthFormat, compare: .Always, write: false)),
-            sampleCount: samples,
+            sampleCount: target.samples,
             layout: .Some(skyLayout.share()),
             label: "sky"
         );
@@ -153,15 +159,15 @@ struct Renderer: not Copyable {
             entries: [uniformBuffer.binding(0), atlasView.binding(1), atlasSampler.binding(2), shadowView.binding(3), shadowSampler.binding(4)]
         );
         let shadowGroup = device.createBindGroup(layout: shadowLayout.bindGroupLayout(0), entries: [uniformBuffer.binding(0)]);
-        let chunks = ChunkPass.create(device, shader, format: format, layout: layout, shadowLayout: shadowLayout);
-        let models = ModelPass.create(device, shader, format: format, layout: skyLayout);
-        let icons = IconPass.create(device, shader, format: format);
-        let overlay = OverlayPass.create(device, format: format, encode: encode, blocks: atlasView, blockSampler: atlasSampler, ui: uiView, uiSampler: uiSampler);
-        let depth = Renderer.makeDepth(device, width, height);
-        let color = Renderer.makeColor(device, format, width, height);
+        let chunks = ChunkPass.create(device, shader, target: target, layout: layout, shadowLayout: shadowLayout);
+        let models = ModelPass.create(device, shader, target: target, layout: skyLayout);
+        let icons = IconPass.create(device, shader, target: target);
+        let overlay = OverlayPass.create(device, overlayShader, target: target, blocks: atlasView, blockSampler: atlasSampler, ui: uiView, uiSampler: uiSampler);
+        let depth = Renderer.makeDepth(device, target, width, height);
+        let colorView = Renderer.makeColor(device, target, width, height);
         .Ok(Renderer(
-            instance: instance, device: device, surface: surface, format: format, presentMode: presentMode, width: width, height: height,
-            depth: depth, color: color, skyPipeline: skyPipeline, worldGroup: worldGroup,
+            instance: instance, device: device, surface: surface, target: target, graphics: graphics, width: width, height: height,
+            depth: depth, colorView: colorView, skyPipeline: skyPipeline, worldGroup: worldGroup,
             shadowMap: shadowMap, shadowGroup: shadowGroup, uniformBuffer: uniformBuffer,
             chunks: chunks, models: models, overlay: overlay, icons: icons,
             viewDistance: 160.0, fieldOfView: baseFieldOfView, drawnChunks: 0, chunkDraws: 0, gpuTimer: GpuTimer()
@@ -175,15 +181,24 @@ struct Renderer: not Copyable {
         guard width > 0 and height > 0 else {
             return;
         }
-        self.surface.configure(device: self.device, format: self.format, width: width, height: height, presentMode: self.presentMode);
-        self.depth = Renderer.makeDepth(self.device, width, height);
-        self.color = Renderer.makeColor(self.device, self.format, width, height);
+        self.surface.configure(device: self.device, format: self.target.format, width: width, height: height, presentMode: self.graphics.presentMode);
+        self.depth = Renderer.makeDepth(self.device, self.target, width, height);
+        self.colorView = Renderer.makeColor(self.device, self.target, width, height);
     }
 
     /// Draw `faces` for chunk (cx, cy, cz), lit by `lights`, replacing any
     /// it had.
     mutating func upload(cx: Int64, cy: Int64, cz: Int64, faces: ChunkFaces, lights: [Vec4]) {
         self.chunks.upload(self.device, cx, cy, cz, faces, lights);
+    }
+
+    /// The main pass's color attachment, cleared to `clear`: the
+    /// multisampled buffer resolving into `frame`, or `frame` itself.
+    func colorAttachment(frame: TextureView, clear clear: Color) -> ColorAttachment {
+        match self.colorView {
+            .Some(view) => view.colorAttachment(resolvingInto: frame, clear: .Some(clear)),
+            .None => frame.colorAttachment(clear: .Some(clear))
+        }
     }
 
     /// Draw one frame of `scene`.
@@ -203,14 +218,13 @@ struct Renderer: not Copyable {
         let frame = match self.surface.currentTexture() {
             .Ok(f) => f,
             .Err(.SurfaceOutdated(_)) => {
-                self.surface.configure(device: self.device, format: self.format, width: self.width, height: self.height, presentMode: self.presentMode);
+                self.surface.configure(device: self.device, format: self.target.format, width: self.width, height: self.height, presentMode: self.graphics.presentMode);
                 return .Ok(());
             },
             .Err(.SurfaceTimeout(_)) => { return .Ok(()); },
             .Err(e) => { throw e }
         };
         let frameView = frame.texture.createView();
-        let colorView = self.color.createView();
         let depthView = self.depth.createView();
         let shadowView = self.shadowMap.createView();
         let sky = Color(r: Float64(from: light.horizon.x), g: Float64(from: light.horizon.y), b: Float64(from: light.horizon.z));
@@ -219,7 +233,7 @@ struct Renderer: not Copyable {
             self.chunks.drawShadows(pass, list: list, uniforms: self.shadowGroup);
             self.models.drawShadows(pass, count: shadowBoxes, group: self.shadowGroup);
         };
-        let target = colorView.colorAttachment(resolvingInto: frameView, clear: .Some(sky));
+        let target = self.colorAttachment(frameView, clear: sky);
         encoder.renderPass(RenderPassDescriptor(color: [target], depth: .Some(depthView.depthAttachment()), timestamps: self.gpuTimer.timestamps(.Main))) { (pass) in
             pass.setPipeline(self.skyPipeline);
             pass.setBindGroup(0, self.worldGroup);
@@ -244,7 +258,7 @@ struct Renderer: not Copyable {
         let aspect = Float32(from: self.width) / Float32(from: self.height);
         let projection = Mat4.perspective(fovY: radians(self.fieldOfView), aspect: aspect, near: 0.1, far: self.viewDistance + 64.0);
         let viewProj = projection * view;
-        let lightViewProj = light.shadowView(eye);
+        let lightViewProj = light.shadowView(eye, mapSize: self.graphics.quality.shadowSize);
         self.device.write(self.uniformBuffer, value: Uniforms(
             viewProj: viewProj,
             lightViewProj: lightViewProj,
