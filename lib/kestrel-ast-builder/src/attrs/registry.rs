@@ -399,7 +399,7 @@ pub static REGISTRY: &[AttrDef] = &[
         // warning (E914) for one release.
         params: &[ParamDef {
             label: None,
-            kind: ParamKind::Cases("platform", &["Darwin", "Linux", "darwin", "linux"]),
+            kind: ParamKind::Cases("platform", &["Darwin", "Linux", "Emscripten", "darwin", "linux"]),
             required: true,
             variadic: true,
             missing_code: None,

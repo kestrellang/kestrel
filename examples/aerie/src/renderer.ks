@@ -119,16 +119,6 @@ func boxVisible(planes: [Vec4], low: Vec3, high: Vec3) -> Bool {
     true
 }
 
-func surfaceSource(window: NativeWindow) -> SurfaceSource {
-    match window {
-        .Xlib(display, id) => .Xlib(display, id),
-        .Wayland(display, surface) => .Wayland(display, surface),
-        .MetalLayer(layer) => .MetalLayer(layer),
-        .Windows(hinstance, hwnd) => .Windows(hinstance, hwnd),
-        .Unsupported => fatalError("this platform's windows aren't supported")
-    }
-}
-
 /// The block atlas: `assets/blocks.png` is a column of 16x16 tiles, and
 /// each becomes one layer of a mipmapped 2D array texture, so tiles never
 /// bleed into each other at a distance.
@@ -168,6 +158,9 @@ func loadAtlas(device: Device, path: String) -> Texture {
 /// buffers it reads. The game hands it a camera and faces; it knows nothing
 /// about blocks itself.
 struct Renderer: not Copyable {
+    /// Kept for the renderer's lifetime: a browser's WebGPU stops serving
+    /// the surface once its instance is released.
+    var instance: Instance
     var device: Device
     var surface: Surface
     var format: TextureFormat
@@ -304,7 +297,7 @@ struct Renderer: not Copyable {
         let depth = Renderer.makeDepth(device, width, height);
         let color = Renderer.makeColor(device, format, width, height);
         .Ok(Renderer(
-            device: device, surface: surface, format: format, width: width, height: height,
+            instance: instance, device: device, surface: surface, format: format, width: width, height: height,
             depth: depth, color: color, pipeline: pipeline, glassPipeline: glassPipeline, bindGroup: bindGroup,
             shadowMap: shadowMap, shadowPipeline: shadowPipeline, shadowGroup: shadowGroup,
             chunkLayout: layout.bindGroupLayout(1), uniformBuffer: uniformBuffer,

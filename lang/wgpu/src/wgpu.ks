@@ -179,6 +179,7 @@ public struct Instance: not Copyable {
         unsafe raw.wgpuInstanceRequestAdapter(self.handle, options, info);
         while not r.done {
             unsafe raw.wgpuInstanceProcessEvents(self.handle);
+            let _ = raw.yieldToHost();
         }
         if r.status != raw.WGPURequestAdapterStatus_Success {
             throw WgpuError.NoAdapter(r.message.clone());
@@ -297,6 +298,8 @@ public struct Adapter: not Copyable {
             userdata2: RawPointer.nullPointer()
         );
         unsafe raw.wgpuAdapterRequestDevice(self.handle, descriptor, info);
+        // wgpu-native answers before returning; a browser on a later turn.
+        while not r.done and raw.yieldToHost() {}
         if not r.done or r.status != raw.WGPURequestDeviceStatus_Success {
             throw WgpuError.NoDevice(r.message.clone());
         }

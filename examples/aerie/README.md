@@ -48,6 +48,11 @@ are meshed separately and blended after the solid world, far chunks first.
 A title screen turns over the world until you press Enter (`AERIE_PLAY=1`
 skips it), and the overlay draws text with a built-in 3x5 pixel font.
 
+**Milestone 7** runs Aerie in a browser. `web/build.sh` compiles it to
+wasm64 with Emscripten, using browser WebGPU (Dawn's `emdawnwebgpu`) and
+SDL2's Emscripten port; saves go to IndexedDB. The game code is shared;
+`src/platform.ks` holds the few desktop and web differences.
+
 Controls: WASD to walk, arrow keys to look, Space to jump (hold to glide),
 Q to break, E to place, 1 to 9 for the hotbar, T to skip time, P to save, F to fly (Space and Left
 Shift to rise and sink), Escape to save and quit, Enter to leave the title screen. `AERIE_FRAMES=n` quits after n
@@ -62,9 +67,22 @@ Same requirements as `examples/wgpu_scene` (wgpu-native v27 in
 WGPU_NATIVE_DIR=~/wgpu-native flock run
 ```
 
+### In a browser
+
+Needs Emscripten 4 or later and a browser with WebGPU and wasm64
+(Memory64), such as a recent Chrome. From the repository root:
+
+```sh
+source ~/emsdk/emsdk_env.sh
+examples/aerie/web/build.sh
+python3 -m http.server -d examples/aerie/web/out 8000   # open localhost:8000
+```
+
 ## Layout
 
-- `src/main.ks` — the desktop driver: an SDL window and loop.
+- `src/main.ks` — the driver: an SDL window and loop, on the desktop and in a browser.
+- `src/platform.ks` — what differs between desktop and browser: the surface, save path, frame end.
+- `web/` — the browser build script, page shell and a wasm64 workaround.
 - `src/game.ks` — `Game`, driven one `event` and one `frame` at a time, so a
   browser build can call it from `requestAnimationFrame` instead.
 - `src/renderer.ks` — the wgpu side: surface, shadow and main passes, HUD overlay, daylight.

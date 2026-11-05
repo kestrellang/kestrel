@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aerie</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #dfe6f2; }
+  body { display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; color: #334; }
+  canvas { display: block; width: min(100vw, 1280px); aspect-ratio: 16 / 9; outline: none; }
+  #status { position: fixed; bottom: 12px; left: 0; right: 0; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+<div id="status">Loading…</div>
+<script>
+  const status = document.getElementById('status');
+  if (!navigator.gpu) {
+    status.textContent = 'Aerie needs a browser with WebGPU (for example a recent Chrome).';
+  }
+  var Module = {
+    canvas: document.getElementById('canvas'),
+    // Saves live in IndexedDB: mount it before main runs, and load what's
+    // there. The game flushes it after each save.
+    preRun: [() => {
+      FS.mkdir('/saves');
+      FS.mount(IDBFS, {}, '/saves');
+      addRunDependency('saves');
+      FS.syncfs(true, (err) => {
+        if (err) console.error('loading saves failed', err);
+        removeRunDependency('saves');
+      });
+    }],
+    onRuntimeInitialized: () => { status.textContent = 'Click the game, then press Enter.'; Module.canvas.focus(); },
+    print: (text) => console.log(text),
+    printErr: (text) => console.error(text),
+  };
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

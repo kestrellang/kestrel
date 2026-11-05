@@ -26,6 +26,8 @@ pub struct CodegenOptions {
     pub libraries: Vec<String>,
     pub library_paths: Vec<String>,
     pub frameworks: Vec<String>,
+    /// Extra arguments passed verbatim to the linker driver.
+    pub link_args: Vec<String>,
     pub c_sources: Vec<std::path::PathBuf>,
     pub emit_clif: bool,
     /// `--overflow-checks on|off`; `None` derives it from `opt_level`.

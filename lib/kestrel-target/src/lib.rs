@@ -52,6 +52,18 @@ impl TargetConfig {
         self.pointer_width == 8
     }
 
+    /// Whether this targets WebAssembly, which needs its own LLVM target,
+    /// static relocation, and a generic CPU.
+    pub fn is_wasm(&self) -> bool {
+        matches!(self.triple.architecture, Architecture::Wasm32 | Architecture::Wasm64)
+    }
+
+    /// Whether this is the machine the compiler runs on, so code can be
+    /// tuned for the host CPU.
+    pub fn is_host(&self) -> bool {
+        self.triple == Triple::host()
+    }
+
     /// Pointer size in bytes as `u64`.
     ///
     /// Uses `u64` (not `usize`) so layout computation is correct when
@@ -72,6 +84,7 @@ impl TargetConfig {
                 CAbi::SysV64
             },
             Architecture::Aarch64(_) => CAbi::Aapcs64,
+            Architecture::Wasm32 | Architecture::Wasm64 => CAbi::Wasm,
             _ => CAbi::Other,
         }
     }
@@ -84,6 +97,10 @@ pub enum CAbi {
     SysV64,
     /// AArch64 AAPCS64 (Linux, Apple silicon).
     Aapcs64,
+    /// WebAssembly (clang's basic C ABI): a struct holding a single scalar
+    /// passes and returns as that scalar; any other struct passes by pointer
+    /// to a copy and returns through a hidden pointer.
+    Wasm,
     /// Anything else: structs pass by pointer and return through a hidden
     /// pointer, which is right for no real C ABI but keeps the old behaviour.
     Other,
@@ -103,11 +120,15 @@ fn pointer_width_of(triple: &Triple) -> Option<u8> {
     }
 }
 
-/// Target operating system for `@platform(.Darwin)` / `@platform(.Linux)`.
+/// Target operating system for `@platform(.Darwin)` / `@platform(.Linux)` /
+/// `@platform(.Emscripten)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Os {
     Darwin,
     Linux,
+    /// WebAssembly in a browser through Emscripten (`wasm64-unknown-emscripten`).
+    /// Its libc is musl, so most constants match Linux; struct layouts don't.
+    Emscripten,
 }
 
 impl Os {
@@ -117,6 +138,7 @@ impl Os {
             // Lowercase is the pre-0.18 spelling (warned by `AttrsOf`).
             "Darwin" | "darwin" => Some(Os::Darwin),
             "Linux" | "linux" => Some(Os::Linux),
+            "Emscripten" => Some(Os::Emscripten),
             _ => None,
         }
     }
@@ -138,6 +160,7 @@ impl Os {
         match triple.operating_system {
             OperatingSystem::Darwin | OperatingSystem::MacOSX { .. } => Some(Os::Darwin),
             OperatingSystem::Linux => Some(Os::Linux),
+            OperatingSystem::Emscripten => Some(Os::Emscripten),
             _ => None,
         }
     }
@@ -175,6 +198,14 @@ mod tests {
         let target = TargetConfig::from_triple("i686-unknown-linux-gnu").unwrap();
         assert!(!target.is_64bit());
         assert_eq!(target.pointer_size(), 4);
+    }
+
+    #[test]
+    fn from_triple_wasm64_emscripten() {
+        let target = TargetConfig::from_triple("wasm64-unknown-emscripten").unwrap();
+        assert_eq!(target.pointer_size(), 8);
+        assert_eq!(target.os(), Some(Os::Emscripten));
+        assert!(target.is_wasm());
     }
 
     #[test]

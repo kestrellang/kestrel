@@ -150,6 +150,11 @@ struct BuildArgs {
     /// Link a macOS framework (repeatable).
     #[arg(long = "framework", value_name = "NAME")]
     frameworks: Vec<String>,
+
+    /// Pass an argument straight to the linker driver (repeatable), e.g.
+    /// `--link-arg=-sUSE_SDL=2` for Emscripten.
+    #[arg(long = "link-arg", value_name = "ARG", allow_hyphen_values = true)]
+    link_args: Vec<String>,
 }
 
 #[derive(Args)]
@@ -282,6 +287,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
                 libraries: args.libraries,
                 library_paths: args.library_paths,
                 frameworks: args.frameworks,
+                link_args: args.link_args,
                 c_sources,
                 overflow_checks_override: args.overflow_checks,
                 ..Default::default()
@@ -296,6 +302,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
                 libraries: args.libraries,
                 library_paths: args.library_paths,
                 frameworks: args.frameworks,
+                link_args: args.link_args,
                 c_sources,
                 overflow_checks_override: args.overflow_checks,
                 ..Default::default()
