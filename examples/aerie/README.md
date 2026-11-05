@@ -60,11 +60,11 @@ sun and its halo, and the moon and twinkling stars at night. Fog fades the
 world into that same gradient, sunlight warms to peach at dusk and shadows
 are cool blue-grey. Every block texture is redrawn at 16x16 (`tools/make_atlas.py`),
 and the interface comes from a generated atlas (`tools/make_ui.py`,
-`assets/ui.png`): text is set in Inter (SIL Open Font License) with upper and
-lowercase. The interface is pixel art to match the blocks: a wooden tray of
+`assets/ui.png`): text is set in our own pixel font (`tools/pixel_font.py`),
+upper and lowercase, drawn crisp at whole-pixel sizes. The interface is pixel art to match the blocks: a wooden tray of
 stone slots holding little 3D blocks (gold for the selected one), wooden
-boards behind text, a warm wooden button on the title screen, and a logo of
-driftstone letters capped with dripping moss, built from the block textures.
+boards behind text, a warm wooden button on the title screen, and a logo
+whose every pixel is a driftstone block, mossy where it's open to the sky.
 The mouse looks around once captured (click, or Enter on the title).
 
 About half the sky belongs to evil lairs. A low-frequency theme noise

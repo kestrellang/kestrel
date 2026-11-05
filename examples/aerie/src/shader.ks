@@ -348,7 +348,8 @@ fn fs_glass(in: VertexOut) -> @location(0) vec4f {
 }
 
 /// The 2D overlay: screen-space rectangles in pixels, each a solid color,
-/// a tinted block tile, or a tinted layer of the interface atlas (sprites, block icons and font glyphs).
+/// a tinted block tile, or a tinted layer of the interface atlas (sprites, block icons and font glyphs),
+/// smooth or, for pixel art, crisp.
 let overlayShader: String = "
 struct Screen {
     size: vec4f,
@@ -389,7 +390,12 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let layer = max(in.layer, 0);
     let block = textureSampleLevel(atlas, atlasSampler, in.uv, layer, 0.0);
     let sprite = textureSample(ui, uiSampler, in.uv, layer);
-    let texel = select(block, sprite, in.source == 1);
+    // Pixel art and the pixel font (source 2): the middle of the 24-pixel
+    // grid cell under this fragment, unfiltered, so the pixels stay crisp
+    // at any size.
+    let snapped = (floor(in.uv * 24.0) + 0.5) / 24.0;
+    let crisp = textureSampleLevel(ui, uiSampler, snapped, layer, 0.0);
+    let texel = select(select(block, sprite, in.source == 1), crisp, in.source == 2);
     if in.layer < 0 {
         return in.color;
     }

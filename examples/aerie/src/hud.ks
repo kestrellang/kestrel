@@ -17,8 +17,18 @@ func uiQuad(layer: Float32, x: Float32, y: Float32, w: Float32, h: Float32, colo
     OverlayQuad(rect: Vec4(x: x, y: y, z: w, w: h), color: color, tile: Vec4(x: layer, y: 1.0, z: 0.0, w: 1.0))
 }
 
+/// As `uiQuad`, for pixel art: sampled crisp, on its 24-pixel grid.
+func pixelQuad(layer: Float32, x: Float32, y: Float32, w: Float32, h: Float32, color: Vec4) -> OverlayQuad {
+    OverlayQuad(rect: Vec4(x: x, y: y, z: w, w: h), color: color, tile: Vec4(x: layer, y: 2.0, z: 0.0, w: 1.0))
+}
+
+/// The overlay source for a sprite: crisp for pixel art, else smooth.
+func source(sprite: UISprite) -> Float32 {
+    if sprite.pixelArt { 2.0 } else { 1.0 }
+}
+
 func sprite(sprite: UISprite, x: Float32, y: Float32, w: Float32, h: Float32, color: Vec4) -> OverlayQuad {
-    uiQuad(sprite.layer, x, y, w, h, color)
+    OverlayQuad(rect: Vec4(x: x, y: y, z: w, w: h), color: color, tile: Vec4(x: sprite.layer, y: source(sprite), z: 0.0, w: 1.0))
 }
 
 /// A sprite stretched to any width without stretching its rounded ends:
@@ -27,10 +37,11 @@ func sprite(sprite: UISprite, x: Float32, y: Float32, w: Float32, h: Float32, co
 func slicedSprite(sprite: UISprite, x: Float32, y: Float32, w: Float32, h: Float32, color: Vec4) -> [OverlayQuad] {
     let cap = h * 0.5;
     let layer = sprite.layer;
+    let from = source(sprite);
     [
-        OverlayQuad(rect: Vec4(x: x, y: y, z: cap, w: h), color: color, tile: Vec4(x: layer, y: 1.0, z: 0.0, w: 0.5)),
-        OverlayQuad(rect: Vec4(x: x + cap, y: y, z: w - cap * 2.0, w: h), color: color, tile: Vec4(x: layer, y: 1.0, z: 0.5, w: 0.5)),
-        OverlayQuad(rect: Vec4(x: x + w - cap, y: y, z: cap, w: h), color: color, tile: Vec4(x: layer, y: 1.0, z: 0.5, w: 1.0))
+        OverlayQuad(rect: Vec4(x: x, y: y, z: cap, w: h), color: color, tile: Vec4(x: layer, y: from, z: 0.0, w: 0.5)),
+        OverlayQuad(rect: Vec4(x: x + cap, y: y, z: w - cap * 2.0, w: h), color: color, tile: Vec4(x: layer, y: from, z: 0.5, w: 0.5)),
+        OverlayQuad(rect: Vec4(x: x + w - cap, y: y, z: cap, w: h), color: color, tile: Vec4(x: layer, y: from, z: 0.5, w: 1.0))
     ]
 }
 
@@ -43,6 +54,13 @@ func faded(color: Vec4, a: Float32) -> Vec4 {
     Vec4(x: color.x, y: color.y, z: color.z, w: color.w * a)
 }
 
+/// The nearest text size, at least `size`'s floor, at which each pixel of
+/// the font is a whole number of screen pixels: a multiple of the font's
+/// 9 rows.
+func crispSize(size: Float32) -> Float32 {
+    ((size / 9.0).floor() * 9.0).clamp(9.0, 1000.0)
+}
+
 /// Width in pixels of `text` set at `size` pixels.
 func textWidth(text: String, size: Float32) -> Float32 {
     var width: Float32 = 0.0;
@@ -52,28 +70,31 @@ func textWidth(text: String, size: Float32) -> Float32 {
     width * size / uiFontSize
 }
 
-/// `text` set at `size` pixels with the top of its tallest letters at y,
-/// one glyph quad per character.
+/// `text` set at `size` pixels (best a `crispSize`) with the top of its
+/// tallest letters at y, one glyph quad per character.
 func textQuads(text: String, x x: Float32, y y: Float32, size size: Float32, color color: Vec4) -> [OverlayQuad] {
     let k = size / uiFontSize;
     let cell = uiCell * k;
     var quads: [OverlayQuad] = [];
-    var pen = x;
+    // Whole pixels, so the font's pixels line up with the screen's.
+    var pen = x.floor();
+    let top = y.floor();
     for byte in text.bytes {
         if byte != 32 {
             // Each glyph sits `uiGlyphPad` in from its cell's left and 4
             // pixels down from its top (see tools/make_ui.py).
-            quads.append(uiQuad(uiGlyphLayer(byte), pen - uiGlyphPad * k, y - 4.0 * k, cell, cell, color));
+            quads.append(pixelQuad(uiGlyphLayer(byte), pen - uiGlyphPad * k, top - 4.0 * k, cell, cell, color));
         }
         pen = pen + uiAdvance(byte) * k;
     }
     quads
 }
 
-/// `text` over a soft drop shadow, so it reads over a bright sky.
+/// `text` over a drop shadow one font pixel down and right, so it reads
+/// over a bright sky.
 func labelQuads(text: String, x x: Float32, y y: Float32, size size: Float32, color color: Vec4) -> [OverlayQuad] {
-    let offset = (size * 0.07).clamp(1.0, 100.0);
-    var quads = textQuads(text, x: x + offset, y: y + offset, size: size, color: faded(ink, color.w * 0.6));
+    let offset = (size / 9.0).floor().clamp(1.0, 100.0);
+    var quads = textQuads(text, x: x + offset, y: y + offset, size: size, color: faded(ink, color.w * 0.8));
     quads.append(contentsOf: textQuads(text, x: x, y: y, size: size, color: color));
     quads
 }
@@ -113,7 +134,7 @@ func boardLabel(text: String, width width: Float32, y y: Float32, size size: Flo
 /// A message in the top left on a small frosted pill, fading out over
 /// its last second.
 func noticeQuads(text: String, fade fade: Float32) -> [OverlayQuad] {
-    let size: Float32 = 20.0;
+    let size: Float32 = 18.0;
     let width = textWidth(text, size);
     var quads = slicedSprite(.Panel, 14.0, 14.0, width + 36.0, 40.0, faded(white, fade));
     quads.append(contentsOf: labelQuads(text, x: 32.0, y: 24.0, size: size, color: faded(white, fade)));
@@ -121,9 +142,8 @@ func noticeQuads(text: String, fade fade: Float32) -> [OverlayQuad] {
 }
 
 /// The crosshair, the hotbar and the selected block's name for a `width`
-/// by `height` screen, `time` seconds in. Without the mouse captured, a
-/// hint says how to get it back.
-func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool, time: Float32, captured captured: Bool) -> [OverlayQuad] {
+/// by `height` screen, `time` seconds in.
+func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool, time: Float32) -> [OverlayQuad] {
     var quads: [OverlayQuad] = [];
     let w = Float32(from: width);
     let h = Float32(from: height);
@@ -136,9 +156,6 @@ func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool, time: Floa
     quads.append(rect(cx - 2.0, cy - arm - 1.0, 4.0, arm * 2.0 + 2.0, outline));
     quads.append(rect(cx - arm, cy - 1.0, arm * 2.0, 2.0, cross));
     quads.append(rect(cx - 1.0, cy - arm, 2.0, arm * 2.0, cross));
-    if not captured {
-        quads.append(contentsOf: centeredLabel("Click to look around", width: w, y: cy + 28.0, size: 20.0, color: white));
-    }
 
     // The hotbar: a wooden tray of stone slots, each with a little 3D
     // block. The selected slot turns gold and rises with a warm glow, its
@@ -166,11 +183,9 @@ func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool, time: Floa
             quads.append(sprite(.Slot, x, top, slot, slot, white));
             quads.append(uiQuad(uiIconLayer(block.id), x + 14.0, top + 14.0, slot - 28.0, slot - 28.0, white));
         }
-        let number = labelQuads("\(i + 1)", x: x + 9.0, y: top + 7.0 - if chosen { 6.0 } else { 0.0 }, size: 13.0, color: faded(white, if chosen { 0.95 } else { 0.7 }));
-        quads.append(contentsOf: number);
         i = i + 1;
     }
-    quads.append(contentsOf: pillLabel(hotbar(selected).name, width: w, y: top - 54.0, size: 20.0, color: white));
+    quads.append(contentsOf: pillLabel(hotbar(selected).name, width: w, y: top - 54.0, size: 18.0, color: white));
     quads
 }
 
@@ -213,20 +228,20 @@ func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [
         let y = titleTop + size * 0.8 * fy;
         quads.append(sprite(.Twinkle, x - s * 0.5, y - s * 0.5, s, s, Vec4(x: 1.0, y: 0.97, z: 0.88, w: 0.4 + beat * 0.6)));
     }
-    let small = (size * 0.2).floor().clamp(18.0, 30.0);
+    let small = crispSize((size * 0.2).clamp(18.0, 30.0));
     quads.append(contentsOf: pillLabel("Islands above the cloud sea", width: w, y: (logoTop + cell * rows + small * 0.6).floor(), size: small, color: Vec4(x: 0.92, y: 0.95, z: 1.0, w: 1.0)));
     // Bound first: an `if` directly inside an array literal crashes the
     // compiler (array_literal_if_expression_owned_element.ks).
     let prompt = if resumed { "Press Enter or click to continue" } else { "Press Enter or click to begin" };
     // The prompt on a warm wooden button, with a glow that breathes.
     let pulse = 0.5 + 0.5 * (time * 3.0).sin();
-    let promptSize = (small * 1.15).floor();
+    let promptSize = crispSize(small * 1.3);
     let promptY = (h * 0.64).floor();
     let promptW = textWidth(prompt, promptSize) + promptSize * 2.6;
     quads.append(sprite(.Glow, w * 0.5 - promptW * 0.7, promptY - promptSize * 2.2, promptW * 1.4, promptSize * 5.0, Vec4(x: 1.0, y: 0.82, z: 0.5, w: 0.15 + pulse * 0.2)));
     quads.append(contentsOf: boardLabel(prompt, width: w, y: promptY, size: promptSize, color: white, board: .Button));
     // The controls, on a frosted strip along the bottom.
-    let controls = "WASD move    Mouse look    Hold left click break    Right click place    Wheel or 1-9 pick    Space jump, hold to glide    P save";
-    quads.append(contentsOf: pillLabel(controls, width: w, y: h - 46.0, size: 16.0, color: faded(white, 0.92)));
+    let controls = "WASD move   Mouse look   Hold left click break   Right click place   Wheel or 1-9 pick   Space jump, hold to glide   P save";
+    quads.append(contentsOf: pillLabel(controls, width: w, y: h - 46.0, size: 18.0, color: faded(white, 0.92)));
     quads
 }

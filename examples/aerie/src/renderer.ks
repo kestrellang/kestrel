@@ -104,8 +104,9 @@ func lightViewProjection(sun: Vec3, center: Vec3) -> Mat4 {
 
 /// One overlay rectangle: `rect` is (x, y, width, height) in pixels from
 /// the top left. `tile.x` is a layer to draw tinted by `color`, or negative
-/// for a plain `color` fill; `tile.y` picks the block atlas (0) or the
-/// interface atlas (1); `tile.z` to `tile.w` is the span of the layer's
+/// for a plain `color` fill; `tile.y` picks the block atlas (0), the
+/// interface atlas smoothed (1), or the interface atlas crisp, for pixel
+/// art (2); `tile.z` to `tile.w` is the span of the layer's
 /// width to show, so a sprite can be drawn in stretched slices.
 struct OverlayQuad: FFISafe {
     var rect: Vec4
