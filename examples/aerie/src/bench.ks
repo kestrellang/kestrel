@@ -19,6 +19,12 @@ struct Bench {
             }
         }
         let built = unsafe monotonicMs();
+        for _ in 0..<runs {
+            for cy in 0..<worldChunksY {
+                let _ = world.padded(cx, cy, cz);
+            }
+        }
+        let padded = unsafe monotonicMs();
         var faces = 0;
         for _ in 0..<runs {
             faces = 0;
@@ -29,9 +35,11 @@ struct Bench {
         let meshed = unsafe monotonicMs();
         // Per chunk: 9 columns of 4 chunks generated, 4 chunks meshed.
         let generated = Float64(from: built - start) / Float64(from: runs * 9 * worldChunksY);
-        let mesh = Float64(from: meshed - built) / Float64(from: runs * worldChunksY);
+        let pad = Float64(from: padded - built) / Float64(from: runs * worldChunksY);
+        let mesh = Float64(from: meshed - padded) / Float64(from: runs * worldChunksY);
         println("\(runs) runs, \(faces) faces in the spawn column");
         println("generate: \(generated) ms per chunk");
-        println("mesh:     \(mesh) ms per chunk");
+        println("pad:      \(pad) ms per chunk");
+        println("mesh:     \(mesh) ms per chunk, padding included");
     }
 }
