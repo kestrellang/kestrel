@@ -531,9 +531,16 @@ fn monomorphize_body(
             // would leak or double-drop the argument (a borrowed value stored
             // by a consuming setter was freed twice) — fail loudly instead.
             if was_witness && let Some(idx) = witness_convention_mismatch(&inst.kind, functions) {
+                let witness = match &inst.kind {
+                    InstKind::Call {
+                        callee: Callee::Direct { func, .. },
+                        ..
+                    } => functions.get(func).map(|f| f.name.clone()),
+                    _ => None,
+                };
                 panic!(
                     "ICE: witness call in {:?} passes arg {idx} with a convention its witness \
-                     doesn't take — the requirement and witness disagree",
+                     {witness:?} doesn't take — the requirement and witness disagree",
                     func.name
                 );
             }

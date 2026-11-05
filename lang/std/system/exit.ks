@@ -10,8 +10,9 @@ import std.os.(ExitCode, Exitable)
 
 /// Ends the process with `code`, the same type `@main` returns.
 ///
-/// Runs `atexit` handlers and flushes C stdio buffers. Kestrel values still
-/// in scope are **not** deinitialized, so flush any buffered writers first.
+/// Runs `atexit` handlers, which flush C stdio buffers and std.streams'
+/// standard output buffer. Kestrel values still in scope are **not**
+/// deinitialized, so flush any other buffered writers first.
 ///
 /// # Examples
 ///

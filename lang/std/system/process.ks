@@ -12,6 +12,7 @@ import std.io.error.(IoError)
 import std.io.read.(Readable)
 import std.io.write.(Writable)
 import std.ffi.(malloc, free)
+import std.streams
 
 // ============================================================================
 // THIS PROCESS
@@ -184,6 +185,25 @@ public struct PipeWriter: Writable, not Copyable {
         if self.fd >= 0 {
             native_close(self.fd);
         }
+    }
+}
+
+/// A child's pipe as a std.streams reader, for std.system's own reads. It
+/// borrows the fd; the `PipeReader` owning it closes it.
+///
+/// `PipeReader` itself conforms to std.io's `Readable` until std.io is
+/// removed, and then to std.streams'. It can't conform to both meanwhile:
+/// the compiler rejects one type satisfying two unrelated protocols'
+/// `read`, even through separate extensions (E463).
+struct PipeStream: streams.Readable {
+    var fd: Int32
+
+    internal mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        let n = native_read(self.fd, buf.pointer.asRaw(), buf.count);
+        if n < 0 {
+            return .Err(IoError.last())
+        }
+        .Ok(n)
     }
 }
 
@@ -395,6 +415,9 @@ public struct Command: not Copyable {
         let pidCell = NativeInt32Cells(1);
         let fds = NativeInt32Cells(3);
 
+        // Anything this process buffered for standard output goes out
+        // before the child, which may share fd 1, writes its own.
+        let _ = streams.flushStandardOutput();
         let program = self.program.toCString();
         // Borrow, don't bind: binding would move the array into the arm and
         // free the strings before the spawn reads them.
@@ -617,6 +640,8 @@ public struct Child: not Copyable {
         let err = self.error.take();
         var outFd = descriptor(of: out);
         var errFd = descriptor(of: err);
+        var outStream = PipeStream(fd: outFd);
+        var errStream = PipeStream(fd: errFd);
         var outBytes = Array[UInt8]();
         var errBytes = Array[UInt8]();
         var scratch = Array[UInt8](repeating: 0, count: 65536);
@@ -641,13 +666,13 @@ public struct Child: not Copyable {
                 return .Err(IoError.last())
             }
             if ready.read(at: 0) != 0 {
-                let open = try drainOnce(outFd, scratch, outBytes, limit);
+                let open = try drainOnce(outStream, scratch, outBytes, limit);
                 if not open {
                     outFd = -1
                 }
             }
             if ready.read(at: 1) != 0 {
-                let open = try drainOnce(errFd, scratch, errBytes, limit);
+                let open = try drainOnce(errStream, scratch, errBytes, limit);
                 if not open {
                     errFd = -1
                 }
@@ -671,17 +696,20 @@ public struct Child: not Copyable {
     }
 }
 
-/// One `read` from `fd` into `into`, keeping at most `limit` bytes in total
-/// (`0` = no limit). `false` at end-of-file.
-func drainOnce(fd: Int32, mutating scratch: Array[UInt8], mutating into: Array[UInt8], limit: Int64) -> Result[Bool, IoError] {
-    let n = native_read(fd, scratch.asPointer().asRaw(), scratch.count);
-    if n < 0 {
-        let error = IoError.last();
-        if error.errno() == 4 {
-            return .Ok(true)
+/// One `read` from `pipe` into `into`, keeping at most `limit` bytes in
+/// total (`0` = no limit). `false` at end-of-file.
+func drainOnce[R](mutating pipe: R, mutating scratch: Array[UInt8], mutating into: Array[UInt8], limit: Int64) -> Result[Bool, IoError]
+    where R: streams.Readable, R: not Copyable, R: not Static {
+    let n = match pipe.read(into: scratch.asMutableSlice()) {
+        .Ok(n) => n,
+        .Err(error) => {
+            // EINTR: poll again.
+            if error.errno() == 4 {
+                return .Ok(true)
+            }
+            return .Err(error)
         }
-        return .Err(error)
-    }
+    };
     if n == 0 {
         return .Ok(false)
     }

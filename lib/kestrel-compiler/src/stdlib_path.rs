@@ -131,7 +131,7 @@ pub fn repo_std_path() -> PathBuf {
 ///
 /// Every shim is listed here, the one place call sites read from, so adding
 /// or moving a shim is one edit.
-const STDLIB_C_SHIMS: &[&str] = &["io/libc_shims.c", "system/system_shims.c"];
+const STDLIB_C_SHIMS: &[&str] = &["io/libc_shims.c", "streams/streams_shims.c", "system/system_shims.c"];
 
 pub fn stdlib_c_sources(std_dir: Option<&Path>) -> Vec<PathBuf> {
     let Some(std_dir) = std_dir else {
