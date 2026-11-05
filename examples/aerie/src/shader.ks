@@ -180,6 +180,24 @@ fn skyGradient(dir: vec3f) -> vec3f {
     return color + u.sunColor.rgb * halo;
 }
 
+// A surface's color in the sun, sky light and nearby glow. `facing` is
+// how squarely it faces the sun, `ao` its ambient occlusion (0 to 1).
+fn lit(world: vec3f, n: vec3f, facing: f32, ao: f32, glowColor: vec3f, rgb: vec3f) -> vec3f {
+    let direct = facing * u.sunDir.w * sunlight(world, n);
+    // Lavender sky light from above, and a dimmer bounce from the cloud sea.
+    let ambient = u.sky.rgb * mix(0.5, 0.7, n.y * 0.5 + 0.5);
+    return rgb * (ambient * ao + glowColor * ao + direct * u.sunColor.rgb * mix(0.6, 1.0, ao));
+}
+
+// Fog only near the view distance, so chunks fade in at the edge instead
+// of popping; everything nearer is clear.
+fn fogged(world: vec3f, color: vec3f) -> vec3f {
+    let toEye = world - u.camera.xyz;
+    let distance = length(toEye);
+    let edge = smoothstep(u.fog.w * 0.75, u.fog.w, distance);
+    return mix(color, skyGradient(toEye / max(distance, 0.001)), edge);
+}
+
 // The lit, fogged color of a texel, keeping its alpha.
 fn shade(in: VertexOut, texel: vec4f) -> vec4f {
     let n = NORMALS[in.face];
@@ -187,22 +205,59 @@ fn shade(in: VertexOut, texel: vec4f) -> vec4f {
     // Plants are lit from all sides alike, so their quads don't flicker
     // between light and dark as the sun moves.
     let facing = select(max(dot(n, l), 0.0), 0.6, in.face >= 6u);
-    let direct = facing * u.sunDir.w * sunlight(in.world, n);
-    // Lavender sky light from above, and a dimmer bounce from the cloud sea.
-    let ambient = u.sky.rgb * mix(0.5, 0.7, n.y * 0.5 + 0.5);
-    let glowColor = glow(in.world, n);
-    var color = texel.rgb * (ambient * in.light + glowColor * in.light + direct * u.sunColor.rgb * mix(0.6, 1.0, in.light));
+    var color = lit(in.world, n, facing, in.light, glow(in.world, n), texel.rgb);
     // Glowing blocks light themselves.
     if in.layer == GLOWCAP_LAYER || in.layer == EMBERCORE_LAYER || in.layer == HEXBLOOM_LAYER {
         color = texel.rgb * 1.15;
     }
-    let toEye = in.world - u.camera.xyz;
-    let distance = length(toEye);
-    // Fog only near the view distance, so chunks fade in at the edge
-    // instead of popping; everything nearer is clear.
-    let edge = smoothstep(u.fog.w * 0.75, u.fog.w, distance);
-    color = mix(color, skyGradient(toEye / max(distance, 0.001)), edge);
-    return vec4f(color, texel.a);
+    return vec4f(fogged(in.world, color), texel.a);
+}
+
+// Models: boxes at any angle (`ModelBox`), for birds and the cracks on a
+// block being broken. 36 vertices each: six faces of two triangles.
+struct ModelOut {
+    @builtin(position) position: vec4f,
+    @location(0) world: vec3f,
+    @location(1) uv: vec2f,
+    @location(2) @interpolate(flat) layer: u32,
+    @location(3) normal: vec3f,
+};
+
+fn modelCorner(vertex: u32, center: vec3f, ax: vec3f, ay: vec3f, az: vec3f) -> vec3f {
+    let local = CORNERS[(vertex / 6u) * 4u + QUAD[vertex % 6u]] * 2.0 - 1.0;
+    return center + ax * local.x + ay * local.y + az * local.z;
+}
+
+@vertex
+fn vs_model(@builtin(vertex_index) vertex: u32, @location(0) center: vec4f, @location(1) ax: vec4f, @location(2) ay: vec4f, @location(3) az: vec4f) -> ModelOut {
+    let face = vertex / 6u;
+    let world = modelCorner(vertex, center.xyz, ax.xyz, ay.xyz, az.xyz);
+    let n = NORMALS[face];
+    var out: ModelOut;
+    out.position = u.viewProj * vec4f(world, 1.0);
+    out.world = world;
+    out.uv = UVS[QUAD[vertex % 6u]];
+    // The top face, the bottom, or a side.
+    out.layer = u32(select(select(center.w, ay.w, face == 3u), ax.w, face == 2u));
+    out.normal = normalize(ax.xyz * n.x + ay.xyz * n.y + az.xyz * n.z);
+    return out;
+}
+
+@vertex
+fn vs_model_shadow(@builtin(vertex_index) vertex: u32, @location(0) center: vec4f, @location(1) ax: vec4f, @location(2) ay: vec4f, @location(3) az: vec4f) -> @builtin(position) vec4f {
+    return u.lightViewProj * vec4f(modelCorner(vertex, center.xyz, ax.xyz, ay.xyz, az.xyz), 1.0);
+}
+
+@fragment
+fn fs_model(in: ModelOut) -> @location(0) vec4f {
+    let texel = textureSample(atlas, atlasSampler, in.uv, in.layer);
+    // Alpha-tested, so cracks show only where they're drawn.
+    if texel.a < 0.3 {
+        discard;
+    }
+    let n = normalize(in.normal);
+    let facing = max(dot(n, normalize(-u.sunDir.xyz)), 0.0);
+    return vec4f(fogged(in.world, lit(in.world, n, facing, 1.0, vec3f(0.0), texel.rgb)), 1.0);
 }
 
 // The sky: one triangle covering the screen, behind everything.

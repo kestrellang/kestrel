@@ -437,12 +437,152 @@ def hexbloom(rng):
     return t
 
 
+# Birds: kestrels over the dream islands, vultures over the lairs. Each
+# bird is a few boxes (see src/birds.ks), textured from these tiles.
+RUFOUS = [(132, 62, 40), (176, 92, 54), (206, 120, 70), (228, 150, 96)]
+CREAM = [(196, 170, 140), (228, 206, 176), (246, 232, 208), (255, 246, 228)]
+SLATE = [(84, 92, 122), (112, 122, 156), (146, 156, 188), (182, 190, 216)]
+SOOT = [(22, 18, 20), (34, 28, 30), (48, 40, 40), (64, 54, 52)]
+VULTURE = [(26, 20, 22), (40, 32, 32), (58, 46, 44), (78, 64, 58)]
+SILVER = [(90, 88, 96), (122, 120, 128), (156, 154, 160), (190, 188, 192)]
+SKIN = [(120, 32, 40), (164, 52, 56), (200, 84, 80), (228, 128, 112)]
+BEAK = [(70, 70, 80), (210, 170, 60), (240, 206, 90), (255, 232, 150)]
+
+
+def feathers(rng, colors, base, bar_every=0, bar=None, spots=0, spot=None):
+    """Soft feathering: noise along rows, so it reads as feather rows,
+    with optional dark bars across and arrowhead spots."""
+    n = fbm(rng, ((2, 0.4), (8, 0.6)))
+    t = [[ramp(colors, base + (n[y][x] - 0.5) * 0.6 + (0.08 if x % 4 == 0 else 0.0)) for x in range(S)] for y in range(S)]
+    if bar_every:
+        for y in range(S):
+            if y % bar_every == bar_every - 1:
+                for x in range(S):
+                    t[y][x] = bar
+    for _ in range(spots):
+        x, y = rng.randrange(S), rng.randrange(S)
+        t[y][x] = spot
+        t[y][(x + 1) % S] = spot
+        t[(y + 1) % S][x] = spot
+    return t
+
+
+def kestrel_back(rng):
+    return feathers(rng, RUFOUS, 0.55, spots=7, spot=SOOT[1])
+
+
+def kestrel_belly(rng):
+    return feathers(rng, CREAM, 0.5, spots=6, spot=RUFOUS[0])
+
+
+def kestrel_wing(rng):
+    return feathers(rng, RUFOUS, 0.45, bar_every=4, bar=SOOT[2])
+
+
+def kestrel_wing_under(rng):
+    return feathers(rng, CREAM, 0.6, bar_every=3, bar=SILVER[2])
+
+
+def kestrel_tips(rng):
+    """The dark, pointed primaries."""
+    return feathers(rng, SOOT, 0.55, bar_every=5, bar=CREAM[0])
+
+
+def kestrel_head(rng):
+    """Slate-blue cap, cream cheeks, a dark moustache stripe and an eye."""
+    t = feathers(rng, SLATE, 0.6)
+    for y in range(8, S):
+        for x in range(S):
+            t[y][x] = ramp(CREAM, 0.5 + rng.uniform(-0.2, 0.2))
+    for y in range(7, 13):
+        t[y][4] = t[y][11] = SOOT[1]
+    for x, y in ((4, 6), (11, 6)):
+        t[y][x] = SOOT[0]
+        t[y - 1][x] = (250, 220, 120)
+    return t
+
+
+def kestrel_tail(rng):
+    """Slate grey, a black band near the end and a pale tip."""
+    t = feathers(rng, SLATE, 0.55)
+    for y in range(11, 14):
+        for x in range(S):
+            t[y][x] = SOOT[1]
+    for y in range(14, S):
+        for x in range(S):
+            t[y][x] = CREAM[3]
+    return t
+
+
+def beak(rng):
+    t = [[ramp(BEAK, 0.55 + rng.uniform(-0.15, 0.2)) for x in range(S)] for y in range(S)]
+    for y in range(11, S):
+        for x in range(S):
+            t[y][x] = BEAK[0]
+    return t
+
+
+def vulture_body(rng):
+    return feathers(rng, VULTURE, 0.55, spots=5, spot=VULTURE[3])
+
+
+def vulture_wing(rng):
+    return feathers(rng, VULTURE, 0.5, bar_every=4, bar=VULTURE[0])
+
+
+def vulture_wing_under(rng):
+    """Black coverts, silver flight feathers along the trailing half."""
+    t = feathers(rng, SOOT, 0.5)
+    for y in range(8, S):
+        for x in range(S):
+            t[y][x] = ramp(SILVER, 0.5 + (0.25 if x % 3 == 0 else 0.0) + rng.uniform(-0.15, 0.15))
+    return t
+
+
+def vulture_head(rng):
+    """Bare, wrinkled red skin with a pale hooked beak and dark eyes."""
+    n = fbm(rng, ((8, 1.0),))
+    t = [[ramp(SKIN, 0.3 + n[y][x] * 0.6) for x in range(S)] for y in range(S)]
+    for y in range(0, S, 4):
+        for x in range(S):
+            if rng.random() < 0.5:
+                t[y][x] = SKIN[0]
+    for x, y in ((4, 6), (11, 6)):
+        t[y][x] = SOOT[0]
+    return t
+
+
+def vulture_ruff(rng):
+    """The pale fluffy collar."""
+    return feathers(rng, CREAM, 0.35)
+
+
+def crack(stage):
+    """Cracks spreading across a block being broken: stage 0 (a few) to 4
+    (shattered). Clear elsewhere, so only the cracks draw."""
+    def make(rng):
+        rng = random.Random(77)  # the same cracks at every stage, growing
+        t = blank()
+        for i in range(2 + stage * 3):
+            x, y = rng.randrange(S), rng.randrange(S)
+            for _ in range(3 + stage * 2):
+                t[y % S][x % S] = (24, 20, 28, 220)
+                x += rng.choice([-1, 0, 1])
+                y += rng.choice([-1, 0, 1])
+        return t
+    make.__name__ = f"crack{stage}"
+    return make
+
+
 # Layer order is the source of truth for block faces; keep it in sync with
 # `Layer` in src/blocks.ks.
 TILES = [driftstone, loam, moss_top, moss_side, bark, rings, emberleaf, cloudglass,
          skyiron, glowcap, sailcloth, featherthatch, planks,
          ashrock, scorch_top, scorch_side, darkbrick, embercore, deadwood, dead_rings,
-         gloomleaf, hexbloom]
+         gloomleaf, hexbloom,
+         kestrel_back, kestrel_belly, kestrel_wing, kestrel_wing_under, kestrel_tips,
+         kestrel_head, kestrel_tail, beak, vulture_body, vulture_wing, vulture_wing_under,
+         vulture_head, vulture_ruff] + [crack(i) for i in range(5)]
 
 
 def main():

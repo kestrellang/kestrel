@@ -16,9 +16,10 @@ struct Controls {
     var turnRight: Bool = false
     var lookUp: Bool = false
     var lookDown: Bool = false
-    /// Presses waiting for the next frame: break, place, toggle flying,
-    /// and a hotbar slot (or -1).
-    var breakPressed: Bool = false
+    /// Breaking: the left mouse button or Q, held.
+    var breakHeld: Bool = false
+    /// Presses waiting for the next frame: place, toggle flying, and a
+    /// hotbar slot (or -1).
     var placePressed: Bool = false
     var flyPressed: Bool = false
     var slotPressed: Int64 = -1
@@ -45,7 +46,7 @@ struct Controls {
             .RightArrow => { self.turnRight = held },
             .UpArrow => { self.lookUp = held },
             .DownArrow => { self.lookDown = held },
-            .Q => { if held { self.breakPressed = true } },
+            .Q => { self.breakHeld = held },
             .E => { if held { self.placePressed = true } },
             .F => { if held { self.flyPressed = true } },
             .Digit1 => { if held { self.slotPressed = 0 } },
@@ -67,7 +68,6 @@ struct Controls {
 
     /// Forget presses once a frame has handled them.
     mutating func clearPresses() {
-        self.breakPressed = false;
         self.placePressed = false;
         self.flyPressed = false;
         self.slotPressed = -1;
@@ -198,6 +198,11 @@ struct Game: not Copyable {
     /// Whether the mouse should be captured for mouse look; the driver
     /// applies it to the window.
     var mouseCaptured: Bool
+    /// The block being broken and how far along, 0 to 1; breaking takes
+    /// `Block.hardness` seconds of holding.
+    var breaking: (Int64, Int64, Int64)?
+    var breakProgress: Float32
+    var flock: Flock
     /// How much the lairs' crimson sky shows, easing toward how deep in
     /// lair country the camera is.
     var gloom: Float32
@@ -213,9 +218,12 @@ struct Game: not Copyable {
         self.viewRadius = view.clamp(minViewRadius, maxViewRadius);
         self.mouseCaptured = false;
         self.gloom = 0.0;
+        self.breaking = .None;
+        self.breakProgress = 0.0;
         self.renderer.viewDistance = Float32(from: self.viewRadius * chunkSize);
         let worldSeed = match save { .Some(s) => s.seed, .None => seed };
         self.world = World(worldSeed);
+        self.flock = Flock(seed: worldSeed);
         self.meshed = Dictionary[Int64, Bool]();
         self.player = Player(spawnPoint(self.world.generator));
         self.selected = 0;
@@ -261,7 +269,7 @@ struct Game: not Copyable {
             .Quit => { self.running = false },
             // Escape frees a captured mouse first, then saves and quits.
             .KeyDown(.Escape) => {
-                if self.mouseCaptured { self.mouseCaptured = false } else { self.running = false }
+                if self.mouseCaptured { self.release() } else { self.running = false }
             },
             .KeyDown(.Return) => { self.start() },
             // A click starts play or recaptures the mouse; once captured,
@@ -271,12 +279,13 @@ struct Game: not Copyable {
                     self.start();
                 } else {
                     match button {
-                        .Left => { self.controls.breakPressed = true },
+                        .Left => { self.controls.breakHeld = true },
                         .Right => { self.controls.placePressed = true },
                         _ => {}
                     }
                 }
             },
+            .MouseUp(.Left, _, _) => { self.controls.breakHeld = false },
             .MouseMove(_, _, dx, dy) => {
                 if self.mouseCaptured {
                     self.controls.mouseX = self.controls.mouseX + Float32(from: dx);
@@ -369,23 +378,27 @@ struct Game: not Copyable {
         }
     }
 
-    /// Break or place a block where the player is looking.
-    mutating func useBlocks() {
-        if not self.controls.breakPressed and not self.controls.placePressed {
-            return;
-        }
+    /// Break or place a block where the player is looking. Breaking
+    /// takes holding: the block cracks over its `hardness` in seconds, and
+    /// looking away or letting go starts over.
+    mutating func useBlocks(dt: Float32) {
         let view = self.player.camera;
-        guard let .Some(hit) = raycast(self.world, view.position, view.forward, reach) else {
+        let target = raycast(self.world, view.position, view.forward, reach);
+        if not self.controls.breakHeld {
+            self.breaking = .None;
+        }
+        if self.controls.breakHeld {
+            if let .Some(hit) = target {
+                self.chip(hit.x, hit.y, hit.z, dt);
+            } else {
+                self.breaking = .None;
+            }
             return;
         }
-        if self.controls.breakPressed {
-            let glowed = match self.world.blockAt(hit.x, hit.y, hit.z) {
-                .Some(b) => b.emits,
-                .None => false
-            };
-            if self.world.setBlock(hit.x, hit.y, hit.z, .Air) {
-                self.remeshAround(hit.x, hit.y, hit.z, light: glowed);
-            }
+        if not self.controls.placePressed {
+            return;
+        }
+        guard let .Some(hit) = target else {
             return;
         }
         // Don't wall the player in.
@@ -398,6 +411,41 @@ struct Game: not Copyable {
         }
     }
 
+    /// Work at block (x, y, z) for `dt` seconds, knocking it out once
+    /// its hardness is used up.
+    mutating func chip(x: Int64, y: Int64, z: Int64, dt: Float32) {
+        guard let .Some(block) = self.world.blockAt(x, y, z) else {
+            return;
+        }
+        let same = match self.breaking {
+            .Some((bx, by, bz)) => bx == x and by == y and bz == z,
+            .None => false
+        };
+        if not same {
+            self.breaking = .Some((x, y, z));
+            self.breakProgress = 0.0;
+        }
+        self.breakProgress = self.breakProgress + dt / block.hardness;
+        if self.breakProgress < 1.0 {
+            return;
+        }
+        self.breaking = .None;
+        if self.world.setBlock(x, y, z, .Air) {
+            self.remeshAround(x, y, z, light: block.emits);
+        }
+    }
+
+    /// The birds, then the cracks on the block being broken (which cast no
+    /// shadow), and how many of the boxes are birds.
+    func models() -> ([ModelBox], Int64) {
+        var boxes = self.flock.models(self.seconds);
+        let birds = boxes.count;
+        if let .Some((x, y, z)) = self.breaking {
+            boxes.append(crackBox(x, y, z, self.breakProgress));
+        }
+        (boxes, birds)
+    }
+
     /// Advance the game by `dt` seconds and draw it.
     mutating func frame(dt: Float32) -> () throws WgpuError {
         self.seconds = self.seconds + dt;
@@ -405,6 +453,7 @@ struct Game: not Copyable {
             self.play(dt);
         }
         self.stream();
+        self.flock.update(dt, center: self.player.position, reach: self.renderer.viewDistance.clamp(32.0, 96.0), generator: self.world.generator, time: self.seconds);
         self.timeOfDay = self.timeOfDay + dt / dayLength;
         self.timeOfDay = self.timeOfDay - self.timeOfDay.floor();
         self.controls.clearPresses();
@@ -429,7 +478,8 @@ struct Game: not Copyable {
             let notice = noticeQuads(self.notice, fade: self.noticeTime.clamp(0.0, 1.0));
             overlay.append(contentsOf: notice);
         }
-        try self.renderer.draw(view.view(), eye: view.position, light: daylight(self.timeOfDay, gloom: self.gloom), time: self.seconds, overlay: overlay);
+        let (models, casters) = self.models();
+        try self.renderer.draw(view.view(), eye: view.position, light: daylight(self.timeOfDay, gloom: self.gloom), time: self.seconds, models: models, casters: casters, overlay: overlay);
         .Ok(())
     }
 
@@ -457,7 +507,7 @@ struct Game: not Copyable {
             self.player.update(self.controls, self.world, dt: step);
             remaining = remaining - step;
         }
-        self.useBlocks();
+        self.useBlocks(dt);
         if self.controls.savePressed {
             self.wantsSave = true;
         }
@@ -482,6 +532,12 @@ struct Game: not Copyable {
     mutating func start() {
         self.onTitle = false;
         self.mouseCaptured = true;
+    }
+
+    /// Free the mouse; a button held as it goes is let go.
+    mutating func release() {
+        self.mouseCaptured = false;
+        self.controls.breakHeld = false;
     }
 
     /// Show `text` in the corner for a few seconds.

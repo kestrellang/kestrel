@@ -174,7 +174,7 @@ func run() -> Int64 {
         }
     }
     if let .Some(p) = path { let _ = writeSave(p, game.save()); }
-    println("drew \(frames) frames; \(game.world.chunks.count) chunks loaded, \(game.renderer.meshes.count) meshes, \(game.renderer.drawnChunks) drawn");
+    println("drew \(frames) frames; \(game.world.chunks.count) chunks loaded, \(game.renderer.meshes.count) meshes, \(game.renderer.drawnChunks) drawn, \(game.flock.birds.count) birds");
     let p = game.player.position;
     println("player at (\(p.x), \(p.y), \(p.z)), on ground: \(game.player.onGround)");
     0
