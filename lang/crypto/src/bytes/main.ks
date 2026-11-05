@@ -101,9 +101,9 @@ func decodeHex(hex: String) -> Array[UInt8]? {
 
 /// The value of one ASCII hex digit, or null if `c` isn't one.
 func hexValue(c: UInt8) -> UInt8? {
-    if c >= 0x30 and c <= 0x39 { return c - 0x30; }        // 0-9
-    if c >= 0x61 and c <= 0x66 { return c - 0x61 + 10; }   // a-f
-    if c >= 0x41 and c <= 0x46 { return c - 0x41 + 10; }   // A-F
+    if c >= 0x30 and c <= 0x39 { return c.subtractWrapping(0x30); }        // 0-9
+    if c >= 0x61 and c <= 0x66 { return c.subtractWrapping(0x61).addWrapping(10); }   // a-f
+    if c >= 0x41 and c <= 0x46 { return c.subtractWrapping(0x41).addWrapping(10); }   // A-F
     return null;
 }
 
@@ -175,9 +175,9 @@ func decodeBase64(text: String) -> Array[UInt8]? {
 
 /// The 6-bit value of one base64 character from either alphabet, or null.
 func base64Value(c: UInt8) -> Int64? {
-    if c >= 0x41 and c <= 0x5a { return Int64(from: c - 0x41); }        // A-Z
-    if c >= 0x61 and c <= 0x7a { return Int64(from: c - 0x61) + 26; }   // a-z
-    if c >= 0x30 and c <= 0x39 { return Int64(from: c - 0x30) + 52; }   // 0-9
+    if c >= 0x41 and c <= 0x5a { return Int64(from: c.subtractWrapping(0x41)); }        // A-Z
+    if c >= 0x61 and c <= 0x7a { return Int64(from: c.subtractWrapping(0x61)) + 26; }   // a-z
+    if c >= 0x30 and c <= 0x39 { return Int64(from: c.subtractWrapping(0x30)) + 52; }   // 0-9
     if c == 0x2b or c == 0x2d { return 62; }                             // + or -
     if c == 0x2f or c == 0x5f { return 63; }                             // / or _
     return null;

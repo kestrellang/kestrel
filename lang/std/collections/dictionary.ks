@@ -1666,8 +1666,8 @@ extend Dictionary[K, V, H]: Hashable where K: Hashable, V: Hashable, H: Hasher, 
             var entryHasher = H();
             pair.0.hash(into: entryHasher);
             pair.1.hash(into: entryHasher);
-            // `+` wraps by default, so the sum is a safe commutative combiner.
-            combined = combined + entryHasher.finish();
+            // Wrapping addition is a safe commutative combiner.
+            combined = combined.addWrapping(entryHasher.finish());
         }
         self.count.hash(into: hasher);
         combined.hash(into: hasher);

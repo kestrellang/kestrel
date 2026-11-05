@@ -101,6 +101,11 @@ pub enum Op {
     AddOverflows(IntBits, Signedness),
     SubOverflows(IntBits, Signedness),
     MulOverflows(IntBits, Signedness),
+    /// `true` when this build checks integer overflow (`+ - *` trap instead
+    /// of wrapping). Takes a unit arg. Codegen resolves it to a constant from
+    /// `CodegenOptions::overflow_checks()`, so MIR (and its cache) stays the
+    /// same across `-O` levels.
+    OverflowChecks,
 
     FAdd(FloatBits),
     FSub(FloatBits),

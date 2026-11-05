@@ -335,6 +335,8 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
         );
     }
     seed_fn(world, lang, "i1_not", &[("a", i1.clone())], i1.clone());
+    // Whether `+ - *` trap on overflow in this build (on at -O0 by default).
+    seed_fn(world, lang, "overflow_checks", &[], i1.clone());
 
     for ty_name in int_types {
         let ty = lang_ty(ty_name);

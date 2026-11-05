@@ -435,6 +435,13 @@ impl OssaBodyCtx<'_, '_> {
                 args,
                 ..
             } => {
+                // `-128` is a negative literal, not `negate(128)`: the
+                // magnitude alone may not fit (`Int8`), and a trapping
+                // `negate` would then reject `Int8.minValue`. E121 already
+                // range-checks it as the negated value.
+                if let Some(lit) = self.negated_int_literal(*receiver, method.as_str_or_empty()) {
+                    return self.lower_literal(expr_id, &lit);
+                }
                 // A `?.` bind calls the method inference settled on.
                 let written = method.as_str_or_empty();
                 let method = match self.typed.as_ref() {

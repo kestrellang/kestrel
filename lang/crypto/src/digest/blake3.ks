@@ -31,7 +31,7 @@ public struct BLAKE3: Digest {
             // last chunk can still be marked as the root.
             if self.chunk.count == 1024 {
                 let chunkValue = self.chunk.output().chainingValue();
-                let totalChunks = self.chunk.counter + 1;
+                let totalChunks = self.chunk.counter.addWrapping(1);
                 self.pushChunk(chunkValue, totalChunks);
                 self.chunk = BLAKE3Chunk(BLAKE3.IV, totalChunks);
             }
@@ -137,13 +137,13 @@ public struct BLAKE3: Digest {
         a: Int64, b: Int64, c: Int64, d: Int64,
         x: UInt32, y: UInt32
     ) {
-        v(a) = v(a) + v(b) + x;
+        v(a) = v(a).addWrapping(v(b)).addWrapping(x);
         v(d) = (v(d) ^ v(a)).rotateRight(by: 16);
-        v(c) = v(c) + v(d);
+        v(c) = v(c).addWrapping(v(d));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 12);
-        v(a) = v(a) + v(b) + y;
+        v(a) = v(a).addWrapping(v(b)).addWrapping(y);
         v(d) = (v(d) ^ v(a)).rotateRight(by: 8);
-        v(c) = v(c) + v(d);
+        v(c) = v(c).addWrapping(v(d));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 7);
     }
 

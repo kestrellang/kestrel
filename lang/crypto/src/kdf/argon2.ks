@@ -240,8 +240,8 @@ struct Argon2State {
             }
         }
 
-        let x = (j1 * j1) >> 32;
-        let y = (UInt64(truncating: area) * x) >> 32;
+        let x = (j1.multiplyWrapping(j1)) >> 32;
+        let y = ((UInt64(truncating: area)).multiplyWrapping(x)) >> 32;
         let relative = area - 1 - Int64(truncating: y);
 
         // Where that window starts: the segment after this one, from the
@@ -253,7 +253,7 @@ struct Argon2State {
     /// Advances the address counter and regenerates 128 reference
     /// addresses: G(0, G(0, input)).
     static func nextAddresses(mutating input: Array[UInt64], mutating addresses: Array[UInt64]) {
-        input(6) = input(6) + 1;
+        input(6) = input(6).addWrapping(1);
         let zero = Array[UInt64](repeating: 0, count: 128);
         addresses = Argon2State.compress(zero, Argon2State.compress(zero, input));
     }
@@ -301,13 +301,13 @@ struct Argon2State {
     /// BLAKE2b's G with an added multiplication of the low 32-bit halves
     /// (RFC 9106 §3.6), which makes the work hard to shortcut in hardware.
     static func gb(mutating v: Array[UInt64], a: Int64, b: Int64, c: Int64, d: Int64) {
-        v(a) = v(a) + v(b) + 2 * (v(a) & 0xffffffff) * (v(b) & 0xffffffff);
+        v(a) = v(a).addWrapping(v(b)).addWrapping(((v(a) & 0xffffffff) * (v(b) & 0xffffffff)).multiplyWrapping(2));
         v(d) = (v(d) ^ v(a)).rotateRight(by: 32);
-        v(c) = v(c) + v(d) + 2 * (v(c) & 0xffffffff) * (v(d) & 0xffffffff);
+        v(c) = v(c).addWrapping(v(d)).addWrapping(((v(c) & 0xffffffff) * (v(d) & 0xffffffff)).multiplyWrapping(2));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 24);
-        v(a) = v(a) + v(b) + 2 * (v(a) & 0xffffffff) * (v(b) & 0xffffffff);
+        v(a) = v(a).addWrapping(v(b)).addWrapping(((v(a) & 0xffffffff) * (v(b) & 0xffffffff)).multiplyWrapping(2));
         v(d) = (v(d) ^ v(a)).rotateRight(by: 16);
-        v(c) = v(c) + v(d) + 2 * (v(c) & 0xffffffff) * (v(d) & 0xffffffff);
+        v(c) = v(c).addWrapping(v(d)).addWrapping(((v(c) & 0xffffffff) * (v(d) & 0xffffffff)).multiplyWrapping(2));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 63);
     }
 }

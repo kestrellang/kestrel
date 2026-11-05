@@ -24,9 +24,10 @@ import std.numeric.(UInt8, Int64, UInt64)
 ///
 /// UInt8 is the 8-bit member of the integer family. The same surface
 /// area is provided across all widths; switch widths to trade range for memory
-/// or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-/// `*Checked` variants for overflow detection or `*Saturating` to clamp to
-/// `minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+/// or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+/// optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+/// `*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+/// that holds in every build. The type is `FFISafe` and lays out as a single
 /// `lang.i8` so it can cross C boundaries unchanged.
 ///
 /// # Examples
@@ -511,11 +512,11 @@ public struct UInt8:
     // STEPPING
     // ========================================================================
 
-    /// Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+    /// Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
     /// integer ranges.
     public func successor() -> UInt8 { self.add(UInt8.one) }
 
-    /// Predecessor — `self - 1`. Wraps at `minValue`.
+    /// Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
     public func predecessor() -> UInt8 { self.subtract(UInt8.one) }
 
     /// Number of `successor()` steps from `self` to `other` — `other - self`
@@ -584,18 +585,80 @@ public struct UInt8:
     type RangeThroughConstructible.Output = RangeThrough[UInt8]
 
     // ========================================================================
-    // ARITHMETIC (Wrapping - Default)
+    // ARITHMETIC (Overflow-checked)
     // ========================================================================
 
-    /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
-    /// `addSaturating` to clamp.
-    public consuming func add(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_add(self.raw, other.raw)) }
+    /// `self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+    /// `addSaturating` or `addOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `UInt8` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func add(consuming other: UInt8) -> UInt8 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i8_unsigned_add_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: UInt8 +")
+        }
+        UInt8(raw: lang.i8_add(self.raw, other.raw))
+    }
 
-    /// `self - other`, wrapping on overflow.
-    public consuming func subtract(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_sub(self.raw, other.raw)) }
+    /// `self + other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func addWrapping(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_add(self.raw, other.raw)) }
 
-    /// `self * other`, wrapping on overflow.
-    public consuming func multiply(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_mul(self.raw, other.raw)) }
+    /// `self + other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `addWrapping`.
+    public func addOverflowing(other: UInt8) -> (UInt8, Bool) {
+        (UInt8(raw: lang.i8_add(self.raw, other.raw)), Bool(boolLiteral: lang.i8_unsigned_add_overflows(self.raw, other.raw)))
+    }
+
+    /// `self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+    /// `subtractSaturating` or `subtractOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `UInt8` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func subtract(consuming other: UInt8) -> UInt8 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i8_unsigned_sub_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: UInt8 -")
+        }
+        UInt8(raw: lang.i8_sub(self.raw, other.raw))
+    }
+
+    /// `self - other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func subtractWrapping(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_sub(self.raw, other.raw)) }
+
+    /// `self - other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `subtractWrapping`.
+    public func subtractOverflowing(other: UInt8) -> (UInt8, Bool) {
+        (UInt8(raw: lang.i8_sub(self.raw, other.raw)), Bool(boolLiteral: lang.i8_unsigned_sub_overflows(self.raw, other.raw)))
+    }
+
+    /// `self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+    /// `multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `UInt8` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func multiply(consuming other: UInt8) -> UInt8 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i8_unsigned_mul_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: UInt8 *")
+        }
+        UInt8(raw: lang.i8_mul(self.raw, other.raw))
+    }
+
+    /// `self * other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func multiplyWrapping(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_mul(self.raw, other.raw)) }
+
+    /// `self * other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `multiplyWrapping`.
+    public func multiplyOverflowing(other: UInt8) -> (UInt8, Bool) {
+        (UInt8(raw: lang.i8_mul(self.raw, other.raw)), Bool(boolLiteral: lang.i8_unsigned_mul_overflows(self.raw, other.raw)))
+    }
 
     /// Truncating integer division (`self / other`). For signed types,
     /// `minValue / -1` wraps; use `divideChecked` to detect.
@@ -652,19 +715,19 @@ public struct UInt8:
     /// Wrapping addition that returns `None` on overflow.
     public func addChecked(other: UInt8) -> UInt8? {
         if Bool(boolLiteral: lang.i8_unsigned_add_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.add(other))
+        .Some(self.addWrapping(other))
     }
 
     /// Subtraction that returns `None` on underflow (`other > self`).
     public func subtractChecked(other: UInt8) -> UInt8? {
         if Bool(boolLiteral: lang.i8_unsigned_sub_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.subtract(other))
+        .Some(self.subtractWrapping(other))
     }
 
     /// Wrapping multiplication that returns `None` on overflow.
     public func multiplyChecked(other: UInt8) -> UInt8? {
         if Bool(boolLiteral: lang.i8_unsigned_mul_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.multiply(other))
+        .Some(self.multiplyWrapping(other))
     }
 
     /// Division that returns `None` for divide-by-zero.
@@ -713,35 +776,86 @@ public struct UInt8:
     // ARITHMETIC (Extended)
     // ========================================================================
 
-    /// Raises `self` to `exponent` via binary exponentiation. Wraps on
-    /// overflow. Negative exponents return zero (integer truncation of
-    /// the would-be fraction).
+    /// Raises `self` to `exponent` via binary exponentiation.
+    ///
+    /// # Errors
+    ///
+    /// Panics on a negative exponent, and on overflow when overflow checks
+    /// are on (wraps when off); see `powChecked`,
+    /// `powWrapping` and `powSaturating`.
     ///
     /// # Examples
     ///
     /// ```
     /// (2).pow(10);  // 1024
     /// (3).pow(4);   // 81
-    /// (5).pow(-1);  // 0
     /// ```
     public func pow(exponent: Int64) -> UInt8 {
+        if Bool(boolLiteral: lang.i1_not(lang.overflow_checks())) {
+            return self.powWrapping(exponent)
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+            .None => fatalError("arithmetic overflow: UInt8.pow")
+        }
+    }
+
+    /// `self` raised to `exponent`, or `None` on overflow or a negative
+    /// exponent.
+    public func powChecked(exponent: Int64) -> UInt8? {
         if exponent < 0 {
-            return UInt8.zero
-        };
-        if exponent == 0 {
-            return UInt8.one
-        };
-        var result = UInt8.one;
+            return .None
+        }
+        var result: UInt8 = 1;
         var base = self;
         var exp = exponent;
         while exp > 0 {
             if exp % 2 == 1 {
-                result = result.multiply(base)
-            };
-            base = base.multiply(base);
+                let next = result.multiplyChecked(base);
+                if next.isNone { return .None }
+                result = next.unwrap()
+            }
+            exp = exp / 2;
+            // Square only when another bit remains, so the last step can't
+            // overflow a result that fits.
+            if exp > 0 {
+                let squared = base.multiplyChecked(base);
+                if squared.isNone { return .None }
+                base = squared.unwrap()
+            }
+        }
+        .Some(result)
+    }
+
+    /// `self` raised to `exponent`, wrapping on overflow. A negative
+    /// exponent traps.
+    public func powWrapping(exponent: Int64) -> UInt8 {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        var result: UInt8 = 1;
+        var base = self;
+        var exp = exponent;
+        while exp > 0 {
+            if exp % 2 == 1 {
+                result = result.multiplyWrapping(base)
+            }
+            base = base.multiplyWrapping(base);
             exp = exp / 2
-        };
+        }
         result
+    }
+
+    /// `self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+    /// overflow. A negative exponent traps.
+    public func powSaturating(exponent: Int64) -> UInt8 {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+            .None => UInt8.maxValue
+        }
     }
 
     /// Greatest common divisor via Euclidean algorithm. For signed types
@@ -840,7 +954,7 @@ public struct UInt8:
     /// MSB re-enter at the LSB.
     public func rotateLeft(by count: Int64) -> UInt8 {
         let bits: Int64 = 8;
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftLeft(by: c).bitwiseOr(self.shiftRight(by: bits - c)) }
     }
@@ -849,7 +963,7 @@ public struct UInt8:
     /// `rotateLeft`.
     public func rotateRight(by count: Int64) -> UInt8 {
         let bits: Int64 = 8;
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftRight(by: c).bitwiseOr(self.shiftLeft(by: bits - c)) }
     }

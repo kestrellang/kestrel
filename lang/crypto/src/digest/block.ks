@@ -36,7 +36,7 @@ struct BlockBuffer[F] where F: BlockFunction {
     }
 
     mutating func update(bytes: UnsafeSlice[UInt8]) {
-        self.totalLength = self.totalLength + UInt64(truncating: bytes.count);
+        self.totalLength = self.totalLength.addWrapping(UInt64(truncating: bytes.count));
         var offset: Int64 = 0;
 
         // Top up a partial block first.
@@ -77,7 +77,7 @@ struct BlockBuffer[F] where F: BlockFunction {
             tail.append(0);
         }
 
-        let bitLength = self.totalLength * 8;
+        let bitLength = self.totalLength.multiplyWrapping(8);
         match encoding {
             .BigEndian64 => { tail.append(contentsOf: bitLength.toBytesBigEndian().asUnsafeSlice()); },
             .BigEndian128 => {

@@ -99,7 +99,7 @@ public struct DefaultHasher: Hasher, Defaultable {
         while i < count {
             let byte = ptr.offset(by: i).read();
             self.state = self.state.bitwiseXor(UInt64(from: byte));
-            self.state = self.state.multiply(mult);
+            self.state = self.state.multiplyWrapping(mult);
             // Per-byte avalanche: mix high bits down so adjacent
             // states diverge faster than plain FNV-1a.
             self.state = self.state.bitwiseXor(self.state.shiftRight(by: 32));
@@ -124,9 +124,9 @@ public struct DefaultHasher: Hasher, Defaultable {
         let m2 = 14181476777654086739;  // 0xc4ceb9fe1a85ec53
         var x = self.state;
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        x = x.multiply(m1);
+        x = x.multiplyWrapping(m1);
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        x = x.multiply(m2);
+        x = x.multiplyWrapping(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
         self.state = x;
         x

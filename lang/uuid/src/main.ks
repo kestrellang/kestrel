@@ -142,7 +142,7 @@ func parseHexRun(chars: CharsView, from start: Int64, to end: Int64) -> UInt64? 
 func hexDigitValue(ch: Char) -> UInt32? {
     let v = ch.value();
     if v < 0x30 or v > 0x66 { return .None; }
-    let nibble = HEX_TABLE(Int64(from: v - 0x30));
+    let nibble = HEX_TABLE(Int64(from: v.subtractWrapping(0x30)));
     if nibble == 255 { return .None; }
     .Some(nibble)
 }

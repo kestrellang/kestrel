@@ -23,6 +23,15 @@ enum Backend {
     Llvm,
 }
 
+/// Parses `--overflow-checks on|off`.
+fn parse_on_off(s: &str) -> Result<bool, String> {
+    match s {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        _ => Err(format!("expected `on` or `off`, got `{s}`")),
+    }
+}
+
 impl Backend {
     /// `-O0` builds with Cranelift (compile speed); `-O1`/`-O2` with LLVM
     /// (code quality). The single place the backend is decided.
@@ -124,6 +133,11 @@ struct BuildArgs {
         default_value = "0"
     )]
     opt_level: u8,
+
+    /// Trap on integer overflow (`on`) or wrap (`off`). Defaults to on at
+    /// `-O0` and off at `-O1`/`-O2`.
+    #[arg(long = "overflow-checks", value_name = "on|off", value_parser = parse_on_off)]
+    overflow_checks: Option<bool>,
 
     /// Link with a library (repeatable; use `:libname.a` for static).
     #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
@@ -269,6 +283,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
                 library_paths: args.library_paths,
                 frameworks: args.frameworks,
                 c_sources,
+                overflow_checks_override: args.overflow_checks,
                 ..Default::default()
             };
             compiler
@@ -282,6 +297,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
                 library_paths: args.library_paths,
                 frameworks: args.frameworks,
                 c_sources,
+                overflow_checks_override: args.overflow_checks,
                 ..Default::default()
             };
             compiler

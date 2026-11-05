@@ -175,7 +175,7 @@ public struct Lcg64: RandomNumberGenerator, Defaultable {
         // LCG formula: state = state * a + c
         let a = 6364136223846793005;
         let c = 1442695040888963407;
-        self.state = self.state.multiply(a).add(c);
+        self.state = self.state.multiplyWrapping(a).addWrapping(c);
         self.state
     }
 }
@@ -390,11 +390,11 @@ extend Int64 {
         // Work in the UInt64 bit domain: wrapping subtraction yields the
         // span even when it exceeds Int64.maxValue.
         let lo = UInt64(truncating: bounds.start);
-        let span = UInt64(truncating: bounds.end).subtract(lo);
+        let span = UInt64(truncating: bounds.end).subtractWrapping(lo);
         if span == UInt64.maxValue {
             return Int64(truncating: rng.nextUInt64())
         }
-        Int64(truncating: lo.add(rng.nextUInt64(below: span + 1)))
+        Int64(truncating: lo.addWrapping(rng.nextUInt64(below: span + 1)))
     }
 
     /// Returns a uniform value in `range`, using OS entropy.

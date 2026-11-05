@@ -151,9 +151,9 @@ public struct BLAKE2b {
         let remaining = UInt64(truncating: buf.count);
 
         // Increment counter by remaining bytes
-        ct0 = ct0 + remaining;
+        ct0 = ct0.addWrapping(remaining);
         if ct0 < remaining {
-            ct1 = ct1 + 1;
+            ct1 = ct1.addWrapping(1);
         }
 
         while buf.count < 128 {
@@ -194,9 +194,9 @@ public struct BLAKE2b {
 
     mutating func incrementCounter(n: Int64) {
         let add = UInt64(truncating: n);
-        self.t0 = self.t0 + add;
+        self.t0 = self.t0.addWrapping(add);
         if self.t0 < add {
-            self.t1 = self.t1 + 1;
+            self.t1 = self.t1.addWrapping(1);
         }
     }
 
@@ -281,13 +281,13 @@ public struct BLAKE2b {
         a: Int64, b: Int64, c: Int64, d: Int64,
         x: UInt64, y: UInt64
     ) {
-        v(a) = v(a) + v(b) + x;
+        v(a) = v(a).addWrapping(v(b)).addWrapping(x);
         v(d) = (v(d) ^ v(a)).rotateRight(by: 32);
-        v(c) = v(c) + v(d);
+        v(c) = v(c).addWrapping(v(d));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 24);
-        v(a) = v(a) + v(b) + y;
+        v(a) = v(a).addWrapping(v(b)).addWrapping(y);
         v(d) = (v(d) ^ v(a)).rotateRight(by: 16);
-        v(c) = v(c) + v(d);
+        v(c) = v(c).addWrapping(v(d));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 63);
     }
 }

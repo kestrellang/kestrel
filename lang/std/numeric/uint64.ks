@@ -24,9 +24,10 @@ import std.numeric.(UInt8, Int64, UInt64)
 ///
 /// UInt64 is the 64-bit member of the integer family. The same surface
 /// area is provided across all widths; switch widths to trade range for memory
-/// or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-/// `*Checked` variants for overflow detection or `*Saturating` to clamp to
-/// `minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+/// or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+/// optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+/// `*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+/// that holds in every build. The type is `FFISafe` and lays out as a single
 /// `lang.i64` so it can cross C boundaries unchanged.
 ///
 /// # Examples
@@ -427,18 +428,23 @@ public struct UInt64:
     // STEPPING
     // ========================================================================
 
-    /// Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+    /// Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
     /// integer ranges.
     public func successor() -> UInt64 { self.add(UInt64.one) }
 
-    /// Predecessor — `self - 1`. Wraps at `minValue`.
+    /// Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
     public func predecessor() -> UInt64 { self.subtract(UInt64.one) }
 
     /// Number of `successor()` steps from `self` to `other` — `other - self`
     /// widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
     /// ranges iterate with a counter instead of a "finished" flag.
     public func distance(to other: UInt64) -> Int64 {
-        Int64(raw: lang.i64_sub(other.raw, self.raw))
+        if other >= self {
+            return Int64(from: other.subtract(self))
+        }
+        let back = self.subtract(other);
+        // 2^63 back is exactly Int64.minValue; anything larger traps.
+        if back == UInt64(bitPattern: Int64.minValue) { Int64.minValue } else { Int64(from: back).negate() }
     }
 
     /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.
@@ -500,18 +506,80 @@ public struct UInt64:
     type RangeThroughConstructible.Output = RangeThrough[UInt64]
 
     // ========================================================================
-    // ARITHMETIC (Wrapping - Default)
+    // ARITHMETIC (Overflow-checked)
     // ========================================================================
 
-    /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
-    /// `addSaturating` to clamp.
-    public consuming func add(consuming other: UInt64) -> UInt64 { UInt64(raw: lang.i64_add(self.raw, other.raw)) }
+    /// `self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+    /// `addSaturating` or `addOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `UInt64` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func add(consuming other: UInt64) -> UInt64 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i64_unsigned_add_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: UInt64 +")
+        }
+        UInt64(raw: lang.i64_add(self.raw, other.raw))
+    }
 
-    /// `self - other`, wrapping on overflow.
-    public consuming func subtract(consuming other: UInt64) -> UInt64 { UInt64(raw: lang.i64_sub(self.raw, other.raw)) }
+    /// `self + other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func addWrapping(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_add(self.raw, other.raw)) }
 
-    /// `self * other`, wrapping on overflow.
-    public consuming func multiply(consuming other: UInt64) -> UInt64 { UInt64(raw: lang.i64_mul(self.raw, other.raw)) }
+    /// `self + other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `addWrapping`.
+    public func addOverflowing(other: UInt64) -> (UInt64, Bool) {
+        (UInt64(raw: lang.i64_add(self.raw, other.raw)), Bool(boolLiteral: lang.i64_unsigned_add_overflows(self.raw, other.raw)))
+    }
+
+    /// `self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+    /// `subtractSaturating` or `subtractOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `UInt64` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func subtract(consuming other: UInt64) -> UInt64 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i64_unsigned_sub_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: UInt64 -")
+        }
+        UInt64(raw: lang.i64_sub(self.raw, other.raw))
+    }
+
+    /// `self - other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func subtractWrapping(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_sub(self.raw, other.raw)) }
+
+    /// `self - other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `subtractWrapping`.
+    public func subtractOverflowing(other: UInt64) -> (UInt64, Bool) {
+        (UInt64(raw: lang.i64_sub(self.raw, other.raw)), Bool(boolLiteral: lang.i64_unsigned_sub_overflows(self.raw, other.raw)))
+    }
+
+    /// `self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+    /// `multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `UInt64` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func multiply(consuming other: UInt64) -> UInt64 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i64_unsigned_mul_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: UInt64 *")
+        }
+        UInt64(raw: lang.i64_mul(self.raw, other.raw))
+    }
+
+    /// `self * other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func multiplyWrapping(other: UInt64) -> UInt64 { UInt64(raw: lang.i64_mul(self.raw, other.raw)) }
+
+    /// `self * other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `multiplyWrapping`.
+    public func multiplyOverflowing(other: UInt64) -> (UInt64, Bool) {
+        (UInt64(raw: lang.i64_mul(self.raw, other.raw)), Bool(boolLiteral: lang.i64_unsigned_mul_overflows(self.raw, other.raw)))
+    }
 
     /// Truncating integer division (`self / other`). For signed types,
     /// `minValue / -1` wraps; use `divideChecked` to detect.
@@ -568,19 +636,19 @@ public struct UInt64:
     /// Wrapping addition that returns `None` on overflow.
     public func addChecked(other: UInt64) -> UInt64? {
         if Bool(boolLiteral: lang.i64_unsigned_add_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.add(other))
+        .Some(self.addWrapping(other))
     }
 
     /// Subtraction that returns `None` on underflow (`other > self`).
     public func subtractChecked(other: UInt64) -> UInt64? {
         if Bool(boolLiteral: lang.i64_unsigned_sub_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.subtract(other))
+        .Some(self.subtractWrapping(other))
     }
 
     /// Wrapping multiplication that returns `None` on overflow.
     public func multiplyChecked(other: UInt64) -> UInt64? {
         if Bool(boolLiteral: lang.i64_unsigned_mul_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.multiply(other))
+        .Some(self.multiplyWrapping(other))
     }
 
     /// Division that returns `None` for divide-by-zero.
@@ -629,35 +697,86 @@ public struct UInt64:
     // ARITHMETIC (Extended)
     // ========================================================================
 
-    /// Raises `self` to `exponent` via binary exponentiation. Wraps on
-    /// overflow. Negative exponents return zero (integer truncation of
-    /// the would-be fraction).
+    /// Raises `self` to `exponent` via binary exponentiation.
+    ///
+    /// # Errors
+    ///
+    /// Panics on a negative exponent, and on overflow when overflow checks
+    /// are on (wraps when off); see `powChecked`,
+    /// `powWrapping` and `powSaturating`.
     ///
     /// # Examples
     ///
     /// ```
     /// (2).pow(10);  // 1024
     /// (3).pow(4);   // 81
-    /// (5).pow(-1);  // 0
     /// ```
     public func pow(exponent: Int64) -> UInt64 {
+        if Bool(boolLiteral: lang.i1_not(lang.overflow_checks())) {
+            return self.powWrapping(exponent)
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+            .None => fatalError("arithmetic overflow: UInt64.pow")
+        }
+    }
+
+    /// `self` raised to `exponent`, or `None` on overflow or a negative
+    /// exponent.
+    public func powChecked(exponent: Int64) -> UInt64? {
         if exponent < 0 {
-            return UInt64.zero
-        };
-        if exponent == 0 {
-            return UInt64.one
-        };
-        var result = UInt64.one;
+            return .None
+        }
+        var result: UInt64 = 1;
         var base = self;
         var exp = exponent;
         while exp > 0 {
             if exp % 2 == 1 {
-                result = result.multiply(base)
-            };
-            base = base.multiply(base);
+                let next = result.multiplyChecked(base);
+                if next.isNone { return .None }
+                result = next.unwrap()
+            }
+            exp = exp / 2;
+            // Square only when another bit remains, so the last step can't
+            // overflow a result that fits.
+            if exp > 0 {
+                let squared = base.multiplyChecked(base);
+                if squared.isNone { return .None }
+                base = squared.unwrap()
+            }
+        }
+        .Some(result)
+    }
+
+    /// `self` raised to `exponent`, wrapping on overflow. A negative
+    /// exponent traps.
+    public func powWrapping(exponent: Int64) -> UInt64 {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        var result: UInt64 = 1;
+        var base = self;
+        var exp = exponent;
+        while exp > 0 {
+            if exp % 2 == 1 {
+                result = result.multiplyWrapping(base)
+            }
+            base = base.multiplyWrapping(base);
             exp = exp / 2
-        };
+        }
         result
+    }
+
+    /// `self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+    /// overflow. A negative exponent traps.
+    public func powSaturating(exponent: Int64) -> UInt64 {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+            .None => UInt64.maxValue
+        }
     }
 
     /// Greatest common divisor via Euclidean algorithm. For signed types
@@ -756,7 +875,7 @@ public struct UInt64:
     /// MSB re-enter at the LSB.
     public func rotateLeft(by count: Int64) -> UInt64 {
         let bits: Int64 = 64;
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftLeft(by: c).bitwiseOr(self.shiftRight(by: bits - c)) }
     }
@@ -765,7 +884,7 @@ public struct UInt64:
     /// `rotateLeft`.
     public func rotateRight(by count: Int64) -> UInt64 {
         let bits: Int64 = 64;
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftRight(by: c).bitwiseOr(self.shiftLeft(by: bits - c)) }
     }
