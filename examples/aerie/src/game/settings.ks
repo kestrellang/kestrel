@@ -6,7 +6,8 @@ import wgpu.(PresentMode)
 /// `AERIE_VIEW` (view distance in chunks), `AERIE_TIME` (time of day, 0 to
 /// 1), `AERIE_PLAY=1` (skip the title), `AERIE_SAVE` (a save path, or
 /// `none`), `AERIE_FRAMES` (quit after n frames), `AERIE_VSYNC=0` (draw as fast
-/// as possible, to measure frame rate) and `AERIE_BENCH` (time generation
+/// as possible, to measure frame rate), `AERIE_TOUR=n` (fly straight
+/// east at n blocks a second, to measure loading while moving) and `AERIE_BENCH` (time generation
 /// and meshing over n runs instead of playing).
 struct Settings {
     /// How many chunk columns around the player are loaded and drawn.
@@ -18,6 +19,8 @@ struct Settings {
     var maxFrames: Int64
     /// Wait for the display's refresh before showing each frame.
     var vsync: Bool
+    /// Blocks per second to fly east on its own, or 0 to play normally.
+    var tourSpeed: Float32
     var benchRuns: Int64?
 
     static func fromEnvironment() -> Settings {
@@ -30,6 +33,7 @@ struct Settings {
             savePath: if save == "none" { .None } else { .Some(save) },
             maxFrames: Int64(parsing: getenv("AERIE_FRAMES") ?? "") ?? 0,
             vsync: (getenv("AERIE_VSYNC") ?? "1") != "0",
+            tourSpeed: Float32(parsing: getenv("AERIE_TOUR") ?? "") ?? 0.0,
             benchRuns: match getenv("AERIE_BENCH") {
                 .Some(runs) => .Some(Int64(parsing: runs) ?? 10),
                 .None => .None

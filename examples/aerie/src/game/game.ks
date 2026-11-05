@@ -119,6 +119,7 @@ struct Game: not Copyable {
         if not self.onTitle {
             self.play(dt);
         }
+        self.tour(dt);
         self.profile.mark(.Update);
         self.stream();
         self.profile.mark(.Stream);
@@ -142,6 +143,17 @@ struct Game: not Copyable {
         self.profile.mark(.Draw);
         self.profile.end();
         .Ok(())
+    }
+
+    /// On a measured tour, carry the player east at `tourSpeed`, flying
+    /// through anything in the way, so new land keeps loading.
+    mutating func tour(dt: Float32) {
+        guard self.settings.tourSpeed > 0.0 else {
+            return;
+        }
+        self.player.flying = true;
+        self.player.velocity = Vec3(x: 0.0, y: 0.0, z: 0.0);
+        self.player.position = self.player.position + Vec3(x: self.settings.tourSpeed * dt, y: 0.0, z: 0.0);
     }
 
     /// Widen the view as you soar faster, up to 25 degrees, easing in and

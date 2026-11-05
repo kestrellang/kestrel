@@ -85,17 +85,20 @@ struct Padded {
     }
 
     /// From a 3x3x3 block of chunks around the middle one, ordered as
-    /// `neighborhood()` is.
+    /// `neighborhood()` is. Copies a row at a time, since this runs for
+    /// every chunk meshed.
     static func around(chunks: [Chunk]) -> Padded {
         let side = Padded.size;
         var blocks: [UInt16] = [];
         blocks.reserveCapacity(side * side * side);
         // x fastest, then z, then y, as `index` lays them out.
-        for i in 0..<(side * side * side) {
-            let (sx, lx) = split(i % side - 1);
-            let (sz, lz) = split(i / side % side - 1);
-            let (sy, ly) = split(i / (side * side) - 1);
-            blocks.append(chunks(neighborIndex(sx, sy, sz)).blocks(Chunk.index(lx, ly, lz)));
+        for row in 0..<(side * side) {
+            let (sz, lz) = split(row % side - 1);
+            let (sy, ly) = split(row / side - 1);
+            let start = Chunk.index(0, ly, lz);
+            blocks.append(chunks(neighborIndex(-1, sy, sz)).blocks(start + chunkSize - 1));
+            blocks.append(contentsOf: chunks(neighborIndex(0, sy, sz)).blocks(start..<(start + chunkSize)));
+            blocks.append(chunks(neighborIndex(1, sy, sz)).blocks(start));
         }
         Padded(blocks: blocks)
     }

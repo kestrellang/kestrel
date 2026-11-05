@@ -279,6 +279,6 @@ enum Face {
         }
     }
 
-    static var cube: [Face] { [.East, .West, .Up, .Down, .South, .North] }
-    static var cross: [Face] { [.Cross0, .Cross1, .Cross2, .Cross3] }
+    static let cube: [Face] = [.East, .West, .Up, .Down, .South, .North];
+    static let cross: [Face] = [.Cross0, .Cross1, .Cross2, .Cross3];
 }
