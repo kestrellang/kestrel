@@ -1,0 +1,11 @@
+[package]
+name = "aerie"
+version = "0.1.0"
+description = "Aerie: a voxel sandbox on floating islands, drawn with wgpu"
+source = "src"
+
+[dependencies]
+wgpu = { path = "../../lang/wgpu" }
+sdl = { path = "../../lang/sdl" }
+linalg = { path = "../../lang/linalg" }
+images = { path = "../../lang/images" }
