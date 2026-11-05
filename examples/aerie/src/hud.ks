@@ -56,9 +56,15 @@ func faded(color: Vec4, a: Float32) -> Vec4 {
 
 /// The nearest text size, at least `size`'s floor, at which each pixel of
 /// the font is a whole number of screen pixels: a multiple of the font's
-/// 9 rows.
+/// rows.
 func crispSize(size: Float32) -> Float32 {
-    ((size / 9.0).floor() * 9.0).clamp(9.0, 1000.0)
+    ((size / uiFontRows).floor() * uiFontRows).clamp(uiFontRows, 1000.0)
+}
+
+/// How big one of the font's pixels is in text set at `size`, in whole
+/// screen pixels.
+func fontPixel(size: Float32) -> Float32 {
+    (size / uiFontRows).floor().clamp(1.0, 100.0)
 }
 
 /// Width in pixels of `text` set at `size` pixels.
@@ -81,9 +87,8 @@ func textQuads(text: String, x x: Float32, y y: Float32, size size: Float32, col
     let top = y.floor();
     for byte in text.bytes {
         if byte != 32 {
-            // Each glyph sits `uiGlyphPad` in from its cell's left and 4
-            // pixels down from its top (see tools/make_ui.py).
-            quads.append(pixelQuad(uiGlyphLayer(byte), pen - uiGlyphPad * k, top - 4.0 * k, cell, cell, color));
+            // Each glyph sits `uiGlyphPad` in from its cell's top left.
+            quads.append(pixelQuad(uiGlyphLayer(byte), pen - uiGlyphPad * k, top - uiGlyphPad * k, cell, cell, color));
         }
         pen = pen + uiAdvance(byte) * k;
     }
@@ -93,7 +98,7 @@ func textQuads(text: String, x x: Float32, y y: Float32, size size: Float32, col
 /// `text` over a drop shadow one font pixel down and right, so it reads
 /// over a bright sky.
 func labelQuads(text: String, x x: Float32, y y: Float32, size size: Float32, color color: Vec4) -> [OverlayQuad] {
-    let offset = (size / 9.0).floor().clamp(1.0, 100.0);
+    let offset = fontPixel(size);
     var quads = textQuads(text, x: x + offset, y: y + offset, size: size, color: faded(ink, color.w * 0.8));
     quads.append(contentsOf: textQuads(text, x: x, y: y, size: size, color: color));
     quads
@@ -132,24 +137,42 @@ func boardLabel(text: String, width width: Float32, y y: Float32, size size: Flo
     quads
 }
 
-/// A message in the top left on a small frosted pill, fading out over
-/// its last second.
-func noticeQuads(text: String, fade fade: Float32) -> [OverlayQuad] {
-    let size: Float32 = 18.0;
-    let width = textWidth(text, size);
-    var quads = slicedSprite(.Panel, 14.0, 14.0, width + 36.0, 40.0, faded(white, fade));
-    quads.append(contentsOf: labelQuads(text, x: 32.0, y: 24.0, size: size, color: faded(white, fade)));
+/// Text for small labels, such as the corner ones.
+let smallText: Float32 = 18.0;
+
+/// `text` in the top left on a small board, `row` boards down (0 is the
+/// top), faded by `alpha`.
+func cornerLabel(text: String, row row: Int64, alpha alpha: Float32) -> [OverlayQuad] {
+    let margin: Float32 = 14.0;
+    let height: Float32 = 40.0;
+    let pad: Float32 = 20.0;
+    let y = margin + Float32(from: row) * (height + 6.0);
+    let color = faded(white, alpha);
+    var quads = slicedSprite(.Panel, margin, y, textWidth(text, smallText) + pad * 2.0, height, color);
+    quads.append(contentsOf: labelQuads(text, x: margin + pad, y: y + (height - smallText) * 0.5, size: smallText, color: color));
     quads
 }
 
-/// Frames per second, in the top left on a small board.
-func fpsQuads(fps: Int64) -> [OverlayQuad] {
-    let text = "\(fps) FPS";
-    let size: Float32 = 18.0;
-    var quads = slicedSprite(.Panel, 14.0, 14.0, textWidth(text, size) + 44.0, 40.0, white);
-    quads.append(contentsOf: labelQuads(text, x: 36.0, y: 25.0, size: size, color: white));
-    quads
+/// A notice in the corner, below the frame rate if that's showing, fading
+/// out over its last second.
+func noticeQuads(text: String, row row: Int64, fade fade: Float32) -> [OverlayQuad] {
+    cornerLabel(text, row: row, alpha: fade)
 }
+
+/// Frames per second, in the top left corner.
+func fpsQuads(fps: Int64) -> [OverlayQuad] {
+    cornerLabel("\(fps) FPS", row: 0, alpha: 1.0)
+}
+
+/// Hotbar slots are a whole multiple of the sprites' 24 pixels, so the
+/// pixel art stays crisp.
+let slotSize: Float32 = 72.0;
+let slotGap: Float32 = 4.0;
+/// From the hotbar's slots to the screen's bottom edge.
+let hotbarBottom: Float32 = 22.0;
+/// How far the wooden tray reaches past the slots, across and down.
+let trayRimX: Float32 = 22.0;
+let trayRimY: Float32 = 12.0;
 
 /// The crosshair, the hotbar and the selected block's name for a `width`
 /// by `height` screen, `time` seconds in.
@@ -169,33 +192,31 @@ func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool, time: Floa
 
     // The hotbar: a wooden tray of stone slots, each with a little 3D
     // block. The selected slot turns gold and rises with a warm glow, its
-    // block bobbing, and its name floats above. Slots are a whole multiple
-    // of the sprites' 24 pixels, so the pixel art stays crisp.
-    let slot: Float32 = 72.0;
-    let gap: Float32 = 4.0;
+    // block bobbing, and its name floats above.
+    let slot = slotSize;
     let count = Float32(from: hotbar.count);
-    let total = count * slot + (count - 1.0) * gap;
+    let total = count * slot + (count - 1.0) * slotGap;
     let left = ((w - total) * 0.5).floor();
-    let top = h - slot - 22.0;
-    quads.append(contentsOf: slicedSprite(.Panel, left - 22.0, top - 12.0, total + 44.0, slot + 24.0, white));
+    let top = h - slot - hotbarBottom;
+    quads.append(contentsOf: slicedSprite(.Panel, left - trayRimX, top - trayRimY, total + trayRimX * 2.0, slot + trayRimY * 2.0, white));
     var i: Int64 = 0;
     while i < hotbar.count {
         let chosen = i == selected;
-        let x = left + Float32(from: i) * (slot + gap);
+        let x = left + Float32(from: i) * (slot + slotGap);
         let block = hotbar(i);
+        // The selected slot rises, with a bigger icon that bobs.
+        let lift: Float32 = if chosen { 6.0 } else { 0.0 };
+        let inset: Float32 = if chosen { 10.0 } else { 14.0 };
+        let bob = if chosen { ((time * 3.0).sin() * 2.0).floor() - 1.0 } else { 0.0 };
         if chosen {
-            let lift: Float32 = 6.0;
-            quads.append(sprite(.Glow, x - 30.0, top - lift - 30.0, slot + 60.0, slot + 60.0, Vec4(x: 1.0, y: 0.86, z: 0.55, w: 0.45)));
-            quads.append(sprite(.SlotSelected, x, top - lift, slot, slot, white));
-            let bob = ((time * 3.0).sin() * 2.0).floor();
-            quads.append(uiQuad(uiIconLayer(block.id), x + 10.0, top - lift + 9.0 + bob, slot - 20.0, slot - 20.0, white));
-        } else {
-            quads.append(sprite(.Slot, x, top, slot, slot, white));
-            quads.append(uiQuad(uiIconLayer(block.id), x + 14.0, top + 14.0, slot - 28.0, slot - 28.0, white));
+            let glow = slot * 0.4;
+            quads.append(sprite(.Glow, x - glow, top - lift - glow, slot + glow * 2.0, slot + glow * 2.0, Vec4(x: 1.0, y: 0.86, z: 0.55, w: 0.45)));
         }
+        quads.append(sprite(if chosen { .SlotSelected } else { .Slot }, x, top - lift, slot, slot, white));
+        quads.append(uiQuad(uiIconLayer(block.id), x + inset, top - lift + inset + bob, slot - inset * 2.0, slot - inset * 2.0, white));
         i = i + 1;
     }
-    quads.append(contentsOf: pillLabel(hotbar(selected).name, width: w, y: top - 54.0, size: 18.0, color: white));
+    quads.append(contentsOf: pillLabel(hotbar(selected).name, width: w, y: top - slot * 0.75, size: smallText, color: white));
     quads
 }
 

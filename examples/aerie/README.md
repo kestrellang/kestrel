@@ -123,8 +123,13 @@ python3 -m http.server -d examples/aerie/web/out 8000   # open localhost:8000
 - `web/` — the browser build script, page shell and a wasm64 workaround.
 - `src/game.ks` — `Game`, driven one `event` and one `frame` at a time, so a
   browser build can call it from `requestAnimationFrame` instead.
-- `src/renderer.ks` — the wgpu side: surface, shadow and main passes, HUD overlay, daylight.
-- `src/shader.ks` — WGSL: expands each packed face into a quad, sun shadows, glow, fog, and the sky.
+- `src/controls.ks` — which keys and buttons are held or pressed.
+- `src/stream.ks` — generating, meshing and dropping chunk columns around the player.
+- `src/editing.ks` — the hotbar, breaking (with cracks) and placing blocks.
+- `src/renderer.ks` — the wgpu side: surface, shadow and main passes, models, HUD overlay, daylight.
+- `src/shader.ks` — loads the WGSL in `assets/shaders/`, after a header of constants the game decides.
+- `assets/shaders/blocks.wgsl` — expands each packed face into a quad, sun shadows, glow, fog, the sky and models.
+- `assets/shaders/overlay.wgsl` — the 2D interface; `surface.wgsl` — the sRGB step every shader's output goes through.
 - `src/blocks.ks` — block ids, shapes and which atlas layer each face uses.
 - `src/chunk.ks` — 32³ chunks, padded chunks for meshing, the test island.
 - `src/noise.ks` — seeded 2D gradient noise.
