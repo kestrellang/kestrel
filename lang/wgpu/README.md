@@ -9,6 +9,7 @@ Examples:
 - `examples/wgpu_compute` doubles numbers with a compute shader.
 - `examples/wgpu_triangle` renders a triangle offscreen and saves it as `triangle.ppm`.
 - `examples/wgpu_cube` spins a depth-tested cube in an SDL window.
+- `examples/wgpu_scene` flies a camera over a textured floor and a grid of instanced, lit cubes in an SDL window.
 
 ## Installation
 
