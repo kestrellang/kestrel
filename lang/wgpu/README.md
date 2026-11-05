@@ -19,7 +19,7 @@ Examples:
 wgpu = { path = "../../lang/wgpu" }
 ```
 
-**Requires wgpu-native v27.** Download a release from [wgpu-native's releases](https://github.com/gfx-rs/wgpu-native/releases), unpack it, and point `WGPU_NATIVE_DIR` at it (the folder with `include/` and `lib/`). The build links `$WGPU_NATIVE_DIR/lib/libwgpu_native.a` statically, so the binary has no runtime dependency on it. `WGPU_NATIVE_DIR` defaults to `/usr/local`.
+**Requires wgpu-native v27.0.2.0.** Later v27 releases (27.0.4 and up) renumber the texture formats that `src/raw.ks` hard-codes, which breaks pipelines at runtime. Download v27.0.2.0 from [wgpu-native's releases](https://github.com/gfx-rs/wgpu-native/releases), unpack it, and point `WGPU_NATIVE_DIR` at it (the folder with `include/` and `lib/`). The build links `$WGPU_NATIVE_DIR/lib/libwgpu_native.a` statically, so the binary has no runtime dependency on it. `WGPU_NATIVE_DIR` defaults to `/usr/local`.
 
 ```sh
 WGPU_NATIVE_DIR=~/wgpu-native flock build
