@@ -8,10 +8,12 @@ struct Uniforms {
     viewProj: mat4x4f,
     sunDir: vec4f,
     camera: vec4f,
+    // rgb: the fog color; w: the view distance, where fog is total.
     fog: vec4f,
-    chunkOrigin: vec4f,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
+// Where the chunk being drawn sits in the world.
+@group(1) @binding(0) var<uniform> chunkOrigin: vec4f;
 @group(0) @binding(1) var atlas: texture_2d_array<f32>;
 @group(0) @binding(2) var atlasSampler: sampler;
 
@@ -47,7 +49,7 @@ fn vs_main(@builtin(vertex_index) vertex: u32, @location(0) packed: u32, @locati
     let cell = vec3f(f32(packed & 31u), f32((packed >> 5u) & 31u), f32((packed >> 10u) & 31u));
     let face = (packed >> 15u) & 15u;
     let corner = QUAD[vertex + select(0u, 6u, (shade & 256u) != 0u)];
-    let world = u.chunkOrigin.xyz + cell + CORNERS[face * 4u + corner];
+    let world = chunkOrigin.xyz + cell + CORNERS[face * 4u + corner];
     var out: VertexOut;
     out.position = u.viewProj * vec4f(world, 1.0);
     out.world = world;
@@ -77,7 +79,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let ambient = mix(vec3f(0.30, 0.25, 0.30), vec3f(0.38, 0.44, 0.58), n.y * 0.5 + 0.5);
     var color = texel.rgb * (ambient * in.light + direct * vec3f(1.0, 0.90, 0.76) * 0.85 * mix(0.6, 1.0, in.light));
     let distance = length(u.camera.xyz - in.world);
-    color = mix(color, u.fog.rgb, 1.0 - exp(-distance * u.fog.w));
+    // A light haze everywhere, closing in fully at the view distance so
+    // chunks fade in instead of popping.
+    let haze = 1.0 - exp(-distance * 0.002);
+    let edge = smoothstep(u.fog.w * 0.55, u.fog.w, distance);
+    color = mix(color, u.fog.rgb, max(haze, edge));
     return vec4f(color, 1.0);
 }
 "

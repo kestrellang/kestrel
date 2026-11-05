@@ -14,25 +14,45 @@ import sdl.(SDLWindow, Event, monotonicMs)
 /// Time building and meshing the test island `runs` times, without a
 /// window, and print the average per chunk.
 func bench(runs: Int64) -> Int64 {
-    var start = unsafe monotonicMs();
-    var island = testIsland();
-    var i = 1;
+    // The densest chunk of the column under the spawn point.
+    let generator = Generator(1);
+    let (cx, cz) = columnOf(spawnPoint(generator));
+    let start = unsafe monotonicMs();
+    var world = World(1);
+    var i = 0;
     while i < runs {
-        island = testIsland();
+        world = World(1);
+        var dz: Int64 = -1;
+        while dz <= 1 {
+            var dx: Int64 = -1;
+            while dx <= 1 {
+                world.generateColumn(cx + dx, cz + dz);
+                dx = dx + 1;
+            }
+            dz = dz + 1;
+        }
         i = i + 1;
     }
     let built = unsafe monotonicMs();
     var faces = 0;
     i = 0;
     while i < runs {
-        faces = meshChunk(island).count;
+        faces = 0;
+        var cy: Int64 = 0;
+        while cy < worldChunksY {
+            faces = faces + meshChunk(world.padded(cx, cy, cz)).count;
+            cy = cy + 1;
+        }
         i = i + 1;
     }
     let meshed = unsafe monotonicMs();
-    println("\(runs) runs, \(faces) faces per chunk");
-    println("generate: \(Float64(from: built - start) / Float64(from: runs)) ms per chunk");
-    println("mesh:     \(Float64(from: meshed - built) / Float64(from: runs)) ms per chunk");
-    0
+    // Per chunk: 9 columns of 4 chunks generated, 4 chunks meshed.
+    let generated = Float64(from: built - start) / Float64(from: runs * 9 * worldChunksY);
+    let mesh = Float64(from: meshed - built) / Float64(from: runs * worldChunksY);
+    println("\(runs) runs, \(faces) faces in the spawn column");
+    println("generate: \(generated) ms per chunk");
+    println("mesh:     \(mesh) ms per chunk");
+    return 0;
 }
 
 /// The desktop driver: an SDL window and a `while` loop feeding the game
@@ -50,7 +70,7 @@ func run() -> Int64 {
             return 1;
         }
     };
-    var game = Game(renderer);
+    var game = Game(renderer, seed: 1);
     let maxFrames = match getenv("AERIE_FRAMES") {
         .Some(s) => Int64(parsing: s) ?? 0,
         .None => 0
@@ -82,7 +102,7 @@ func run() -> Int64 {
             game.running = false;
         }
     }
-    println("drew \(frames) frames");
+    println("drew \(frames) frames; \(game.world.chunks.count) chunks loaded, \(game.renderer.meshes.count) meshes, \(game.renderer.drawnChunks) drawn");
     0
 }
 

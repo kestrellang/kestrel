@@ -29,7 +29,7 @@ func packFace(x: Int64, y: Int64, z: Int64, face: Face, layer: Layer, shade: UIn
 }
 
 /// 1 if (x, y, z) holds a block that darkens corners next to it.
-func occludes(chunk: Chunk, x: Int64, y: Int64, z: Int64) -> Int64 {
+func occludes(chunk: Padded, x: Int64, y: Int64, z: Int64) -> Int64 {
     match chunk.block(x, y, z).shape {
         .Solid => 1,
         _ => 0
@@ -45,7 +45,7 @@ func outward(offset: Int64) -> Int64 {
 /// packed for `FaceInstance.shade`. A corner looks at the three cells that
 /// touch it in the layer in front of the face: the two sides and the
 /// diagonal. Two sides together fully darken it, whatever the diagonal is.
-func faceShade(chunk: Chunk, x: Int64, y: Int64, z: Int64, face: Face) -> UInt32 {
+func faceShade(chunk: Padded, x: Int64, y: Int64, z: Int64, face: Face) -> UInt32 {
     let (nx, ny, nz) = face.step;
     let (fx, fy, fz) = (x + nx, y + ny, z + nz);
     var levels: [Int64] = [];
@@ -87,10 +87,10 @@ func faceVisible(block: Block, neighbor: Block) -> Bool {
     }
 }
 
-/// Every visible face in `chunk`. Faces between two solid blocks are
-/// skipped; faces on the chunk's edge are kept, since there are no
-/// neighbor chunks yet.
-func meshChunk(chunk: Chunk) -> [FaceInstance] {
+/// Every visible face of the chunk in the middle of `chunk`. Faces between
+/// two solid blocks are skipped, including across chunk edges, since the
+/// padding holds the neighbors' bordering blocks.
+func meshChunk(chunk: Padded) -> [FaceInstance] {
     var faces: [FaceInstance] = [];
     var y: Int64 = 0;
     while y < chunkSize {

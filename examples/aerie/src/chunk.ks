@@ -28,6 +28,14 @@ struct Chunk {
         Block.from(self.blocks(Chunk.index(x, y, z)))
     }
 
+    /// Whether every block is air.
+    func isEmpty() -> Bool {
+        for id in self.blocks {
+            if id != 0 { return false; }
+        }
+        true
+    }
+
     /// Set (x, y, z) to `block`; outside the chunk does nothing.
     mutating func put(x: Int64, y: Int64, z: Int64, block: Block) {
         if not Chunk.contains(x, y, z) {
@@ -35,6 +43,74 @@ struct Chunk {
         }
         self.blocks(Chunk.index(x, y, z)) = block.id;
     }
+}
+
+/// A chunk plus a one-block border taken from its 26 neighbors, so the
+/// mesher can look across edges without finding the neighbor chunk for
+/// every lookup. Coordinates run from -1 to `chunkSize`.
+struct Padded {
+    var blocks: [UInt16]
+
+    static var size: Int64 { chunkSize + 2 }
+
+    static func index(x: Int64, y: Int64, z: Int64) -> Int64 {
+        ((y + 1) * Padded.size + (z + 1)) * Padded.size + (x + 1)
+    }
+
+    func block(x: Int64, y: Int64, z: Int64) -> Block {
+        if x < -1 or y < -1 or z < -1 or x > chunkSize or y > chunkSize or z > chunkSize {
+            return .Air;
+        }
+        Block.from(self.blocks(Padded.index(x, y, z)))
+    }
+
+    /// From a 3x3x3 block of chunks around the middle one, ordered by y,
+    /// then z, then x (see `neighborIndex`).
+    static func around(chunks: [Chunk]) -> Padded {
+        var blocks: [UInt16] = [];
+        blocks.reserveCapacity(Padded.size * Padded.size * Padded.size);
+        var y: Int64 = -1;
+        while y <= chunkSize {
+            let (sy, ly) = split(y);
+            var z: Int64 = -1;
+            while z <= chunkSize {
+                let (sz, lz) = split(z);
+                var x: Int64 = -1;
+                while x <= chunkSize {
+                    let (sx, lx) = split(x);
+                    blocks.append(chunks(neighborIndex(sx, sy, sz)).blocks(Chunk.index(lx, ly, lz)));
+                    x = x + 1;
+                }
+                z = z + 1;
+            }
+            y = y + 1;
+        }
+        Padded(blocks: blocks)
+    }
+
+    /// One chunk with air all around it.
+    static func alone(chunk: Chunk) -> Padded {
+        var chunks: [Chunk] = [];
+        var i: Int64 = 0;
+        while i < 27 {
+            chunks.append(if i == 13 { chunk } else { Chunk() });
+            i = i + 1;
+        }
+        Padded.around(chunks)
+    }
+}
+
+/// Which neighbor a padded coordinate (-1 to `chunkSize`) falls in, as -1,
+/// 0 or 1, and its coordinate inside that chunk.
+func split(v: Int64) -> (Int64, Int64) {
+    if v < 0 { return (-1, v + chunkSize); }
+    if v >= chunkSize { return (1, v - chunkSize); }
+    (0, v)
+}
+
+/// Where neighbor (dx, dy, dz), each -1 to 1, sits in a 27-chunk list.
+func neighborIndex(dx: Int64, dy: Int64, dz: Int64) -> Int64 {
+    ((dy + 1) * 3 + (dz + 1)) * 3 + (dx + 1)
 }
 
 /// A cheap, repeatable hash of a block position to 0..<1000, for scattering
