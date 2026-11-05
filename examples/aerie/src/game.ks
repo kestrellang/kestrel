@@ -179,6 +179,30 @@ func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool) -> [Overla
     quads
 }
 
+/// The title screen's overlay: the name, and how to start.
+func titleScreen(width: Int64, height: Int64, resumed: Bool) -> [OverlayQuad] {
+    let w = Float32(from: width);
+    let h = Float32(from: height);
+    let none = Vec4(x: -1.0, y: 0.0, z: 0.0, w: 0.0);
+    // A soft band behind the text, so it reads over bright sky.
+    var quads = [OverlayQuad(rect: Vec4(x: 0.0, y: h * 0.27, z: w, w: h * 0.48), color: Vec4(x: 0.10, y: 0.12, z: 0.22, w: 0.4), tile: none)];
+    // Bound first: an `if` directly inside an array literal crashes the
+    // compiler (array_literal_if_expression_owned_element.ks).
+    let prompt = if resumed { "PRESS ENTER TO CONTINUE" } else { "PRESS ENTER TO START A NEW WORLD" };
+    let lines: [(String, Float32, Float32, Vec4)] = [
+        ("AERIE", 22.0, 0.32, Vec4(x: 1.0, y: 0.97, z: 0.9, w: 1.0)),
+        ("ISLANDS ABOVE THE CLOUD SEA", 4.0, 0.51, Vec4(x: 0.8, y: 0.95, z: 0.92, w: 0.9)),
+        (prompt, 5.0, 0.61, Vec4(x: 1.0, y: 1.0, z: 1.0, w: 1.0)),
+        ("WASD MOVE  ARROWS LOOK  SPACE JUMP/GLIDE  Q BREAK  E PLACE  P SAVE", 3.0, 0.69, Vec4(x: 0.85, y: 0.9, z: 1.0, w: 0.8))
+    ];
+    for (text, scale, top, color) in lines {
+        let x = (w - textWidth(text, scale)) * 0.5;
+        let glyphs = labelQuads(text, x: x.floor(), y: (h * top).floor(), scale: scale, color: color);
+        quads.append(contentsOf: glyphs);
+    }
+    quads
+}
+
 /// How many chunk columns around the player are drawn.
 let viewRadius: Int64 = 5;
 /// Milliseconds per frame spent generating and meshing.
@@ -202,6 +226,13 @@ struct Game: not Copyable {
     /// Set when the player asks to save; the driver writes `save()` out and
     /// clears it, since only it knows where saves live.
     var wantsSave: Bool
+    /// Showing the title screen: the world turns behind it until Enter.
+    var onTitle: Bool
+    /// Whether the world came from a save, for the title's wording.
+    var resumed: Bool
+    /// A short message in the corner, shown while `noticeTime` > 0.
+    var notice: String
+    var noticeTime: Float32
 
     /// A new world from `seed`, or the one in `save`.
     init(consuming renderer: Renderer, seed seed: Int64, save save: SaveState?) {
@@ -221,6 +252,11 @@ struct Game: not Copyable {
         };
         self.running = true;
         self.wantsSave = false;
+        // `AERIE_PLAY=1` skips the title screen.
+        self.onTitle = getenv("AERIE_PLAY").isNone();
+        self.resumed = save.isSome();
+        self.notice = "";
+        self.noticeTime = 0.0;
         if let .Some(s) = save {
             for (key, chunk) in s.chunks {
                 let _ = self.world.stored.insert(key, chunk);
@@ -248,6 +284,7 @@ struct Game: not Copyable {
         match event {
             .Quit => { self.running = false },
             .KeyDown(.Escape) => { self.running = false },
+            .KeyDown(.Return) => { self.onTitle = false },
             .KeyDown(key) => { self.controls.setKey(key, held: true) },
             .KeyUp(key) => { self.controls.setKey(key, held: false) },
             _ => {}
@@ -258,7 +295,7 @@ struct Game: not Copyable {
     mutating func meshColumn(cx: Int64, cz: Int64) {
         var cy: Int64 = 0;
         while cy < worldChunksY {
-            let faces = if self.world.chunk(cx, cy, cz).isEmpty() { [] } else { meshChunk(self.world.padded(cx, cy, cz)) };
+            let faces = if self.world.chunk(cx, cy, cz).isEmpty() { ChunkFaces() } else { meshChunk(self.world.padded(cx, cy, cz)) };
             self.renderer.upload(cx, cy, cz, faces, self.world.lights(cx, cy, cz));
             cy = cy + 1;
         }
@@ -362,8 +399,36 @@ struct Game: not Copyable {
         }
     }
 
+    /// Advance the game by `dt` seconds and draw it.
     mutating func frame(dt: Float32) -> () throws WgpuError {
         self.seconds = self.seconds + dt;
+        if not self.onTitle {
+            self.play(dt);
+        }
+        self.stream();
+        self.timeOfDay = self.timeOfDay + dt / dayLength;
+        self.timeOfDay = self.timeOfDay - self.timeOfDay.floor();
+        self.controls.clearPresses();
+        self.noticeTime = self.noticeTime - dt;
+
+        let (w, h) = (self.renderer.width, self.renderer.height);
+        // The title screen turns slowly above where play starts.
+        let view = if self.onTitle {
+            Camera(position: self.player.eye + Vec3(x: 0.0, y: 6.0, z: 0.0), yaw: self.player.yaw + self.seconds * 0.05, pitch: -0.15)
+        } else {
+            self.player.camera
+        };
+        var overlay = if self.onTitle { titleScreen(w, h, self.resumed) } else { hud(w, h, self.selected, self.player.gliding) };
+        if self.noticeTime > 0.0 {
+            let notice = labelQuads(self.notice, x: 16.0, y: 16.0, scale: 4.0, color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: 0.9));
+            overlay.append(contentsOf: notice);
+        }
+        try self.renderer.draw(view.view(), eye: view.position, light: daylight(self.timeOfDay), overlay: overlay);
+        .Ok(())
+    }
+
+    /// One frame of play: the player's input, movement and edits.
+    mutating func play(dt: Float32) {
         if self.controls.flyPressed {
             self.player.flying = not self.player.flying;
         }
@@ -382,7 +447,6 @@ struct Game: not Copyable {
             remaining = remaining - step;
         }
         self.useBlocks();
-        self.stream();
         if self.controls.savePressed {
             self.wantsSave = true;
         }
@@ -390,12 +454,11 @@ struct Game: not Copyable {
         if self.controls.timePressed {
             self.timeOfDay = self.timeOfDay + 0.25;
         }
-        self.timeOfDay = self.timeOfDay + dt / dayLength;
-        self.timeOfDay = self.timeOfDay - self.timeOfDay.floor();
-        self.controls.clearPresses();
-        let view = self.player.camera;
-        let overlay = hud(self.renderer.width, self.renderer.height, self.selected, self.player.gliding);
-        try self.renderer.draw(view.view(), eye: view.position, light: daylight(self.timeOfDay), overlay: overlay);
-        .Ok(())
+    }
+
+    /// Show `text` in the corner for a few seconds.
+    mutating func notify(text: String) {
+        self.notice = text;
+        self.noticeTime = 3.0;
     }
 }

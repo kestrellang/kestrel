@@ -4,7 +4,8 @@
 // while falling to glide. Q breaks the block you look at, E places the
 // selected one, 1 to 9 pick from the hotbar, F toggles flying (Space and
 // Left Shift to rise and sink), T skips ahead a quarter day, P saves.
-// Escape saves and quits.
+// Escape saves and quits. The title screen waits for Enter
+// (`AERIE_PLAY=1` skips it).
 //
 // The world is saved to `world.aerie`, or the path in `AERIE_SAVE`
 // (`AERIE_SAVE=none` turns saving off). `AERIE_FRAMES=n` quits after n
@@ -49,13 +50,20 @@ func loadSave(path: String) -> SaveState? {
     state
 }
 
-/// Compress and write `state` to `path`, reporting how it went.
-func writeSave(path: String, state: SaveState) {
+/// Compress and write `state` to `path`, reporting how it went. True if
+/// it was written.
+func writeSave(path: String, state: SaveState) -> Bool {
     let bytes = encodeSave(state);
     let packed = Zlib.compress(bytes);
     match writeFileBytes(path, packed) {
-        .Ok(_) => println("saved \(state.chunks.count) changed chunks to \(path) (\(packed.count) bytes)"),
-        .Err(_) => println("couldn't write \(path)")
+        .Ok(_) => {
+            println("saved \(state.chunks.count) changed chunks to \(path) (\(packed.count) bytes)");
+            true
+        },
+        .Err(_) => {
+            println("couldn't write \(path)");
+            false
+        }
     }
 }
 
@@ -149,14 +157,16 @@ func run() -> Int64 {
         }
         if game.wantsSave {
             game.wantsSave = false;
-            if let .Some(p) = path { writeSave(p, game.save()); }
+            if let .Some(p) = path {
+                game.notify(if writeSave(p, game.save()) { "WORLD SAVED" } else { "COULDN'T SAVE" });
+            }
         }
         frames = frames + 1;
         if maxFrames > 0 and frames >= maxFrames {
             game.running = false;
         }
     }
-    if let .Some(p) = path { writeSave(p, game.save()); }
+    if let .Some(p) = path { let _ = writeSave(p, game.save()); }
     println("drew \(frames) frames; \(game.world.chunks.count) chunks loaded, \(game.renderer.meshes.count) meshes, \(game.renderer.drawnChunks) drawn");
     let p = game.player.position;
     println("player at (\(p.x), \(p.y), \(p.z)), on ground: \(game.player.onGround)");

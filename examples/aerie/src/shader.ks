@@ -120,14 +120,8 @@ fn glow(world: vec3f, n: vec3f) -> f32 {
     return min(total, 1.4);
 }
 
-@fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4f {
-    let texel = textureSample(atlas, atlasSampler, in.uv, in.layer);
-    // Alpha-tested: leaves and plants have holes. Glass draws as a solid
-    // pane for now (translucency comes with milestone 6).
-    if texel.a < 0.3 {
-        discard;
-    }
+// The lit, fogged color of a texel, keeping its alpha.
+fn shade(in: VertexOut, texel: vec4f) -> vec4f {
     let n = NORMALS[in.face];
     let l = normalize(-u.sunDir.xyz);
     // Plants are lit from all sides alike, so their quads don't flicker
@@ -147,7 +141,23 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
     let haze = 1.0 - exp(-distance * 0.002);
     let edge = smoothstep(u.fog.w * 0.55, u.fog.w, distance);
     color = mix(color, u.fog.rgb, max(haze, edge));
-    return vec4f(color, 1.0);
+    return vec4f(color, texel.a);
+}
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4f {
+    let texel = textureSample(atlas, atlasSampler, in.uv, in.layer);
+    // Alpha-tested: leaves and plants have holes.
+    if texel.a < 0.3 {
+        discard;
+    }
+    return vec4f(shade(in, texel).rgb, 1.0);
+}
+
+// Translucent faces, blended over the opaque world by their alpha.
+@fragment
+fn fs_glass(in: VertexOut) -> @location(0) vec4f {
+    return shade(in, textureSample(atlas, atlasSampler, in.uv, in.layer));
 }
 "
 }

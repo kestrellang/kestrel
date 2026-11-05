@@ -90,8 +90,23 @@ func faceVisible(block: Block, neighbor: Block) -> Bool {
 /// Every visible face of the chunk in the middle of `chunk`. Faces between
 /// two solid blocks are skipped, including across chunk edges, since the
 /// padding holds the neighbors' bordering blocks.
-func meshChunk(chunk: Padded) -> [FaceInstance] {
-    var faces: [FaceInstance] = [];
+/// A chunk's faces, split by how they're drawn.
+struct ChunkFaces {
+    /// Solid and alpha-tested faces, drawn first in any order.
+    var opaque: [FaceInstance]
+    /// See-through faces, blended after everything opaque.
+    var glass: [FaceInstance]
+
+    init() {
+        self.opaque = [];
+        self.glass = [];
+    }
+
+    var count: Int64 { self.opaque.count + self.glass.count }
+}
+
+func meshChunk(chunk: Padded) -> ChunkFaces {
+    var faces = ChunkFaces();
     var y: Int64 = 0;
     while y < chunkSize {
         var z: Int64 = 0;
@@ -103,7 +118,7 @@ func meshChunk(chunk: Padded) -> [FaceInstance] {
                     .Empty => {},
                     .Cross => {
                         for face in Face.cross {
-                            faces.append(packFace(x, y, z, face, block.layer(face), 255));
+                            faces.opaque.append(packFace(x, y, z, face, block.layer(face), 255));
                         }
                     },
                     _ => {
@@ -111,7 +126,8 @@ func meshChunk(chunk: Padded) -> [FaceInstance] {
                             let (dx, dy, dz) = face.step;
                             if faceVisible(block, chunk.block(x + dx, y + dy, z + dz)) {
                                 let shade = faceShade(chunk, x, y, z, face);
-                                faces.append(packFace(x, y, z, face, block.layer(face), shade));
+                                let packed = packFace(x, y, z, face, block.layer(face), shade);
+                                if block.translucent { faces.glass.append(packed); } else { faces.opaque.append(packed); }
                             }
                         }
                     }
