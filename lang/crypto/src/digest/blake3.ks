@@ -102,8 +102,8 @@ public struct BLAKE3: Digest {
         state.append(iv(1));
         state.append(iv(2));
         state.append(iv(3));
-        state.append(UInt32(from: counter & 0xffffffff));
-        state.append(UInt32(from: counter >> 32));
+        state.append(UInt32(truncating: counter & 0xffffffff));
+        state.append(UInt32(truncating: counter >> 32));
         state.append(blockLength);
         state.append(flags);
 
@@ -202,7 +202,7 @@ struct BLAKE3Chunk {
             self.chainingValue,
             BLAKE3.words(self.block),
             self.counter,
-            UInt32(from: self.block.count),
+            UInt32(truncating: self.block.count),
             self.startFlag() | BLAKE3.chunkEnd
         )
     }

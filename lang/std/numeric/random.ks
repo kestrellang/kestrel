@@ -90,7 +90,7 @@ extend RandomNumberGenerator {
     public mutating func nextFloat64() -> Float64 {
         // Top 53 bits fit a Float64 mantissa exactly; the Int64 view of the
         // shifted value is always non-negative.
-        let bits = Int64(from: self.nextUInt64().shiftRight(by: 11));
+        let bits = Int64(truncating: self.nextUInt64().shiftRight(by: 11));
         Float64(from: bits) * (1.0 / 9007199254740992.0)
     }
 
@@ -98,7 +98,7 @@ extend RandomNumberGenerator {
     ///
     /// Uses the top 24 bits of one `nextUInt64()` draw scaled by `2^-24`.
     public mutating func nextFloat32() -> Float32 {
-        let bits = Int64(from: self.nextUInt64().shiftRight(by: 40));
+        let bits = Int64(truncating: self.nextUInt64().shiftRight(by: 40));
         Float32(from: Float64(from: bits) * (1.0 / 16777216.0))
     }
 
@@ -358,7 +358,7 @@ extend ClosedRange[T]: RandomBounds[T] where T: Steppable, T: Comparable {
 extend Int64 {
     /// Returns a uniform value over the full `Int64` range, drawn from `rng`.
     public static func random(mutating using rng: some RandomNumberGenerator) -> Int64 {
-        Int64(from: rng.nextUInt64())
+        Int64(truncating: rng.nextUInt64())
     }
 
     /// Returns a uniform value over the full `Int64` range, using OS entropy.
@@ -389,12 +389,12 @@ extend Int64 {
         }
         // Work in the UInt64 bit domain: wrapping subtraction yields the
         // span even when it exceeds Int64.maxValue.
-        let lo = UInt64(from: bounds.start);
-        let span = UInt64(from: bounds.end).subtract(lo);
+        let lo = UInt64(truncating: bounds.start);
+        let span = UInt64(truncating: bounds.end).subtract(lo);
         if span == UInt64.maxValue {
-            return Int64(from: rng.nextUInt64())
+            return Int64(truncating: rng.nextUInt64())
         }
-        Int64(from: lo.add(rng.nextUInt64(below: span + 1)))
+        Int64(truncating: lo.add(rng.nextUInt64(below: span + 1)))
     }
 
     /// Returns a uniform value in `range`, using OS entropy.
@@ -442,8 +442,8 @@ extend UInt64 {
         if bounds.start < 0 {
             fatalError("UInt64.random(in:): negative bound");
         }
-        let lo = UInt64(from: bounds.start);
-        let span = UInt64(from: bounds.end) - lo;
+        let lo = UInt64(truncating: bounds.start);
+        let span = UInt64(truncating: bounds.end) - lo;
         lo + rng.nextUInt64(below: span + 1)
     }
 
@@ -459,7 +459,7 @@ extend Int8 {
     public static func random(mutating using rng: some RandomNumberGenerator) -> Int8 {
         // Truncating conversion keeps the draw uniform: every Int8 value has
         // the same number of UInt64 preimages.
-        Int8(from: rng.nextUInt64())
+        Int8(truncating: rng.nextUInt64())
     }
 
     /// Returns a uniform value over the full `Int8` range, using OS entropy.
@@ -480,7 +480,7 @@ extend Int8 {
             fatalError("Int8.random(in:): bounds exceed the Int8 range");
         }
         let span = bounds.end - bounds.start;
-        Int8(from: bounds.start + Int64(from: rng.nextUInt64(below: UInt64(from: span) + 1)))
+        Int8(truncating: bounds.start + Int64(truncating: rng.nextUInt64(below: UInt64(truncating: span) + 1)))
     }
 
     /// Returns a uniform value in `range`, using OS entropy.
@@ -495,7 +495,7 @@ extend Int16 {
     public static func random(mutating using rng: some RandomNumberGenerator) -> Int16 {
         // Truncating conversion keeps the draw uniform: every Int16 value has
         // the same number of UInt64 preimages.
-        Int16(from: rng.nextUInt64())
+        Int16(truncating: rng.nextUInt64())
     }
 
     /// Returns a uniform value over the full `Int16` range, using OS entropy.
@@ -516,7 +516,7 @@ extend Int16 {
             fatalError("Int16.random(in:): bounds exceed the Int16 range");
         }
         let span = bounds.end - bounds.start;
-        Int16(from: bounds.start + Int64(from: rng.nextUInt64(below: UInt64(from: span) + 1)))
+        Int16(truncating: bounds.start + Int64(truncating: rng.nextUInt64(below: UInt64(truncating: span) + 1)))
     }
 
     /// Returns a uniform value in `range`, using OS entropy.
@@ -531,7 +531,7 @@ extend Int32 {
     public static func random(mutating using rng: some RandomNumberGenerator) -> Int32 {
         // Truncating conversion keeps the draw uniform: every Int32 value has
         // the same number of UInt64 preimages.
-        Int32(from: rng.nextUInt64())
+        Int32(truncating: rng.nextUInt64())
     }
 
     /// Returns a uniform value over the full `Int32` range, using OS entropy.
@@ -552,7 +552,7 @@ extend Int32 {
             fatalError("Int32.random(in:): bounds exceed the Int32 range");
         }
         let span = bounds.end - bounds.start;
-        Int32(from: bounds.start + Int64(from: rng.nextUInt64(below: UInt64(from: span) + 1)))
+        Int32(truncating: bounds.start + Int64(truncating: rng.nextUInt64(below: UInt64(truncating: span) + 1)))
     }
 
     /// Returns a uniform value in `range`, using OS entropy.
@@ -567,7 +567,7 @@ extend UInt8 {
     public static func random(mutating using rng: some RandomNumberGenerator) -> UInt8 {
         // Truncating conversion keeps the draw uniform: every UInt8 value has
         // the same number of UInt64 preimages.
-        UInt8(from: rng.nextUInt64())
+        UInt8(truncating: rng.nextUInt64())
     }
 
     /// Returns a uniform value over the full `UInt8` range, using OS entropy.
@@ -588,7 +588,7 @@ extend UInt8 {
             fatalError("UInt8.random(in:): bounds exceed the UInt8 range");
         }
         let span = bounds.end - bounds.start;
-        UInt8(from: bounds.start + Int64(from: rng.nextUInt64(below: UInt64(from: span) + 1)))
+        UInt8(truncating: bounds.start + Int64(truncating: rng.nextUInt64(below: UInt64(truncating: span) + 1)))
     }
 
     /// Returns a uniform value in `range`, using OS entropy.
@@ -603,7 +603,7 @@ extend UInt16 {
     public static func random(mutating using rng: some RandomNumberGenerator) -> UInt16 {
         // Truncating conversion keeps the draw uniform: every UInt16 value has
         // the same number of UInt64 preimages.
-        UInt16(from: rng.nextUInt64())
+        UInt16(truncating: rng.nextUInt64())
     }
 
     /// Returns a uniform value over the full `UInt16` range, using OS entropy.
@@ -624,7 +624,7 @@ extend UInt16 {
             fatalError("UInt16.random(in:): bounds exceed the UInt16 range");
         }
         let span = bounds.end - bounds.start;
-        UInt16(from: bounds.start + Int64(from: rng.nextUInt64(below: UInt64(from: span) + 1)))
+        UInt16(truncating: bounds.start + Int64(truncating: rng.nextUInt64(below: UInt64(truncating: span) + 1)))
     }
 
     /// Returns a uniform value in `range`, using OS entropy.
@@ -639,7 +639,7 @@ extend UInt32 {
     public static func random(mutating using rng: some RandomNumberGenerator) -> UInt32 {
         // Truncating conversion keeps the draw uniform: every UInt32 value has
         // the same number of UInt64 preimages.
-        UInt32(from: rng.nextUInt64())
+        UInt32(truncating: rng.nextUInt64())
     }
 
     /// Returns a uniform value over the full `UInt32` range, using OS entropy.
@@ -660,7 +660,7 @@ extend UInt32 {
             fatalError("UInt32.random(in:): bounds exceed the UInt32 range");
         }
         let span = bounds.end - bounds.start;
-        UInt32(from: bounds.start + Int64(from: rng.nextUInt64(below: UInt64(from: span) + 1)))
+        UInt32(truncating: bounds.start + Int64(truncating: rng.nextUInt64(below: UInt64(truncating: span) + 1)))
     }
 
     /// Returns a uniform value in `range`, using OS entropy.

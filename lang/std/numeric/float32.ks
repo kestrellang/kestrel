@@ -977,8 +977,8 @@ public struct Float32:
         var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
-            mantissa = bnMulSmall(mantissa, UInt32(from: 10));
-            mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+            mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
+            mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
             hasDigits = true;
             index = index + 1;
             if index < len {
@@ -991,8 +991,8 @@ public struct Float32:
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
-                    mantissa = bnMulSmall(mantissa, UInt32(from: 10));
-                    mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+                    mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
+                    mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
                     fracCount = fracCount + 1;
                     hasDigits = true;
                     index = index + 1;
@@ -1071,13 +1071,13 @@ public struct Float32:
         let parts = floatRoundDecimal(mantissa, k, 23, -149, 104);
         var rawBits = UInt64.zero;
         if parts.overflow {
-            rawBits = UInt64(from: 255).shiftLeft(by: 23)
+            rawBits = UInt64(truncating: 255).shiftLeft(by: 23)
         } else if parts.m == UInt64.zero {
             rawBits = UInt64.zero
-        } else if parts.m >= UInt64(from: 8388608) {
+        } else if parts.m >= UInt64(truncating: 8388608) {
             let rawExp = parts.e + 150;
-            rawBits = UInt64(from: rawExp).shiftLeft(by: 23)
-                .bitwiseOr(parts.m.bitwiseAnd(UInt64(from: 8388607)))
+            rawBits = UInt64(truncating: rawExp).shiftLeft(by: 23)
+                .bitwiseOr(parts.m.bitwiseAnd(UInt64(truncating: 8388607)))
         } else {
             rawBits = parts.m
         }
@@ -1085,7 +1085,7 @@ public struct Float32:
             rawBits = rawBits.bitwiseOr(UInt64.one.shiftLeft(by: 31))
         }
 
-        self.raw = lang.f32_from_bits(UInt32(from: rawBits).raw);
+        self.raw = lang.f32_from_bits(UInt32(truncating: rawBits).raw);
     }
 
     // ========================================================================
@@ -1157,15 +1157,15 @@ public struct Float32:
             // Exact IEEE-754 decomposition of the non-negative `value` into
             // m * 2^e (m an integer significand, e a binary exponent).
             let bits = UInt64(from: UInt32(raw: lang.f32_to_bits(value.raw)));
-            let rawExp = Int64(from: bits.shiftRight(by: 23).bitwiseAnd(UInt64(from: 255)));
-            let rawMant = bits.bitwiseAnd(UInt64(from: 8388607));
+            let rawExp = Int64(truncating: bits.shiftRight(by: 23).bitwiseAnd(UInt64(truncating: 255)));
+            let rawMant = bits.bitwiseAnd(UInt64(truncating: 8388607));
             var m = UInt64.zero;
             var e: Int64 = 0;
             if rawExp == 0 {
                 m = rawMant;
                 e = -149
             } else {
-                m = rawMant.bitwiseOr(UInt64(from: 8388608));
+                m = rawMant.bitwiseOr(UInt64(truncating: 8388608));
                 e = rawExp - 150
             }
 

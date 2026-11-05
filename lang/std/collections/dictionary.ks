@@ -765,9 +765,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         }
 
         let hashValue: UInt64 = self.hashKey(key);
-        let capU: UInt64 = UInt64(from: myCap);
+        let capU: UInt64 = UInt64(truncating: myCap);
         let mod: UInt64 = hashValue.remainder(capU);
-        var index: Int64 = Int64(from: mod);
+        var index: Int64 = Int64(truncating: mod);
         let myBuckets = self.buckets();
         var i: Int64 = 0;
 
@@ -801,9 +801,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             return .None
         }
 
-        let capU: UInt64 = UInt64(from: myCap);
+        let capU: UInt64 = UInt64(truncating: myCap);
         let mod: UInt64 = hashValue.remainder(capU);
-        var index: Int64 = Int64(from: mod);
+        var index: Int64 = Int64(truncating: mod);
         let myBuckets = self.buckets();
         var i: Int64 = 0;
 
@@ -874,10 +874,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         // Move every live entry into the new table (linear probing). The
         // old buckets are left moved-out, so freeing them drops nothing.
-        let newCapU: UInt64 = UInt64(from: newCap);
+        let newCapU: UInt64 = UInt64(truncating: newCap);
         for i in 0..<s.cap {
             if let .Occupied(key, value, hashValue) = s.buckets.offset(by: i).take() {
-                var slotIndex: Int64 = Int64(from: hashValue.remainder(newCapU));
+                var slotIndex: Int64 = Int64(truncating: hashValue.remainder(newCapU));
                 while not bucketIsEmpty(newBuckets.offset(by: slotIndex).value) {
                     slotIndex = (slotIndex + 1) % newCap
                 }

@@ -93,7 +93,7 @@ struct Bcrypt {
             bits = bits + 6;
             if bits >= 8 {
                 bits = bits - 8;
-                if result.count < count { result.append(UInt8(from: (buffer >> bits) & 0xff)); }
+                if result.count < count { result.append(UInt8(truncating: (buffer >> bits) & 0xff)); }
                 buffer = buffer & ((1 << bits) - 1);
             }
         }

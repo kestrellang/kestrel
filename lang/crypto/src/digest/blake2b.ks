@@ -107,7 +107,7 @@ public struct BLAKE2b {
     /// length, no key, fanout 1, depth 1 (RFC 7693 §2.5).
     static func initialState(outputLength: Int64) -> Array[UInt64] {
         var h = BLAKE2b.IV;
-        h(0) = h(0) ^ 0x01010000 ^ UInt64(from: outputLength);
+        h(0) = h(0) ^ 0x01010000 ^ UInt64(truncating: outputLength);
         h
     }
 
@@ -148,7 +148,7 @@ public struct BLAKE2b {
         // Pad the remaining buffer with zeros
         var buf: [UInt8] = [];
         buf.append(contentsOf: self.buffer.asUnsafeSlice());
-        let remaining = UInt64(from: buf.count);
+        let remaining = UInt64(truncating: buf.count);
 
         // Increment counter by remaining bytes
         ct0 = ct0 + remaining;
@@ -193,7 +193,7 @@ public struct BLAKE2b {
     }
 
     mutating func incrementCounter(n: Int64) {
-        let add = UInt64(from: n);
+        let add = UInt64(truncating: n);
         self.t0 = self.t0 + add;
         if self.t0 < add {
             self.t1 = self.t1 + 1;

@@ -246,10 +246,10 @@ public struct ChaCha20Poly1305 {
         for i in 0..<16 {
             let val = w(i) + state(i);
             let off = i * 4;
-            out(off) = UInt8(from: val);
-            out(off + 1) = UInt8(from: val >> 8);
-            out(off + 2) = UInt8(from: val >> 16);
-            out(off + 3) = UInt8(from: val >> 24);
+            out(off) = UInt8(truncating: val);
+            out(off + 1) = UInt8(truncating: val >> 8);
+            out(off + 2) = UInt8(truncating: val >> 16);
+            out(off + 3) = UInt8(truncating: val >> 24);
         }
     }
 
@@ -294,8 +294,8 @@ public struct ChaCha20Poly1305 {
         while mac.count % 16 != 0 { mac.append(0); }
         mac.append(contentsOf: ciphertext);
         while mac.count % 16 != 0 { mac.append(0); }
-        mac.append(contentsOf: UInt64(from: aad.count).toBytesLittleEndian().asUnsafeSlice());
-        mac.append(contentsOf: UInt64(from: ciphertext.count).toBytesLittleEndian().asUnsafeSlice());
+        mac.append(contentsOf: UInt64(truncating: aad.count).toBytesLittleEndian().asUnsafeSlice());
+        mac.append(contentsOf: UInt64(truncating: ciphertext.count).toBytesLittleEndian().asUnsafeSlice());
         ChaCha20Poly1305.poly1305(key, mac.asUnsafeSlice())
     }
 
@@ -386,13 +386,13 @@ public struct ChaCha20Poly1305 {
         let w3 = ((h3 >> 18) | (h4 << 8)) & 0xffffffff;
 
         var f = w0 + UInt64(from: loadLE32(key, 16));
-        let t0 = UInt32(from: f & 0xffffffff);
+        let t0 = UInt32(truncating: f & 0xffffffff);
         f = (f >> 32) + w1 + UInt64(from: loadLE32(key, 20));
-        let t1 = UInt32(from: f & 0xffffffff);
+        let t1 = UInt32(truncating: f & 0xffffffff);
         f = (f >> 32) + w2 + UInt64(from: loadLE32(key, 24));
-        let t2 = UInt32(from: f & 0xffffffff);
+        let t2 = UInt32(truncating: f & 0xffffffff);
         f = (f >> 32) + w3 + UInt64(from: loadLE32(key, 28));
-        let t3 = UInt32(from: f & 0xffffffff);
+        let t3 = UInt32(truncating: f & 0xffffffff);
 
         var tag: [UInt8] = [];
         tag.append(contentsOf: t0.toBytesLittleEndian().asUnsafeSlice());

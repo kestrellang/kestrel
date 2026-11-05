@@ -36,7 +36,7 @@ struct BlockBuffer[F] where F: BlockFunction {
     }
 
     mutating func update(bytes: UnsafeSlice[UInt8]) {
-        self.totalLength = self.totalLength + UInt64(from: bytes.count);
+        self.totalLength = self.totalLength + UInt64(truncating: bytes.count);
         var offset: Int64 = 0;
 
         // Top up a partial block first.

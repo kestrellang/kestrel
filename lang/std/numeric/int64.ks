@@ -10,7 +10,7 @@ import std.core.(
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible, Defaultable,
+    ExpressibleByIntLiteral, Convertible, LossyConvertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
@@ -93,7 +93,8 @@ public struct Int64:
     Convertible[UInt8],
     Convertible[UInt16],
     Convertible[UInt32],
-    Convertible[UInt64]
+    Convertible[UInt64],
+    LossyConvertible[UInt64]
 {
     /// The underlying primitive `lang.i64` value. Exposed for FFI
     /// and intrinsic use; prefer the typed surface for everything else.
@@ -162,33 +163,54 @@ public struct Int64:
     }
 
     /// @name From Integer
-    /// Converts from `Int8`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `Int8`. Lossless: every `Int8` fits in `Int64`.
     public init(from other: Int8) { self.raw = lang.cast_i8_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `Int16`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `Int16`. Lossless: every `Int16` fits in `Int64`.
     public init(from other: Int16) { self.raw = lang.cast_i16_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `Int32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `Int32`. Lossless: every `Int32` fits in `Int64`.
     public init(from other: Int32) { self.raw = lang.cast_i32_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `UInt8`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `UInt8`. Lossless: every `UInt8` fits in `Int64`.
     public init(from other: UInt8) { self.raw = lang.cast_u8_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `UInt16`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `UInt16`. Lossless: every `UInt16` fits in `Int64`.
     public init(from other: UInt16) { self.raw = lang.cast_u16_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `UInt32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `UInt32`. Lossless: every `UInt32` fits in `Int64`.
     public init(from other: UInt32) { self.raw = lang.cast_u32_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `UInt64`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt64) { self.raw = other.raw }
+    /// Converts from `UInt64`, trapping when the value doesn't fit in
+    /// `Int64`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `Int64.minValue...Int64.maxValue`.
+    public init(from other: UInt64) {
+        if other > UInt64(truncating: Int64.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in Int64")
+        }
+        self.raw = other.raw
+    }
+    /// @name Truncating
+    /// Converts from `UInt64` keeping only the low bits, reinterpreted as
+    /// `Int64`. Never traps.
+    public init(truncating other: UInt64) { self.raw = other.raw }
+    /// @name Clamping
+    /// Converts from `UInt64`, saturating to `Int64.minValue` / `Int64.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: UInt64) {
+        if other > UInt64(truncating: Int64.maxValue) {
+            self.raw = Int64.maxValue.raw
+        } else {
+            self.raw = other.raw
+        }
+    }
+    /// @name Bit Pattern
+    /// Reinterprets the bits of a same-width `UInt64` as `Int64`. Never traps.
+    public init(bitPattern other: UInt64) { self.raw = other.raw }
 
     // ========================================================================
     // SIGN INSPECTION (Properties)
@@ -792,13 +814,13 @@ public struct Int64:
     /// significant byte first — i.e. network byte order).
     public func toBytesBigEndian() -> std.collections.Array[UInt8] {
         var result = std.collections.Array[UInt8](capacity: 8);
-        let value = UInt64(from: self);
+        let value = UInt64(truncating: self);
         let mask: UInt64 = 255;
         var i: Int64 = 0;
         while i < 8 {
             let shift = (8 - 1 - i) * 8;
             let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
-            result.append(UInt8(from: byteVal));
+            result.append(UInt8(truncating: byteVal));
             i = i + 1
         }
         result
@@ -808,13 +830,13 @@ public struct Int64:
     /// significant byte first).
     public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
         var result = std.collections.Array[UInt8](capacity: 8);
-        let value = UInt64(from: self);
+        let value = UInt64(truncating: self);
         let mask: UInt64 = 255;
         var i: Int64 = 0;
         while i < 8 {
             let shift = i * 8;
             let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
-            result.append(UInt8(from: byteVal));
+            result.append(UInt8(truncating: byteVal));
             i = i + 1
         }
         result
@@ -853,7 +875,7 @@ public struct Int64:
             result = (result << 8) | byteVal;
             i = i + 1
         }
-        self.raw = Int64(from: result).raw;
+        self.raw = Int64(truncating: result).raw;
     }
 
     /// @name From Bytes Little Endian
@@ -872,7 +894,7 @@ public struct Int64:
             result = result | (byteVal << shift);
             i = i + 1
         }
-        self.raw = Int64(from: result).raw;
+        self.raw = Int64(truncating: result).raw;
     }
 
     // ========================================================================
@@ -916,9 +938,9 @@ public struct Int64:
         // Accumulate the positive magnitude in UInt64 so that minValue's
         // magnitude (maxValue+1) is representable; convert + negate at the end.
         let maxMagnitude: UInt64 = if isNegative {
-            UInt64(from: Int64.maxValue) + 1
+            UInt64(truncating: Int64.maxValue) + 1
         } else {
-            UInt64(from: Int64.maxValue)
+            UInt64(truncating: Int64.maxValue)
         };
 
         var result: UInt64 = 0;
@@ -932,7 +954,7 @@ public struct Int64:
             }
 
             let digit = byteVal - 48;
-            let digitU: UInt64 = UInt64(from: digit);
+            let digitU: UInt64 = UInt64(truncating: digit);
 
             if result > (maxMagnitude - digitU) / 10 {
                 return null
@@ -942,7 +964,7 @@ public struct Int64:
             index = index + 1
         }
 
-        let typedResult = Int64(from: result);
+        let typedResult = Int64(truncating: result);
         if isNegative {
             self.raw = typedResult.negate().raw
         } else {
@@ -986,11 +1008,11 @@ public struct Int64:
             return null
         }
 
-        let radixU: UInt64 = UInt64(from: radix);
+        let radixU: UInt64 = UInt64(truncating: radix);
         let maxMagnitude: UInt64 = if isNegative {
-            UInt64(from: Int64.maxValue) + 1
+            UInt64(truncating: Int64.maxValue) + 1
         } else {
-            UInt64(from: Int64.maxValue)
+            UInt64(truncating: Int64.maxValue)
         };
 
         var result: UInt64 = 0;
@@ -1013,7 +1035,7 @@ public struct Int64:
                 return null
             }
 
-            let digitU: UInt64 = UInt64(from: digit);
+            let digitU: UInt64 = UInt64(truncating: digit);
             if result > (maxMagnitude - digitU) / radixU {
                 return null
             }
@@ -1021,7 +1043,7 @@ public struct Int64:
             index = index + 1
         }
 
-        let typedResult = Int64(from: result);
+        let typedResult = Int64(truncating: result);
         if isNegative {
             self.raw = typedResult.negate().raw
         } else {
@@ -1065,15 +1087,15 @@ public struct Int64:
         // Convert to unsigned magnitude so minValue formats correctly.
         // negate() overflows on minValue; unsigned subtraction from zero does not.
         let mag: UInt64 = if isNegative {
-            UInt64.zero - UInt64(from: n)
+            UInt64.zero - UInt64(truncating: n)
         } else {
-            UInt64(from: n)
+            UInt64(truncating: n)
         };
-        let radixVal: UInt64 = UInt64(from: radix);
+        let radixVal: UInt64 = UInt64(truncating: radix);
         var m = mag;
         while m != UInt64.zero {
             let digit: UInt64 = m % radixVal;
-            let digitVal: Int64 = Int64(from: digit);
+            let digitVal: Int64 = Int64(truncating: digit);
             let charCode: Int64 = if digitVal < 10 {
                 digitVal + 48
             } else if options.uppercase {
@@ -1081,7 +1103,7 @@ public struct Int64:
             } else {
                 digitVal - 10 + 97
             };
-            digits.appendByte(UInt8(from: charCode));
+            digits.appendByte(UInt8(truncating: charCode));
             m = m / radixVal
         }
         }

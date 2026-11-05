@@ -666,7 +666,7 @@ extend Sliceable[T] {
         if s.count == 0 {
             return .None
         }
-        let index = Int64(from: rng.nextUInt64(below: UInt64(from: s.count)));
+        let index = Int64(truncating: rng.nextUInt64(below: UInt64(truncating: s.count)));
         .Some(s.pointer.offset(by: index).read())
     }
 

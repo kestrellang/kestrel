@@ -10,7 +10,7 @@ import std.core.(
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible, Defaultable,
+    ExpressibleByIntLiteral, Convertible, LossyConvertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
@@ -93,7 +93,13 @@ public struct UInt16:
     Convertible[Int64],
     Convertible[UInt8],
     Convertible[UInt32],
-    Convertible[UInt64]
+    Convertible[UInt64],
+    LossyConvertible[Int8],
+    LossyConvertible[Int16],
+    LossyConvertible[Int32],
+    LossyConvertible[Int64],
+    LossyConvertible[UInt32],
+    LossyConvertible[UInt64]
 {
     /// The underlying primitive `lang.i16` value. Exposed for FFI
     /// and intrinsic use; prefer the typed surface for everything else.
@@ -162,33 +168,183 @@ public struct UInt16:
     }
 
     /// @name From Integer
-    /// Converts from `Int8`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int8) { self.raw = lang.cast_i8_i16(other.raw) }
+    /// Converts from `Int8`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: Int8) {
+        if other < 0 {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = lang.cast_i8_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `Int8` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: Int8) { self.raw = lang.cast_i8_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `Int8`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: Int8) {
+        if other < 0 {
+            self.raw = UInt16.minValue.raw
+        } else {
+            self.raw = lang.cast_i8_i16(other.raw)
+        }
+    }
     /// @name From Integer
-    /// Converts from `Int16`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int16) { self.raw = other.raw }
+    /// Converts from `Int16`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: Int16) {
+        if other < 0 {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = other.raw
+    }
+    /// @name Truncating
+    /// Converts from `Int16` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: Int16) { self.raw = other.raw }
+    /// @name Clamping
+    /// Converts from `Int16`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: Int16) {
+        if other < 0 {
+            self.raw = UInt16.minValue.raw
+        } else {
+            self.raw = other.raw
+        }
+    }
+    /// @name Bit Pattern
+    /// Reinterprets the bits of a same-width `Int16` as `UInt16`. Never traps.
+    public init(bitPattern other: Int16) { self.raw = other.raw }
     /// @name From Integer
-    /// Converts from `Int32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int32) { self.raw = lang.cast_i32_i16(other.raw) }
+    /// Converts from `Int32`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: Int32) {
+        if other < 0 or other > Int32(from: UInt16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = lang.cast_i32_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `Int32` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: Int32) { self.raw = lang.cast_i32_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `Int32`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: Int32) {
+        if other < 0 {
+            self.raw = UInt16.minValue.raw
+        } else if other > Int32(from: UInt16.maxValue) {
+            self.raw = UInt16.maxValue.raw
+        } else {
+            self.raw = lang.cast_i32_i16(other.raw)
+        }
+    }
     /// @name From Integer
-    /// Converts from `Int64`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int64) { self.raw = lang.cast_i64_i16(other.raw) }
+    /// Converts from `Int64`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: Int64) {
+        if other < 0 or other > Int64(from: UInt16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = lang.cast_i64_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `Int64` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: Int64) { self.raw = lang.cast_i64_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `Int64`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: Int64) {
+        if other < 0 {
+            self.raw = UInt16.minValue.raw
+        } else if other > Int64(from: UInt16.maxValue) {
+            self.raw = UInt16.maxValue.raw
+        } else {
+            self.raw = lang.cast_i64_i16(other.raw)
+        }
+    }
     /// @name From Integer
-    /// Converts from `UInt8`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `UInt8`. Lossless: every `UInt8` fits in `UInt16`.
     public init(from other: UInt8) { self.raw = lang.cast_u8_i16(other.raw) }
     /// @name From Integer
-    /// Converts from `UInt32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt32) { self.raw = lang.cast_u32_i16(other.raw) }
+    /// Converts from `UInt32`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: UInt32) {
+        if other > UInt32(from: UInt16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = lang.cast_u32_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `UInt32` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: UInt32) { self.raw = lang.cast_u32_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `UInt32`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: UInt32) {
+        if other > UInt32(from: UInt16.maxValue) {
+            self.raw = UInt16.maxValue.raw
+        } else {
+            self.raw = lang.cast_u32_i16(other.raw)
+        }
+    }
     /// @name From Integer
-    /// Converts from `UInt64`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt64) { self.raw = lang.cast_u64_i16(other.raw) }
+    /// Converts from `UInt64`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: UInt64) {
+        if other > UInt64(from: UInt16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = lang.cast_u64_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `UInt64` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: UInt64) { self.raw = lang.cast_u64_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `UInt64`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: UInt64) {
+        if other > UInt64(from: UInt16.maxValue) {
+            self.raw = UInt16.maxValue.raw
+        } else {
+            self.raw = lang.cast_u64_i16(other.raw)
+        }
+    }
 
     // ========================================================================
     // SIGN INSPECTION (Properties)
@@ -730,7 +886,7 @@ public struct UInt16:
         while i < 2 {
             let shift = (2 - 1 - i) * 8;
             let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
-            result.append(UInt8(from: byteVal));
+            result.append(UInt8(truncating: byteVal));
             i = i + 1
         }
         result
@@ -746,7 +902,7 @@ public struct UInt16:
         while i < 2 {
             let shift = i * 8;
             let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
-            result.append(UInt8(from: byteVal));
+            result.append(UInt8(truncating: byteVal));
             i = i + 1
         }
         result
@@ -785,7 +941,7 @@ public struct UInt16:
             result = (result << 8) | byteVal;
             i = i + 1
         }
-        self.raw = UInt16(from: result).raw;
+        self.raw = UInt16(truncating: result).raw;
     }
 
     /// @name From Bytes Little Endian
@@ -804,7 +960,7 @@ public struct UInt16:
             result = result | (byteVal << shift);
             i = i + 1
         }
-        self.raw = UInt16(from: result).raw;
+        self.raw = UInt16(truncating: result).raw;
     }
 
     // ========================================================================
@@ -874,7 +1030,7 @@ public struct UInt16:
             return null
         }
 
-        self.raw = UInt16(from: result).raw;
+        self.raw = UInt16(truncating: result).raw;
     }
     /// @name Parse Radix
     /// Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -913,7 +1069,7 @@ public struct UInt16:
             return null
         }
 
-        let radixU: UInt64 = UInt64(from: radix);
+        let radixU: UInt64 = UInt64(truncating: radix);
         let maxVal: UInt64 = UInt64(from: UInt16.maxValue);
 
         var result: UInt64 = 0;
@@ -936,7 +1092,7 @@ public struct UInt16:
                 return null
             }
 
-            let digitU: UInt64 = UInt64(from: digit);
+            let digitU: UInt64 = UInt64(truncating: digit);
             if result > (maxVal - digitU) / radixU {
                 return null
             }
@@ -944,7 +1100,7 @@ public struct UInt16:
             index = index + 1
         }
 
-        self.raw = UInt16(from: result).raw;
+        self.raw = UInt16(truncating: result).raw;
     }
 
     // ========================================================================
@@ -980,7 +1136,7 @@ public struct UInt16:
         if n == UInt16.zero {
             digits.appendByte(48)
         } else {
-        let radixVal: UInt16 = UInt16(from: radix);
+        let radixVal: UInt16 = UInt16(truncating: radix);
         var m = n;
         while m != UInt16.zero {
             let digit: UInt16 = m % radixVal;
@@ -992,7 +1148,7 @@ public struct UInt16:
             } else {
                 digitVal - 10 + 97
             };
-            digits.appendByte(UInt8(from: charCode));
+            digits.appendByte(UInt8(truncating: charCode));
             m = m / radixVal
         }
         }

@@ -123,7 +123,7 @@ public struct TlsStream: Readable, Writable, Cloneable {
     public mutating func read(mutating into buf: Slice[UInt8]) -> Int64 throws IoError {
         let raw = buf.asUnsafeSlice();
         let ssl = self.conn.value.ssl;
-        let count32 = if raw.count > 2147483647 { 2147483647 } else { Int32(from: raw.count) };
+        let count32 = if raw.count > 2147483647 { 2147483647 } else { Int32(truncating: raw.count) };
         let n = Int32(raw: libc_SSL_read(
             ssl,
             lang.cast_ptr[_, lang.i8](raw.pointer.raw),
@@ -137,7 +137,7 @@ public struct TlsStream: Readable, Writable, Cloneable {
 
     public mutating func write(from buf: Slice[UInt8]) -> Int64 throws IoError {
         let ssl = self.conn.value.ssl;
-        let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
+        let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(truncating: buf.count) };
         let n = Int32(raw: libc_SSL_write(
             ssl,
             lang.cast_ptr[_, lang.i8](buf.pointer.raw),

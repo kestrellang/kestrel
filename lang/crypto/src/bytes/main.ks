@@ -165,7 +165,7 @@ func decodeBase64(text: String) -> Array[UInt8]? {
         bits = bits + 6;
         if bits >= 8 {
             bits = bits - 8;
-            result.append(UInt8(from: (buffer >> bits) & 0xff));
+            result.append(UInt8(truncating: (buffer >> bits) & 0xff));
             buffer = buffer & ((1 << bits) - 1);
         }
     }

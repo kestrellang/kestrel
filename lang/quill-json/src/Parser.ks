@@ -375,7 +375,7 @@ func unescape(mutating cursor: JsonCursor) -> Char throws JsonParseError {
             let codepoint = try parseUnicodeEscape(cursor);
             // Surrogate halves and out-of-range values have no scalar; reject
             // them rather than unwrapping a `.None`.
-            guard let some decoded = Char(UInt32(from: codepoint)) else {
+            guard let some decoded = Char(UInt32(truncating: codepoint)) else {
                 throw JsonParseError("invalid unicode escape", cursor.pos - 6)
             }
             .Ok(decoded)
