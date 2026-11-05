@@ -438,7 +438,7 @@ def hexbloom(rng):
 
 
 # Birds: kestrels over the dream islands, vultures over the lairs. Each
-# bird is a few boxes (see src/birds.ks), textured from these tiles.
+# bird is a few boxes (see src/game/birds.ks), textured from these tiles.
 RUFOUS = [(132, 62, 40), (176, 92, 54), (206, 120, 70), (228, 150, 96)]
 CREAM = [(196, 170, 140), (228, 206, 176), (246, 232, 208), (255, 246, 228)]
 SLATE = [(84, 92, 122), (112, 122, 156), (146, 156, 188), (182, 190, 216)]
@@ -604,7 +604,7 @@ def crack(stage):
 
 
 # Layer order is the source of truth for block faces; keep it in sync with
-# `Layer` in src/blocks.ks.
+# `Layer` in src/world/blocks.ks.
 TILES = [driftstone, loam, moss_top, moss_side, bark, rings, emberleaf, cloudglass,
          skyiron, glowcap, sailcloth, featherthatch, planks,
          ashrock, scorch_top, scorch_side, darkbrick, embercore, deadwood, dead_rings,

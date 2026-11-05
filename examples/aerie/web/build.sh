@@ -19,9 +19,11 @@ mkdir -p "$out"
 # The SDL package's C helpers, built for the same target.
 emcc --target=$target -sUSE_SDL=2 -O2 -c "$lang/sdl/sdl_helpers.c" -o "$out/sdl_helpers.o"
 
-sources=("$aerie"/src/*.ks)
-for dep in wgpu sdl linalg images deflate; do
-    sources+=("$lang/$dep"/src/*.ks)
+# Every .ks file under each package's src, subfolders included. A read
+# loop rather than mapfile, which macOS's bash 3.2 lacks.
+sources=()
+for dir in "$aerie/src" "$lang"/{wgpu,sdl,linalg,images,deflate}/src; do
+    while IFS= read -r file; do sources+=("$file"); done < <(find "$dir" -name '*.ks' | sort)
 done
 
 cd "$aerie"  # so --preload-file's `assets` path matches the desktop layout

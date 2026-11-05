@@ -1,4 +1,4 @@
-"""Draws Aerie's interface atlas, assets/ui.png, and writes src/ui.ks, the
+"""Draws Aerie's interface atlas, assets/ui.png, and writes src/ui/ui.ks, the
 layer numbers and glyph widths the game needs to use it.
 
 The atlas is a column of 96x96 layers, loaded as one texture array:
@@ -24,7 +24,7 @@ CELL = 96
 FONT_SIZE = pixel_font.ROWS * 4
 SUPER = 4  # supersampling for smooth edges
 
-# Block atlas layers (see `Layer` in src/blocks.ks).
+# Block atlas layers (see `Layer` in src/world/blocks.ks).
 DRIFTSTONE, LOAM, MOSS_TOP, MOSS_SIDE, BARK, RINGS, EMBERLEAF, CLOUDGLASS, \
     SKYIRON, GLOWCAP, SAILCLOTH, FEATHERTHATCH, PLANKS, ASHROCK, SCORCH_TOP, \
     SCORCH_SIDE, DARKBRICK, EMBERCORE, DEADWOOD, DEAD_RINGS, GLOOMLEAF, HEXBLOOM = range(22)
@@ -414,9 +414,9 @@ def main():
         "}",
         "",
     ]
-    with open("src/ui.ks", "w") as f:
+    with open("src/ui/ui.ks", "w") as f:
         f.write("\n".join(lines))
-    print(f"wrote assets/ui.png ({len(layers)} layers) and src/ui.ks")
+    print(f"wrote assets/ui.png ({len(layers)} layers) and src/ui/ui.ks")
 
 
 if __name__ == "__main__":
