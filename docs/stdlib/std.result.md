@@ -42,6 +42,46 @@ Wraps a present value of `T`.
 
 _Defined in `lang/std/result/optional.ks`._
 
+#### function `andThen`
+
+```kestrel
+public consuming func andThen[U]((T) -> Optional[U]) -> Optional[U]
+```
+
+Monadic bind — apply a transform that itself returns an
+`Optional`, without nesting. Equivalent to `map(...).flatten()`.
+
+##### Examples
+
+```
+func parse(s: String) -> Int64? { ... }
+
+Some("42").andThen(parse);    // Some(42)
+Some("abc").andThen(parse);   // None  (parse failed)
+None.andThen(parse);          // None
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
+#### function `andValue`
+
+```kestrel
+public consuming func andValue[U](consuming Optional[U]) -> Optional[U]
+```
+
+Returns `other` when `self` is `Some`, otherwise `None`. `other` is
+evaluated eagerly — use `andThen` for lazy chaining.
+
+##### Examples
+
+```
+Some(1).andValue(Some("a"));    // Some("a")
+Some(1).andValue(None);         // None
+None.andValue(Some("a"));       // None
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
 #### function `asRef`
 
 ```kestrel
@@ -113,27 +153,6 @@ None.filter(where: { it % 2 == 0 });      // None
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `flatMap`
-
-```kestrel
-public consuming func flatMap[U]((T) -> Optional[U]) -> Optional[U]
-```
-
-Monadic bind — apply a transform that itself returns an
-`Optional`, without nesting. Equivalent to `map(...).flatten()`.
-
-##### Examples
-
-```
-func parse(s: String) -> Int64? { ... }
-
-Some("42").flatMap(parse);    // Some(42)
-Some("abc").flatMap(parse);   // None  (parse failed)
-None.flatMap(parse);          // None
-```
-
-_Defined in `lang/std/result/optional.ks`._
-
 #### function `flatten`
 
 ```kestrel
@@ -173,20 +192,20 @@ getUser(id)
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `isNone`
+#### field `isNone`
 
 ```kestrel
-public func isNone() -> Bool
+public var isNone: Bool { get }
 ```
 
 True when this is `.None`. The complement of `isSome`.
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `isSome`
+#### field `isSome`
 
 ```kestrel
-public func isSome() -> Bool
+public var isSome: Bool { get }
 ```
 
 True when this is `.Some`. Cheap discriminator-only check.
@@ -194,8 +213,8 @@ True when this is `.Some`. Cheap discriminator-only check.
 ##### Examples
 
 ```
-Some(42).isSome();   // true
-None.isSome();       // false
+Some(42).isSome;   // true
+None.isSome;       // false
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -262,24 +281,6 @@ Some("hello").map { it.len };     // Some(5)
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `none`
-
-```kestrel
-public static func none() -> Optional[T]
-```
-
-Returns `.None`. Prefer the `null` literal — it works in any
-optional context without naming the type parameter.
-
-##### Examples
-
-```
-let a = Optional[Int64].none();   // None
-let b: Int64? = null;             // identical, preferred
-```
-
-_Defined in `lang/std/result/optional.ks`._
-
 #### function `okOr`
 
 ```kestrel
@@ -334,6 +335,24 @@ None.orElse { loadFromCache() };   // calls fn
 
 // For unwrapping with a default, prefer ??:
 let value = optionalInt ?? 0;
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
+#### function `orValue`
+
+```kestrel
+public consuming func orValue(consuming Optional[T]) -> Optional[T]
+```
+
+Returns `self` when `Some`, otherwise `other`. `other` is evaluated
+eagerly — use `orElse` for a lazy fallback.
+
+##### Examples
+
+```
+Some(1).orValue(Some(2));   // Some(1)
+None.orValue(Some(2));      // Some(2)
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -400,25 +419,6 @@ opt2.take(where: { it < 0 });   // None;     opt2 is still Some(42)
 
 _Defined in `lang/std/result/optional.ks`._
 
-#### function `then`
-
-```kestrel
-public consuming func then[U](consuming Optional[U]) -> Optional[U]
-```
-
-Returns `other` when `self` is `Some`, otherwise `None`. `other` is
-evaluated eagerly — use `flatMap` for lazy chaining.
-
-##### Examples
-
-```
-Some(1).then(Some("a"));    // Some("a")
-Some(1).then(None);         // None
-None.then(Some("a"));       // None
-```
-
-_Defined in `lang/std/result/optional.ks`._
-
 #### function `unwrap`
 
 ```kestrel
@@ -475,25 +475,6 @@ when the default is expensive to compute or has side effects.
 ```
 Some(42).unwrap(orElse: { expensiveDefault() });   // 42, no call
 None.unwrap(orElse: { expensiveDefault() });       // calls fn
-```
-
-_Defined in `lang/std/result/optional.ks`._
-
-#### function `wrap`
-
-```kestrel
-public static func wrap(T) -> Optional[T]
-```
-
-Wraps `value` in `.Some`. Rarely needed in practice — bare values
-are promoted via `FromValue`, and `let x: Int64? = 42` does the
-right thing.
-
-##### Examples
-
-```
-let opt = Optional.wrap(42);   // Some(42)
-let opt: Int64? = 42;                 // identical, preferred
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -876,8 +857,8 @@ _Defined in `lang/std/result/result.ks`._
 public consuming func andThen[U]((T) -> Result[U, E]) -> Result[U, E]
 ```
 
-Alias for `flatMap` — chains a fallible step onto an `Ok` branch.
-Reads more naturally in long pipelines (`parseInput().andThen(validate).andThen(persist)`).
+Chains a fallible step onto an `Ok` branch, without nesting:
+`parseInput().andThen(validate).andThen(persist)`.
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -890,17 +871,6 @@ public consuming func andValue[U](consuming Result[U, E]) -> Result[U, E]
 Returns `other` when `self` is `Ok`, otherwise propagates the
 existing `Err`. Named `andValue` (not `and`) because `and` is a
 reserved keyword.
-
-_Defined in `lang/std/result/result.ks`._
-
-#### function `err`
-
-```kestrel
-public static func err(E) -> Result[T, E]
-```
-
-Wraps `error` in `.Err`. Useful when constructing a `Result` from
-a known error in non-promotion contexts.
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -947,25 +917,18 @@ let cfg = loadConfig().expect("Config file required");
 
 _Defined in `lang/std/result/result.ks`._
 
-#### function `flatMap`
+#### function `expectErr`
 
 ```kestrel
-public consuming func flatMap[U]((T) -> Result[U, E]) -> Result[U, E]
+public consuming func expectErr(String) -> E
 ```
 
-Monadic bind on the success branch — apply a transform that itself
-returns a `Result`, without nesting.
+Returns the error value, panicking with `message` if `Ok`. Mirror
+of `expect(_:)` for asserting that a call failed.
 
-_Defined in `lang/std/result/result.ks`._
+##### Errors
 
-#### function `flatMapErr`
-
-```kestrel
-public consuming func flatMapErr[F]((E) -> Result[T, F]) -> Result[T, F]
-```
-
-Monadic bind on the error branch — apply a recovery function that
-itself returns a `Result`, without nesting. Mirror of `flatMap`.
+Panics with `message` on `.Ok` via `fatalError`.
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -1029,10 +992,10 @@ parsePort(input)
 
 _Defined in `lang/std/result/result.ks`._
 
-#### function `isErr`
+#### field `isErr`
 
 ```kestrel
-public func isErr() -> Bool
+public var isErr: Bool { get }
 ```
 
 True when this is `.Err`. Complement of `isOk`.
@@ -1059,10 +1022,10 @@ Ok(1).isErrAnd(where: { it == 404 });      // false
 
 _Defined in `lang/std/result/result.ks`._
 
-#### function `isOk`
+#### field `isOk`
 
 ```kestrel
-public func isOk() -> Bool
+public var isOk: Bool { get }
 ```
 
 True when this is `.Ok`. Cheap discriminator-only check.
@@ -1070,8 +1033,8 @@ True when this is `.Ok`. Cheap discriminator-only check.
 ##### Examples
 
 ```
-Ok(42).isOk();          // true
-Err("oops").isOk();     // false
+Ok(42).isOk;          // true
+Err("oops").isOk;     // false
 ```
 
 _Defined in `lang/std/result/result.ks`._
@@ -1139,17 +1102,6 @@ specific error type into a more general one.
 ```
 parse(s).mapErr { AppError.Parse(it) };
 ```
-
-_Defined in `lang/std/result/result.ks`._
-
-#### function `ok`
-
-```kestrel
-public static func ok(T) -> Result[T, E]
-```
-
-Wraps `value` in `.Ok`. Rarely needed in practice — `FromValue`
-promotes bare values where the context expects a `Result`.
 
 _Defined in `lang/std/result/result.ks`._
 

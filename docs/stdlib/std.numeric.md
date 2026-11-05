@@ -3332,18 +3332,27 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
-#### function `moduloUnchecked`
+#### function `modulo`
 
 ```kestrel
-public consuming func moduloUnchecked(consuming Int16) -> Int16
+public func modulo(by: Int16) -> Int16
 ```
 
-`self % other` without the divide-by-zero and `minValue % -1` guards.
-Same safety contract as `divideUnchecked`.
+Euclidean modulo: the result is always in `0..<|other|`, whatever
+the signs. Differs from `%` (`remainder`) only when `self` is
+negative: `(-7) % 3` is `-1`, `(-7).modulo(by: 3)` is `2`.
 
-##### Safety
+##### Errors
 
-UB when `other == 0`, or signed `minValue % -1`.
+Traps on division by zero, like `remainder`.
+
+##### Examples
+
+```
+(-7).modulo(by: 3);   // 2
+(7).modulo(by: -3);   // 1
+(-7).modulo(by: -3);  // 2
+```
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3458,6 +3467,21 @@ public var raw: lang.i16
 
 The underlying primitive `lang.i16` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
+#### function `remainderUnchecked`
+
+```kestrel
+public consuming func remainderUnchecked(consuming Int16) -> Int16
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3915,12 +3939,12 @@ process aborts before producing a result).
 
 _Defined in `lang/std/numeric/int16.ks`._
 
-### Implements `Modulo`
+### Implements `Remainder`
 
-#### function `modulo`
+#### function `remainder`
 
 ```kestrel
-public consuming func modulo(consuming Int16) -> Int16
+public consuming func remainder(consuming Int16) -> Int16
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -4071,12 +4095,12 @@ public mutating func divideAssign(Int16)
 
 _Defined in `lang/std/numeric/int16.ks`._
 
-### Implements `ModuloAssign`
+### Implements `RemainderAssign`
 
-#### function `modAssign`
+#### function `remainderAssign`
 
 ```kestrel
-public mutating func modAssign(Int16)
+public mutating func remainderAssign(Int16)
 ```
 
 `self %= other`
@@ -4734,18 +4758,27 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
-#### function `moduloUnchecked`
+#### function `modulo`
 
 ```kestrel
-public consuming func moduloUnchecked(consuming Int32) -> Int32
+public func modulo(by: Int32) -> Int32
 ```
 
-`self % other` without the divide-by-zero and `minValue % -1` guards.
-Same safety contract as `divideUnchecked`.
+Euclidean modulo: the result is always in `0..<|other|`, whatever
+the signs. Differs from `%` (`remainder`) only when `self` is
+negative: `(-7) % 3` is `-1`, `(-7).modulo(by: 3)` is `2`.
 
-##### Safety
+##### Errors
 
-UB when `other == 0`, or signed `minValue % -1`.
+Traps on division by zero, like `remainder`.
+
+##### Examples
+
+```
+(-7).modulo(by: 3);   // 2
+(7).modulo(by: -3);   // 1
+(-7).modulo(by: -3);  // 2
+```
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -4860,6 +4893,21 @@ public var raw: lang.i32
 
 The underlying primitive `lang.i32` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
+#### function `remainderUnchecked`
+
+```kestrel
+public consuming func remainderUnchecked(consuming Int32) -> Int32
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5317,12 +5365,12 @@ process aborts before producing a result).
 
 _Defined in `lang/std/numeric/int32.ks`._
 
-### Implements `Modulo`
+### Implements `Remainder`
 
-#### function `modulo`
+#### function `remainder`
 
 ```kestrel
-public consuming func modulo(consuming Int32) -> Int32
+public consuming func remainder(consuming Int32) -> Int32
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -5473,12 +5521,12 @@ public mutating func divideAssign(Int32)
 
 _Defined in `lang/std/numeric/int32.ks`._
 
-### Implements `ModuloAssign`
+### Implements `RemainderAssign`
 
-#### function `modAssign`
+#### function `remainderAssign`
 
 ```kestrel
-public mutating func modAssign(Int32)
+public mutating func remainderAssign(Int32)
 ```
 
 `self %= other`
@@ -6136,18 +6184,27 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
-#### function `moduloUnchecked`
+#### function `modulo`
 
 ```kestrel
-public consuming func moduloUnchecked(consuming Int64) -> Int64
+public func modulo(by: Int64) -> Int64
 ```
 
-`self % other` without the divide-by-zero and `minValue % -1` guards.
-Same safety contract as `divideUnchecked`.
+Euclidean modulo: the result is always in `0..<|other|`, whatever
+the signs. Differs from `%` (`remainder`) only when `self` is
+negative: `(-7) % 3` is `-1`, `(-7).modulo(by: 3)` is `2`.
 
-##### Safety
+##### Errors
 
-UB when `other == 0`, or signed `minValue % -1`.
+Traps on division by zero, like `remainder`.
+
+##### Examples
+
+```
+(-7).modulo(by: 3);   // 2
+(7).modulo(by: -3);   // 1
+(-7).modulo(by: -3);  // 2
+```
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6280,6 +6337,21 @@ public var raw: lang.i64
 
 The underlying primitive `lang.i64` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
+#### function `remainderUnchecked`
+
+```kestrel
+public consuming func remainderUnchecked(consuming Int64) -> Int64
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6737,12 +6809,12 @@ process aborts before producing a result).
 
 _Defined in `lang/std/numeric/int64.ks`._
 
-### Implements `Modulo`
+### Implements `Remainder`
 
-#### function `modulo`
+#### function `remainder`
 
 ```kestrel
-public consuming func modulo(consuming Int64) -> Int64
+public consuming func remainder(consuming Int64) -> Int64
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -6893,12 +6965,12 @@ public mutating func divideAssign(Int64)
 
 _Defined in `lang/std/numeric/int64.ks`._
 
-### Implements `ModuloAssign`
+### Implements `RemainderAssign`
 
-#### function `modAssign`
+#### function `remainderAssign`
 
 ```kestrel
-public mutating func modAssign(Int64)
+public mutating func remainderAssign(Int64)
 ```
 
 `self %= other`
@@ -7990,18 +8062,27 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
-#### function `moduloUnchecked`
+#### function `modulo`
 
 ```kestrel
-public consuming func moduloUnchecked(consuming Int8) -> Int8
+public func modulo(by: Int8) -> Int8
 ```
 
-`self % other` without the divide-by-zero and `minValue % -1` guards.
-Same safety contract as `divideUnchecked`.
+Euclidean modulo: the result is always in `0..<|other|`, whatever
+the signs. Differs from `%` (`remainder`) only when `self` is
+negative: `(-7) % 3` is `-1`, `(-7).modulo(by: 3)` is `2`.
 
-##### Safety
+##### Errors
 
-UB when `other == 0`, or signed `minValue % -1`.
+Traps on division by zero, like `remainder`.
+
+##### Examples
+
+```
+(-7).modulo(by: 3);   // 2
+(7).modulo(by: -3);   // 1
+(-7).modulo(by: -3);  // 2
+```
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8116,6 +8197,21 @@ public var raw: lang.i8
 
 The underlying primitive `lang.i8` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
+#### function `remainderUnchecked`
+
+```kestrel
+public consuming func remainderUnchecked(consuming Int8) -> Int8
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8573,12 +8669,12 @@ process aborts before producing a result).
 
 _Defined in `lang/std/numeric/int8.ks`._
 
-### Implements `Modulo`
+### Implements `Remainder`
 
-#### function `modulo`
+#### function `remainder`
 
 ```kestrel
-public consuming func modulo(consuming Int8) -> Int8
+public consuming func remainder(consuming Int8) -> Int8
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -8729,12 +8825,12 @@ public mutating func divideAssign(Int8)
 
 _Defined in `lang/std/numeric/int8.ks`._
 
-### Implements `ModuloAssign`
+### Implements `RemainderAssign`
 
-#### function `modAssign`
+#### function `remainderAssign`
 
 ```kestrel
-public mutating func modAssign(Int8)
+public mutating func remainderAssign(Int8)
 ```
 
 `self %= other`
@@ -9748,18 +9844,18 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
-#### function `moduloUnchecked`
+#### function `modulo`
 
 ```kestrel
-public consuming func moduloUnchecked(consuming UInt16) -> UInt16
+public func modulo(by: UInt16) -> UInt16
 ```
 
-`self % other` without the divide-by-zero and `minValue % -1` guards.
-Same safety contract as `divideUnchecked`.
+Euclidean modulo. For unsigned types this is the same as `%`
+(`remainder`); it exists so generic code can use one name.
 
-##### Safety
+##### Errors
 
-UB when `other == 0`, or signed `minValue % -1`.
+Traps on division by zero, like `remainder`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -9853,6 +9949,21 @@ public var raw: lang.i16
 
 The underlying primitive `lang.i16` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### function `remainderUnchecked`
+
+```kestrel
+public consuming func remainderUnchecked(consuming UInt16) -> UInt16
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10292,12 +10403,12 @@ process aborts before producing a result).
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
-### Implements `Modulo`
+### Implements `Remainder`
 
-#### function `modulo`
+#### function `remainder`
 
 ```kestrel
-public consuming func modulo(consuming UInt16) -> UInt16
+public consuming func remainder(consuming UInt16) -> UInt16
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -10434,12 +10545,12 @@ public mutating func divideAssign(UInt16)
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
-### Implements `ModuloAssign`
+### Implements `RemainderAssign`
 
-#### function `modAssign`
+#### function `remainderAssign`
 
 ```kestrel
-public mutating func modAssign(UInt16)
+public mutating func remainderAssign(UInt16)
 ```
 
 `self %= other`
@@ -11077,18 +11188,18 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
-#### function `moduloUnchecked`
+#### function `modulo`
 
 ```kestrel
-public consuming func moduloUnchecked(consuming UInt32) -> UInt32
+public func modulo(by: UInt32) -> UInt32
 ```
 
-`self % other` without the divide-by-zero and `minValue % -1` guards.
-Same safety contract as `divideUnchecked`.
+Euclidean modulo. For unsigned types this is the same as `%`
+(`remainder`); it exists so generic code can use one name.
 
-##### Safety
+##### Errors
 
-UB when `other == 0`, or signed `minValue % -1`.
+Traps on division by zero, like `remainder`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11182,6 +11293,21 @@ public var raw: lang.i32
 
 The underlying primitive `lang.i32` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### function `remainderUnchecked`
+
+```kestrel
+public consuming func remainderUnchecked(consuming UInt32) -> UInt32
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11621,12 +11747,12 @@ process aborts before producing a result).
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
-### Implements `Modulo`
+### Implements `Remainder`
 
-#### function `modulo`
+#### function `remainder`
 
 ```kestrel
-public consuming func modulo(consuming UInt32) -> UInt32
+public consuming func remainder(consuming UInt32) -> UInt32
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -11763,12 +11889,12 @@ public mutating func divideAssign(UInt32)
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
-### Implements `ModuloAssign`
+### Implements `RemainderAssign`
 
-#### function `modAssign`
+#### function `remainderAssign`
 
 ```kestrel
-public mutating func modAssign(UInt32)
+public mutating func remainderAssign(UInt32)
 ```
 
 `self %= other`
@@ -12406,18 +12532,18 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
-#### function `moduloUnchecked`
+#### function `modulo`
 
 ```kestrel
-public consuming func moduloUnchecked(consuming UInt64) -> UInt64
+public func modulo(by: UInt64) -> UInt64
 ```
 
-`self % other` without the divide-by-zero and `minValue % -1` guards.
-Same safety contract as `divideUnchecked`.
+Euclidean modulo. For unsigned types this is the same as `%`
+(`remainder`); it exists so generic code can use one name.
 
-##### Safety
+##### Errors
 
-UB when `other == 0`, or signed `minValue % -1`.
+Traps on division by zero, like `remainder`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12520,6 +12646,21 @@ public var raw: lang.i64
 
 The underlying primitive `lang.i64` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### function `remainderUnchecked`
+
+```kestrel
+public consuming func remainderUnchecked(consuming UInt64) -> UInt64
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -12959,12 +13100,12 @@ process aborts before producing a result).
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
-### Implements `Modulo`
+### Implements `Remainder`
 
-#### function `modulo`
+#### function `remainder`
 
 ```kestrel
-public consuming func modulo(consuming UInt64) -> UInt64
+public consuming func remainder(consuming UInt64) -> UInt64
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -13101,12 +13242,12 @@ public mutating func divideAssign(UInt64)
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
-### Implements `ModuloAssign`
+### Implements `RemainderAssign`
 
-#### function `modAssign`
+#### function `remainderAssign`
 
 ```kestrel
-public mutating func modAssign(UInt64)
+public mutating func remainderAssign(UInt64)
 ```
 
 `self %= other`
@@ -13744,18 +13885,18 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
-#### function `moduloUnchecked`
+#### function `modulo`
 
 ```kestrel
-public consuming func moduloUnchecked(consuming UInt8) -> UInt8
+public func modulo(by: UInt8) -> UInt8
 ```
 
-`self % other` without the divide-by-zero and `minValue % -1` guards.
-Same safety contract as `divideUnchecked`.
+Euclidean modulo. For unsigned types this is the same as `%`
+(`remainder`); it exists so generic code can use one name.
 
-##### Safety
+##### Errors
 
-UB when `other == 0`, or signed `minValue % -1`.
+Traps on division by zero, like `remainder`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -13849,6 +13990,21 @@ public var raw: lang.i8
 
 The underlying primitive `lang.i8` value. Exposed for FFI
 and intrinsic use; prefer the typed surface for everything else.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### function `remainderUnchecked`
+
+```kestrel
+public consuming func remainderUnchecked(consuming UInt8) -> UInt8
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14288,12 +14444,12 @@ process aborts before producing a result).
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
-### Implements `Modulo`
+### Implements `Remainder`
 
-#### function `modulo`
+#### function `remainder`
 
 ```kestrel
-public consuming func modulo(consuming UInt8) -> UInt8
+public consuming func remainder(consuming UInt8) -> UInt8
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -14430,12 +14586,12 @@ public mutating func divideAssign(UInt8)
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
-### Implements `ModuloAssign`
+### Implements `RemainderAssign`
 
-#### function `modAssign`
+#### function `remainderAssign`
 
 ```kestrel
-public mutating func modAssign(UInt8)
+public mutating func remainderAssign(UInt8)
 ```
 
 `self %= other`
