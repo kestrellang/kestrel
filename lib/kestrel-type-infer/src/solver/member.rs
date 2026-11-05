@@ -489,6 +489,46 @@ pub(super) fn solve_member(
         );
     }
 
+    // An operator on a lent `Optional[&T]` (`xs.first() ?? 0`,
+    // `b(checked: 1) == .Some(5)`) works on the copied-out `Optional[T]`, as
+    // a binding would: the receiver expression decays (`optional_ref_decays`).
+    if let Some(&recv_expr) = ctx.operator_receivers.get(&expr)
+        && let Some((optional, pointee)) = super::equality::optional_ref_pointee(ctx, resolved)
+    {
+        match super::pointee_sizedness(ctx, pointee) {
+            Some(true) => {
+                ctx.optional_ref_decays.insert(recv_expr);
+                let decayed = ctx.named(optional, vec![pointee]);
+                return solve_member(
+                    ctx,
+                    decayed,
+                    name,
+                    args,
+                    result,
+                    expr,
+                    is_call,
+                    is_static_context,
+                    explicit_type_args,
+                    span,
+                );
+            },
+            None => {
+                return SolveResult::Deferred(Constraint::Member {
+                    receiver,
+                    name: name.to_string(),
+                    args,
+                    result,
+                    expr,
+                    is_call,
+                    is_static_context,
+                    explicit_type_args: explicit_type_args.to_vec(),
+                    span,
+                });
+            },
+            Some(false) => {},
+        }
+    }
+
     // Existential receiver (`B[rawany P]`): protocol members first, then
     // the box's own (existentials design §7). Operators and for-in go
     // through self-conformance instead, so they skip the peel.

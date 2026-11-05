@@ -88,10 +88,13 @@ extend Slice[T] {
         mutating ref { I.lendMutatingUnchecked(index, self) }
     }
 
-    /// Like `self(index)`, but `.None` instead of a panic when out of range.
-    /// An element comes back as a copy; a range as a lent slice.
-    public subscript[I](checked index: I) -> I.SliceCheckedOutput where I: SliceIndex[T] {
-        get { I.lendChecked(index, self) }
+    /// Like `self(index)`, but the place may not exist: `.None` instead of
+    /// a panic when out of range. Reading copies the element out (`T?`) or
+    /// lends the slice; `if let .Some(&mutating v) = s(checked: i)` writes
+    /// in place.
+    public subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendChecked(index, self) }
+        mutating ref { I.lendMutatingChecked(index, self) }
     }
 
     /// Like `self(index)`, with the index or range clamped into the slice.
@@ -217,14 +220,13 @@ extend Slice[T]: ArrayMatchable {
 /// the index).
 public protocol SliceIndex[T] {
     type SliceOutput
-    /// What `checked:` gives: a copy of the element (`T?`), or a lent
-    /// slice (`Optional[&Slice[T]]`).
-    type SliceCheckedOutput
     static func lend(consuming index: Self, base: Slice[T]) -> &SliceOutput
     static func lendMutating(consuming index: Self, mutating base: Slice[T]) -> &mutating SliceOutput
     static func lendUnchecked(consuming index: Self, base: Slice[T]) -> &SliceOutput
     static func lendMutatingUnchecked(consuming index: Self, mutating base: Slice[T]) -> &mutating SliceOutput
-    static func lendChecked(consuming index: Self, base: Slice[T]) -> SliceCheckedOutput
+    /// `.None` when the index or range doesn't fit.
+    static func lendChecked(consuming index: Self, base: Slice[T]) -> Optional[&SliceOutput]
+    static func lendMutatingChecked(consuming index: Self, mutating base: Slice[T]) -> Optional[&mutating SliceOutput]
 }
 
 /// The clamped form of `SliceIndex`: a range is clamped into the slice and
@@ -237,7 +239,6 @@ public protocol SliceClampable[T] {
 
 extend Int64: SliceIndex[T] {
     type SliceOutput = T
-    type SliceCheckedOutput = T?
 
     public static func lend(consuming index: Int64, base: Slice[T]) -> &T {
         if index < 0 or index >= base.count {
@@ -261,11 +262,18 @@ extend Int64: SliceIndex[T] {
         base.pointer.offset(by: index).mutatingValue
     }
 
-    public static func lendChecked(consuming index: Int64, base: Slice[T]) -> T? {
+    public static func lendChecked(consuming index: Int64, base: Slice[T]) -> Optional[&T] {
         if index < 0 or index >= base.count {
             return .None;
         }
-        .Some(base.pointer.offset(by: index).read())
+        .Some(base.pointer.offset(by: index).value)
+    }
+
+    public static func lendMutatingChecked(consuming index: Int64, mutating base: Slice[T]) -> Optional[&mutating T] {
+        if index < 0 or index >= base.count {
+            return .None;
+        }
+        .Some(base.pointer.offset(by: index).mutatingValue)
     }
 }
 
@@ -286,52 +294,52 @@ extend Int64: SliceClampable[T] {
 
 extend Range[Int64]: SliceIndex[T] {
     type SliceOutput = Slice[T]
-    type SliceCheckedOutput = Optional[&Slice[T]]
     public static func lend(consuming index: Range[Int64], base: Slice[T]) -> &Slice[T] { subslice(base, checkedSliceRange(index, base.count)).value }
     public static func lendMutating(consuming index: Range[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { subslice(base, checkedSliceRange(index, base.count)).mutatingValue }
     public static func lendUnchecked(consuming index: Range[Int64], base: Slice[T]) -> &Slice[T] { subslice(base, index).value }
     public static func lendMutatingUnchecked(consuming index: Range[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { subslice(base, index).mutatingValue }
     public static func lendChecked(consuming index: Range[Int64], base: Slice[T]) -> Optional[&Slice[T]] { checkedSubslice(base, index) }
+    public static func lendMutatingChecked(consuming index: Range[Int64], mutating base: Slice[T]) -> Optional[&mutating Slice[T]] { checkedSubsliceMutating(base, index) }
 }
 
 extend ClosedRange[Int64]: SliceIndex[T] {
     type SliceOutput = Slice[T]
-    type SliceCheckedOutput = Optional[&Slice[T]]
     public static func lend(consuming index: ClosedRange[Int64], base: Slice[T]) -> &Slice[T] { subslice(base, checkedSliceRange(index.resolve(base.count), base.count)).value }
     public static func lendMutating(consuming index: ClosedRange[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { subslice(base, checkedSliceRange(index.resolve(base.count), base.count)).mutatingValue }
     public static func lendUnchecked(consuming index: ClosedRange[Int64], base: Slice[T]) -> &Slice[T] { subslice(base, index.resolve(base.count)).value }
     public static func lendMutatingUnchecked(consuming index: ClosedRange[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { subslice(base, index.resolve(base.count)).mutatingValue }
     public static func lendChecked(consuming index: ClosedRange[Int64], base: Slice[T]) -> Optional[&Slice[T]] { checkedSubslice(base, index.resolve(base.count)) }
+    public static func lendMutatingChecked(consuming index: ClosedRange[Int64], mutating base: Slice[T]) -> Optional[&mutating Slice[T]] { checkedSubsliceMutating(base, index.resolve(base.count)) }
 }
 
 extend RangeFrom[Int64]: SliceIndex[T] {
     type SliceOutput = Slice[T]
-    type SliceCheckedOutput = Optional[&Slice[T]]
     public static func lend(consuming index: RangeFrom[Int64], base: Slice[T]) -> &Slice[T] { subslice(base, checkedSliceRange(index.resolve(base.count), base.count)).value }
     public static func lendMutating(consuming index: RangeFrom[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { subslice(base, checkedSliceRange(index.resolve(base.count), base.count)).mutatingValue }
     public static func lendUnchecked(consuming index: RangeFrom[Int64], base: Slice[T]) -> &Slice[T] { subslice(base, index.resolve(base.count)).value }
     public static func lendMutatingUnchecked(consuming index: RangeFrom[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { subslice(base, index.resolve(base.count)).mutatingValue }
     public static func lendChecked(consuming index: RangeFrom[Int64], base: Slice[T]) -> Optional[&Slice[T]] { checkedSubslice(base, index.resolve(base.count)) }
+    public static func lendMutatingChecked(consuming index: RangeFrom[Int64], mutating base: Slice[T]) -> Optional[&mutating Slice[T]] { checkedSubsliceMutating(base, index.resolve(base.count)) }
 }
 
 extend RangeUpTo[Int64]: SliceIndex[T] {
     type SliceOutput = Slice[T]
-    type SliceCheckedOutput = Optional[&Slice[T]]
     public static func lend(consuming index: RangeUpTo[Int64], base: Slice[T]) -> &Slice[T] { subslice(base, checkedSliceRange(index.resolve(base.count), base.count)).value }
     public static func lendMutating(consuming index: RangeUpTo[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { subslice(base, checkedSliceRange(index.resolve(base.count), base.count)).mutatingValue }
     public static func lendUnchecked(consuming index: RangeUpTo[Int64], base: Slice[T]) -> &Slice[T] { subslice(base, index.resolve(base.count)).value }
     public static func lendMutatingUnchecked(consuming index: RangeUpTo[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { subslice(base, index.resolve(base.count)).mutatingValue }
     public static func lendChecked(consuming index: RangeUpTo[Int64], base: Slice[T]) -> Optional[&Slice[T]] { checkedSubslice(base, index.resolve(base.count)) }
+    public static func lendMutatingChecked(consuming index: RangeUpTo[Int64], mutating base: Slice[T]) -> Optional[&mutating Slice[T]] { checkedSubsliceMutating(base, index.resolve(base.count)) }
 }
 
 extend RangeThrough[Int64]: SliceIndex[T] {
     type SliceOutput = Slice[T]
-    type SliceCheckedOutput = Optional[&Slice[T]]
     public static func lend(consuming index: RangeThrough[Int64], base: Slice[T]) -> &Slice[T] { subslice(base, checkedSliceRange(index.resolve(base.count), base.count)).value }
     public static func lendMutating(consuming index: RangeThrough[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { subslice(base, checkedSliceRange(index.resolve(base.count), base.count)).mutatingValue }
     public static func lendUnchecked(consuming index: RangeThrough[Int64], base: Slice[T]) -> &Slice[T] { subslice(base, index.resolve(base.count)).value }
     public static func lendMutatingUnchecked(consuming index: RangeThrough[Int64], mutating base: Slice[T]) -> &mutating Slice[T] { subslice(base, index.resolve(base.count)).mutatingValue }
     public static func lendChecked(consuming index: RangeThrough[Int64], base: Slice[T]) -> Optional[&Slice[T]] { checkedSubslice(base, index.resolve(base.count)) }
+    public static func lendMutatingChecked(consuming index: RangeThrough[Int64], mutating base: Slice[T]) -> Optional[&mutating Slice[T]] { checkedSubsliceMutating(base, index.resolve(base.count)) }
 }
 
 extend Range[Int64]: SliceClampable[T] {
@@ -374,6 +382,14 @@ fileprivate func checkedSubslice[T](base: Slice[T], range: Range[Int64]) -> Opti
         return .None;
     }
     .Some(subslice(base, range).value)
+}
+
+/// Like `checkedSubslice`, lent mutably.
+fileprivate func checkedSubsliceMutating[T](mutating base: Slice[T], range: Range[Int64]) -> Optional[&mutating Slice[T]] {
+    if range.start < 0 or range.end > base.count or range.start > range.end {
+        return .None;
+    }
+    .Some(subslice(base, range).mutatingValue)
 }
 
 /// `range`, after checking it fits `0..<count`.

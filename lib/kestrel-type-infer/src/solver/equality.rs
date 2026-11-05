@@ -405,10 +405,10 @@ pub(super) fn solve_coerce(
     }
     // 1b. A bound `Optional[&T]` (`let f = b.first`) decays to `Optional[T]`
     //     like a bound `&T` does: the binding owns a copy. Only binding
-    //     initializers decay (MIR copies them out, `optional_ref_decays`); an
+    //     initializers and call arguments decay (MIR copies them out, `optional_ref_decays`); an
     //     unresolved target waits for an annotation, else the end-of-body
     //     default decays it (`apply_ref_decay_defaults`).
-    if ctx.binding_init_exprs.contains(&expr)
+    if optional_ref_decay_site(ctx, expr)
         && let Some((optional, pointee)) = optional_ref_pointee(ctx, fr)
     {
         if matches!(ctx.slot(tr), TySlot::Unresolved { literal: None }) {
@@ -861,6 +861,17 @@ pub(super) fn reconcile_closure_conventions(
 /// Shared `Optional[&T]` → the `Optional` entity and `T`. `None` for any other
 /// type (an `Optional[&mutating T]`, or an `Optional` whose payload is not yet
 /// known).
+/// A position where a lent `Optional[&T]` decays to `Optional[T]` (unless
+/// the target itself is `Optional[&T]`): a binding initializer, a call
+/// argument (`print("\(xs.first())")`), or a method receiver
+/// (`xs.first().map(f)`: `Optional`'s methods aren't written for a
+/// reference payload).
+pub(crate) fn optional_ref_decay_site(ctx: &InferCtx<'_>, expr: kestrel_hir::body::HirExprId) -> bool {
+    ctx.binding_init_exprs.contains(&expr)
+        || ctx.call_arg_exprs.contains(&expr)
+        || ctx.method_receiver_exprs.contains(&expr)
+}
+
 pub(crate) fn optional_ref_pointee(ctx: &InferCtx<'_>, tv: TyVar) -> Option<(Entity, TyVar)> {
     let optional = ctx.resolver.builtin(Builtin::OptionalEnum)?;
     let (TySlot::Resolved(TyKind::Enum { entity, args })

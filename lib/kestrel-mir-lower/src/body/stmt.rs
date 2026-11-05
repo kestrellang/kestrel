@@ -13,18 +13,18 @@ use kestrel_span::Span;
 use super::OssaBodyCtx;
 
 impl OssaBodyCtx<'_, '_> {
-    /// Did inference decay this bound `Optional[&T]` initializer to
-    /// `Optional[T]` (`let f = b.first`)?
-    fn decays_optional_ref(&self, init: HirExprId) -> bool {
+    /// Did inference decay this `Optional[&T]` expression's value to
+    /// `Optional[T]` (`let f = b.first`, `xs.first() ?? 0`)?
+    pub(super) fn decays_optional_ref(&self, init: HirExprId) -> bool {
         self.typed
             .as_ref()
             .is_some_and(|t| t.optional_ref_decays.contains(&init))
     }
 
-    /// Copy an `Optional[&T]` out into the binding's `Optional[T]`
-    /// (`result_ty`) through the `@builtin(.DecayOptionalRef)` function, so
-    /// the binding owns a value and the place's borrow ends here.
-    fn emit_optional_ref_decay(&mut self, value: ValueId, result_ty: TyId) -> ValueId {
+    /// Copy an `Optional[&T]` out into an `Optional[T]` (`result_ty`) through
+    /// the `@builtin(.DecayOptionalRef)` function, so the value is owned and
+    /// the place's borrow ends here.
+    pub(super) fn emit_optional_ref_decay(&mut self, value: ValueId, result_ty: TyId) -> ValueId {
         let decay = self
             .ctx
             .query
@@ -46,6 +46,26 @@ impl OssaBodyCtx<'_, '_> {
         let arg = self.prepare_call_arg(value, ParamConvention::Consuming);
         let callee = Callee::direct_with_args(decay, vec![payload], None);
         self.emit_call_returning(callee, vec![arg], result_ty)
+    }
+
+    /// `Optional[&T]` → `Optional[T]` (a type that is already decayed is
+    /// returned as is).
+    pub(super) fn decayed_optional_ty(&mut self, lent: TyId) -> TyId {
+        let arena = &self.ctx.module.ty_arena;
+        let MirTy::Named { entity, type_args } = arena.get(lent) else {
+            return lent;
+        };
+        let [payload] = type_args.as_slice() else {
+            return lent;
+        };
+        let MirTy::Ref { pointee, .. } = arena.get(*payload) else {
+            return lent;
+        };
+        let decayed = MirTy::Named {
+            entity: *entity,
+            type_args: vec![*pointee],
+        };
+        self.ctx.module.ty_arena.intern(decayed)
     }
 
     /// Bind `local` to the place `v` (a `@guaranteed` borrow): the binding
@@ -111,9 +131,6 @@ impl OssaBodyCtx<'_, '_> {
                             let owned = self.emit_copy_value(init_val);
                             self.end_ref_if_single_use(init_val);
                             owned
-                        } else if self.decays_optional_ref(*init_expr) {
-                            let ty = self.resolve_local_type(*local);
-                            self.emit_optional_ref_decay(init_val, ty)
                         } else {
                             init_val
                         };

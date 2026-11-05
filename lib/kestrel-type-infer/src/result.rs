@@ -75,9 +75,10 @@ pub struct TypedBody {
     /// the iterable itself is CONSUMED as the loop's iterator. Decided once
     /// by inference; the move checker and MIR lowering both read it.
     pub direct_iterators: HashSet<HirExprId>,
-    /// Bound initializers of type `Optional[&T]` that decay to `Optional[T]`
-    /// (`let f = b.first`): MIR copies the payload out through the
-    /// `@builtin(.DecayOptionalRef)` function.
+    /// Expressions of type `Optional[&T]` whose value decays to `Optional[T]`:
+    /// bound initializers (`let f = b.first`) and operator receivers
+    /// (`xs.first() ?? 0`). MIR copies the payload out wherever the
+    /// expression is lowered, through `@builtin(.DecayOptionalRef)`.
     pub optional_ref_decays: HashSet<HirExprId>,
     /// Calls whose callee returns a ref ONCE INSTANTIATED (value: mutating),
     /// including generic returns that only become refs through their type

@@ -34,7 +34,7 @@ let pivot = names.partition(by: { (n) in n.count > 3 });
 ### Indexing
 
 The default subscript `arr(i)` panics on out-of-bounds. Variants exist
-for every common policy: `arr(checked: i)` returns `T?`,
+for every common policy: `arr(checked: i)` lends `Optional[&T]`,
 `arr(unchecked: i)` skips the bounds check (UB on OOB),
 `arr(wrapped: i)` wraps with modulo (and supports negative indices),
 and `arr(clamped: i)` clamps to `[0, count-1]`. Range arguments use the
@@ -1237,11 +1237,13 @@ _Defined in `lang/std/collections/array.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](checked: I) -> I.SliceCheckedOutput where I: SliceIndex[T] { get }
+public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref mutating ref }
 ```
 
-Like `xs(index)`, but `.None` instead of a panic when out of range.
-An element comes back as a copy; a range as a lent slice.
+Like `xs(index)`, but the place may not exist: `.None` instead of a
+panic when out of range. Reading copies the element out (`T?`) or
+lends the slice; `if let .Some(&mutating v) = xs(checked: i)` writes
+in place.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -2284,7 +2286,7 @@ _Defined in `lang/std/collections/deque.ks`._
 #### subscript `Indexed`
 
 ```kestrel
-subscript(Int64) -> T { get set }
+subscript(Int64) -> T { ref mutating ref }
 ```
 
 O(1) random access by logical index.
@@ -2416,10 +2418,10 @@ _Defined in `lang/std/collections/deque.ks`._
 #### function `first`
 
 ```kestrel
-public func first() -> T?
+public func first() -> Optional[&T]
 ```
 
-Returns the front element without removing it, or `.None` if empty.
+Lends the front element without removing it, or `.None` if empty.
 
 O(1). The removing counterpart is `popFront()`.
 
@@ -2453,10 +2455,10 @@ _Defined in `lang/std/collections/deque.ks`._
 #### function `last`
 
 ```kestrel
-public func last() -> T?
+public func last() -> Optional[&T]
 ```
 
-Returns the back element without removing it, or `.None` if empty.
+Lends the back element without removing it, or `.None` if empty.
 
 O(1). The removing counterpart is `popBack()`.
 
@@ -2579,6 +2581,26 @@ when the final size is known in advance.
 ```
 var d = Deque[Int64]();
 d.reserveCapacity(minimumCapacity: 100);
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+subscript(checked: Int64) -> T? { ref mutating ref }
+```
+
+Like `d(index)`, but the place may not exist: `.None` instead of a
+panic when out of range. `if let .Some(&mutating v) = d(checked: i)`
+writes in place.
+
+##### Examples
+
+```
+var d = Deque[Int64](from: [10, 20]);
+d(checked: 1);  // .Some(20)
+d(checked: 5);  // .None
 ```
 
 _Defined in `lang/std/collections/deque.ks`._
@@ -6481,11 +6503,13 @@ _Defined in `lang/std/collections/slice.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](checked: I) -> I.SliceCheckedOutput where I: SliceIndex[T] { get }
+public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref mutating ref }
 ```
 
-Like `self(index)`, but `.None` instead of a panic when out of range.
-An element comes back as a copy; a range as a lent slice.
+Like `self(index)`, but the place may not exist: `.None` instead of
+a panic when out of range. Reading copies the element out (`T?`) or
+lends the slice; `if let .Some(&mutating v) = s(checked: i)` writes
+in place.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6691,17 +6715,6 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ### Members
 
-#### typealias `SliceCheckedOutput`
-
-```kestrel
-type SliceCheckedOutput
-```
-
-What `checked:` gives: a copy of the element (`T?`), or a lent
-slice (`Optional[&Slice[T]]`).
-
-_Defined in `lang/std/collections/slice.ks`._
-
 #### typealias `SliceOutput`
 
 ```kestrel
@@ -6721,8 +6734,10 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `lendChecked`
 
 ```kestrel
-static func lendChecked(consuming Self, Slice[T]) -> SliceCheckedOutput
+static func lendChecked(consuming Self, Slice[T]) -> Optional[&SliceOutput]
 ```
+
+`.None` when the index or range doesn't fit.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6730,6 +6745,14 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ```kestrel
 static func lendMutating(consuming Self, mutating Slice[T]) -> &mutating SliceOutput
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+static func lendMutatingChecked(consuming Self, mutating Slice[T]) -> Optional[&mutating SliceOutput]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -7023,10 +7046,11 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `first`
 
 ```kestrel
-public func first() -> T?
+public func first() -> Optional[&T]
 ```
 
-First element, or `.None` for an empty collection. O(1).
+Lends the first element in place, or `.None` for an empty collection.
+O(1). A binding (`let f = xs.first()`) copies it out.
 
 Read-only — to remove the first element from an `Array`, use
 `popFirst()`.
@@ -7043,10 +7067,10 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `first`
 
 ```kestrel
-public func first(where: (T) -> Bool) -> T?
+public func first(where: (T) -> Bool) -> Optional[&T]
 ```
 
-First element matching `predicate`, or `None`. O(n).
+Lends the first element matching `predicate`, or `None`. O(n).
 
 ##### Examples
 
@@ -7222,10 +7246,11 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `last`
 
 ```kestrel
-public func last() -> T?
+public func last() -> Optional[&T]
 ```
 
-Last element, or `.None` for an empty collection. O(1).
+Lends the last element in place, or `.None` for an empty collection.
+O(1).
 
 Read-only — to remove the last element from an `Array`, use
 `pop()`.
@@ -7242,10 +7267,10 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `last`
 
 ```kestrel
-public func last(where: (T) -> Bool) -> T?
+public func last(where: (T) -> Bool) -> Optional[&T]
 ```
 
-Last element matching `predicate`, or `None`. O(n).
+Lends the last element matching `predicate`, or `None`. O(n).
 
 ##### Examples
 
@@ -7313,10 +7338,10 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `max`
 
 ```kestrel
-public func max() -> T? where T: Comparable
+public func max() -> Optional[&T] where T: Comparable
 ```
 
-Largest element, or `None` if empty. O(n).
+Lends the largest element, or `None` if empty. O(n).
 
 Ties go to the first occurrence.
 
@@ -7332,10 +7357,10 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `min`
 
 ```kestrel
-public func min() -> T? where T: Comparable
+public func min() -> Optional[&T] where T: Comparable
 ```
 
-Smallest element, or `None` if empty. O(n).
+Lends the smallest element, or `None` if empty. O(n).
 
 Ties go to the first occurrence.
 

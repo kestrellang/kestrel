@@ -118,7 +118,7 @@ Decay applies to: bindings of ref-returning call results, assignment right-hand 
 
 Decay is a copy, so decaying a reference to a non-`Copyable`, non-`Cloneable` value is rejected as a move out of a borrow (E503).
 
-There is no decay between `Optional[&T]` and `Optional[T]`: construction is type-driven. An unannotated `Optional.Some(r)` snapshots the pointee (giving `Optional[Int64]`); with an `Optional[&T]` annotation the reference itself is stored.
+A lent `Optional[&T]` (`xs.first()`, `xs(checked: i)`) decays the same way to `Optional[T]` in a binding, a call argument, a method receiver (`xs.first().map(f)`), and an operator's left operand (`xs.first() ?? 0`, `xs.first() == .Some(3)`). It stays a reference where one is asked for: a `match` / `if let` borrows the element (and `if let .Some(&mutating v) = xs(checked: i)` writes through it), and an `Optional[&T]` annotation or parameter keeps the reference. Only a shared payload decays; an `Optional[&mutating T]` is consumed through patterns. Construction is type-driven: an unannotated `Optional.Some(r)` snapshots the pointee (giving `Optional[Int64]`); with an `Optional[&T]` annotation the reference itself is stored.
 
 ## References in Structs and Tuples
 
@@ -206,7 +206,7 @@ That's the entire model. There are no lifetime parameters, no `'a`, no borrow an
 
 ## Not Yet Supported
 
-- **Dictionary reference APIs** and `arr(checked: i) -> Optional[&T]` — planned, pending dictionary storage work. Interim: `Dictionary.modify(key) { (mutating v) in ... }` for in-place updates.
+- **Dictionary reference APIs** (and `Set` lookups, which sit on the dictionary) — planned, pending dictionary storage work. Interim: `Dictionary.modify(key) { (mutating v) in ... }` for in-place updates.
 - **`Hashable`/`Matchable` conformances for `&T`** — reject cleanly for now.
 - **Storable references** (escaping the root's scope, lifetime annotations) — permanently out of scope by design.
 
