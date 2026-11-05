@@ -255,13 +255,6 @@ impl Args {
         }
     }
 
-    pub(super) fn bool(&self, i: usize) -> Option<bool> {
-        match self.get(i)? {
-            AttrValue::Bool(b) => Some(*b),
-            _ => None,
-        }
-    }
-
     pub(super) fn case(&self, i: usize) -> Option<&str> {
         match self.get(i)? {
             AttrValue::Case(c) => Some(c),
@@ -608,7 +601,6 @@ fn build(def: &AttrDef, args: &Args) -> Option<ParsedAttr> {
                 _ => return None,
             },
             mangle_name: args.str(1),
-            safe: args.bool(2).unwrap_or(false),
         },
         "fileconstant" => ParsedAttr::FileConstant { path: args.str(0)? },
         "layout" => ParsedAttr::Layout(match args.case(0)? {

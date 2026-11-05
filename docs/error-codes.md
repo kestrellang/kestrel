@@ -564,7 +564,7 @@ See [language/unsafe.md](language/unsafe.md). An unsafe context is the operand o
 
 | Code | Message | Explanation |
 |---|---|---|
-| E640 | [extern function ]'{name}' is unsafe and requires an \`unsafe\` expression or block | A use (call, property read, initializer, subscript, or naming it as a value) of an `unsafe` declaration, a pointer-access `lang` intrinsic, or an `@extern` function without `safe: true`, outside an unsafe context. |
+| E640 | [extern function ]'{name}' is unsafe and requires an \`unsafe\` expression or block | A use (call, property read, initializer, subscript, or naming it as a value) of an `unsafe` declaration, a pointer-access `lang` intrinsic, or an `@extern` function, outside an unsafe context. |
 | E641 | unnecessary \`unsafe\`: it covers no unsafe operation | **Warning.** The region contains no unsafe use. A use marks only the innermost `unsafe` around it, so an `unsafe` wrapping another one is reported too. |
 | E642 | '{name}' is unsafe, but the requirement it satisfies in protocol '{proto}' is not | Generic code calls the requirement without `unsafe`, so its witness can't need it. Mark the requirement `unsafe` or make the witness safe. |
 | E643 | '{proto}' is an unsafe protocol; write the conformance as \`unsafe {proto}\` | Conforming to an `unsafe protocol` vouches for its contract (e.g. `ArrayMatchable`'s in-bounds indices), so it is written `T: unsafe P`. |

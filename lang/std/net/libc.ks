@@ -118,7 +118,7 @@ func libc_close(fd: Int32) -> Int32
 @extern(.C, mangleName: "setsockopt")
 func libc_setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: RawPointer, optlen: Int32) -> Int32
 
-@extern(.C, mangleName: "htons", safe: true)
+@extern(.C, mangleName: "htons")
 func libc_htons(hostshort: UInt16) -> UInt16
 
 @extern(.C, mangleName: "connect")
@@ -221,7 +221,7 @@ public func setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: Poin
 /// hosts it is the identity. Use to convert a port number before
 /// writing it into a `sockaddr_in.sin_port` field.
 public func htons(hostshort: UInt16) -> UInt16 {
-    libc_htons(hostshort)
+    unsafe libc_htons(hostshort)
 }
 
 /// Wraps `connect(2)` — initiates a connection on `sockfd` to the address at `addr`.

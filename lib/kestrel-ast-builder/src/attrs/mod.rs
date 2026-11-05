@@ -113,22 +113,13 @@ impl ParsedAttrs {
     /// `@extern(abi, mangleName:)`.
     pub fn extern_info(&self) -> Option<(Abi, Option<&str>)> {
         self.attrs.iter().find_map(|e| match &e.attr {
-            ParsedAttr::Extern {
-                abi, mangle_name, ..
-            } => Some((*abi, mangle_name.as_deref())),
+            ParsedAttr::Extern { abi, mangle_name } => Some((*abi, mangle_name.as_deref())),
             _ => None,
         })
     }
 
     pub fn is_extern(&self) -> bool {
         self.extern_info().is_some()
-    }
-
-    /// An `@extern` without `safe: true`: calling it needs `unsafe`.
-    pub fn is_unsafe_extern(&self) -> bool {
-        self.attrs
-            .iter()
-            .any(|e| matches!(e.attr, ParsedAttr::Extern { safe: false, .. }))
     }
 
     pub fn builtin(&self) -> Option<kestrel_hir::Builtin> {
