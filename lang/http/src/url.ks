@@ -165,7 +165,7 @@ public func percentDecode(s: String) -> String {
             i = i + 1
         }
     }
-    String(utf8: out.asSlice()) ?? String()
+    String(fromUtf8: out.asSlice()) ?? String()
 }
 
 /// Percent-encodes a string for use in URLs and form data.

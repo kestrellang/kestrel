@@ -75,7 +75,7 @@ struct Bcrypt {
         if bits > 0 {
             ascii.append(table((buffer << (6 - bits)) & 63));
         }
-        String(utf8Unchecked: ascii)
+        String(fromUtf8Unchecked: ascii)
     }
 
     /// Decodes exactly `count` bytes, or null on a wrong length or a

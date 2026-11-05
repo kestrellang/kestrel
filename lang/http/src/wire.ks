@@ -136,7 +136,7 @@ public func hexChar(value: Int64) -> UInt8 {
 /// ```
 /// // "5\r\nHello\r\n0\r\n\r\n"
 /// let decoded = dechunk(raw);
-/// String(utf8: decoded.asSlice());  // Some("Hello")
+/// String.fromUtf8(decoded.asSlice());  // Some("Hello")
 /// ```
 public func dechunk(raw: Array[UInt8]) -> Array[UInt8] {
     var result = [];

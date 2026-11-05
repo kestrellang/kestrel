@@ -560,7 +560,7 @@ func matchName(bytes: Array[UInt8], offset: Int64, names: Array[String]) -> (Int
 
 // Extract a String from a byte slice
 func stringFromBytes(bytes: Array[UInt8], start: Int64, length: Int64) -> String {
-    String(utf8Unchecked: bytes(start..<(start + length)))
+    String(fromUtf8Unchecked: bytes(start..<(start + length)))
 }
 
 func isAsciiLetter(b: UInt8) -> Bool {

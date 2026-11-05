@@ -217,7 +217,7 @@ public func readLine() -> Result[Optional[String], IoError] {
         }
     }
 
-    .Ok(.Some(String(utf8Lossy: bytes)))
+    .Ok(.Some(String(fromUtf8Lossy: bytes)))
 }
 
 /// Writes `message` to stdout, flushes, then reads a line from stdin.

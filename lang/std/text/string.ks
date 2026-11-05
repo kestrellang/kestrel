@@ -312,10 +312,10 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// # Examples
     ///
     /// ```
-    /// let s = String(utf8: "héllo".bytes);  // Some("héllo")
+    /// let s = String(fromUtf8: "héllo".bytes);  // Some("héllo")
     /// ```
-    public init[S](utf8 utf8: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
-        let bytes = utf8.asUnsafeSlice();
+    public init[S](fromUtf8 fromUtf8: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromUtf8.asUnsafeSlice();
         let count = bytes.count;
         if count == 0 {
             self.storage = CowBox(StringStorage(
@@ -344,8 +344,8 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// # Safety
     ///
     /// The caller must ensure the bytes are valid UTF-8.
-    public init[S](utf8Unchecked utf8Unchecked: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
-        let bytes = utf8Unchecked.asUnsafeSlice();
+    public init[S](fromUtf8Unchecked fromUtf8Unchecked: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromUtf8Unchecked.asUnsafeSlice();
         let count = bytes.count;
         if count == 0 {
             self.storage = CowBox(StringStorage(
@@ -367,10 +367,10 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// # Examples
     ///
     /// ```
-    /// let s = String(utf8Lossy: mixedBytes);  // invalid bytes become '�'
+    /// let s = String(fromUtf8Lossy: mixedBytes);  // invalid bytes become '�'
     /// ```
-    public init[S](utf8Lossy utf8Lossy: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
-        let bytes = utf8Lossy.asUnsafeSlice();
+    public init[S](fromUtf8Lossy fromUtf8Lossy: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromUtf8Lossy.asUnsafeSlice();
         let count = bytes.count;
         if count == 0 {
             self.storage = CowBox(StringStorage(

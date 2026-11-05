@@ -149,7 +149,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
         throw SwoopError.invalidResponse("no header terminator found")
     }
 
-    let headerStr = String(utf8: buf(0..<headerEnd)) ?? String();
+    let headerStr = String(fromUtf8: buf(0..<headerEnd)) ?? String();
 
     let hdrSlice = headerStr.asSlice();
     guard let .Some(firstLineEnd) = headerStr.firstIndex(of: "\r\n") else {
@@ -222,7 +222,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
         rawBuf
     };
 
-    let bodyStr = String(utf8: bodyBuf.asSlice()) ?? String();
+    let bodyStr = String(fromUtf8: bodyBuf.asSlice()) ?? String();
 
     .Ok(Response(StatusCode(statusCode), headers, bodyStr, bodyBuf))
 }

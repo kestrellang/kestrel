@@ -82,7 +82,7 @@ func encodeHex(bytes: Array[UInt8]) -> String {
         ascii.append(digits(Int64(from: b >> 4)));
         ascii.append(digits(Int64(from: b & 0x0f)));
     }
-    String(utf8Unchecked: ascii)
+    String(fromUtf8Unchecked: ascii)
 }
 
 func decodeHex(hex: String) -> Array[UInt8]? {
@@ -138,7 +138,7 @@ func encodeBase64(bytes: Array[UInt8], style: Base64Style) -> String {
             for _ in tail..<3 { ascii.append(0x3d); }   // '='
         }
     }
-    String(utf8Unchecked: ascii)
+    String(fromUtf8Unchecked: ascii)
 }
 
 /// Decodes any `Base64Style`. Rejects characters outside both alphabets,
