@@ -221,6 +221,10 @@ struct Renderer: not Copyable {
     var shadowGroup: BindGroup
     var chunkLayout: BindGroupLayout
     var uniformBuffer: Buffer
+    /// Boxes at any angle: birds, and the cracks on a block being broken.
+    var modelPipeline: RenderPipeline
+    var modelShadowPipeline: RenderPipeline
+    var modelBuffer: Buffer
     var overlayPipeline: RenderPipeline
     var overlayGroup: BindGroup
     var screenBuffer: Buffer
@@ -339,6 +343,33 @@ struct Renderer: not Copyable {
             label: "shadow"
         );
         let shadowGroup = device.createBindGroup(layout: shadowLayout.bindGroupLayout(0), entries: [uniformBuffer.binding(0)]);
+        // Models read only group 0, like the sky. Both faces are drawn:
+        // a mirrored wing turns its boxes inside out.
+        let modelBuffers = [VertexBufferLayout(packed: [.Float32x4, .Float32x4, .Float32x4, .Float32x4], stepMode: .Instance)];
+        let modelPipeline = device.createRenderPipeline(
+            shader: shaderModule,
+            targets: [ColorTarget(format: format)],
+            buffers: modelBuffers,
+            vertexEntry: "vs_model",
+            fragmentEntry: "fs_model",
+            depth: .Some(DepthTest(format: depthFormat)),
+            sampleCount: samples,
+            layout: .Some(skyLayout.share()),
+            label: "models"
+        );
+        let modelShadowLayout = device.createPipelineLayout(groups: [[
+            BindingLayout.uniformBuffer(0, visibility: [.Vertex])
+        ]], label: "model shadow");
+        let modelShadowPipeline = device.createRenderPipeline(
+            shader: shaderModule,
+            targets: [],
+            buffers: modelBuffers,
+            vertexEntry: "vs_model_shadow",
+            depth: .Some(DepthTest(format: shadowFormat, depthBias: 2, depthBiasSlopeScale: 2.0)),
+            layout: .Some(modelShadowLayout.share()),
+            label: "model shadow"
+        );
+        let modelBuffer = device.createBuffer(size: maxModelBoxes * modelBoxSize, usage: [.Vertex, .CopyDst], label: "models");
         // The overlay draws in the same pass, over everything: it keeps the
         // pass's depth format but never tests or writes depth.
         let overlayLayout = device.createPipelineLayout(groups: [[
@@ -371,6 +402,7 @@ struct Renderer: not Copyable {
             depth: depth, color: color, pipeline: pipeline, glassPipeline: glassPipeline, skyPipeline: skyPipeline, bindGroup: bindGroup,
             shadowMap: shadowMap, shadowPipeline: shadowPipeline, shadowGroup: shadowGroup,
             chunkLayout: layout.bindGroupLayout(1), uniformBuffer: uniformBuffer,
+            modelPipeline: modelPipeline, modelShadowPipeline: modelShadowPipeline, modelBuffer: modelBuffer,
             overlayPipeline: overlayPipeline, overlayGroup: overlayGroup, screenBuffer: screenBuffer, overlayBuffer: overlayBuffer,
             meshes: [], viewDistance: 160.0, drawnChunks: 0
         ))
@@ -431,8 +463,9 @@ struct Renderer: not Copyable {
     }
 
     /// Draw one frame as seen through `view`, in the light of `light`, at
-    /// `time` seconds (which drifts the clouds).
-    mutating func draw(view: Mat4, eye eye: Vec3, light light: Daylight, time time: Float32, overlay overlay: [OverlayQuad]) -> () throws WgpuError {
+    /// `time` seconds (which drifts the clouds). The first `casters` of
+    /// `models` cast shadows.
+    mutating func draw(view: Mat4, eye eye: Vec3, light light: Daylight, time time: Float32, models models: [ModelBox], casters modelCasters: Int64, overlay overlay: [OverlayQuad]) -> () throws WgpuError {
         let aspect = Float32(from: self.width) / Float32(from: self.height);
         let projection = Mat4.perspective(fovY: radians(70.0), aspect: aspect, near: 0.1, far: self.viewDistance + 64.0);
         let viewProj = projection * view;
@@ -458,6 +491,15 @@ struct Renderer: not Copyable {
         let quadCount = quads.count;
         if quadCount > 0 {
             self.device.write(self.overlayBuffer, data: quads);
+        }
+        var boxes = models;
+        while boxes.count > maxModelBoxes {
+            let _ = boxes.pop();
+        }
+        let boxCount = boxes.count;
+        let shadowBoxes = modelCasters.clamp(0, boxCount);
+        if boxCount > 0 {
+            self.device.write(self.modelBuffer, data: boxes);
         }
 
         let frame = match self.surface.currentTexture() {
@@ -511,6 +553,12 @@ struct Renderer: not Copyable {
                 pass.setVertexBuffer(0, self.meshes(index).value.faces);
                 pass.draw(vertices: 6, instances: self.meshes(index).value.faceCount);
             }
+            if shadowBoxes > 0 {
+                pass.setPipeline(self.modelShadowPipeline);
+                pass.setBindGroup(0, self.shadowGroup);
+                pass.setVertexBuffer(0, self.modelBuffer);
+                pass.draw(vertices: 36, instances: shadowBoxes);
+            }
         };
         encoder.renderPass(color: [colorView.colorAttachment(resolvingInto: frameView, clear: .Some(sky))], depth: depthView.depthAttachment()) { (pass) in
             pass.setPipeline(self.skyPipeline);
@@ -523,6 +571,11 @@ struct Renderer: not Copyable {
                 pass.setBindGroup(1, self.meshes(index).value.group);
                 pass.setVertexBuffer(0, self.meshes(index).value.faces);
                 pass.draw(vertices: 6, instances: self.meshes(index).value.faceCount);
+            }
+            if boxCount > 0 {
+                pass.setPipeline(self.modelPipeline);
+                pass.setVertexBuffer(0, self.modelBuffer);
+                pass.draw(vertices: 36, instances: boxCount);
             }
             pass.setPipeline(self.glassPipeline);
             for index in glassOrder {

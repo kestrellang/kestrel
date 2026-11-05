@@ -25,6 +25,21 @@ enum Layer {
     case DeadRings
     case Gloomleaf
     case Hexbloom
+    // Birds (see birds.ks) and the cracks on a block being broken.
+    case KestrelBack
+    case KestrelBelly
+    case KestrelWing
+    case KestrelWingUnder
+    case KestrelTips
+    case KestrelHead
+    case KestrelTail
+    case Beak
+    case VultureBody
+    case VultureWing
+    case VultureWingUnder
+    case VultureHead
+    case VultureRuff
+    case Crack0
 
     var index: UInt32 {
         match self {
@@ -33,11 +48,18 @@ enum Layer {
             .Skyiron => 8, .Glowcap => 9, .Sailcloth => 10, .Featherthatch => 11,
             .Planks => 12, .Ashrock => 13, .ScorchTop => 14, .ScorchSide => 15,
             .Darkbrick => 16, .Embercore => 17, .Deadwood => 18, .DeadRings => 19,
-            .Gloomleaf => 20, .Hexbloom => 21
+            .Gloomleaf => 20, .Hexbloom => 21,
+            .KestrelBack => 22, .KestrelBelly => 23, .KestrelWing => 24, .KestrelWingUnder => 25,
+            .KestrelTips => 26, .KestrelHead => 27, .KestrelTail => 28, .Beak => 29,
+            .VultureBody => 30, .VultureWing => 31, .VultureWingUnder => 32,
+            .VultureHead => 33, .VultureRuff => 34, .Crack0 => 35
         }
     }
 
-    static var count: Int64 { 22 }
+    /// The crack stages follow `Crack0` in the atlas.
+    static var crackStages: Int64 { 5 }
+
+    static var count: Int64 { 40 }
 }
 
 /// How a block is drawn.
@@ -144,6 +166,21 @@ enum Block {
             .Embercore => 2.0,
             .Hexbloom => 2.0,
             _ => 0.0
+        }
+    }
+
+    /// Seconds of holding break to knock the block out: plants pop at
+    /// once, soil and leaves are quick, stone and metal take a while.
+    var hardness: Float32 {
+        match self {
+            .Glowcap => 0.1, .Hexbloom => 0.1,
+            .Emberleaf => 0.3, .Gloomleaf => 0.3,
+            .Loam => 0.5, .Mossloam => 0.6, .Scorchloam => 0.6, .Cloudglass => 0.5,
+            .Sailcloth => 0.5, .Featherthatch => 0.5,
+            .Emberwood => 1.0, .Deadwood => 1.0, .Planks => 0.9,
+            .Driftstone => 1.4, .Ashrock => 1.4, .Embercore => 1.6, .Darkbrick => 1.8,
+            .Skyiron => 2.5,
+            _ => 1.0
         }
     }
 
