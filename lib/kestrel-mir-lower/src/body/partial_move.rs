@@ -154,6 +154,12 @@ impl OssaBodyCtx<'_, '_> {
             let mut moves = Vec::new();
             let mut root = None;
             for (binding, place) in places {
+                // A ref binding (a `&T` tuple/payload slot) copies the stored
+                // address and never moves: `resolve_local_type` peels it to
+                // the pointee, which may be NotCopyable (`&Slice[T]`).
+                if self.local_is_ref(binding) {
+                    continue;
+                }
                 let ty = self.resolve_local_type(binding);
                 if !(self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty)) {
                     continue;
