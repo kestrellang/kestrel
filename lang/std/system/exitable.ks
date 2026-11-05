@@ -120,7 +120,7 @@ extend !: Exitable {
 // printed to stderr and the process exits non-zero.
 // ============================================================================
 
-extend Result[T, E]: Exitable where T: Exitable, E: Formattable {
+extend Result[T, E]: Exitable where T: Exitable, E: Formattable, E: Copyable {
     consuming func report() -> ExitCode {
         match self {
             .Ok(value)  => value.report(),

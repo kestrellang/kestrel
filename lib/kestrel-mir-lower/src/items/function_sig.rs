@@ -388,8 +388,43 @@ fn populate_where_clause(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionD
         }
         current = ctx.world.parent_of(e);
     }
+    mark_maybe_noncopyable_params(ctx, entity, def, &mut wc);
     if !wc.constraints.is_empty() || has_type_params {
         def.where_clause = Some(wc);
+    }
+}
+
+/// `T: not Copyable` for each in-scope param the front end judges
+/// `MayBeNonCopyable` but no explicit clause marks — the params of a type that
+/// opts out of Copyable, and target params seen from an extension (whose
+/// parent walk never reaches the nominal's own where clause). One rule:
+/// `TypeParamCopyRequirement` decides, so MIR copy behavior can't drift from
+/// the front end's.
+fn mark_maybe_noncopyable_params(
+    ctx: &LowerCtx,
+    entity: Entity,
+    def: &FunctionDef,
+    wc: &mut WhereClause,
+) {
+    let Some(copyable) = ctx.module.copyable_protocol else {
+        return;
+    };
+    for tp in &def.type_params {
+        let marked = wc.constraints.iter().any(|c| {
+            matches!(c, WhereConstraint::NotImplements { type_param, protocol }
+                if *type_param == tp.entity && *protocol == copyable)
+        });
+        if marked {
+            continue;
+        }
+        let requirement = ctx.query.query(kestrel_semantics::TypeParamCopyRequirement {
+            param: tp.entity,
+            context: entity,
+            root: ctx.root,
+        });
+        if requirement == kestrel_semantics::CopyRequirement::MayBeNonCopyable {
+            wc.add_constraint(WhereConstraint::not_implements(tp.entity, copyable));
+        }
     }
 }
 

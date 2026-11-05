@@ -827,9 +827,11 @@ impl kestrel_semantics::CopyShapeLayer for SolverCopyLayer<'_, '_> {
         self.ctx.root
     }
 
-    // HOOK: structural parent context scopes the bound lookup.
-    fn param_context(&self, param: Entity) -> Entity {
-        self.ctx.query_ctx.parent_of(param).unwrap_or(param)
+    // HOOK: the body being solved scopes the bound lookup, so a method's or
+    // extension's `where T: Copyable` counts (the param's own declaring
+    // entity is always consulted too — see `param_bound_contexts`).
+    fn param_context(&self, _param: Entity) -> Entity {
+        self.ctx.owner
     }
 
     fn self_context(&self) -> Entity {

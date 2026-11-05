@@ -409,7 +409,7 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     /// Returns a `ResultIterator` yielding the success value (one element
     /// for `.Ok`, zero for `.Err`). Lets a `Result` plug into iterator
     /// pipelines that only care about the happy path.
-    public consuming func iter() -> ResultIterator[T, E] {
+    public consuming func iter() -> ResultIterator[T, E] where T: Copyable, E: Copyable {
         ResultIterator(self)
     }
 }
@@ -519,10 +519,17 @@ extend Result[T, E]: Equatable where T: Equatable, E: Equatable {
     /// Ok(1)       == Err("x");     // false
     /// ```
     public func isEqual(to other: Result[T, E]) -> Bool {
-        match (self, other) {
-            (.Ok(a), .Ok(b)) => a == b,
-            (.Err(a), .Err(b)) => a == b,
-            _ => false
+        // Nested rather than `match (self, other)`: a tuple would move
+        // both borrowed operands (T and E may be non-Copyable).
+        match self {
+            .Ok(a) => match other {
+                .Ok(b) => a == b,
+                .Err(_) => false
+            },
+            .Err(a) => match other {
+                .Ok(_) => false,
+                .Err(b) => a == b
+            }
         }
     }
 }

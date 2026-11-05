@@ -390,7 +390,7 @@ public struct ArraySplitWhereIterator[T]: Iterator {
 // CONSTRUCTORS
 // ============================================================================
 
-extend Slice[T] {
+extend Slice[T] where T: Copyable {
     /// Multi-pass lazy view over non-overlapping `size`-sized chunks. The
     /// last chunk is shorter when `count` isn't a multiple of `size`.
     /// Panics if `size <= 0`.
@@ -443,7 +443,7 @@ extend Slice[T] {
     }
 }
 
-extend Slice[T] where T: Equatable {
+extend Slice[T] where T: Equatable, T: Copyable {
     /// Multi-pass lazy view over the segments between occurrences of
     /// `separator`. `toArray()` copies them into owned arrays.
     ///
