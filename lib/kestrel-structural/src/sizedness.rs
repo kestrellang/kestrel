@@ -19,14 +19,18 @@ pub enum Sizedness {
     /// a struct whose last stored field is (transitively) one of its own
     /// `not Sized` params.
     ConditionalOn(Vec<usize>),
+    /// Never Sized: `lang.slice[T]`, and a struct whose tail always is one.
+    Unsized,
 }
 
 /// One type form's view of a type, as far as sizedness cares. Each layer
 /// only maps its own type onto this; what each shape *means* is decided
 /// once, in [`ty_is_sized`].
 pub enum SizedShape<'t, T: Clone> {
-    /// A raw existential: the one unsized value type.
+    /// A raw existential: unsized, its size read from its table.
     RawExistential,
+    /// `lang.slice[T]`: unsized, its size is count × the element's.
+    Slice,
     /// A struct instantiation: the per-instance rule (its tail may be a
     /// relaxed param).
     Struct { entity: Entity, args: Cow<'t, [T]> },
@@ -67,7 +71,7 @@ pub trait SizedLayer {
 /// means is written here once, for every layer.
 pub fn ty_is_sized<L: SizedLayer>(layer: &L, ty: &L::Ty) -> bool {
     match layer.shape(ty) {
-        SizedShape::RawExistential => false,
+        SizedShape::RawExistential | SizedShape::Slice => false,
         SizedShape::Struct { entity, args } => instance_is_sized(layer, entity, &args),
         SizedShape::Alias(expanded) => layer.component_is_sized(expanded),
         SizedShape::Param(param) => layer.param_is_sized(param),
@@ -82,6 +86,7 @@ pub fn ty_is_sized<L: SizedLayer>(layer: &L, ty: &L::Ty) -> bool {
 pub fn instance_is_sized<L: SizedLayer>(layer: &L, entity: Entity, args: &[L::Ty]) -> bool {
     match layer.nominal_sizedness(entity) {
         Sizedness::Sized => true,
+        Sizedness::Unsized => false,
         Sizedness::ConditionalOn(positions) => positions
             .iter()
             .all(|&i| args.get(i).is_some_and(|arg| layer.component_is_sized(arg))),

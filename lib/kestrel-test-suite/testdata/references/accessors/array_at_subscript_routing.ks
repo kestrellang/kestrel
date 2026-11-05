@@ -17,16 +17,16 @@ func main() -> lang.i64 {
     var arr = [11, 22, 33];
 
     // Inherent at: — in place.
-    if arr(at: 0) != 11 { return 1; }
-    arr(at: 1) = 220;
-    if arr(at: 1) != 220 { return 2; }
-    arr(at: 2) += 7;
-    if arr(at: 2) != 40 { return 3; }
+    if arr(0) != 11 { return 1; }
+    arr(1) = 220;
+    if arr(1) != 220 { return 2; }
+    arr(2) += 7;
+    if arr(2) != 40 { return 3; }
 
     // Unlabeled — Slice extension get/set, still routed via fallback.
     if arr(0) != 11 { return 4; }
     arr(0) = 110;
-    if arr(at: 0) != 110 { return 5; }
+    if arr(0) != 110 { return 5; }
 
     // Range subscript — the shape an inherent unlabeled Int64 subscript
     // would have captured and broken; `at:` doesn't.
@@ -42,8 +42,8 @@ func main() -> lang.i64 {
 
     // COW: writes through at: never touch a sibling copy.
     let snapshot = arr;
-    arr(at: 0) = 9999;
-    if snapshot(at: 0) != 110 { return 9; }
-    if arr(at: 0) != 9999 { return 10; }
+    arr(0) = 9999;
+    if snapshot(0) != 110 { return 9; }
+    if arr(0) != 9999 { return 10; }
     0
 }

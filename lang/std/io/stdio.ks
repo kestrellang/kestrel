@@ -5,7 +5,7 @@ module std.io.stdio
 import std.numeric.(Int64, UInt8)
 import std.result.(Result, Optional)
 import std.memory.(UnsafeSlice, Pointer)
-import std.collections.(Array, MutableArraySlice)
+import std.collections.(Array, Slice)
 import std.text.(String, Formattable)
 import std.core.(Bool)
 import std.io.libc
@@ -33,8 +33,8 @@ public struct Stdin: Readable {
 
     /// Calls `read(2)` on `STDIN_FILENO`. Returns `0` on EOF (e.g. after
     /// the user types Ctrl-D in a terminal).
-    public mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let raw = buf.asUnsafeMutableSlice();
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        let raw = buf.asUnsafeSlice();
         let n = libc.read(libc.STDIN(), raw.pointer, raw.count);
         if n < 0 {
             return .Err(IoError.last())

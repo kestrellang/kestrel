@@ -10,7 +10,7 @@
 module Test
 
 import std.core.ArrayMatchable
-import std.collections.ArraySlice
+import std.collections.Slice
 import std.collections.Array
 
 struct Bag[T] {
@@ -19,10 +19,10 @@ struct Bag[T] {
 
 extend Bag[T]: ArrayMatchable {
     type Element = T
-    type Rest = ArraySlice[T]
+    type Rest = &Slice[T]
     public func matchLength() -> Int64 { self.items.count }
     public func matchGet(index: Int64) -> T { self.items(index) }
-    public func matchSlice(from: Int64, to: Int64) -> ArraySlice[T] {
+    public func matchSlice(from: Int64, to: Int64) -> &Slice[T] {
         self.items(from..<to)
     }
 }

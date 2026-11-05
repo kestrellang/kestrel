@@ -54,6 +54,14 @@ enum Bucket[K, V] {
 // HELPER FUNCTIONS
 // ============================================================================
 
+/// Is `bucket` a never-used slot (the end of a probe chain)?
+func bucketIsEmpty[K, V](bucket: Bucket[K, V]) -> Bool {
+    match bucket {
+        .Empty => true,
+        _ => false
+    }
+}
+
 /// Returns the smallest power of two `>= n`, clamped up to a minimum of 8.
 ///
 /// Used to pick the next hash-table capacity. A power of two is required
@@ -353,11 +361,11 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     private var storage: CowBox[DictionaryStorage[K, V, H]]
 
     /// Returns the bucket-array pointer from storage. Internal helper.
-    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.valuePtr().with { (s) in s.buckets } }
+    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.value.buckets }
     /// Returns the live-entry count from storage. Internal helper.
-    private func len() -> Int64 { self.storage.valuePtr().with { (s) in s.len } }
+    private func len() -> Int64 { self.storage.value.len }
     /// Returns the total bucket capacity from storage. Internal helper.
-    private func cap() -> Int64 { self.storage.valuePtr().with { (s) in s.cap } }
+    private func cap() -> Int64 { self.storage.value.cap }
 
     /// COW write barrier — ensures the storage is uniquely owned.
     private mutating func makeUnique() {
@@ -637,13 +645,12 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     // ========================================================================
 
     /// @name Lookup
-    /// Reads the value for `key` (or `None` if absent), or assigns
-    /// to insert/remove the entry.
+    /// The value stored for `key`, in place, or `.None` when absent.
     ///
-    /// The assignment form treats `Some(v)` as insert/update and
-    /// `None` as delete — so `dict(k) = None` is the inline form of
-    /// `dict.remove(k)`. For a non-`Optional` getter use
-    /// `dict(key, default: ...)` or `dict(unwrap: key)`.
+    /// Reads lend `Optional[&V]` (a binding copies it out); a `&mutating`
+    /// payload binder updates the stored value in place with one lookup.
+    /// The place never inserts or removes: use `insert(key, value)`,
+    /// `remove(key)`, or `dict(key, default: v)` to insert when missing.
     ///
     /// # Examples
     ///
@@ -651,93 +658,118 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// var dict = ["a": 1, "b": 2];
     /// dict("a");           // Some(1)
     /// dict("z");           // None
-    /// dict("c") = 3;       // inserts "c": 3
-    /// dict("a") = None;    // removes "a"
+    /// if let .Some(&mutating v) = dict("a") { v += 10; }  // "a": 11
     /// ```
-    public subscript(key: K) -> V? {
-        get {
-            let maybeIndex = self.findEntry(key);
-            if let .Some(index) = maybeIndex {
-                let bucket = self.buckets().offset(by: index).read();
-                match bucket {
-                    .Occupied(_, value, _) => .Some(value),
-                    _ => .None
-                }
-            } else {
-                .None
-            }
+    public subscript(key: K)? -> V {
+        ref {
+            let index = self.findEntry(key) ?? -1;
+            if index < 0 { return null; }
+            self.valueAt(index)
         }
-        set {
-            match newValue {
-                .Some(value) => {
-                     self.insert( key, value);
-                },
-                .None => {
-                     self.remove( key);
-                }
-            }
+        mutating ref {
+            self.makeUnique();
+            let index = self.findEntry(key) ?? -1;
+            if index < 0 { return null; }
+            .Some(self.mutatingValueAt(index))
         }
     }
 
     /// @name With Default
-    /// Reads the value for `key`, falling back to `defaultValue` when
-    /// the key is absent.
+    /// The value for `key`, or `defaultValue` when absent.
     ///
-    /// Read-only and *non-inserting* — the default value is returned
-    /// but never stored. To upsert with a default, use `upsert(...)`
-    /// or `update(...)`.
+    /// Reading never stores the default. Writing inserts `defaultValue`
+    /// first when the key is missing, then updates the stored value in
+    /// place, so `counts(word, default: 0) += 1` is one lookup.
     ///
     /// # Examples
     ///
     /// ```
-    /// let dict = ["a": 1, "b": 2];
-    /// dict("a", default: 0);  // 1
-    /// dict("z", default: 0);  // 0
-    /// dict("z");              // still None — default wasn't stored
+    /// var dict = ["a": 1];
+    /// dict("z", default: 0);       // 0, nothing stored
+    /// dict("z", default: 0) += 5;  // inserts "z": 5
     /// ```
     public subscript(key: K, default defaultValue: V) -> V {
         get {
-            let maybeValue = self(key);
-            match maybeValue {
+            match self(key) {
                 .Some(v) => v,
                 .None => defaultValue
             }
         }
+        mutating ref {
+            if let .None = self.findEntry(key) { self.insert(key, defaultValue); }
+            self.makeUnique();
+            self.mutatingValueAt(self.findEntry(key) ?? -1)
+        }
     }
 
     /// @name Unwrap
-    /// Reads or writes the value for `key`, panicking on the read
-    /// when the key is absent.
+    /// The value for `key`, in place, panicking when the key is absent.
     ///
-    /// Use when you've already verified the key exists (or when its
-    /// absence indicates a bug). The setter is equivalent to
-    /// `insert(key, newValue)` and never panics. For a non-panicking
-    /// read use `dict(key)` or `dict(key, default: ...)`.
+    /// Use when absence is a bug. Reads lend `&V` and writes update the
+    /// stored value in place; assigning to a missing key panics too, so
+    /// insert with `insert(key, value)` or `dict(key, default: v)`.
     ///
     /// # Errors
     ///
-    /// Read panics with
-    /// `"Dictionary subscript(unwrap:): key not found"` when the key
-    /// is absent.
+    /// Panics with `"Dictionary subscript(unwrap:): key not found"` when
+    /// the key is absent.
     ///
     /// # Examples
     ///
     /// ```
-    /// let dict = ["a": 1, "b": 2];
-    /// dict(unwrap: "a");  // 1
-    /// dict(unwrap: "z");  // PANIC: key not found
+    /// var dict = ["a": 1, "b": 2];
+    /// dict(unwrap: "a");       // 1
+    /// dict(unwrap: "a") += 1;  // "a": 2
+    /// dict(unwrap: "z");       // PANIC: key not found
     /// ```
     public subscript(unwrap key: K) -> V {
-        get {
-            let maybeValue = self(key);
-            match maybeValue {
-                .Some(v) => v,
-                .None => fatalError("Dictionary subscript(unwrap:): key not found")
-            }
+        ref {
+            let index = self.findEntry(key) ?? -1;
+            if index < 0 { fatalError("Dictionary subscript(unwrap:): key not found") }
+            self.valueRefAt(index)
         }
-        set {
-             self.insert( key, newValue);
+        mutating ref {
+            self.makeUnique();
+            let index = self.findEntry(key) ?? -1;
+            if index < 0 { fatalError("Dictionary subscript(unwrap:): key not found") }
+            self.mutatingValueAt(index)
         }
+    }
+
+    /// Number of bucket slots, for slot-wise key scans (`Set`).
+    internal var slotCount: Int64 { self.cap() }
+
+    /// Lends the key in bucket `slot`, or `.None` for an empty or deleted
+    /// slot, or one out of range.
+    internal func keyAt(consuming slot: Int64) -> Optional[&K] {
+        if slot < 0 or slot >= self.cap() { return .None; }
+        let bucket = &self.buckets().offset(by: slot).value;
+        if let .Occupied(&key, _, _) = bucket { return .Some(key); }
+        .None
+    }
+
+    /// Lends the value of the occupied bucket at `index`.
+    private func valueAt(consuming index: Int64) -> Optional[&V] {
+        let bucket = &self.buckets().offset(by: index).value;
+        match bucket {
+            .Occupied(_, &v, _) => .Some(v),
+            _ => .None,
+        }
+    }
+
+    /// Lends the value of the occupied bucket at `index`.
+    private func valueRefAt(consuming index: Int64) -> &V {
+        let bucket = &self.buckets().offset(by: index).value;
+        if let .Occupied(_, &v, _) = bucket { return v; }
+        fatalError("Dictionary: bucket is not occupied")
+    }
+
+    /// Lends the value of the occupied bucket at `index` mutably. The
+    /// caller makes the storage unique first.
+    private func mutatingValueAt(consuming index: Int64) -> &mutating V {
+        let bucket = &mutating self.buckets().offset(by: index).mutatingValue;
+        if let .Occupied(_, &mutating v, _) = bucket { return v; }
+        fatalError("Dictionary: bucket is not occupied")
     }
 
     // ========================================================================
@@ -838,125 +870,49 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// reclaim space wasted by previous removes. Triggers COW.
     /// Panics on allocation failure.
     private mutating func resize() {
-        self.makeUnique();
-        let s = self.storage.read();
-        let newCap: Int64 = if s.cap == 0 {
-            8
-        } else {
-            s.cap * 2
-        };
-
-        let oldBuckets = s.buckets;
-        let oldCap = s.cap;
-
-        // Allocate new table
-        let layout = Layout.array[Bucket[K, V]](newCap);
-        var allocator = SystemAllocator();
-        let result = allocator.allocate(layout);
-        if let .Some(rawPtr) = result {
-            let newBuckets = rawPtr.cast[Bucket[K, V]]();
-
-            // Initialize new buckets as empty
-            for i in 0..<newCap {
-                newBuckets.offset(by: i).write(.Empty);
-            }
-
-            // Copy occupied buckets
-            var newLen: Int64 = 0;
-            for i in 0..<oldCap {
-                let bucket = oldBuckets.offset(by: i).read();
-                match bucket {
-                    .Occupied(key, value, hashValue) => {
-                        // Find empty slot in new table using hashing and linear probing
-                        let newCapU: UInt64 = UInt64(from: newCap);
-                        let mod: UInt64 = hashValue.modulo(newCapU);
-                        var slotIndex: Int64 = Int64(from: mod);
-                        var foundSlot: Bool = false;
-                        while not foundSlot {
-                            let slotBucket = newBuckets.offset(by: slotIndex).read();
-                            match slotBucket {
-                                .Empty => {
-                                    newBuckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-                                    newLen = newLen + 1;
-                                    foundSlot = true
-                                },
-                                _ => slotIndex = (slotIndex + 1) % newCap
-                            }
-                        }
-                    },
-                    _ => {}
-                }
-            }
-
-            self.storage.setValue(DictionaryStorage(
-                buckets: newBuckets,
-                len: newLen,
-                cap: newCap
-            ))
-        } else {
-            fatalError("Dictionary resize failed")
-        }
+        let oldCap = self.cap();
+        self.resizeToCapacity(if oldCap == 0 { 8 } else { oldCap * 2 })
     }
 
     /// Rebuilds the bucket array at the exact `newCap` capacity.
     ///
-    /// Used by `reserveCapacity` and `shrinkToFit`. The caller must
-    /// ensure `newCap` is large enough to hold the current `count`
+    /// Used by `resize`, `reserveCapacity` and `shrinkToFit`. The caller
+    /// must ensure `newCap` is large enough to hold the current `count`
     /// without exceeding the load factor; this routine itself does
     /// not check. Triggers COW. Panics on allocation failure.
     private mutating func resizeToCapacity(newCap: Int64) {
-        self.makeUnique();
-        let s = self.storage.read();
-        let oldBuckets = s.buckets;
-        let oldCap = s.cap;
-
-        // Allocate new table
+        // Writing through `value` forks shared storage first.
+        let s = &mutating self.storage.value;
         let layout = Layout.array[Bucket[K, V]](newCap);
         var allocator = SystemAllocator();
         let result = allocator.allocate(layout);
+        var newBuckets = Pointer[Bucket[K, V]].nullPointer();
         if let .Some(rawPtr) = result {
-            let newBuckets = rawPtr.cast[Bucket[K, V]]();
-
-            // Initialize new buckets as empty
-            for i in 0..<newCap {
-                newBuckets.offset(by: i).write(.Empty);
-            }
-
-            // Copy occupied buckets
-            var newLen: Int64 = 0;
-            for i in 0..<oldCap {
-                let bucket = oldBuckets.offset(by: i).read();
-                match bucket {
-                    .Occupied(key, value, hashValue) => {
-                        // Find empty slot in new table using hashing and linear probing
-                        let newCapU: UInt64 = UInt64(from: newCap);
-                        let mod: UInt64 = hashValue.modulo(newCapU);
-                        var slotIndex: Int64 = Int64(from: mod);
-                        var foundSlot: Bool = false;
-                        while not foundSlot {
-                            let slotBucket = newBuckets.offset(by: slotIndex).read();
-                            match slotBucket {
-                                .Empty => {
-                                    newBuckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-                                    newLen = newLen + 1;
-                                    foundSlot = true
-                                },
-                                _ => slotIndex = (slotIndex + 1) % newCap
-                            }
-                        }
-                    },
-                    _ => {}
-                }
-            }
-
-            self.storage.setValue(DictionaryStorage(
-                buckets: newBuckets,
-                len: newLen,
-                cap: newCap
-            ))
+            newBuckets = rawPtr.cast[Bucket[K, V]]()
         } else {
             fatalError("Dictionary resize failed")
         }
+        for i in 0..<newCap {
+            newBuckets.offset(by: i).write(.Empty);
+        }
+
+        // Move every live entry into the new table (linear probing). The
+        // old buckets are left moved-out, so freeing them drops nothing.
+        let newCapU: UInt64 = UInt64(from: newCap);
+        for i in 0..<s.cap {
+            if let .Occupied(key, value, hashValue) = s.buckets.offset(by: i).take() {
+                var slotIndex: Int64 = Int64(from: hashValue.modulo(newCapU));
+                while not bucketIsEmpty(newBuckets.offset(by: slotIndex).value) {
+                    slotIndex = (slotIndex + 1) % newCap
+                }
+                newBuckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue))
+            }
+        }
+        if s.cap > 0 {
+            allocator.deallocate(s.buckets.asRaw(), Layout.array[Bucket[K, V]](s.cap))
+        }
+        s.buckets = newBuckets;
+        s.cap = newCap
     }
 
     // ========================================================================
@@ -986,8 +942,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// and returns the old value (or `None`) on update.
     ///
     /// Triggers `ensureCapacity()` and may resize before the insert
-    /// lands. The cached hash is computed once here. For
-    /// transform-based updates see `update(...)` and `upsert(...)`.
+    /// lands. The cached hash is computed once here. To update a value in
+    /// place use `if let .Some(&mutating v) = dict(key)` or
+    /// `dict(key, default: v) += …`.
     ///
     /// # Examples
     ///
@@ -1021,10 +978,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         // Find empty slot
         let maybeSlot = self.findEmptySlot(hashValue);
         if let .Some(slotIndex) = maybeSlot {
-            self.storage.modify { (mutating s) in
-                s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-                s.len = s.len + 1
-            }
+            let s = &mutating self.storage.value;
+            s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
+            s.len = s.len + 1
         } else {
             fatalError("Dictionary insert failed - no empty slot")
         }
@@ -1050,21 +1006,16 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
-            let removedValue = self.storage.modify { (mutating s) in
-                // Moved out (not `read()`): the tombstone write drops nothing.
-                let bucket = s.buckets.offset(by: index).take();
-                let rv: V? = match bucket {
-                    .Occupied(_, v, _) => .Some(v),
-                    _ => .None
-                };
-
-                // Mark as deleted (tombstone)
-                s.buckets.offset(by: index).write(.Deleted);
-                s.len = s.len - 1;
-                rv
-            };
-
-            return removedValue
+            let s = &mutating self.storage.value;
+            // Moved out (not `read()`): the tombstone write drops nothing.
+            let bucket = s.buckets.offset(by: index).take();
+            // Mark as deleted (tombstone)
+            s.buckets.offset(by: index).write(.Deleted);
+            s.len = s.len - 1;
+            return match bucket {
+                .Occupied(_, v, _) => .Some(v),
+                _ => .None
+            }
         }
 
         .None
@@ -1090,21 +1041,16 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
-            let removedEntry = self.storage.modify { (mutating s) in
-                // Moved out (not `read()`): the tombstone write drops nothing.
-                let bucket = s.buckets.offset(by: index).take();
-                let rv: (K, V)? = match bucket {
-                    .Occupied(k, v, _) => .Some((k, v)),
-                    _ => .None
-                };
-
-                // Mark as deleted (tombstone)
-                s.buckets.offset(by: index).write(.Deleted);
-                s.len = s.len - 1;
-                rv
-            };
-
-            return removedEntry
+            let s = &mutating self.storage.value;
+            // Moved out (not `read()`): the tombstone write drops nothing.
+            let bucket = s.buckets.offset(by: index).take();
+            // Mark as deleted (tombstone)
+            s.buckets.offset(by: index).write(.Deleted);
+            s.len = s.len - 1;
+            return match bucket {
+                .Occupied(k, v, _) => .Some((k, v)),
+                _ => .None
+            }
         }
 
         .None
@@ -1124,109 +1070,12 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// dict.capacity;   // unchanged
     /// ```
     public mutating func clear() {
-        self.makeUnique();
-        self.storage.modify { (mutating s) in
-            for i in 0..<s.cap {
-                s.buckets.offset(by: i).write(.Empty);
-            }
-            s.len = 0
+        let s = &mutating self.storage.value;
+        // `assign` drops the entry it replaces; `write` leaked them.
+        for i in 0..<s.cap {
+            s.buckets.offset(by: i).assign(.Empty);
         }
-    }
-
-    /// Applies `transform` to the existing value for `key` and writes
-    /// the result back; returns whether the key was found.
-    ///
-    /// **Deprecated:** prefer `modify(...)`, which mutates in place with
-    /// a single probe (no re-hash on write-back) and returns the
-    /// closure's result. `update` will be removed in a future release.
-    ///
-    /// No-op when the key is absent — for "update or insert" semantics
-    /// use `upsert(...)`. Internally re-uses `insert(...)`, so the
-    /// hash is recomputed.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1, "b": 2];
-    /// dict.update("a") { (v) in v * 10 };  // true;  dict("a") == Some(10)
-    /// dict.update("z") { (v) in v * 10 };  // false; dict unchanged
-    /// ```
-    public mutating func update(key: K, with transform: (V) -> V) -> Bool {
-        let maybeValue = self(key);
-        match maybeValue {
-            .Some(v) => {
-                 self.insert( key, transform(v));
-                true
-            },
-            .None => false
-        }
-    }
-
-    /// Mutates the value for `key` in place and returns the closure's
-    /// result, or `None` (without invoking `body`) if the key is absent.
-    ///
-    /// The interim form of in-place value access — the conditional
-    /// ref-returning lookup (`find(key:) -> Optional[&V]`) waits for
-    /// `Optional[&T]`. Today this is a bucket read → mutate → write-back
-    /// under the hood; it can upgrade to true in-place mutation later with
-    /// no API change. One probe (no re-hash on write-back, unlike
-    /// `update(...)`); triggers COW only when the key is present.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var dict = ["a": 1];
-    /// dict.modify("a") { (mutating v) in v = v + 1 };  // .Some(())
-    /// dict.modify("z") { (mutating v) in v = v + 1 };  // .None; body not invoked
-    /// dict("a");  // Some(2)
-    /// ```
-    public mutating func modify[R](key: K, body: (mutating V) -> R) -> R? {
-        let maybeIndex = self.findEntry(key);
-        if let .Some(index) = maybeIndex {
-            self.makeUnique();
-            let myBuckets = self.buckets();
-            // Moved out and written back below: `write` drops nothing.
-            let bucket = myBuckets.offset(by: index).take();
-            match bucket {
-                .Occupied(k, v, h) => {
-                    var value = v;
-                    let result = body(value);
-                    myBuckets.offset(by: index).write(.Occupied(k, value, h));
-                    return .Some(result)
-                },
-                // Unreachable: findEntry only returns occupied slots.
-                _ => {}
-            }
-        }
-        .None
-    }
-
-    /// Inserts `transform(defaultValue)` for a new key, or
-    /// `transform(existing)` for an existing one.
-    ///
-    /// The classic "increment-or-set-to-1" pattern. `defaultValue` is
-    /// passed through `transform` even on the insert path, so the same
-    /// closure handles both branches uniformly. For the no-insert
-    /// variant see `update(...)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var counts: [String: Int64] = [:];
-    /// counts.upsert("apple", default: 0) { (n) in n + 1 };
-    /// counts.upsert("apple", default: 0) { (n) in n + 1 };
-    /// counts("apple");  // Some(2)
-    /// ```
-    public mutating func upsert(key: K, default defaultValue: V, with transform: (V) -> V) {
-        let maybeValue = self(key);
-        match maybeValue {
-            .Some(v) => {
-                 self.insert( key, transform(v));
-            },
-            .None => {
-                 self.insert( key, transform(defaultValue));
-            }
-        }
+        s.len = 0
     }
 
     /// Merges every entry of `other` into `self`, calling `combine`
@@ -1455,8 +1304,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         false
     }
 
-    /// Returns *some* entry matching `predicate(key, value)`, or
-    /// `None`.
+    /// Lends *some* entry matching `predicate(key, value)`, or `None`.
     ///
     /// "First" is determined by bucket order, which is hash-dependent
     /// and unspecified — treat the result as arbitrary among matching
@@ -1469,19 +1317,14 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// dict.first { (k, v) in v > 2 };  // Some entry with v > 2
     /// dict.first { (k, v) in v > 99 }; // None
     /// ```
-    public func first(where predicate: (K, V) -> Bool) -> (K, V)? {
-        let myCap = self.cap();
-        let myBuckets = self.buckets();
-
-        for i in 0..<myCap {
-            let bucket = myBuckets.offset(by: i).read();
-            match bucket {
-                .Occupied(key, value, _) => {
-                    if predicate(key, value) {
-                        return .Some((key, value))
-                    }
-                },
-                _ => {}
+    public func first(where predicate: (K, V) -> Bool) -> Optional[(&K, &V)] {
+        for i in 0..<self.cap() {
+            let bucket = &self.buckets().offset(by: i).value;
+            if let .Occupied(&key, &value, _) = bucket {
+                if predicate(key, value) {
+                    let entry: (&K, &V) = (key, value);
+                    return .Some(entry)
+                }
             }
         }
         .None

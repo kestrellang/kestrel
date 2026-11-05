@@ -31,10 +31,10 @@ Rules for borrow expressions:
 - **Function and method return types** — `-> &Int64`, `-> &mutating T`
 - **Struct fields and tuple elements** — `var item: &Int64;`, `(&Int64, Int64)`
 - **Generic arguments** — `Optional[&T]`, iterator `Item` types
+- **Parameters** — `x: &T` borrows (like `x: T`) and `x: &mutating T` mutably borrows (like `mutating x: T`), in declarations, function types and closure params. Only a ref-typed param may take an unsized type: `func sum[S](s: &S) where S: Sliceable[Int64], S: not Copyable, S: not Sized` accepts a `Slice[Int64]`. Combining the ref with a `mutating`/`consuming` keyword is E480.
 
 They may **not** appear in:
 
-- **Parameter types** (E480). Spell the convention instead: `x: T` borrows, `mutating x: T` mutably borrows. This is a permanent design decision, not a gap.
 - **`let`/`var` type annotations** (E482). Write `let r = &x;` and let the type be inferred.
 - **Subscript return types** (E481) — subscripts use `ref` accessors instead (below).
 - **Function types** (E486) — `() -> &Int64` as a value is rejected.
@@ -93,7 +93,7 @@ struct Buffer {
 // buf(at: 0) = 5;   buf(at: 0) += 2;   — all in place, no copies
 ```
 
-`ref` provides reads (borrowing receiver), `mutating ref` provides writes (mutating receiver). You can also mix: a `get` for reads plus a `mutating ref` for in-place writes. A member with only `ref` is read-only — assigning through it is E201/E207. Duplicate providers are rejected (`get`+`ref` is E619, `set`+`mutating ref` is E620, a write provider without any read provider is E622), and ref accessors are not allowed in protocols (E621).
+`ref` provides reads (borrowing receiver), `mutating ref` provides writes (mutating receiver). You can also mix: a `get` for reads plus a `mutating ref` for in-place writes. A member with only `ref` is read-only — assigning through it is E201/E207. Duplicate providers are rejected (`get`+`ref` is E619, `set`+`mutating ref` is E620, a write provider without any read provider is E622). A protocol can require a place with bodyless clauses, `var value: T { ref mutating ref }`: generic code reads and writes it in place, and a conformer meets it with its own `ref` / `mutating ref` accessors or a stored field (a `get`-only property is E405). A protocol extension can give default bodies (`extend P { var value: T { ref { … } } }`), used by any conformer that doesn't declare its own; a body in the protocol itself, a bodyless clause in an extension, and `modifying` accessors in either are E621. A bodyless `ref` outside a protocol is E640.
 
 `modifying ref` lends `&T` like `ref` but takes a mutating receiver, for a
 read that has to update `self` first (filling a cache, for example); reads
@@ -118,7 +118,7 @@ Decay applies to: bindings of ref-returning call results, assignment right-hand 
 
 Decay is a copy, so decaying a reference to a non-`Copyable`, non-`Cloneable` value is rejected as a move out of a borrow (E503).
 
-There is no decay between `Optional[&T]` and `Optional[T]`: construction is type-driven. An unannotated `Optional.Some(r)` snapshots the pointee (giving `Optional[Int64]`); with an `Optional[&T]` annotation the reference itself is stored.
+A lent `Optional[&T]` (`xs.first()`, `xs(checked: i)`) decays the same way to `Optional[T]` in a binding, a call argument, a method receiver (`xs.first().map(f)`), and an operator's left operand (`xs.first() ?? 0`, `xs.first() == .Some(3)`). It stays a reference where one is asked for: a `match` / `if let` borrows the element (and `if let .Some(&mutating v) = xs(checked: i)` writes through it), and an `Optional[&T]` annotation or parameter keeps the reference. Only a shared payload decays; an `Optional[&mutating T]` is consumed through patterns. Construction is type-driven: an unannotated `Optional.Some(r)` snapshots the pointee (giving `Optional[Int64]`); with an `Optional[&T]` annotation the reference itself is stored.
 
 ## References in Structs and Tuples
 
@@ -169,16 +169,17 @@ Mutability is exact: `&mutating T` does not inherit conformances declared for `&
 ## Standard Library Surface
 
 - **`Array.refs()`** — iterator of shared `&T` over the elements, in place, no copies. Writing through an item is rejected (E208).
-- **`Array.mutableRefs()`** — mutating iterator of `&mutating T`; runs the copy-on-write barrier once up front, then yields in-place slots:
+- **`Array.mutatingRefs()`** — mutating iterator of `&mutating T`; runs the copy-on-write barrier once up front, then yields in-place slots:
 
   ```kestrel
   var xs = [1, 2, 3];
-  for x in xs.mutableRefs() {
+  for x in xs.mutatingRefs() {
       x += 10;
   }
   // xs is now [11, 12, 13]
   ```
 - **`Array(at: i)`** — the labeled `at:` subscript lends elements via `ref`/`mutating ref` accessors.
+- **Box `.value`** — every box lends its payload as a place. On `CowBox` and `OwnedBox` (value semantics) `.value` has `ref` and `mutating ref` accessors: `&c.value` borrows, `c.value.len += 1` writes in place, and a shared `CowBox` forks first. On `RcBox` (shared) `.value` is a read-only `&T`, and writes go through `mutatingValue`, which every handle sees and which works on a `let` handle.
 - **`Pointer.value` / `Pointer.mutatingValue`** — the low-level bridge from raw pointers to references. Pointer-derived references are *your* contract: the compiler does not verify them.
 
 ## The Escape Rule (E494) — No Lifetimes
@@ -205,7 +206,6 @@ That's the entire model. There are no lifetime parameters, no `'a`, no borrow an
 
 ## Not Yet Supported
 
-- **Dictionary reference APIs** and `arr(checked: i) -> Optional[&T]` — planned, pending dictionary storage work. Interim: `Dictionary.modify(key) { (mutating v) in ... }` for in-place updates.
 - **`Hashable`/`Matchable` conformances for `&T`** — reject cleanly for now.
 - **Storable references** (escaping the root's scope, lifetime annotations) — permanently out of scope by design.
 
@@ -213,7 +213,7 @@ That's the entire model. There are no lifetime parameters, no `'a`, no borrow an
 
 | Code | Meaning |
 |---|---|
-| E480 | Reference type in parameter position — spell the convention (`x: T` borrows, `mutating x: T`) instead |
+| E480 | Reference-typed parameter combined with `mutating`/`consuming`, or written through a type alias |
 | E481 | Declared reference return on a subscript — use `ref`/`mutating ref` accessors |
 | E482 | Reference type in a `let`/`var` annotation — write `let r = &x;` unannotated |
 | E486 | Function type with a reference return (`() -> &Int64`) used as a value |

@@ -24,7 +24,7 @@ func main() -> lang.i64 {
     if total != 10 + 2 + 3 + 4 + 4950 { return 3 }
     var ys = [1, 2, 3];
     let copy = ys;
-    for y in ys.mutableRefs() { y *= 2; }
+    for y in ys.mutatingRefs() { y *= 2; }
     if ys(2) != 6 { return 4 }
     if copy(2) != 3 { return 5 }
     0

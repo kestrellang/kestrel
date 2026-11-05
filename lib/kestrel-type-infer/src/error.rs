@@ -93,6 +93,11 @@ pub enum InferError {
     /// bind the value first (`let x = ...`) to store the decayed copy.
     RefInTypeArgument { span: Span },
 
+    /// E156: an assignment whose target is unsized (`xs(1..<3) = ys`, a
+    /// `Slice[T]` place). A slice can't be assigned as a whole; copy into it
+    /// (`assign(from:)`) or resize the owner (`replaceSubrange`).
+    UnsizedAssign { target: TyVar, span: Span },
+
     /// Error propagated from HIR (HirExpr::Error, HirPat::Error, etc.)
     FromHir { span: Span },
 
@@ -726,6 +731,18 @@ impl InferError {
                 ],
                 secondary: Vec::new(),
             },
+
+            Self::UnsizedAssign { .. } => RenderedInferError {
+                code: self.code(),
+                message: "a slice cannot be assigned as a whole".into(),
+                label: Some("this place is unsized".into()),
+                notes: vec![
+                    "copy into it with `.assign(from: other)` (the lengths must match), or \
+                     resize the owner with `replaceSubrange`"
+                        .into(),
+                ],
+                secondary: Vec::new(),
+            },
         }
     }
 
@@ -786,6 +803,7 @@ impl InferError {
             Self::KindMismatch { .. } => "E624",
             Self::RefFunctionAsValue { .. } => "E491",
             Self::RefInTypeArgument { .. } => "E492",
+            Self::UnsizedAssign { .. } => "E156",
             Self::FromHir { .. } => "E100",
         }
     }
@@ -848,6 +866,7 @@ impl InferError {
             | Self::OpaqueUnderlierNotCopyable { span, .. }
             | Self::RefFunctionAsValue { span }
             | Self::RefInTypeArgument { span }
+            | Self::UnsizedAssign { span, .. }
             | Self::ConventionMismatch { span }
             | Self::KindMismatch { span, .. } => span,
         }

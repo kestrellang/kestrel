@@ -31,15 +31,15 @@ public struct FakeClock: Clock, Cloneable {
     }
 
     public func advance(by duration: Duration) {
-        self.current.setValue(self.current.getValue().advanced(by: duration));
+        self.current.mutatingValue = self.current.value.advanced(by: duration);
     }
 
     public func setTo(instant: Instant) {
-        self.current.setValue(instant);
+        self.current.mutatingValue = instant;
     }
 
     public func now() -> Instant {
-        self.current.getValue()
+        self.current.value
     }
 
     // A handle on the same time source (not a snapshot).

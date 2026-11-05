@@ -141,6 +141,11 @@ pub struct InferCtx<'a> {
     /// would defeat the coerce-side decay arm).
     pub(crate) binding_init_exprs: HashSet<HirExprId>,
 
+    /// The `binding_init_exprs` whose binding has a type annotation: its type
+    /// flows into the initializer (a generic return infers from it), so a
+    /// not-yet-known return never waits on the deferred decay.
+    pub(crate) annotated_init_exprs: HashSet<HirExprId>,
+
     /// HirExprIds that are an `Assign`'s TARGET. A `&mutating T`-returning
     /// target (`arr.mutableAt(index: i) = v`) types as the POINTEE so the
     /// value's Coerce just works — order-independently (the value side may
@@ -148,6 +153,12 @@ pub struct InferCtx<'a> {
     /// for the analyzer and MIR comes from the resolved callee's
     /// `CallableRefReturn`, not from this expression's recorded type.
     pub(crate) assign_target_exprs: HashSet<HirExprId>,
+
+    /// The VALUE exprs of assignments whose target is a call / member
+    /// access (`d(k) = v`), so `solve_assign_target` can tell a lent
+    /// failable place (never assignable: the analyzer reports E214) from an
+    /// `Optional[&T]` local being rebound.
+    pub(crate) place_assign_values: HashSet<HirExprId>,
 
     /// HirExprIds in ALWAYS-DECAY value positions: `if`/`match` ARM VALUES
     /// (refs cannot cross merges) and array/tuple/dict LITERAL ELEMENTS
@@ -158,6 +169,14 @@ pub struct InferCtx<'a> {
     /// bidirectional back-flow (annotation → arms/elements, literal
     /// defaulting, ExpressibleByArrayLiteral targeting) is untouched.
     pub(crate) always_decay_exprs: HashSet<HirExprId>,
+
+    /// HirExprIds that are a call's ARGUMENT. Params never carry ref types
+    /// (E480), so an argument's value type is the POINTEE: a ref-returning
+    /// call here binds its result to the pointee in `bind_call_result`,
+    /// before a generic param (`m(s(i))`, `I` of the outer subscript) can
+    /// adopt the pending ref wholesale. The place itself still reaches MIR
+    /// through `ref_return_calls`.
+    pub(crate) call_arg_exprs: HashSet<HirExprId>,
 
     /// Check-mode leaves whose type comes from their OWN pending constraint
     /// (a call, method call or operator — bidi §2.1 synth). While
@@ -211,6 +230,14 @@ pub struct InferCtx<'a> {
     /// Surfaced on `TypedBody.direct_iterators`.
     pub(crate) direct_iterators: HashSet<HirExprId>,
 
+    /// Expressions whose `Optional[&T]` value decays to `Optional[T]`: bound
+    /// initializers and operator receivers. Surfaced on `TypedBody.optional_ref_decays`.
+    pub(crate) optional_ref_decays: HashSet<HirExprId>,
+
+    /// Every resolved call's instantiated return var (`bind_call_result`).
+    /// Those that resolve to a ref surface as `TypedBody.ref_return_calls`.
+    pub(crate) call_return_tvs: HashMap<HirExprId, TyVar>,
+
     /// Member-access exprs that came from a desugared `ProtocolCall`
     /// (operators, for-in, try). The lazy `Indirection` peel in `solve_member`
     /// is SKIPPED for these — operators/conformances forward via explicit
@@ -226,6 +253,11 @@ pub struct InferCtx<'a> {
     /// Maps the expr to its operator protocol (`Addable`, `Equal`, …), which
     /// Rule L checks the right operand against.
     pub(crate) operator_members: HashMap<HirExprId, Entity>,
+    /// Operator call → its receiver (left operand) expression.
+    pub(crate) operator_receivers: HashMap<HirExprId, HirExprId>,
+    /// Receivers of instance method calls (`xs.first().map(f)`): a lent
+    /// `Optional[&T]` there decays to `Optional[T]` (`optional_ref_decay_site`).
+    pub(crate) method_receiver_exprs: HashSet<HirExprId>,
 
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
@@ -465,10 +497,13 @@ impl<'a> InferCtx<'a> {
             scrutinee_exprs: HashSet::default(),
             mutating_scrutinee_exprs: HashSet::default(),
             assign_target_exprs: HashSet::default(),
+            place_assign_values: HashSet::default(),
             always_decay_exprs: HashSet::default(),
+            call_arg_exprs: HashSet::default(),
             direct_callee_exprs: HashSet::default(),
             type_callee_calls: HashSet::default(),
             binding_init_exprs: HashSet::default(),
+            annotated_init_exprs: HashSet::default(),
             synth_pending_exprs: HashSet::default(),
             optional_chain_leaves: HashSet::default(),
             chain_modes: HashMap::default(),
@@ -479,8 +514,12 @@ impl<'a> InferCtx<'a> {
             poison_protocol_call_recv_on_failure: HashSet::default(),
             for_loop_iter_calls: HashSet::default(),
             direct_iterators: HashSet::default(),
+            optional_ref_decays: HashSet::default(),
+            call_return_tvs: HashMap::default(),
             protocol_dispatch_members: HashSet::default(),
             operator_members: HashMap::default(),
+            operator_receivers: HashMap::default(),
+            method_receiver_exprs: HashSet::default(),
             resolutions: HashMap::default(),
             indirection_peels: HashMap::default(),
             field_subscripts: HashMap::default(),

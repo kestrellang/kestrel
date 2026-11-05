@@ -14,6 +14,7 @@ impl RefSourceLayer for MirRefSources<'_> {
         match self.0.ty_arena.get(*ty).clone() {
             MirTy::Ref { pointee, .. } => RefShape::Ref(pointee),
             MirTy::Pointer(p) => RefShape::Pointer(p),
+            MirTy::Slice(elem) => RefShape::Elements(elem),
             MirTy::Tuple(elems) => RefShape::Tuple(elems),
             MirTy::Named { entity, type_args } => RefShape::Nominal {
                 entity,
@@ -31,6 +32,10 @@ impl RefSourceLayer for MirRefSources<'_> {
 
     fn same(&self, a: &TyId, b: &TyId) -> bool {
         a == b
+    }
+
+    fn pointer_to(&mut self, elem: &TyId) -> Option<TyId> {
+        Some(self.0.ty_arena.intern(MirTy::Pointer(*elem)))
     }
 }
 

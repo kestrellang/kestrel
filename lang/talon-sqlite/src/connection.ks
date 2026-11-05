@@ -132,7 +132,7 @@ func getCachedStmt(
     cache: RcBox[Dictionary[String, RawPointer]],
     template: String
 ) -> RawPointer throws SqliteError {
-    let cached = cache.valuePtr().with { (d) in d(template) };
+    let cached = cache.value(template);
     match cached {
         .Some(stmt) => {
              ffi.sqlite3_reset(stmt);
@@ -152,7 +152,7 @@ func getCachedStmt(
             if prepResult != ffi.SQLITE_OK() {
                 throw SqliteError.Error(errorMessage(db));
             }
-            cache.modify { (mutating d) in let _ = d.insert(template, stmtRaw); };
+            let _ = cache.mutatingValue.insert(template, stmtRaw);
             .Ok(stmtRaw)
         }
     }
@@ -205,11 +205,9 @@ func queryCachedOnDb[R](
 // Finalizes every cached statement. Call once, before `sqlite3_close` (open
 // statements make `sqlite3_close` fail and leak the handle).
 func finalizeCachedStmts(cache: RcBox[Dictionary[String, RawPointer]]) {
-    cache.valuePtr().with { (d) in
-        for entry in d.iter() {
-             ffi.sqlite3_finalize(entry.1);
-        }
-    };
+    for entry in cache.value.iter() {
+         ffi.sqlite3_finalize(entry.1);
+    }
 }
 
 // Helper: run a raw SQL string (for BEGIN/COMMIT/ROLLBACK)

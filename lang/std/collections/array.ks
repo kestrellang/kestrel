@@ -14,7 +14,7 @@ import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RawPointer
 import std.ffi.(memcpy)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
-import std.collections.(Slice, ArraySlice)
+import std.collections.(Sliceable, Slice, SliceIndex, SliceClampable)
 
 /// Forward iterator over an `Array[T]`: an `UnsafeSliceIterator[T]` cursor plus
 /// a share of the array's storage.
@@ -211,15 +211,12 @@ struct ArrayStorage[T]: Cloneable {
 /// # Indexing
 ///
 /// The default subscript `arr(i)` panics on out-of-bounds. Variants exist
-/// for every common policy: `arr(checked: i)` returns `T?`,
-/// `arr(unchecked: i)` skips the bounds check (UB on OOB),
-/// `arr(wrapped: i)` wraps with modulo (and supports negative indices),
-/// and `arr(clamped: i)` clamps to `[0, count-1]`. Range arguments use the
-/// same labels — `arr(0..<3)`, `arr(checked: r)`, `arr(unchecked: r)`,
-/// `arr(clamped: r)` — dispatched through the unified `SeqIndex[T]`,
-/// `SeqClampable[T]`, and `SeqWrappable[T]` protocols. `Int64` and range
-/// types share each label; the result type varies (`T?` vs `UnsafeSlice[T]`
-/// for `clamped:`).
+/// for every common policy, each an in-place place: `arr(checked: i)` is
+/// `.None` when out of range, `arr(unchecked: i)` skips the bounds check
+/// (UB on OOB), `arr(wrapped: i)` wraps with modulo (negative indices count
+/// from the end), and `arr(clamped: i)` saturates into `[0, count-1]`.
+/// Ranges take `arr(0..<3)`, `arr(checked: r)` and `arr(unchecked: r)`,
+/// and `arr(within: r)` lends the part of `r` inside the array.
 ///
 /// # Capacity & Reallocation
 ///
@@ -251,7 +248,7 @@ struct ArrayStorage[T]: Cloneable {
 /// - Iteration order is insertion order.
 /// - Operations marked O(1) are amortized; growth is geometric.
 @builtin(.ArrayStruct)
-public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable {
+public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable {
     /// `Iterable` element type — the element produced by `iter().next()`.
     type Item = T
     /// `Iterable` iterator type — the concrete iterator returned by `iter()`.
@@ -266,11 +263,11 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     fileprivate var storage: CowBox[ArrayStorage[T]]
 
     /// Returns the raw element pointer. Internal helper for storage access.
-    fileprivate func ptr() -> Pointer[T] { self.storage.valuePtr().with { (s) in s.ptr } }
+    fileprivate func ptr() -> Pointer[T] { self.storage.value.ptr }
     /// Returns the element count from the storage. Internal helper.
-    fileprivate func len() -> Int64 { self.storage.valuePtr().with { (s) in s.len } }
+    fileprivate func len() -> Int64 { self.storage.value.len }
     /// Returns the buffer capacity from the storage. Internal helper.
-    fileprivate func cap() -> Int64 { self.storage.valuePtr().with { (s) in s.cap } }
+    fileprivate func cap() -> Int64 { self.storage.value.cap }
 
     /// COW write barrier — ensures the storage is uniquely owned.
     fileprivate mutating func makeUnique() {
@@ -551,59 +548,76 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     // PROPERTIES
     // ========================================================================
 
-    // count, isEmpty, indices, asPointer, isValidIndex: provided by extend Slice[T]
+    // count, isEmpty, indices, asPointer, isValidIndex: provided by extend Sliceable[T]
 
     /// The number of elements the buffer can hold without reallocating.
     public var capacity: Int64 { self.cap() }
 
-    /// Slice protocol kernel — borrows the array's buffer as an UnsafeSlice.
-    public func asUnsafeSlice() -> UnsafeSlice[T] {
-        UnsafeSlice(pointer: self.ptr(), count: self.len())
+    /// The elements as a slice, in place. Valid until the array next
+    /// reallocates or is dropped.
+    public func asSlice() -> &Slice[T] {
+        Slice.lend(start: self.ptr(), count: self.len())
     }
 
-    /// In-place element access (stage-1.5 place accessors): reads borrow
-    /// the element — no copy, no clone, no `T: Cloneable` requirement —
-    /// and writes, `+=`, and mutating methods go through the element's
-    /// address. Binding the read (`let x = arr(at: i)`) stores an owned
-    /// copy instead (binding decay). Panics if out of bounds, like
-    /// `arr(index)`.
+    /// The elements as a writable slice, in place. Runs the copy-on-write
+    /// check first, so writes never reach a copy's buffer. The slice can
+    /// change elements, never the array's length.
+    public mutating func asMutableSlice() -> &mutating Slice[T] {
+        self.makeUnique();
+        Slice.lendMutating(start: self.ptr(), count: self.len())
+    }
+
+    /// Element access and sub-slicing, in place: `xs(2)` is a reference to
+    /// an element (`let x = xs(2)` binds a copy), `xs(1..<3)` a `Slice` of
+    /// the array's elements. Writes (`xs(0) = v`, `xs(0) += 1`,
+    /// `xs(0..<2).sort()`) run the copy-on-write check first. Panics when
+    /// the index or range doesn't fit.
     ///
-    /// The mutating accessor ensures unique (COW) storage BEFORE the
-    /// place is fabricated, so writes through it never touch a sibling
-    /// copy's buffer. Copying `self` inside the same expression that
-    /// uses the place (`f(arr(at: 0), arr)` with a mutating first arg)
-    /// re-shares the buffer and can make the write observable through
-    /// the copy — accepted stage-1 behavior, recorded in the references
-    /// semantics.
-    ///
-    /// The unlabeled subscripts (`arr(i)`, `arr(1..<3)`, `checked:`,
-    /// `unchecked:`, `clamped:`, `wrapped:`) live in `array_slice.ks` and
-    /// keep get/set semantics; `at:` is the labeled in-place form.
-    public func atProbe(index index: Int64) -> T {
-        self.asUnsafeSlice()(unchecked: index)
+    /// Copying the array inside the same expression that uses the place
+    /// (`f(xs(0), xs)` with a mutating first argument) re-shares the buffer,
+    /// so the write can show through the copy: accepted stage-1 behavior,
+    /// recorded in the references semantics.
+    public subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lend(index, self.asSlice()) }
+        mutating ref { I.lendMutating(index, self.asMutableSlice()) }
     }
 
-    public subscript(at index: Int64) -> T {
-        ref {
-            // Hoisted: `or`'s short-circuit RHS is a closure, and a
-            // closure capturing Cloneable `self` deep-clones the array.
-            let count = self.len();
-            if index < 0 or index >= count {
-                fatalError("Array(at:): index out of bounds");
-            }
-            self.ptr().offset(by: index).value
-        }
-        mutating ref {
-            let count = self.len();
-            if index < 0 or index >= count {
-                fatalError("Array(at:): index out of bounds");
-            }
-            self.makeUnique();
-            self.ptr().offset(by: index).mutatingValue
-        }
+    /// Like `xs(index)`, without the bounds check (undefined behavior when
+    /// out of range).
+    public subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendUnchecked(index, self.asSlice()) }
+        mutating ref { I.lendMutatingUnchecked(index, self.asMutableSlice()) }
     }
 
-    // All other subscripts: array_slice.ks
+    /// Like `xs(index)`, but the place may not exist: `.None` instead of a
+    /// panic when out of range. Reading copies the element out (`T?`) or
+    /// lends the slice; `if let .Some(&mutating v) = xs(checked: i)` writes
+    /// in place.
+    public subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendChecked(index, self.asSlice()) }
+        mutating ref { I.lendMutatingChecked(index, self.asMutableSlice()) }
+    }
+
+    /// The element at `index` saturated into `0..<count`, in place, or
+    /// `.None` for an empty array.
+    public subscript(clamped index: Int64)? -> T {
+        ref { self.asSlice().lendClamped(index) }
+        mutating ref { self.asMutableSlice().lendMutatingClamped(index) }
+    }
+
+    /// The part of `range` that lies within the array, in place (always
+    /// valid, possibly empty).
+    public subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] {
+        ref { R.lendWithin(range, self.asSlice()) }
+        mutating ref { R.lendMutatingWithin(range, self.asMutableSlice()) }
+    }
+
+    /// The element at `index` modulo `count` (negative indices count from
+    /// the end), in place, or `.None` for an empty array.
+    public subscript(wrapped index: Int64)? -> T {
+        ref { self.asSlice().lendWrapped(index) }
+        mutating ref { self.asMutableSlice().lendMutatingWrapped(index) }
+    }
 
     /// COW write barrier — deep-copies storage if shared.
     public mutating func ensureUnique() {
@@ -621,6 +635,21 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// zero), allocates the new buffer, copies elements over, and frees
     /// the old buffer. Triggers COW first so the reallocation is
     /// invisible to other `Array` copies. Panics if allocation fails.
+    // Moves every element into the fresh buffer `newPtr` (capacity `cap`)
+    // and frees the old one. The storage must be unique.
+    private mutating func moveStorage(to newPtr: Pointer[T], cap cap: Int64) {
+        let s = &mutating self.storage.value;
+        for i in 0..<s.len {
+            newPtr.offset(by: i).write(s.ptr.offset(by: i).take())
+        }
+        if s.cap > 0 {
+            var allocator = SystemAllocator();
+            allocator.deallocate(s.ptr.asRaw(), Layout.array[T](s.cap))
+        }
+        s.ptr = newPtr;
+        s.cap = cap
+    }
+
     private mutating func grow(minCapacity: Int64) {
         let myCap = self.cap();
         if myCap >= minCapacity {
@@ -643,13 +672,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         var allocator = SystemAllocator();
         let result = allocator.allocate(newLayout);
         if let .Some(rawPtr) = result {
-            let newPtr = rawPtr.cast[T]();
-            let oldStorage = self.storage.read();
-            // Copy existing elements
-            for i in 0..<oldStorage.len {
-                newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read());
-            }
-            self.storage.setValue(ArrayStorage(ptr: newPtr, len: oldStorage.len, cap: newCap))
+            self.moveStorage(to: rawPtr.cast[T](), cap: newCap)
         } else {
             fatalError("Array grow failed")
         }
@@ -681,16 +704,11 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let myLen = self.len();
         self.makeUnique();
         self.grow(myLen + 1);
-        // Reserve the slot and bump `len` in place (O(1) amortized). The
-        // closure returns the slot pointer and captures NOTHING — capturing
-        // `element` here would clone a Cloneable value into the closure env and
-        // orphan the original (one leaked element per append). The element is
-        // moved into the slot *outside* the closure, so it is never cloned.
-        let slot = self.storage.modify { (mutating s) in
-            let p = s.ptr.offset(by: s.len);
-            s.len = s.len + 1;
-            p
-        };
+        // Reserve the slot and bump `len` in place (O(1) amortized), then
+        // move the element in.
+        let s = &mutating self.storage.value;
+        let slot = s.ptr.offset(by: s.len);
+        s.len = s.len + 1;
         slot.write(element)
     }
 
@@ -710,7 +728,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.append(contentsOf: [3, 4]);  // [1, 2, 3, 4]
     /// arr.append(contentsOf: []);      // [1, 2, 3, 4]  — no-op
     /// ```
-    public mutating func append(contentsOf other: some Slice[T] and not Static) {
+    public mutating func append(contentsOf other: &some Sliceable[T] and not Static and not Copyable and not Sized) {
         let sl = other.asUnsafeSlice();
         let otherLen = sl.count;
         if otherLen == 0 {
@@ -720,11 +738,10 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         self.makeUnique();
         self.grow(myLen + otherLen);
         let otherPtr = sl.asPointer();
-        self.storage.modify { (mutating s) in
-            for i in 0..<otherLen {
-                s.ptr.offset(by: s.len).write(otherPtr.offset(by: i).read());
-                s.len = s.len + 1
-            }
+        let s = &mutating self.storage.value;
+        for i in 0..<otherLen {
+            s.ptr.offset(by: s.len).write(otherPtr.offset(by: i).read());
+            s.len = s.len + 1
         }
     }
 
@@ -775,16 +792,15 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         }
         self.makeUnique();
         self.grow(myLen + 1);
-        self.storage.modify { (mutating s) in
-            // Shift elements right
-            var i: Int64 = s.len;
-            while i > index {
-                s.ptr.offset(by: i).write(s.ptr.offset(by: i - 1).read());
-                i = i - 1
-            }
-            s.ptr.offset(by: index).write(element);
-            s.len = s.len + 1
+        let s = &mutating self.storage.value;
+        // Shift elements right
+        var i: Int64 = s.len;
+        while i > index {
+            s.ptr.offset(by: i).write(s.ptr.offset(by: i - 1).take());
+            i = i - 1
         }
+        s.ptr.offset(by: index).write(element);
+        s.len = s.len + 1
     }
 
     // ========================================================================
@@ -811,10 +827,10 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let myLen = self.len();
         if myLen > 0 {
             self.makeUnique();
-            let value = self.storage.modify { (mutating s) in
-                s.len = s.len - 1;
-                s.ptr.offset(by: s.len).read()
-            };
+            let s = &mutating self.storage.value;
+            s.len = s.len - 1;
+            // Move out: the slot leaves the live range, so a copy leaked.
+            let value = s.ptr.offset(by: s.len).take();
             .Some(value)
         } else {
             .None
@@ -868,19 +884,18 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             fatalError("Array.remove: index out of bounds")
         }
         self.makeUnique();
-        self.storage.modify { (mutating s) in
-            // Move (`take`), not `read()`: each slot is overwritten by
-            // `write`, which drops nothing, so a copy here leaked.
-            let removed = s.ptr.offset(by: index).take();
-            // Shift elements left
-            var i: Int64 = index;
-            while i < s.len - 1 {
-                s.ptr.offset(by: i).write(s.ptr.offset(by: i + 1).take());
-                i = i + 1
-            }
-            s.len = s.len - 1;
-            removed
+        let s = &mutating self.storage.value;
+        // Move (`take`), not `read()`: each slot is overwritten by
+        // `write`, which drops nothing, so a copy here leaked.
+        let removed = s.ptr.offset(by: index).take();
+        // Shift elements left
+        var i: Int64 = index;
+        while i < s.len - 1 {
+            s.ptr.offset(by: i).write(s.ptr.offset(by: i + 1).take());
+            i = i + 1
         }
+        s.len = s.len - 1;
+        removed
     }
 
     /// Removes every element in `range`, shifting later elements left.
@@ -915,15 +930,17 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             return
         }
         self.makeUnique();
-        self.storage.modify { (mutating s) in
-            // Shift elements left
-            var i = start;
-            while i < myLen - removeCount {
-                s.ptr.offset(by: i).write(s.ptr.offset(by: i + removeCount).read());
-                i = i + 1
-            }
-            s.len = s.len - removeCount
+        let s = &mutating self.storage.value;
+        // Drop the removed elements, then move the tail left.
+        for k in start..<end {
+            s.ptr.offset(by: k).dropInPlace()
         }
+        var i = start;
+        while i < myLen - removeCount {
+            s.ptr.offset(by: i).write(s.ptr.offset(by: i + removeCount).take());
+            i = i + 1
+        }
+        s.len = s.len - removeCount
     }
 
 
@@ -944,14 +961,13 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         // Drop every live element (mirrors ArrayStorage.deinit) before
         // resetting len; without this, elements with non-trivial deinits
         // (e.g. heap-owning types) would leak because deinit only drops 0..<len.
-        self.storage.modify { (mutating s) in
-            var i: Int64 = 0;
-            while i < s.len {
-                s.ptr.offset(by: i).dropInPlace();
-                i = i + 1
-            };
-            s.len = 0
-        }
+        let s = &mutating self.storage.value;
+        var i: Int64 = 0;
+        while i < s.len {
+            s.ptr.offset(by: i).dropInPlace();
+            i = i + 1
+        };
+        s.len = 0
     }
 
     /// Keeps only elements for which `predicate` returns true; removes
@@ -969,24 +985,21 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     public mutating func retain(where predicate: (T) -> Bool) {
         self.makeUnique();
-        self.storage.modify { (mutating s) in
-            var writeIdx: Int64 = 0;
-            for readIdx in 0..<s.len {
-                let keep = s.ptr.offset(by: readIdx).with { (element) in
-                    predicate(element)
-                };
-                if keep {
-                    if writeIdx != readIdx {
-                        let element = s.ptr.offset(by: readIdx).take();
-                        s.ptr.offset(by: writeIdx).write(element)
-                    }
-                    writeIdx = writeIdx + 1
-                } else {
-                    s.ptr.offset(by: readIdx).dropInPlace()
+        let s = &mutating self.storage.value;
+        var writeIdx: Int64 = 0;
+        for readIdx in 0..<s.len {
+            let keep = predicate(s.ptr.offset(by: readIdx).value);
+            if keep {
+                if writeIdx != readIdx {
+                    let element = s.ptr.offset(by: readIdx).take();
+                    s.ptr.offset(by: writeIdx).write(element)
                 }
+                writeIdx = writeIdx + 1
+            } else {
+                s.ptr.offset(by: readIdx).dropInPlace()
             }
-            s.len = writeIdx
         }
+        s.len = writeIdx
     }
 
     /// Removes every element for which `predicate` returns true.
@@ -1038,8 +1051,9 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         }
         self.makeUnique();
         let ptr = self.ptr();
-        let temp = ptr.offset(by: i).read();
-        ptr.offset(by: i).write(ptr.offset(by: j).read());
+        // Move, not `read()`: `write` drops nothing, so a copy leaked.
+        let temp = ptr.offset(by: i).take();
+        ptr.offset(by: i).write(ptr.offset(by: j).take());
         ptr.offset(by: j).write(temp)
     }
 
@@ -1058,7 +1072,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         self.asMutableSlice().reverse()
     }
 
-    // reversed(): provided by extend Slice[T] — returns a lazy ReversedView[T]
+    // reversed(): provided by extend Sliceable[T] — returns a lazy ReversedView[T]
     // (use `arr.reversed().toArray()` if an owned Array is needed).
 
     /// Rotates the elements in place by `amount` positions to the left.
@@ -1117,30 +1131,33 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
 
         self.grow(newLen);
         self.makeUnique();
-        self.storage.modify { (mutating s) in
-            if insertCount > removeCount {
-                // Shift elements right
-                var i = myLen - 1;
-                while i >= end {
-                    s.ptr.offset(by: i + insertCount - removeCount).write(s.ptr.offset(by: i).read());
-                    i = i - 1
-                }
-            } else if insertCount < removeCount {
-                // Shift elements left
-                var i = end;
-                while i < myLen {
-                    s.ptr.offset(by: start + insertCount + (i - end)).write(s.ptr.offset(by: i).read());
-                    i = i + 1
-                }
-            }
-
-            // Copy replacement
-            for i in 0..<insertCount {
-                s.ptr.offset(by: start + i).write(replacement(unchecked: i))
-            }
-
-            s.len = newLen
+        let s = &mutating self.storage.value;
+        // Drop the replaced elements; every shift below is a move.
+        for k in start..<end {
+            s.ptr.offset(by: k).dropInPlace()
         }
+        if insertCount > removeCount {
+            // Shift elements right
+            var i = myLen - 1;
+            while i >= end {
+                s.ptr.offset(by: i + insertCount - removeCount).write(s.ptr.offset(by: i).take());
+                i = i - 1
+            }
+        } else if insertCount < removeCount {
+            // Shift elements left
+            var i = end;
+            while i < myLen {
+                s.ptr.offset(by: start + insertCount + (i - end)).write(s.ptr.offset(by: i).take());
+                i = i + 1
+            }
+        }
+
+        // Copy replacement
+        for i in 0..<insertCount {
+            s.ptr.offset(by: start + i).write(replacement(unchecked: i))
+        }
+
+        s.len = newLen
     }
 
     /// Shuffles the array in place using `rng`.
@@ -1262,13 +1279,12 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             if myLen == 0 and myCap > 0 {
                 // Deallocate entirely for empty array
                 self.makeUnique();
-                self.storage.modify { (mutating s) in
-                    let layout = Layout.array[T](myCap);
-                    var allocator = SystemAllocator();
-                    allocator.deallocate(s.ptr.asRaw(), layout);
-                    s.ptr = Pointer[T].nullPointer();
-                    s.cap = 0
-                }
+                let s = &mutating self.storage.value;
+                let layout = Layout.array[T](myCap);
+                var allocator = SystemAllocator();
+                allocator.deallocate(s.ptr.asRaw(), layout);
+                s.ptr = Pointer[T].nullPointer();
+                s.cap = 0
             }
             return
         }
@@ -1280,19 +1296,14 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         var allocator = SystemAllocator();
         let result = allocator.allocate(newLayout);
         if let .Some(rawPtr) = result {
-            let newPtr = rawPtr.cast[T]();
-            let oldStorage = self.storage.read();
-            for i in 0..<myLen {
-                newPtr.offset(by: i).write(oldStorage.ptr.offset(by: i).read())
-            }
-            self.storage.setValue(ArrayStorage(ptr: newPtr, len: myLen, cap: myLen))
+            self.moveStorage(to: rawPtr.cast[T](), cap: myLen)
         }
     }
 
     // first(), last(), firstIndex(where:), lastIndex(where:),
     // first(where:), last(where:), all(where:), any(where:),
     // countItems(where:), prefix(count:), suffix(count:),
-    // drop(first:), drop(last:): provided by extend Slice[T]
+    // drop(first:), drop(last:): provided by extend Sliceable[T]
 
     // ========================================================================
     // ITERATION
@@ -1314,9 +1325,9 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         )
     }
 
-    // refs(), mutableRefs(): in array_slice.ks — they borrow the array.
+    // refs(), mutatingRefs(): in array_slice.ks — they borrow the array.
 
-    // chunks(of:), windows(of:): provided by extend Slice[T] — return
+    // chunks(of:), windows(of:): provided by extend Sliceable[T] — return
     // ChunksView[T] / WindowsView[T] (multi-pass; subscript via .get(i)).
 
     // ========================================================================
@@ -1364,9 +1375,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let myLen = self.len();
         let myPtr = self.ptr();
         for i in 0..<myLen {
-            let matches = myPtr.offset(by: i).with { (element) in
-                predicate(element)
-            };
+            let matches = predicate(myPtr.offset(by: i).value);
             if matches {
                 matching.append(myPtr.offset(by: i).read())
             } else {
@@ -1407,7 +1416,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
 /// `Equatable` and value-based search/dedup operations available when the
 /// element type itself is `Equatable`.
 // contains, firstIndex(of:), lastIndex(of:), starts(with:), ends(with:), split(separator:),
-// isEqual: provided by extend Slice[T] where T: Equatable
+// isEqual: provided by extend Sliceable[T] where T: Equatable
 extend Array[T]: Equatable where T: Equatable { }
 
 extend Array[T] where T: Equatable {
@@ -1467,20 +1476,23 @@ extend Array[T] where T: Equatable {
             return
         }
         self.makeUnique();
-        var s = self.storage.read();
+        let s = &mutating self.storage.value;
         var writeIdx: Int64 = 1;
         for readIdx in 1..<s.len {
-            let current = s.ptr.offset(by: readIdx).read();
-            let previous = s.ptr.offset(by: writeIdx - 1).read();
-            if current.isEqual(to: previous) == false {
+            // Compare in place; keepers move down, duplicates are dropped
+            // (copying here leaked every element it touched).
+            let current = s.ptr.offset(by: readIdx);
+            let duplicate = current.value.isEqual(to: s.ptr.offset(by: writeIdx - 1).value);
+            if duplicate {
+                current.dropInPlace()
+            } else {
                 if writeIdx != readIdx {
-                    s.ptr.offset(by: writeIdx).write(current)
+                    s.ptr.offset(by: writeIdx).write(current.take())
                 }
                 writeIdx = writeIdx + 1
             }
         }
-        s.len = writeIdx;
-        self.storage.setValue(s)
+        s.len = writeIdx
     }
 
     /// Returns a new array with consecutive duplicates removed; original
@@ -1511,8 +1523,8 @@ extend Array[T] where T: Equatable {
 extend Array[T]: ArrayMatchable {
     /// `ArrayMatchable` element type — what the pattern bindings extract.
     type Element = T
-    /// `..rest` binds a narrower slice of the same array.
-    type Rest = ArraySlice[T]
+    /// `..rest` binds a slice of the array's elements.
+    type Rest = &Slice[T]
 
     /// Pattern-matcher hook returning the array's `count`.
     ///
@@ -1538,7 +1550,7 @@ extend Array[T]: ArrayMatchable {
     ///
     /// Used to bind `..rest` segments. The matcher guarantees the
     /// indices are in range.
-    public func matchSlice(from: Int64, to: Int64) -> ArraySlice[T] {
+    public func matchSlice(from: Int64, to: Int64) -> &Slice[T] {
         self(from..<to)
     }
 }
@@ -1565,7 +1577,7 @@ extend Array[T] where T: Comparable {
         self.sort(by: { (a, b) in a < b })
     }
 
-    // sorted(), min(), max(), isSorted(), binarySearch(): provided by extend Slice[T] where T: Comparable
+    // sorted(), min(), max(), isSorted(), binarySearch(): provided by extend Sliceable[T] where T: Comparable
 }
 
 // ============================================================================
@@ -1748,7 +1760,7 @@ extend Array[T] where T: Formattable {
     }
 }
 
-// Formattable: provided by extend Slice[T] where T: Formattable
+// Formattable: provided by extend Sliceable[T] where T: Formattable
 
 // ============================================================================
 // DIRECT ITERABLE CONFORMANCE

@@ -45,13 +45,13 @@ func main() -> lang.i64 {
     c.count = 5;
     // willSet(5), didSet(old 3)
     if c.log.count != 2 { return 2; }
-    if c.log(at: 0) != 5 { return 3; }
-    if c.log(at: 1) != 300 { return 4; }
+    if c.log(0) != 5 { return 3; }
+    if c.log(1) != 300 { return 4; }
 
     c.count += 2;
     if c.count != 7 { return 5; }
-    if c.log(at: 2) != 7 { return 6; }
-    if c.log(at: 3) != 500 { return 7; }
+    if c.log(2) != 7 { return 6; }
+    if c.log(3) != 500 { return 7; }
 
     c.bump();
     if c.count != 8 { return 8; }
@@ -59,11 +59,11 @@ func main() -> lang.i64 {
 
     c.items.append(1);
     if c.items.count != 1 { return 10; }
-    if c.log(at: 6) != -1 { return 11; }
+    if c.log(6) != -1 { return 11; }
 
     c.pos.x = 4;
     if c.pos.x != 4 { return 12; }
-    if c.log(at: 7) != -2 { return 13; }
+    if c.log(7) != -2 { return 13; }
     if c.log.count != 8 { return 14; }
     0
 }

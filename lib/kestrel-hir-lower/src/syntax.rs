@@ -637,13 +637,25 @@ pub(crate) fn closure_params(
             .filter(|c| c.kind() == SyntaxKind::ClosureParam)
             .map(|param| {
                 let span = get_node_span(&param, file_id);
+                let mut ty = param
+                    .children()
+                    .find(|c| c.kind().is_type())
+                    .and_then(|c| ast_type_from_cst(&c, file_id));
+                let mut is_mut = has_token(&param, SyntaxKind::Mutating);
+                // `(x: &T)` / `(x: &mutating T)` spell the access mode with
+                // the type, as a declared param does: the param is the pointee.
+                if !is_mut
+                    && let Some((inner, mutating)) =
+                        ty.as_ref().and_then(kestrel_ast::AstType::param_ref)
+                {
+                    let inner = inner.clone();
+                    ty = Some(inner);
+                    is_mut = mutating;
+                }
                 ClosureParamSyntax {
                     pat: PatSrc::or_error(first_pat(&param), &span),
-                    ty: param
-                        .children()
-                        .find(|c| c.kind().is_type())
-                        .and_then(|c| ast_type_from_cst(&c, file_id)),
-                    is_mut: has_token(&param, SyntaxKind::Mutating),
+                    ty,
+                    is_mut,
                 }
             })
             .collect(),

@@ -15,11 +15,11 @@ struct View { let base: &Array[Int64] }
 
 struct MutView {
     let base: &mutating Array[Int64]
-    mutating func put(i: Int64, v: Int64) { self.base(at: i) = v; }
+    mutating func put(i: Int64, v: Int64) { self.base(i) = v; }
     mutating func bump(i: Int64) { self.base(i) += 10; }
 }
 
-func viaField(s: View) -> Int64 { s.base(1) + s.base(at: 2) }
+func viaField(s: View) -> Int64 { s.base(1) + s.base(2) }
 
 @main
 func main() {

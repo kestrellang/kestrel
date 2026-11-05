@@ -3,14 +3,14 @@
 // expect-exit: 0
 //
 // #188 (BUG-52) — recursive array-pattern destructuring. The `..rest` binding
-// yields an `ArraySlice[T]`, which itself conforms to `ArrayMatchable`, so it
+// yields a `&Slice[T]`, whose `Slice[T]` itself conforms to `ArrayMatchable`, so it
 // can be matched again. Also pins the exhaustiveness fix: `[a, ..rest] | []`
 // over a *slice* is exhaustive (the slice has infinite length like an array),
 // which previously false-tripped E305 (slice classified as a 1-field struct).
 
 module Test
 
-func sumSlice(s: ArraySlice[Int64]) -> Int64 {
+func sumSlice(s: Slice[Int64]) -> Int64 {
     match s {
         [a, ..rest] => a + sumSlice(rest),
         [] => 0

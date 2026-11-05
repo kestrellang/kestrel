@@ -15,8 +15,8 @@ import std.iter.(Iterator, Iterable)
 /// Ring-buffer storage cell for `Deque[T]`.
 ///
 /// Wrapped in a `CowBox` by `Deque[T]` so that copying a deque simply
-/// bumps a reference count; mutations call `CowBox.write()` first to
-/// perform the copy-on-write barrier. The `clone()` method linearizes
+/// bumps a reference count; mutations write through `storage.value`, which
+/// performs the copy-on-write barrier first. The `clone()` method linearizes
 /// the ring buffer into a fresh contiguous allocation.
 struct DequeStorage[T]: Cloneable {
     /// Heap pointer to the element buffer; null when `cap == 0`.
@@ -211,13 +211,13 @@ public struct Deque[T]: Iterable, Cloneable {
     // -- internal helpers --
 
     /// Reads the current element count from the COW storage.
-    fileprivate func len() -> Int64 { self.storage.valuePtr().with { (s) in s.len } }
+    fileprivate func len() -> Int64 { self.storage.value.len }
     /// Reads the current buffer capacity from the COW storage.
-    fileprivate func cap() -> Int64 { self.storage.valuePtr().with { (s) in s.cap } }
+    fileprivate func cap() -> Int64 { self.storage.value.cap }
     /// Reads the ring-buffer head offset from the COW storage.
-    fileprivate func head() -> Int64 { self.storage.valuePtr().with { (s) in s.head } }
+    fileprivate func head() -> Int64 { self.storage.value.head }
     /// Reads the raw element pointer from the COW storage.
-    fileprivate func rawPtr() -> Pointer[T] { self.storage.valuePtr().with { (s) in s.ptr } }
+    fileprivate func rawPtr() -> Pointer[T] { self.storage.value.ptr }
 
     // ========================================================================
     // CONSTRUCTORS
@@ -361,18 +361,21 @@ public struct Deque[T]: Iterable, Cloneable {
         let result = allocator.allocate(newLayout);
         if let .Some(rawPtr) = result {
             let newPtr = rawPtr.cast[T]();
-            // write() fires the COW barrier before we read the old storage
-            var oldStorage = self.storage.write();
-            // Linearize ring buffer into new contiguous buffer
-            for i in 0..<oldStorage.len {
-                var phys = oldStorage.head + i;
-                if phys >= oldStorage.cap { phys = phys - oldStorage.cap; }
-                newPtr.offset(by: i).write(oldStorage.ptr.offset(by: phys).read());
+            // Writing through `value` forks shared storage first. Linearize
+            // the ring into the new buffer by moving each element, then
+            // free the old buffer.
+            let s = &mutating self.storage.value;
+            for i in 0..<s.len {
+                var phys = s.head + i;
+                if phys >= s.cap { phys = phys - s.cap; }
+                newPtr.offset(by: i).write(s.ptr.offset(by: phys).take());
             }
-            let oldLen = oldStorage.len;
-            self.storage.setValue(DequeStorage(
-                ptr: newPtr, len: oldLen, cap: newCap, head: 0
-            ))
+            if s.cap > 0 {
+                allocator.deallocate(s.ptr.asRaw(), Layout.array[T](s.cap))
+            }
+            s.ptr = newPtr;
+            s.cap = newCap;
+            s.head = 0
         } else {
             fatalError("Deque grow failed")
         }
@@ -411,10 +414,15 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d.isEmpty;  // true
     /// ```
     public mutating func clear() {
-        self.storage.modify { (mutating s) in
-            s.len = 0;
-            s.head = 0
+        let s = &mutating self.storage.value;
+        // Drop the live elements; resetting `len` alone leaked them.
+        for i in 0..<s.len {
+            var phys = s.head + i;
+            if phys >= s.cap { phys = phys - s.cap; }
+            s.ptr.offset(by: phys).dropInPlace()
         }
+        s.len = 0;
+        s.head = 0
     }
 
     // ========================================================================
@@ -436,12 +444,11 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func pushBack(element: T) {
         self.grow(minCapacity: self.len() + 1);
-        self.storage.modify { (mutating s) in
-            var tail = s.head + s.len;
-            if tail >= s.cap { tail = tail - s.cap; }
-            s.ptr.offset(by: tail).write(element);
-            s.len = s.len + 1
-        }
+        let s = &mutating self.storage.value;
+        var tail = s.head + s.len;
+        if tail >= s.cap { tail = tail - s.cap; }
+        s.ptr.offset(by: tail).write(element);
+        s.len = s.len + 1
     }
 
     /// Prepends `element` to the front of the deque. O(1) amortized.
@@ -459,12 +466,11 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func pushFront(element: T) {
         self.grow(minCapacity: self.len() + 1);
-        self.storage.modify { (mutating s) in
-            s.head = s.head - 1;
-            if s.head < 0 { s.head = s.cap - 1; }
-            s.ptr.offset(by: s.head).write(element);
-            s.len = s.len + 1
-        }
+        let s = &mutating self.storage.value;
+        s.head = s.head - 1;
+        if s.head < 0 { s.head = s.cap - 1; }
+        s.ptr.offset(by: s.head).write(element);
+        s.len = s.len + 1
     }
 
     // ========================================================================
@@ -487,15 +493,13 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func popFront() -> T? {
         if self.len() == 0 { return .None; }
-        let value = self.storage.modify { (mutating s) in
-            // Moved out: the slot leaves the live range, so nothing drops it.
-            let v = s.ptr.offset(by: s.head).take();
-            s.head = s.head + 1;
-            if s.head >= s.cap { s.head = 0; }
-            s.len = s.len - 1;
-            v
-        };
-        .Some(value)
+        let s = &mutating self.storage.value;
+        // Moved out: the slot leaves the live range, so nothing drops it.
+        let v = s.ptr.offset(by: s.head).take();
+        s.head = s.head + 1;
+        if s.head >= s.cap { s.head = 0; }
+        s.len = s.len - 1;
+        .Some(v)
     }
 
     /// Removes and returns the back element, or `.None` if empty. O(1).
@@ -514,21 +518,19 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func popBack() -> T? {
         if self.len() == 0 { return .None; }
-        let value = self.storage.modify { (mutating s) in
-            s.len = s.len - 1;
-            var tail = s.head + s.len;
-            if tail >= s.cap { tail = tail - s.cap; }
-            // Moved out: the slot leaves the live range, so nothing drops it.
-            s.ptr.offset(by: tail).take()
-        };
-        .Some(value)
+        let s = &mutating self.storage.value;
+        s.len = s.len - 1;
+        var tail = s.head + s.len;
+        if tail >= s.cap { tail = tail - s.cap; }
+        // Moved out: the slot leaves the live range, so nothing drops it.
+        .Some(s.ptr.offset(by: tail).take())
     }
 
     // ========================================================================
     // ELEMENT ACCESS
     // ========================================================================
 
-    /// Returns the front element without removing it, or `.None` if empty.
+    /// Lends the front element without removing it, or `.None` if empty.
     ///
     /// O(1). The removing counterpart is `popFront()`.
     ///
@@ -539,12 +541,13 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d.first();  // .Some(10)
     /// Deque[Int64]().first();  // .None
     /// ```
-    public func first() -> T? {
-        if self.len() == 0 { return .None; }
-        .Some(self.rawPtr().offset(by: self.head()).read())
+    public func first() -> Optional[&T] {
+        let phys = self.physicalIndex(0);
+        if phys < 0 { return .None; }
+        .Some(self.rawPtr().offset(by: phys).value)
     }
 
-    /// Returns the back element without removing it, or `.None` if empty.
+    /// Lends the back element without removing it, or `.None` if empty.
     ///
     /// O(1). The removing counterpart is `popBack()`.
     ///
@@ -555,11 +558,10 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d.last();  // .Some(30)
     /// Deque[Int64]().last();  // .None
     /// ```
-    public func last() -> T? {
-        if self.len() == 0 { return .None; }
-        var tail = self.head() + self.len() - 1;
-        if tail >= self.cap() { tail = tail - self.cap(); }
-        .Some(self.rawPtr().offset(by: tail).read())
+    public func last() -> Optional[&T] {
+        let phys = self.physicalIndex(self.len() - 1);
+        if phys < 0 { return .None; }
+        .Some(self.rawPtr().offset(by: phys).value)
     }
 
     /// @name Indexed
@@ -584,25 +586,52 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d(1);  // 99
     /// ```
     subscript(index: Int64) -> T {
-        get {
-            if index < 0 or index >= self.len() {
-                fatalError("Deque: index out of bounds")
-            }
-            var phys = self.head() + index;
-            let myCap = self.cap();
-            if phys >= myCap { phys = phys - myCap; }
-            self.rawPtr().offset(by: phys).read()
+        ref {
+            let phys = self.physicalIndex(index);
+            if phys < 0 { fatalError("Deque: index out of bounds") }
+            self.rawPtr().offset(by: phys).value
         }
-        set {
-            if index < 0 or index >= self.len() {
-                fatalError("Deque: index out of bounds")
-            }
-            var s = self.storage.write();
-            var phys = s.head + index;
-            if phys >= s.cap { phys = phys - s.cap; }
-            s.ptr.offset(by: phys).write(newValue);
-            self.storage.setValue(s)
+        mutating ref {
+            // Unique the storage (COW) before locating the slot: a copy
+            // re-bases the ring to `head == 0`.
+            self.storage.ensureUnique();
+            let phys = self.physicalIndex(index);
+            if phys < 0 { fatalError("Deque: index out of bounds") }
+            self.rawPtr().offset(by: phys).mutatingValue
         }
+    }
+
+    /// Like `d(index)`, but the place may not exist: `.None` instead of a
+    /// panic when out of range. `if let .Some(&mutating v) = d(checked: i)`
+    /// writes in place.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var d = Deque[Int64](from: [10, 20]);
+    /// d(checked: 1);  // .Some(20)
+    /// d(checked: 5);  // .None
+    /// ```
+    subscript(checked index: Int64)? -> T {
+        ref {
+            let phys = self.physicalIndex(index);
+            if phys < 0 { return null; }
+            .Some(self.rawPtr().offset(by: phys).value)
+        }
+        mutating ref {
+            self.storage.ensureUnique();
+            let phys = self.physicalIndex(index);
+            if phys < 0 { return null; }
+            .Some(self.rawPtr().offset(by: phys).mutatingValue)
+        }
+    }
+
+    /// The ring-buffer offset of logical `index`, or `-1` when out of range.
+    fileprivate func physicalIndex(index: Int64) -> Int64 {
+        if index < 0 or index >= self.len() { return -1; }
+        let phys = self.head() + index;
+        if phys >= self.cap() { return phys - self.cap(); }
+        phys
     }
 
     /// Returns the two contiguous slices that make up the ring buffer.

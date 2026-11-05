@@ -257,9 +257,9 @@ fn build_accessors(
     // Place accessors: a RefAccessor child per clause. Field accessors take
     // no params (no index, no newValue). `(yields_mutating, receiver_mutating)`.
     let ref_clauses = [
-        ref_clause.and_then(|c| Some((c.syntax().clone(), c.code_block()?, false, false))),
-        modifying_ref_clause.and_then(|c| Some((c.syntax().clone(), c.code_block()?, false, true))),
-        mutating_ref_clause.and_then(|c| Some((c.syntax().clone(), c.code_block()?, true, true))),
+        ref_clause.map(|c| (c.syntax().clone(), c.code_block(), false, false)),
+        modifying_ref_clause.map(|c| (c.syntax().clone(), c.code_block(), false, true)),
+        mutating_ref_clause.map(|c| (c.syntax().clone(), c.code_block(), true, true)),
     ];
     for (clause, body, mutating, receiver_mutating) in ref_clauses.into_iter().flatten() {
         let accessor_receiver = has_receiver.then_some(if receiver_mutating {
@@ -271,7 +271,7 @@ fn build_accessors(
             world,
             entity,
             &clause,
-            body.syntax(),
+            body.as_ref().map(|b| b.syntax()),
             Vec::new(),
             accessor_receiver,
             mutating,

@@ -277,8 +277,10 @@ impl PropertyAccessors {
         self.code_block().is_some()
             || self.getter().is_some_and(|g| g.code_block().is_some())
             || self.setter().is_some_and(|s| s.code_block().is_some())
-            || self.ref_clause().is_some()
-            || self.mutating_ref_clause().is_some()
+            || self.ref_clause().is_some_and(|r| r.code_block().is_some())
+            || self
+                .mutating_ref_clause()
+                .is_some_and(|r| r.code_block().is_some())
             || self.modifying_getter().is_some()
             || self.modifying_ref_clause().is_some()
     }

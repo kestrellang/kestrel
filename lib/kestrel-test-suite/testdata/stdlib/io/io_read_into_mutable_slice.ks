@@ -2,14 +2,14 @@
 // stdlib: true
 // expect-exit: 0
 //
-// `Readable.read(into:)` takes a `MutableArraySlice[UInt8]`: a reader can
+// `Readable.read(into:)` takes a `mutating Slice[UInt8]`: a reader can
 // only write the elements the caller handed it, never past them, and a
 // write never reaches storage another array shares (the raw view runs the
 // copy-on-write check first).
 
 module Test
 
-import std.collections.(Array, MutableArraySlice)
+import std.collections.(Array)
 import std.io.read.(Cursor, Repeat, readExact)
 
 @main
@@ -19,7 +19,7 @@ func main() -> lang.i64 {
 
     // A sub-slice: only elements 2..<4 change.
     var rep = Repeat(byte: 7);
-    match rep.read(into: buf.mutatingSlice(2..<4)) {
+    match rep.read(into: buf(2..<4)) {
         .Ok(n) => if n != 2 { return 1 },
         .Err(_) => return 2
     }

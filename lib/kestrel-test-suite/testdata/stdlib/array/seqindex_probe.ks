@@ -62,10 +62,10 @@ func main() -> lang.i64 {
     if rcBad.isSome() { return 21 }
 
     // -- Range clamped --
-    let rcl = arr(clamped: -5..<100);
+    let rcl = arr(within: -5..<100);
     if rcl.count != 3 { return 22 }
 
-    // -- ArraySlice subscripts via Slice[T] extension --
+    // -- Slice subscripts --
     let s = arr.asSlice();
     if s(0) != 10 { return 23 }
     if s(2) != 30 { return 24 }

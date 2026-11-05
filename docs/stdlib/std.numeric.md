@@ -2878,7 +2878,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Slice[UInt8]
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int16` from 2 bytes in native byte order.
@@ -2889,7 +2889,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int16` from 2 bytes in big-endian order.
@@ -2900,7 +2900,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int16` from 2 bytes in little-endian order.
@@ -4280,7 +4280,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Slice[UInt8]
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int32` from 4 bytes in native byte order.
@@ -4291,7 +4291,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int32` from 4 bytes in big-endian order.
@@ -4302,7 +4302,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int32` from 4 bytes in little-endian order.
@@ -5682,7 +5682,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Slice[UInt8]
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int64` from 8 bytes in native byte order.
@@ -5693,7 +5693,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int64` from 8 bytes in big-endian order.
@@ -5704,7 +5704,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int64` from 8 bytes in little-endian order.
@@ -7033,6 +7033,82 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Convertible`
 
+### Implements `SliceIndex`
+
+#### typealias `SliceOutput`
+
+```kestrel
+type SliceOutput = T
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lend`
+
+```kestrel
+public static func lend(consuming Int64, Slice[T]) -> &T
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendChecked`
+
+```kestrel
+public static func lendChecked(consuming Int64, Slice[T]) -> Optional[&T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutating`
+
+```kestrel
+public static func lendMutating(consuming Int64, mutating Slice[T]) -> &mutating T
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming Int64, mutating Slice[T]) -> Optional[&mutating T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingUnchecked`
+
+```kestrel
+public static func lendMutatingUnchecked(consuming Int64, mutating Slice[T]) -> &mutating T
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendUnchecked`
+
+```kestrel
+public static func lendUnchecked(consuming Int64, Slice[T]) -> &T
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `SliceClampable`
+
+#### typealias `SliceClampedOutput`
+
+```kestrel
+type SliceClampedOutput = T?
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendClamped`
+
+```kestrel
+public static func lendClamped(consuming Int64, Slice[T]) -> T?
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
 ### Implements `SeqIndex`
 
 #### typealias `SeqOutput`
@@ -7041,47 +7117,47 @@ _Defined in `lang/std/numeric/int64.ks`._
 type SeqOutput = T
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeq`
 
 ```kestrel
-public func readSeq(from: ArraySlice[T]) -> T
+public func readSeq(from: UnsafeSlice[T]) -> T
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqChecked`
 
 ```kestrel
-public func readSeqChecked(from: ArraySlice[T]) -> T?
+public func readSeqChecked(from: UnsafeSlice[T]) -> T?
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqUnchecked`
 
 ```kestrel
-public func readSeqUnchecked(from: ArraySlice[T]) -> T
+public func readSeqUnchecked(from: UnsafeSlice[T]) -> T
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeq`
 
 ```kestrel
-public func writeSeq(to: ArraySlice[T], with: T)
+public func writeSeq(to: UnsafeSlice[T], with: T)
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeqUnchecked`
 
 ```kestrel
-public func writeSeqUnchecked(to: ArraySlice[T], with: T)
+public func writeSeqUnchecked(to: UnsafeSlice[T], with: T)
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqClampable`
 
@@ -7091,23 +7167,23 @@ _Defined in `lang/std/collections/slice.ks`._
 type SeqClampedOutput = T?
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqClamped`
 
 ```kestrel
-public func readSeqClamped(from: ArraySlice[T]) -> T?
+public func readSeqClamped(from: UnsafeSlice[T]) -> T?
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeqClamped`
 
 ```kestrel
-public func writeSeqClamped(to: ArraySlice[T], with: T?)
+public func writeSeqClamped(to: UnsafeSlice[T], with: T?)
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqWrappable`
 
@@ -7117,23 +7193,23 @@ _Defined in `lang/std/collections/slice.ks`._
 type SeqWrappedOutput = T?
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqWrapped`
 
 ```kestrel
-public func readSeqWrapped(from: ArraySlice[T]) -> T?
+public func readSeqWrapped(from: UnsafeSlice[T]) -> T?
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeqWrapped`
 
 ```kestrel
-public func writeSeqWrapped(to: ArraySlice[T], with: T?)
+public func writeSeqWrapped(to: UnsafeSlice[T], with: T?)
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `Exitable`
 
@@ -7460,7 +7536,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Slice[UInt8]
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int8` from 1 bytes in native byte order.
@@ -7471,7 +7547,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int8` from 1 bytes in big-endian order.
@@ -7482,7 +7558,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int8` from 1 bytes in little-endian order.
@@ -7694,8 +7770,8 @@ _Defined in `lang/std/numeric/int8.ks`._
 public var byteSwapped: Int8 { get }
 ```
 
-Value with its byte order reversed. Use to convert between big- and
-little-endian; lowered to a `bswap` intrinsic.
+Value with its byte order reversed. A single byte has no byte order,
+so this is the identity — there is no `bswap` intrinsic at this width.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -9238,7 +9314,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Slice[UInt8]
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt16` from 2 bytes in native byte order.
@@ -9249,7 +9325,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt16` from 2 bytes in big-endian order.
@@ -9260,7 +9336,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt16` from 2 bytes in little-endian order.
@@ -10567,7 +10643,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Slice[UInt8]
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt32` from 4 bytes in native byte order.
@@ -10578,7 +10654,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt32` from 4 bytes in big-endian order.
@@ -10589,7 +10665,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt32` from 4 bytes in little-endian order.
@@ -11896,7 +11972,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Slice[UInt8]
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt64` from 8 bytes in native byte order.
@@ -11907,7 +11983,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt64` from 8 bytes in big-endian order.
@@ -11918,7 +11994,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt64` from 8 bytes in little-endian order.
@@ -13234,7 +13310,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: S)? where S: Slice[UInt8]
+public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt8` from 1 bytes in native byte order.
@@ -13245,7 +13321,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt8` from 1 bytes in big-endian order.
@@ -13256,7 +13332,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: S)? where S: Slice[UInt8]
+public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt8` from 1 bytes in little-endian order.
@@ -13449,8 +13525,8 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public var byteSwapped: UInt8 { get }
 ```
 
-Value with its byte order reversed. Use to convert between big- and
-little-endian; lowered to a `bswap` intrinsic.
+Value with its byte order reversed. A single byte has no byte order,
+so this is the identity — there is no `bswap` intrinsic at this width.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14512,7 +14588,8 @@ public protocol UnsignedInteger
 
 Marker protocol for unsigned integer types. Carries no requirements —
 it exists so generic code can constrain on signedness without naming
-every concrete `UInt*` type.
+every concrete `UInt*` type. The compiler also reads it: integer patterns
+on a conforming type test and tile its raw bits as unsigned.
 
 _Defined in `lang/std/numeric/numeric.ks`._
 

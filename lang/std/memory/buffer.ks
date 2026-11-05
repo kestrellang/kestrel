@@ -13,7 +13,7 @@ import std.ffi.(memcpy, memmove, memset)
 /// `Buffer` is the building block underneath `Array`, `String`, and any
 /// other COW/growable collection. It owns its allocation, deallocates on
 /// drop, and is `not Copyable` to keep ownership unique. For a non-owning
-/// view see `Slice`; for a refcounted owning wrapper see `RcBox`.
+/// view see `Sliceable`; for a refcounted owning wrapper see `RcBox`.
 ///
 /// # Examples
 ///

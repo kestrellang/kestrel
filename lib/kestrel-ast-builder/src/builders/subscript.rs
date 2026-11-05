@@ -166,11 +166,11 @@ fn build_accessors(
     // `(yields_mutating, receiver_mutating)` per clause.
     let ref_clauses = [
         acc.ref_clause()
-            .and_then(|c| Some((c.syntax().clone(), c.code_block()?, false, false))),
+            .map(|c| (c.syntax().clone(), c.code_block(), false, false)),
         acc.modifying_ref_clause()
-            .and_then(|c| Some((c.syntax().clone(), c.code_block()?, false, true))),
+            .map(|c| (c.syntax().clone(), c.code_block(), false, true)),
         acc.mutating_ref_clause()
-            .and_then(|c| Some((c.syntax().clone(), c.code_block()?, true, true))),
+            .map(|c| (c.syntax().clone(), c.code_block(), true, true)),
     ];
     for (clause, body, mutating, receiver_mutating) in ref_clauses.into_iter().flatten() {
         if mutating {
@@ -186,7 +186,7 @@ fn build_accessors(
             world,
             entity,
             &clause,
-            body.syntax(),
+            body.as_ref().map(|b| b.syntax()),
             params,
             accessor_receiver,
             mutating,

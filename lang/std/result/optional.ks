@@ -897,3 +897,14 @@ public struct OptionalIterator[T]: Iterator where T: not Static {
 /// ```
 @builtin(.OptionalTypeOperator)
 public type OptionalTypeOperator[T] = Optional[T];
+
+/// Copies the payload out of a lent `Optional[&T]`. The compiler calls this
+/// when such a value is bound (`let f = b.first`): the binding owns a copy
+/// and stops borrowing the place, the same way binding a `&T` copies.
+@builtin(.DecayOptionalRef)
+public func decayOptionalRef[T](optional: Optional[&T]) -> Optional[T] {
+    match optional {
+        .Some(r) => .Some(r),
+        .None => .None
+    }
+}

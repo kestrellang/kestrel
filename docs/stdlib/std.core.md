@@ -126,6 +126,8 @@ _Defined in `lang/std/core/logical.ks`._
 public type ArrayLiteralType[T] = std.collections.Array[T]
 ```
 
+Default type for array literals (`let a = [1, 2, 3]` → `Array[Int64]`).
+
 _Defined in `lang/std/core/literals.ks`._
 
 ## protocol `ArrayMatchable`
@@ -142,8 +144,8 @@ rest-binding through `matchSlice` — they take `Int64` bounds the
 compiler has already verified. A conformer may assume `0 <= index <
 matchLength()` and `0 <= from <= to <= matchLength()` and skip its
 own bounds checks; the conformance is unsafe to satisfy if those
-invariants don't hold. `Array[T]` and `ArraySlice[T]` are the canonical
-conformers.
+invariants don't hold. `Array[T]`, `Slice[T]` and `UnsafeSlice[T]` are
+the canonical conformers.
 
 _Defined in `lang/std/core/protocols.ks`._
 
@@ -154,6 +156,17 @@ _Defined in `lang/std/core/protocols.ks`._
 ```kestrel
 type Element
 ```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### typealias `Rest`
+
+```kestrel
+type Rest
+```
+
+What `..rest` binds: the view `matchSlice` returns (`&Slice[T]` for
+arrays and slices).
 
 _Defined in `lang/std/core/protocols.ks`._
 
@@ -181,7 +194,7 @@ _Defined in `lang/std/core/protocols.ks`._
 #### function `matchSlice`
 
 ```kestrel
-func matchSlice(Int64, Int64) -> ArraySlice[Element]
+func matchSlice(Int64, Int64) -> Rest
 ```
 
 Returns the slice `[from, to)`. Caller guarantees
@@ -800,55 +813,131 @@ non-positive count and so produces nothing.
 
 _Defined in `lang/std/core/range.ks`._
 
+### Implements `SliceIndex`
+
+#### typealias `SliceOutput`
+
+```kestrel
+type SliceOutput = Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lend`
+
+```kestrel
+public static func lend(consuming ClosedRange[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendChecked`
+
+```kestrel
+public static func lendChecked(consuming ClosedRange[Int64], Slice[T]) -> Optional[&Slice[T]]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutating`
+
+```kestrel
+public static func lendMutating(consuming ClosedRange[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming ClosedRange[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingUnchecked`
+
+```kestrel
+public static func lendMutatingUnchecked(consuming ClosedRange[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendUnchecked`
+
+```kestrel
+public static func lendUnchecked(consuming ClosedRange[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `SliceClampable`
+
+#### typealias `SliceClampedOutput`
+
+```kestrel
+type SliceClampedOutput = &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendClamped`
+
+```kestrel
+public static func lendClamped(consuming ClosedRange[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
 ### Implements `SeqIndex`
 
 #### typealias `SeqOutput`
 
 ```kestrel
-type SeqOutput = ArraySlice[T]
+type SeqOutput = UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeq`
 
 ```kestrel
-public func readSeq(from: ArraySlice[T]) -> ArraySlice[T]
+public func readSeq(from: UnsafeSlice[T]) -> UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqChecked`
 
 ```kestrel
-public func readSeqChecked(from: ArraySlice[T]) -> ArraySlice[T]?
+public func readSeqChecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]?
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqUnchecked`
 
 ```kestrel
-public func readSeqUnchecked(from: ArraySlice[T]) -> ArraySlice[T]
+public func readSeqUnchecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeq`
 
 ```kestrel
-public func writeSeq(to: ArraySlice[T], with: ArraySlice[T])
+public func writeSeq(to: UnsafeSlice[T], with: UnsafeSlice[T])
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeqUnchecked`
 
 ```kestrel
-public func writeSeqUnchecked(to: ArraySlice[T], with: ArraySlice[T])
+public func writeSeqUnchecked(to: UnsafeSlice[T], with: UnsafeSlice[T])
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqRange`
 
@@ -858,7 +947,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `RandomBounds`
 
@@ -1460,6 +1549,41 @@ public func isBelow(Self) -> Bool
 
 _Defined in `lang/std/core/protocols.ks`._
 
+## protocol `ConsumingIndirection`
+
+```kestrel
+public protocol ConsumingIndirection
+```
+
+A box that can give up its payload: the single owner moves the payload
+out and the box frees its storage. Consuming requirements called through
+an existential, and `consuming x as? T`, go through this
+(docs/plans/existentials/existentials-design.md §3). Shared boxes
+(`RcBox`, `CowBox`) cannot conform — other handles may still see the
+payload.
+
+_Defined in `lang/std/core/indirection.ks`._
+
+### Members
+
+#### function `consumePointee`
+
+```kestrel
+consuming func consumePointee[R]((Pointer[Target]) -> R) -> R where R: not Copyable, R: not Static
+```
+
+Ends the box. `body` gets the payload's address and must move the
+payload out of it (or destroy it in place). The box then frees its
+storage without running the payload's deinit.
+
+A closure rather than a returned value because the payload's size may
+only be known at runtime; keeping "move out, then free" in one call
+means no caller can free the storage twice or forget to.
+
+_Defined in `lang/std/core/indirection.ks`._
+
+### Implements `MutableIndirection`
+
 ## enum `ControlFlow`
 
 ```kestrel
@@ -1579,6 +1703,9 @@ _Defined in `lang/std/core/protocols.ks`._
 ```kestrel
 public type DictionaryLiteralType[K, V] = std.collections.Dictionary[K, V, std.collections.DefaultHasher]
 ```
+
+Default type for dictionary literals (`let d = ["a": 1]` →
+`Dictionary[String, Int64, DefaultHasher]`).
 
 _Defined in `lang/std/core/literals.ks`._
 
@@ -2179,7 +2306,7 @@ _Defined in `lang/std/core/protocols.ks`._
 #### function `write`
 
 ```kestrel
-mutating func write(ArraySlice[UInt8])
+mutating func write(UnsafeSlice[UInt8])
 ```
 
 Mixes `bytes` into the running hash state.
@@ -2193,7 +2320,7 @@ public protocol Indirection
 ```
 
 Opt-in transparent member access. `wrapper.foo` resolves through to
-`Target.foo` via `pointeeRef()` when the wrapper has no `foo` of its own.
+`wrapper.value.foo` when the wrapper has no `foo` of its own.
 
 _Defined in `lang/std/core/indirection.ks`._
 
@@ -2205,17 +2332,18 @@ _Defined in `lang/std/core/indirection.ks`._
 type Target
 ```
 
-The pointee type that member access forwards to.
+The pointee type that member access forwards to. May be unsized: an
+existential box's `Target` is the raw existential it holds.
 
 _Defined in `lang/std/core/indirection.ks`._
 
-#### function `pointeeRef`
+#### field `value`
 
 ```kestrel
-func pointeeRef() -> &Target
+var value: Target { ref }
 ```
 
-A shared reference to the pointee. Member READS peel through this.
+The pointee, lent in place. Member READS peel through its `ref`.
 
 _Defined in `lang/std/core/indirection.ks`._
 
@@ -2515,29 +2643,27 @@ public protocol MutableIndirection
 
 A smart pointer whose pointee can also be mutated through the peel.
 Writes (`wrapper.field = v`), compound assignments (`wrapper.n += 1`), and
-`mutating`-method calls route through `pointeeMutRef()`. A read-only
-wrapper conforms to `Indirection` only; mutating through it is rejected.
+`mutating`-method calls route through `value`'s `mutating ref`. A
+read-only wrapper conforms to `Indirection` only; mutating through it is
+rejected.
 
-`pointeeMutRef()` is `mutating` so a copy-on-write wrapper can fork its
-storage before handing out the mutable view; wrappers that don't need to
-(raw `Pointer`, `RcBox`) still mark it `mutating` — the marker is harmless.
-
-_Defined in `lang/std/core/indirection.ks`._
-
-### Members
-
-#### function `pointeeMutRef`
-
-```kestrel
-mutating func pointeeMutRef() -> &mutating Target
-```
-
-A mutating reference to the pointee. Member WRITES / RMW / mutating
-methods peel through this.
+A `mutating ref` takes the wrapper mutably, so a copy-on-write wrapper can
+fork its storage before handing out the mutable view.
 
 _Defined in `lang/std/core/indirection.ks`._
 
 ### Implements `Indirection`
+
+#### field `value`
+
+```kestrel
+var value: Target { ref mutating ref }
+```
+
+The pointee, lent in place. Member WRITES / RMW / mutating methods
+peel through its `mutating ref`.
+
+_Defined in `lang/std/core/indirection.ks`._
 
 ## protocol `Negatable`
 
@@ -2645,6 +2771,75 @@ public type NullLiteralType[T] = std.result.Optional[T]
 Default type for null literals (`let x = null` → `Optional[T]`).
 
 _Defined in `lang/std/core/literals.ks`._
+
+## protocol `OptionalChain`
+
+```kestrel
+public protocol OptionalChain
+```
+
+Raw protocol backing the `?.` operator.
+
+`a?.rest` evaluates `a` once and asks it for its payload. With none, the
+rest of the postfix chain is skipped and the whole expression is `.None`;
+otherwise the chain continues on the payload and its result is wrapped in
+`Optional` (or flattened, when it already is one). The chain's result is
+always `Optional`, whatever the conforming type is.
+
+A conforming type hands out its payload three ways; the compiler picks
+one per chain from what the chain does with it.
+
+### Examples
+
+```
+let theme = user?.profile?.settings.theme ?? Theme.default;
+inventory?.items.push(item);       // mutates in place
+let n = parse(text)?.count;        // `Result` chains on its `Ok` value
+```
+
+_Defined in `lang/std/core/optional_chain.ks`._
+
+### Members
+
+#### typealias `Wrapped`
+
+```kestrel
+type Wrapped
+```
+
+The type the chain continues on.
+
+_Defined in `lang/std/core/optional_chain.ks`._
+
+#### function `chainBorrow`
+
+```kestrel
+func chainBorrow() -> Optional[&Wrapped]
+```
+
+Read-only chains: `a?.count`, `a?.describe()`.
+
+_Defined in `lang/std/core/optional_chain.ks`._
+
+#### function `chainMutate`
+
+```kestrel
+mutating func chainMutate() -> Optional[&mutating Wrapped]
+```
+
+Chains that mutate the payload: `a?.push(x)`, `a?.n = 1`.
+
+_Defined in `lang/std/core/optional_chain.ks`._
+
+#### function `chainTake`
+
+```kestrel
+consuming func chainTake() -> Optional[Wrapped]
+```
+
+Chains on a temporary: `load()?.consume()`.
+
+_Defined in `lang/std/core/optional_chain.ks`._
 
 ## protocol `Or`
 
@@ -2939,81 +3134,157 @@ independent iterators — `Range` is value-typed.
 
 _Defined in `lang/std/core/range.ks`._
 
+### Implements `SliceIndex`
+
+#### typealias `SliceOutput`
+
+```kestrel
+type SliceOutput = Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lend`
+
+```kestrel
+public static func lend(consuming Range[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendChecked`
+
+```kestrel
+public static func lendChecked(consuming Range[Int64], Slice[T]) -> Optional[&Slice[T]]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutating`
+
+```kestrel
+public static func lendMutating(consuming Range[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming Range[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingUnchecked`
+
+```kestrel
+public static func lendMutatingUnchecked(consuming Range[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendUnchecked`
+
+```kestrel
+public static func lendUnchecked(consuming Range[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `SliceClampable`
+
+#### typealias `SliceClampedOutput`
+
+```kestrel
+type SliceClampedOutput = &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendClamped`
+
+```kestrel
+public static func lendClamped(consuming Range[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
 ### Implements `SeqIndex`
 
 #### typealias `SeqOutput`
 
 ```kestrel
-type SeqOutput = ArraySlice[T]
+type SeqOutput = UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeq`
 
 ```kestrel
-public func readSeq(from: ArraySlice[T]) -> ArraySlice[T]
+public func readSeq(from: UnsafeSlice[T]) -> UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqChecked`
 
 ```kestrel
-public func readSeqChecked(from: ArraySlice[T]) -> ArraySlice[T]?
+public func readSeqChecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]?
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqUnchecked`
 
 ```kestrel
-public func readSeqUnchecked(from: ArraySlice[T]) -> ArraySlice[T]
+public func readSeqUnchecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeq`
 
 ```kestrel
-public func writeSeq(to: ArraySlice[T], with: ArraySlice[T])
+public func writeSeq(to: UnsafeSlice[T], with: UnsafeSlice[T])
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeqUnchecked`
 
 ```kestrel
-public func writeSeqUnchecked(to: ArraySlice[T], with: ArraySlice[T])
+public func writeSeqUnchecked(to: UnsafeSlice[T], with: UnsafeSlice[T])
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqClampable`
 
 #### typealias `SeqClampedOutput`
 
 ```kestrel
-type SeqClampedOutput = ArraySlice[T]
+type SeqClampedOutput = UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqClamped`
 
 ```kestrel
-public func readSeqClamped(from: ArraySlice[T]) -> ArraySlice[T]
+public func readSeqClamped(from: UnsafeSlice[T]) -> UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeqClamped`
 
 ```kestrel
-public func writeSeqClamped(to: ArraySlice[T], with: ArraySlice[T])
+public func writeSeqClamped(to: UnsafeSlice[T], with: UnsafeSlice[T])
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqRange`
 
@@ -3023,7 +3294,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `RandomBounds`
 
@@ -3463,55 +3734,131 @@ Returns a fresh infinite iterator starting at `start`.
 
 _Defined in `lang/std/core/range.ks`._
 
+### Implements `SliceIndex`
+
+#### typealias `SliceOutput`
+
+```kestrel
+type SliceOutput = Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lend`
+
+```kestrel
+public static func lend(consuming RangeFrom[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendChecked`
+
+```kestrel
+public static func lendChecked(consuming RangeFrom[Int64], Slice[T]) -> Optional[&Slice[T]]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutating`
+
+```kestrel
+public static func lendMutating(consuming RangeFrom[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming RangeFrom[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingUnchecked`
+
+```kestrel
+public static func lendMutatingUnchecked(consuming RangeFrom[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendUnchecked`
+
+```kestrel
+public static func lendUnchecked(consuming RangeFrom[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `SliceClampable`
+
+#### typealias `SliceClampedOutput`
+
+```kestrel
+type SliceClampedOutput = &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendClamped`
+
+```kestrel
+public static func lendClamped(consuming RangeFrom[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
 ### Implements `SeqIndex`
 
 #### typealias `SeqOutput`
 
 ```kestrel
-type SeqOutput = ArraySlice[T]
+type SeqOutput = UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeq`
 
 ```kestrel
-public func readSeq(from: ArraySlice[T]) -> ArraySlice[T]
+public func readSeq(from: UnsafeSlice[T]) -> UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqChecked`
 
 ```kestrel
-public func readSeqChecked(from: ArraySlice[T]) -> ArraySlice[T]?
+public func readSeqChecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]?
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqUnchecked`
 
 ```kestrel
-public func readSeqUnchecked(from: ArraySlice[T]) -> ArraySlice[T]
+public func readSeqUnchecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeq`
 
 ```kestrel
-public func writeSeq(to: ArraySlice[T], with: ArraySlice[T])
+public func writeSeq(to: UnsafeSlice[T], with: UnsafeSlice[T])
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeqUnchecked`
 
 ```kestrel
-public func writeSeqUnchecked(to: ArraySlice[T], with: ArraySlice[T])
+public func writeSeqUnchecked(to: UnsafeSlice[T], with: UnsafeSlice[T])
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqRange`
 
@@ -3521,7 +3868,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `BytesIndex`
 
@@ -4057,55 +4404,131 @@ Structural equality.
 
 _Defined in `lang/std/core/range.ks`._
 
+### Implements `SliceIndex`
+
+#### typealias `SliceOutput`
+
+```kestrel
+type SliceOutput = Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lend`
+
+```kestrel
+public static func lend(consuming RangeThrough[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendChecked`
+
+```kestrel
+public static func lendChecked(consuming RangeThrough[Int64], Slice[T]) -> Optional[&Slice[T]]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutating`
+
+```kestrel
+public static func lendMutating(consuming RangeThrough[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming RangeThrough[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingUnchecked`
+
+```kestrel
+public static func lendMutatingUnchecked(consuming RangeThrough[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendUnchecked`
+
+```kestrel
+public static func lendUnchecked(consuming RangeThrough[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `SliceClampable`
+
+#### typealias `SliceClampedOutput`
+
+```kestrel
+type SliceClampedOutput = &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendClamped`
+
+```kestrel
+public static func lendClamped(consuming RangeThrough[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
 ### Implements `SeqIndex`
 
 #### typealias `SeqOutput`
 
 ```kestrel
-type SeqOutput = ArraySlice[T]
+type SeqOutput = UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeq`
 
 ```kestrel
-public func readSeq(from: ArraySlice[T]) -> ArraySlice[T]
+public func readSeq(from: UnsafeSlice[T]) -> UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqChecked`
 
 ```kestrel
-public func readSeqChecked(from: ArraySlice[T]) -> ArraySlice[T]?
+public func readSeqChecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]?
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqUnchecked`
 
 ```kestrel
-public func readSeqUnchecked(from: ArraySlice[T]) -> ArraySlice[T]
+public func readSeqUnchecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeq`
 
 ```kestrel
-public func writeSeq(to: ArraySlice[T], with: ArraySlice[T])
+public func writeSeq(to: UnsafeSlice[T], with: UnsafeSlice[T])
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeqUnchecked`
 
 ```kestrel
-public func writeSeqUnchecked(to: ArraySlice[T], with: ArraySlice[T])
+public func writeSeqUnchecked(to: UnsafeSlice[T], with: UnsafeSlice[T])
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqRange`
 
@@ -4115,7 +4538,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `BytesIndex`
 
@@ -4510,55 +4933,131 @@ Structural equality.
 
 _Defined in `lang/std/core/range.ks`._
 
+### Implements `SliceIndex`
+
+#### typealias `SliceOutput`
+
+```kestrel
+type SliceOutput = Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lend`
+
+```kestrel
+public static func lend(consuming RangeUpTo[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendChecked`
+
+```kestrel
+public static func lendChecked(consuming RangeUpTo[Int64], Slice[T]) -> Optional[&Slice[T]]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutating`
+
+```kestrel
+public static func lendMutating(consuming RangeUpTo[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming RangeUpTo[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingUnchecked`
+
+```kestrel
+public static func lendMutatingUnchecked(consuming RangeUpTo[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendUnchecked`
+
+```kestrel
+public static func lendUnchecked(consuming RangeUpTo[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `SliceClampable`
+
+#### typealias `SliceClampedOutput`
+
+```kestrel
+type SliceClampedOutput = &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendClamped`
+
+```kestrel
+public static func lendClamped(consuming RangeUpTo[Int64], Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
 ### Implements `SeqIndex`
 
 #### typealias `SeqOutput`
 
 ```kestrel
-type SeqOutput = ArraySlice[T]
+type SeqOutput = UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeq`
 
 ```kestrel
-public func readSeq(from: ArraySlice[T]) -> ArraySlice[T]
+public func readSeq(from: UnsafeSlice[T]) -> UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqChecked`
 
 ```kestrel
-public func readSeqChecked(from: ArraySlice[T]) -> ArraySlice[T]?
+public func readSeqChecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]?
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `readSeqUnchecked`
 
 ```kestrel
-public func readSeqUnchecked(from: ArraySlice[T]) -> ArraySlice[T]
+public func readSeqUnchecked(from: UnsafeSlice[T]) -> UnsafeSlice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeq`
 
 ```kestrel
-public func writeSeq(to: ArraySlice[T], with: ArraySlice[T])
+public func writeSeq(to: UnsafeSlice[T], with: UnsafeSlice[T])
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `writeSeqUnchecked`
 
 ```kestrel
-public func writeSeqUnchecked(to: ArraySlice[T], with: ArraySlice[T])
+public func writeSeqUnchecked(to: UnsafeSlice[T], with: UnsafeSlice[T])
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `SeqRange`
 
@@ -4568,7 +5067,7 @@ _Defined in `lang/std/collections/slice.ks`._
 public func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `BytesIndex`
 
@@ -4952,6 +5451,26 @@ mutating func shiftRightAssign(by: Other)
 Mutates `self` to `self >> count`.
 
 _Defined in `lang/std/core/assign.ks`._
+
+## protocol `Sized`
+
+```kestrel
+public protocol Sized
+```
+
+Marker protocol for types whose size is known at compile time.
+
+Every type is `Sized` except the raw existential an `any P` box holds,
+and a struct whose last stored field is an unsized type parameter
+instantiated at an unsized type. Conformance is structural — computed,
+never declared. Every generic type parameter carries an implicit
+`T: Sized` bound; relax it with `where T: not Sized` (a box type, or a
+storage struct with an unsized tail). Inside such a declaration `T` can
+only be used behind a pointer or as the last stored field; members that
+take or return `T` by value go in an `extend … where T: Sized` extension
+(docs/plans/existentials/existentials-design.md §2).
+
+_Defined in `lang/std/core/sized.ks`._
 
 ## protocol `Static`
 

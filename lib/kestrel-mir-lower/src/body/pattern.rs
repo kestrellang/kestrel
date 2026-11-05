@@ -64,7 +64,10 @@ impl OssaBodyCtx<'_, '_> {
     /// Unconditionally non-Copyable scrutinees already move via
     /// `emit_copy_value`; genuinely-Copyable scrutinees keep the copy (they may
     /// be read after the match), so both route through `lower_expr` unchanged.
-    fn lower_match_scrutinee(&mut self, scrutinee_expr: HirExprId) -> ValueId {
+    /// Returns the scrutinee and whether it is an ADDRESS (place mode): a
+    /// non-copyable ref result can't be copied out, so it is pinned as an
+    /// address like a place-mode scrutinee and its view ends here.
+    fn lower_match_scrutinee(&mut self, scrutinee_expr: HirExprId) -> (ValueId, bool) {
         let expr = self.hir.exprs[scrutinee_expr].clone();
         if let HirExpr::Local(hir_local, _) = &expr
             && !self.is_var_local(hir_local)
@@ -72,7 +75,7 @@ impl OssaBodyCtx<'_, '_> {
             let val = self.map_local(*hir_local);
             let vdef = self.body.value(val);
             if vdef.ownership == Ownership::Owned && self.copy_behavior_is_mono_dependent(vdef.ty) {
-                return self.emit_move_value(val);
+                return (self.emit_move_value(val), false);
             }
         }
         let val = self.lower_expr(scrutinee_expr);
@@ -84,17 +87,67 @@ impl OssaBodyCtx<'_, '_> {
         // better be the binding's LAST use, or the branch terminator
         // reports the binding E497 (bindings never cross blocks).
         if self.ref_results.contains(&val) {
-            // A non-copyable pointee cannot be copied out: match through the
-            // view itself, like a borrowed parameter (arm bindings are then
-            // views into the referent).
+            // A non-copyable pointee cannot be copied out. A named ref
+            // binding matches through the view itself, like a borrowed
+            // parameter; a call result (`xs(1) is A`, an `any P` element)
+            // is pinned as an address so no view reaches the branches.
             if !self.is_copy_type(self.body.value(val).ty) {
-                return val;
+                if self.ref_binding_vals.contains_key(&val) {
+                    return (val, false);
+                }
+                return (self.pin_view_address(val), true);
             }
             let owned = self.emit_copy_value(val);
             self.end_ref_if_single_use(val);
-            return owned;
+            return (owned, false);
         }
-        val
+        (val, false)
+    }
+
+    /// End the single-use refs a decision-tree test loaded since `before`
+    /// (the `&V` inside a lent `Optional[&V]` scrutinee). A test only reads
+    /// through them and the subtrees re-project from the scrutinee, so they
+    /// end before the branch instead of crossing it (E497).
+    fn end_path_refs(&mut self, before: &[ValueId]) {
+        let loaded: Vec<ValueId> = self
+            .tracked_expr_refs()
+            .into_iter()
+            .filter(|v| !before.contains(v))
+            .collect();
+        for r in loaded.into_iter().rev() {
+            self.emit_end_borrow(r);
+        }
+    }
+
+    /// The raw address of `view`, rooted where the viewed storage lives;
+    /// the view itself ends here unless a named binding owns it.
+    fn pin_view_address(&mut self, view: ValueId) -> ValueId {
+        let pointee = self.body.value(view).ty;
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
+        let addr = self.emit_op1(Op::PtrTo(pointee), view, ptr_ty);
+        // The address lives where the viewed storage lives: inherit its
+        // provenance root (as `FieldAddr` does). Otherwise it self-roots
+        // `Local` and a `&mutating` payload binder on a `mutating` receiver
+        // (`match self { .Some(&mutating v) => .Some(v), … }`) fails E494
+        // "borrows local" when returned.
+        let view_root = self.body.value(view).root;
+        self.stamp_root(addr, view_root);
+        // The view's job is done — the address stays valid while the
+        // underlying storage lives (var slot / pinned temp / borrowed
+        // receiver). Named bindings keep their own lifecycle.
+        if !self.ref_binding_vals.contains_key(&view) {
+            let src = self.body.value(view).borrow_source;
+            self.emit_end_borrow(view);
+            // A sub-borrow of a ref call result (`xs(1) is A`) was that
+            // ref's single use: end it too, or it reaches the decision
+            // tree's first branch (E497), as a direct call's arg does.
+            if let Some(src) = src
+                && self.ref_results.contains(&src)
+            {
+                self.end_ref_if_single_use(src);
+            }
+        }
+        addr
     }
 
     /// Place-mode scrutinee: evaluate the scrutinee as a PLACE and pin its
@@ -124,23 +177,7 @@ impl OssaBodyCtx<'_, '_> {
         let view = self
             .prepare_call_arg_for_expr(scrutinee_expr, convention)
             .value;
-        let pointee = self.body.value(view).ty;
-        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
-        let addr = self.emit_op1(Op::PtrTo(pointee), view, ptr_ty);
-        // The address lives where the viewed storage lives: inherit its
-        // provenance root (as `FieldAddr` does). Otherwise it self-roots
-        // `Local` and a `&mutating` payload binder on a `mutating` receiver
-        // (`match self { .Some(&mutating v) => .Some(v), … }`) fails E494
-        // "borrows local" when returned.
-        let view_root = self.body.value(view).root;
-        self.stamp_root(addr, view_root);
-        // The view's job is done — the address stays valid while the
-        // underlying storage lives (var slot / pinned temp / borrowed
-        // receiver). Named bindings keep their own lifecycle.
-        if !self.ref_binding_vals.contains_key(&view) {
-            self.emit_end_borrow(view);
-        }
-        addr
+        self.pin_view_address(view)
     }
 
     pub fn lower_match(
@@ -192,9 +229,15 @@ impl OssaBodyCtx<'_, '_> {
             (mode, _) => mode,
         };
         let saved_match_moves = std::mem::replace(&mut self.active_match_moves, part_moves);
-        let scrutinee_val = match place_mode {
-            Some(mutating) => self.lower_match_scrutinee_place(scrutinee_expr, mutating),
-            None => self.lower_match_scrutinee(scrutinee_expr),
+        let (scrutinee_val, place_mode) = match place_mode {
+            Some(mutating) => (
+                self.lower_match_scrutinee_place(scrutinee_expr, mutating),
+                place_mode,
+            ),
+            None => match self.lower_match_scrutinee(scrutinee_expr) {
+                (val, true) => (val, Some(false)),
+                (val, false) => (val, None),
+            },
         };
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
 
@@ -483,6 +526,7 @@ impl OssaBodyCtx<'_, '_> {
                     // mode reads through an intra-block view of the pinned
                     // address; the owned copy joins the extra test values
                     // destroyed per successor.
+                    let refs_before = self.tracked_expr_refs();
                     let test_val = if place {
                         let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
                         let (proj, _) = self.apply_access_path(view, scrutinee_ty, path);
@@ -490,8 +534,16 @@ impl OssaBodyCtx<'_, '_> {
                         self.emit_end_borrow(view);
                         owned
                     } else {
-                        self.apply_access_path(scrutinee, scrutinee_ty, path).0
+                        let proj = self.apply_access_path(scrutinee, scrutinee_ty, path).0;
+                        // Read through a lent payload: copy the Bool out
+                        // before its ref ends.
+                        if self.body.value(proj).ownership == Ownership::Guaranteed {
+                            self.emit_copy_value(proj)
+                        } else {
+                            proj
+                        }
                     };
+                    self.end_path_refs(&refs_before);
                     let branch_snapshot = self.snapshot_scope();
                     let current_live: Vec<ValueId> =
                         self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
@@ -634,6 +686,7 @@ impl OssaBodyCtx<'_, '_> {
                 // to be inspected. The borrow is closed right after the read.
                 // Place mode: the read goes through an intra-block view of
                 // the pinned address.
+                let refs_before = self.tracked_expr_refs();
                 let (disc_operand, borrow_to_end) = if place {
                     let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
                     let operand = if path.is_empty() {
@@ -686,6 +739,7 @@ impl OssaBodyCtx<'_, '_> {
                     Some(d) => self.emit_int_discriminant(disc_operand, d.bits),
                     None => self.emit_discriminant(disc_operand),
                 };
+                self.end_path_refs(&refs_before);
                 if let Some(borrow) = borrow_to_end {
                     self.emit_end_borrow(borrow);
                 }
@@ -1715,9 +1769,11 @@ impl OssaBodyCtx<'_, '_> {
                 .iter()
                 .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
                 .collect();
+            let refs_before = self.tracked_expr_refs();
             let Some(cmp) = test(self, ctor, current_scrutinee) else {
                 continue;
             };
+            self.end_path_refs(&refs_before);
             // Use the chain-level live set (not the inflated post-test set)
             // so test intermediates are destroyed in each arm rather than
             // forwarded and accumulated.

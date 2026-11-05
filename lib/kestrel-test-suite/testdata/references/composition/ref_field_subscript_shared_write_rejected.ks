@@ -8,5 +8,5 @@ module Test
 struct View { let base: &Array[Int64] }
 
 func poke(v: View) {
-    v.base(at: 0) = 5; // ERROR(E208)
+    v.base(0) = 5; // ERROR(E208)
 }

@@ -3,7 +3,7 @@
 ## struct `ChainIterator`
 
 ```kestrel
-public struct ChainIterator[A, B] where A: Iterator, B: Iterator, B.Item == A.Item, A: not Copyable, B: not Copyable { /* private fields */ }
+public struct ChainIterator[A, B] where A: Iterator, B: Iterator, B.Item == A.Item, A: not Copyable, B: not Copyable, A: not Static, B: not Static { /* private fields */ }
 ```
 
 Lazy `chain` — yields all of `first`, then all of `second`. Returned
@@ -75,7 +75,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `CycleIterator`
 
 ```kestrel
-public struct CycleIterator[I] where I: Iterator, I: Copyable { /* private fields */ }
+public struct CycleIterator[I] where I: Iterator, I: Copyable, I: not Static { /* private fields */ }
 ```
 
 Repeats a finite iterator forever by copying it on each lap. Returned
@@ -265,7 +265,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `EnumerateIterator`
 
 ```kestrel
-public struct EnumerateIterator[I] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct EnumerateIterator[I] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `enumerate` — pairs each element with its zero-based position.
@@ -368,7 +368,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 ## struct `FilterIterator`
 
 ```kestrel
-public struct FilterIterator[I] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct FilterIterator[I] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `filter` — yields only elements where the predicate returns
@@ -433,7 +433,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `FilterMapIterator`
 
 ```kestrel
-public struct FilterMapIterator[I, U] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct FilterMapIterator[I, U] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `filterMap` / `compactMap` — runs a transform that returns
@@ -499,7 +499,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `FlatMapIterator`
 
 ```kestrel
-public struct FlatMapIterator[I, U] where I: Iterator, U: Iterator, I: not Copyable, U: not Copyable { /* private fields */ }
+public struct FlatMapIterator[I, U] where I: Iterator, U: Iterator, I: not Copyable, U: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `flatMap` — turns each element of the source into an iterator
@@ -573,7 +573,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `FlattenIterator`
 
 ```kestrel
-public struct FlattenIterator[I] where I: Iterator, I.Item: Iterator, I: not Copyable, I.Item: not Copyable { /* private fields */ }
+public struct FlattenIterator[I] where I: Iterator, I.Item: Iterator, I: not Copyable, I.Item: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `flatten` — concatenates the inner iterators of an
@@ -638,7 +638,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `FusedIterator`
 
 ```kestrel
-public struct FusedIterator[I] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct FusedIterator[I] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Wraps a source so that once `None` is returned, future calls also
@@ -702,7 +702,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `InspectIterator`
 
 ```kestrel
-public struct InspectIterator[I] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct InspectIterator[I] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Side-effecting passthrough. Calls `inspector` on each element and
@@ -766,7 +766,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `IntersperseIterator`
 
 ```kestrel
-public struct IntersperseIterator[I] where I: Iterator, I: not Copyable, I.Item: Copyable { /* private fields */ }
+public struct IntersperseIterator[I] where I: Iterator, I: not Copyable, I.Item: Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `intersperse` — inserts a copy of `separator` between
@@ -849,7 +849,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `IntersperseWithIterator`
 
 ```kestrel
-public struct IntersperseWithIterator[I] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct IntersperseWithIterator[I] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `intersperseWith` — like `IntersperseIterator`, but builds each
@@ -940,8 +940,8 @@ loops desugar through, and what most collections conform to.
 `Iterable` is one level above `Iterator`: a collection conforms to
 `Iterable` and produces a fresh `Iter` each call to `iter()`, leaving
 the source intact. (Compare with `Iterator`, which is consumed in
-place.) Every `Iterator` is also `Iterable` via the blanket
-conformance below — `iter()` on an iterator returns itself.
+place.) An `Iterator` is not itself `Iterable`; a `for` loop over an
+iterator uses it directly.
 
 ### Examples
 
@@ -984,7 +984,8 @@ _Defined in `lang/std/iter/iterator.ks`._
 func iter() -> TargetIterator
 ```
 
-Builds a fresh iterator over the contents.
+Builds a fresh iterator over the contents. Borrows `self`: the
+collection outlives the iterator it hands out.
 
 _Defined in `lang/std/iter/iterator.ks`._
 
@@ -994,9 +995,60 @@ _Defined in `lang/std/iter/iterator.ks`._
 public protocol Iterator
 ```
 
+Pull-style sequence — produces one element at a time via `next()` until
+it returns `None`.
+
+Iterators are the foundation of lazy sequence processing in Kestrel.
+They are *single-pass* by default: once consumed, an iterator must be
+rebuilt from its source. The dozens of `extend Iterator` blocks in this
+file layer adapter combinators (lazy: `map`, `filter`, `take`, `zip`,
+…) and terminal operations (eager: `collect`, `fold`, `find`, `sum`,
+…) on top of the single `next` requirement.
+
+### Examples
+
+```
+// Defining a custom iterator
+struct CountDown: Iterator {
+    type Item = Int64;
+    var current: Int64;
+
+    mutating func next() -> Int64? {
+        if current <= 0 { return None };
+        let value = current;
+        current -= 1;
+        .Some(value)
+    }
+}
+
+var c = CountDown(current: 3);
+c.next();   // Some(3)
+c.next();   // Some(2)
+c.next();   // Some(1)
+c.next();   // None
+```
+
+```
+// Using the adapter / terminal surface
+let evens: [Int64] = [1, 2, 3, 4, 5].iter()
+    .filter { it % 2 == 0 }
+    .map { it * 10 }
+    .collect();   // [20, 40]
+```
+
 _Defined in `lang/std/iter/iterator.ks`._
 
 ### Members
+
+#### typealias `Item`
+
+```kestrel
+type Item
+```
+
+The element type produced by `next()`.
+
+_Defined in `lang/std/iter/iterator.ks`._
 
 #### function `all`
 
@@ -1891,49 +1943,10 @@ names.iter().zip(ages.iter()).collect();
 
 _Defined in `lang/std/iter/iterator.ks`._
 
-### Implements `Iterable`
-
-#### typealias `Item`
-
-```kestrel
-type Item
-```
-
-The element type produced by `next()`.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### typealias `Item`
-
-```kestrel
-type Item = Self.Item
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### typealias `TargetIterator`
-
-```kestrel
-type TargetIterator = Self
-```
-
-_Defined in `lang/std/iter/iterator.ks`._
-
-#### function `iter`
-
-```kestrel
-func iter() -> Self
-```
-
-Returns `self`. The blanket conformance pivot — iterators *are*
-iterables.
-
-_Defined in `lang/std/iter/iterator.ks`._
-
 ## struct `MapIterator`
 
 ```kestrel
-public struct MapIterator[I, U] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct MapIterator[I, U] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `map` — applies a transform to each element of `inner` as values
@@ -2053,7 +2066,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `PeekableIterator`
 
 ```kestrel
-public struct PeekableIterator[I] where I: Iterator, I: not Copyable, I.Item: Copyable { /* private fields */ }
+public struct PeekableIterator[I] where I: Iterator, I: not Copyable, I.Item: Copyable, I: not Static { /* private fields */ }
 ```
 
 Iterator wrapper that lets you peek at the next element without
@@ -2249,7 +2262,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `ReversedIterator`
 
 ```kestrel
-public struct ReversedIterator[I] where I: DoubleEndedIterator, I: Iterator, I: not Copyable { /* private fields */ }
+public struct ReversedIterator[I] where I: DoubleEndedIterator, I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Wraps a `DoubleEndedIterator` to walk it back to front. The
@@ -2322,7 +2335,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 ## struct `ScanIterator`
 
 ```kestrel
-public struct ScanIterator[I, Acc] where I: Iterator, I: not Copyable, Acc: Copyable { /* private fields */ }
+public struct ScanIterator[I, Acc] where I: Iterator, I: not Copyable, Acc: Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `scan` — yields the running fold accumulator after each step.
@@ -2395,7 +2408,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `SkipIterator`
 
 ```kestrel
-public struct SkipIterator[I] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct SkipIterator[I] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `skip` — drops the first `count` elements, then yields the rest.
@@ -2461,7 +2474,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `SkipWhileIterator`
 
 ```kestrel
-public struct SkipWhileIterator[I] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct SkipWhileIterator[I] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `skipWhile` — drops a leading run of elements satisfying the
@@ -2536,7 +2549,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `StepByIterator`
 
 ```kestrel
-public struct StepByIterator[I] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct StepByIterator[I] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `stepBy` — yields every `step`-th element, starting with the
@@ -2615,7 +2628,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `TakeIterator`
 
 ```kestrel
-public struct TakeIterator[I] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct TakeIterator[I] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `take` — yields at most `count` elements from the source.
@@ -2679,7 +2692,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `TakeWhileIterator`
 
 ```kestrel
-public struct TakeWhileIterator[I] where I: Iterator, I: not Copyable { /* private fields */ }
+public struct TakeWhileIterator[I] where I: Iterator, I: not Copyable, I: not Static { /* private fields */ }
 ```
 
 Lazy `takeWhile` — yields elements until the predicate first returns
@@ -2753,7 +2766,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 ## struct `ZipIterator`
 
 ```kestrel
-public struct ZipIterator[A, B] where A: Iterator, B: Iterator, A: not Copyable, B: not Copyable { /* private fields */ }
+public struct ZipIterator[A, B] where A: Iterator, B: Iterator, A: not Copyable, B: not Copyable, A: not Static, B: not Static { /* private fields */ }
 ```
 
 Lazy `zip` — pairs elements from two iterators. Stops at the shorter

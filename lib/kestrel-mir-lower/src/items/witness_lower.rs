@@ -1,7 +1,9 @@
 //! Witness generation — creates WitnessDef entries from conformance data.
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, Computed, Name, NodeKind, Settable, Static, TypeParams};
+use kestrel_ast_builder::{
+    Callable, Computed, MutatingAccessor, Name, NodeKind, Settable, Static, TypeParams,
+};
 use kestrel_hecs::Entity;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::LowerExtensionTargetTypeArgs;
@@ -18,7 +20,7 @@ use kestrel_name_res::{
     TypeMemberSource, TypeMembersByName,
 };
 
-use crate::context::LowerCtx;
+use crate::context::{LowerCtx, parse_ref_witness_name, ref_witness_name};
 use crate::ty::{
     lower_named_type, lower_type, resolve_callable_return_type, resolve_callable_types,
     resolve_type_annotation,
@@ -209,6 +211,20 @@ fn lower_witnesses_for_type(
                         m.clone(),
                     ));
                 }
+                // A place requirement's `ref` / `mutating ref` get slots of
+                // their own (the keys `LowerCtx::witness_ref_key` builds).
+                for &acc in ctx.world.children_of(m.entity) {
+                    if ctx.world.get::<NodeKind>(acc) != Some(&NodeKind::RefAccessor) {
+                        continue;
+                    }
+                    let mutating = ctx.world.get::<MutatingAccessor>(acc).is_some();
+                    let slot_name = ref_witness_name(&name, mutating);
+                    entries.push((
+                        WitnessMethodKey::new(slot_name.clone(), labels.clone()),
+                        slot_name,
+                        m.clone(),
+                    ));
+                }
                 entries
             })
             .collect();
@@ -261,7 +277,11 @@ fn bind_witness_methods(
     for (method_key, method_name, member) in method_entries {
         let expected = expected_signature_for(ctx, member.entity, proto_subst);
 
-        let lookup_name = method_name.strip_suffix(".set").unwrap_or(method_name);
+        // An accessor slot (`x.set`, `x.ref`, `x.mutref`) binds an accessor
+        // child of the conformer's same-named member.
+        let slot = accessor_slot(method_name);
+        let lookup_name = slot.map_or(method_name.as_str(), |(name, _)| name);
+        let slot = slot.map(|(_, slot)| slot);
 
         // A member that only a protocol extension declares (not a
         // requirement) is not overridable: it binds to that extension
@@ -276,8 +296,15 @@ fn bind_witness_methods(
         let mut impl_func = None;
         if prefer_source && !extension_only {
             let source_children: Vec<Entity> = ctx.world.children_of(source).to_vec();
-            impl_func = if method_name.ends_with(".set") {
-                find_setter_among(ctx, &source_children)
+            impl_func = if let Some(slot) = slot {
+                find_accessor_among(
+                    ctx,
+                    &source_children,
+                    slot,
+                    lookup_name,
+                    &method_key.labels,
+                    &expected,
+                )
             } else {
                 find_impl_among(
                     ctx,
@@ -319,8 +346,15 @@ fn bind_witness_methods(
                 .collect();
             let entities: Vec<Entity> = type_side.iter().map(|(e, _)| *e).collect();
 
-            impl_func = if method_name.ends_with(".set") {
-                find_setter_among(ctx, &entities)
+            impl_func = if let Some(slot) = slot {
+                find_accessor_among(
+                    ctx,
+                    &entities,
+                    slot,
+                    lookup_name,
+                    &method_key.labels,
+                    &expected,
+                )
             } else {
                 find_impl_among(
                     ctx,
@@ -364,9 +398,10 @@ fn bind_witness_methods(
         // (#147), so synthesize a getter (clones the global) and, for a settable
         // requirement, a setter (stores into the global). Static types are never
         // generic (E416), so the accessors need no type params.
-        if let Some(field) = find_stored_static_field(ctx, type_entity, lookup_name) {
+        let ref_slot = matches!(slot, Some(AccessorSlot::Ref | AccessorSlot::MutRef));
+        if !ref_slot && let Some(field) = find_stored_static_field(ctx, type_entity, lookup_name) {
             let field_ty = resolve_type_annotation(ctx, field);
-            let is_setter = method_name.ends_with(".set");
+            let is_setter = slot == Some(AccessorSlot::Set);
             let accessor = ctx.next_synthetic_entity();
             let acc_name = format!("__{}${lookup_name}", if is_setter { "set" } else { "get" });
             ctx.module.register_name(accessor, acc_name.clone());
@@ -403,6 +438,8 @@ fn bind_witness_methods(
         // carries the conformer's type params and is bound with the conformer's
         // type args (`impl_type_arg_tys`), so mono substitutes `T` per
         // instantiation — the same vocabulary the generic field types are in.
+        // A `ref` / `mutating ref` requirement met by a stored field gets an
+        // accessor lending the field in place (`&self.field`).
         if let Some(field_idx) = ctx.resolve_field_idx(type_entity, lookup_name)
             && let Some(field_ty) = ctx.resolve_field_ty(type_entity, field_idx)
         {
@@ -424,11 +461,32 @@ fn bind_witness_methods(
                         .collect()
                 })
                 .unwrap_or_default();
-            let is_setter = method_name.ends_with(".set");
             let accessor = ctx.next_synthetic_entity();
-            let acc_name = format!("__i{}${lookup_name}", if is_setter { "set" } else { "get" });
+            let kind = match slot {
+                Some(AccessorSlot::Set) => "set",
+                Some(AccessorSlot::Ref) => "ref",
+                Some(AccessorSlot::MutRef) => "mutref",
+                None => "get",
+            };
+            let acc_name = format!("__i{kind}${lookup_name}");
             ctx.module.register_name(accessor, acc_name.clone());
-            if is_setter {
+            if ref_slot {
+                let mutating = slot == Some(AccessorSlot::MutRef);
+                let ret = ctx.module.ty_arena.ref_ty(field_ty, mutating);
+                let convention = if mutating {
+                    ParamConvention::MutBorrow
+                } else {
+                    ParamConvention::Borrow
+                };
+                let mut def = FunctionDef::new(accessor, &acc_name, ret);
+                def.kind = FunctionKind::Free;
+                def.type_params = acc_type_params;
+                def.params = vec![ParamDef::new("self", ValueId::new(0), self_ty, convention)];
+                ctx.module.add_function(def);
+                crate::body::synthesize_instance_var_ref(
+                    ctx, accessor, self_ty, field_idx, field_ty, mutating,
+                );
+            } else if slot == Some(AccessorSlot::Set) {
                 let unit_ty = ctx.module.ty_arena.unit();
                 let mut def = FunctionDef::new(accessor, &acc_name, unit_ty);
                 def.kind = FunctionKind::Free;
@@ -487,8 +545,18 @@ fn bind_witness_methods(
                     });
         if source_is_protocol_ext {
             let ext_children: Vec<Entity> = ctx.world.children_of(source).to_vec();
-            let ext_impl = if method_name.ends_with(".set") {
-                find_setter_among(ctx, &ext_children)
+            let ext_impl = if let Some(slot) = slot {
+                find_accessor_among(
+                    ctx,
+                    &ext_children,
+                    slot,
+                    lookup_name,
+                    &method_key.labels,
+                    &ExpectedSignature {
+                        params: None,
+                        ret: None,
+                    },
+                )
             } else {
                 find_impl_among(
                     ctx,
@@ -514,8 +582,16 @@ fn bind_witness_methods(
 
         // Protocol extension default
         if member.extension.is_some() {
-            let bind_entity = if method_name.ends_with(".set") {
-                find_setter_among(ctx, &[member.entity]).unwrap_or(member.entity)
+            let bind_entity = if let Some(slot) = slot {
+                find_accessor_among(
+                    ctx,
+                    &[member.entity],
+                    slot,
+                    lookup_name,
+                    &method_key.labels,
+                    &expected,
+                )
+                .unwrap_or(member.entity)
             } else {
                 member.entity
             };
@@ -818,21 +894,74 @@ fn find_stored_static_field(ctx: &LowerCtx, type_entity: Entity, name: &str) -> 
     })
 }
 
-fn find_setter_among(ctx: &LowerCtx, candidates: &[Entity]) -> Option<Entity> {
-    for &c in candidates {
-        if !matches!(
-            ctx.world.get::<NodeKind>(c),
-            Some(NodeKind::Field | NodeKind::Subscript)
-        ) {
-            continue;
-        }
-        for &gc in ctx.world.children_of(c) {
-            if ctx.world.get::<NodeKind>(gc) == Some(&NodeKind::Setter) {
-                return Some(gc);
-            }
-        }
+/// Which accessor of a place member a witness slot names.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AccessorSlot {
+    Set,
+    Ref,
+    MutRef,
+}
+
+/// Split an accessor slot name (`"x.set"`, `"x.ref"`, `"x.mutref"`, see
+/// `ref_witness_name`) into the member name and the slot; `None` for a
+/// plain member.
+fn accessor_slot(method_name: &str) -> Option<(&str, AccessorSlot)> {
+    if let Some((member, mutating)) = parse_ref_witness_name(method_name) {
+        let slot = if mutating {
+            AccessorSlot::MutRef
+        } else {
+            AccessorSlot::Ref
+        };
+        return Some((member, slot));
     }
-    None
+    Some((method_name.strip_suffix(".set")?, AccessorSlot::Set))
+}
+
+/// The accessor child (`set`, `ref` or `mutating ref`) that `slot` names,
+/// on the first Field/Subscript among `candidates` that declares one.
+/// The `slot` accessor (`set` / `ref` / `mutating ref`) of the candidate
+/// member that matches the requirement by name, labels and signature, as
+/// `find_impl_among` picks a method: a type can declare several subscripts
+/// with places (`xs(i)`, `xs(checked: i)`, …), one per label set.
+fn find_accessor_among(
+    ctx: &mut LowerCtx,
+    candidates: &[Entity],
+    slot: AccessorSlot,
+    member_name: &str,
+    labels: &[Option<String>],
+    expected: &ExpectedSignature,
+) -> Option<Entity> {
+    let owners: Vec<Entity> = candidates
+        .iter()
+        .copied()
+        .filter(|&c| {
+            matches!(
+                ctx.world.get::<NodeKind>(c),
+                Some(NodeKind::Field | NodeKind::Subscript)
+            ) && accessor_child(ctx, c, slot).is_some()
+        })
+        .collect();
+    // A field place has no labels or `Callable`: its name alone decides.
+    let owner = match find_impl_among(ctx, &owners, member_name, Some(labels), expected) {
+        Some(owner) => owner,
+        None => *owners
+            .iter()
+            .find(|&&c| member_lookup_name(&ctx.query, c) == Some(member_name))?,
+    };
+    accessor_child(ctx, owner, slot)
+}
+
+/// `member`'s accessor child filling `slot`.
+fn accessor_child(ctx: &LowerCtx, member: Entity, slot: AccessorSlot) -> Option<Entity> {
+    ctx.world.children_of(member).iter().copied().find(|&gc| {
+        match (ctx.world.get::<NodeKind>(gc), slot) {
+            (Some(NodeKind::Setter), AccessorSlot::Set) => true,
+            (Some(NodeKind::RefAccessor), AccessorSlot::Ref | AccessorSlot::MutRef) => {
+                ctx.world.get::<MutatingAccessor>(gc).is_some() == (slot == AccessorSlot::MutRef)
+            },
+            _ => false,
+        }
+    })
 }
 
 fn matches_candidate(

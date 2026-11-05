@@ -3,7 +3,7 @@
 // backends: cranelift,llvm
 
 // Indirection write peel (R4): `rc.balance = v` routes through the
-// MutableIndirection `pointeeMutRef()` half. The mutation is visible on a
+// MutableIndirection `mutating ref` half. The mutation is visible on a
 // subsequent read through the same wrapper.
 module Test
 

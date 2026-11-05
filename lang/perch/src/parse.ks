@@ -57,7 +57,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Request throws IoError {
         }
     }
 
-    let headerStr = String(fromUtf8: buffer.asSlice()(0..<headerEnd)) ?? String();
+    let headerStr = String(fromUtf8: buffer(0..<headerEnd)) ?? String();
 
     guard let .Some(firstLineEnd) = headerStr.firstIndex(of: "\r\n") else {
         throw invalidInput();
@@ -82,7 +82,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Request throws IoError {
             let bodyStart = headerEnd + 4;
             var bodyBytes = [];
 
-            bodyBytes.append(contentsOf: buffer.asSlice()(bodyStart..<buffer.count));
+            bodyBytes.append(contentsOf: buffer(bodyStart..<buffer.count));
 
             while bodyBytes.count < contentLength {
                 let remaining = contentLength - bodyBytes.count;

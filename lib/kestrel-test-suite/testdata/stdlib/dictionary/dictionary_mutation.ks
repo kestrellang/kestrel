@@ -14,23 +14,25 @@ module Test
             if dict.count != 0 { return 1 }
             if dict.isEmpty == false { return 2 }
 
-            // Test update(key:with:) - key exists
+            // Update in place - key exists
              dict.insert(1, 10);
              dict.insert(2, 20);
-            let updated = dict.update(1, with: { (v) in v * 10 });
+            var updated = false;
+            if let .Some(&mutating v) = dict(1) { v = v * 10; updated = true; }
             if updated == false { return 3 }
             if dict(1).unwrap() != 100 { return 4 }
 
-            // Test update(key:with:) - key missing
-            let notUpdated = dict.update(99, with: { (v) in v * 10 });
+            // Update in place - key missing
+            var notUpdated = false;
+            if let .Some(&mutating v) = dict(99) { v = v * 10; notUpdated = true; }
             if notUpdated { return 5 }
 
-            // Test upsert(key:default:with:) - key exists
-            dict.upsert(2, default: 0, with: { (v) in v + 5 });
+            // dict(key, default:) write - key exists
+            dict(2, default: 0) += 5;
             if dict(2).unwrap() != 25 { return 6 }
 
-            // Test upsert(key:default:with:) - key missing
-            dict.upsert(99, default: 0, with: { (v) in v + 5 });
+            // dict(key, default:) write - key missing inserts the default
+            dict(99, default: 0) += 5;
             if dict(99).unwrap() != 5 { return 7 }
 
             // Test merge()
