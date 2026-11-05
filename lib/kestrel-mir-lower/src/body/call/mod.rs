@@ -203,7 +203,7 @@ impl OssaBodyCtx<'_, '_> {
             self.prepare_closure_arg_snapshots(Some((receiver_expr, recv_conv)), args, &arg_convs);
             // Indirection method peel: `wrapper.method()` where the wrapper has
             // no `method` → dispatch to the pointee, reached via
-            // `pointeeRef()` / `pointeeMutRef()`. A mutating method (recv_conv
+            // `value`'s `ref` / `mutating ref`. A mutating method (recv_conv
             // == MutBorrow) peels through the mutating accessor. `receiver_ty`
             // is retargeted to the pointee so the callee's type args resolve
             // against the pointee, not the wrapper.

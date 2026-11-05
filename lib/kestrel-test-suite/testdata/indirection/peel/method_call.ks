@@ -3,7 +3,7 @@
 // backends: cranelift,llvm
 
 // Indirection read peel for a method call (R1): a non-mutating method
-// missing on the wrapper dispatches to the pointee via pointeeRef().
+// missing on the wrapper dispatches to the pointee via `value`.
 module Test
 
 import std.memory.(RcBox)

@@ -120,7 +120,7 @@ The rule covers the requirement itself (`t.modAssign(3)` on `T: ModuloAssign`) a
 - code in the module that wrote the implementation, so your own types keep calling their own methods and inits;
 - the body of another sugar-only implementation, so a type's `init(stringLiteral:length:)` can build its `String` field with `String(stringLiteral:length:)`.
 
-The standard library marks its operator, compound-assignment, comparison, range, `try`, `?.`/`??`/`!`, literal, pattern, interpolation and indexing hooks this way. Hooks that read well as methods stay public: `add`, `subtract`, `multiply`, `divide`, `modulo`, `negate`, `isEqual`, `compare`, `clone`, `next`, `iter`, and `pointeeRef` (the explicit way past auto-deref).
+The standard library marks its operator, compound-assignment, comparison, range, `try`, `?.`/`??`/`!`, literal, pattern, interpolation and indexing hooks this way. Hooks that read well as methods stay public: `add`, `subtract`, `multiply`, `divide`, `modulo`, `negate`, `isEqual`, `compare`, `clone`, `next`, `iter`, and `Indirection.value` (the explicit way past auto-deref).
 
 ## Associated Types
 

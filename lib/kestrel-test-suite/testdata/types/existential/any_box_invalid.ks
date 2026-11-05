@@ -35,7 +35,7 @@ struct ByValueBox[T] where T: not Sized {
 }
 extend ByValueBox[T]: Indirection {
     type Target = T
-    public func pointeeRef() -> &T { self.items }
+    public var value: T { ref { self.items } }
 }
 extend ByValueBox[T]: ExistentialBox {
     public init(consuming value: T) where T: Sized { self.items = value; }

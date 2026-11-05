@@ -82,7 +82,7 @@ Most of the contract is inherited rather than invented:
 |---|---|---|
 | share | `Cloneable.clone()` | the aggregate copy fold already routes struct/enum copies through it — a struct holding a handle becomes Cloneable and shares on copy for free |
 | release | the conformer's own `deinit` | ordinary drop rules; last release destroys the payload |
-| read payload | `MutableIndirection.pointeeRef()` | also gives transparent member access (`box.field`) |
+| read payload | `MutableIndirection.value` (its `ref`) | also gives transparent member access (`box.field`) |
 | create | `init(consuming:)` | protocol requirement |
 | shared mutation | `sharedMutRef()` | protocol requirement, see below |
 | identity | `isIdentical(to:)` | protocol requirement |
@@ -143,7 +143,7 @@ and keeps it regardless of the binding.
 |---|---|---|---|
 | `escaping` closure (**shipped**) | synthesized environment struct | reference — aliases share state | `init`, `clone`, drop, `sharedMutRef` |
 | class (future) | synthesized storage struct | reference | the above + `isIdentical` for `===` |
-| `any P` (**shipped**, 0.17) | the concrete `T` | reference — copies share the payload | `init`, `clone`, drop, `pointeeRef` |
+| `any P` (**shipped**, 0.17) | the concrete `T` | reference — copies share the payload | `init`, `clone`, drop, `value` |
 | `indirect enum` (future) | the recursive payload | **value** — copy-on-write | via the CoW layer: `clone` on copy, `isUnique` + fork on mutation |
 
 ### Escaping closures
@@ -166,7 +166,7 @@ capture-free closures stay bare function pointers and never allocate.
 ### Classes
 
 A `class C` is sugar for a hidden storage struct plus a handle type bound to
-`Box[C.Storage]`. Field reads go through `pointeeRef`, field writes and
+`Box[C.Storage]`. Field reads go through `value`, field writes and
 `mutating` methods through `sharedMutRef` (classes are the other sanctioned
 reference-semantics feature), `===` is `isIdentical(to:)`. Class values are
 Cloneable handles: assignment shares, and the existing copy fold propagates
@@ -178,7 +178,7 @@ that through aggregates unchanged.
 existential *is* a shared box over an unsized payload, so copies share it
 (reference semantics; `any[CowBox] P` gives value semantics). The payload's
 drop, size, alignment and clone travel in the function table carried by the
-box's pointer, so `clone`/drop/`pointeeRef` on `RcBox[rawany P]` are the
+box's pointer, so `clone`/drop/`value` on `RcBox[rawany P]` are the
 ordinary box operations. A box only needs `ExistentialBox` (this protocol's
 `init(consuming:)` + `Indirection`) to hold an existential; `SharedBox`
 refines it. See [`docs/plans/existentials/existentials-design.md`](../plans/existentials/existentials-design.md)

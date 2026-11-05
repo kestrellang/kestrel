@@ -52,10 +52,10 @@ pub struct TypedBody {
     pub opaque_concrete_type: Option<ResolvedTy>,
 
     /// `Indirection`-peel plan for member-access exprs that resolved through a
-    /// smart-pointer's pointee (`wrapper.m` → `wrapper.pointeeRef().m`). The
+    /// smart-pointer's pointee (`wrapper.m` → `wrapper.value.m`). The
     /// `Vec` is the peel CHAIN, outer→inner, for nested wrappers
     /// (`RcBox[Pointer[T]]`). MIR lowering replays it: project the receiver
-    /// through each `pointeeRef()`/`pointeeMutRef()` before the member access.
+    /// through each level's `value` accessor before the member access.
     /// Single source of truth — MIR never re-derives the peel (mirrors
     /// `resolutions` / `ClosureCaptures`).
     pub indirection_peels: HashMap<HirExprId, Vec<IndirectionPeel>>,
@@ -156,16 +156,18 @@ pub struct ExistentialConversion {
     pub to: ResolvedTy,
 }
 
-/// One level of an `Indirection` member peel: the concrete pointee accessors
-/// on the wrapper type at this level. `mut_method` is `None` when the wrapper
+/// One level of an `Indirection` member peel: the pointee accessors the
+/// wrapper at this level lends through. `mut_method` is `None` when the wrapper
 /// is `Indirection` but not `MutableIndirection` (read-only) — a write through
 /// it is the `indirection_no_mutating_accessor` error.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IndirectionPeel {
-    /// `pointeeRef()` on the wrapper — yields `&Target` for reads.
+    /// `Indirection.value`'s `ref` requirement — yields `&Target` for reads,
+    /// dispatched through the wrapper's witness.
     pub read_method: Entity,
-    /// `pointeeMutRef()` on the wrapper — yields `&mutating Target` for
-    /// writes / RMW / mutating-method receivers; `None` if read-only.
+    /// `MutableIndirection.value`'s `mutating ref` — yields `&mutating
+    /// Target` for writes / RMW / mutating-method receivers; `None` if the
+    /// wrapper is read-only.
     pub mut_method: Option<Entity>,
     /// The concrete pointee type (`Indirection.Target`) at this level. MIR
     /// builds the `&Target` / `&mutating Target` result type of the accessor

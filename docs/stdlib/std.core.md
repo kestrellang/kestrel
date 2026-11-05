@@ -2320,7 +2320,7 @@ public protocol Indirection
 ```
 
 Opt-in transparent member access. `wrapper.foo` resolves through to
-`Target.foo` via `pointeeRef()` when the wrapper has no `foo` of its own.
+`wrapper.value.foo` when the wrapper has no `foo` of its own.
 
 _Defined in `lang/std/core/indirection.ks`._
 
@@ -2337,13 +2337,13 @@ existential box's `Target` is the raw existential it holds.
 
 _Defined in `lang/std/core/indirection.ks`._
 
-#### function `pointeeRef`
+#### field `value`
 
 ```kestrel
-func pointeeRef() -> &Target
+var value: Target { ref }
 ```
 
-A shared reference to the pointee. Member READS peel through this.
+The pointee, lent in place. Member READS peel through its `ref`.
 
 _Defined in `lang/std/core/indirection.ks`._
 
@@ -2643,29 +2643,27 @@ public protocol MutableIndirection
 
 A smart pointer whose pointee can also be mutated through the peel.
 Writes (`wrapper.field = v`), compound assignments (`wrapper.n += 1`), and
-`mutating`-method calls route through `pointeeMutRef()`. A read-only
-wrapper conforms to `Indirection` only; mutating through it is rejected.
+`mutating`-method calls route through `value`'s `mutating ref`. A
+read-only wrapper conforms to `Indirection` only; mutating through it is
+rejected.
 
-`pointeeMutRef()` is `mutating` so a copy-on-write wrapper can fork its
-storage before handing out the mutable view; wrappers that don't need to
-(raw `Pointer`, `RcBox`) still mark it `mutating` — the marker is harmless.
-
-_Defined in `lang/std/core/indirection.ks`._
-
-### Members
-
-#### function `pointeeMutRef`
-
-```kestrel
-mutating func pointeeMutRef() -> &mutating Target
-```
-
-A mutating reference to the pointee. Member WRITES / RMW / mutating
-methods peel through this.
+A `mutating ref` takes the wrapper mutably, so a copy-on-write wrapper can
+fork its storage before handing out the mutable view.
 
 _Defined in `lang/std/core/indirection.ks`._
 
 ### Implements `Indirection`
+
+#### field `value`
+
+```kestrel
+var value: Target { ref mutating ref }
+```
+
+The pointee, lent in place. Member WRITES / RMW / mutating methods
+peel through its `mutating ref`.
+
+_Defined in `lang/std/core/indirection.ks`._
 
 ## protocol `Negatable`
 
