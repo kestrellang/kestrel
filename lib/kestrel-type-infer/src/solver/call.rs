@@ -82,8 +82,18 @@ pub(super) fn solve_call(
             // an in-place side effect), capturing the first mismatch. We still
             // run every `coerce` so the param/return types unify regardless —
             // reporting the convention error without a spurious cascade.
+            // A named function's arguments fill the parameters their labels
+            // bind them to; any other callee's fill them in order.
+            let slots = ctx
+                .call_arg_slots
+                .get(&expr)
+                .cloned()
+                .unwrap_or_else(|| (0..args.len()).collect());
             let mut conv_err: Option<InferError> = None;
-            for (index, (arg, param)) in args.iter().zip(params.iter()).enumerate() {
+            for (arg, &index) in args.iter().zip(slots.iter()) {
+                let Some(param) = params.get(index) else {
+                    continue;
+                };
                 let e = reconcile_fn_convention(ctx, arg, *param, &span);
                 if conv_err.is_none() {
                     conv_err = e;

@@ -4,7 +4,7 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
-use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, bind_arguments};
+use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, Binding, bind_arguments};
 use kestrel_ast_builder::{Callable, InitEffect, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
@@ -431,6 +431,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.type_callee_calls.insert(id);
             }
             let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
+            record_call_arg_slots(ctx, hir, *callee, &arg_tvs, id);
             bind_skipped_default_type_params(ctx, hir, *callee, &arg_tvs, span);
 
             // If the callee is a known function returning Never (e.g., lang.panic),
@@ -1643,6 +1644,38 @@ fn gen_pat(
     }
 }
 
+/// Record which parameter each argument of a direct named-function call
+/// fills (`InferCtx::call_arg_slots`), from the label-aware binding plan.
+fn record_call_arg_slots(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    callee: HirExprId,
+    args: &[CallArg],
+    call: HirExprId,
+) {
+    let HirExpr::Def(entity, _, _) = &hir.exprs[callee] else {
+        return;
+    };
+    let Some(plan) = crate::solver::call::binding_plan_for(ctx.query_ctx, *entity, args) else {
+        return;
+    };
+    ctx.call_arg_slots
+        .insert(call, arg_slots(&plan, args.len()));
+}
+
+/// The parameter slot of each argument under `plan`, in argument order.
+pub(crate) fn arg_slots(plan: &[Binding], arg_count: usize) -> Vec<usize> {
+    let mut slots: Vec<usize> = (0..arg_count).collect();
+    for (slot, binding) in plan.iter().enumerate() {
+        if let Binding::Arg(ai) = binding
+            && let Some(s) = slots.get_mut(*ai)
+        {
+            *s = slot;
+        }
+    }
+    slots
+}
+
 /// A free-function call that omits a defaulted argument whose type is one
 /// of the function's type parameters (`extra: some Slice[UInt8] = …`): pin
 /// that parameter to the default's type, which nothing else would. Method and
@@ -1873,10 +1906,15 @@ fn gen_struct_init(
 
             emit_where_clause_constraints_with_subs(ctx, init, &init_subs, span);
 
-            // Constrain args against the matched init's param types
+            // Constrain args against the matched init's param types, each
+            // against the parameter its label binds it to (skipped defaults
+            // shift later arguments past them).
             if let Some(param_tys) = qctx.query(LowerCallableTypes { entity: init, root }) {
-                for (index, (arg, param_ty)) in args.iter().zip(param_tys.iter()).enumerate() {
-                    if let Some(hir_ty) = param_ty {
+                let slots = crate::solver::call::binding_plan_for(qctx, init, args)
+                    .map(|plan| arg_slots(&plan, args.len()))
+                    .unwrap_or_else(|| (0..args.len()).collect());
+                for (arg, &index) in args.iter().zip(slots.iter()) {
+                    if let Some(Some(hir_ty)) = param_tys.get(index) {
                         let param_tv = lower_hir_ty_with_subs(ctx, hir_ty, &init_subs);
                         let reason = Reason::Param {
                             index,
