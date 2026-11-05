@@ -101,7 +101,7 @@ LeftShift     (not LeftShiftable)
 Negate        (not Negateable)
 FFISafe       (not FFISafeable)
 Equal         (not Equalable)
-Modulo        (not Modulable)
+Remainder     (not Remainderable)
 ```
 
 The test: say it out loud. If the `-able` form sounds natural, use it. If it sounds clunky, drop to a short name.

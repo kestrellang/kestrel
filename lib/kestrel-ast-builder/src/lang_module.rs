@@ -372,7 +372,7 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
             );
         }
         // Unchecked signed div/rem: same signature, no safety guards (UB on
-        // divide-by-zero / min/-1). Back `divideUnchecked`/`moduloUnchecked`.
+        // divide-by-zero / min/-1). Back `divideUnchecked`/`remainderUnchecked`.
         for op in ["div", "rem"] {
             seed_fn(
                 world,

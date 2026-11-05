@@ -766,7 +766,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         let hashValue: UInt64 = self.hashKey(key);
         let capU: UInt64 = UInt64(from: myCap);
-        let mod: UInt64 = hashValue.modulo(capU);
+        let mod: UInt64 = hashValue.remainder(capU);
         var index: Int64 = Int64(from: mod);
         let myBuckets = self.buckets();
         var i: Int64 = 0;
@@ -802,7 +802,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         }
 
         let capU: UInt64 = UInt64(from: myCap);
-        let mod: UInt64 = hashValue.modulo(capU);
+        let mod: UInt64 = hashValue.remainder(capU);
         var index: Int64 = Int64(from: mod);
         let myBuckets = self.buckets();
         var i: Int64 = 0;
@@ -877,7 +877,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let newCapU: UInt64 = UInt64(from: newCap);
         for i in 0..<s.cap {
             if let .Occupied(key, value, hashValue) = s.buckets.offset(by: i).take() {
-                var slotIndex: Int64 = Int64(from: hashValue.modulo(newCapU));
+                var slotIndex: Int64 = Int64(from: hashValue.remainder(newCapU));
                 while not bucketIsEmpty(newBuckets.offset(by: slotIndex).value) {
                     slotIndex = (slotIndex + 1) % newCap
                 }

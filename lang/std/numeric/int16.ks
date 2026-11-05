@@ -6,9 +6,9 @@ module std.numeric
 import std.ffi.(FFISafe)
 import std.core.(
     Equatable, Comparable, Ordering, Bool, Matchable, Hashable, Hasher,
-    Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
+    Addable, Subtractable, Multipliable, Divisible, Remainder, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
-    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
@@ -61,7 +61,7 @@ public struct Int16:
     Subtractable,
     Multipliable,
     Divisible,
-    Modulo,
+    Remainder,
     Negatable,
     BitwiseAnd,
     BitwiseOr,
@@ -73,7 +73,7 @@ public struct Int16:
     SubtractAssign,
     MultiplyAssign,
     DivideAssign,
-    ModuloAssign,
+    RemainderAssign,
     BitwiseAndAssign,
     BitwiseOrAssign,
     BitwiseXorAssign,
@@ -384,7 +384,7 @@ public struct Int16:
     type Subtractable.Output = Int16
     type Multipliable.Output = Int16
     type Divisible.Output = Int16
-    type Modulo.Output = Int16
+    type Remainder.Output = Int16
     type Negatable.Output = Int16
     type BitwiseAnd.Output = Int16
     type BitwiseOr.Output = Int16
@@ -427,7 +427,31 @@ public struct Int16:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public consuming func modulo(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem(self.raw, other.raw)) }
+    public consuming func remainder(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem(self.raw, other.raw)) }
+
+    /// Euclidean modulo: the result is always in `0..<|other|`, whatever
+    /// the signs. Differs from `%` (`remainder`) only when `self` is
+    /// negative: `(-7) % 3` is `-1`, `(-7).modulo(by: 3)` is `2`.
+    ///
+    /// # Errors
+    ///
+    /// Traps on division by zero, like `remainder`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (-7).modulo(by: 3);   // 2
+    /// (7).modulo(by: -3);   // 1
+    /// (-7).modulo(by: -3);  // 2
+    /// ```
+    public func modulo(by other: Int16) -> Int16 {
+        let r = self.remainder(other);
+        if r >= 0 {
+            return r
+        }
+        // |r| < |other|, so neither branch overflows (even for minValue).
+        if other < 0 { r - other } else { r + other }
+    }
 
     /// `self / other` without the divide-by-zero and `minValue / -1` guards —
     /// the bare hardware divide. Faster in hot loops, but **undefined
@@ -447,7 +471,7 @@ public struct Int16:
     /// # Safety
     ///
     /// UB when `other == 0`, or signed `minValue % -1`.
-    public consuming func moduloUnchecked(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem_unchecked(self.raw, other.raw)) }
+    public consuming func remainderUnchecked(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem_unchecked(self.raw, other.raw)) }
 
     /// Two's-complement negation. Wraps at the minimum value:
     /// `Int16.minValue.negate() == Int16.minValue`. Use
@@ -619,7 +643,7 @@ public struct Int16:
         // non-negative (only `gcd(minValue, 0)` = 2^(n-1) is unrepresentable).
         while b != Int16.zero {
             let t = b;
-            b = a.modulo(b).abs();
+            b = a.remainder(b).abs();
             a = t
         };
         a.abs()
@@ -727,7 +751,7 @@ public struct Int16:
     /// `self /= other`
     public mutating func divideAssign(other: Int16) { self = self.divide(other) }
     /// `self %= other`
-    public mutating func modAssign(other: Int16) { self = self.modulo(other) }
+    public mutating func remainderAssign(other: Int16) { self = self.remainder(other) }
     /// `self &= other`
     public mutating func bitwiseAndAssign(other: Int16) { self = self.bitwiseAnd(other) }
     /// `self |= other`

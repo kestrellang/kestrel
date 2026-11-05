@@ -224,7 +224,7 @@ fileprivate func bnDivSmall(n: Array[UInt32], d: UInt64) -> Array[UInt32] {
     while i >= 0 {
         let cur = rem.shiftLeft(by: 32).bitwiseOr(UInt64(from: n(i)));
         qRev.append(UInt32(from: cur.divide(d)));
-        rem = cur.modulo(d);
+        rem = cur.remainder(d);
         i = i - 1
     };
     var q = Array[UInt32]();
@@ -271,7 +271,7 @@ fileprivate func bnToDecimalDigits(n0: Array[UInt32]) -> Array[Int64] {
         while i >= 0 {
             let cur = rem.shiftLeft(by: 32).bitwiseOr(UInt64(from: n(i)));
             qRev.append(UInt32(from: cur.divide(ten)));
-            rem = cur.modulo(ten);
+            rem = cur.remainder(ten);
             i = i - 1
         };
         digitsRev.append(Int64(from: rem));

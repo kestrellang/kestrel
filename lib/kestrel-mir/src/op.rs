@@ -62,7 +62,7 @@ pub enum Signedness {
 /// Whether a signed `Div`/`Rem` carries its safety guards (divide-by-zero trap
 /// and the `Int.MIN / -1` overflow guard). `Unchecked` skips both, emitting the
 /// bare hardware divide — undefined behaviour on those edges, like C. Backs the
-/// `divideUnchecked`/`moduloUnchecked` stdlib methods for hot loops where the
+/// `divideUnchecked`/`remainderUnchecked` stdlib methods for hot loops where the
 /// caller guarantees a valid divisor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DivGuard {

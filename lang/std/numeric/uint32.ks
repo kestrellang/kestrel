@@ -6,9 +6,9 @@ module std.numeric
 import std.ffi.(FFISafe)
 import std.core.(
     Equatable, Comparable, Ordering, Bool, Matchable, Hashable, Hasher,
-    Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
+    Addable, Subtractable, Multipliable, Divisible, Remainder, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
-    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
@@ -61,7 +61,7 @@ public struct UInt32:
     Subtractable,
     Multipliable,
     Divisible,
-    Modulo,
+    Remainder,
     
     BitwiseAnd,
     BitwiseOr,
@@ -73,7 +73,7 @@ public struct UInt32:
     SubtractAssign,
     MultiplyAssign,
     DivideAssign,
-    ModuloAssign,
+    RemainderAssign,
     BitwiseAndAssign,
     BitwiseOrAssign,
     BitwiseXorAssign,
@@ -385,7 +385,7 @@ public struct UInt32:
     type Subtractable.Output = UInt32
     type Multipliable.Output = UInt32
     type Divisible.Output = UInt32
-    type Modulo.Output = UInt32
+    type Remainder.Output = UInt32
     
     type BitwiseAnd.Output = UInt32
     type BitwiseOr.Output = UInt32
@@ -428,7 +428,15 @@ public struct UInt32:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public consuming func modulo(consuming other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_rem(self.raw, other.raw)) }
+    public consuming func remainder(consuming other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_rem(self.raw, other.raw)) }
+
+    /// Euclidean modulo. For unsigned types this is the same as `%`
+    /// (`remainder`); it exists so generic code can use one name.
+    ///
+    /// # Errors
+    ///
+    /// Traps on division by zero, like `remainder`.
+    public func modulo(by other: UInt32) -> UInt32 { self.remainder(other) }
 
     /// `self / other` without the divide-by-zero and `minValue / -1` guards —
     /// the bare hardware divide. Faster in hot loops, but **undefined
@@ -448,7 +456,7 @@ public struct UInt32:
     /// # Safety
     ///
     /// UB when `other == 0`, or signed `minValue % -1`.
-    public consuming func moduloUnchecked(consuming other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_rem_unchecked(self.raw, other.raw)) }
+    public consuming func remainderUnchecked(consuming other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_rem_unchecked(self.raw, other.raw)) }
 
     
     
@@ -567,7 +575,7 @@ public struct UInt32:
         var b = other;
         while b != UInt32.zero {
             let t = b;
-            b = a.modulo(b);
+            b = a.remainder(b);
             a = t
         };
         a
@@ -675,7 +683,7 @@ public struct UInt32:
     /// `self /= other`
     public mutating func divideAssign(other: UInt32) { self = self.divide(other) }
     /// `self %= other`
-    public mutating func modAssign(other: UInt32) { self = self.modulo(other) }
+    public mutating func remainderAssign(other: UInt32) { self = self.remainder(other) }
     /// `self &= other`
     public mutating func bitwiseAndAssign(other: UInt32) { self = self.bitwiseAnd(other) }
     /// `self |= other`

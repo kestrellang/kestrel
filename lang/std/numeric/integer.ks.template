@@ -6,9 +6,9 @@ module std.numeric
 import std.ffi.(FFISafe)
 import std.core.(
     Equatable, Comparable, Ordering, Bool, Matchable, Hashable, Hasher,
-    Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
+    Addable, Subtractable, Multipliable, Divisible, Remainder, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
-    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
@@ -61,7 +61,7 @@ public struct {{TYPE_NAME}}:
     Subtractable,
     Multipliable,
     Divisible,
-    Modulo,
+    Remainder,
     {{NEGATABLE}}
     BitwiseAnd,
     BitwiseOr,
@@ -73,7 +73,7 @@ public struct {{TYPE_NAME}}:
     SubtractAssign,
     MultiplyAssign,
     DivideAssign,
-    ModuloAssign,
+    RemainderAssign,
     BitwiseAndAssign,
     BitwiseOrAssign,
     BitwiseXorAssign,
@@ -327,7 +327,7 @@ public struct {{TYPE_NAME}}:
     type Subtractable.Output = {{TYPE_NAME}}
     type Multipliable.Output = {{TYPE_NAME}}
     type Divisible.Output = {{TYPE_NAME}}
-    type Modulo.Output = {{TYPE_NAME}}
+    type Remainder.Output = {{TYPE_NAME}}
     {{NEGATABLE_OUTPUT}}
     type BitwiseAnd.Output = {{TYPE_NAME}}
     type BitwiseOr.Output = {{TYPE_NAME}}
@@ -370,7 +370,7 @@ public struct {{TYPE_NAME}}:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public consuming func modulo(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem(self.raw, other.raw)) }
+    public consuming func remainder(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem(self.raw, other.raw)) }
 
     /// `self / other` without the divide-by-zero and `minValue / -1` guards —
     /// the bare hardware divide. Faster in hot loops, but **undefined
@@ -390,7 +390,7 @@ public struct {{TYPE_NAME}}:
     /// # Safety
     ///
     /// UB when `other == 0`, or signed `minValue % -1`.
-    public consuming func moduloUnchecked(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem_unchecked(self.raw, other.raw)) }
+    public consuming func remainderUnchecked(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}rem_unchecked(self.raw, other.raw)) }
 
     {{NEGATE_METHOD}}
     {{ABS_METHOD}}
@@ -455,7 +455,7 @@ public struct {{TYPE_NAME}}:
         var b = {{GCD_ABS_OTHER}};
         while b != {{TYPE_NAME}}.zero {
             let t = b;
-            b = a.modulo(b);
+            b = a.remainder(b);
             a = t
         };
         a
@@ -563,7 +563,7 @@ public struct {{TYPE_NAME}}:
     /// `self /= other`
     public mutating func divideAssign(other: {{TYPE_NAME}}) { self = self.divide(other) }
     /// `self %= other`
-    public mutating func modAssign(other: {{TYPE_NAME}}) { self = self.modulo(other) }
+    public mutating func remainderAssign(other: {{TYPE_NAME}}) { self = self.remainder(other) }
     /// `self &= other`
     public mutating func bitwiseAndAssign(other: {{TYPE_NAME}}) { self = self.bitwiseAnd(other) }
     /// `self |= other`

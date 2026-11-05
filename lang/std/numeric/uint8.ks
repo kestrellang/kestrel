@@ -6,9 +6,9 @@ module std.numeric
 import std.ffi.(FFISafe)
 import std.core.(
     Equatable, Comparable, Ordering, Bool, Matchable, Hashable, Hasher,
-    Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
+    Addable, Subtractable, Multipliable, Divisible, Remainder, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
-    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
@@ -61,7 +61,7 @@ public struct UInt8:
     Subtractable,
     Multipliable,
     Divisible,
-    Modulo,
+    Remainder,
     
     BitwiseAnd,
     BitwiseOr,
@@ -73,7 +73,7 @@ public struct UInt8:
     SubtractAssign,
     MultiplyAssign,
     DivideAssign,
-    ModuloAssign,
+    RemainderAssign,
     BitwiseAndAssign,
     BitwiseOrAssign,
     BitwiseXorAssign,
@@ -385,7 +385,7 @@ public struct UInt8:
     type Subtractable.Output = UInt8
     type Multipliable.Output = UInt8
     type Divisible.Output = UInt8
-    type Modulo.Output = UInt8
+    type Remainder.Output = UInt8
     
     type BitwiseAnd.Output = UInt8
     type BitwiseOr.Output = UInt8
@@ -428,7 +428,15 @@ public struct UInt8:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public consuming func modulo(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem(self.raw, other.raw)) }
+    public consuming func remainder(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem(self.raw, other.raw)) }
+
+    /// Euclidean modulo. For unsigned types this is the same as `%`
+    /// (`remainder`); it exists so generic code can use one name.
+    ///
+    /// # Errors
+    ///
+    /// Traps on division by zero, like `remainder`.
+    public func modulo(by other: UInt8) -> UInt8 { self.remainder(other) }
 
     /// `self / other` without the divide-by-zero and `minValue / -1` guards —
     /// the bare hardware divide. Faster in hot loops, but **undefined
@@ -448,7 +456,7 @@ public struct UInt8:
     /// # Safety
     ///
     /// UB when `other == 0`, or signed `minValue % -1`.
-    public consuming func moduloUnchecked(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem_unchecked(self.raw, other.raw)) }
+    public consuming func remainderUnchecked(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem_unchecked(self.raw, other.raw)) }
 
     
     
@@ -567,7 +575,7 @@ public struct UInt8:
         var b = other;
         while b != UInt8.zero {
             let t = b;
-            b = a.modulo(b);
+            b = a.remainder(b);
             a = t
         };
         a
@@ -675,7 +683,7 @@ public struct UInt8:
     /// `self /= other`
     public mutating func divideAssign(other: UInt8) { self = self.divide(other) }
     /// `self %= other`
-    public mutating func modAssign(other: UInt8) { self = self.modulo(other) }
+    public mutating func remainderAssign(other: UInt8) { self = self.remainder(other) }
     /// `self &= other`
     public mutating func bitwiseAndAssign(other: UInt8) { self = self.bitwiseAnd(other) }
     /// `self |= other`

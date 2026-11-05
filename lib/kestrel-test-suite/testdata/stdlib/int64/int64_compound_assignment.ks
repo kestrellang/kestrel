@@ -25,9 +25,9 @@ module Test
             d.divideAssign(4);
             if d != 25 { return 4 }
 
-            // modAssign
+            // remainderAssign
             var m: std.numeric.Int64 = 17;
-            m.modAssign(5);
+            m.remainderAssign(5);
             if m != 2 { return 5 }
 
             // bitwiseAndAssign: 0b1111 & 0b1010 = 0b1010 = 10

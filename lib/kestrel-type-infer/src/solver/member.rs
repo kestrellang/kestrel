@@ -222,7 +222,7 @@ pub(super) fn is_known_primitive_method(family: PrimitiveFamily, name: &str) -> 
                 | "subtract"
                 | "multiply"
                 | "divide"
-                | "modulo"
+                | "remainder"
                 | "negate"
                 | "equal"
                 | "notEqual"
