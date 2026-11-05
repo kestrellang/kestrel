@@ -7,9 +7,13 @@ let chunkSize: Int64 = 32;
 /// then z, then y (so a horizontal slice is contiguous).
 struct Chunk {
     var blocks: [UInt16]
+    /// Indices of the blocks that glow, kept up to date by `put`, so finding
+    /// the lights near a chunk doesn't scan every block.
+    var emitters: [Int64]
 
     init() {
         self.blocks = Array(repeating: Block.Air.id, count: chunkSize * chunkSize * chunkSize);
+        self.emitters = [];
     }
 
     static func contains(x: Int64, y: Int64, z: Int64) -> Bool {
@@ -41,7 +45,14 @@ struct Chunk {
         if not Chunk.contains(x, y, z) {
             return;
         }
-        self.blocks(Chunk.index(x, y, z)) = block.id;
+        let i = Chunk.index(x, y, z);
+        if Block.from(self.blocks(i)).emits {
+            let _ = self.emitters.remove(i);
+        }
+        self.blocks(i) = block.id;
+        if block.emits {
+            self.emitters.append(i);
+        }
     }
 }
 

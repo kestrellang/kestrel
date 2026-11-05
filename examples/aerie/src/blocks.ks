@@ -83,6 +83,14 @@ enum Block {
         }
     }
 
+    /// Whether the block glows, lighting what's around it.
+    var emits: Bool {
+        match self {
+            .Glowcap => true,
+            _ => false
+        }
+    }
+
     /// The texture on `face` (see `Face`).
     func layer(face: Face) -> Layer {
         match self {

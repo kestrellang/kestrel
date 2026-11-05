@@ -1,5 +1,12 @@
 module Aerie
 
+import linalg.(Vec3)
+
+/// How far a glowing block's light reaches, in blocks.
+let lightRadius: Float32 = 10.0;
+/// The most lights one chunk is shaded by.
+let maxLights: Int64 = 32;
+
 /// Chunks stacked in each column: the world is 128 blocks tall.
 let worldChunksY: Int64 = 4;
 
@@ -115,6 +122,46 @@ struct World {
             dy = dy + 1;
         }
         Padded.around(around)
+    }
+
+    /// Up to `maxLights` glowing blocks that can reach chunk (cx, cy, cz),
+    /// nearest its middle first, as world positions of their centers.
+    func lights(cx: Int64, cy: Int64, cz: Int64) -> [Vec3] {
+        let size = Float32(from: chunkSize);
+        let middle = Vec3(x: (Float32(from: cx) + 0.5) * size, y: (Float32(from: cy) + 0.5) * size, z: (Float32(from: cz) + 0.5) * size);
+        // Inside the chunk's box grown by the light radius.
+        let low = middle - Vec3(splat: size * 0.5 + lightRadius);
+        let high = middle + Vec3(splat: size * 0.5 + lightRadius);
+        var found: [(Float32, Vec3)] = [];
+        var dy: Int64 = -1;
+        while dy <= 1 {
+            var dz: Int64 = -1;
+            while dz <= 1 {
+                var dx: Int64 = -1;
+                while dx <= 1 {
+                    let (nx, ny, nz) = (cx + dx, cy + dy, cz + dz);
+                    for i in self.chunk(nx, ny, nz).emitters {
+                        let p = Vec3(
+                            x: Float32(from: nx * chunkSize + i % chunkSize) + 0.5,
+                            y: Float32(from: ny * chunkSize + i / (chunkSize * chunkSize)) + 0.5,
+                            z: Float32(from: nz * chunkSize + (i / chunkSize) % chunkSize) + 0.5
+                        );
+                        if p.x >= low.x and p.y >= low.y and p.z >= low.z and p.x <= high.x and p.y <= high.y and p.z <= high.z {
+                            found.append(((p - middle).lengthSquared, p));
+                        }
+                    }
+                    dx = dx + 1;
+                }
+                dz = dz + 1;
+            }
+            dy = dy + 1;
+        }
+        found.sort(by: { (a: (Float32, Vec3), b: (Float32, Vec3)) in a.0 < b.0 });
+        var out: [Vec3] = [];
+        for (_, p) in found {
+            if out.count < maxLights { out.append(p); }
+        }
+        out
     }
 
     /// Forget columns further than `radius` chunks from (cx, cz).

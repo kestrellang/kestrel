@@ -25,12 +25,21 @@ chunks outside the camera's view are skipped.
 **Milestone 4** makes it playable. You walk with gravity and collision,
 jump, and hold jump while falling to open the wing-cloak and glide: you sink
 slowly and sail forward at 10 blocks a second. Q breaks the block under the
-crosshair and E places the hotbar's selected block (1 to 8); each edit
+crosshair and E places the hotbar's selected block (1 to 9); each edit
 re-meshes the chunks it touches. F toggles free flying. Falling into the
 cloud sea puts you back at the spawn island.
 
+**Milestone 5** adds light and time. The sun crosses the sky over an
+eight-minute day; a depth-only shadow pass renders the world from the sun
+into a 2048² shadow map that follows the player, and the sky, fog and
+ambient light fade from dawn to a dark-blue night. Glowcaps give off a cool
+light: each chunk carries the glowcaps near it in its own bind group, and
+the shader adds their falloff, so they light up the ground at night. T skips
+ahead a quarter day, and `AERIE_TIME=0..1` sets the starting time (0 dawn,
+0.25 noon, 0.5 dusk, 0.75 midnight).
+
 Controls: WASD to walk, arrow keys to look, Space to jump (hold to glide),
-Q to break, E to place, 1 to 8 for the hotbar, F to fly (Space and Left
+Q to break, E to place, 1 to 9 for the hotbar, T to skip time, F to fly (Space and Left
 Shift to rise and sink), Escape to quit. `AERIE_FRAMES=n` quits after n
 frames.
 
@@ -48,8 +57,8 @@ WGPU_NATIVE_DIR=~/wgpu-native flock run
 - `src/main.ks` — the desktop driver: an SDL window and loop.
 - `src/game.ks` — `Game`, driven one `event` and one `frame` at a time, so a
   browser build can call it from `requestAnimationFrame` instead.
-- `src/renderer.ks` — the wgpu side: surface, pipeline, atlas upload.
-- `src/shader.ks` — WGSL: expands each packed face into a quad.
+- `src/renderer.ks` — the wgpu side: surface, shadow and main passes, HUD overlay, daylight.
+- `src/shader.ks` — WGSL: expands each packed face into a quad, sun shadows, glow, fog.
 - `src/blocks.ks` — block ids, shapes and which atlas layer each face uses.
 - `src/chunk.ks` — 32³ chunks, padded chunks for meshing, the test island.
 - `src/noise.ks` — seeded 2D gradient noise.

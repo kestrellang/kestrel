@@ -22,6 +22,7 @@ struct Controls {
     var placePressed: Bool = false
     var flyPressed: Bool = false
     var slotPressed: Int64 = -1
+    var timePressed: Bool = false
 
     init() {}
 
@@ -48,6 +49,8 @@ struct Controls {
             .Digit6 => { if held { self.slotPressed = 5 } },
             .Digit7 => { if held { self.slotPressed = 6 } },
             .Digit8 => { if held { self.slotPressed = 7 } },
+            .Digit9 => { if held { self.slotPressed = 8 } },
+            .T => { if held { self.timePressed = true } },
             _ => {}
         }
     }
@@ -58,6 +61,7 @@ struct Controls {
         self.placePressed = false;
         self.flyPressed = false;
         self.slotPressed = -1;
+        self.timePressed = false;
     }
 }
 
@@ -131,8 +135,11 @@ func spawnPoint(generator: Generator) -> Vec3 {
     Vec3(x: 0.0, y: 90.0, z: 0.0)
 }
 
-/// The blocks on the hotbar, keys 1 to 8.
-let hotbar: [Block] = [.Driftstone, .Loam, .Mossloam, .Emberwood, .Planks, .Cloudglass, .Featherthatch, .Sailcloth];
+/// Seconds in one day.
+let dayLength: Float32 = 480.0;
+
+/// The blocks on the hotbar, keys 1 to 9.
+let hotbar: [Block] = [.Driftstone, .Loam, .Mossloam, .Emberwood, .Planks, .Cloudglass, .Featherthatch, .Sailcloth, .Glowcap];
 /// How far away blocks can be broken or placed.
 let reach: Float32 = 6.0;
 
@@ -149,9 +156,9 @@ func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool) -> [Overla
     quads.append(OverlayQuad(rect: Vec4(x: w * 0.5 - 1.0, y: h * 0.5 - arm, z: 2.0, w: arm * 2.0), color: white, tile: none));
     // Hotbar: a frame per slot, the selected one bright, with its block.
     let slot: Float32 = 52.0;
-    let left = w * 0.5 - slot * 4.0;
+    let left = w * 0.5 - slot * Float32(from: hotbar.count) * 0.5;
     let top = h - slot - 14.0;
-    quads.append(OverlayQuad(rect: Vec4(x: left - 4.0, y: top - 4.0, z: slot * 8.0 + 8.0, w: slot + 8.0), color: Vec4(x: 0.12, y: 0.14, z: 0.22, w: 0.45), tile: none));
+    quads.append(OverlayQuad(rect: Vec4(x: left - 4.0, y: top - 4.0, z: slot * Float32(from: hotbar.count) + 8.0, w: slot + 8.0), color: Vec4(x: 0.12, y: 0.14, z: 0.22, w: 0.45), tile: none));
     var i: Int64 = 0;
     while i < hotbar.count {
         let x = left + Float32(from: i) * slot;
@@ -186,6 +193,8 @@ struct Game: not Copyable {
     var selected: Int64
     var controls: Controls
     var seconds: Float32
+    /// 0 to 1 over a day; see `daylight`.
+    var timeOfDay: Float32
     var running: Bool
 
     init(consuming renderer: Renderer, seed seed: Int64) {
@@ -197,6 +206,11 @@ struct Game: not Copyable {
         self.selected = 0;
         self.controls = Controls();
         self.seconds = 0.0;
+        // `AERIE_TIME` sets the starting time of day, 0 to 1.
+        self.timeOfDay = match getenv("AERIE_TIME") {
+            .Some(t) => Float32(parsing: t) ?? 0.1,
+            .None => 0.1
+        };
         self.running = true;
     }
 
@@ -215,7 +229,7 @@ struct Game: not Copyable {
         var cy: Int64 = 0;
         while cy < worldChunksY {
             let faces = if self.world.chunk(cx, cy, cz).isEmpty() { [] } else { meshChunk(self.world.padded(cx, cy, cz)) };
-            self.renderer.upload(cx, cy, cz, faces);
+            self.renderer.upload(cx, cy, cz, faces, self.world.lights(cx, cy, cz));
             cy = cy + 1;
         }
         let _ = self.meshed.insert(chunkKey(cx, 0, cz), true);
@@ -266,26 +280,28 @@ struct Game: not Copyable {
     }
 
     /// Re-mesh every loaded chunk that block (x, y, z) shows up in: its own,
-    /// and neighbors whose border or corner shading includes it.
-    mutating func remeshAround(x: Int64, y: Int64, z: Int64) {
+    /// and neighbors whose border or corner shading includes it. A glowing
+    /// block changes the lights of every chunk it can reach.
+    mutating func remeshAround(x: Int64, y: Int64, z: Int64, light light: Bool) {
+        let spread = if light { (lightRadius.toInt64() ?? 10) + 1 } else { 1 };
         var done: [Int64] = [];
-        var dy: Int64 = -1;
-        while dy <= 1 {
-            var dz: Int64 = -1;
-            while dz <= 1 {
-                var dx: Int64 = -1;
-                while dx <= 1 {
+        var dy = -spread;
+        while dy <= spread {
+            var dz = -spread;
+            while dz <= spread {
+                var dx = -spread;
+                while dx <= spread {
                     let (cx, cy, cz) = (chunkOf(x + dx), chunkOf(y + dy), chunkOf(z + dz));
                     let key = chunkKey(cx, cy, cz);
                     if World.inRange(cy) and not done.contains(key) and self.meshed.contains(chunkKey(cx, 0, cz)) {
                         done.append(key);
-                        self.renderer.upload(cx, cy, cz, meshChunk(self.world.padded(cx, cy, cz)));
+                        self.renderer.upload(cx, cy, cz, meshChunk(self.world.padded(cx, cy, cz)), self.world.lights(cx, cy, cz));
                     }
-                    dx = dx + 1;
+                    dx = dx + spread;
                 }
-                dz = dz + 1;
+                dz = dz + spread;
             }
-            dy = dy + 1;
+            dy = dy + spread;
         }
     }
 
@@ -299,8 +315,12 @@ struct Game: not Copyable {
             return;
         }
         if self.controls.breakPressed {
+            let glowed = match self.world.blockAt(hit.x, hit.y, hit.z) {
+                .Some(b) => b.emits,
+                .None => false
+            };
             if self.world.setBlock(hit.x, hit.y, hit.z, .Air) {
-                self.remeshAround(hit.x, hit.y, hit.z);
+                self.remeshAround(hit.x, hit.y, hit.z, light: glowed);
             }
             return;
         }
@@ -308,8 +328,9 @@ struct Game: not Copyable {
         if self.player.overlaps(hit.beforeX, hit.beforeY, hit.beforeZ) {
             return;
         }
-        if self.world.setBlock(hit.beforeX, hit.beforeY, hit.beforeZ, hotbar(self.selected)) {
-            self.remeshAround(hit.beforeX, hit.beforeY, hit.beforeZ);
+        let block = hotbar(self.selected);
+        if self.world.setBlock(hit.beforeX, hit.beforeY, hit.beforeZ, block) {
+            self.remeshAround(hit.beforeX, hit.beforeY, hit.beforeZ, light: block.emits);
         }
     }
 
@@ -321,19 +342,26 @@ struct Game: not Copyable {
         if self.controls.slotPressed >= 0 {
             self.selected = self.controls.slotPressed;
         }
-        // Long frames (a stall, a debug build) mustn't launch the player
-        // through the floor.
-        let step = if dt > 0.05 { 0.05 } else { dt };
-        self.player.update(self.controls, self.world, dt: step);
+        // Physics in steps of at most 50 ms, so a slow frame can't launch
+        // the player through the floor; a long stall is dropped.
+        var remaining = if dt > 0.25 { 0.25 } else { dt };
+        while remaining > 0.0 {
+            let step = if remaining > 0.05 { 0.05 } else { remaining };
+            self.player.update(self.controls, self.world, dt: step);
+            remaining = remaining - step;
+        }
         self.useBlocks();
-        self.controls.clearPresses();
         self.stream();
-        // A low sun that slowly circles.
-        let angle = 0.6 + self.seconds * 0.05;
-        let sun = Vec3(x: angle.cos(), y: -0.7, z: angle.sin()).normalized;
+        // T skips ahead a quarter of a day.
+        if self.controls.timePressed {
+            self.timeOfDay = self.timeOfDay + 0.25;
+        }
+        self.timeOfDay = self.timeOfDay + dt / dayLength;
+        self.timeOfDay = self.timeOfDay - self.timeOfDay.floor();
+        self.controls.clearPresses();
         let view = self.player.camera;
         let overlay = hud(self.renderer.width, self.renderer.height, self.selected, self.player.gliding);
-        try self.renderer.draw(view.view(), eye: view.position, sun: sun, overlay: overlay);
+        try self.renderer.draw(view.view(), eye: view.position, light: daylight(self.timeOfDay), overlay: overlay);
         .Ok(())
     }
 }
