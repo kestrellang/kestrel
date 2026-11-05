@@ -99,7 +99,9 @@ Rules:
 - One read provider per member: `get`, `modifying get`, `ref` or
   `modifying ref` (E619).
 - `modifying` accessors need `self`, so static and global members can't use
-  them (E636), and protocols can't declare them (E621).
+  them (E636), and protocols can't declare them (E621). A protocol can
+  require a plain `ref` / `mutating ref` place, though (see
+  [references](references.md)).
 - A `modifying` read can't witness a protocol's `{ get }` requirement, since
   the requirement promises reads don't mutate (E477).
 

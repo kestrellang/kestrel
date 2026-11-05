@@ -543,9 +543,9 @@ impl OssaBodyCtx<'_, '_> {
             .cloned()
     }
 
-    /// Replay an `Indirection` peel: emit the `pointeeRef()` / `pointeeMutRef()`
-    /// accessor call(s) on member-access base `base`, returning the final
-    /// `&Target` / `&mutating Target` pointee view. `mutating` selects the
+    /// Replay an `Indirection` peel: emit the `value` place's `ref` /
+    /// `mutating ref` witness call(s) on member-access base `base`, returning
+    /// the final `&Target` / `&mutating Target` pointee view. `mutating` selects the
     /// write accessor; each level's result is the next level's receiver
     /// (nested `RcBox[Pointer[T]]`). The returned view is then projected
     /// (field) or passed as a receiver (method) by the caller.
@@ -575,14 +575,13 @@ impl OssaBodyCtx<'_, '_> {
             };
             self.ctx.register_name(method);
             // Pass the POINTEE type as the result type, NOT `&Target`: the
-            // callee's `CallableRefReturn` (`pointeeRef -> &Target`) drives
+            // callee's `CallableRefReturn` (`value.ref -> &Target`) drives
             // `emit_call_inner` to register the result @guaranteed as the
             // pointee VIEW (holding the address) — exactly like `arr.at(i)`.
             // Passing `&Target` would register an @owned pointer whose
             // StructExtract reads the pointer's bytes as the pointee (segfault).
             let target_ty = lower_resolved_ty(self.ctx, &peel.target);
-            let type_args = self.prepend_receiver_type_args(recv_ty, vec![]);
-            let callee = Callee::direct_with_args(method, type_args, None);
+            let callee = self.place_accessor_callee(method, recv_ty, vec![]);
             let ref_val = self.emit_call_returning(callee, vec![recv_arg], target_ty);
             recv_ty = target_ty;
             recv_arg = CallArg {
@@ -595,8 +594,9 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// Store `value` into `field_name` of an `Indirection` pointee reached by a
-    /// write peel: get the `&mutating Target` view via `pointeeMutRef()`, take
-    /// the field's address through it, and `StoreAssign` (drops the old value).
+    /// write peel: get the `&mutating Target` view via `value`'s `mutating
+    /// ref`, take the field's address through it, and `StoreAssign` (drops
+    /// the old value).
     /// `rhs` is lowered first (pinned evaluation order).
     fn lower_indirection_field_store(
         &mut self,
@@ -636,7 +636,7 @@ impl OssaBodyCtx<'_, '_> {
         field_name: &str,
     ) -> ValueId {
         // Indirection read peel: `wrapper.field` where the wrapper has no
-        // `field` → resolve it on the pointee, reached via `pointeeRef()`.
+        // `field` → resolve it on the pointee, reached via `value`'s `ref`.
         if let Some(peels) = self.indirection_peels_of(expr_id) {
             let view = self.lower_indirection_chain(base, &peels, false);
             let result_ty = self.resolve_expr_type(expr_id);
@@ -1040,7 +1040,8 @@ impl OssaBodyCtx<'_, '_> {
         value: HirExprId,
     ) -> ValueId {
         // Indirection write peel: `wrapper.field = v` where the wrapper has no
-        // `field` → store through the pointee, reached via `pointeeMutRef()`.
+        // `field` → store through the pointee, reached via `value`'s
+        // `mutating ref`.
         if let HirExpr::Field { base, name, .. } = &self.hir.exprs[target]
             && let Some(peels) = self.indirection_peels_of(target)
         {

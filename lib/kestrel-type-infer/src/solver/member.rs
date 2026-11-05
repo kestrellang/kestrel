@@ -330,9 +330,9 @@ pub(super) fn member_not_found_error(
 /// Lazy `Indirection` member peel. When member `name` was not found on the
 /// concrete nominal `recv_kind`, but its entity conforms to the `Indirection`
 /// protocol, this:
-///   1. resolves the concrete `pointeeRef`/`pointeeMutRef` accessors on the
-///      wrapper and records an `IndirectionPeel` for MIR (appending → the
-///      outer→inner chain for nested wrappers), and
+///   1. records an `IndirectionPeel` for MIR with the `value` requirement's
+///      `ref` / `mutating ref` accessors (appending → the outer→inner chain
+///      for nested wrappers), and
 ///   2. emits an `Associated` constraint binding a fresh TyVar to the
 ///      wrapper's `Indirection.Target` (reusing `solve_associated`),
 ///
@@ -366,19 +366,21 @@ pub(crate) fn try_indirection_peel(
         return None;
     }
 
-    // Resolve the concrete pointee accessors on the wrapper (for MIR replay).
-    // `pointeeRef` is required by `Indirection`; `pointeeMutRef` only exists on
-    // `MutableIndirection` conformers (None ⇒ read-only ⇒ writes are D2).
-    let read_method = ctx
-        .resolver
-        .resolve_member(recv_kind, "pointeeRef", &[])
-        .ok()?
-        .entity;
+    // The pointee accessors MIR replays: the protocol requirements' `ref` /
+    // `mutating ref`, dispatched through the wrapper's witness table. The
+    // write accessor exists only for a `MutableIndirection` conformer (None
+    // ⇒ read-only ⇒ writes are D2).
+    let read_method = crate::indirection_accessor(ctx.query_ctx, ctx.root, false)?;
     let mut_method = ctx
-        .resolver
-        .resolve_member(recv_kind, "pointeeMutRef", &[])
-        .ok()
-        .map(|r| r.entity);
+        .query_ctx
+        .query(ResolveBuiltin {
+            builtin: Builtin::MutableIndirection,
+            root: ctx.root,
+        })
+        .filter(|&mutable| {
+            crate::conformance::type_satisfies(ctx.query_ctx, &w_hir, mutable, ctx.root)
+        })
+        .and_then(|_| crate::indirection_accessor(ctx.query_ctx, ctx.root, true));
 
     // Pointee type = wrapper's `Indirection.Target`. Reuse the assoc-type
     // machinery via an `Associated` constraint on a fresh TyVar.

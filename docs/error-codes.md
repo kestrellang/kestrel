@@ -188,6 +188,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E402 | '{B}' cannot box an existential: {reason} | `any[B] P` names a box that cannot hold a raw existential. `B` needs exactly one type parameter declared `not Sized`, a conformance to `ExistentialBox`, and no stored field holding `T` by value. Reasons: `it must have exactly one type parameter`, `its type parameter is not declared 'not Sized'`, `it does not conform to 'ExistentialBox'`, `field '{f}' stores '{T}' by value`. |
 | E403 | '{T}' may be unsized here ('where {T}: not Sized'), so it can only be used behind a pointer or as the last stored field | A `not Sized` type parameter used by value in a signature or a non-tail field. Move by-value members into an extension `where T: Sized`. |
 | E404 | the box in 'any[...]' is written without type arguments: '{suggestion}' / must name a box type | `any[B] P` takes the box unapplied (`any[RcBox] P`, not `any[RcBox[T]] P`), and it must be a type name. Emitted by HIR lowering. |
+| E405 | property '{name}' must lend a reference (\`ref\` / \`mutating ref\`) to satisfy protocol '{proto}' | The protocol requires `{ ref }` or `{ ref mutating ref }`, and the witness is a computed property without that accessor (a `get` returns a copy, not the place). Declare the ref accessor, or make the property stored. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |
@@ -509,12 +510,13 @@ members and `lazy` properties.
 |---|---|---|
 | E619 | duplicate read provider: this member declares more than one of \`get\`, \`modifying get\`, \`ref\` and \`modifying ref\` | Reads need exactly one provider. |
 | E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. |
-| E621 | \`ref\` and \`modifying\` accessors are not allowed in protocols or protocol extensions | Declare them on concrete types only. |
+| E621 | a protocol can only require \`ref\` / \`mutating ref\`: ref accessor bodies and \`modifying\` accessors are not allowed in protocols or protocol extensions | A protocol requires a place with bodyless clauses (`var value: T { ref mutating ref }`); bodies and `modifying` accessors belong on concrete types. A protocol extension can't add a ref requirement. |
 | E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a read provider; add one. |
 | E636 | \`modifying\` accessors need an instance receiver | A static member or global has no `self` to modify; use a plain `get` / `ref`. |
 | E637 | a failable/throwing member needs a read accessor · a failable/throwing place cannot have a \`set\` accessor | A failable member (`var x?: T`, `subscript(...)? -> T`) reads as `Optional`, a throwing one (`-> T throws E` with accessors) as `Result`; neither can be assigned. Write through it with a `mutating ref` (`Optional[&mutating T]` / `Result[&mutating T, E]`) and a `&mutating` payload binder. |
 | E638 | (varies) | `willSet` / `didSet` on anything but an instance stored `var` of a struct or enum: a `let`, static or global property, a subscript, a failable member, a protocol member, or mixed with `get`/`set`/`ref`. Also `return` in an observer body, which would skip the store. |
 | E639 | (varies) | `lazy` on anything but an instance `var` of a struct or enum with a type annotation and an `= expr` initializer and no accessors; also a `lazy` property whose type isn't Copyable. |
+| E640 | a \`ref\` accessor needs a body outside a protocol | A bodyless `ref` / `mutating ref` only declares a protocol requirement. Write `ref { … }`, or drop the accessor block for a stored property. |
 
 ## E624–E626 — Closure kinds
 
