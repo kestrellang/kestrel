@@ -4377,10 +4377,10 @@ Unicode case mapping, use `lowercased()`.
 
 _Defined in `lang/std/text/str.ks`._
 
-#### function `pad`
+#### function `padded`
 
 ```kestrel
-public func pad(leading: Int64, with: Char) -> String
+public func padded(leading: Int64, with: Char) -> String
 ```
 
 Returns the string padded at the start with `char` so the
@@ -4392,15 +4392,15 @@ returns a copy unchanged.
 ##### Examples
 
 ```
-"42".pad(leading: 5, with: '0');  // "00042"
+"42".padded(leading: 5, with: '0');  // "00042"
 ```
 
 _Defined in `lang/std/text/str.ks`._
 
-#### function `pad`
+#### function `padded`
 
 ```kestrel
-public func pad(trailing: Int64, with: Char) -> String
+public func padded(trailing: Int64, with: Char) -> String
 ```
 
 Returns the string padded at the end with `char` so the
@@ -4412,7 +4412,7 @@ returns a copy unchanged.
 ##### Examples
 
 ```
-"42".pad(trailing: 5, with: '.');  // "42..."
+"42".padded(trailing: 5, with: '.');  // "42..."
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4978,7 +4978,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8`
 
 ```kestrel
-public init[S](fromUtf8: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](utf8: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Constructs a string from validated UTF-8 bytes, returning `null`
@@ -4987,7 +4987,7 @@ if the input is not valid UTF-8.
 ##### Examples
 
 ```
-let s = String(fromUtf8: "héllo".bytes);  // Some("héllo")
+let s = String(utf8: "héllo".bytes);  // Some("héllo")
 ```
 
 _Defined in `lang/std/text/string.ks`._
@@ -4995,7 +4995,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8 Lossy`
 
 ```kestrel
-public init[S](fromUtf8Lossy: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](utf8Lossy: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Constructs a string from bytes, replacing invalid UTF-8 sequences
@@ -5004,7 +5004,7 @@ with the Unicode replacement character (U+FFFD).
 ##### Examples
 
 ```
-let s = String(fromUtf8Lossy: mixedBytes);  // invalid bytes become '�'
+let s = String(utf8Lossy: mixedBytes);  // invalid bytes become '�'
 ```
 
 _Defined in `lang/std/text/string.ks`._
@@ -5012,7 +5012,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8 Unchecked`
 
 ```kestrel
-public init[S](fromUtf8Unchecked: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](utf8Unchecked: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Constructs a string by copying bytes without UTF-8 validation.

@@ -2943,10 +2943,10 @@ The receiver compared less than the argument.
 
 _Defined in `lang/std/core/ordering.ks`._
 
-#### function `reverse`
+#### function `reversed`
 
 ```kestrel
-public func reverse() -> Ordering
+public func reversed() -> Ordering
 ```
 
 Swaps `Less` and `Greater`; leaves `Equal` alone. Useful for sorting
@@ -2955,8 +2955,8 @@ in reverse without writing a second comparator.
 ##### Examples
 
 ```
-Ordering.Less.reverse()     // .Greater
-Ordering.Equal.reverse()    // .Equal
+Ordering.Less.reversed()     // .Greater
+Ordering.Equal.reversed()    // .Equal
 ```
 
 _Defined in `lang/std/core/ordering.ks`._

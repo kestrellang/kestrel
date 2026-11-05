@@ -1477,15 +1477,3 @@ resolve to a concrete type.
 
 _Defined in `lang/std/result/result.ks`._
 
-## function `decayOptionalRef`
-
-```kestrel
-public func decayOptionalRef[T](Optional[&T]) -> Optional[T]
-```
-
-Copies the payload out of a lent `Optional[&T]`. The compiler calls this
-when such a value is bound (`let f = b.first`): the binding owns a copy
-and stops borrowing the place, the same way binding a `&T` copies.
-
-_Defined in `lang/std/result/optional.ks`._
-
