@@ -8,6 +8,8 @@ let depthFormat: TextureFormat = .Depth24Plus;
 let shadowFormat: TextureFormat = .Depth32Float;
 /// Multisampling: samples per pixel.
 let samples: Int64 = 4;
+/// The usual vertical field of view, in degrees; it widens with speed.
+let baseFieldOfView: Float32 = 70.0;
 /// The block atlas's tiles are this many pixels square.
 let tileSize: Int64 = 16;
 
@@ -81,6 +83,8 @@ struct Renderer: not Copyable {
     var overlay: OverlayPass
     /// How far, in blocks, chunks are drawn; fog closes in before it.
     var viewDistance: Float32
+    /// The vertical field of view, in degrees.
+    var fieldOfView: Float32
     /// How many chunk meshes passed frustum culling last frame, and how
     /// many draw calls they took.
     var drawnChunks: Int64
@@ -152,7 +156,7 @@ struct Renderer: not Copyable {
             depth: depth, color: color, skyPipeline: skyPipeline, worldGroup: worldGroup,
             shadowMap: shadowMap, shadowGroup: shadowGroup, uniformBuffer: uniformBuffer,
             chunks: chunks, models: models, overlay: overlay,
-            viewDistance: 160.0, drawnChunks: 0, chunkDraws: 0
+            viewDistance: 160.0, fieldOfView: baseFieldOfView, drawnChunks: 0, chunkDraws: 0
         ))
     }
 
@@ -160,6 +164,9 @@ struct Renderer: not Copyable {
     mutating func resize(width: Int64, height: Int64) {
         self.width = width;
         self.height = height;
+        guard width > 0 and height > 0 else {
+            return;
+        }
         self.surface.configure(device: self.device, format: self.format, width: width, height: height);
         self.depth = Renderer.makeDepth(self.device, width, height);
         self.color = Renderer.makeColor(self.device, self.format, width, height);
@@ -175,6 +182,10 @@ struct Renderer: not Copyable {
     /// `time` seconds (which drifts the clouds). The first `casters` of
     /// `models` cast shadows.
     mutating func draw(view: Mat4, eye eye: Vec3, light light: Daylight, time time: Float32, models models: [ModelBox], casters casters: Int64, overlay overlay: [OverlayQuad]) -> () throws WgpuError {
+        // A hidden or collapsed window has nothing to draw into.
+        guard self.width > 0 and self.height > 0 else {
+            return .Ok(());
+        }
         let (viewProj, lightViewProj) = self.writeUniforms(view, eye: eye, light: light, time: time);
         let list = self.chunks.cull(Frustum(viewProj: viewProj), shadow: Frustum(viewProj: lightViewProj), eye: eye);
         let quadCount = self.overlay.write(self.device, quads: overlay, width: self.width, height: self.height);
@@ -220,7 +231,7 @@ struct Renderer: not Copyable {
     /// view-projections.
     func writeUniforms(view: Mat4, eye eye: Vec3, light light: Daylight, time time: Float32) -> (Mat4, Mat4) {
         let aspect = Float32(from: self.width) / Float32(from: self.height);
-        let projection = Mat4.perspective(fovY: radians(70.0), aspect: aspect, near: 0.1, far: self.viewDistance + 64.0);
+        let projection = Mat4.perspective(fovY: radians(self.fieldOfView), aspect: aspect, near: 0.1, far: self.viewDistance + 64.0);
         let viewProj = projection * view;
         let lightViewProj = light.shadowView(eye);
         self.device.write(self.uniformBuffer, value: Uniforms(

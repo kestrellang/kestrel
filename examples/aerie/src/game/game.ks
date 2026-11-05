@@ -114,6 +114,7 @@ struct Game: not Copyable {
         self.stream();
         self.flock.update(dt, center: self.player.position, reach: self.renderer.viewDistance.clamp(32.0, 96.0), generator: self.world.generator, time: self.seconds);
         let view = self.view();
+        self.widenView(dt);
         self.sky.update(dt, lairness: self.world.generator.lairness(view.position.x, view.position.z));
         self.fps.count(dt, toggle: self.controls.fpsPressed);
         self.notice.update(dt);
@@ -121,6 +122,14 @@ struct Game: not Copyable {
         let (models, casters) = self.models();
         try self.renderer.draw(view.view(), eye: view.position, light: self.sky.daylight, time: self.seconds, models: models, casters: casters, overlay: self.overlay());
         .Ok(())
+    }
+
+    /// Widen the view as you soar faster, up to 25 degrees, easing in and
+    /// out, so speed reads as speed.
+    mutating func widenView(dt: Float32) {
+        let fast = if self.player.gliding { ((self.player.velocity.length - 8.0) * 0.8).clamp(0.0, 25.0) } else { 0.0 };
+        let fov = self.renderer.fieldOfView;
+        self.renderer.fieldOfView = fov + (baseFieldOfView + fast - fov) * (dt * 3.0).clamp(0.0, 1.0);
     }
 
     /// Through the player's eyes; on the title screen, turning slowly
@@ -151,6 +160,11 @@ struct Game: not Copyable {
     mutating func play(dt: Float32) {
         if self.controls.flyPressed {
             self.player.flying = not self.player.flying;
+        }
+        // Once per press, before the physics steps, so the frame's own
+        // jump off the ground isn't taken for a double jump.
+        if self.controls.jumpPressed {
+            self.player.boost();
         }
         self.hotbar.update(self.controls);
         self.player.look(yaw: self.controls.mouseX * mouseSensitivity, pitch: -self.controls.mouseY * mouseSensitivity);
