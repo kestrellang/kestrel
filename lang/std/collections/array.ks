@@ -612,10 +612,11 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
         get { I.lendClamped(index, self.asSlice()) }
     }
 
-    /// A copy of the element at `index` modulo `count` (negative indices
-    /// count from the end), or `.None` for an empty array.
-    public subscript(wrapped index: Int64) -> T? {
-        get { self.asSlice()(wrapped: index) }
+    /// The element at `index` modulo `count` (negative indices count from
+    /// the end), in place, or `.None` for an empty array.
+    public subscript(wrapped index: Int64)? -> T {
+        ref { self.asSlice().lendWrapped(index) }
+        mutating ref { self.asMutableSlice().lendMutatingWrapped(index) }
     }
 
     /// COW write barrier — deep-copies storage if shared.

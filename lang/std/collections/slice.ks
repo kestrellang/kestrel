@@ -103,18 +103,25 @@ extend Slice[T] {
         get { I.lendClamped(index, self) }
     }
 
-    /// A copy of the element at `index` modulo `count` (negative indices
-    /// count from the end), or `.None` for an empty slice.
-    public subscript(wrapped index: Int64) -> T? {
-        get {
-            let n = self.count;
-            if n == 0 {
-                return .None;
-            }
-            var i = index % n;
-            if i < 0 { i = i + n }
-            .Some(self.pointer.offset(by: i).read())
-        }
+    /// The element at `index` modulo `count` (negative indices count from
+    /// the end), in place, or `.None` for an empty slice.
+    public subscript(wrapped index: Int64)? -> T {
+        ref { self.lendWrapped(index) }
+        mutating ref { self.lendMutatingWrapped(index) }
+    }
+
+    /// Lends the element `xs(wrapped: index)` names.
+    internal func lendWrapped(consuming index: Int64) -> Optional[&T] {
+        let i = wrapSliceIndex(index, self.count);
+        if i < 0 { return .None; }
+        .Some(self.pointer.offset(by: i).value)
+    }
+
+    /// Like `lendWrapped`, lent mutably.
+    internal mutating func lendMutatingWrapped(consuming index: Int64) -> Optional[&mutating T] {
+        let i = wrapSliceIndex(index, self.count);
+        if i < 0 { return .None; }
+        .Some(self.pointer.offset(by: i).mutatingValue)
     }
 }
 
@@ -398,6 +405,15 @@ fileprivate func checkedSliceRange(range: Range[Int64], count: Int64) -> Range[I
         fatalError("Slice range out of bounds");
     }
     range
+}
+
+/// `index` modulo `count` (negative counts from the end), or `-1` when
+/// `count` is 0.
+fileprivate func wrapSliceIndex(index: Int64, count: Int64) -> Int64 {
+    if count == 0 { return -1; }
+    let i = index % count;
+    if i < 0 { return i + count; }
+    i
 }
 
 /// `range` clamped into `0..<count`.

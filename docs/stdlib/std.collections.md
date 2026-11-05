@@ -1261,11 +1261,11 @@ _Defined in `lang/std/collections/array.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript(wrapped: Int64) -> T? { get }
+public subscript(wrapped: Int64) -> T? { ref mutating ref }
 ```
 
-A copy of the element at `index` modulo `count` (negative indices
-count from the end), or `.None` for an empty array.
+The element at `index` modulo `count` (negative indices count from
+the end), in place, or `.None` for an empty array.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -2937,16 +2937,15 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### subscript `Lookup`
 
 ```kestrel
-public subscript(K) -> V? { get set }
+public subscript(K) -> V? { ref mutating ref }
 ```
 
-Reads the value for `key` (or `None` if absent), or assigns
-to insert/remove the entry.
+The value stored for `key`, in place, or `.None` when absent.
 
-The assignment form treats `Some(v)` as insert/update and
-`None` as delete — so `dict(k) = None` is the inline form of
-`dict.remove(k)`. For a non-`Optional` getter use
-`dict(key, default: ...)` or `dict(unwrap: key)`.
+Reads lend `Optional[&V]` (a binding copies it out); a `&mutating`
+payload binder updates the stored value in place with one lookup.
+The place never inserts or removes: use `insert(key, value)`,
+`remove(key)`, or `dict(key, default: v)` to insert when missing.
 
 ##### Examples
 
@@ -2954,8 +2953,7 @@ The assignment form treats `Some(v)` as insert/update and
 var dict = ["a": 1, "b": 2];
 dict("a");           // Some(1)
 dict("z");           // None
-dict("c") = 3;       // inserts "c": 3
-dict("a") = None;    // removes "a"
+if let .Some(&mutating v) = dict("a") { v += 10; }  // "a": 11
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -2992,29 +2990,27 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### subscript `Unwrap`
 
 ```kestrel
-public subscript(unwrap: K) -> V { get set }
+public subscript(unwrap: K) -> V { ref mutating ref }
 ```
 
-Reads or writes the value for `key`, panicking on the read
-when the key is absent.
+The value for `key`, in place, panicking when the key is absent.
 
-Use when you've already verified the key exists (or when its
-absence indicates a bug). The setter is equivalent to
-`insert(key, newValue)` and never panics. For a non-panicking
-read use `dict(key)` or `dict(key, default: ...)`.
+Use when absence is a bug. Reads lend `&V` and writes update the
+stored value in place; assigning to a missing key panics too, so
+insert with `insert(key, value)` or `dict(key, default: v)`.
 
 ##### Errors
 
-Read panics with
-`"Dictionary subscript(unwrap:): key not found"` when the key
-is absent.
+Panics with `"Dictionary subscript(unwrap:): key not found"` when
+the key is absent.
 
 ##### Examples
 
 ```
-let dict = ["a": 1, "b": 2];
-dict(unwrap: "a");  // 1
-dict(unwrap: "z");  // PANIC: key not found
+var dict = ["a": 1, "b": 2];
+dict(unwrap: "a");       // 1
+dict(unwrap: "a") += 1;  // "a": 2
+dict(unwrap: "z");       // PANIC: key not found
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3045,23 +3041,21 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### subscript `With Default`
 
 ```kestrel
-public subscript(K, default: V) -> V { get }
+public subscript(K, default: V) -> V { get mutating ref }
 ```
 
-Reads the value for `key`, falling back to `defaultValue` when
-the key is absent.
+The value for `key`, or `defaultValue` when absent.
 
-Read-only and *non-inserting* — the default value is returned
-but never stored. To upsert with a default, use `upsert(...)`
-or `update(...)`.
+Reading never stores the default. Writing inserts `defaultValue`
+first when the key is missing, then updates the stored value in
+place, so `counts(word, default: 0) += 1` is one lookup.
 
 ##### Examples
 
 ```
-let dict = ["a": 1, "b": 2];
-dict("a", default: 0);  // 1
-dict("z", default: 0);  // 0
-dict("z");              // still None — default wasn't stored
+var dict = ["a": 1];
+dict("z", default: 0);       // 0, nothing stored
+dict("z", default: 0) += 5;  // inserts "z": 5
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3350,11 +3344,10 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `first`
 
 ```kestrel
-public func first(where: (K, V) -> Bool) -> (K, V)?
+public func first(where: (K, V) -> Bool) -> Optional[(&K, &V)]
 ```
 
-Returns *some* entry matching `predicate(key, value)`, or
-`None`.
+Lends *some* entry matching `predicate(key, value)`, or `None`.
 
 "First" is determined by bucket order, which is hash-dependent
 and unspecified — treat the result as arbitrary among matching
@@ -3401,8 +3394,9 @@ Inserts `(key, value)`, replacing any existing entry for `key`,
 and returns the old value (or `None`) on update.
 
 Triggers `ensureCapacity()` and may resize before the insert
-lands. The cached hash is computed once here. For
-transform-based updates see `update(...)` and `upsert(...)`.
+lands. The cached hash is computed once here. To update a value in
+place use `if let .Some(&mutating v) = dict(key)` or
+`dict(key, default: v) += …`.
 
 ##### Examples
 
@@ -3431,6 +3425,17 @@ Reads more naturally than the comparison.
 [:].isEmpty;           // true
 ["a": 1].isEmpty;      // false
 ```
+
+_Defined in `lang/std/collections/dictionary.ks`._
+
+#### function `keyAt`
+
+```kestrel
+internal func keyAt(consuming Int64) -> Optional[&K]
+```
+
+Lends the key in bucket `slot`, or `.None` for an empty or deleted
+slot, or one out of range.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
@@ -3549,33 +3554,6 @@ let b = ["y": 20, "z": 30];
 let merged = a.merging(b) { (_, new) in new };
 // merged == ["x": 1, "y": 20, "z": 30]
 // a is unchanged
-```
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-#### function `modify`
-
-```kestrel
-public mutating func modify[R](K, (V) -> R) -> R?
-```
-
-Mutates the value for `key` in place and returns the closure's
-result, or `None` (without invoking `body`) if the key is absent.
-
-The interim form of in-place value access — the conditional
-ref-returning lookup (`find(key:) -> Optional[&V]`) waits for
-`Optional[&T]`. Today this is a bucket read → mutate → write-back
-under the hood; it can upgrade to true in-place mutation later with
-no API change. One probe (no re-hash on write-back, unlike
-`update(...)`); triggers COW only when the key is present.
-
-##### Examples
-
-```
-var dict = ["a": 1];
-dict.modify("a") { (mutating v) in v = v + 1 };  // .Some(())
-dict.modify("z") { (mutating v) in v = v + 1 };  // .None; body not invoked
-dict("a");  // Some(2)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3717,6 +3695,16 @@ dict.shrinkToFit();  // capacity drops from 1024 to 8
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
+#### field `slotCount`
+
+```kestrel
+internal var slotCount: Int64 { get }
+```
+
+Number of bucket slots, for slot-wise key scans (`Set`).
+
+_Defined in `lang/std/collections/dictionary.ks`._
+
 #### function `sumValues`
 
 ```kestrel
@@ -3734,58 +3722,6 @@ Empty dictionaries return `V()` — for `Int64` that's `0`, for
 ```
 ["a": 1, "b": 2, "c": 3].sumValues();  // 6
 [:].sumValues();                        // 0 — V's default
-```
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-#### function `update`
-
-```kestrel
-public mutating func update(K, with: (V) -> V) -> Bool
-```
-
-Applies `transform` to the existing value for `key` and writes
-the result back; returns whether the key was found.
-
-**Deprecated:** prefer `modify(...)`, which mutates in place with
-a single probe (no re-hash on write-back) and returns the
-closure's result. `update` will be removed in a future release.
-
-No-op when the key is absent — for "update or insert" semantics
-use `upsert(...)`. Internally re-uses `insert(...)`, so the
-hash is recomputed.
-
-##### Examples
-
-```
-var dict = ["a": 1, "b": 2];
-dict.update("a") { (v) in v * 10 };  // true;  dict("a") == Some(10)
-dict.update("z") { (v) in v * 10 };  // false; dict unchanged
-```
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-#### function `upsert`
-
-```kestrel
-public mutating func upsert(K, default: V, with: (V) -> V)
-```
-
-Inserts `transform(defaultValue)` for a new key, or
-`transform(existing)` for an existing one.
-
-The classic "increment-or-set-to-1" pattern. `defaultValue` is
-passed through `transform` even on the insert path, so the same
-closure handles both branches uniformly. For the no-insert
-variant see `update(...)`.
-
-##### Examples
-
-```
-var counts: [String: Int64] = [:];
-counts.upsert("apple", default: 0) { (n) in n + 1 };
-counts.upsert("apple", default: 0) { (n) in n + 1 };
-counts("apple");  // Some(2)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -5333,10 +5269,10 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `first`
 
 ```kestrel
-public func first(where: (T) -> Bool) -> T?
+public func first(where: (T) -> Bool) -> Optional[&T]
 ```
 
-Returns *some* element matching `predicate`, or `None`.
+Lends *some* element matching `predicate`, or `None`.
 
 "First" is determined by iteration order, which is
 unspecified — treat the result as arbitrary among matching
@@ -5708,10 +5644,10 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `max`
 
 ```kestrel
-public func max() -> T? where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
+public func max() -> Optional[&T] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
 ```
 
-Returns the largest element, or `None` for an empty set.
+Lends the largest element, or `None` for an empty set.
 
 Single linear pass. Mirror of `min()`.
 
@@ -5727,10 +5663,10 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `min`
 
 ```kestrel
-public func min() -> T? where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
+public func min() -> Optional[&T] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
 ```
 
-Returns the smallest element, or `None` for an empty set.
+Lends the smallest element, or `None` for an empty set.
 
 Single linear pass; ties go to the first occurrence in
 iteration order (which is unspecified, so equally-minimal
@@ -6327,6 +6263,26 @@ Like `lend(start:count:)`, for writing through.
 
 _Defined in `lang/std/collections/slice.ks`._
 
+#### function `lendMutatingWrapped`
+
+```kestrel
+internal mutating func lendMutatingWrapped(consuming Int64) -> Optional[&mutating T]
+```
+
+Like `lendWrapped`, lent mutably.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendWrapped`
+
+```kestrel
+internal func lendWrapped(consuming Int64) -> Optional[&T]
+```
+
+Lends the element `xs(wrapped: index)` names.
+
+_Defined in `lang/std/collections/slice.ks`._
+
 #### function `partition`
 
 ```kestrel
@@ -6527,11 +6483,11 @@ _Defined in `lang/std/collections/slice.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript(wrapped: Int64) -> T? { get }
+public subscript(wrapped: Int64) -> T? { ref mutating ref }
 ```
 
-A copy of the element at `index` modulo `count` (negative indices
-count from the end), or `.None` for an empty slice.
+The element at `index` modulo `count` (negative indices count from
+the end), in place, or `.None` for an empty slice.
 
 _Defined in `lang/std/collections/slice.ks`._
 

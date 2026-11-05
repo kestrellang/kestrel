@@ -206,7 +206,6 @@ That's the entire model. There are no lifetime parameters, no `'a`, no borrow an
 
 ## Not Yet Supported
 
-- **Dictionary reference APIs** (and `Set` lookups, which sit on the dictionary) — planned, pending dictionary storage work. Interim: `Dictionary.modify(key) { (mutating v) in ... }` for in-place updates.
 - **`Hashable`/`Matchable` conformances for `&T`** — reject cleanly for now.
 - **Storable references** (escaping the root's scope, lifetime annotations) — permanently out of scope by design.
 
