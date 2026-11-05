@@ -63,9 +63,10 @@ the hotbar is a frosted tray with numbered slots and the selected block's
 name, and the title screen has an outlined, bobbing name with twinkles.
 
 Controls: WASD to walk, arrow keys to look, Space to jump (hold to glide),
-Q to break, E to place, 1 to 9 for the hotbar, T to skip time, P to save, F to fly (Space and Left
+Q to break, E to place, 1 to 9 for the hotbar, T to skip time, P to save, - and = to shrink or grow the view distance, F to fly (Space and Left
 Shift to rise and sink), Escape to save and quit, Enter to leave the title screen. `AERIE_FRAMES=n` quits after n
-frames.
+frames. `AERIE_VIEW=n` sets the view distance to n chunks (2 to 16, default 5); fog
+only covers the last quarter of it, so chunks fade in at the edge.
 
 ## Running
 

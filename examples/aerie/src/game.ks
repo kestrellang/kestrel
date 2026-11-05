@@ -24,6 +24,8 @@ struct Controls {
     var slotPressed: Int64 = -1
     var timePressed: Bool = false
     var savePressed: Bool = false
+    /// -1 or 1 to shrink or grow the view distance by a chunk, else 0.
+    var viewStep: Int64 = 0
 
     init() {}
 
@@ -53,6 +55,8 @@ struct Controls {
             .Digit9 => { if held { self.slotPressed = 8 } },
             .T => { if held { self.timePressed = true } },
             .P => { if held { self.savePressed = true } },
+            .Minus => { if held { self.viewStep = -1 } },
+            .Equals => { if held { self.viewStep = 1 } },
             _ => {}
         }
     }
@@ -65,6 +69,7 @@ struct Controls {
         self.slotPressed = -1;
         self.timePressed = false;
         self.savePressed = false;
+        self.viewStep = 0;
     }
 }
 
@@ -288,7 +293,7 @@ func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [
         color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: glow), bottom: Vec4(x: 1.0, y: 0.94, z: 0.80, w: glow), rim: Vec4(x: 0.22, y: 0.26, z: 0.46, w: glow * 0.9));
     quads.append(contentsOf: pressed);
     // The controls, on a frosted strip along the bottom.
-    let controls = "WASD MOVE  ARROWS LOOK  SPACE JUMP/GLIDE  Q BREAK  E PLACE  P SAVE";
+    let controls = "WASD MOVE  ARROWS LOOK  SPACE JUMP/GLIDE  Q BREAK  E PLACE  P SAVE  -/= VIEW";
     let controlScale: Float32 = 3.0;
     quads.append(rect(0.0, h - 48.0, w, 48.0, Vec4(x: 0.20, y: 0.22, z: 0.36, w: 0.45)));
     quads.append(rect(0.0, h - 48.0, w, 2.0, Vec4(x: 0.92, y: 0.94, z: 1.0, w: 0.40)));
@@ -297,8 +302,11 @@ func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [
     quads
 }
 
-/// How many chunk columns around the player are drawn.
-let viewRadius: Int64 = 5;
+/// How many chunk columns around the player are drawn, by default and at
+/// most; `AERIE_VIEW` and the - and = keys pick within the range.
+let defaultViewRadius: Int64 = 5;
+let minViewRadius: Int64 = 2;
+let maxViewRadius: Int64 = 16;
 /// Milliseconds per frame spent generating and meshing.
 let streamBudgetMs: Int64 = 6;
 
@@ -327,11 +335,19 @@ struct Game: not Copyable {
     /// A short message in the corner, shown while `noticeTime` > 0.
     var notice: String
     var noticeTime: Float32
+    /// How many chunk columns around the player are loaded and drawn.
+    var viewRadius: Int64
 
     /// A new world from `seed`, or the one in `save`.
     init(consuming renderer: Renderer, seed seed: Int64, save save: SaveState?) {
         self.renderer = renderer;
-        self.renderer.viewDistance = Float32(from: viewRadius * chunkSize);
+        // `AERIE_VIEW` sets the view distance in chunks.
+        let view = match getenv("AERIE_VIEW") {
+            .Some(v) => Int64(parsing: v) ?? defaultViewRadius,
+            .None => defaultViewRadius
+        };
+        self.viewRadius = view.clamp(minViewRadius, maxViewRadius);
+        self.renderer.viewDistance = Float32(from: self.viewRadius * chunkSize);
         let worldSeed = match save { .Some(s) => s.seed, .None => seed };
         self.world = World(worldSeed);
         self.meshed = Dictionary[Int64, Bool]();
@@ -399,8 +415,8 @@ struct Game: not Copyable {
     /// The nearest column still to generate, and the nearest one ready to
     /// mesh, around chunk column (pcx, pcz).
     func nextJobs(pcx: Int64, pcz: Int64) -> ((Int64, Int64)?, (Int64, Int64)?) {
-        let missing = nearestColumn(pcx, pcz, viewRadius + 1, { (x: Int64, z: Int64) in not self.world.hasColumn(x, z) });
-        let ready = nearestColumn(pcx, pcz, viewRadius, { (x: Int64, z: Int64) in
+        let missing = nearestColumn(pcx, pcz, self.viewRadius + 1, { (x: Int64, z: Int64) in not self.world.hasColumn(x, z) });
+        let ready = nearestColumn(pcx, pcz, self.viewRadius, { (x: Int64, z: Int64) in
             not self.meshed.contains(chunkKey(x, 0, z)) and self.world.neighborsReady(x, z)
         });
         (missing, ready)
@@ -429,8 +445,8 @@ struct Game: not Copyable {
                 }
             }
         }
-        self.world.unload(pcx, pcz, viewRadius + 2);
-        let keep = viewRadius + 1;
+        self.world.unload(pcx, pcz, self.viewRadius + 2);
+        let keep = self.viewRadius + 1;
         self.renderer.remove(where: { (key: Int64, x: Int64, z: Int64) in (x - pcx).abs() > keep or (z - pcz).abs() > keep });
         self.meshed.retain(where: { (key: Int64, done: Bool) in
             let (x, z) = columnOfKey(key);
@@ -548,6 +564,17 @@ struct Game: not Copyable {
         if self.controls.timePressed {
             self.timeOfDay = self.timeOfDay + 0.25;
         }
+        if self.controls.viewStep != 0 {
+            self.setViewRadius(self.viewRadius + self.controls.viewStep);
+        }
+    }
+
+    /// Load and draw `radius` chunk columns around the player, within the
+    /// allowed range; streaming fills in or drops columns to match.
+    mutating func setViewRadius(radius: Int64) {
+        self.viewRadius = radius.clamp(minViewRadius, maxViewRadius);
+        self.renderer.viewDistance = Float32(from: self.viewRadius * chunkSize);
+        self.notify("VIEW DISTANCE \(self.viewRadius) CHUNKS");
     }
 
     /// Show `text` in the corner for a few seconds.
