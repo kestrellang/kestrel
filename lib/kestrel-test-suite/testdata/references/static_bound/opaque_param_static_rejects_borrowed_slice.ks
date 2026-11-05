@@ -6,7 +6,7 @@
 
 module Test
 
-import std.collections.(Array, Sliceable)
+import std.collections.(Array, Slice, Sliceable)
 import std.memory.(UnsafeSlice, UnsafeSliceIterator)
 
 // A borrowing view: it holds a reference, so it is not `Static`.
@@ -15,7 +15,7 @@ struct Borrowed { let base: &Array[Int64] }
 extend Borrowed: Sliceable[Int64], Iterable {
     type Item = Int64
     type TargetIterator = UnsafeSliceIterator[Int64]
-    func asUnsafeSlice() -> UnsafeSlice[Int64] { self.base.asUnsafeSlice() }
+    func asSlice() -> &Slice[Int64] { self.base.asSlice() }
     func iter() -> UnsafeSliceIterator[Int64] { self.base.asUnsafeSlice().iter() }
 }
 

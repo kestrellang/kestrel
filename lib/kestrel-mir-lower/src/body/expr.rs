@@ -32,6 +32,7 @@ impl OssaBodyCtx<'_, '_> {
     /// Lower an HIR expression to a ValueId, applying promotion if needed.
     pub fn lower_expr(&mut self, expr_id: HirExprId) -> ValueId {
         let value = self.lower_expr_no_promote(expr_id);
+        let value = self.apply_optional_ref_decay(expr_id, value);
         let value = self.apply_kind_coercion(expr_id, value);
         self.apply_promotion(expr_id, value)
     }
@@ -119,8 +120,19 @@ impl OssaBodyCtx<'_, '_> {
     /// cross-kind closure coercion, or an existential conversion)? Such an
     /// expression must go through `lower_expr`: the place-oriented fast paths
     /// would hand back the unconverted source.
+    /// Copy a decaying `Optional[&T]` value out (`optional_ref_decays`).
+    fn apply_optional_ref_decay(&mut self, expr_id: HirExprId, value: ValueId) -> ValueId {
+        if !self.decays_optional_ref(expr_id) {
+            return value;
+        }
+        let lent = self.resolve_expr_type(expr_id);
+        let decayed = self.decayed_optional_ty(lent);
+        self.emit_optional_ref_decay(value, decayed)
+    }
+
     pub(crate) fn has_value_conversion(&self, expr_id: HirExprId) -> bool {
-        self.has_kind_coercion(expr_id)
+        self.decays_optional_ref(expr_id)
+            || self.has_kind_coercion(expr_id)
             || self
                 .typed
                 .as_ref()

@@ -815,14 +815,6 @@ _Defined in `lang/std/core/range.ks`._
 
 ### Implements `SliceIndex`
 
-#### typealias `SliceCheckedOutput`
-
-```kestrel
-type SliceCheckedOutput = Optional[&Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 #### typealias `SliceOutput`
 
 ```kestrel
@@ -851,6 +843,14 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ```kestrel
 public static func lendMutating(consuming ClosedRange[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming ClosedRange[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -3136,14 +3136,6 @@ _Defined in `lang/std/core/range.ks`._
 
 ### Implements `SliceIndex`
 
-#### typealias `SliceCheckedOutput`
-
-```kestrel
-type SliceCheckedOutput = Optional[&Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 #### typealias `SliceOutput`
 
 ```kestrel
@@ -3172,6 +3164,14 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ```kestrel
 public static func lendMutating(consuming Range[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming Range[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -3736,14 +3736,6 @@ _Defined in `lang/std/core/range.ks`._
 
 ### Implements `SliceIndex`
 
-#### typealias `SliceCheckedOutput`
-
-```kestrel
-type SliceCheckedOutput = Optional[&Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 #### typealias `SliceOutput`
 
 ```kestrel
@@ -3772,6 +3764,14 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ```kestrel
 public static func lendMutating(consuming RangeFrom[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming RangeFrom[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -4406,14 +4406,6 @@ _Defined in `lang/std/core/range.ks`._
 
 ### Implements `SliceIndex`
 
-#### typealias `SliceCheckedOutput`
-
-```kestrel
-type SliceCheckedOutput = Optional[&Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 #### typealias `SliceOutput`
 
 ```kestrel
@@ -4442,6 +4434,14 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ```kestrel
 public static func lendMutating(consuming RangeThrough[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming RangeThrough[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -4935,14 +4935,6 @@ _Defined in `lang/std/core/range.ks`._
 
 ### Implements `SliceIndex`
 
-#### typealias `SliceCheckedOutput`
-
-```kestrel
-type SliceCheckedOutput = Optional[&Slice[T]]
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 #### typealias `SliceOutput`
 
 ```kestrel
@@ -4971,6 +4963,14 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ```kestrel
 public static func lendMutating(consuming RangeUpTo[Int64], mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming RangeUpTo[Int64], mutating Slice[T]) -> Optional[&mutating Slice[T]]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._

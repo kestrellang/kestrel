@@ -601,8 +601,12 @@ impl OssaBodyCtx<'_, '_> {
         {
             return self.lower_expr(receiver_expr);
         }
-        let receiver_ty = self.resolve_expr_type(receiver_expr);
+        let mut receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
+        // `xs.first() ?? 0`: the operator works on the copied-out `Optional[T]`.
+        if self.decays_optional_ref(receiver_expr) {
+            receiver_ty = self.decayed_optional_ty(receiver_ty);
+        }
 
         self.ctx.register_name(protocol);
         let method_type_args = self.resolve_type_args(expr_id);

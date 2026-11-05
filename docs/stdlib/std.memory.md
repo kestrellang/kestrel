@@ -1996,6 +1996,26 @@ caller is responsible for ensuring `count` elements live at `pointer`.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
+#### function `asMutableSlice`
+
+```kestrel
+public mutating func asMutableSlice() -> &mutating Slice[T]
+```
+
+Like `asSlice()`, for writing through.
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### function `asUnsafeSlice`
+
+```kestrel
+public func asUnsafeSlice() -> UnsafeSlice[T]
+```
+
+Returns `self` — `UnsafeSlice` is already the borrowed view.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
 #### field `count`
 
 ```kestrel
@@ -2050,7 +2070,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](I) -> I.SeqOutput where I: SeqIndex[T] { get set }
+public subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -2058,7 +2078,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](unchecked: I) -> I.SeqOutput where I: SeqIndex[T] { get set }
+public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref mutating ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -2066,7 +2086,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.SeqClampedOutput where I: SeqClampable[T] { get set }
+public subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -2074,22 +2094,38 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](wrapped: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] { get set }
+public subscript(clamped: Int64) -> T? { ref mutating ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(wrapped: Int64) -> T? { ref mutating ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `Sliceable`
 
-#### function `asUnsafeSlice`
+#### function `asSlice`
 
 ```kestrel
-public func asUnsafeSlice() -> UnsafeSlice[T]
+public func asSlice() -> &Slice[T]
 ```
 
-Returns `self` — `UnsafeSlice` is already the borrowed view.
+The elements as a `Slice`, in place.
 
-_Defined in `lang/std/memory/pointer.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `Iterable`
 
