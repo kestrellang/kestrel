@@ -121,11 +121,12 @@ func pillLabel(text: String, width width: Float32, y y: Float32, size size: Floa
     boardLabel(text, width: width, y: y, size: size, color: color, board: .Panel)
 }
 
-/// `text` centered on `width` on `board`, a sliced sprite.
-func boardLabel(text: String, width width: Float32, y y: Float32, size size: Float32, color color: Vec4, board board: UISprite) -> [OverlayQuad] {
+/// `text` centered on `width` on `board`, a sliced sprite, `roomy` times
+/// the usual space around the text.
+func boardLabel(text: String, width width: Float32, y y: Float32, size size: Float32, color color: Vec4, board board: UISprite, roomy roomy: Float32 = 1.0) -> [OverlayQuad] {
     let textW = textWidth(text, size);
-    let height = (size * 2.0).floor();
-    let pad = (size * 1.3).floor();
+    let height = (size * 2.0 * roomy).floor();
+    let pad = (size * 1.3 * roomy).floor();
     var quads = slicedSprite(board, ((width - textW) * 0.5 - pad).floor(), (y - (height - size * 0.95) * 0.5).floor(), textW + pad * 2.0, height, white);
     quads.append(contentsOf: centeredLabel(text, width: width, y: y, size: size, color: color));
     quads
@@ -235,11 +236,12 @@ func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [
     let prompt = if resumed { "Press Enter or click to continue" } else { "Press Enter or click to begin" };
     // The prompt on a warm wooden button, with a glow that breathes.
     let pulse = 0.5 + 0.5 * (time * 3.0).sin();
-    let promptSize = crispSize(small * 1.3);
-    let promptY = (h * 0.64).floor();
-    let promptW = textWidth(prompt, promptSize) + promptSize * 2.6;
+    // Big: it's the one thing to press.
+    let promptSize = crispSize(small * 1.7);
+    let promptY = (h * 0.72).floor();
+    let promptW = textWidth(prompt, promptSize) + promptSize * 3.4;
     quads.append(sprite(.Glow, w * 0.5 - promptW * 0.7, promptY - promptSize * 2.2, promptW * 1.4, promptSize * 5.0, Vec4(x: 1.0, y: 0.82, z: 0.5, w: 0.15 + pulse * 0.2)));
-    quads.append(contentsOf: boardLabel(prompt, width: w, y: promptY, size: promptSize, color: white, board: .Button));
+    quads.append(contentsOf: boardLabel(prompt, width: w, y: promptY, size: promptSize, color: white, board: .Button, roomy: 1.3));
     // The controls, on a frosted strip along the bottom.
     let controls = "WASD move   Mouse look   Hold left click break   Right click place   Wheel or 1-9 pick   Space jump, hold to glide   P save";
     quads.append(contentsOf: pillLabel(controls, width: w, y: h - 46.0, size: 18.0, color: faded(white, 0.92)));
