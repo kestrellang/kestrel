@@ -13,10 +13,13 @@ struct Column {
 /// rises past a threshold there's land, and the further past, the thicker
 /// the island's keel. Each island also floats at its own altitude.
 struct Generator {
+    /// The seed everything else is derived from; saves store it.
+    var seed: Int64
     var mask: Noise
     var detail: Noise
 
     init(seed: Int64) {
+        self.seed = seed;
         self.mask = Noise(seed);
         self.detail = Noise(seed + 7919);
     }

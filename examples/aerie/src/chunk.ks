@@ -16,6 +16,17 @@ struct Chunk {
         self.emitters = [];
     }
 
+    /// A chunk from saved block ids, finding its emitters again.
+    init(blocks: [UInt16]) {
+        self.blocks = blocks;
+        self.emitters = [];
+        var i: Int64 = 0;
+        while i < blocks.count {
+            if Block.from(blocks(i)).emits { self.emitters.append(i); }
+            i = i + 1;
+        }
+    }
+
     static func contains(x: Int64, y: Int64, z: Int64) -> Bool {
         x >= 0 and y >= 0 and z >= 0 and x < chunkSize and y < chunkSize and z < chunkSize
     }

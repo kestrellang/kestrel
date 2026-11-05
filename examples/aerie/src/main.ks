@@ -2,17 +2,62 @@
 //
 // Walk with WASD, look with the arrow keys, jump with Space and hold it
 // while falling to glide. Q breaks the block you look at, E places the
-// selected one, 1 to 8 pick from the hotbar, F toggles flying (Space and
-// Left Shift to rise and sink). Escape quits.
+// selected one, 1 to 9 pick from the hotbar, F toggles flying (Space and
+// Left Shift to rise and sink), T skips ahead a quarter day, P saves.
+// Escape saves and quits.
 //
-// `AERIE_FRAMES=n` quits after n frames; `AERIE_BENCH=n` times chunk
-// generation and meshing over n runs instead of opening a window.
+// The world is saved to `world.aerie`, or the path in `AERIE_SAVE`
+// (`AERIE_SAVE=none` turns saving off). `AERIE_FRAMES=n` quits after n
+// frames; `AERIE_BENCH=n` times chunk generation and meshing over n runs
+// instead of opening a window.
 //
 // Run from this folder, so `assets/blocks.png` resolves.
 
 module Aerie
 
 import sdl.(SDLWindow, Event, monotonicMs)
+import deflate.(Zlib)
+import std.io.file.(readFileBytes, writeFileBytes)
+
+/// Where the world is saved, or `None` with `AERIE_SAVE=none`.
+func savePath() -> String? {
+    match getenv("AERIE_SAVE") {
+        .Some(path) => if path == "none" { .None } else { .Some(path) },
+        .None => .Some("world.aerie")
+    }
+}
+
+/// The save at `path`, if there is a readable one. A missing file is a new
+/// world; a damaged one is reported and ignored rather than overwritten
+/// silently on the next save.
+func loadSave(path: String) -> SaveState? {
+    let packed = match readFileBytes(path) {
+        .Ok(bytes) => bytes,
+        .Err(_) => { return .None; }
+    };
+    let bytes = match Zlib.decompress(packed) {
+        .Ok(bytes) => bytes,
+        .Err(_) => {
+            println("\(path) is not a readable save; starting a new world");
+            return .None;
+        }
+    };
+    let state = decodeSave(bytes);
+    if state.isNone() {
+        println("\(path) is from another version of Aerie; starting a new world");
+    }
+    state
+}
+
+/// Compress and write `state` to `path`, reporting how it went.
+func writeSave(path: String, state: SaveState) {
+    let bytes = encodeSave(state);
+    let packed = Zlib.compress(bytes);
+    match writeFileBytes(path, packed) {
+        .Ok(_) => println("saved \(state.chunks.count) changed chunks to \(path) (\(packed.count) bytes)"),
+        .Err(_) => println("couldn't write \(path)")
+    }
+}
 
 /// Time building and meshing the test island `runs` times, without a
 /// window, and print the average per chunk.
@@ -73,7 +118,9 @@ func run() -> Int64 {
             return 1;
         }
     };
-    var game = Game(renderer, seed: 1);
+    let path = savePath();
+    let save = match path { .Some(p) => loadSave(p), .None => .None };
+    var game = Game(renderer, seed: 1, save: save);
     let maxFrames = match getenv("AERIE_FRAMES") {
         .Some(s) => Int64(parsing: s) ?? 0,
         .None => 0
@@ -100,11 +147,16 @@ func run() -> Int64 {
                 return 1;
             }
         }
+        if game.wantsSave {
+            game.wantsSave = false;
+            if let .Some(p) = path { writeSave(p, game.save()); }
+        }
         frames = frames + 1;
         if maxFrames > 0 and frames >= maxFrames {
             game.running = false;
         }
     }
+    if let .Some(p) = path { writeSave(p, game.save()); }
     println("drew \(frames) frames; \(game.world.chunks.count) chunks loaded, \(game.renderer.meshes.count) meshes, \(game.renderer.drawnChunks) drawn");
     let p = game.player.position;
     println("player at (\(p.x), \(p.y), \(p.z)), on ground: \(game.player.onGround)");

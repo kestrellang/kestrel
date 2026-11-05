@@ -38,9 +38,16 @@ the shader adds their falloff, so they light up the ground at night. T skips
 ahead a quarter day, and `AERIE_TIME=0..1` sets the starting time (0 dawn,
 0.25 noon, 0.5 dusk, 0.75 midnight).
 
+**Milestone 6** (in progress) saves the world. Only chunks you changed are
+kept; everything else is regenerated from the seed. Escape saves and quits
+and P saves on the spot, to `world.aerie` (zlib-compressed with
+`lang/deflate`), or the path in `AERIE_SAVE`; `AERIE_SAVE=none` turns
+saving off. Changed chunks that stream out of range are held until they
+come back or the world is saved.
+
 Controls: WASD to walk, arrow keys to look, Space to jump (hold to glide),
-Q to break, E to place, 1 to 9 for the hotbar, T to skip time, F to fly (Space and Left
-Shift to rise and sink), Escape to quit. `AERIE_FRAMES=n` quits after n
+Q to break, E to place, 1 to 9 for the hotbar, T to skip time, P to save, F to fly (Space and Left
+Shift to rise and sink), Escape to save and quit. `AERIE_FRAMES=n` quits after n
 frames.
 
 ## Running
@@ -63,6 +70,7 @@ WGPU_NATIVE_DIR=~/wgpu-native flock run
 - `src/chunk.ks` — 32³ chunks, padded chunks for meshing, the test island.
 - `src/noise.ks` — seeded 2D gradient noise.
 - `src/gen.ks` — the island generator.
-- `src/world.ks` — loaded chunks, keyed by position.
+- `src/world.ks` — loaded chunks, keyed by position, and changed ones kept for saving.
+- `src/save.ks` — the save format: encode and decode as bytes.
 - `src/player.ks` — movement, collision, gliding and block raycasts.
 - `src/mesh.ks` — face culling into packed `FaceInstance`s.
