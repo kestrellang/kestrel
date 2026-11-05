@@ -15,7 +15,9 @@ Needs Inter installed (Debian/Ubuntu: `apt install fonts-inter`).
 
 Run: python3 tools/make_ui.py   (from examples/aerie)
 """
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+import random
+
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 CELL = 96
 FONT_PATH = "/usr/share/fonts/opentype/inter/Inter-SemiBold.otf"
@@ -70,6 +72,159 @@ def rounded(fill, outline, width, radius, glow=None, inset=0):
     ImageDraw.Draw(top).rounded_rectangle(inner, (radius - width) * SUPER, fill=(255, 255, 255, 34))
     img = Image.alpha_composite(img, top)
     return img.resize((CELL, CELL), Image.LANCZOS)
+
+
+# Pixel-art pieces are drawn on a 24x24 grid and scaled up 4x, so they
+# match the blocks' chunky pixels.
+GRID = 24
+INK = (30, 22, 34, 255)
+# Dusky walnut for panels, a warmer wood for buttons, slate stone for
+# slots and gold for the selected one.
+DARK_WOOD = [(54, 38, 52), (64, 46, 60), (76, 54, 68), (90, 64, 80)]
+WARM_WOOD = [(128, 78, 70), (148, 94, 80), (168, 112, 92), (188, 132, 106)]
+STONE_LIGHT, STONE_MID, STONE_DARK = (206, 202, 228), (150, 144, 182), (96, 90, 128)
+GOLD_LIGHT, GOLD_MID, GOLD_DARK = (255, 238, 170), (240, 196, 100), (176, 120, 56)
+
+
+def pixels(draw):
+    """A GRID x GRID pixel-art sprite from `draw(put)`, scaled up crisp."""
+    img = Image.new("RGBA", (GRID, GRID), (0, 0, 0, 0))
+    def put(x, y, c):
+        if 0 <= x < GRID and 0 <= y < GRID:
+            img.putpixel((x, y), c if len(c) == 4 else (*c, 255))
+    draw(put)
+    return img.resize((CELL, CELL), Image.NEAREST)
+
+
+def chunky_box(x0, y0, x1, y1, cut):
+    """Whether (x, y) is inside a box with its corners cut in `cut` steps."""
+    def inside(x, y):
+        if not (x0 <= x <= x1 and y0 <= y <= y1):
+            return False
+        dx = min(x - x0, x1 - x)
+        dy = min(y - y0, y1 - y)
+        return dx + dy >= cut
+    return inside
+
+
+def plank_pill(wood, rim_light, rim_dark, trim, top, bottom):
+    """A wooden board with rounded pixel ends and rivets at each end. The
+    grain runs across, so the middle column can stretch to any width
+    (see `slicedSprite`)."""
+    rng = random.Random(5)
+    grain = [rng.random() for _ in range(GRID)]
+    def draw(put):
+        outer = chunky_box(0, top, GRID - 1, bottom, 4)
+        inner = chunky_box(1, top + 1, GRID - 2, bottom - 1, 4)
+        for y in range(GRID):
+            for x in range(GRID):
+                if not outer(x, y):
+                    continue
+                if not inner(x, y):
+                    put(x, y, INK)
+                elif not inner(x, y - 1) or not inner(x - 1, y) and y < (top + bottom) // 2:
+                    put(x, y, rim_light)
+                elif not inner(x, y + 1) or not inner(x + 1, y) and y > (top + bottom) // 2:
+                    put(x, y, rim_dark)
+                elif y == (top + bottom) // 2:
+                    put(x, y, wood[0])  # the seam between two boards
+                else:
+                    put(x, y, wood[min(3, int(grain[y] * 3.2) + (1 if y < (top + bottom) // 2 else 0))])
+        mid = (top + bottom) // 2
+        for x in (4, GRID - 5):
+            for y in (mid - 3, mid + 3):
+                put(x, y, trim[0])
+                put(x + 1, y, trim[1])
+                put(x, y + 1, trim[1])
+                put(x + 1, y + 1, trim[2])
+    return pixels(draw)
+
+
+def slot(frame_light, frame_dark, recess, gems=None):
+    """A hotbar slot: a beveled frame around a recessed hollow."""
+    def draw(put):
+        outer = chunky_box(0, 0, GRID - 1, GRID - 1, 2)
+        frame = chunky_box(1, 1, GRID - 2, GRID - 2, 2)
+        hollow = chunky_box(4, 4, GRID - 5, GRID - 5, 1)
+        for y in range(GRID):
+            for x in range(GRID):
+                if not outer(x, y):
+                    continue
+                if not frame(x, y):
+                    put(x, y, INK)
+                elif hollow(x, y):
+                    # A shadow along the hollow's top and left: it's sunk in.
+                    shade = 0.7 if (x == 4 or y == 4) else 1.0
+                    put(x, y, (int(recess[0] * shade), int(recess[1] * shade), int(recess[2] * shade), recess[3]))
+                elif x + y < GRID - 1:
+                    put(x, y, frame_light)
+                else:
+                    put(x, y, frame_dark)
+        # A ring between frame and hollow.
+        for i in range(4, GRID - 4):
+            for x, y in ((i, 3), (3, i), (i, GRID - 4), (GRID - 4, i)):
+                if outer(x, y) and not hollow(x, y):
+                    put(x, y, INK)
+        if gems:
+            for x, y in ((2, 2), (GRID - 3, 2), (2, GRID - 3), (GRID - 3, GRID - 3)):
+                put(x, y, gems)
+    return pixels(draw)
+
+
+def logo(atlas, text, columns, rows):
+    """The title, built from the game's own blocks: driftstone letters
+    capped with moss, extruded downward into darker stone and outlined.
+    Returns `columns` x `rows` cells, left to right, top to bottom."""
+    w, h = CELL * columns, CELL * rows
+    font = ImageFont.truetype("/usr/share/fonts/opentype/inter/InterDisplay-Black.otf", int(h * 0.8))
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).text((w / 2, h * 0.45), text, font=font, fill=255, anchor="mm")
+    mask = mask.point(lambda v: 255 if v > 110 else 0)
+
+    def tiled(layer, scale):
+        tile = atlas.crop((0, layer * 16, 16, layer * 16 + 16)).resize((16 * scale, 16 * scale), Image.NEAREST)
+        out = Image.new("RGBA", (w, h))
+        for y in range(0, h, tile.height):
+            for x in range(0, w, tile.width):
+                out.paste(tile, (x, y))
+        return out
+
+    stone = tiled(DRIFTSTONE, 4)
+    moss = tiled(MOSS_TOP, 4)
+    dark = Image.eval(stone, lambda v: int(v * 0.5)).convert("RGB").convert("RGBA")
+    # The extrusion: the letters stacked downward in shaded stone.
+    depth = 14
+    body = Image.new("L", (w, h), 0)
+    for d in range(1, depth + 1):
+        body.paste(255, (0, 0), ImageChops.offset(mask, d // 3, d))
+    body = ImageChops.lighter(body, mask)
+    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    # The outline: everything grown by a few pixels, in ink.
+    ring = body.filter(ImageFilter.MaxFilter(9))
+    out.paste(Image.new("RGBA", (w, h), INK), (0, 0), ring)
+    out.paste(dark, (0, 0), body)
+    out.paste(stone, (0, 0), mask)
+    # Moss on top: the band of each letter within a few pixels of open
+    # air above, ragged by column so it drips.
+    rng = random.Random(9)
+    drips = [rng.choice([14, 16, 18, 20, 24, 28]) for _ in range(w // 4 + 1)]
+    m = mask.load()
+    grass = Image.new("L", (w, h), 0)
+    g = grass.load()
+    for x in range(w):
+        run = 0
+        for y in range(h):
+            if m[x, y]:
+                run += 1
+                if run <= drips[x // 4]:
+                    g[x, y] = 255
+            else:
+                run = 0
+    out.paste(moss, (0, 0), grass)
+    # A light lip along the very top of the moss.
+    lip = ImageChops.subtract(grass, ImageChops.offset(grass, 0, 4))
+    out.paste(Image.new("RGBA", (w, h), (226, 252, 230, 255)), (0, 0), lip)
+    return [out.crop((c * CELL, r * CELL, (c + 1) * CELL, (r + 1) * CELL)) for r in range(rows) for c in range(columns)]
 
 
 def glow():
@@ -158,15 +313,17 @@ def glyph(font, ch):
 
 
 GLYPH_PAD = 12
+LOGO_COLUMNS, LOGO_ROWS = 6, 2
 
 
 def main():
     atlas = Image.open("assets/blocks.png").convert("RGBA")
     font = ImageFont.truetype(FONT_PATH, FONT_SIZE)
     layers = [
-        ("Slot", rounded((255, 255, 255, 60), (255, 255, 255, 150), 3, 20, inset=3)),
-        ("SlotSelected", rounded((255, 252, 240, 150), (255, 226, 150, 255), 5, 20, glow=(255, 214, 120, 255), inset=8)),
-        ("Panel", rounded((30, 34, 62, 215), (255, 255, 255, 70), 2, 46)),
+        ("Slot", slot(STONE_MID, STONE_DARK, (40, 34, 58, 200))),
+        ("SlotSelected", slot(GOLD_LIGHT, GOLD_DARK, (84, 66, 96, 190), gems=(150, 240, 230))),
+        ("Panel", plank_pill(DARK_WOOD, (124, 96, 112), (40, 28, 40), (GOLD_LIGHT, GOLD_MID, GOLD_DARK), 2, 21)),
+        ("Button", plank_pill(WARM_WOOD, (226, 176, 140), (96, 56, 52), (GOLD_LIGHT, GOLD_MID, GOLD_DARK), 1, 22)),
         ("Glow", glow()),
         ("Twinkle", twinkle()),
     ]
@@ -177,6 +334,9 @@ def main():
             icon = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
             icon.paste(sprite_icon(atlas, faces), (8, 8))
         layers.append(("Icon" + name, icon))
+    logo_base = len(layers)
+    for cell in logo(atlas, "Aerie", LOGO_COLUMNS, LOGO_ROWS):
+        layers.append((None, cell))
     glyph_base = len(layers)
     advances = []
     for code in range(32, 127):
@@ -201,6 +361,12 @@ def main():
         "/// The font's pixel size inside a glyph layer, and where its glyphs start.",
         f"let uiFontSize: Float32 = {FONT_SIZE}.0;",
         f"let uiGlyphPad: Float32 = {GLYPH_PAD}.0;",
+        "",
+        "/// The title logo: this many cells across and down, from this layer,",
+        "/// left to right then top to bottom.",
+        f"let uiLogoLayer: Float32 = {logo_base}.0;",
+        f"let uiLogoColumns: Int64 = {LOGO_COLUMNS};",
+        f"let uiLogoRows: Int64 = {LOGO_ROWS};",
         "",
         "/// A sprite in the interface atlas.",
         "enum UISprite {",
