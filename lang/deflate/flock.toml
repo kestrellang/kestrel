@@ -1,0 +1,9 @@
+[package]
+name = "deflate"
+version = "0.1.0"
+description = "DEFLATE, zlib and gzip compression in pure Kestrel"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[dependencies]
