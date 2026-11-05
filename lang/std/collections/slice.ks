@@ -181,6 +181,9 @@ extend Slice[T]: Sliceable[T], Iterable {
     type Item = T
     type TargetIterator = UnsafeSliceIterator[T]
 
+    /// Itself: a slice is already the in-place view.
+    public func asSlice() -> &Slice[T] { self }
+
     /// The elements as a raw `(pointer, count)` view.
     public func asUnsafeSlice() -> UnsafeSlice[T] {
         UnsafeSlice(pointer: self.pointer, count: self.count)
