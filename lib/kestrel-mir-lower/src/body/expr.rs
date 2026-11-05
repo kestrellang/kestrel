@@ -638,7 +638,11 @@ impl OssaBodyCtx<'_, '_> {
             return None;
         }
         let parent = self.ctx.world.parent_of(resolved)?;
-        matches!(self.ctx.world.get::<NodeKind>(parent), Some(NodeKind::Protocol)).then_some(resolved)
+        matches!(
+            self.ctx.world.get::<NodeKind>(parent),
+            Some(NodeKind::Protocol)
+        )
+        .then_some(resolved)
     }
 
     pub(crate) fn lower_field_access(
