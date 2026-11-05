@@ -54,6 +54,12 @@ wasm64 with Emscripten, using browser WebGPU (Dawn's `emdawnwebgpu`) and
 SDL2's Emscripten port; saves go to IndexedDB. The game code is shared;
 `src/platform.ks` holds the few desktop and web differences.
 
+Soaring works like a glider: a double jump launches you about twelve
+blocks up and opens the wing-cloak at the top. Your path follows where you
+look; diving trades height for speed and climbing spends it, and below
+stall speed you sink. Each jump while soaring boosts you along your view,
+and the view widens as you speed up. Landing folds the cloak.
+
 **Milestone 8** makes it dreamy. The sky is drawn as its own pass: a
 soft pastel gradient (rose-cream horizon, baby blue overhead), drifting
 clouds warmed on the sun's side, a sea of puffs below the islands, the
@@ -87,7 +93,9 @@ holding: cracks spread over it for its `Block.hardness` in seconds (a
 glowcap pops at once, skyiron takes two and a half), drawn by the same
 pipeline.
 
-Controls: WASD to walk, the mouse to look, Space to jump (hold to glide),
+Controls: WASD to walk, the mouse to look, Space to jump, and Space again in
+midair to launch up and soar on the wing-cloak (look down to dive and gain
+speed, up to climb, Space to boost, Shift to fold the cloak),
 hold left click to break, right click to place, the wheel or 1 to 9 for the
 hotbar, F to fly (Space and Left Shift to rise and sink), Z to show frames per
 second, Escape to free the mouse (and again to save and quit), Enter or a

@@ -1,7 +1,8 @@
 // Kestrelcraft: a voxel sandbox on floating islands above a cloud sea.
 //
-// Walk with WASD, look with the mouse, jump with Space and hold it while
-// falling to glide. Hold the left button to break the block you look at,
+// Walk with WASD, look with the mouse, jump with Space; Space again in
+// midair launches you up on the wing-cloak to soar (look down to dive and
+// gain speed, up to climb; Space boosts, Shift folds the cloak). Hold the left button to break the block you look at,
 // right click to place the selected one; the wheel or 1 to 9 pick from the
 // hotbar, F toggles flying (Space and Left Shift to rise and sink), Z shows
 // frames per second. The world saves every minute; Escape frees the mouse,

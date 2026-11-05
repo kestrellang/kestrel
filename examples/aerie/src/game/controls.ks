@@ -17,6 +17,8 @@ struct Controls {
     /// hotbar slot (or -1).
     var placePressed: Bool = false
     var flyPressed: Bool = false
+    /// Space went down this frame: a jump, or in midair a boost.
+    var jumpPressed: Bool = false
     var slotPressed: Int64 = -1
     var fpsPressed: Bool = false
     /// Mouse movement since the last frame, in pixels, and wheel clicks.
@@ -33,7 +35,12 @@ struct Controls {
             .S => { self.back = held },
             .A => { self.left = held },
             .D => { self.right = held },
-            .Space => { self.up = held },
+            // Key repeat sends more downs while held; only the first counts
+            // as a press.
+            .Space => {
+                if held and not self.up { self.jumpPressed = true }
+                self.up = held
+            },
             .LeftShift => { self.down = held },
             .F => { if held { self.flyPressed = true } },
             .Digit1 => { if held { self.slotPressed = 0 } },
@@ -76,6 +83,7 @@ struct Controls {
     mutating func clearPresses() {
         self.placePressed = false;
         self.flyPressed = false;
+        self.jumpPressed = false;
         self.slotPressed = -1;
         self.fpsPressed = false;
         self.mouseX = 0.0;

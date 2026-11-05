@@ -12,24 +12,37 @@ let walkSpeed: Float32 = 5.0;
 let flySpeed: Float32 = 12.0;
 let jumpSpeed: Float32 = 8.0;
 let gravity: Float32 = 26.0;
-/// While gliding: the fastest you sink, how fast you sail forward, and how
-/// fast you can steer sideways.
-let glideSink: Float32 = 2.2;
-let glideSpeed: Float32 = 10.0;
-let glideSteer: Float32 = 3.0;
+/// Soaring on the wing-cloak, like an elytra. A double jump launches you
+/// `launchSpeed` blocks a second straight up (about 12 blocks high); each
+/// jump while soaring pushes `boostSpeed` more along your view.
+let launchSpeed: Float32 = 25.0;
+let boostSpeed: Float32 = 12.0;
+/// How fast diving gains speed and climbing loses it (gravity along your
+/// path), and the air's drag, per second.
+let soarGravity: Float32 = 16.0;
+let soarDrag: Float32 = 0.12;
+let maxSoarSpeed: Float32 = 45.0;
+/// Below this speed the cloak loses lift and you sink.
+let stallSpeed: Float32 = 7.0;
+/// How quickly your path turns to follow your view, per second.
+let soarTurn: Float32 = 3.0;
 /// Below this height you've fallen into the cloud sea.
 let seaLevel: Float32 = -40.0;
 
 /// The player: feet at `position`, looking along `yaw` and `pitch` the way
-/// `Camera` does. Walking has gravity and collision; holding jump while
-/// falling opens the wing-cloak and glides; flying (F) ignores both.
+/// `Camera` does. Walking has gravity and collision; a jump in midair opens
+/// the wing-cloak and soars (see `boost`); flying (F) ignores both.
 struct Player {
     var position: Vec3
     var velocity: Vec3
     var yaw: Float32
     var pitch: Float32
     var onGround: Bool
+    /// Soaring on the wing-cloak, from a double jump until landing.
     var gliding: Bool
+    /// Rising from the double jump's launch; the cloak catches the air at
+    /// the top.
+    var launching: Bool
     var flying: Bool
     var spawn: Vec3
 
@@ -40,6 +53,7 @@ struct Player {
         self.pitch = -0.2;
         self.onGround = false;
         self.gliding = false;
+        self.launching = false;
         self.flying = false;
         self.spawn = spawn;
     }
@@ -79,11 +93,33 @@ struct Player {
             self.fly(controls, dt);
             return;
         }
-        self.walk(controls, world, dt: dt);
+        // Shift folds the cloak to drop.
+        if self.gliding and controls.down {
+            self.gliding = false;
+            self.launching = false;
+        }
+        if self.gliding { self.soar(dt) } else { self.walk(controls, dt) }
+        self.moveThrough(world, dt);
         // Fell into the cloud sea: back home.
         if self.position.y < seaLevel {
             self.position = self.spawn;
             self.velocity = Vec3.zero;
+            self.gliding = false;
+        }
+    }
+
+    /// A jump in midair: the first launches you high and opens the cloak;
+    /// once soaring, each one pushes you along your view.
+    mutating func boost() {
+        guard not self.onGround and not self.flying else {
+            return;
+        }
+        if self.gliding {
+            self.velocity = self.velocity + self.camera.forward * boostSpeed;
+        } else {
+            self.velocity = Vec3(x: self.velocity.x, y: launchSpeed, z: self.velocity.z);
+            self.gliding = true;
+            self.launching = true;
         }
     }
 
@@ -100,23 +136,37 @@ struct Player {
         self.velocity = Vec3.zero;
     }
 
-    /// Walk, jump and glide under gravity, stopping against blocks.
-    mutating func walk(controls: Controls, world: World, dt dt: Float32) {
-        // Jump from the ground; hold it while falling to glide.
-        var vy = if self.onGround and controls.up { jumpSpeed } else { self.velocity.y };
-        vy = vy - gravity * dt;
-        self.gliding = not self.onGround and controls.up and vy < 0.0;
-        // The cloak carries you forward even without pressing W.
-        let horizontal = if self.gliding {
-            self.ahead * glideSpeed + self.side * (controls.strafeAxis * glideSteer)
-        } else {
-            self.wish(controls) * walkSpeed
-        };
-        if self.gliding and vy < -glideSink {
-            vy = -glideSink;
+    /// Walk and jump under gravity.
+    mutating func walk(controls: Controls, dt: Float32) {
+        let vy = if self.onGround and controls.up { jumpSpeed } else { self.velocity.y };
+        let horizontal = self.wish(controls) * walkSpeed;
+        self.velocity = Vec3(x: horizontal.x, y: vy - gravity * dt, z: horizontal.z);
+    }
+
+    /// Soar like an elytra: your path turns to follow your view; diving
+    /// gains speed and climbing spends it; too slow and you sink.
+    mutating func soar(dt: Float32) {
+        if self.launching {
+            self.velocity.y = self.velocity.y - gravity * dt;
+            self.launching = self.velocity.y > 0.0;
+            return;
         }
-        self.velocity = Vec3(x: horizontal.x, y: vy, z: horizontal.z);
-        // Small steps, so a fast fall can't skip through a thin floor.
+        let look = self.camera.forward;
+        let heading = if self.velocity.length > 0.01 { self.velocity.normalized } else { look };
+        var speed = self.velocity.length;
+        speed = speed - soarGravity * heading.y * dt - speed * soarDrag * dt;
+        speed = speed.clamp(0.0, maxSoarSpeed);
+        let turned = heading + (look - heading) * (soarTurn * dt).clamp(0.0, 1.0);
+        var velocity = turned.normalized * speed;
+        // Lift fades below stall speed, and gravity takes over.
+        let stall = (1.0 - speed / stallSpeed).clamp(0.0, 1.0);
+        velocity.y = velocity.y - gravity * stall * dt;
+        self.velocity = velocity;
+    }
+
+    /// Move by the velocity for `dt` seconds, in small steps so a fast fall
+    /// can't skip through a thin floor.
+    mutating func moveThrough(world: World, dt: Float32) {
         let steps = 1 + (((self.velocity * dt).length / 0.4).floor().toInt64() ?? 0);
         self.onGround = false;
         for _ in 0..<steps {
@@ -130,8 +180,11 @@ struct Player {
         guard hitY else {
             return;
         }
+        // Landing folds the cloak.
         if self.velocity.y < 0.0 {
             self.onGround = true;
+            self.gliding = false;
+            self.launching = false;
         }
         self.velocity = Vec3(x: self.velocity.x, y: 0.0, z: self.velocity.z);
     }
