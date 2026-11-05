@@ -526,8 +526,7 @@ fn visibility_public_accessible_from_outside() {
 
 #[test]
 fn visibility_private_not_accessible_from_outside() {
-    // No `public` keyword — has no Vis component, so it's visible by default.
-    // This tests the current design: no Vis = always visible.
+    // No visibility keyword means internal: hidden outside `std.core`.
     let (world, root) = build_two_files(
         "module std.core\nstruct Secret {}",
         "module MyApp\nimport std.core",
@@ -540,8 +539,7 @@ fn visibility_private_not_accessible_from_outside() {
         context: myapp,
         root,
     });
-    // Items without Vis component are visible by default
-    assert!(matches!(result, TypeResolution::Found(_)));
+    assert!(matches!(result, TypeResolution::NotFound(_)));
 }
 
 // ================================================================

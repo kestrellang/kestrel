@@ -49,4 +49,4 @@ pub use traversal::MemberMap;
 pub use type_members::{
     TypeMember, TypeMemberMap, TypeMemberSource, TypeMembers, TypeMembersByName,
 };
-pub use visibility::{IsVisibleFrom, VisibleChildrenByName, internal_boundary};
+pub use visibility::{IsVisibleFrom, VisibleChildrenByName, effective_vis, internal_boundary};
