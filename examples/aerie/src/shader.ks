@@ -18,7 +18,7 @@ struct Uniforms {
     sky: vec4f,
     // rgb: the sky overhead.
     zenith: vec4f,
-    // rgb: the sunlight's color.
+    // rgb: the sunlight's color; w: the lairs' gloom, 0 to 1.
     sunColor: vec4f,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -37,6 +37,8 @@ struct ChunkData {
 
 const LIGHT_RADIUS = \(lightRadius);
 const GLOWCAP_LAYER = \(Layer.Glowcap.index)u;
+const EMBERCORE_LAYER = \(Layer.Embercore.index)u;
+const HEXBLOOM_LAYER = \(Layer.Hexbloom.index)u;
 
 // Four corners per face, counter-clockwise seen from outside, as offsets
 // inside the unit cell. Faces: east, west, up, down, south, north, then
@@ -111,9 +113,11 @@ fn sunlight(world: vec3f, n: vec3f) -> f32 {
 }
 
 // Light from nearby glowing blocks: a soft falloff to zero at
-// LIGHT_RADIUS. It passes through walls; it's cheap and reads as a glow.
-fn glow(world: vec3f, n: vec3f) -> f32 {
-    var total = 0.0;
+// LIGHT_RADIUS, colored by each light's kind (`Block.glow`): glowcaps' cool
+// cyan or the lairs' ember red. It passes through walls; it's cheap and
+// reads as a glow.
+fn glow(world: vec3f, n: vec3f) -> vec3f {
+    var total = vec3f(0.0);
     let count = u32(chunk.origin.w);
     for (var i = 0u; i < count; i++) {
         let to = chunk.lights[i].xyz - world;
@@ -121,9 +125,10 @@ fn glow(world: vec3f, n: vec3f) -> f32 {
         let falloff = clamp(1.0 - d / LIGHT_RADIUS, 0.0, 1.0);
         // Faces turned away get a little, so corners don't go black.
         let facing = select(0.35 + 0.65 * max(dot(n, to / max(d, 0.001)), 0.0), 1.0, d < 0.9);
-        total += falloff * falloff * facing;
+        let tint = select(vec3f(0.55, 0.95, 0.90), vec3f(1.0, 0.42, 0.16) * 1.3, chunk.lights[i].w > 1.5);
+        total += tint * falloff * falloff * facing;
     }
-    return min(total, 1.4);
+    return min(total, vec3f(1.6));
 }
 
 // Hashed value noise, for clouds and stars.
@@ -185,9 +190,10 @@ fn shade(in: VertexOut, texel: vec4f) -> vec4f {
     let direct = facing * u.sunDir.w * sunlight(in.world, n);
     // Lavender sky light from above, and a dimmer bounce from the cloud sea.
     let ambient = u.sky.rgb * mix(0.5, 0.7, n.y * 0.5 + 0.5);
-    let glowColor = vec3f(0.55, 0.95, 0.90) * glow(in.world, n);
+    let glowColor = glow(in.world, n);
     var color = texel.rgb * (ambient * in.light + glowColor * in.light + direct * u.sunColor.rgb * mix(0.6, 1.0, in.light));
-    if in.layer == GLOWCAP_LAYER {
+    // Glowing blocks light themselves.
+    if in.layer == GLOWCAP_LAYER || in.layer == EMBERCORE_LAYER || in.layer == HEXBLOOM_LAYER {
         color = texel.rgb * 1.15;
     }
     let toEye = in.world - u.camera.xyz;
@@ -214,6 +220,11 @@ fn vs_sky(@builtin(vertex_index) vertex: u32) -> SkyOut {
     return out;
 }
 
+// Clouds over the lairs: ash grey, lit red from below.
+fn gloomy(color: vec3f) -> vec3f {
+    return mix(color, color * vec3f(0.42, 0.22, 0.26), u.sunColor.w);
+}
+
 // Soft clouds: drifting noise on a plane above, warmed on the sun's side, and a sea of puffs below.
 fn clouds(dir: vec3f, color: vec3f) -> vec3f {
     let time = u.camera.w;
@@ -228,14 +239,14 @@ fn clouds(dir: vec3f, color: vec3f) -> vec3f {
         // Lighter where the cloud thins toward the sun.
         let toward = fbm(p + toSun.xz * 0.12);
         let lit = clamp(0.55 + (n - toward) * 4.0, 0.0, 1.0);
-        let tint = mix(light, bright, lit);
+        let tint = gloomy(mix(light, bright, lit));
         return mix(color, tint, cover * 0.92);
     }
     let p = dir.xz / (-dir.y + 0.04) * 0.7 + vec2f(time * 0.006, time * 0.003);
     let n = fbm(p);
     let puff = smoothstep(0.3, 0.75, n);
     let shadow = mix(vec3f(0.28, 0.20, 0.42), vec3f(0.80, 0.80, 0.92), day);
-    let sea = mix(shadow, mix(light, bright, 0.6), puff);
+    let sea = gloomy(mix(shadow, mix(light, bright, 0.6), puff));
     return mix(color, sea, smoothstep(0.0, 0.3, -dir.y) * 0.85);
 }
 

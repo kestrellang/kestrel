@@ -16,17 +16,28 @@ enum Layer {
     case Sailcloth
     case Featherthatch
     case Planks
+    case Ashrock
+    case ScorchTop
+    case ScorchSide
+    case Darkbrick
+    case Embercore
+    case Deadwood
+    case DeadRings
+    case Gloomleaf
+    case Hexbloom
 
     var index: UInt32 {
         match self {
             .Driftstone => 0, .Loam => 1, .MossTop => 2, .MossSide => 3,
             .Bark => 4, .Rings => 5, .Emberleaf => 6, .Cloudglass => 7,
             .Skyiron => 8, .Glowcap => 9, .Sailcloth => 10, .Featherthatch => 11,
-            .Planks => 12
+            .Planks => 12, .Ashrock => 13, .ScorchTop => 14, .ScorchSide => 15,
+            .Darkbrick => 16, .Embercore => 17, .Deadwood => 18, .DeadRings => 19,
+            .Gloomleaf => 20, .Hexbloom => 21
         }
     }
 
-    static var count: Int64 { 13 }
+    static var count: Int64 { 22 }
 }
 
 /// How a block is drawn.
@@ -55,12 +66,22 @@ enum Block {
     case Sailcloth
     case Featherthatch
     case Planks
+    // The evil lair islands.
+    case Ashrock
+    case Scorchloam
+    case Darkbrick
+    case Embercore
+    case Deadwood
+    case Gloomleaf
+    case Hexbloom
 
     var id: UInt16 {
         match self {
             .Air => 0, .Driftstone => 1, .Loam => 2, .Mossloam => 3, .Emberwood => 4,
             .Emberleaf => 5, .Cloudglass => 6, .Skyiron => 7, .Glowcap => 8,
-            .Sailcloth => 9, .Featherthatch => 10, .Planks => 11
+            .Sailcloth => 9, .Featherthatch => 10, .Planks => 11,
+            .Ashrock => 12, .Scorchloam => 13, .Darkbrick => 14, .Embercore => 15,
+            .Deadwood => 16, .Gloomleaf => 17, .Hexbloom => 18
         }
     }
 
@@ -69,6 +90,8 @@ enum Block {
             1 => .Driftstone, 2 => .Loam, 3 => .Mossloam, 4 => .Emberwood,
             5 => .Emberleaf, 6 => .Cloudglass, 7 => .Skyiron, 8 => .Glowcap,
             9 => .Sailcloth, 10 => .Featherthatch, 11 => .Planks,
+            12 => .Ashrock, 13 => .Scorchloam, 14 => .Darkbrick, 15 => .Embercore,
+            16 => .Deadwood, 17 => .Gloomleaf, 18 => .Hexbloom,
             _ => .Air
         }
     }
@@ -77,8 +100,10 @@ enum Block {
         match self {
             .Air => .Empty,
             .Emberleaf => .Clear,
+            .Gloomleaf => .Clear,
             .Cloudglass => .Clear,
             .Glowcap => .Cross,
+            .Hexbloom => .Cross,
             _ => .Solid
         }
     }
@@ -89,7 +114,10 @@ enum Block {
             .Air => "Air", .Driftstone => "Driftstone", .Loam => "Loam", .Mossloam => "Mossloam",
             .Emberwood => "Emberwood", .Emberleaf => "Emberleaf", .Cloudglass => "Cloudglass",
             .Skyiron => "Skyiron", .Glowcap => "Glowcap", .Sailcloth => "Sailcloth",
-            .Featherthatch => "Featherthatch", .Planks => "Planks"
+            .Featherthatch => "Featherthatch", .Planks => "Planks",
+            .Ashrock => "Ashrock", .Scorchloam => "Scorchloam", .Darkbrick => "Darkbrick",
+            .Embercore => "Embercore", .Deadwood => "Deadwood", .Gloomleaf => "Gloomleaf",
+            .Hexbloom => "Hexbloom"
         }
     }
 
@@ -104,9 +132,18 @@ enum Block {
 
     /// Whether the block glows, lighting what's around it.
     var emits: Bool {
+        self.glow > 0.0
+    }
+
+    /// The color a glowing block lights its surroundings with: 1 for the
+    /// glowcaps' cool cyan, 2 for the lairs' ember red, 0 for none. The
+    /// shader picks the color from this (see `glow` there).
+    var glow: Float32 {
         match self {
-            .Glowcap => true,
-            _ => false
+            .Glowcap => 1.0,
+            .Embercore => 2.0,
+            .Hexbloom => 2.0,
+            _ => 0.0
         }
     }
 
@@ -131,6 +168,21 @@ enum Block {
             .Sailcloth => .Sailcloth,
             .Featherthatch => .Featherthatch,
             .Planks => .Planks,
+            .Ashrock => .Ashrock,
+            .Scorchloam => match face {
+                .Up => .ScorchTop,
+                .Down => .Ashrock,
+                _ => .ScorchSide
+            },
+            .Darkbrick => .Darkbrick,
+            .Embercore => .Embercore,
+            .Deadwood => match face {
+                .Up => .DeadRings,
+                .Down => .DeadRings,
+                _ => .Deadwood
+            },
+            .Gloomleaf => .Gloomleaf,
+            .Hexbloom => .Hexbloom,
             _ => .Driftstone
         }
     }

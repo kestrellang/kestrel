@@ -31,6 +31,13 @@ SAIL = [(214, 192, 170), (232, 214, 192), (246, 234, 214), (255, 248, 234)]
 STRAW = [(206, 162, 96), (230, 194, 120), (246, 222, 150), (255, 240, 190)]
 PLANK = [(178, 104, 112), (206, 132, 130), (228, 160, 148), (244, 188, 170)]
 FLOWERS = [(255, 250, 240), (206, 196, 255), (255, 236, 170), (255, 214, 120)]
+# The evil lair islands: soot, crimson and ember.
+ASH = [(34, 30, 40), (50, 44, 58), (68, 60, 76), (90, 80, 98)]
+SCORCH = [(26, 22, 30), (38, 30, 40), (52, 38, 48), (70, 46, 56)]
+BRICK = [(28, 22, 36), (44, 34, 54), (62, 48, 74), (84, 66, 98)]
+EMBER = [(150, 30, 24), (214, 70, 30), (250, 130, 40), (255, 200, 90), (255, 244, 190)]
+DEADWOOD = [(38, 32, 36), (58, 48, 52), (80, 68, 70), (104, 92, 92)]
+GLOOM = [(46, 18, 60), (72, 28, 88), (102, 42, 118), (140, 64, 150)]
 
 
 def ramp(colors, v):
@@ -309,10 +316,133 @@ def planks(rng):
     return t
 
 
+def ashrock(rng):
+    return stones(rng, ASH, 8, ASH[0])
+
+
+def lava_cracks(rng, t, count):
+    """Glowing fissures wandering across a tile."""
+    for _ in range(count):
+        x, y = rng.randrange(S), rng.randrange(S)
+        for _ in range(rng.randrange(4, 9)):
+            t[y % S][x % S] = EMBER[rng.choice([1, 2, 2, 3])]
+            x += rng.choice([-1, 0, 1, 1])
+            y += rng.choice([0, 1, 1])
+    return t
+
+
+def scorch_top(rng):
+    n = fbm(rng)
+    t = [[ramp(SCORCH, n[y][x] * 1.1 - 0.05) for x in range(S)] for y in range(S)]
+    for _ in range(6):  # ash flecks
+        t[rng.randrange(S)][rng.randrange(S)] = ASH[3]
+    return lava_cracks(rng, t, 2)
+
+
+def scorch_side(rng):
+    t = ashrock(rng)
+    for x in range(S):
+        depth = 2 + rng.choice([0, 0, 1, 1, 2])
+        for y in range(depth):
+            t[y][x] = ramp(SCORCH, 0.3 + rng.uniform(0.0, 0.6))
+        t[depth][x] = SCORCH[0]
+        if rng.random() < 0.15:
+            t[depth][x] = EMBER[1]
+    return t
+
+
+def darkbrick(rng):
+    """Big dark bricks in offset courses, a cold violet sheen on top edges."""
+    t = blank(BRICK[0])
+    n = fbm(rng, ((4, 0.6), (16, 0.4)))
+    for y in range(S):
+        course = y // 4
+        for x in range(S):
+            if y % 4 == 3 or (x + course * 4) % 8 == 7:
+                continue  # mortar
+            v = 0.35 + (n[y][x] - 0.5) * 0.5
+            if y % 4 == 0:
+                v += 0.3
+            t[y][x] = ramp(BRICK, v)
+    return t
+
+
+def embercore(rng):
+    """Molten rock: bright cells with dark cooled crust between."""
+    pts = [(rng.uniform(0, S), rng.uniform(0, S)) for _ in range(6)]
+    cells = voronoi(pts)
+    n = fbm(rng, ((8, 1.0),))
+    t = blank()
+    for y in range(S):
+        for x in range(S):
+            _, d, gap = cells[y][x]
+            if gap < 1.2:
+                t[y][x] = SCORCH[0] if gap < 0.6 else EMBER[0]
+            else:
+                t[y][x] = ramp(EMBER, 0.45 + gap * 0.08 + (n[y][x] - 0.5) * 0.4)
+    return t
+
+
+def deadwood(rng):
+    t = blank()
+    n = fbm(rng, ((2, 0.5), (8, 0.5)))
+    for x in range(S):
+        base = [0.4, 0.75, 0.5, 0.05][x % 4]
+        for y in range(S):
+            t[y][x] = ramp(DEADWOOD, base + (n[y][x] - 0.5) * 0.4)
+    for _ in range(2):  # a sickly glowing knot
+        x, y = rng.randrange(S), rng.randrange(S)
+        t[y][x] = GLOOM[3]
+    return t
+
+
+def dead_rings(rng):
+    t = blank()
+    c = 7.5
+    for y in range(S):
+        for x in range(S):
+            if x in (0, S - 1) or y in (0, S - 1):
+                t[y][x] = DEADWOOD[1]
+                continue
+            d = math.hypot(x - c, y - c)
+            t[y][x] = DEADWOOD[2] if int(d * 0.8 + 0.5) % 2 == 0 else DEADWOOD[3]
+    return t
+
+
+def gloomleaf(rng):
+    """Sparse, ragged violet leaves; more holes than blossoms have."""
+    n = fbm(rng, ((4, 0.7), (8, 0.3)))
+    t = [[ramp(GLOOM, 0.1 + n[y][x] * 0.7) for x in range(S)] for y in range(S)]
+    for _ in range(40):
+        t[rng.randrange(S)][rng.randrange(S)] = CLEAR
+    for _ in range(4):
+        t[rng.randrange(S)][rng.randrange(S)] = EMBER[2]
+    return t
+
+
+def hexbloom(rng):
+    """A thorny stalk with a burning flower head."""
+    t = blank()
+    for y in range(7, S):
+        t[y][8] = DEADWOOD[2]
+    for y, x in ((10, 9), (12, 7), (13, 9)):
+        t[y][x] = DEADWOOD[1]
+    for y in range(2, 8):
+        for x in range(4, 12):
+            d = math.hypot(x - 7.5, y - 4.5)
+            if d < 3.2:
+                t[y][x] = EMBER[min(4, int((3.2 - d) * 1.3))]
+    for x, y in ((3, 3), (12, 3), (5, 1), (10, 1)):  # petals flicking out
+        t[y][x] = EMBER[1]
+    return t
+
+
 # Layer order is the source of truth for block faces; keep it in sync with
 # `Layer` in src/blocks.ks.
 TILES = [driftstone, loam, moss_top, moss_side, bark, rings, emberleaf, cloudglass,
-         skyiron, glowcap, sailcloth, featherthatch, planks]
+         skyiron, glowcap, sailcloth, featherthatch, planks,
+         ashrock, scorch_top, scorch_side, darkbrick, embercore, deadwood, dead_rings,
+         gloomleaf, hexbloom]
 
 
 def main():
