@@ -8,7 +8,6 @@ import std.result.(Result, Optional)
 import std.collections.(Array, Slice)
 import std.text.(String)
 import std.core.(Bool)
-import std.io.error.(IoError)
 
 // ============================================================================
 // READABLE
@@ -24,13 +23,13 @@ import std.io.error.(IoError)
 ///
 /// ```
 /// struct Zeros: Readable {
-///     internal mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+///     public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
 ///         buf.fill(with: 0);
 ///         .Ok(buf.count)
 ///     }
 /// }
 /// ```
-internal protocol Readable {
+public protocol Readable {
     /// Reads up to `buf.count` bytes into `buf`; `0` at end of stream.
     mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError]
 }
@@ -38,7 +37,7 @@ internal protocol Readable {
 extend Readable {
     /// Reads to end of stream, appending to `buf`. Returns the number of
     /// bytes appended. Retries reads interrupted by a signal.
-    internal mutating func readAll(mutating into buf: Array[UInt8]) -> Result[Int64, IoError] {
+    public mutating func readAll(mutating into buf: Array[UInt8]) -> Result[Int64, IoError] {
         var chunk = Array[UInt8](repeating: 0, count: 8192);
         var total: Int64 = 0;
         loop {
@@ -63,9 +62,8 @@ extend Readable {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` (`UnexpectedEnd` once `IoError` moves here) if the
-    /// stream ends before `buf` is full.
-    internal mutating func readExact(mutating into buf: Slice[UInt8]) -> Result[(), IoError] {
+    /// `UnexpectedEnd` if the stream ends before `buf` is full.
+    public mutating func readExact(mutating into buf: Slice[UInt8]) -> Result[(), IoError] {
         var filled: Int64 = 0;
         while filled < buf.count {
             let n = match self.read(into: buf(filled..)) {
@@ -76,7 +74,7 @@ extend Readable {
                 }
             };
             if n == 0 {
-                return .Err(IoError(kind: .InvalidInput))
+                return .Err(IoError(kind: .UnexpectedEnd))
             }
             filled = filled + n
         }
@@ -84,7 +82,7 @@ extend Readable {
     }
 
     /// Reads one byte; `None` at end of stream.
-    internal mutating func readByte() -> Result[Optional[UInt8], IoError] {
+    public mutating func readByte() -> Result[Optional[UInt8], IoError] {
         var one = Array[UInt8](repeating: 0, count: 1);
         if try self.read(into: one.asMutableSlice()) == 0 {
             return .Ok(.None)
@@ -96,37 +94,36 @@ extend Readable {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` (`InvalidData` once `IoError` moves here) if the
-    /// bytes aren't valid UTF-8.
-    internal mutating func readText() -> Result[String, IoError] {
+    /// `InvalidData` if the bytes aren't valid UTF-8.
+    public mutating func readText() -> Result[String, IoError] {
         var bytes = Array[UInt8]();
         try self.readAll(into: bytes);
         match String(fromUtf8: bytes.asSlice()) {
             .Some(text) => .Ok(text),
-            .None => .Err(IoError(kind: .InvalidInput))
+            .None => .Err(IoError(kind: .InvalidData))
         }
     }
 
     /// Wraps the stream in a `BufferedReader`, for line reading and fewer
     /// system calls.
-    internal consuming func buffered() -> BufferedReader[Self] {
+    public consuming func buffered() -> BufferedReader[Self] {
         BufferedReader(self)
     }
 
     /// A reader that stops after `bytes` bytes of this one.
-    internal consuming func take(bytes bytes: Int64) -> TakeReader[Self] {
+    public consuming func take(bytes bytes: Int64) -> TakeReader[Self] {
         TakeReader(inner: self, bytes: bytes)
     }
 
     /// A reader that reads this one to its end, then `next`.
-    internal consuming func chained[R](consuming with next: R) -> ChainReader[Self, R] where R: Readable, R: not Copyable, R: not Static {
+    public consuming func chained[R](consuming with next: R) -> ChainReader[Self, R] where R: Readable, R: not Copyable, R: not Static {
         ChainReader(first: self, second: next)
     }
 }
 
-/// `EINTR`: the read was cut short by a signal and can be retried.
-func isInterrupted(error: IoError) -> Bool {
-    error.errno() == 4
+/// The call was cut short by a signal and can be retried.
+internal func isInterrupted(error: IoError) -> Bool {
+    error.kind == .Interrupted
 }
 
 // ============================================================================
@@ -135,22 +132,22 @@ func isInterrupted(error: IoError) -> Bool {
 
 /// Reads at most a fixed number of bytes from another reader, then reports
 /// end of stream. Built by `reader.take(bytes:)`.
-internal struct TakeReader[R]: Readable where R: Readable, R: not Copyable, R: not Static {
+public struct TakeReader[R]: Readable where R: Readable, R: not Copyable, R: not Static {
     var inner: R
     var left: Int64
 
     /// @name From Reader
     /// Limits `inner` to `bytes` more bytes. Prefer `inner.take(bytes:)`.
-    internal init(consuming inner inner: R, bytes bytes: Int64) {
+    public init(consuming inner inner: R, bytes bytes: Int64) {
         self.inner = inner;
         self.left = bytes;
     }
 
     /// Bytes still allowed before end of stream.
-    internal var limit: Int64 { self.left }
+    public var limit: Int64 { self.left }
 
     /// Reads from the inner reader, never past the limit.
-    internal mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         if self.left <= 0 {
             return .Ok(0)
         }
@@ -164,7 +161,7 @@ internal struct TakeReader[R]: Readable where R: Readable, R: not Copyable, R: n
     }
 
     /// The inner reader, positioned after what was read through this one.
-    internal consuming func intoInner() -> R {
+    public consuming func intoInner() -> R {
         self.inner
     }
 }
@@ -175,21 +172,21 @@ internal struct TakeReader[R]: Readable where R: Readable, R: not Copyable, R: n
 
 /// Reads one reader to its end, then another. Built by
 /// `first.chained(with: second)`.
-internal struct ChainReader[A, B]: Readable where A: Readable, B: Readable, A: not Copyable, B: not Copyable, A: not Static, B: not Static {
+public struct ChainReader[A, B]: Readable where A: Readable, B: Readable, A: not Copyable, B: not Copyable, A: not Static, B: not Static {
     var first: A
     var second: B
     var firstDone: Bool
 
     /// @name From Readers
     /// Reads `first`, then `second`. Prefer `first.chained(with: second)`.
-    internal init(consuming first first: A, consuming second second: B) {
+    public init(consuming first first: A, consuming second second: B) {
         self.first = first;
         self.second = second;
         self.firstDone = false;
     }
 
     /// Reads from the first reader until it ends, then from the second.
-    internal mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         if not self.firstDone {
             let n = try self.first.read(into: buf);
             if n > 0 or buf.count == 0 {

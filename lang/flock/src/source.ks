@@ -61,11 +61,11 @@ public struct PathSource: PackageSource {
                 let pkgDir = joinPath(base: baseDir, rel: relPath);
                 let manifestPath = joinPath(base: pkgDir, rel: "flock.toml");
 
-                if not fileExists(manifestPath) {
+                if not Path(manifestPath).exists() {
                     throw FlockError.ManifestNotFound(manifestPath)
                 }
 
-                match readFileString(manifestPath) {
+                match readText(Path(manifestPath)) {
                     .Err(e) => {
                         var msg = String(); msg.append("cannot read "); msg.append(manifestPath);
                         throw FlockError.IoError(msg)
@@ -159,18 +159,18 @@ public func joinPath(base base: String, rel rel: String) -> String {
 /// is renamed in place (a one-time move). If the rename fails, the legacy path is
 /// returned so existing data stays reachable.
 public func flockHome() -> String {
-    match getenv("HOME") {
+    match Environment.variable("HOME") {
         .None => ".flock",
         .Some(home) => {
             let flockDir = joinPath(base: home, rel: ".flock");
             // ~/.flock already present (post-migration, or fresh) — use it.
-            if isDirectory(flockDir) {
+            if Path(flockDir).isDirectory() {
                 return flockDir
             }
             // One-time move of the legacy ~/.kestrel home.
             let kestrelDir = joinPath(base: home, rel: ".kestrel");
-            if isDirectory(kestrelDir) {
-                match rename(kestrelDir, flockDir) {
+            if Path(kestrelDir).isDirectory() {
+                match rename(Path(kestrelDir), to: Path(flockDir)) {
                     .Ok(_) => flockDir,
                     .Err(_) => kestrelDir
                 }

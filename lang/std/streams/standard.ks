@@ -6,7 +6,6 @@ import std.numeric.(Int64, UInt8)
 import std.result.(Result, Optional)
 import std.collections.(Array, Slice)
 import std.text.(String, Formattable)
-import std.io.error.(IoError)
 
 // ============================================================================
 // STANDARD INPUT
@@ -14,12 +13,12 @@ import std.io.error.(IoError)
 
 /// The process's standard input. Every value reads through one shared
 /// buffer, so lines read through one value aren't lost to another.
-internal struct StandardInput: Readable {
+public struct StandardInput: Readable {
     /// @name Default
-    internal init() {}
+    public init() {}
 
     /// Reads from the shared buffer, refilling it from fd 0.
-    internal mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = native_stdin_read(buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -29,7 +28,7 @@ internal struct StandardInput: Readable {
 
     /// The next line without its `"\n"` (or `"\r\n"`); `None` at end of
     /// input. Invalid UTF-8 becomes U+FFFD.
-    internal mutating func readLine() -> Result[Optional[String], IoError] {
+    public mutating func readLine() -> Result[Optional[String], IoError] {
         var bytes = Array[UInt8]();
         var sawAny = false;
         while let .Some(b) = try self.readByte() {
@@ -56,12 +55,12 @@ internal struct StandardInput: Readable {
 /// The process's standard output: line-buffered on a terminal,
 /// block-buffered otherwise. The buffer is shared by every value and
 /// flushed when the process exits normally.
-internal struct StandardOutput: Writable {
+public struct StandardOutput: Writable {
     /// @name Default
-    internal init() {}
+    public init() {}
 
     /// Adds `buf` to the shared buffer.
-    internal mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = native_stdout_write(buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -70,18 +69,18 @@ internal struct StandardOutput: Writable {
     }
 
     /// Writes the shared buffer to fd 1.
-    internal mutating func flush() -> Result[(), IoError] {
+    public mutating func flush() -> Result[(), IoError] {
         flushStandardOutput()
     }
 }
 
 /// The process's standard error. Unbuffered, so diagnostics appear at once.
-internal struct StandardError: Writable {
+public struct StandardError: Writable {
     /// @name Default
-    internal init() {}
+    public init() {}
 
     /// Writes `buf` to fd 2.
-    internal mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = native_stream_write(2, buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -90,7 +89,7 @@ internal struct StandardError: Writable {
     }
 
     /// Nothing to flush.
-    internal mutating func flush() -> Result[(), IoError] { .Ok(()) }
+    public mutating func flush() -> Result[(), IoError] { .Ok(()) }
 }
 
 /// Writes standard output's shared buffer to fd 1. Other std modules call
@@ -107,59 +106,59 @@ internal func flushStandardOutput() -> Result[(), IoError] {
 // ============================================================================
 
 /// The process's standard input.
-internal func standardInput() -> StandardInput { StandardInput() }
+public func standardInput() -> StandardInput { StandardInput() }
 
 /// The process's standard output.
-internal func standardOutput() -> StandardOutput { StandardOutput() }
+public func standardOutput() -> StandardOutput { StandardOutput() }
 
 /// The process's standard error.
-internal func standardError() -> StandardError { StandardError() }
+public func standardError() -> StandardError { StandardError() }
 
 // ============================================================================
 // PRINTING AND READING
 // ============================================================================
 
 /// Writes `value` to standard output.
-internal func print(value: some Formattable) -> Result[(), IoError] {
+public func print(value: some Formattable) -> Result[(), IoError] {
     var out = StandardOutput();
     out.write(formatted: value)
 }
 
 /// Writes `value` and a `"\n"` to standard output.
-internal func println(value: some Formattable) -> Result[(), IoError] {
+public func println(value: some Formattable) -> Result[(), IoError] {
     var out = StandardOutput();
     try out.write(formatted: value);
     out.write(byte: 10)
 }
 
 /// Writes a `"\n"` to standard output.
-internal func println() -> Result[(), IoError] {
+public func println() -> Result[(), IoError] {
     var out = StandardOutput();
     out.write(byte: 10)
 }
 
 /// Writes `value` to standard error.
-internal func eprint(value: some Formattable) -> Result[(), IoError] {
+public func eprint(value: some Formattable) -> Result[(), IoError] {
     var err = StandardError();
     err.write(formatted: value)
 }
 
 /// Writes `value` and a `"\n"` to standard error.
-internal func eprintln(value: some Formattable) -> Result[(), IoError] {
+public func eprintln(value: some Formattable) -> Result[(), IoError] {
     var err = StandardError();
     try err.write(formatted: value);
     err.write(byte: 10)
 }
 
 /// Reads a line from standard input. `None` at end of input.
-internal func readLine() -> Result[Optional[String], IoError] {
+public func readLine() -> Result[Optional[String], IoError] {
     var input = StandardInput();
     input.readLine()
 }
 
 /// Writes `message`, flushes standard output so it shows before the user
 /// types, then reads a line.
-internal func prompt(message: String) -> Result[Optional[String], IoError] {
+public func prompt(message: String) -> Result[Optional[String], IoError] {
     var out = StandardOutput();
     try out.write(text: message);
     try out.flush();

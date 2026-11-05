@@ -4,9 +4,6 @@ module std.system
 
 import std.numeric.(Int32)
 
-// `ExitCode` and `Exitable` are re-exported from std.os, which owns the
-// `@builtin` hooks the `@main` wrapper uses. They move here when std.os goes.
-import std.os.(ExitCode, Exitable)
 
 /// Ends the process with `code`, the same type `@main` returns.
 ///

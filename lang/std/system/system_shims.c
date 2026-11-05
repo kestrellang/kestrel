@@ -156,7 +156,6 @@ void kestrel_sleep_ms(int32_t ms) {
     while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {}
 }
 
-int32_t kestrel_errno_timed_out(void) { return ETIMEDOUT; }
 
 // Milliseconds on a clock that never jumps, for timeouts.
 int64_t kestrel_monotonic_ms(void) {

@@ -17,7 +17,7 @@
 
 module Test
 
-import std.io.stdio.print
+import std.streams.print
 
 @main
 func main() -> lang.i64 {

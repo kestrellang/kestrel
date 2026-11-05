@@ -129,15 +129,15 @@ public struct Platform: Equatable, Formattable {
 }
 
 @platform(.Darwin)
-func currentOperatingSystem() -> OperatingSystem { .Darwin }
+internal func currentOperatingSystem() -> OperatingSystem { .Darwin }
 
 @platform(.Linux)
-func currentOperatingSystem() -> OperatingSystem { .Linux }
+internal func currentOperatingSystem() -> OperatingSystem { .Linux }
 
 /// The shim's answer comes from the C compiler's target macros, so it is
 /// right for cross-compiled builds too. `@platform` can't select on
 /// architecture yet; when it can, this becomes a compile-time constant.
-func currentArchitecture() -> Architecture {
+internal func currentArchitecture() -> Architecture {
     match native_architecture() {
         0 => .X86_64,
         1 => .Arm64,

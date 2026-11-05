@@ -7,7 +7,7 @@
 // not itself `Exitable`).
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 @main
 func main() { println("ran"); }

@@ -43,7 +43,7 @@ func main() -> ExitCode {
 }
 ```
 
-`ExitCode` lives in `std.os` (available without an import). Construct one from any `UInt8`: `ExitCode(3)`. The meaningful range is 0–255.
+`ExitCode` lives in `std.system` (available without an import). Construct one from any `UInt8`: `ExitCode(3)`. The meaningful range is 0–255.
 
 ### Integer Returns
 

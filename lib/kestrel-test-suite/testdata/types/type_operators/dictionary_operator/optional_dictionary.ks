@@ -3,7 +3,7 @@
 // skip: blocked on type alias normalization
 
 module Test
-import std.io.stdio.println
+import std.streams.println
 
 func main() -> lang.i64 {
     let someOpt: [std.numeric.Int64: std.numeric.Int64]? = .Some(std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]());

@@ -799,6 +799,107 @@ skipped.
 
 _Defined in `lang/std/system/environment.ks`._
 
+## struct `ExitCode`
+
+```kestrel
+public struct ExitCode { /* private fields */ }
+```
+
+A process exit code.
+
+Conventionally `0` means success and any non-zero value means failure. Only
+the low 8 bits survive on POSIX (`WEXITSTATUS`), so the meaningful range is
+`0`–`255`. The byte is private; build one with `ExitCode(_:)` or use the
+`.success` / `.failure` constants.
+
+_Defined in `lang/std/system/exitable.ks`._
+
+### Members
+
+#### field `failure`
+
+```kestrel
+public static var failure: ExitCode { get }
+```
+
+The conventional generic-failure code, `1`.
+
+_Defined in `lang/std/system/exitable.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(UInt8)
+```
+
+Builds an exit code from a byte. `exit(-1)`-style codes are spelled
+`ExitCode(255)`.
+
+_Defined in `lang/std/system/exitable.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(intLiteral: lang.i64)
+```
+
+`exit(2)` takes a literal. Only the low 8 bits are kept, as
+`WEXITSTATUS` does.
+
+_Defined in `lang/std/system/exitable.ks`._
+
+#### field `isSuccess`
+
+```kestrel
+public var isSuccess: Bool { get }
+```
+
+True for `0`, the conventional success code.
+
+_Defined in `lang/std/system/exitable.ks`._
+
+#### field `success`
+
+```kestrel
+public static var success: ExitCode { get }
+```
+
+The conventional success code, `0`.
+
+_Defined in `lang/std/system/exitable.ks`._
+
+#### field `value`
+
+```kestrel
+public var value: UInt8 { get }
+```
+
+The code as a byte, `0`–`255`.
+
+_Defined in `lang/std/system/exitable.ks`._
+
+### Implements `ExpressibleByIntLiteral`
+
+### Implements `Equatable`
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: ExitCode) -> Bool
+```
+
+_Defined in `lang/std/system/exitable.ks`._
+
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/system/exitable.ks`._
+
 ## enum `ExitStatus`
 
 ```kestrel
@@ -872,6 +973,33 @@ public func format(into: mutating some Formatter, FormatOptions)
 Prints `exit code 3` or `terminated`.
 
 _Defined in `lang/std/system/process.ks`._
+
+## protocol `Exitable`
+
+```kestrel
+public protocol Exitable
+```
+
+A type that a `@main` function may return: it knows how to produce a process
+exit code.
+
+The compiler synthesizes C `main` as a wrapper that calls `report()` on the
+value `@main` returns. `report()` is `consuming` so move-only conformers
+(e.g. `Result`) can move out their payload.
+
+_Defined in `lang/std/system/exitable.ks`._
+
+### Members
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+Produce the process exit code for this value.
+
+_Defined in `lang/std/system/exitable.ks`._
 
 ## enum `Machine`
 
@@ -1065,6 +1193,8 @@ _Defined in `lang/std/system/process.ks`._
 public mutating func read(into: mutating Slice[UInt8]) -> Result[Int64, IoError]
 ```
 
+Reads what the child has written so far; `0` once it closes its end.
+
 _Defined in `lang/std/system/process.ks`._
 
 ## struct `PipeWriter`
@@ -1096,15 +1226,17 @@ _Defined in `lang/std/system/process.ks`._
 public mutating func flush() -> Result[(), IoError]
 ```
 
-No-op: pipe writes are unbuffered.
+Nothing to flush: pipe writes are unbuffered.
 
 _Defined in `lang/std/system/process.ks`._
 
 #### function `write`
 
 ```kestrel
-public mutating func write(from: UnsafeSlice[UInt8]) -> Result[Int64, IoError]
+public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]
 ```
+
+Writes to the child's standard input.
 
 _Defined in `lang/std/system/process.ks`._
 
@@ -1364,8 +1496,9 @@ public func exit(ExitCode) -> !
 
 Ends the process with `code`, the same type `@main` returns.
 
-Runs `atexit` handlers and flushes C stdio buffers. Kestrel values still
-in scope are **not** deinitialized, so flush any buffered writers first.
+Runs `atexit` handlers, which flush C stdio buffers and std.streams'
+standard output buffer. Kestrel values still in scope are **not**
+deinitialized, so flush any other buffered writers first.
 
 ### Examples
 

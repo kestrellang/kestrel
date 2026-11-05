@@ -7,15 +7,15 @@ import std.memory.(RawPointer)
 
 /// Buffers bytes for standard output (`streams_shims.c`).
 @extern(.C, mangleName: "kestrel_stdout_write")
-func native_stdout_write(bytes: RawPointer, count: Int64) -> Int64
+internal func native_stdout_write(bytes: RawPointer, count: Int64) -> Int64
 
 /// Writes the standard output buffer out. `0`, or `-1` with errno set.
 @extern(.C, mangleName: "kestrel_stdout_flush")
-func native_stdout_flush() -> Int64
+internal func native_stdout_flush() -> Int64
 
 /// Reads standard input through the shared buffer.
 @extern(.C, mangleName: "kestrel_stdin_read")
-func native_stdin_read(bytes: RawPointer, count: Int64) -> Int64
+internal func native_stdin_read(bytes: RawPointer, count: Int64) -> Int64
 
 @extern(.C, mangleName: "write")
-func native_stream_write(fd: Int32, bytes: RawPointer, count: Int64) -> Int64
+internal func native_stream_write(fd: Int32, bytes: RawPointer, count: Int64) -> Int64

@@ -5,7 +5,8 @@
 
 module jessup.platform
 
-// captureOutput is auto-imported from stdlib
+import clutch.shell.(shellOutput)
+
 import jessup.error.(JessupError)
 
 // ============================================================================
@@ -71,8 +72,8 @@ public struct Platform: Cloneable {
 
 /// Detects the current platform from uname.
 public func detectPlatform() -> Platform throws JessupError {
-    let rawOs = captureOutput("uname -s").unwrap(or: String());
-    let rawArch = captureOutput("uname -m").unwrap(or: String());
+    let rawOs = shellOutput("uname -s");
+    let rawArch = shellOutput("uname -m");
 
     let os = trimWhitespace(rawOs);
     let arch = trimWhitespace(rawArch);

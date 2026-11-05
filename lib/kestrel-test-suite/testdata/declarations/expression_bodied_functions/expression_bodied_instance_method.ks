@@ -2,7 +2,7 @@
 // expect-stdout: 7\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 struct Point {
     let x: std.numeric.Int64

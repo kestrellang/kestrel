@@ -19,99 +19,97 @@ import std.result.(Optional)
 // ============================================================================
 
 @extern(.C, mangleName: "getenv")
-func native_getenv(name: RawPointer) -> RawPointer
+internal func native_getenv(name: RawPointer) -> RawPointer
 
 @extern(.C, mangleName: "setenv")
-func native_setenv(name: RawPointer, value: RawPointer, overwrite: Int32) -> Int32
+internal func native_setenv(name: RawPointer, value: RawPointer, overwrite: Int32) -> Int32
 
 @extern(.C, mangleName: "unsetenv")
-func native_unsetenv(name: RawPointer) -> Int32
+internal func native_unsetenv(name: RawPointer) -> Int32
 
 @extern(.C, mangleName: "getcwd")
-func native_getcwd(buf: RawPointer, size: Int64) -> RawPointer
+internal func native_getcwd(buf: RawPointer, size: Int64) -> RawPointer
 
 @extern(.C, mangleName: "chdir")
-func native_chdir(path: RawPointer) -> Int32
+internal func native_chdir(path: RawPointer) -> Int32
 
 @extern(.C, mangleName: "getpid")
-func native_getpid() -> Int32
+internal func native_getpid() -> Int32
 
 @extern(.C, mangleName: "getppid")
-func native_getppid() -> Int32
+internal func native_getppid() -> Int32
 
 @extern(.C, mangleName: "gethostname")
-func native_gethostname(buf: RawPointer, size: Int64) -> Int32
+internal func native_gethostname(buf: RawPointer, size: Int64) -> Int32
 
 @extern(.C, mangleName: "kill")
-func native_kill(pid: Int32, signal: Int32) -> Int32
+internal func native_kill(pid: Int32, signal: Int32) -> Int32
 
 @extern(.C, mangleName: "close")
-func native_close(fd: Int32) -> Int32
+internal func native_close(fd: Int32) -> Int32
 
 @extern(.C, mangleName: "read")
-func native_read(fd: Int32, buf: RawPointer, count: Int64) -> Int64
+internal func native_read(fd: Int32, buf: RawPointer, count: Int64) -> Int64
 
 @extern(.C, mangleName: "write")
-func native_write(fd: Int32, buf: RawPointer, count: Int64) -> Int64
+internal func native_write(fd: Int32, buf: RawPointer, count: Int64) -> Int64
 
 @extern(.C, mangleName: "exit")
-func native_exit(code: Int32)
+internal func native_exit(code: Int32)
 
 @extern(.C, mangleName: "abort")
-func native_abort()
+internal func native_abort()
 
 // ============================================================================
 // system_shims.c
 // ============================================================================
 
 @extern(.C, mangleName: "kestrel_argc")
-func native_argc() -> Int32
+internal func native_argc() -> Int32
 
 @extern(.C, mangleName: "kestrel_argv")
-func native_argv() -> RawPointer
+internal func native_argv() -> RawPointer
 
 @extern(.C, mangleName: "kestrel_environ")
-func native_environ() -> RawPointer
+internal func native_environ() -> RawPointer
 
 @extern(.C, mangleName: "kestrel_spawn")
-func native_spawn(program: RawPointer, argv: RawPointer, envp: RawPointer, cwd: RawPointer,
+internal func native_spawn(program: RawPointer, argv: RawPointer, envp: RawPointer, cwd: RawPointer,
                   modes: RawPointer, pidOut: RawPointer, parentFds: RawPointer) -> Int32
 
 @extern(.C, mangleName: "kestrel_wait")
-func native_wait(pid: Int32, nohang: Int32, kind: RawPointer, value: RawPointer) -> Int32
+internal func native_wait(pid: Int32, nohang: Int32, kind: RawPointer, value: RawPointer) -> Int32
 
 @extern(.C, mangleName: "kestrel_poll_two")
-func native_poll_two(fd0: Int32, fd1: Int32, timeoutMs: Int32, ready: RawPointer) -> Int32
+internal func native_poll_two(fd0: Int32, fd1: Int32, timeoutMs: Int32, ready: RawPointer) -> Int32
 
 @extern(.C, mangleName: "kestrel_sleep_ms")
-func native_sleep_ms(ms: Int32)
+internal func native_sleep_ms(ms: Int32)
 
-@extern(.C, mangleName: "kestrel_errno_timed_out")
-func native_errno_timed_out() -> Int32
 
 @extern(.C, mangleName: "kestrel_monotonic_ms")
-func native_monotonic_ms() -> Int64
+internal func native_monotonic_ms() -> Int64
 
 @extern(.C, mangleName: "kestrel_executable_path")
-func native_executable_path(buf: RawPointer, size: Int64) -> Int64
+internal func native_executable_path(buf: RawPointer, size: Int64) -> Int64
 
 @extern(.C, mangleName: "kestrel_passwd_home")
-func native_passwd_home() -> RawPointer
+internal func native_passwd_home() -> RawPointer
 
 @extern(.C, mangleName: "kestrel_processor_count")
-func native_processor_count() -> Int64
+internal func native_processor_count() -> Int64
 
 @extern(.C, mangleName: "kestrel_page_size")
-func native_page_size() -> Int64
+internal func native_page_size() -> Int64
 
 @extern(.C, mangleName: "kestrel_architecture")
-func native_architecture() -> Int32
+internal func native_architecture() -> Int32
 
 @extern(.C, mangleName: "kestrel_pointer_width")
-func native_pointer_width() -> Int32
+internal func native_pointer_width() -> Int32
 
 @extern(.C, mangleName: "kestrel_is_little_endian")
-func native_is_little_endian() -> Int32
+internal func native_is_little_endian() -> Int32
 
 // ============================================================================
 // Helpers
@@ -119,7 +117,7 @@ func native_is_little_endian() -> Int32
 
 /// Copies a NUL-terminated C string into a `String`. `None` for a null
 /// pointer. Bytes are copied as-is; no UTF-8 check.
-func stringFromNative(raw: RawPointer) -> Optional[String] {
+internal func stringFromNative(raw: RawPointer) -> Optional[String] {
     if raw.isNull {
         return .None
     }
@@ -127,7 +125,7 @@ func stringFromNative(raw: RawPointer) -> Optional[String] {
 }
 
 /// Copies a NUL-terminated C string's bytes, without the terminator.
-func bytesFromNative(raw: RawPointer) -> Array[UInt8] {
+internal func bytesFromNative(raw: RawPointer) -> Array[UInt8] {
     let ptr = raw.cast[UInt8]();
     var bytes = Array[UInt8]();
     var i: Int64 = 0;
@@ -139,12 +137,12 @@ func bytesFromNative(raw: RawPointer) -> Array[UInt8] {
 }
 
 /// Reads the `index`th pointer of a C `char **` array.
-func nativePointerAt(array: RawPointer, index: Int64) -> RawPointer {
+internal func nativePointerAt(array: RawPointer, index: Int64) -> RawPointer {
     array.cast[RawPointer]().offset(by: index).read()
 }
 
 /// A small block of C `int32_t` cells for out-parameters. Freed on drop.
-struct NativeInt32Cells: not Copyable {
+internal struct NativeInt32Cells: not Copyable {
     var pointer: Pointer[Int32]
 
     init(count: Int64) {
@@ -166,7 +164,7 @@ struct NativeInt32Cells: not Copyable {
 
 /// A NULL-terminated `char **` built from Kestrel strings, for argv and
 /// envp. Owns the copies and frees them on drop.
-struct NativeStringArray: not Copyable {
+internal struct NativeStringArray: not Copyable {
     var pointers: Array[RawPointer]
 
     init(from strings: Array[String]) {

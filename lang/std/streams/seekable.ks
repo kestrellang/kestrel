@@ -4,10 +4,9 @@ module std.streams
 
 import std.numeric.(Int64)
 import std.result.(Result)
-import std.io.error.(IoError)
 
 /// Where `seek(to:)` moves a stream.
-internal enum Seek {
+public enum Seek {
     /// This many bytes from the start.
     case Start(Int64)
     /// This many bytes from the current position; negative moves back.
@@ -29,7 +28,7 @@ internal enum Seek {
 /// try c.seek(to: .End(-2));
 /// try c.readText()      // "lo"
 /// ```
-internal protocol Seekable {
+public protocol Seekable {
     /// Moves to `position`; returns the new offset from the start.
     ///
     /// # Errors
@@ -40,19 +39,19 @@ internal protocol Seekable {
 
 extend Seekable {
     /// The offset from the start.
-    internal mutating func currentPosition() -> Result[Int64, IoError] {
+    public mutating func currentPosition() -> Result[Int64, IoError] {
         self.seek(to: .Current(0))
     }
 
     /// Moves back to the start.
-    internal mutating func rewind() -> Result[(), IoError] {
+    public mutating func rewind() -> Result[(), IoError] {
         try self.seek(to: .Start(0));
         .Ok(())
     }
 
     /// The stream's length in bytes. Seeks to the end and back, so the
     /// position is unchanged.
-    internal mutating func length() -> Result[Int64, IoError] {
+    public mutating func length() -> Result[Int64, IoError] {
         let here = try self.currentPosition();
         let end = try self.seek(to: .End(0));
         try self.seek(to: .Start(here));

@@ -2944,7 +2944,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int16` from 2 bytes in native byte order.
@@ -2955,7 +2955,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int16` from 2 bytes in big-endian order.
@@ -2966,7 +2966,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int16` from 2 bytes in little-endian order.
@@ -4539,7 +4539,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 consuming func report() -> ExitCode
 ```
 
-_Defined in `lang/std/os/exitable.ks`._
+_Defined in `lang/std/system/exitable.ks`._
 
 ## struct `Int32`
 
@@ -4644,7 +4644,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int32` from 4 bytes in native byte order.
@@ -4655,7 +4655,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int32` from 4 bytes in big-endian order.
@@ -4666,7 +4666,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int32` from 4 bytes in little-endian order.
@@ -6205,7 +6205,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 consuming func report() -> ExitCode
 ```
 
-_Defined in `lang/std/os/exitable.ks`._
+_Defined in `lang/std/system/exitable.ks`._
 
 ## struct `Int64`
 
@@ -6288,7 +6288,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int64` from 8 bytes in native byte order.
@@ -6299,7 +6299,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int64` from 8 bytes in big-endian order.
@@ -6310,7 +6310,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int64` from 8 bytes in little-endian order.
@@ -8011,7 +8011,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 consuming func report() -> ExitCode
 ```
 
-_Defined in `lang/std/os/exitable.ks`._
+_Defined in `lang/std/system/exitable.ks`._
 
 ### Implements `BytesIndex`
 
@@ -8416,7 +8416,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int8` from 1 bytes in native byte order.
@@ -8427,7 +8427,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int8` from 1 bytes in big-endian order.
@@ -8438,7 +8438,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `Int8` from 1 bytes in little-endian order.
@@ -10045,7 +10045,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 consuming func report() -> ExitCode
 ```
 
-_Defined in `lang/std/os/exitable.ks`._
+_Defined in `lang/std/system/exitable.ks`._
 
 ## struct `Lcg64`
 
@@ -10559,7 +10559,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt16` from 2 bytes in native byte order.
@@ -10570,7 +10570,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt16` from 2 bytes in big-endian order.
@@ -10581,7 +10581,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt16` from 2 bytes in little-endian order.
@@ -12058,7 +12058,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 consuming func report() -> ExitCode
 ```
 
-_Defined in `lang/std/os/exitable.ks`._
+_Defined in `lang/std/system/exitable.ks`._
 
 ## struct `UInt32`
 
@@ -12185,7 +12185,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt32` from 4 bytes in native byte order.
@@ -12196,7 +12196,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt32` from 4 bytes in big-endian order.
@@ -12207,7 +12207,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt32` from 4 bytes in little-endian order.
@@ -13667,7 +13667,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 consuming func report() -> ExitCode
 ```
 
-_Defined in `lang/std/os/exitable.ks`._
+_Defined in `lang/std/system/exitable.ks`._
 
 ## struct `UInt64`
 
@@ -13783,7 +13783,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt64` from 8 bytes in native byte order.
@@ -13794,7 +13794,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt64` from 8 bytes in big-endian order.
@@ -13805,7 +13805,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt64` from 8 bytes in little-endian order.
@@ -15257,7 +15257,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 consuming func report() -> ExitCode
 ```
 
-_Defined in `lang/std/os/exitable.ks`._
+_Defined in `lang/std/system/exitable.ks`._
 
 ## struct `UInt8`
 
@@ -15406,7 +15406,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes`
 
 ```kestrel
-public init[S](fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytes: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt8` from 1 bytes in native byte order.
@@ -15417,7 +15417,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Big Endian`
 
 ```kestrel
-public init[S](fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesBigEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt8` from 1 bytes in big-endian order.
@@ -15428,7 +15428,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### initializer `From Bytes Little Endian`
 
 ```kestrel
-public init[S](fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromBytesLittleEndian: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Reassembles a `UInt8` from 1 bytes in little-endian order.
@@ -16922,7 +16922,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 consuming func report() -> ExitCode
 ```
 
-_Defined in `lang/std/os/exitable.ks`._
+_Defined in `lang/std/system/exitable.ks`._
 
 ## protocol `UnsignedInteger`
 

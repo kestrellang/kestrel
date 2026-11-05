@@ -8,11 +8,8 @@ import std.collections.(Array, Slice)
 import std.text.(String, Str, Formatter, Formattable, FormatOptions, _writePadded)
 import std.core.(Bool, Equatable)
 import std.result.(Optional, Result)
-import std.io.error.(IoError)
-import std.io.read.(Readable)
-import std.io.write.(Writable)
+import std.streams.(IoError, Readable, Writable, flushStandardOutput)
 import std.ffi.(malloc, free)
-import std.streams
 
 // ============================================================================
 // THIS PROCESS
@@ -149,9 +146,9 @@ public struct Output: not Copyable {
 public struct PipeReader: Readable, not Copyable {
     var fd: Int32
 
+    /// Reads what the child has written so far; `0` once it closes its end.
     public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
-        let raw = buf.asUnsafeSlice();
-        let n = native_read(self.fd, raw.pointer.asRaw(), raw.count);
+        let n = native_read(self.fd, buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -170,7 +167,8 @@ public struct PipeReader: Readable, not Copyable {
 public struct PipeWriter: Writable, not Copyable {
     var fd: Int32
 
-    public mutating func write(from buf: UnsafeSlice[UInt8]) -> Result[Int64, IoError] {
+    /// Writes to the child's standard input.
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = native_write(self.fd, buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -178,32 +176,13 @@ public struct PipeWriter: Writable, not Copyable {
         .Ok(n)
     }
 
-    /// No-op: pipe writes are unbuffered.
+    /// Nothing to flush: pipe writes are unbuffered.
     public mutating func flush() -> Result[(), IoError] { .Ok(()) }
 
     deinit {
         if self.fd >= 0 {
             native_close(self.fd);
         }
-    }
-}
-
-/// A child's pipe as a std.streams reader, for std.system's own reads. It
-/// borrows the fd; the `PipeReader` owning it closes it.
-///
-/// `PipeReader` itself conforms to std.io's `Readable` until std.io is
-/// removed, and then to std.streams'. It can't conform to both meanwhile:
-/// the compiler rejects one type satisfying two unrelated protocols'
-/// `read`, even through separate extensions (E463).
-struct PipeStream: streams.Readable {
-    var fd: Int32
-
-    internal mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
-        let n = native_read(self.fd, buf.pointer.asRaw(), buf.count);
-        if n < 0 {
-            return .Err(IoError.last())
-        }
-        .Ok(n)
     }
 }
 
@@ -417,7 +396,7 @@ public struct Command: not Copyable {
 
         // Anything this process buffered for standard output goes out
         // before the child, which may share fd 1, writes its own.
-        let _ = streams.flushStandardOutput();
+        let _ = flushStandardOutput();
         let program = self.program.toCString();
         // Borrow, don't bind: binding would move the array into the arm and
         // free the strings before the spawn reads them.
@@ -432,7 +411,7 @@ public struct Command: not Copyable {
             free(cwd);
         }
         if status != 0 {
-            return .Err(IoError(code: status))
+            return .Err(IoError(errno: status))
         }
         .Ok(Child(
             pid: pidCell.read(at: 0),
@@ -479,27 +458,19 @@ public func run(program: String, args: Array[String]) -> Result[ExitStatus, IoEr
     Command(program).arguments(args).run()
 }
 
-/// The fd inside an optional pipe, or -1.
-func descriptor(of pipe: Optional[PipeReader]) -> Int32 {
-    match pipe.asRef() {
-        .Some(p) => p.fd,
-        .None => -1
-    }
-}
-
-func pipeReader(fd: Int32) -> Optional[PipeReader] {
+internal func pipeReader(fd: Int32) -> Optional[PipeReader] {
     if fd < 0 { .None } else { .Some(PipeReader(fd: fd)) }
 }
 
-func pipeWriter(fd: Int32) -> Optional[PipeWriter] {
+internal func pipeWriter(fd: Int32) -> Optional[PipeWriter] {
     if fd < 0 { .None } else { .Some(PipeWriter(fd: fd)) }
 }
 
 @extern(.C, mangleName: "access")
-func native_access(path: RawPointer, mode: Int32) -> Int32
+internal func native_access(path: RawPointer, mode: Int32) -> Int32
 
 /// True if `path` names a file this process may execute (`X_OK` is 1).
-func isExecutable(path: String) -> Bool {
+internal func isExecutable(path: String) -> Bool {
     let cpath = path.toCString();
     let result = native_access(cpath.raw.asRaw(), 1);
     cpath.free();
@@ -627,7 +598,7 @@ public struct Child: not Copyable {
         }
         let _ = self.kill();
         let _ = self.wait();
-        .Err(IoError(code: native_errno_timed_out()))
+        .Err(IoError.timedOut)
     }
 
     /// Drains the piped output streams with `poll`, so a child filling one
@@ -636,12 +607,17 @@ public struct Child: not Copyable {
         self.input = .None;
         // The pipes stay open until this returns; a closed stream's fd is
         // set to -1 so poll skips it.
-        let out = self.output.take();
-        let err = self.error.take();
-        var outFd = descriptor(of: out);
-        var errFd = descriptor(of: err);
-        var outStream = PipeStream(fd: outFd);
-        var errStream = PipeStream(fd: errFd);
+        // A stream that wasn't piped stands in as a closed pipe (fd -1).
+        var out = match self.output.take() {
+            .Some(pipe) => pipe,
+            .None => PipeReader(fd: -1)
+        };
+        var err = match self.error.take() {
+            .Some(pipe) => pipe,
+            .None => PipeReader(fd: -1)
+        };
+        var outFd = out.fd;
+        var errFd = err.fd;
         var outBytes = Array[UInt8]();
         var errBytes = Array[UInt8]();
         var scratch = Array[UInt8](repeating: 0, count: 65536);
@@ -658,7 +634,7 @@ public struct Child: not Copyable {
                 if left <= 0 {
                     let _ = self.kill();
                     let _ = self.wait();
-                    return .Err(IoError(code: native_errno_timed_out()))
+                    return .Err(IoError.timedOut)
                 }
                 wait = Int32(from: left)
             }
@@ -666,13 +642,13 @@ public struct Child: not Copyable {
                 return .Err(IoError.last())
             }
             if ready.read(at: 0) != 0 {
-                let open = try drainOnce(outStream, scratch, outBytes, limit);
+                let open = try drainOnce(out, scratch, outBytes, limit);
                 if not open {
                     outFd = -1
                 }
             }
             if ready.read(at: 1) != 0 {
-                let open = try drainOnce(errStream, scratch, errBytes, limit);
+                let open = try drainOnce(err, scratch, errBytes, limit);
                 if not open {
                     errFd = -1
                 }
@@ -698,13 +674,13 @@ public struct Child: not Copyable {
 
 /// One `read` from `pipe` into `into`, keeping at most `limit` bytes in
 /// total (`0` = no limit). `false` at end-of-file.
-func drainOnce[R](mutating pipe: R, mutating scratch: Array[UInt8], mutating into: Array[UInt8], limit: Int64) -> Result[Bool, IoError]
-    where R: streams.Readable, R: not Copyable, R: not Static {
+internal func drainOnce[R](mutating pipe: R, mutating scratch: Array[UInt8], mutating into: Array[UInt8], limit: Int64) -> Result[Bool, IoError]
+    where R: Readable, R: not Copyable, R: not Static {
     let n = match pipe.read(into: scratch.asMutableSlice()) {
         .Ok(n) => n,
         .Err(error) => {
-            // EINTR: poll again.
-            if error.errno() == 4 {
+            // A signal interrupted the read: poll again.
+            if error.kind == .Interrupted {
                 return .Ok(true)
             }
             return .Err(error)

@@ -8,7 +8,7 @@ import std.collections.(Array)
 import std.text.(String)
 import std.core.(Bool)
 import std.result.(Optional, Result)
-import std.io.error.(IoError)
+import std.streams.(IoError)
 import std.ffi.(malloc, free)
 
 /// Environment variables and the process's working, home and temporary
@@ -135,7 +135,7 @@ public enum Environment {
             let error = IoError.last();
             free(buf);
             // ERANGE: the buffer was too small, so grow it and retry.
-            if error.errno() != rangeErrorCode() or size >= 1048576 {
+            if (error.errno ?? 0) != rangeErrorCode() or size >= 1048576 {
                 return .Err(error)
             }
             size = size * 2
@@ -179,7 +179,7 @@ public enum Environment {
 
 /// Splits a `NAME=value` environment entry at its first `=`. `None` if
 /// there is no `=` or either side isn't UTF-8.
-func splitEnvironmentEntry(entry: Array[UInt8]) -> Optional[(String, String)] {
+internal func splitEnvironmentEntry(entry: Array[UInt8]) -> Optional[(String, String)] {
     var i: Int64 = 0;
     // Start at 1: Windows-style `=C:` names begin with `=`, never split there.
     while i < entry.count {
@@ -194,4 +194,4 @@ func splitEnvironmentEntry(entry: Array[UInt8]) -> Optional[(String, String)] {
 }
 
 /// `ERANGE` is 34 on both Linux and Darwin.
-func rangeErrorCode() -> Int32 { 34 }
+internal func rangeErrorCode() -> Int32 { 34 }

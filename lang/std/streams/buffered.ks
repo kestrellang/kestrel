@@ -8,7 +8,6 @@ import std.collections.(Array, Slice)
 import std.text.(String)
 import std.core.(Bool)
 import std.iter.(Iterator)
-import std.io.error.(IoError)
 
 // ============================================================================
 // BUFFERED READER
@@ -23,7 +22,7 @@ import std.io.error.(IoError)
 /// var input = Cursor(text: "a\nb\n").buffered();
 /// try input.readLine()     // .Some("a")
 /// ```
-internal struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, R: not Static {
+public struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, R: not Static {
     var inner: R
     var buffer: Array[UInt8]
     /// Unread bytes are `buffer(start..<end)`.
@@ -32,7 +31,7 @@ internal struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, 
 
     /// @name From Reader
     /// Buffers `inner` with `capacity` bytes of read-ahead.
-    internal init(consuming inner: R, capacity capacity: Int64 = 8192) {
+    public init(consuming inner: R, capacity capacity: Int64 = 8192) {
         self.inner = inner;
         self.buffer = Array[UInt8](repeating: 0, count: if capacity < 1 { 1 } else { capacity });
         self.start = 0;
@@ -40,10 +39,10 @@ internal struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, 
     }
 
     /// Bytes read ahead and not yet handed out.
-    internal var buffered: Int64 { self.end - self.start }
+    public var buffered: Int64 { self.end - self.start }
 
     /// Refills the buffer if it's empty. `false` at end of stream.
-    mutating func fill() -> Result[Bool, IoError] {
+    internal mutating func fill() -> Result[Bool, IoError] {
         if self.start < self.end {
             return .Ok(true)
         }
@@ -55,7 +54,7 @@ internal struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, 
 
     /// Hands out buffered bytes first. A read at least as large as the
     /// buffer, with nothing buffered, goes straight to the inner reader.
-    internal mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         if self.start == self.end and buf.count >= self.buffer.count {
             return self.inner.read(into: buf)
         }
@@ -71,7 +70,7 @@ internal struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, 
 
     /// Reads up to and including the next `byte`, appending to `buf`.
     /// Returns the bytes appended; `0` at end of stream.
-    internal mutating func readUntil(byte byte: UInt8, mutating into buf: Array[UInt8]) -> Result[Int64, IoError] {
+    public mutating func readUntil(byte byte: UInt8, mutating into buf: Array[UInt8]) -> Result[Int64, IoError] {
         var total: Int64 = 0;
         loop {
             let more = try self.fill();
@@ -96,7 +95,7 @@ internal struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, 
 
     /// The next line without its `"\n"` (or `"\r\n"`); `None` at end of
     /// stream. Invalid UTF-8 becomes U+FFFD.
-    internal mutating func readLine() -> Result[Optional[String], IoError] {
+    public mutating func readLine() -> Result[Optional[String], IoError] {
         var bytes = Array[UInt8]();
         if try self.readUntil(byte: 10, into: bytes) == 0 {
             return .Ok(.None)
@@ -111,19 +110,19 @@ internal struct BufferedReader[R]: Readable where R: Readable, R: not Copyable, 
     }
 
     /// An iterator over the remaining lines.
-    internal consuming func lines() -> Lines[R] {
+    public consuming func lines() -> Lines[R] {
         Lines(reader: self)
     }
 
     /// The inner reader. Bytes already read ahead are lost.
-    internal consuming func intoInner() -> R {
+    public consuming func intoInner() -> R {
         self.inner
     }
 }
 
 /// The lines of a `BufferedReader`, each as `Result[String, IoError]`.
 /// Ends at end of stream or after the first error.
-internal struct Lines[R]: Iterator where R: Readable, R: not Copyable, R: not Static {
+public struct Lines[R]: Iterator where R: Readable, R: not Copyable, R: not Static {
     type Item = Result[String, IoError]
 
     var reader: BufferedReader[R]
@@ -131,13 +130,13 @@ internal struct Lines[R]: Iterator where R: Readable, R: not Copyable, R: not St
 
     /// @name From Reader
     /// Prefer `reader.lines()`.
-    internal init(consuming reader reader: BufferedReader[R]) {
+    public init(consuming reader reader: BufferedReader[R]) {
         self.reader = reader;
         self.done = false;
     }
 
     /// The next line, or the error that ended the iteration.
-    internal mutating func next() -> Optional[Result[String, IoError]] {
+    public mutating func next() -> Optional[Result[String, IoError]] {
         if self.done {
             return .None
         }
@@ -171,24 +170,24 @@ internal struct Lines[R]: Iterator where R: Readable, R: not Copyable, R: not St
 /// try out.write(line: "hello");
 /// try out.flush();
 /// ```
-internal struct BufferedWriter[W]: Writable, not Copyable where W: Writable, W: not Copyable, W: not Static {
+public struct BufferedWriter[W]: Writable, not Copyable where W: Writable, W: not Copyable, W: not Static {
     var inner: Optional[W]
     var buffer: Array[UInt8]
     var capacity: Int64
 
     /// @name From Writer
     /// Buffers up to `capacity` bytes before writing to `inner`.
-    internal init(consuming inner: W, capacity capacity: Int64 = 8192) {
+    public init(consuming inner: W, capacity capacity: Int64 = 8192) {
         self.inner = .Some(inner);
         self.capacity = if capacity < 1 { 1 } else { capacity };
         self.buffer = Array[UInt8](capacity: self.capacity);
     }
 
     /// Bytes waiting to be written.
-    internal var buffered: Int64 { self.buffer.count }
+    public var buffered: Int64 { self.buffer.count }
 
     /// Writes the buffered bytes to the inner writer, without flushing it.
-    mutating func drain() -> Result[(), IoError] {
+    internal mutating func drain() -> Result[(), IoError] {
         if self.buffer.count == 0 {
             return .Ok(())
         }
@@ -202,7 +201,7 @@ internal struct BufferedWriter[W]: Writable, not Copyable where W: Writable, W: 
 
     /// Buffers `buf`, writing the buffer out first if `buf` won't fit. A
     /// write at least as large as the buffer goes straight through.
-    internal mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         if self.buffer.count + buf.count > self.capacity {
             try self.drain()
         }
@@ -217,7 +216,7 @@ internal struct BufferedWriter[W]: Writable, not Copyable where W: Writable, W: 
     }
 
     /// Writes the buffer out and flushes the inner writer.
-    internal mutating func flush() -> Result[(), IoError] {
+    public mutating func flush() -> Result[(), IoError] {
         try self.drain();
         match self.inner.chainMutate() {
             .Some(w) => w.flush(),
@@ -226,7 +225,7 @@ internal struct BufferedWriter[W]: Writable, not Copyable where W: Writable, W: 
     }
 
     /// Flushes, then returns the inner writer.
-    internal consuming func intoInner() -> Result[W, IoError] {
+    public consuming func intoInner() -> Result[W, IoError] {
         try self.flush();
         match self.inner.take() {
             .Some(w) => .Ok(w),
@@ -246,7 +245,7 @@ internal struct BufferedWriter[W]: Writable, not Copyable where W: Writable, W: 
 extend BufferedReader[R]: Seekable where R: Seekable {
     /// Drops the read-ahead, then seeks the inner reader. A `.Current`
     /// offset counts from the position the caller sees, not the inner one.
-    internal mutating func seek(to position: Seek) -> Result[Int64, IoError] {
+    public mutating func seek(to position: Seek) -> Result[Int64, IoError] {
         let target = match position {
             .Current(n) => Seek.Current(n - self.buffered),
             other => other
@@ -259,7 +258,7 @@ extend BufferedReader[R]: Seekable where R: Seekable {
 
 extend BufferedWriter[W]: Seekable where W: Seekable {
     /// Writes the buffer out, then seeks the inner writer.
-    internal mutating func seek(to position: Seek) -> Result[Int64, IoError] {
+    public mutating func seek(to position: Seek) -> Result[Int64, IoError] {
         try self.drain();
         match self.inner.chainMutate() {
             .Some(w) => w.seek(to: position),

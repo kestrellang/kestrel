@@ -5,7 +5,7 @@ module std.system
 import std.numeric.(Int64)
 import std.text.(String)
 import std.result.(Result)
-import std.io.error.(IoError)
+import std.streams.(IoError)
 import std.ffi.(malloc, free)
 
 /// The machine the process is running on.

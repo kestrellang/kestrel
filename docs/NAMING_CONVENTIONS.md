@@ -67,7 +67,7 @@ Initialisms for well-known system domains are allowed in module names: `io`, `fs
 ```
 // Good
 count, capacity, remaining, pointer, address
-std.io, std.os.fs, std.ffi
+std.files, std.network, std.ffi
 
 // Bad
 cnt, cap, rem, ptr, addr

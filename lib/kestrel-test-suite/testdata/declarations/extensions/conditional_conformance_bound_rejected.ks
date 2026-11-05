@@ -9,7 +9,7 @@
 // the conformance is declared) and then ICE at monomorphization on the missing
 // `report()` witness. Guards the bound-aware `solve_conforms` path.
 module Main
-import std.os.Exitable
+import std.system.Exitable
 
 struct NotExitable { var x: Int64 }
 

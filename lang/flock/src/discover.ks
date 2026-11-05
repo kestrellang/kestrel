@@ -4,6 +4,8 @@
 
 module flock.discover
 
+import clutch.shell.(entryNames)
+
 import flock.source.(joinPath)
 import flock.error.(FlockError)
 import flock.manifest.(BinDecl)
@@ -41,14 +43,14 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
 
     // src/main.ks -> default bin named after the package.
     let mainPath = joinPath(base: srcDir, rel: "main.ks");
-    if fileExists(mainPath) {
+    if Path(mainPath).exists() {
         result.append(BinTarget(name: packageName, entry: mainPath))
     }
 
     // src/bin/*.ks -> one bin each (direct children only).
     let binDir = joinPath(base: srcDir, rel: "bin");
-    if isDirectory(binDir) {
-        let entries = listDir(binDir).unwrap(or: []);
+    if Path(binDir).isDirectory() {
+        let entries = entryNames(binDir);
         var i: Int64 = 0;
         while i < entries.count {
             let entry = entries(unchecked: i);
@@ -57,7 +59,7 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
                 // skip hidden entries and non-.ks files
             } else {
                 let full = joinPath(base: binDir, rel: entry);
-                if not isDirectory(full) {
+                if not Path(full).isDirectory() {
                     let stem = entry.asSlice().subslice(from: 0, to: entry.bytes.count - 3).toOwned();
                     result.append(BinTarget(name: stem, entry: full))
                 }
@@ -121,7 +123,7 @@ func declsContainName(bins bins: Array[BinDecl], name name: String) -> Bool {
 /// Skips hidden directories (starting with ".") and "target" directories.
 public func discoverSources(rootDir rootDir: String) -> Array[String] {
     var result = [];
-    let entries = listDir(rootDir).unwrap(or: []);
+    let entries = entryNames(rootDir);
     var i: Int64 = 0;
     while i < entries.count {
         let entry = entries(unchecked: i);
@@ -133,7 +135,7 @@ public func discoverSources(rootDir rootDir: String) -> Array[String] {
         } else {
             let fullPath = joinPath(base: rootDir, rel: entry);
 
-            if isDirectory(fullPath) {
+            if Path(fullPath).isDirectory() {
                 // Recurse into subdirectories
                 let subFiles = discoverSources(rootDir: fullPath);
                 for element in subFiles {

@@ -5,7 +5,7 @@
 
 module swoop.tls
 
-import std.io.error.(IoError)
+import std.streams.(IoError, Readable, Writable)
 import std.collections.(Slice)
 import std.memory.(RcBox)
 import http.wire.(stringToBytes)
@@ -181,8 +181,8 @@ extend TlsStream {
          unsafe libc_OPENSSL_init_ssl(initOpts.raw, lang.ptr_null[lang.i8]());
 
         // TCP connect, then take ownership of the fd
-        var tcpStream = try TcpStream.connect(host, port);
-        let fd = tcpStream.detachFd();
+        let tcpStream = try TcpStream.connect(host, port);
+        let fd = tcpStream.intoRawDescriptor().value;
 
         // Create SSL_CTX
         let method = unsafe libc_TLS_client_method();

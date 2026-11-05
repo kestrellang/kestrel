@@ -4,7 +4,7 @@ module perch
 
 import std.io.error.(IoError)
 
-/// Serializes and sends an HTTP response over a socket file descriptor.
+/// Serializes and sends an HTTP response over a connection.
 ///
 /// Builds the full HTTP/1.1 wire format — status line, headers
 /// (including Content-Length and Connection: close), and body — then
@@ -19,7 +19,7 @@ import std.io.error.(IoError)
 ///
 /// ```
 /// let response = Response.ok(Text("hello"));
-///  sendResponse(response, to: socketFd);
+///  sendResponse(response, to: stream);
 /// ```
 func sendResponse(response: Response, to fileDescriptor: Int32) -> () throws IoError {
     var resp = String(capacity: 256 + response.bodyContent.bytes.count);
@@ -37,34 +37,5 @@ func sendResponse(response: Response, to fileDescriptor: Int32) -> () throws IoE
 
     resp.append(response.bodyContent);
 
-    sendAllBytes(fileDescriptor, resp)
-}
-
-/// Writes all bytes of a string to a socket, retrying on partial writes.
-func sendAllBytes(fileDescriptor: Int32, content: String) -> () throws IoError {
-    let length = content.bytes.count;
-    if length == 0 {
-        return .Ok(())
-    }
-
-    // Write the response string's UTF-8 bytes straight to the socket.
-    // asByteSlice() is a non-owning view over `content`'s live buffer —
-    // no toBytes() array allocation, no COW clone, no per-byte copy.
-    // `content` outlives this loop, so the pointer stays valid.
-    let bytes = content.asByteSlice();
-
-    var sent: Int64 = 0;
-    while sent < length {
-        let ptr = bytes.pointer.offset(by: sent);
-        let remaining = length - sent;
-        let bytesWritten = send(fileDescriptor, ptr, remaining, 0);
-        if bytesWritten < 0 {
-            throw IoError.last()
-        }
-        if bytesWritten == 0 {
-            throw IoError(code: 32)
-        }
-        sent = sent + bytesWritten
-    }
-    .Ok(())
+    stream.write(text: resp)
 }

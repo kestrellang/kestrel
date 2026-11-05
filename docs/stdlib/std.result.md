@@ -1241,18 +1241,6 @@ Drives `try` — `Continue(value)` for `.Ok`, `Break(error)` for
 
 _Defined in `lang/std/result/result.ks`._
 
-### Implements `Exitable`
-
-_Conditional: `where T: Exitable, E: Formattable`._
-
-#### function `report`
-
-```kestrel
-consuming func report() -> ExitCode where T: Exitable, E: Formattable
-```
-
-_Defined in `lang/std/os/exitable.ks`._
-
 ### Implements `Copyable`
 
 _Conditional: `where T: Copyable, E: Copyable`._
@@ -1374,6 +1362,18 @@ Renders `Ok(...)` or `Err(...)`, forwarding `options` to the inner
 `format` for the payload.
 
 _Defined in `lang/std/result/result.ks`._
+
+### Implements `Exitable`
+
+_Conditional: `where T: Exitable, E: Formattable`._
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode where T: Exitable, E: Formattable
+```
+
+_Defined in `lang/std/system/exitable.ks`._
 
 ## struct `ResultIterator`
 

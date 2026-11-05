@@ -2,7 +2,7 @@
 // expect-stdout: 3\n7\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 func makePair(a: std.numeric.Int64, b: std.numeric.Int64) -> (std.numeric.Int64, std.numeric.Int64) =
     (

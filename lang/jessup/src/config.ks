@@ -4,7 +4,8 @@
 
 module jessup.config
 
-// getenv, fileExists, isDirectory, spawn are auto-imported from stdlib
+import clutch.shell.(runShell)
+
 import quill.value.(Value)
 import quill.toml.parser.(parseToml)
 import jessup.error.(JessupError)
@@ -16,10 +17,10 @@ import jessup.error.(JessupError)
 /// Returns the jessup home directory.
 /// Uses JESSUP_HOME env var if set, otherwise defaults to ~/.jessup.
 public func jessupHome() -> String throws JessupError {
-    match getenv("JESSUP_HOME") {
+    match Environment.variable("JESSUP_HOME") {
         .Some(home) => .Ok(home),
         .None => {
-            match getenv("HOME") {
+            match Environment.variable("HOME") {
                 .Some(home) => {
                     var s = String();
                     s.append(home);
@@ -95,10 +96,10 @@ public func readConfig() -> JessupConfig {
     match configPath() {
         .Err(_) => JessupConfig(defaultChannel: "stable"),
         .Ok(path) => {
-            if not fileExists(path) {
+            if not Path(path).exists() {
                 return JessupConfig(defaultChannel: "stable")
             }
-            match readFileString(path) {
+            match readText(Path(path)) {
                 .Err(_) => JessupConfig(defaultChannel: "stable"),
                 .Ok(source) => {
                     match parseToml(source) {
@@ -123,7 +124,7 @@ public func writeConfig(config config: JessupConfig) -> () throws JessupError {
                     var mkdirCmd = String();
                     mkdirCmd.append("mkdir -p ");
                     mkdirCmd.append(home);
-                     spawn(mkdirCmd).unwrap(or: -1);
+                     runShell(mkdirCmd);
                 }
             }
 
@@ -131,7 +132,7 @@ public func writeConfig(config config: JessupConfig) -> () throws JessupError {
             content.append("[config]\ndefault_channel = \"");
             content.append(config.defaultChannel);
             content.append("\"\n");
-            match writeFileString(path, content) {
+            match writeText(Path(path), content) {
                 .Ok(_) => .Ok(()),
                 .Err(_) => {
                     var ioMsg = String();
@@ -157,12 +158,12 @@ public func ensureDirectories() -> () throws JessupError {
             mkBinCmd.append("mkdir -p ");
             mkBinCmd.append(home);
             mkBinCmd.append("/bin");
-             spawn(mkBinCmd).unwrap(or: -1);
+             runShell(mkBinCmd);
             var mkTcCmd = String();
             mkTcCmd.append("mkdir -p ");
             mkTcCmd.append(home);
             mkTcCmd.append("/toolchains");
-             spawn(mkTcCmd).unwrap(or: -1);
+             runShell(mkTcCmd);
             .Ok(())
         }
     }

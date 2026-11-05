@@ -3,7 +3,7 @@
 // expect-stdout: 7\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 public let globalLet: std.numeric.Int64 = 7;
 

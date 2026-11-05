@@ -18,7 +18,7 @@ func main() -> lang.i64 {
         .Some(input) => {
             var writer = input;
             let bytes: Array[UInt8] = [104, 101, 108, 108, 111, 10];
-            match writeAll(writer, from: bytes.asUnsafeSlice()) {
+            match writer.writeAll(from: bytes.asSlice()) {
                 .Ok(_) => {},
                 .Err(_) => { return 2 }
             }

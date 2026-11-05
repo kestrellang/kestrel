@@ -2,7 +2,7 @@
 // stdlib: true
 
 module Test
-import std.io.stdio.println
+import std.streams.println
 
 struct MyError {}
 

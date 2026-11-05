@@ -8,8 +8,9 @@
 // through a protocol reaching that protocol's implementation.
 //
 // Known gap: the compiler reports the two extension methods as duplicates
-// (E412) and still as ambiguous (E463). std.system hits this: its pipes
-// can't conform to both std.io's and std.streams' `Readable`.
+// (E412) and still as ambiguous (E463). std.system hit this while std.io
+// and std.streams coexisted: its pipes couldn't conform to both libraries'
+// `Readable`.
 
 module Test
 
