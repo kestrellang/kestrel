@@ -17,8 +17,8 @@ import std.collections.(Array, Slice, SliceIndex, SliceClampable)
 /// Shared read-only protocol for contiguous collections.
 ///
 /// `Sliceable[T]` is the contiguous-collection counterpart to `Str` in
-/// `std.text`: a conformer lends itself as a `Slice` (`asSlice`) and its
-/// index places; all read-only logic lives in a protocol extension.
+/// `std.text`: one kernel method (`asSlice`), and the index places and all
+/// read-only logic in a protocol extension.
 /// `Array[T]`, `Slice[T]` and `UnsafeSlice[T]` conform, so generic code
 /// constrained to `S: Sliceable[T]` accepts any of them without
 /// overloading, and `s(i)` borrows the element rather than copying it.
@@ -39,9 +39,9 @@ public protocol Sliceable[T]: Iterable {
     /// through it.
     func asSlice() -> &Slice[T]
 
-    // The index places, lent (a protocol extension can't give ref bodies,
-    // so each conformer forwards them to its `Slice`). Generic code over
-    // `Sliceable` borrows elements through these instead of copying.
+    // The index places, lent: generic code over `Sliceable` borrows
+    // elements through these instead of copying. The extension below
+    // gives defaults that forward to `asSlice()`.
     subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
     subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] { ref }
     subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
@@ -95,9 +95,33 @@ extend RangeThrough[Int64]: SeqRange {
 // UNIFIED SUBSCRIPTS
 // ============================================================================
 
-// Every conformer declares the index places (see the `Sliceable` protocol);
-// this extension derives the raw view from `asSlice()`.
+// Default index places: each lends through `asSlice()`. `Array`, `Slice`
+// and `UnsafeSlice` declare their own, which also write in place.
 extend Sliceable[T] {
+    public subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lend(index, self.asSlice()) }
+    }
+
+    public subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendChecked(index, self.asSlice()) }
+    }
+
+    public subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendUnchecked(index, self.asSlice()) }
+    }
+
+    public subscript(clamped index: Int64)? -> T {
+        ref { self.asSlice().lendClamped(index) }
+    }
+
+    public subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] {
+        ref { R.lendWithin(range, self.asSlice()) }
+    }
+
+    public subscript(wrapped index: Int64)? -> T {
+        ref { self.asSlice().lendWrapped(index) }
+    }
+
     /// The elements as a raw `(pointer, count)` view, for algorithms that
     /// walk the buffer directly. Only valid until the collection next
     /// changes, so never hand it out.

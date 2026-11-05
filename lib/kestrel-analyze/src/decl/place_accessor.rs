@@ -16,9 +16,10 @@
 //! `set { }` and `mutating ref { }` on one member.
 //!
 //! ### E621 -- `ref_accessor_in_protocol` (Error, Correctness)
-//! A `modifying` accessor, or a ref accessor with a body, on a protocol
-//! member or a protocol-extension member (a protocol extension can't
-//! require one either).
+//! A `modifying` accessor on a protocol or protocol-extension member, a
+//! ref accessor body in a protocol (defaults go in a protocol extension),
+//! or a bodyless ref clause in a protocol extension (only a protocol can
+//! require one).
 //!
 //! ### E640 -- `bodyless_ref_accessor` (Error, Correctness)
 //! A bodyless `ref` / `mutating ref` outside a protocol.
@@ -166,29 +167,32 @@ impl DeclCheck for PlaceAccessorAnalyzer {
             .parent_of(cx.entity)
             .is_some_and(|p| cx.query.get::<NodeKind>(p) == Some(&NodeKind::Protocol));
 
-        // E621: a protocol may REQUIRE `ref` / `mutating ref` (bodyless
-        // clauses, witnessed by a conformer's accessors or a stored field),
-        // but `modifying` accessors and ref accessor bodies (defaults in the
-        // protocol or a protocol extension) stay concrete-only.
+        // E621: a protocol REQUIRES `ref` / `mutating ref` with bodyless
+        // clauses (witnessed by a conformer's accessors or a stored field),
+        // and a protocol extension supplies their default bodies, like a
+        // default method. A body in the protocol itself, a bodyless clause in
+        // an extension, and `modifying` accessors stay rejected.
         let protocol_scope = in_protocol_scope(cx);
         if protocol_scope
-            && (declared.any_modifying() || bodied_ref || (!in_protocol && bodyless_ref))
+            && (declared.any_modifying()
+                || (in_protocol && bodied_ref)
+                || (!in_protocol && bodyless_ref))
         {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: descriptor("E621").id,
                 severity: descriptor("E621").default_severity,
-                message: "a protocol can only require `ref` / `mutating ref`: ref accessor \
-                          bodies and `modifying` accessors are not allowed in protocols or \
-                          protocol extensions"
+                message: "a protocol requires `ref` / `mutating ref` with bodyless clauses, \
+                          and only a protocol extension gives their bodies; `modifying` \
+                          accessors are not allowed in either"
                     .into(),
                 labels: vec![DiagLabel {
                     span: span.clone(),
-                    message: "declare the accessor on a concrete type".into(),
+                    message: "not allowed here".into(),
                     is_primary: true,
                 }],
                 notes: vec![
-                    "a protocol can require a place with bodyless clauses: \
-                     `var value: T { ref mutating ref }`"
+                    "require the place in the protocol (`var value: T { ref mutating ref }`) \
+                     and give a default in `extend P { var value: T { ref { … } } }`"
                         .into(),
                 ],
             });
