@@ -173,8 +173,6 @@ struct Game: not Copyable {
     var wantsSave: Bool
     /// Showing the title screen: the world turns behind it until Enter.
     var onTitle: Bool
-    /// Whether the world came from a save, for the title's wording.
-    var resumed: Bool
     /// A short message in the corner, shown while `noticeTime` > 0.
     var notice: String
     var noticeTime: Float32
@@ -236,7 +234,6 @@ struct Game: not Copyable {
         self.wantsSave = false;
         // `AERIE_PLAY=1` skips the title screen.
         self.onTitle = getenv("AERIE_PLAY").isNone();
-        self.resumed = save.isSome();
         self.notice = "";
         self.noticeTime = 0.0;
         if let .Some(s) = save {
@@ -469,7 +466,7 @@ struct Game: not Copyable {
         let target = self.world.generator.lairness(view.position.x, view.position.z);
         self.gloom = self.gloom + (target - self.gloom) * (dt * 0.6).clamp(0.0, 1.0);
         var overlay = if self.onTitle {
-            titleScreen(w, h, self.resumed, self.seconds)
+            titleScreen(w, h, self.seconds)
         } else {
             hud(w, h, self.selected, self.player.gliding, self.seconds)
         };

@@ -349,7 +349,8 @@ struct Renderer: not Copyable {
         let modelBuffers = [VertexBufferLayout(packed: [.Float32x4, .Float32x4, .Float32x4, .Float32x4], stepMode: .Instance)];
         let modelPipeline = device.createRenderPipeline(
             shader: shaderModule,
-            targets: [ColorTarget(format: format)],
+            // Blended, for the cracks' soft lips; birds are opaque.
+            targets: [ColorTarget(format: format, blend: .AlphaBlending)],
             buffers: modelBuffers,
             vertexEntry: "vs_model",
             fragmentEntry: "fs_model",

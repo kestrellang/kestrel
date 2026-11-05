@@ -200,8 +200,8 @@ func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool, time: Floa
 }
 
 /// The title screen, `time` seconds in: the name, bobbing in a soft glow
-/// with twinkles around it, a pulsing prompt, and the controls.
-func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [OverlayQuad] {
+/// with twinkles around it, and a Play Now button.
+func titleScreen(width: Int64, height: Int64, time: Float32) -> [OverlayQuad] {
     let w = Float32(from: width);
     let h = Float32(from: height);
     var quads: [OverlayQuad] = [];
@@ -239,17 +239,14 @@ func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [
         quads.append(sprite(.Twinkle, x - s * 0.5, y - s * 0.5, s, s, Vec4(x: 1.0, y: 0.97, z: 0.88, w: 0.4 + beat * 0.6)));
     }
     let small = crispSize((size * 0.2).clamp(18.0, 30.0));
-    quads.append(contentsOf: pillLabel("Islands above the cloud sea", width: w, y: (logoTop + cell * rows + small * 0.6).floor(), size: small, color: Vec4(x: 0.92, y: 0.95, z: 1.0, w: 1.0)));
-    // Bound first: an `if` directly inside an array literal crashes the
-    // compiler (array_literal_if_expression_owned_element.ks).
-    let prompt = if resumed { "Press Enter or click to continue" } else { "Press Enter or click to begin" };
+    let prompt = "Play Now";
     // The prompt on a warm wooden button, with a glow that breathes.
     let pulse = 0.5 + 0.5 * (time * 3.0).sin();
     // Big: it's the one thing to press.
-    let promptSize = crispSize(small * 1.7);
+    let promptSize = crispSize(small * 2.7);
     let promptY = (h * 0.68).floor();
     let promptW = textWidth(prompt, promptSize) + promptSize * 3.4;
     quads.append(sprite(.Glow, w * 0.5 - promptW * 0.7, promptY - promptSize * 2.2, promptW * 1.4, promptSize * 5.0, Vec4(x: 1.0, y: 0.82, z: 0.5, w: 0.15 + pulse * 0.2)));
-    quads.append(contentsOf: boardLabel(prompt, width: w, y: promptY, size: promptSize, color: white, board: .Button, roomy: 1.3));
+    quads.append(contentsOf: boardLabel(prompt, width: w, y: promptY, size: promptSize, color: white, board: .Button, roomy: 1.1));
     quads
 }

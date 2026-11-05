@@ -557,18 +557,47 @@ def vulture_ruff(rng):
     return feathers(rng, CREAM, 0.35)
 
 
+def crack_network():
+    """One fracture pattern for every stage: branches spreading out from a
+    point near the middle, each pixel stamped with when it appears (0 to
+    1), so later stages show the same cracks, longer."""
+    rng = random.Random(77)
+    when = {}
+    def grow(x, y, angle, start, length, depth):
+        t = start
+        for step in range(length):
+            # Wandering: the heading drifts a little each pixel.
+            angle += rng.uniform(-0.7, 0.7)
+            x, y = x + math.cos(angle), y + math.sin(angle)
+            px, py = round(x), round(y)
+            if not (0 <= px < S and 0 <= py < S):
+                return
+            t += 1.0 / 12
+            when[(px, py)] = min(when.get((px, py), 9.0), t)
+            if depth < 2 and rng.random() < 0.28:
+                grow(x, y, angle + rng.choice([-1, 1]) * rng.uniform(0.6, 1.2), t + 0.1, rng.randrange(2, 6), depth + 1)
+    cx, cy = 7, 8
+    when[(cx, cy)] = 0.0
+    for i in range(5):
+        grow(cx, cy, i * 1.2566 + rng.uniform(-0.4, 0.4), rng.uniform(0.0, 0.25), rng.randrange(9, 14), 0)
+    return when
+
+
 def crack(stage):
-    """Cracks spreading across a block being broken: stage 0 (a few) to 4
-    (shattered). Clear elsewhere, so only the cracks draw."""
+    """Cracks spreading over a block being broken: stage 0 (a hairline at
+    the middle) to 4 (shattered to the edges). Each crack is a dark line
+    with a pale lip below and to its right, so it reads as cut in on light
+    blocks and dark ones alike. Clear elsewhere, so only the cracks draw."""
     def make(rng):
-        rng = random.Random(77)  # the same cracks at every stage, growing
+        reach = 0.2 + stage * 0.2
+        lines = {p for p, t in crack_network().items() if t <= reach}
         t = blank()
-        for i in range(2 + stage * 3):
-            x, y = rng.randrange(S), rng.randrange(S)
-            for _ in range(3 + stage * 2):
-                t[y % S][x % S] = (24, 20, 28, 220)
-                x += rng.choice([-1, 0, 1])
-                y += rng.choice([-1, 0, 1])
+        for (x, y) in lines:
+            for lx, ly in ((x + 1, y), (x, y + 1)):
+                if 0 <= lx < S and 0 <= ly < S and (lx, ly) not in lines:
+                    t[ly][lx] = (230, 222, 240, 70)
+        for (x, y) in lines:
+            t[y][x] = (18, 14, 22, 240)
         return t
     make.__name__ = f"crack{stage}"
     return make

@@ -251,13 +251,13 @@ fn vs_model_shadow(@builtin(vertex_index) vertex: u32, @location(0) center: vec4
 @fragment
 fn fs_model(in: ModelOut) -> @location(0) vec4f {
     let texel = textureSample(atlas, atlasSampler, in.uv, in.layer);
-    // Alpha-tested, so cracks show only where they're drawn.
-    if texel.a < 0.3 {
+    // Clear texels draw nothing; the cracks' pale lips blend over the block.
+    if texel.a < 0.05 {
         discard;
     }
     let n = normalize(in.normal);
     let facing = max(dot(n, normalize(-u.sunDir.xyz)), 0.0);
-    return vec4f(fogged(in.world, lit(in.world, n, facing, 1.0, vec3f(0.0), texel.rgb)), 1.0);
+    return vec4f(fogged(in.world, lit(in.world, n, facing, 1.0, vec3f(0.0), texel.rgb)), texel.a);
 }
 
 // The sky: one triangle covering the screen, behind everything.
