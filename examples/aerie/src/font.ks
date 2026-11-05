@@ -77,9 +77,10 @@ func glyphDot(bits: Int64, row: Int64, col: Int64) -> Bool {
     (bits >> ((glyphHeight - 1 - row) * glyphWidth + (glyphWidth - 1 - col))) & 1 == 1
 }
 
-/// `text` as overlay rectangles with its top left at (x, y). Each run of
-/// lit dots in a glyph row becomes one rectangle, to keep the count low.
-func textQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, color color: Vec4) -> [OverlayQuad] {
+/// `text` as overlay rectangles with its top left at (x, y), shading from
+/// `color` on the top row to `bottom` on the last. Each run of lit dots in
+/// a glyph row becomes one rectangle, to keep the count low.
+func textQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, color color: Vec4, bottom bottom: Vec4) -> [OverlayQuad] {
     let none = Vec4(x: -1.0, y: 0.0, z: 0.0, w: 0.0);
     var quads: [OverlayQuad] = [];
     var left = x;
@@ -87,6 +88,7 @@ func textQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, c
         let bits = glyph(byte);
         var row: Int64 = 0;
         while row < glyphHeight {
+            let rowColor = color + (bottom - color) * (Float32(from: row) / Float32(from: glyphHeight - 1));
             var col: Int64 = 0;
             while col < glyphWidth {
                 var run: Int64 = 0;
@@ -96,7 +98,7 @@ func textQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, c
                 if run > 0 {
                     quads.append(OverlayQuad(
                         rect: Vec4(x: left + Float32(from: col) * scale, y: y + Float32(from: row) * scale, z: Float32(from: run) * scale, w: scale),
-                        color: color, tile: none
+                        color: rowColor, tile: none
                     ));
                 }
                 col = col + run + 1;
@@ -108,11 +110,18 @@ func textQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, c
     quads
 }
 
-/// `text` with a soft dark shadow under it, so it reads over bright sky.
-func labelQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, color color: Vec4) -> [OverlayQuad] {
+/// `text` shading from `color` to `bottom`, over a soft violet shadow so it
+/// reads over bright sky.
+func gradientLabelQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, color color: Vec4, bottom bottom: Vec4) -> [OverlayQuad] {
     let offset = (scale * 0.5).ceil();
-    var quads = textQuads(text, x: x + offset, y: y + offset, scale: scale, color: Vec4(x: 0.05, y: 0.06, z: 0.12, w: color.w * 0.45));
-    let lit = textQuads(text, x: x, y: y, scale: scale, color: color);
+    let shadow = Vec4(x: 0.26, y: 0.12, z: 0.38, w: color.w * 0.75);
+    var quads = textQuads(text, x: x + offset, y: y + offset, scale: scale, color: shadow, bottom: shadow);
+    let lit = textQuads(text, x: x, y: y, scale: scale, color: color, bottom: bottom);
     quads.append(contentsOf: lit);
     quads
+}
+
+/// `text` in one color, over a soft shadow.
+func labelQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, color color: Vec4) -> [OverlayQuad] {
+    gradientLabelQuads(text, x: x, y: y, scale: scale, color: color, bottom: color)
 }

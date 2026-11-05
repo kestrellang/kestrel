@@ -7,13 +7,19 @@ func blockShader() -> String {
 struct Uniforms {
     viewProj: mat4x4f,
     lightViewProj: mat4x4f,
+    invViewProj: mat4x4f,
     // xyz: the direction sunlight travels; w: how strong it is, 0 at night.
     sunDir: vec4f,
+    // xyz: the eye; w: seconds since start, to drift the clouds.
     camera: vec4f,
-    // rgb: the fog color; w: the view distance, where fog is total.
+    // rgb: the sky at the horizon; w: the view distance, where fog is total.
     fog: vec4f,
-    // rgb: sky light from above; w: unused.
+    // rgb: sky light from above; w: how much it is night, 0 to 1.
     sky: vec4f,
+    // rgb: the sky overhead.
+    zenith: vec4f,
+    // rgb: the sunlight's color.
+    sunColor: vec4f,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var atlas: texture_2d_array<f32>;
@@ -120,6 +126,55 @@ fn glow(world: vec3f, n: vec3f) -> f32 {
     return min(total, 1.4);
 }
 
+// Hashed value noise, for clouds and stars.
+fn hash2(p: vec2f) -> f32 {
+    var q = fract(p * vec2f(0.1031, 0.1030));
+    q += dot(q, q.yx + 33.33);
+    return fract((q.x + q.y) * q.x);
+}
+
+fn vnoise(p: vec2f) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let s = f * f * (3.0 - 2.0 * f);
+    let a = hash2(i);
+    let b = hash2(i + vec2f(1.0, 0.0));
+    let c = hash2(i + vec2f(0.0, 1.0));
+    let d = hash2(i + vec2f(1.0, 1.0));
+    return mix(mix(a, b, s.x), mix(c, d, s.x), s.y);
+}
+
+fn fbm(start: vec2f) -> f32 {
+    var p = start;
+    var total = 0.0;
+    var amp = 0.5;
+    for (var i = 0; i < 5; i++) {
+        total += amp * vnoise(p);
+        p = p * 2.03 + vec2f(17.1, 9.2);
+        amp *= 0.5;
+    }
+    return total;
+}
+
+// The sky's gradient along `dir`: pink at the horizon through lavender
+// to blue overhead, the glowing cloud sea below, and the sun's halo. Fog
+// fades the world into this, so far islands melt into the sky.
+fn skyGradient(dir: vec3f) -> vec3f {
+    let horizon = u.fog.rgb;
+    let zenith = u.zenith.rgb;
+    let day = u.sunDir.w;
+    let middle = mix(horizon, zenith, 0.5) + vec3f(0.05, -0.03, 0.06) * day;
+    let up = clamp(dir.y, 0.0, 1.0);
+    var color = mix(horizon, middle, smoothstep(0.0, 0.18, up));
+    color = mix(color, zenith, smoothstep(0.18, 0.6, up));
+    let sea = horizon * vec3f(1.02, 0.94, 1.04) + vec3f(0.06, 0.06, 0.08) * day;
+    color = mix(color, sea, smoothstep(0.0, 0.2, -dir.y));
+    let toSun = normalize(-u.sunDir.xyz);
+    let s = max(dot(dir, toSun), 0.0);
+    let halo = (pow(s, 6.0) * 0.22 + pow(s, 48.0) * 0.4) * smoothstep(-0.3, 0.05, toSun.y);
+    return color + u.sunColor.rgb * halo;
+}
+
 // The lit, fogged color of a texel, keeping its alpha.
 fn shade(in: VertexOut, texel: vec4f) -> vec4f {
     let n = NORMALS[in.face];
@@ -128,20 +183,86 @@ fn shade(in: VertexOut, texel: vec4f) -> vec4f {
     // between light and dark as the sun moves.
     let facing = select(max(dot(n, l), 0.0), 0.6, in.face >= 6u);
     let direct = facing * u.sunDir.w * sunlight(in.world, n);
-    // Sky light from above, and a dimmer bounce from the cloud sea below.
-    let ambient = u.sky.rgb * mix(0.45, 0.65, n.y * 0.5 + 0.5);
-    let glowColor = vec3f(0.45, 0.95, 0.85) * glow(in.world, n);
-    var color = texel.rgb * (ambient * in.light + glowColor * in.light + direct * vec3f(1.0, 0.90, 0.76) * 1.0 * mix(0.6, 1.0, in.light));
+    // Lavender sky light from above, and a dimmer bounce from the cloud sea.
+    let ambient = u.sky.rgb * mix(0.5, 0.7, n.y * 0.5 + 0.5);
+    let glowColor = vec3f(0.55, 0.95, 0.90) * glow(in.world, n);
+    var color = texel.rgb * (ambient * in.light + glowColor * in.light + direct * u.sunColor.rgb * mix(0.6, 1.0, in.light));
     if in.layer == GLOWCAP_LAYER {
-        color = texel.rgb * 1.1;
+        color = texel.rgb * 1.15;
     }
-    let distance = length(u.camera.xyz - in.world);
-    // A light haze everywhere, closing in fully at the view distance so
-    // chunks fade in instead of popping.
-    let haze = 1.0 - exp(-distance * 0.002);
-    let edge = smoothstep(u.fog.w * 0.55, u.fog.w, distance);
-    color = mix(color, u.fog.rgb, max(haze, edge));
+    let toEye = in.world - u.camera.xyz;
+    let distance = length(toEye);
+    // A soft dreamy haze everywhere, closing in fully at the view distance
+    // so chunks fade in instead of popping.
+    let haze = 1.0 - exp(-distance * 0.0045);
+    let edge = smoothstep(u.fog.w * 0.5, u.fog.w, distance);
+    color = mix(color, skyGradient(toEye / max(distance, 0.001)), max(haze, edge));
     return vec4f(color, texel.a);
+}
+
+// The sky: one triangle covering the screen, behind everything.
+struct SkyOut {
+    @builtin(position) position: vec4f,
+    @location(0) ndc: vec2f,
+};
+
+@vertex
+fn vs_sky(@builtin(vertex_index) vertex: u32) -> SkyOut {
+    let p = vec2f(f32((vertex << 1u) & 2u), f32(vertex & 2u)) * 2.0 - 1.0;
+    var out: SkyOut;
+    out.position = vec4f(p, 0.0, 1.0);
+    out.ndc = p;
+    return out;
+}
+
+// Cotton candy clouds: drifting noise on a plane above, lit pink on the
+// sun's side, and a sea of puffs below.
+fn clouds(dir: vec3f, color: vec3f) -> vec3f {
+    let time = u.camera.w;
+    let day = u.sunDir.w;
+    let toSun = normalize(-u.sunDir.xyz);
+    let light = mix(vec3f(0.30, 0.22, 0.46), mix(vec3f(1.0, 0.80, 0.90), u.sunColor.rgb, 0.4), day);
+    let bright = mix(vec3f(0.42, 0.34, 0.60), vec3f(1.0, 0.97, 1.0), day);
+    if dir.y > 0.0 {
+        let p = dir.xz / (dir.y + 0.08) * 1.6 + vec2f(time * 0.012, time * 0.005);
+        let n = fbm(p);
+        let cover = smoothstep(0.52, 0.76, n) * smoothstep(0.0, 0.25, dir.y);
+        // Lighter where the cloud thins toward the sun.
+        let toward = fbm(p + toSun.xz * 0.12);
+        let lit = clamp(0.55 + (n - toward) * 4.0, 0.0, 1.0);
+        let tint = mix(light, bright, lit);
+        return mix(color, tint, cover * 0.92);
+    }
+    let p = dir.xz / (-dir.y + 0.04) * 0.7 + vec2f(time * 0.006, time * 0.003);
+    let n = fbm(p);
+    let puff = smoothstep(0.3, 0.75, n);
+    let shadow = mix(vec3f(0.28, 0.20, 0.42), vec3f(0.80, 0.70, 0.94), day);
+    let sea = mix(shadow, mix(light, bright, 0.6), puff);
+    return mix(color, sea, smoothstep(0.0, 0.3, -dir.y) * 0.85);
+}
+
+@fragment
+fn fs_sky(in: SkyOut) -> @location(0) vec4f {
+    let near = u.invViewProj * vec4f(in.ndc, 0.0, 1.0);
+    let far = u.invViewProj * vec4f(in.ndc, 1.0, 1.0);
+    let dir = normalize(far.xyz / far.w - near.xyz / near.w);
+    var color = skyGradient(dir);
+    let night = u.sky.w;
+    // Stars: a sparse hash over directions, twinkling.
+    if dir.y > 0.0 && night > 0.0 {
+        let cell = floor(dir * 260.0);
+        let h = hash2(cell.xy + vec2f(cell.z * 37.0, cell.z * 11.0));
+        let twinkle = 0.6 + 0.4 * sin(u.camera.w * 2.0 + h * 80.0);
+        let star = step(0.9965, h) * twinkle * night * smoothstep(0.0, 0.25, dir.y);
+        color += vec3f(1.0, 0.88, 1.0) * star;
+    }
+    // The sun, and the moon opposite it.
+    let toSun = normalize(-u.sunDir.xyz);
+    let s = dot(dir, toSun);
+    color = mix(color, u.sunColor.rgb * 0.3 + vec3f(0.85), smoothstep(0.9988, 0.9993, s));
+    color = mix(color, vec3f(0.96, 0.92, 1.0), smoothstep(0.9993, 0.9996, -s) * night);
+    color = clouds(dir, color);
+    return vec4f(color, 1.0);
 }
 
 @fragment

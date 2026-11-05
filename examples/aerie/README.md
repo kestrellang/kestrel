@@ -53,6 +53,15 @@ wasm64 with Emscripten, using browser WebGPU (Dawn's `emdawnwebgpu`) and
 SDL2's Emscripten port; saves go to IndexedDB. The game code is shared;
 `src/platform.ks` holds the few desktop and web differences.
 
+**Milestone 8** makes it dreamy. The sky is drawn as its own pass: a
+cotton candy gradient (pink horizon, lavender, baby blue overhead), drifting
+clouds lit pink on the sun's side, a sea of puffs below the islands, the
+sun and its halo, and the moon and twinkling stars at night. Fog fades the
+world into that same gradient, sunlight warms to peach at dusk and shadows
+are lavender. Every block texture is redrawn at 16x16 (`tools/make_atlas.py`),
+the hotbar is a frosted tray with numbered slots and the selected block's
+name, and the title screen has an outlined, bobbing name with twinkles.
+
 Controls: WASD to walk, arrow keys to look, Space to jump (hold to glide),
 Q to break, E to place, 1 to 9 for the hotbar, T to skip time, P to save, F to fly (Space and Left
 Shift to rise and sink), Escape to save and quit, Enter to leave the title screen. `AERIE_FRAMES=n` quits after n
@@ -86,7 +95,7 @@ python3 -m http.server -d examples/aerie/web/out 8000   # open localhost:8000
 - `src/game.ks` — `Game`, driven one `event` and one `frame` at a time, so a
   browser build can call it from `requestAnimationFrame` instead.
 - `src/renderer.ks` — the wgpu side: surface, shadow and main passes, HUD overlay, daylight.
-- `src/shader.ks` — WGSL: expands each packed face into a quad, sun shadows, glow, fog.
+- `src/shader.ks` — WGSL: expands each packed face into a quad, sun shadows, glow, fog, and the sky.
 - `src/blocks.ks` — block ids, shapes and which atlas layer each face uses.
 - `src/chunk.ks` — 32³ chunks, padded chunks for meshing, the test island.
 - `src/noise.ks` — seeded 2D gradient noise.

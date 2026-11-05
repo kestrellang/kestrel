@@ -146,60 +146,154 @@ let hotbar: [Block] = [.Driftstone, .Loam, .Mossloam, .Emberwood, .Planks, .Clou
 /// How far away blocks can be broken or placed.
 let reach: Float32 = 6.0;
 
-/// The crosshair and hotbar for a `width` by `height` screen.
-func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool) -> [OverlayQuad] {
+/// A plain overlay rectangle.
+func rect(x: Float32, y: Float32, w: Float32, h: Float32, color: Vec4) -> OverlayQuad {
+    OverlayQuad(rect: Vec4(x: x, y: y, z: w, w: h), color: color, tile: Vec4(x: -1.0, y: 0.0, z: 0.0, w: 0.0))
+}
+
+/// A four-pointed twinkle centered on (x, y), `size` pixels from tip to tip.
+func sparkle(x: Float32, y: Float32, size: Float32, color: Vec4) -> [OverlayQuad] {
+    let arm = (size * 0.5).floor();
+    let t = (size / 8.0).ceil();
+    [
+        rect(x - arm, y - t * 0.5, arm * 2.0, t, color),
+        rect(x - t * 0.5, y - arm, t, arm * 2.0, color),
+        rect(x - t * 1.5, y - t * 1.5, t * 3.0, t * 3.0, color)
+    ]
+}
+
+/// `text` shading from `color` to `bottom`, ringed by `rim` so pale
+/// letters stay readable over a pale sky.
+func outlinedQuads(text: String, x x: Float32, y y: Float32, scale scale: Float32, color color: Vec4, bottom bottom: Vec4, rim rim: Vec4) -> [OverlayQuad] {
     var quads: [OverlayQuad] = [];
-    let w = Float32(from: width);
-    let h = Float32(from: height);
-    let none = Vec4(x: -1.0, y: 0.0, z: 0.0, w: 0.0);
-    let white = Vec4(x: 1.0, y: 1.0, z: 1.0, w: 0.85);
-    // Crosshair; it widens while gliding.
-    let arm: Float32 = if gliding { 14.0 } else { 9.0 };
-    quads.append(OverlayQuad(rect: Vec4(x: w * 0.5 - arm, y: h * 0.5 - 1.0, z: arm * 2.0, w: 2.0), color: white, tile: none));
-    quads.append(OverlayQuad(rect: Vec4(x: w * 0.5 - 1.0, y: h * 0.5 - arm, z: 2.0, w: arm * 2.0), color: white, tile: none));
-    // Hotbar: a frame per slot, the selected one bright, with its block.
-    let slot: Float32 = 52.0;
-    let left = w * 0.5 - slot * Float32(from: hotbar.count) * 0.5;
-    let top = h - slot - 14.0;
-    quads.append(OverlayQuad(rect: Vec4(x: left - 4.0, y: top - 4.0, z: slot * Float32(from: hotbar.count) + 8.0, w: slot + 8.0), color: Vec4(x: 0.12, y: 0.14, z: 0.22, w: 0.45), tile: none));
-    var i: Int64 = 0;
-    while i < hotbar.count {
-        let x = left + Float32(from: i) * slot;
-        if i == selected {
-            quads.append(OverlayQuad(rect: Vec4(x: x, y: top, z: slot, w: slot), color: Vec4(x: 1.0, y: 0.95, z: 0.8, w: 0.9), tile: none));
-        }
-        let layer = Float32(from: Int64(from: hotbar(i).layer(.South).index));
-        quads.append(OverlayQuad(
-            rect: Vec4(x: x + 6.0, y: top + 6.0, z: slot - 12.0, w: slot - 12.0),
-            color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: 1.0),
-            tile: Vec4(x: layer, y: 0.0, z: 0.0, w: 0.0)
-        ));
-        i = i + 1;
+    let edge = (scale * 0.3).ceil();
+    for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+        let outline = textQuads(text, x: x + dx * edge, y: y + dy * edge, scale: scale, color: rim, bottom: rim);
+        quads.append(contentsOf: outline);
     }
+    let lit = textQuads(text, x: x, y: y, scale: scale, color: color, bottom: bottom);
+    quads.append(contentsOf: lit);
     quads
 }
 
-/// The title screen's overlay: the name, and how to start.
-func titleScreen(width: Int64, height: Int64, resumed: Bool) -> [OverlayQuad] {
+/// The crosshair, the hotbar and the selected block's name for a `width`
+/// by `height` screen, `time` seconds in.
+func hud(width: Int64, height: Int64, selected: Int64, gliding: Bool, time: Float32) -> [OverlayQuad] {
+    var quads: [OverlayQuad] = [];
     let w = Float32(from: width);
     let h = Float32(from: height);
-    let none = Vec4(x: -1.0, y: 0.0, z: 0.0, w: 0.0);
-    // A soft band behind the text, so it reads over bright sky.
-    var quads = [OverlayQuad(rect: Vec4(x: 0.0, y: h * 0.27, z: w, w: h * 0.48), color: Vec4(x: 0.10, y: 0.12, z: 0.22, w: 0.4), tile: none)];
+    // Crosshair, on a soft violet outline; it widens while gliding.
+    let arm: Float32 = if gliding { 13.0 } else { 8.0 };
+    let (cx, cy) = ((w * 0.5).floor(), (h * 0.5).floor());
+    let outline = Vec4(x: 0.30, y: 0.18, z: 0.42, w: 0.45);
+    let white = Vec4(x: 1.0, y: 0.97, z: 1.0, w: 0.9);
+    quads.append(rect(cx - arm - 1.0, cy - 2.0, arm * 2.0 + 2.0, 4.0, outline));
+    quads.append(rect(cx - 2.0, cy - arm - 1.0, 4.0, arm * 2.0 + 2.0, outline));
+    quads.append(rect(cx - arm, cy - 1.0, arm * 2.0, 2.0, white));
+    quads.append(rect(cx - 1.0, cy - arm, 2.0, arm * 2.0, white));
+
+    // Hotbar: a frosted lavender tray of slots. The selected slot rises,
+    // ringed in pink, and its block's name floats above.
+    let slot: Float32 = 56.0;
+    let gap: Float32 = 6.0;
+    let count = Float32(from: hotbar.count);
+    let total = count * slot + (count - 1.0) * gap;
+    let left = ((w - total) * 0.5).floor();
+    let top = h - slot - 20.0;
+    quads.append(rect(left - 10.0, top - 10.0, total + 20.0, slot + 20.0, Vec4(x: 0.40, y: 0.30, z: 0.58, w: 0.42)));
+    quads.append(rect(left - 10.0, top - 10.0, total + 20.0, 2.0, Vec4(x: 1.0, y: 0.90, z: 1.0, w: 0.45)));
+    quads.append(rect(left - 10.0, top + slot + 8.0, total + 20.0, 2.0, Vec4(x: 0.22, y: 0.12, z: 0.32, w: 0.45)));
+    var i: Int64 = 0;
+    while i < hotbar.count {
+        let chosen = i == selected;
+        let x = left + Float32(from: i) * (slot + gap);
+        let y = if chosen { top - 6.0 } else { top };
+        if chosen {
+            let pulse = 0.8 + 0.2 * (time * 4.0).sin();
+            quads.append(rect(x - 4.0, y - 4.0, slot + 8.0, slot + 8.0, Vec4(x: 1.0, y: 0.60, z: 0.84, w: pulse)));
+            quads.append(rect(x - 2.0, y - 2.0, slot + 4.0, slot + 4.0, Vec4(x: 1.0, y: 0.86, z: 0.95, w: 1.0)));
+        }
+        let face = if chosen { Vec4(x: 1.0, y: 0.95, z: 1.0, w: 0.95) } else { Vec4(x: 0.95, y: 0.90, z: 1.0, w: 0.30) };
+        quads.append(rect(x, y, slot, slot, face));
+        // A recess for the block, a little shadow under it, then the block.
+        quads.append(rect(x + 3.0, y + 3.0, slot - 6.0, slot - 6.0, Vec4(x: 0.26, y: 0.16, z: 0.38, w: 0.30)));
+        let icon = slot - 20.0;
+        quads.append(rect(x + 12.0, y + 13.0, icon, icon, Vec4(x: 0.18, y: 0.08, z: 0.26, w: 0.45)));
+        let layer = Float32(from: Int64(from: hotbar(i).layer(.South).index));
+        quads.append(OverlayQuad(
+            rect: Vec4(x: x + 10.0, y: y + 10.0, z: icon, w: icon),
+            color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: 1.0),
+            tile: Vec4(x: layer, y: 0.0, z: 0.0, w: 0.0)
+        ));
+        let number = labelQuads("\(i + 1)", x: x + 4.0, y: y + 4.0, scale: 2.0, color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: if chosen { 0.95 } else { 0.7 }));
+        quads.append(contentsOf: number);
+        i = i + 1;
+    }
+    let name = hotbar(selected).name;
+    let nameScale: Float32 = 3.0;
+    let label = gradientLabelQuads(name, x: ((w - textWidth(name, nameScale)) * 0.5).floor(), y: top - 38.0, scale: nameScale,
+        color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: 0.95), bottom: Vec4(x: 1.0, y: 0.78, z: 0.92, w: 0.95));
+    quads.append(contentsOf: label);
+    quads
+}
+
+/// The title screen's overlay, `time` seconds in: a bobbing pastel name
+/// with twinkles around it, a pulsing prompt and the controls.
+func titleScreen(width: Int64, height: Int64, resumed: Bool, time: Float32) -> [OverlayQuad] {
+    let w = Float32(from: width);
+    let h = Float32(from: height);
+    var quads: [OverlayQuad] = [];
+    // A soft violet veil behind the text, so pastel letters read over a
+    // pastel sky: stacked bands, densest in the middle, instead of a box.
+    let middle = h * 0.47;
+    var band: Int64 = 0;
+    while band < 8 {
+        let reach = h * 0.30 * (1.0 - Float32(from: band) / 8.0);
+        quads.append(rect(0.0, (middle - reach).floor(), w, (reach * 2.0).floor(), Vec4(x: 0.42, y: 0.28, z: 0.62, w: 0.06)));
+        band = band + 1;
+    }
+    let titleScale = (w / 60.0).floor().clamp(10.0, 24.0);
+    let bob = (time * 1.3).sin() * titleScale * 0.3;
+    let titleTop = (h * 0.24 + bob).floor();
+    let title = "AERIE";
+    let titleLeft = ((w - textWidth(title, titleScale)) * 0.5).floor();
+    // A deep extrusion and an outline give the letters a puffy depth.
+    let deep = Vec4(x: 0.46, y: 0.28, z: 0.70, w: 0.9);
+    let depth = textQuads(title, x: titleLeft + titleScale * 0.6, y: titleTop + titleScale * 0.9, scale: titleScale, color: deep, bottom: Vec4(x: 0.36, y: 0.20, z: 0.56, w: 0.9));
+    quads.append(contentsOf: depth);
+    let name = outlinedQuads(title, x: titleLeft, y: titleTop, scale: titleScale,
+        color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: 1.0), bottom: Vec4(x: 1.0, y: 0.66, z: 0.86, w: 1.0), rim: Vec4(x: 0.56, y: 0.36, z: 0.80, w: 0.95));
+    quads.append(contentsOf: name);
+    // Twinkles around the name, each on its own beat.
+    let titleWidth = textWidth(title, titleScale);
+    let spots: [(Float32, Float32, Float32)] = [(-0.08, 0.1, 0.0), (1.06, 0.2, 1.7), (0.18, -0.25, 3.1), (0.86, -0.2, 4.4), (0.5, 1.35, 2.3), (-0.04, 1.1, 5.2), (1.1, 1.0, 0.9)];
+    for (fx, fy, phase) in spots {
+        let beat = ((time * 2.2 + phase).sin() * 0.5 + 0.5);
+        let size = (titleScale * (0.6 + beat * 0.9)).floor();
+        let glints = sparkle(titleLeft + titleWidth * fx, titleTop + titleScale * 5.0 * fy, size, Vec4(x: 1.0, y: 0.95, z: 1.0, w: 0.35 + beat * 0.6));
+        quads.append(contentsOf: glints);
+    }
+    let subtitle = "ISLANDS ABOVE THE CLOUD SEA";
+    let subScale = (titleScale * 0.22).floor().clamp(3.0, 6.0);
+    let sub = outlinedQuads(subtitle, x: ((w - textWidth(subtitle, subScale)) * 0.5).floor(), y: (h * 0.24 + titleScale * 6.5).floor(), scale: subScale,
+        color: Vec4(x: 0.90, y: 0.95, z: 1.0, w: 1.0), bottom: Vec4(x: 0.80, y: 0.84, z: 1.0, w: 1.0), rim: Vec4(x: 0.36, y: 0.22, z: 0.56, w: 0.85));
+    quads.append(contentsOf: sub);
     // Bound first: an `if` directly inside an array literal crashes the
     // compiler (array_literal_if_expression_owned_element.ks).
     let prompt = if resumed { "PRESS ENTER TO CONTINUE" } else { "PRESS ENTER TO START A NEW WORLD" };
-    let lines: [(String, Float32, Float32, Vec4)] = [
-        ("AERIE", 22.0, 0.32, Vec4(x: 1.0, y: 0.97, z: 0.9, w: 1.0)),
-        ("ISLANDS ABOVE THE CLOUD SEA", 4.0, 0.51, Vec4(x: 0.8, y: 0.95, z: 0.92, w: 0.9)),
-        (prompt, 5.0, 0.61, Vec4(x: 1.0, y: 1.0, z: 1.0, w: 1.0)),
-        ("WASD MOVE  ARROWS LOOK  SPACE JUMP/GLIDE  Q BREAK  E PLACE  P SAVE", 3.0, 0.69, Vec4(x: 0.85, y: 0.9, z: 1.0, w: 0.8))
-    ];
-    for (text, scale, top, color) in lines {
-        let x = (w - textWidth(text, scale)) * 0.5;
-        let glyphs = labelQuads(text, x: x.floor(), y: (h * top).floor(), scale: scale, color: color);
-        quads.append(contentsOf: glyphs);
-    }
+    let promptScale = subScale + 1.0;
+    let glow = 0.75 + 0.25 * (time * 3.0).sin();
+    let promptTop = (h * 0.66).floor();
+    let pressed = outlinedQuads(prompt, x: ((w - textWidth(prompt, promptScale)) * 0.5).floor(), y: promptTop, scale: promptScale,
+        color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: glow), bottom: Vec4(x: 1.0, y: 0.80, z: 0.92, w: glow), rim: Vec4(x: 0.40, y: 0.22, z: 0.58, w: glow * 0.9));
+    quads.append(contentsOf: pressed);
+    // The controls, on a frosted strip along the bottom.
+    let controls = "WASD MOVE  ARROWS LOOK  SPACE JUMP/GLIDE  Q BREAK  E PLACE  P SAVE";
+    let controlScale: Float32 = 3.0;
+    quads.append(rect(0.0, h - 48.0, w, 48.0, Vec4(x: 0.40, y: 0.30, z: 0.58, w: 0.40)));
+    quads.append(rect(0.0, h - 48.0, w, 2.0, Vec4(x: 1.0, y: 0.90, z: 1.0, w: 0.40)));
+    let help = labelQuads(controls, x: ((w - textWidth(controls, controlScale)) * 0.5).floor(), y: h - 32.0, scale: controlScale, color: Vec4(x: 0.96, y: 0.94, z: 1.0, w: 0.9));
+    quads.append(contentsOf: help);
     quads
 }
 
@@ -418,12 +512,12 @@ struct Game: not Copyable {
         } else {
             self.player.camera
         };
-        var overlay = if self.onTitle { titleScreen(w, h, self.resumed) } else { hud(w, h, self.selected, self.player.gliding) };
+        var overlay = if self.onTitle { titleScreen(w, h, self.resumed, self.seconds) } else { hud(w, h, self.selected, self.player.gliding, self.seconds) };
         if self.noticeTime > 0.0 {
             let notice = labelQuads(self.notice, x: 16.0, y: 16.0, scale: 4.0, color: Vec4(x: 1.0, y: 1.0, z: 1.0, w: 0.9));
             overlay.append(contentsOf: notice);
         }
-        try self.renderer.draw(view.view(), eye: view.position, light: daylight(self.timeOfDay), overlay: overlay);
+        try self.renderer.draw(view.view(), eye: view.position, light: daylight(self.timeOfDay), time: self.seconds, overlay: overlay);
         .Ok(())
     }
 
