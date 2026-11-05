@@ -83,7 +83,16 @@ enum Block {
         }
     }
 
-    /// Whether the block glows, lighting what's around it.
+    /// What the hotbar calls it.
+    var name: String {
+        match self {
+            .Air => "AIR", .Driftstone => "DRIFTSTONE", .Loam => "LOAM", .Mossloam => "MOSSLOAM",
+            .Emberwood => "EMBERWOOD", .Emberleaf => "EMBERLEAF", .Cloudglass => "CLOUDGLASS",
+            .Skyiron => "SKYIRON", .Glowcap => "GLOWCAP", .Sailcloth => "SAILCLOTH",
+            .Featherthatch => "FEATHERTHATCH", .Planks => "PLANKS"
+        }
+    }
+
     /// Drawn see-through, blended over what's behind it after the solid
     /// world, instead of alpha-tested.
     var translucent: Bool {
@@ -93,6 +102,7 @@ enum Block {
         }
     }
 
+    /// Whether the block glows, lighting what's around it.
     var emits: Bool {
         match self {
             .Glowcap => true,

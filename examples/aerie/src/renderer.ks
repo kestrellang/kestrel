@@ -13,43 +13,56 @@ let tileSize: Int64 = 16;
 struct Uniforms: FFISafe {
     var viewProj: Mat4
     var lightViewProj: Mat4
+    var invViewProj: Mat4
     var sunDir: Vec4
     var camera: Vec4
     var fog: Vec4
     var sky: Vec4
+    var zenith: Vec4
+    var sunColor: Vec4
 }
 
-let uniformsSize: Int64 = 192;
+let uniformsSize: Int64 = 288;
 let shadowFormat: TextureFormat = .Depth32Float;
 let shadowSize: Int64 = 2048;
 /// Half the width of the square around the player that casts shadows.
 let shadowReach: Float32 = 72.0;
 
-/// The light at one time of day: where the sun is and how strong, the sky
-/// and fog colors, and the ambient light from the sky.
+/// The light at one time of day: where the sun is and how strong, the
+/// sky's colors at the horizon and overhead, the sunlight's color, the
+/// ambient light from the sky, and how much it is night (for stars).
 struct Daylight {
     var sun: Vec3
     var strength: Float32
-    var sky: Vec3
+    var horizon: Vec3
+    var zenith: Vec3
+    var sunColor: Vec3
     var ambient: Vec3
+    var night: Float32
+}
+
+/// `a` moved toward `b` by `t`, 0 to 1.
+func blend(a: Vec3, b: Vec3, t: Float32) -> Vec3 {
+    a + (b - a) * t
 }
 
 /// `phase` runs 0 to 1 over a day: 0 is sunrise, 0.25 noon, 0.5 sunset,
-/// 0.75 midnight.
+/// 0.75 midnight. The palette is cotton candy: a pink horizon under baby
+/// blue by day, peach and violet at dusk, deep indigo at night.
 func daylight(phase: Float32) -> Daylight {
     let angle = phase * Float32.pi * 2.0;
     // Up is +y; the sun crosses the sky from east to west, tilted south.
     let up = angle.sin();
     let sun = Vec3(x: -angle.cos(), y: -up, z: 0.35).normalized;
     let day = (up * 3.0 + 0.3).clamp(0.0, 1.0);
-    // Dusk tints the sky warm just as the sun nears the horizon.
-    let dusk = (1.0 - (up * 4.0).abs()).clamp(0.0, 1.0);
-    let noonSky = Vec3(x: 0.70, y: 0.78, z: 0.90);
-    let nightSky = Vec3(x: 0.06, y: 0.07, z: 0.14);
-    let duskSky = Vec3(x: 0.86, y: 0.60, z: 0.55);
-    let sky = nightSky + (noonSky - nightSky) * day + (duskSky - noonSky) * (dusk * day * 0.6);
-    let ambient = Vec3(x: 0.10, y: 0.11, z: 0.20) + Vec3(x: 0.28, y: 0.32, z: 0.40) * day;
-    Daylight(sun: sun, strength: day, sky: sky, ambient: ambient)
+    // Dusk warms everything just as the sun nears the horizon.
+    let dusk = (1.0 - (up * 4.0).abs()).clamp(0.0, 1.0) * (up * 4.0 + 1.5).clamp(0.0, 1.0);
+    let horizon = blend(blend(Vec3(x: 0.22, y: 0.14, z: 0.36), Vec3(x: 1.00, y: 0.80, z: 0.88), day), Vec3(x: 1.00, y: 0.60, z: 0.62), dusk * 0.8);
+    let zenith = blend(blend(Vec3(x: 0.04, y: 0.04, z: 0.15), Vec3(x: 0.56, y: 0.74, z: 0.98), day), Vec3(x: 0.50, y: 0.44, z: 0.86), dusk * 0.7);
+    let sunColor = blend(Vec3(x: 1.00, y: 0.92, z: 0.90), Vec3(x: 1.00, y: 0.62, z: 0.56), dusk);
+    // Lavender sky light, so shadows read violet rather than grey.
+    let ambient = blend(Vec3(x: 0.14, y: 0.12, z: 0.28), Vec3(x: 0.56, y: 0.50, z: 0.66), day);
+    Daylight(sun: sun, strength: day, horizon: horizon, zenith: zenith, sunColor: sunColor, ambient: ambient, night: 1.0 - day)
 }
 
 /// The sun's view: an orthographic box around `center`, looking along
@@ -170,6 +183,8 @@ struct Renderer: not Copyable {
     var color: Texture
     var pipeline: RenderPipeline
     var glassPipeline: RenderPipeline
+    /// The sky, drawn first behind everything: gradient, sun, stars, clouds.
+    var skyPipeline: RenderPipeline
     var bindGroup: BindGroup
     var shadowMap: Texture
     var shadowPipeline: RenderPipeline
@@ -256,6 +271,25 @@ struct Renderer: not Copyable {
             layout: .Some(layout.share()),
             label: "glass"
         );
+        // The sky reads only group 0; an identical layout lets it share
+        // the blocks' bind group.
+        let skyLayout = device.createPipelineLayout(groups: [[
+            BindingLayout.uniformBuffer(0, visibility: [.Vertex, .Fragment]),
+            BindingLayout.texture(1, visibility: [.Fragment], dimension: .D2Array),
+            BindingLayout.sampler(2, visibility: [.Fragment]),
+            BindingLayout.texture(3, visibility: [.Fragment], sampleType: .Depth),
+            BindingLayout.sampler(4, visibility: [.Fragment], kind: .Comparison)
+        ]], label: "sky");
+        let skyPipeline = device.createRenderPipeline(
+            shader: shaderModule,
+            targets: [ColorTarget(format: format)],
+            vertexEntry: "vs_sky",
+            fragmentEntry: "fs_sky",
+            depth: .Some(DepthTest(format: depthFormat, compare: .Always, write: false)),
+            sampleCount: samples,
+            layout: .Some(skyLayout.share()),
+            label: "sky"
+        );
         let bindGroup = device.createBindGroup(
             layout: layout.bindGroupLayout(0),
             entries: [uniformBuffer.binding(0), atlasView.binding(1), atlasSampler.binding(2), shadowView.binding(3), shadowSampler.binding(4)]
@@ -298,7 +332,7 @@ struct Renderer: not Copyable {
         let color = Renderer.makeColor(device, format, width, height);
         .Ok(Renderer(
             instance: instance, device: device, surface: surface, format: format, width: width, height: height,
-            depth: depth, color: color, pipeline: pipeline, glassPipeline: glassPipeline, bindGroup: bindGroup,
+            depth: depth, color: color, pipeline: pipeline, glassPipeline: glassPipeline, skyPipeline: skyPipeline, bindGroup: bindGroup,
             shadowMap: shadowMap, shadowPipeline: shadowPipeline, shadowGroup: shadowGroup,
             chunkLayout: layout.bindGroupLayout(1), uniformBuffer: uniformBuffer,
             overlayPipeline: overlayPipeline, overlayGroup: overlayGroup, screenBuffer: screenBuffer, overlayBuffer: overlayBuffer,
@@ -359,9 +393,9 @@ struct Renderer: not Copyable {
         }
     }
 
-    /// Draw one frame as seen through `view`, lit by a sun shining along
-    /// `sun`.
-    mutating func draw(view: Mat4, eye eye: Vec3, light light: Daylight, overlay overlay: [OverlayQuad]) -> () throws WgpuError {
+    /// Draw one frame as seen through `view`, in the light of `light`, at
+    /// `time` seconds (which drifts the clouds).
+    mutating func draw(view: Mat4, eye eye: Vec3, light light: Daylight, time time: Float32, overlay overlay: [OverlayQuad]) -> () throws WgpuError {
         let aspect = Float32(from: self.width) / Float32(from: self.height);
         let projection = Mat4.perspective(fovY: radians(70.0), aspect: aspect, near: 0.1, far: self.viewDistance + 64.0);
         let viewProj = projection * view;
@@ -369,10 +403,13 @@ struct Renderer: not Copyable {
         self.device.write(self.uniformBuffer, value: Uniforms(
             viewProj: viewProj,
             lightViewProj: lightViewProj,
+            invViewProj: viewProj.inverse ?? Mat4.identity,
             sunDir: light.sun.extended(w: light.strength),
-            camera: eye.extended(w: 1.0),
-            fog: light.sky.extended(w: self.viewDistance),
-            sky: light.ambient.extended(w: 0.0)
+            camera: eye.extended(w: time),
+            fog: light.horizon.extended(w: self.viewDistance),
+            sky: light.ambient.extended(w: light.night),
+            zenith: light.zenith.extended(w: 0.0),
+            sunColor: light.sunColor.extended(w: 0.0)
         ));
         let shadowPlanes = frustumPlanes(lightViewProj);
         let planes = frustumPlanes(viewProj);
@@ -398,7 +435,7 @@ struct Renderer: not Copyable {
         let frameView = frame.texture.createView();
         let colorView = self.color.createView();
         let depthView = self.depth.createView();
-        let sky = Color(r: Float64(from: light.sky.x), g: Float64(from: light.sky.y), b: Float64(from: light.sky.z));
+        let sky = Color(r: Float64(from: light.horizon.x), g: Float64(from: light.horizon.y), b: Float64(from: light.horizon.z));
         // Frustum-cull before the pass: only chunks the camera can see.
         let size = Float32(from: chunkSize);
         var visible: [Int64] = [];
@@ -439,8 +476,10 @@ struct Renderer: not Copyable {
             }
         };
         encoder.renderPass(color: [colorView.colorAttachment(resolvingInto: frameView, clear: .Some(sky))], depth: depthView.depthAttachment()) { (pass) in
-            pass.setPipeline(self.pipeline);
+            pass.setPipeline(self.skyPipeline);
             pass.setBindGroup(0, self.bindGroup);
+            pass.draw(vertices: 3);
+            pass.setPipeline(self.pipeline);
             // No `let m = &...` here: a ref binding inside a closure trips
             // an OSSA bug (see binding_element_inside_closure.ks).
             for index in visible {
