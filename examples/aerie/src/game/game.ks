@@ -24,6 +24,8 @@ struct Game: not Copyable {
     var fps: FpsCounter
     /// Where frame time goes, for the run's report.
     var profile: FrameProfile
+    /// How much land to load each frame.
+    var pacing: StreamPacing
     var notice: Notice
     /// Seconds since the game started.
     var seconds: Float32
@@ -52,6 +54,7 @@ struct Game: not Copyable {
         self.autosave = Autosave();
         self.fps = FpsCounter();
         self.profile = FrameProfile();
+        self.pacing = StreamPacing();
         self.notice = Notice();
         self.seconds = 0.0;
         self.onTitle = not settings.skipTitle;

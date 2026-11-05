@@ -1,6 +1,6 @@
 module Aerie
 
-import sdl.(monotonicMs)
+import sdl.(monotonicUs)
 import linalg.(Vec3)
 
 // Chunk columns generate and mesh around the player a few milliseconds
@@ -39,8 +39,33 @@ func ring(dx: Int64, dz: Int64) -> Int64 {
 let defaultViewRadius: Int64 = 5;
 let minViewRadius: Int64 = 2;
 let maxViewRadius: Int64 = 16;
-/// Milliseconds per frame spent generating and meshing.
-let streamBudgetMs: Int64 = 6;
+/// Microseconds per frame spent generating and meshing: half a frame at
+/// 120 fps, so loading land never makes a frame late.
+let streamBudget: Int64 = 4000;
+
+/// Keeps each frame's streaming inside `streamBudget`: a step only starts
+/// if one as slow as the slowest lately would still fit. The first step of
+/// a frame always runs, so land keeps coming however slow steps are.
+struct StreamPacing {
+    /// About the slowest recent step, in microseconds; it eases back down
+    /// a little each step.
+    var stepCost: Int64
+
+    init() {
+        self.stepCost = 0;
+    }
+
+    /// Whether another step fits after `spent` microseconds this frame.
+    func fits(spent: Int64) -> Bool {
+        spent == 0 or spent + self.stepCost <= streamBudget
+    }
+
+    /// Note a step that took `took` microseconds.
+    mutating func record(took: Int64) {
+        let eased = self.stepCost - self.stepCost / 8;
+        self.stepCost = if took > eased { took } else { eased };
+    }
+}
 
 extend Game {
     /// Mesh the four chunks of column (cx, cz).
@@ -63,16 +88,20 @@ extend Game {
         (missing, ready)
     }
 
-    /// Generate and mesh the nearest missing columns for a few
-    /// milliseconds, and forget far ones. Generation runs one ring further
-    /// out than meshing, so every meshed chunk has all its neighbors.
+    /// Generate and mesh the nearest missing columns within the frame's
+    /// budget, and forget far ones. Generation runs one ring further out
+    /// than meshing, so every meshed chunk has all its neighbors.
     mutating func stream() {
         let (pcx, pcz) = columnOf(self.player.position);
-        let start = unsafe monotonicMs();
-        while unsafe monotonicMs() - start < streamBudgetMs {
+        let start = unsafe monotonicUs();
+        var now = start;
+        while self.pacing.fits(now - start) {
+            let before = now;
             guard self.streamStep(pcx, pcz) else {
                 break;
             }
+            now = unsafe monotonicUs();
+            self.pacing.record(now - before);
         }
         self.world.unload(pcx, pcz, self.settings.viewRadius + 2);
         self.renderer.chunks.unload(pcx, pcz, keep: self.settings.viewRadius + 1);
