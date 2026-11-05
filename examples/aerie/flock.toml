@@ -9,3 +9,4 @@ wgpu = { path = "../../lang/wgpu" }
 sdl = { path = "../../lang/sdl" }
 linalg = { path = "../../lang/linalg" }
 images = { path = "../../lang/images" }
+deflate = { path = "../../lang/deflate" }

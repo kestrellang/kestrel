@@ -23,6 +23,7 @@ struct Controls {
     var flyPressed: Bool = false
     var slotPressed: Int64 = -1
     var timePressed: Bool = false
+    var savePressed: Bool = false
 
     init() {}
 
@@ -51,6 +52,7 @@ struct Controls {
             .Digit8 => { if held { self.slotPressed = 7 } },
             .Digit9 => { if held { self.slotPressed = 8 } },
             .T => { if held { self.timePressed = true } },
+            .P => { if held { self.savePressed = true } },
             _ => {}
         }
     }
@@ -62,6 +64,7 @@ struct Controls {
         self.flyPressed = false;
         self.slotPressed = -1;
         self.timePressed = false;
+        self.savePressed = false;
     }
 }
 
@@ -196,11 +199,16 @@ struct Game: not Copyable {
     /// 0 to 1 over a day; see `daylight`.
     var timeOfDay: Float32
     var running: Bool
+    /// Set when the player asks to save; the driver writes `save()` out and
+    /// clears it, since only it knows where saves live.
+    var wantsSave: Bool
 
-    init(consuming renderer: Renderer, seed seed: Int64) {
+    /// A new world from `seed`, or the one in `save`.
+    init(consuming renderer: Renderer, seed seed: Int64, save save: SaveState?) {
         self.renderer = renderer;
         self.renderer.viewDistance = Float32(from: viewRadius * chunkSize);
-        self.world = World(seed);
+        let worldSeed = match save { .Some(s) => s.seed, .None => seed };
+        self.world = World(worldSeed);
         self.meshed = Dictionary[Int64, Bool]();
         self.player = Player(spawnPoint(self.world.generator));
         self.selected = 0;
@@ -212,6 +220,28 @@ struct Game: not Copyable {
             .None => 0.1
         };
         self.running = true;
+        self.wantsSave = false;
+        if let .Some(s) = save {
+            for (key, chunk) in s.chunks {
+                let _ = self.world.stored.insert(key, chunk);
+            }
+            self.player.position = s.position;
+            self.player.yaw = s.yaw;
+            self.player.pitch = s.pitch;
+            if getenv("AERIE_TIME").isNone() { self.timeOfDay = s.timeOfDay; }
+        }
+    }
+
+    /// Everything a save file keeps.
+    func save() -> SaveState {
+        SaveState(
+            seed: self.world.generator.seed,
+            timeOfDay: self.timeOfDay,
+            position: self.player.position,
+            yaw: self.player.yaw,
+            pitch: self.player.pitch,
+            chunks: self.world.editedChunks()
+        )
     }
 
     mutating func event(event: Event) {
@@ -272,9 +302,7 @@ struct Game: not Copyable {
         let keep = viewRadius + 1;
         self.renderer.remove(where: { (key: Int64, x: Int64, z: Int64) in (x - pcx).abs() > keep or (z - pcz).abs() > keep });
         self.meshed.retain(where: { (key: Int64, done: Bool) in
-            let column = key / 16;
-            let x = column / 2097152 - 1048576;
-            let z = column % 2097152 - 1048576;
+            let (x, z) = columnOfKey(key);
             (x - pcx).abs() <= keep and (z - pcz).abs() <= keep
         });
     }
@@ -343,8 +371,11 @@ struct Game: not Copyable {
             self.selected = self.controls.slotPressed;
         }
         // Physics in steps of at most 50 ms, so a slow frame can't launch
-        // the player through the floor; a long stall is dropped.
-        var remaining = if dt > 0.25 { 0.25 } else { dt };
+        // the player through the floor; a long stall is dropped. Unloaded
+        // chunks count as solid, so the player waits, frozen, until the
+        // columns around them exist rather than being shoved out of them.
+        let (pcx, pcz) = columnOf(self.player.position);
+        var remaining = if not self.world.neighborsReady(pcx, pcz) { 0.0 } else if dt > 0.25 { 0.25 } else { dt };
         while remaining > 0.0 {
             let step = if remaining > 0.05 { 0.05 } else { remaining };
             self.player.update(self.controls, self.world, dt: step);
@@ -352,6 +383,9 @@ struct Game: not Copyable {
         }
         self.useBlocks();
         self.stream();
+        if self.controls.savePressed {
+            self.wantsSave = true;
+        }
         // T skips ahead a quarter of a day.
         if self.controls.timePressed {
             self.timeOfDay = self.timeOfDay + 0.25;

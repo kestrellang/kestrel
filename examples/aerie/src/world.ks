@@ -16,6 +16,12 @@ func chunkKey(cx: Int64, cy: Int64, cz: Int64) -> Int64 {
     ((cx + 1048576) * 2097152 + (cz + 1048576)) * 16 + cy
 }
 
+/// The column (cx, cz) a `chunkKey` belongs to.
+func columnOfKey(key: Int64) -> (Int64, Int64) {
+    let column = key / 16;
+    (column / 2097152 - 1048576, column % 2097152 - 1048576)
+}
+
 /// `v / chunkSize`, rounded down (toward -infinity, unlike `/`).
 func chunkOf(v: Int64) -> Int64 {
     if v >= 0 { v / chunkSize } else { (v + 1) / chunkSize - 1 }
@@ -27,11 +33,33 @@ struct World {
     var chunks: Dictionary[Int64, Chunk]
     var generator: Generator
     var air: Chunk
+    /// Loaded chunks the player has changed, by key. These are what a save
+    /// keeps; untouched chunks are regenerated from the seed.
+    var edited: Set[Int64]
+    /// Changed chunks that aren't loaded: unloaded ones, and those read from
+    /// a save. Generating their column takes them back instead.
+    var stored: Dictionary[Int64, Chunk]
 
     init(seed: Int64) {
         self.chunks = Dictionary[Int64, Chunk]();
         self.generator = Generator(seed);
         self.air = Chunk();
+        self.edited = Set[Int64]();
+        self.stored = Dictionary[Int64, Chunk]();
+    }
+
+    /// Every changed chunk, loaded or not, for saving.
+    func editedChunks() -> [(Int64, Chunk)] {
+        var out: [(Int64, Chunk)] = [];
+        for (key, chunk) in self.stored {
+            out.append((key, chunk));
+        }
+        for key in self.edited {
+            if let .Some(chunk) = self.chunks(key) {
+                out.append((key, chunk));
+            }
+        }
+        out
     }
 
     static func inRange(cy: Int64) -> Bool {
@@ -73,15 +101,26 @@ struct World {
         let _ = self.chunks.modify(key) { (chunk) in
             chunk.put(x - cx * chunkSize, y - cy * chunkSize, z - cz * chunkSize, block);
         };
+        let _ = self.edited.insert(key);
         true
     }
 
-    /// Generate and keep the whole column of chunks at (cx, cz).
+    /// Generate and keep the whole column of chunks at (cx, cz), taking
+    /// back any stored changed chunks instead of generating them.
     mutating func generateColumn(cx: Int64, cz: Int64) {
         let columns = self.generator.columns(cx, cz);
         var cy: Int64 = 0;
         while cy < worldChunksY {
-            let _ = self.chunks.insert(chunkKey(cx, cy, cz), self.generator.chunk(cx, cy, cz, columns));
+            let key = chunkKey(cx, cy, cz);
+            match self.stored.remove(key) {
+                .Some(chunk) => {
+                    let _ = self.chunks.insert(key, chunk);
+                    let _ = self.edited.insert(key);
+                },
+                .None => {
+                    let _ = self.chunks.insert(key, self.generator.chunk(cx, cy, cz, columns));
+                }
+            }
             cy = cy + 1;
         }
     }
@@ -164,13 +203,23 @@ struct World {
         out
     }
 
-    /// Forget columns further than `radius` chunks from (cx, cz).
+    /// Forget columns further than `radius` chunks from (cx, cz), moving
+    /// changed chunks to `stored` so their changes survive.
     mutating func unload(cx: Int64, cz: Int64, radius: Int64) {
-        self.chunks.retain(where: { (key: Int64, chunk: Chunk) in
-            let column = key / 16;
-            let kx = column / 2097152 - 1048576;
-            let kz = column % 2097152 - 1048576;
+        let near = { (key: Int64) in
+            let (kx, kz) = columnOfKey(key);
             (kx - cx).abs() <= radius and (kz - cz).abs() <= radius
-        });
+        };
+        var leaving: [Int64] = [];
+        for key in self.edited {
+            if not near(key) { leaving.append(key); }
+        }
+        for key in leaving {
+            if let .Some(chunk) = self.chunks(key) {
+                let _ = self.stored.insert(key, chunk);
+            }
+            let _ = self.edited.remove(key);
+        }
+        self.chunks.retain(where: { (key: Int64, chunk: Chunk) in near(key) });
     }
 }

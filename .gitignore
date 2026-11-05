@@ -58,3 +58,4 @@ examples/life/bench/*.a
 examples/life/bench/life_bench_c_O*
 examples/life/bench/life_bench_ks
 target-linux/
+examples/aerie/*.aerie
