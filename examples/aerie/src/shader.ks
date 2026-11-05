@@ -88,3 +88,44 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
 }
 "
 }
+
+/// The 2D overlay: screen-space rectangles in pixels, each either a solid
+/// color or a tinted atlas tile (for hotbar icons).
+let overlayShader: String = "
+struct Screen {
+    size: vec4f,
+};
+@group(0) @binding(0) var<uniform> screen: Screen;
+@group(0) @binding(1) var atlas: texture_2d_array<f32>;
+@group(0) @binding(2) var atlasSampler: sampler;
+
+const CORNERS = array<vec2f, 6>(vec2f(0, 0), vec2f(1, 0), vec2f(1, 1), vec2f(0, 0), vec2f(1, 1), vec2f(0, 1));
+
+struct VertexOut {
+    @builtin(position) position: vec4f,
+    @location(0) uv: vec2f,
+    @location(1) color: vec4f,
+    @location(2) @interpolate(flat) layer: i32,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertex: u32, @location(0) rect: vec4f, @location(1) color: vec4f, @location(2) tile: vec4f) -> VertexOut {
+    let corner = CORNERS[vertex];
+    let pixel = rect.xy + corner * rect.zw;
+    var out: VertexOut;
+    out.position = vec4f(pixel.x / screen.size.x * 2.0 - 1.0, 1.0 - pixel.y / screen.size.y * 2.0, 0.0, 1.0);
+    out.uv = corner;
+    out.color = color;
+    out.layer = i32(tile.x);
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOut) -> @location(0) vec4f {
+    if in.layer < 0 {
+        return in.color;
+    }
+    let texel = textureSampleLevel(atlas, atlasSampler, in.uv, in.layer, 0.0);
+    return vec4f(texel.rgb * in.color.rgb, texel.a * in.color.a);
+}
+";
