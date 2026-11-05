@@ -872,9 +872,9 @@ mod tests {
             other => panic!("expected Named(Bool), got {:?}", other),
         }
 
-        let reverse_fn =
-            find_child_by_name(&world, ordering, &NodeKind::Function, "reverse").unwrap();
-        let callable = world.get::<Callable>(reverse_fn).unwrap();
+        let reversed_fn =
+            find_child_by_name(&world, ordering, &NodeKind::Function, "reversed").unwrap();
+        let callable = world.get::<Callable>(reversed_fn).unwrap();
         assert_eq!(callable.params.len(), 0);
 
         let then_fn = find_child_by_name(&world, ordering, &NodeKind::Function, "then").unwrap();
