@@ -87,6 +87,42 @@ Queries implement `QueryFn` and are memoized by their `Hash + Eq` identity:
 3. **Cache miss or deps changed**: execute query, record new dependencies, store result
 4. **Backdating**: if re-execution produces the same fingerprint as before, keep the old `changed_at` revision so dependents don't needlessly re-execute
 
+## Cycle Recovery
+
+A query that asks for its own key while it is still executing (directly or
+through other queries) forms a **cycle**; the first of its queries on the stack
+is the cycle **head**. By default a cycle panics ("Query cycle detected").
+Recursive-type questions (is `List[T]` Copyable when `List` contains `List`?)
+are cycles by nature, so a query can opt in through `QueryFn::cycle_mode`, in
+the shape of Salsa's cycle handling:
+
+| `CycleMode` | re-entry answers | the head |
+|---|---|---|
+| `Panic` (default) | — (panics) | — |
+| `Fixpoint { initial }` | the head's provisional value, first `initial` | re-executes with its last output as the provisional value until the output's fingerprint stops changing |
+| `Fallback { value }` | `value` | answers `value`; `on_cycle_fallback` runs in its scope (for a diagnostic) |
+
+Rules the framework enforces:
+
+- **Provisional results are never memoized directly.** Every frame above the
+  head when it was re-entered (or above it when a provisional result was read)
+  depends on the head. Its result is parked in `QueryContext::provisional`,
+  answered to later readers in the same iteration, dropped when the head
+  iterates, and committed when the head converges. A head that itself depends
+  on an outer head is parked under the outer one, with its members.
+- **One dependency list per cycle.** At commit every member (head included)
+  gets the union of all members' deps minus the edges between members. Verifying
+  any member therefore never re-enters the cycle, and a change to any input
+  re-runs every member from `initial` — no stale "assumed" answers.
+- **Termination is the query's job.** Outputs must walk a finite lattice
+  monotonically from `initial` (copy semantics: Copyable → Cloneable →
+  NotCopyable). The framework caps iterations (`MAX_CYCLE_ITERATIONS`) and
+  ICEs past it.
+
+Prefer this over a thread-local "currently computing" stack: such a stack is
+invisible to dependency tracking, so a memo computed under its assumption is
+never invalidated when the rest of the cycle changes.
+
 ## Snapshot System
 
 `World::snapshot()` creates a structural clone for reuse across compilations (e.g., stdlib persistence in tests). See [snapshots.md](snapshots.md) for details.

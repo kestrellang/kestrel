@@ -223,9 +223,14 @@ Current allocations:
   — was double-allocated with conformance_completeness's receiver-kind
   check; resolved 2026-07 by moving that check to E477.
 - E469: `wrong_parameter_convention` (compilation/conformance_completeness.rs) — a witness parameter's `consuming`/`mutating`/plain convention must match the requirement's exactly (2026-10-28; receivers are E477).
-- E454–E458, E460, E462–E465: conformance completeness + indirect-enum
-  checks (compilation/conformance_completeness.rs, indirect_enum.rs) —
-  this list is stale for that range.
+- E406, E407, E409: indirect enums (decl/recursive_enum.rs, with E429) —
+  `indirect_enum_requires_stdlib`, `indirect_polymorphic_recursion`,
+  `indirect_without_recursion` (warning).
+- E408: `infinite_opaque_return` (decl/opaque_cycle.rs).
+- E454–E458, E460, E462–E464: conformance completeness checks
+  (compilation/conformance_completeness.rs) — this list is stale for that
+  range. E465 (indirect enums not yet supported) is retired; the ID stays
+  reserved.
 - E466: `some_in_field_type` (decl/field.rs) — `some P` rejected in field
   position (#168).
   E458 (`wrong_method_return_type`) carries the stage-2d ref-shape rule:
@@ -252,7 +257,8 @@ Current allocations:
     `any[...]` box) is emitted by `kestrel-hir-lower/src/ty.rs`; E402 (invalid
     box, `decl/existential_box.rs`, rules in `kestrel_semantics::ExistentialBoxDefect`)
     and E403 (unsized type parameter by value, `decl/unsized_param.rs`) are
-    analyzers. **Free E4xx gaps are now E406–E410 and E414.** E405 `missing_property_ref_accessor` (compilation/conformance_completeness.rs): a computed property without the `ref` / `mutating ref` a protocol requirement needs.
+    analyzers. **Free E4xx gaps are now E410 and E414.** E405 `missing_property_ref_accessor` (compilation/conformance_completeness.rs): a computed property without the `ref` / `mutating ref` a protocol requirement needs.
+  - E406–E409: indirect enums and infinite opaque returns (see the list above).
   - E1xx E144–E155 are existentials too: E144, E150, E153 and E154 are
     emitted by hir-lower; E145–E148 and E151 by type inference (`InferError`
     variants, `kestrel-type-infer/src/existential.rs`); E149, E152 and the

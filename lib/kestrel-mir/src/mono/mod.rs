@@ -1265,7 +1265,7 @@ impl CopyLayer for MonoCopyLayer<'_> {
         copy
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, kestrel_copy_fold::ConditionalCopy> {
         Cow::Borrowed(crate::ty_query::nominal_copy_in(self.structs, self.enums, entity).1)
     }
 
