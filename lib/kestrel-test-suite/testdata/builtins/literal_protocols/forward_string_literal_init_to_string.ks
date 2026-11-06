@@ -5,14 +5,13 @@
 module Test
 
 // A custom string-literal type forwards its literal to `String` by calling
-// `String(stringLiteral:length:)` directly. That init is public, but the
-// explicit call reports "no matching overload for 'String'" (E113). Found
-// while writing `std.files.Path`, which now copies the bytes another way.
+// its `init(stringLiteral ptr:, length:)` directly. `length` is a positional
+// param, so the call is `String(stringLiteral: ptr, length)`.
 
 struct Name: ExpressibleByStringLiteral {
     var text: String
     init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
-        self.text = String(stringLiteral: ptr, length: length)
+        self.text = String(stringLiteral: ptr, length)
     }
 }
 

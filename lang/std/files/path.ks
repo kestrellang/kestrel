@@ -41,10 +41,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// @name String Literal
     /// A path literal, as in `File.open("data.txt")`.
     public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
-        // Calling `String(stringLiteral:length:)` directly doesn't resolve
-        // (E113), so copy the literal's bytes through a borrowed slice.
-        let start = RawPointer(raw: ptr).cast[UInt8]();
-        self.text = String(fromUtf8Unchecked: Slice.lend(start: start, count: Int64(intLiteral: length)))
+        self.text = String(stringLiteral: ptr, length)
     }
 
     /// The path as text.
