@@ -588,6 +588,14 @@ impl Recorder<'_> {
                 }
             },
             HirExpr::Sugar { inner, .. } => self.walk_expr(*inner, force_whole),
+            // `&place` reads the place; `&mutating place` writes through it,
+            // so a captured root needs a by-ref capture, like an assignment.
+            HirExpr::Borrow {
+                inner, mutating, ..
+            } => match self.place_key(*inner) {
+                Some(key) if *mutating => self.record(key, *inner, true, force_whole),
+                _ => self.walk_expr(*inner, force_whole),
+            },
             // A field/tuple access that is *not* a capturable stored-field
             // place (a getter, computed property, …) still uses its base — so
             // the base must be captured (e.g. `self.count` getter → capture
