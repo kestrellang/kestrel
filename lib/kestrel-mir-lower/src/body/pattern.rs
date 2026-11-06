@@ -1201,12 +1201,32 @@ impl OssaBodyCtx<'_, '_> {
         path: &[PathElement],
         local_id: LocalId,
     ) {
+        let refs_before = self.tracked_expr_refs();
         let (extracted, _) = self.apply_access_path(base, base_ty, path);
         // Stage 2b: a ref-slot extraction binds as a NAMED ref binding —
         // `.Some(r)` on `Optional[&T]` gives `r: &T` (no decay; reads
         // through `r` decay per-use like any binding).
         if self.ref_results.contains(&extracted) {
             self.register_ref_binding(extracted, local_id);
+            return;
+        }
+        // A leaf read THROUGH a lent payload (`some .B(b)` on an
+        // `Optional[&V]`) binds by value, like any plain binding: copy (or
+        // implicitly clone) it out and end the refs the path loaded, so they
+        // don't stay live into the arm and cross its branches (E497). A
+        // `not Copyable` leaf can't be duplicated and keeps the borrow.
+        let leaf_ty = self.body.value(extracted).ty;
+        if self.body.value(extracted).ownership == Ownership::Guaranteed
+            && !self.is_non_copyable(leaf_ty)
+            && !self.copy_behavior_is_mono_dependent(leaf_ty)
+            && self
+                .tracked_expr_refs()
+                .iter()
+                .any(|v| !refs_before.contains(v))
+        {
+            let owned = self.emit_copy_value(extracted);
+            self.end_path_refs(&refs_before);
+            self.bind_pattern_local(local_id, owned);
             return;
         }
         // An @owned extraction off a path is already a fresh copy the
@@ -1931,7 +1951,9 @@ impl OssaBodyCtx<'_, '_> {
             .map(|e| self.ctx.witness_method_key(e))
             // The protocol resolved (the caller found `ArrayMatchable`), so a
             // missing method tag is a broken stdlib — never guess a name.
-            .unwrap_or_else(|| panic!("ICE: `ArrayMatchable` requirement {method_builtin:?} is not tagged"));
+            .unwrap_or_else(|| {
+                panic!("ICE: `ArrayMatchable` requirement {method_builtin:?} is not tagged")
+            });
         let callee = Callee::Witness {
             protocol: proto,
             method,
@@ -2051,12 +2073,15 @@ impl OssaBodyCtx<'_, '_> {
         name: &str,
     ) -> Option<(TyId, Entity)> {
         let assoc = self.array_matchable_assoc(name)?;
-        let (alias, owner) = self.ctx.query.query(kestrel_name_res::AssociatedTypeBinding {
-            type_entity,
-            assoc,
-            conformance_source: None,
-            root: self.ctx.root,
-        })?;
+        let (alias, owner) = self
+            .ctx
+            .query
+            .query(kestrel_name_res::AssociatedTypeBinding {
+                type_entity,
+                assoc,
+                conformance_source: None,
+                root: self.ctx.root,
+            })?;
         let ty = crate::ty::resolve_type_annotation(self.ctx, alias);
         Some((ty, owner))
     }
@@ -2107,7 +2132,8 @@ impl OssaBodyCtx<'_, '_> {
     /// Wrap a raw `lang.i64` value into a stdlib `Int64` via its integer-literal
     /// init (the `matchGet`/`matchSlice` bounds are `Int64`-typed).
     fn emit_int64_wrap(&mut self, raw: ValueId, int64_ty: TyId) -> ValueId {
-        self.emit_integer_literal_value(raw, int64_ty).unwrap_or(raw)
+        self.emit_integer_literal_value(raw, int64_ty)
+            .unwrap_or(raw)
     }
 
     /// Emit `array.matchGet(index)` where `raw_index` is a raw `lang.i64`.
