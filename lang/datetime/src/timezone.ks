@@ -25,7 +25,7 @@ public struct TimeZone: Equatable, Hashable, Formattable {
         // would take the address of a *temporary copy* of element 0 (the
         // subscript getter returns a value, not a place), so the C function's
         // write would overflow that 1-byte temporary → stack corruption.
-        kestrel_system_timezone_name(buf.asPointer(), 256);
+        unsafe kestrel_system_timezone_name(buf.asPointer(), 256);
         let name = String(from: CString(raw: buf.asPointer()));
         if let .Some(tz) = TimeZone(name) {
             return tz;
@@ -60,7 +60,7 @@ public struct TimeZone: Equatable, Hashable, Formattable {
     // Find or register `name` in the C-side registry; -1 if it can't be loaded.
     static func registeredId(name: String) -> Int64 {
         let cstr = name.toCString();
-        let tzId = kestrel_tz_find_or_register(cstr);
+        let tzId = unsafe kestrel_tz_find_or_register(cstr);
         cstr.free();
         tzId
     }
@@ -69,7 +69,7 @@ public struct TimeZone: Equatable, Hashable, Formattable {
 
     public var name: String {
         var buf = Array[UInt8](repeating: 0, count: 128);
-        kestrel_tz_name(self.id, buf.asPointer(), 128);
+        unsafe kestrel_tz_name(self.id, buf.asPointer(), 128);
         String(from: CString(raw: buf.asPointer()))
     }
 
@@ -87,15 +87,15 @@ public struct TimeZone: Equatable, Hashable, Formattable {
 
     // Whether daylight saving time is in effect at `instant`.
     public func isDaylightSavingTime(at instant: Instant) -> Bool {
-        kestrel_tz_is_dst(self.id, instant.secs) != 0
+        unsafe kestrel_tz_is_dst(self.id, instant.secs) != 0
     }
 
     // Every IANA zone name installed under /usr/share/zoneinfo, sorted.
     public static func availableIdentifiers() -> Array[String] {
         var probe = Array[UInt8](repeating: 0, count: 1);
-        let needed = kestrel_tz_list_identifiers(probe.asPointer(), 0);
+        let needed = unsafe kestrel_tz_list_identifiers(probe.asPointer(), 0);
         var buf = Array[UInt8](repeating: 0, count: needed);
-        kestrel_tz_list_identifiers(buf.asPointer(), needed);
+        unsafe kestrel_tz_list_identifiers(buf.asPointer(), needed);
         // Split the newline-separated list; the final byte is the NUL.
         var names: Array[String] = [];
         var start: Int64 = 0;
@@ -123,13 +123,13 @@ public struct TimeZone: Equatable, Hashable, Formattable {
 
     // Get the UTC offset in seconds at a given instant
     func offsetAt(epochSec: Int64) -> Int64 {
-        Int64(from: kestrel_tz_offset(self.id, epochSec))
+        Int64(from: unsafe kestrel_tz_offset(self.id, epochSec))
     }
 
     // Get the timezone abbreviation at a given instant
     func abbreviationAt(epochSec: Int64) -> String {
         var buf = Array[UInt8](repeating: 0, count: 32);
-        kestrel_tz_abbr(self.id, epochSec, buf.asPointer(), 32);
+        unsafe kestrel_tz_abbr(self.id, epochSec, buf.asPointer(), 32);
         String(from: CString(raw: buf.asPointer()))
     }
 
@@ -140,7 +140,7 @@ public struct TimeZone: Equatable, Hashable, Formattable {
         let (naiveSecs, _) = dt.toEpochSecs();
         var before: Int32 = 0;
         var after: Int32 = 0;
-        if kestrel_tz_bracketing_transition(self.id, naiveSecs, Pointer(to: before), Pointer(to: after)) == 0 {
+        if unsafe kestrel_tz_bracketing_transition(self.id, naiveSecs, Pointer(to: before), Pointer(to: after)) == 0 {
             return .None;
         }
         .Some((Int64(from: before), Int64(from: after)))

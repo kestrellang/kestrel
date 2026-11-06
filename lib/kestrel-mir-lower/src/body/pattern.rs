@@ -63,7 +63,10 @@ impl OssaBodyCtx<'_, '_> {
     /// Unconditionally non-Copyable scrutinees already move via
     /// `emit_copy_value`; genuinely-Copyable scrutinees keep the copy (they may
     /// be read after the match), so both route through `lower_expr` unchanged.
-    fn lower_match_scrutinee(&mut self, scrutinee_expr: HirExprId) -> ValueId {
+    /// Returns the scrutinee and whether it is an ADDRESS (place mode): a
+    /// non-copyable ref result can't be copied out, so it is pinned as an
+    /// address like a place-mode scrutinee and its view ends here.
+    fn lower_match_scrutinee(&mut self, scrutinee_expr: HirExprId) -> (ValueId, bool) {
         let expr = self.hir.exprs[scrutinee_expr].clone();
         if let HirExpr::Local(hir_local, _) = &expr
             && !self.is_var_local(hir_local)
@@ -71,7 +74,7 @@ impl OssaBodyCtx<'_, '_> {
             let val = self.map_local(*hir_local);
             let vdef = self.body.value(val);
             if vdef.ownership == Ownership::Owned && self.copy_behavior_is_mono_dependent(vdef.ty) {
-                return self.emit_move_value(val);
+                return (self.emit_move_value(val), false);
             }
         }
         let val = self.lower_expr(scrutinee_expr);
@@ -83,56 +86,67 @@ impl OssaBodyCtx<'_, '_> {
         // better be the binding's LAST use, or the branch terminator
         // reports the binding E497 (bindings never cross blocks).
         if self.ref_results.contains(&val) {
-            // A non-copyable pointee cannot be copied out: match through the
-            // view itself, like a borrowed parameter (arm bindings are then
-            // views into the referent).
+            // A non-copyable pointee cannot be copied out. A named ref
+            // binding matches through the view itself, like a borrowed
+            // parameter; a call result (`xs(1) is A`, an `any P` element)
+            // is pinned as an address so no view reaches the branches.
             if !self.is_copy_type(self.body.value(val).ty) {
-                return val;
+                if self.ref_binding_vals.contains_key(&val) {
+                    return (val, false);
+                }
+                return (self.pin_view_address(val), true);
             }
             let owned = self.emit_copy_value(val);
             self.end_ref_if_single_use(val);
-            return owned;
+            return (owned, false);
         }
-        val
+        (val, false)
     }
 
-    /// Does any arm pattern contain a `&`/`&mutating` binder? Returns the
-    /// place-mode request: `None` = value mode (today's lowering, byte
-    /// identical), `Some(mutating)` = place mode, mutable place iff any
-    /// binder is `&mutating`.
-    fn arms_ref_binding_mode(&self, arms: &[HirMatchArm]) -> Option<bool> {
-        fn walk(hir: &kestrel_hir::body::HirBody, id: kestrel_hir::body::HirPatId) -> Option<bool> {
-            use kestrel_hir::body::HirPat;
-            match &hir.pats[id] {
-                HirPat::Binding { by_ref, .. } => *by_ref,
-                HirPat::At { subpattern, .. } => walk(hir, *subpattern),
-                // A type test reads the scrutinee in place (its binding is a
-                // borrow of the payload), so it always takes place mode.
-                HirPat::TypeTest { sub, .. } => walk(hir, *sub).max(Some(false)),
-                HirPat::Tuple { prefix, suffix, .. } => prefix
-                    .iter()
-                    .chain(suffix)
-                    .filter_map(|&p| walk(hir, p))
-                    .max(),
-                HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
-                    args.iter().filter_map(|a| walk(hir, a.pattern)).max()
-                },
-                HirPat::Struct { fields, .. } => fields
-                    .iter()
-                    .filter_map(|f| f.pattern.and_then(|p| walk(hir, p)))
-                    .max(),
-                HirPat::Array { prefix, suffix, .. } => prefix
-                    .iter()
-                    .chain(suffix)
-                    .filter_map(|&p| walk(hir, p))
-                    .max(),
-                HirPat::Or { alternatives, .. } => {
-                    alternatives.iter().filter_map(|&p| walk(hir, p)).max()
-                },
-                _ => None,
+    /// End the single-use refs a decision-tree test loaded since `before`
+    /// (the `&V` inside a lent `Optional[&V]` scrutinee). A test only reads
+    /// through them and the subtrees re-project from the scrutinee, so they
+    /// end before the branch instead of crossing it (E497).
+    fn end_path_refs(&mut self, before: &[ValueId]) {
+        let loaded: Vec<ValueId> = self
+            .tracked_expr_refs()
+            .into_iter()
+            .filter(|v| !before.contains(v))
+            .collect();
+        for r in loaded.into_iter().rev() {
+            self.emit_end_borrow(r);
+        }
+    }
+
+    /// The raw address of `view`, rooted where the viewed storage lives;
+    /// the view itself ends here unless a named binding owns it.
+    fn pin_view_address(&mut self, view: ValueId) -> ValueId {
+        let pointee = self.body.value(view).ty;
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
+        let addr = self.emit_op1(Op::PtrTo(pointee), view, ptr_ty);
+        // The address lives where the viewed storage lives: inherit its
+        // provenance root (as `FieldAddr` does). Otherwise it self-roots
+        // `Local` and a `&mutating` payload binder on a `mutating` receiver
+        // (`match self { .Some(&mutating v) => .Some(v), … }`) fails E494
+        // "borrows local" when returned.
+        let view_root = self.body.value(view).root;
+        self.stamp_root(addr, view_root);
+        // The view's job is done — the address stays valid while the
+        // underlying storage lives (var slot / pinned temp / borrowed
+        // receiver). Named bindings keep their own lifecycle.
+        if !self.ref_binding_vals.contains_key(&view) {
+            let src = self.body.value(view).borrow_source;
+            self.emit_end_borrow(view);
+            // A sub-borrow of a ref call result (`xs(1) is A`) was that
+            // ref's single use: end it too, or it reaches the decision
+            // tree's first branch (E497), as a direct call's arg does.
+            if let Some(src) = src
+                && self.ref_results.contains(&src)
+            {
+                self.end_ref_if_single_use(src);
             }
         }
-        arms.iter().filter_map(|a| walk(&self.hir, a.pattern)).max()
+        addr
     }
 
     /// Place-mode scrutinee: evaluate the scrutinee as a PLACE and pin its
@@ -162,23 +176,7 @@ impl OssaBodyCtx<'_, '_> {
         let view = self
             .prepare_call_arg_for_expr(scrutinee_expr, convention)
             .value;
-        let pointee = self.body.value(view).ty;
-        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
-        let addr = self.emit_op1(Op::PtrTo(pointee), view, ptr_ty);
-        // The address lives where the viewed storage lives: inherit its
-        // provenance root (as `FieldAddr` does). Otherwise it self-roots
-        // `Local` and a `&mutating` payload binder on a `mutating` receiver
-        // (`match self { .Some(&mutating v) => .Some(v), … }`) fails E494
-        // "borrows local" when returned.
-        let view_root = self.body.value(view).root;
-        self.stamp_root(addr, view_root);
-        // The view's job is done — the address stays valid while the
-        // underlying storage lives (var slot / pinned temp / borrowed
-        // receiver). Named bindings keep their own lifecycle.
-        if !self.ref_binding_vals.contains_key(&view) {
-            self.emit_end_borrow(view);
-        }
-        addr
+        self.pin_view_address(view)
     }
 
     pub fn lower_match(
@@ -208,7 +206,7 @@ impl OssaBodyCtx<'_, '_> {
 
         // Place mode (any `&` binder in the arms): the scrutinee is pinned
         // as an address; value mode keeps today's lowering byte-identical.
-        let place_mode = self.arms_ref_binding_mode(arms);
+        let place_mode = self.hir.arms_borrow_mode(arms);
         // A match that moves only its bound parts (partial moves) keeps the
         // scrutinee in place too: bindings take their fields out of it.
         let part_moves = self
@@ -230,9 +228,15 @@ impl OssaBodyCtx<'_, '_> {
             (mode, _) => mode,
         };
         let saved_match_moves = std::mem::replace(&mut self.active_match_moves, part_moves);
-        let scrutinee_val = match place_mode {
-            Some(mutating) => self.lower_match_scrutinee_place(scrutinee_expr, mutating),
-            None => self.lower_match_scrutinee(scrutinee_expr),
+        let (scrutinee_val, place_mode) = match place_mode {
+            Some(mutating) => (
+                self.lower_match_scrutinee_place(scrutinee_expr, mutating),
+                place_mode,
+            ),
+            None => match self.lower_match_scrutinee(scrutinee_expr) {
+                (val, true) => (val, Some(false)),
+                (val, false) => (val, None),
+            },
         };
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
 
@@ -380,8 +384,12 @@ impl OssaBodyCtx<'_, '_> {
                     })
                 )
             });
-        if part_moves.is_some() {
-            return self.lower_destructure_in_place(scrutinee_expr, arm, part_moves);
+        // `&` / `&mutating` binders (`let (&a, b) = pair`) borrow the
+        // scrutinee place, so they bind in place like a partial move.
+        let ref_mode = self.hir.arms_borrow_mode(std::slice::from_ref(arm));
+        if part_moves.is_some() || ref_mode.is_some() {
+            let mutating = ref_mode.unwrap_or(false);
+            return self.lower_destructure_in_place(scrutinee_expr, arm, part_moves, mutating);
         }
         let scrutinee_val = self.lower_expr(scrutinee_expr);
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
@@ -403,16 +411,18 @@ impl OssaBodyCtx<'_, '_> {
         self.lower_expr(arm.body)
     }
 
-    /// `lower_irrefutable_destructure` for a partial move: bind from the
-    /// pinned scrutinee address; moving bindings take their fields out of
-    /// the slot (`emit_bindings_place`), the rest copy or borrow as usual.
+    /// `lower_irrefutable_destructure` for a partial move or `&` binders:
+    /// bind from the pinned scrutinee address; moving bindings take their
+    /// fields out of the slot (`emit_bindings_place`), `&` binders borrow
+    /// it (a mutable place when `mutating`), the rest copy as usual.
     fn lower_destructure_in_place(
         &mut self,
         scrutinee_expr: HirExprId,
         arm: &HirMatchArm,
         part_moves: Option<(LocalId, Vec<(LocalId, Vec<FieldIdx>)>)>,
+        mutating: bool,
     ) -> ValueId {
-        let addr = self.lower_match_scrutinee_place(scrutinee_expr, false);
+        let addr = self.lower_match_scrutinee_place(scrutinee_expr, mutating);
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
         let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
         let tree = kestrel_pattern_matching::compile_decision_tree(
@@ -515,6 +525,7 @@ impl OssaBodyCtx<'_, '_> {
                     // mode reads through an intra-block view of the pinned
                     // address; the owned copy joins the extra test values
                     // destroyed per successor.
+                    let refs_before = self.tracked_expr_refs();
                     let test_val = if place {
                         let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
                         let (proj, _) = self.apply_access_path(view, scrutinee_ty, path);
@@ -522,8 +533,16 @@ impl OssaBodyCtx<'_, '_> {
                         self.emit_end_borrow(view);
                         owned
                     } else {
-                        self.apply_access_path(scrutinee, scrutinee_ty, path).0
+                        let proj = self.apply_access_path(scrutinee, scrutinee_ty, path).0;
+                        // Read through a lent payload: copy the Bool out
+                        // before its ref ends.
+                        if self.body.value(proj).ownership == Ownership::Guaranteed {
+                            self.emit_copy_value(proj)
+                        } else {
+                            proj
+                        }
                     };
+                    self.end_path_refs(&refs_before);
                     let branch_snapshot = self.snapshot_scope();
                     let current_live: Vec<ValueId> =
                         self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
@@ -666,6 +685,7 @@ impl OssaBodyCtx<'_, '_> {
                 // to be inspected. The borrow is closed right after the read.
                 // Place mode: the read goes through an intra-block view of
                 // the pinned address.
+                let refs_before = self.tracked_expr_refs();
                 let (disc_operand, borrow_to_end) = if place {
                     let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
                     let operand = if path.is_empty() {
@@ -718,6 +738,7 @@ impl OssaBodyCtx<'_, '_> {
                     Some(d) => self.emit_int_discriminant(disc_operand, d.bits),
                     None => self.emit_discriminant(disc_operand),
                 };
+                self.end_path_refs(&refs_before);
                 if let Some(borrow) = borrow_to_end {
                     self.emit_end_borrow(borrow);
                 }
@@ -1143,6 +1164,11 @@ impl OssaBodyCtx<'_, '_> {
         let mut addr = base;
         let mut ty = base_ty;
         for elem in path {
+            // An array element is a `matchGet` call result, not a stored
+            // field: there is no address to take it from.
+            if self.is_array_matchable_ty(ty) {
+                return None;
+            }
             let idx = match elem {
                 PathElement::Index(i) => FieldIdx::new(*i),
                 PathElement::Field(name) => {
@@ -1183,11 +1209,16 @@ impl OssaBodyCtx<'_, '_> {
             self.register_ref_binding(extracted, local_id);
             return;
         }
-        let bound_val = if self.body.value(extracted).ownership == Ownership::Owned {
-            self.emit_copy_value(extracted)
-        } else {
-            extracted
-        };
+        // An @owned extraction off a path is already a fresh copy the
+        // binding can own (`emit_enum_payload` / `emit_struct_extract` copy
+        // out of an @owned operand); only the scrutinee itself (an empty
+        // path) must be copied, since the match still owns it.
+        let bound_val =
+            if self.body.value(extracted).ownership == Ownership::Owned && extracted == base {
+                self.emit_copy_value(extracted)
+            } else {
+                extracted
+            };
         self.bind_pattern_local(local_id, bound_val);
     }
 
@@ -1285,8 +1316,8 @@ impl OssaBodyCtx<'_, '_> {
                     }
                     current_ty = field_ty;
                 },
-                // An array prefix element is a runtime `matchGet` (see
-                // `apply_access_path`), not a field of the array struct.
+                // An array element comes from `matchGet` (an owned call
+                // result), not from destructuring the array's storage.
                 PathElement::Index(_)
                     if pending_downcast.is_none() && self.is_array_matchable_ty(current_ty) =>
                 {
@@ -1349,6 +1380,8 @@ impl OssaBodyCtx<'_, '_> {
                     }
                     current_ty = field_ty;
                 },
+                // An array element comes from `matchGet` (an owned call
+                // result), not from destructuring the array's storage.
                 PathElement::Index(_)
                     if pending_downcast.is_none() && self.is_array_matchable_ty(current_ty) =>
                 {
@@ -1536,8 +1569,12 @@ impl OssaBodyCtx<'_, '_> {
             .get(&entity)
             .and_then(|edef| edef.cases.get(variant_idx.index()).map(|c| (c, edef)))
         {
-            Some((case, edef)) => (
-                case.payload_fields.iter().map(|f| f.ty).collect(),
+            // Logical: a boxed `indirect` case answers its declared fields.
+            Some((_, edef)) => (
+                edef.logical_fields(variant_idx.index())
+                    .iter()
+                    .map(|f| f.ty)
+                    .collect(),
                 edef.type_params.iter().map(|tp| tp.entity).collect(),
             ),
             None => (vec![], vec![]),
@@ -1735,9 +1772,11 @@ impl OssaBodyCtx<'_, '_> {
                 .iter()
                 .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
                 .collect();
+            let refs_before = self.tracked_expr_refs();
             let Some(cmp) = test(self, ctor, current_scrutinee) else {
                 continue;
             };
+            self.end_path_refs(&refs_before);
             // Use the chain-level live set (not the inflated post-test set)
             // so test intermediates are destroyed in each arm rather than
             // forwarded and accumulated.
@@ -1964,11 +2003,17 @@ impl OssaBodyCtx<'_, '_> {
     /// binding `type Element = T` substitutes `T → Int64`; for a non-generic
     /// one (`Trio` with `type Element = Int64`) the binding is concrete.
     fn array_element_ty(&mut self, array_ty: TyId) -> TyId {
+        self.array_assoc_ty(array_ty, "Element")
+    }
+
+    /// An `ArrayMatchable` associated type (`Element` or `Rest`) of the
+    /// conformer `array_ty`, substituted with its type args.
+    fn array_assoc_ty(&mut self, array_ty: TyId, name: &str) -> TyId {
         let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(array_ty).clone()
         else {
             return array_ty;
         };
-        let Some((binding, owner)) = self.resolve_array_element_binding(entity) else {
+        let Some((binding, owner)) = self.resolve_array_assoc_binding(entity, name) else {
             // Binding lookup failed (broken stdlib / missing protocol) — fall
             // back to the first type arg so generic conformers still work.
             return type_args.first().copied().unwrap_or(array_ty);
@@ -1996,23 +2041,54 @@ impl OssaBodyCtx<'_, '_> {
         kestrel_mir::substitute(&mut self.ctx.module.ty_arena, binding, &subst)
     }
 
-    /// Find the `type Element = ...` binding for an `ArrayMatchable` conformer,
+    /// Find the `type <name> = ...` binding (`Element` or `Rest`) for an `ArrayMatchable` conformer,
     /// returning the (unsubstituted) binding type and the entity that OWNS it
     /// (the type body, or the conforming extension) — the owner provides the
     /// type params for substitution.
-    fn resolve_array_element_binding(&mut self, type_entity: Entity) -> Option<(TyId, Entity)> {
-        let elem_member = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-            builtin: kestrel_hir::Builtin::ArrayMatchableElement,
-            root: self.ctx.root,
-        })?;
+    fn resolve_array_assoc_binding(
+        &mut self,
+        type_entity: Entity,
+        name: &str,
+    ) -> Option<(TyId, Entity)> {
+        let assoc = self.array_matchable_assoc(name)?;
         let (alias, owner) = self.ctx.query.query(kestrel_name_res::AssociatedTypeBinding {
             type_entity,
-            assoc: elem_member,
+            assoc,
             conformance_source: None,
             root: self.ctx.root,
         })?;
         let ty = crate::ty::resolve_type_annotation(self.ctx, alias);
         Some((ty, owner))
+    }
+
+    /// The `ArrayMatchable` associated-type requirement `name`. `Element` is
+    /// found by its `@builtin` tag; `Rest` has no tag yet, so it is still
+    /// matched by name among the protocol's associated types.
+    fn array_matchable_assoc(&mut self, name: &str) -> Option<Entity> {
+        if name == "Element" {
+            return self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::ArrayMatchableElement,
+                root: self.ctx.root,
+            });
+        }
+        let proto = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ArrayMatchable,
+            root: self.ctx.root,
+        })?;
+        self.ctx
+            .query
+            .query(kestrel_name_res::ProtocolAssociatedTypes {
+                protocol: proto,
+                root: self.ctx.root,
+            })
+            .into_iter()
+            .map(|m| m.entity)
+            .find(|&e| {
+                self.ctx
+                    .world
+                    .get::<kestrel_ast_builder::Name>(e)
+                    .is_some_and(|n| n.0 == name)
+            })
     }
 
     /// The stdlib `Int64` type — the index/length type of `ArrayMatchable`,
@@ -2081,7 +2157,7 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// Emit `array.matchSlice(prefix, matchLength() - suffix)` — the rest
-    /// slice bound by `..rest`. Returns an `ArraySlice[Element]`. The compiler
+    /// slice bound by `..rest`. Returns the conformer's `Rest` type. The compiler
     /// guarantees `0 <= from <= to <= matchLength()`.
     fn emit_array_match_slice(
         &mut self,
@@ -2100,16 +2176,7 @@ impl OssaBodyCtx<'_, '_> {
         // suffix elements; `suffix_len == 0` gives the whole tail).
         let to_raw = self.emit_array_index_from_end(array, array_ty, suffix_len);
         let to = self.emit_int64_wrap(to_raw, int64_ty);
-        let elem_ty = self.array_element_ty(array_ty);
-        let result_ty = self
-            .ctx
-            .query
-            .query(kestrel_name_res::ResolveBuiltin {
-                builtin: kestrel_hir::Builtin::SliceStruct,
-                root: self.ctx.root,
-            })
-            .map(|e| self.ctx.module.ty_arena.named(e, vec![elem_ty]))
-            .unwrap_or(array_ty);
+        let result_ty = self.array_assoc_ty(array_ty, "Rest");
         self.emit_array_matchable_call(
             proto,
             kestrel_hir::Builtin::ArrayMatchableMatchSlice,
@@ -2129,6 +2196,9 @@ impl OssaBodyCtx<'_, '_> {
         field: FieldIdx,
         result_ty: TyId,
     ) -> ValueId {
+        if let Some(case) = self.indirect_case(self.body.value(operand).ty, variant) {
+            return self.emit_indirect_payload(operand, variant, field, result_ty, &case);
+        }
         // Stage 2b ref slot: extraction LOADS the stored address — the
         // result IS the ref (@guaranteed pointee, rooted at the aggregate's
         // root, borrowing nothing: the loaded pointer doesn't depend on the
@@ -2168,6 +2238,45 @@ impl OssaBodyCtx<'_, '_> {
             self.emit_end_borrow(borrow);
             result
         }
+    }
+
+    /// `emit_enum_payload` for a boxed `indirect` case: view the box, read
+    /// the payload in place through it, then pick the declared `field`. An
+    /// @owned operand gets a copy, as for an inline payload.
+    fn emit_indirect_payload(
+        &mut self,
+        operand: ValueId,
+        variant: VariantIdx,
+        field: FieldIdx,
+        result_ty: TyId,
+        case: &super::indirect::IndirectCase,
+    ) -> ValueId {
+        let owned = self.body.value(operand).ownership != Ownership::Guaranteed;
+        let base = if owned {
+            self.emit_begin_borrow(operand)
+        } else {
+            operand
+        };
+        let box_view = self.alloc_guaranteed(case.box_ty, base);
+        self.push_inst(kestrel_mir::inst::InstKind::EnumPayload {
+            result: box_view,
+            operand: base,
+            variant,
+            field: FieldIdx::new(0),
+        });
+        let payload = self.emit_indirect_view(box_view, case);
+        let view = if case.is_tuple {
+            self.emit_tuple_extract(payload, field.index() as u32, result_ty)
+        } else {
+            payload
+        };
+        if !owned {
+            return view;
+        }
+        let result = self.emit_copy_value(view);
+        self.emit_end_borrow(payload);
+        self.emit_end_borrow(base);
+        result
     }
 
     // ================================================================
@@ -2235,7 +2344,8 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
-    /// Resolve an enum variant payload field to its index and type.
+    /// Resolve an enum variant payload field to its LOGICAL index and type
+    /// (a boxed `indirect` case answers its declared fields).
     ///
     /// Finds the enum definition, looks up the variant by index, and
     /// resolves the field within that variant's payload. Applies type
@@ -2255,13 +2365,12 @@ impl OssaBodyCtx<'_, '_> {
 
         if let Some(entity) = entity
             && let Some(edef) = self.ctx.module.enums.get(&entity)
-            && let Some(case) = edef.cases.get(variant_idx.index())
-            && let Some(idx) = case
-                .payload_fields
+            && let Some(idx) = edef
+                .logical_fields(variant_idx.index())
                 .iter()
                 .position(|f| f.name == field_name)
         {
-            let mut field_ty = case.payload_fields[idx].ty;
+            let mut field_ty = edef.logical_fields(variant_idx.index())[idx].ty;
 
             // Substitute generic type params if needed
             if !type_args.is_empty() {
@@ -2295,8 +2404,9 @@ impl OssaBodyCtx<'_, '_> {
 
         if let Some(entity) = entity
             && let Some(edef) = self.ctx.module.enums.get(&entity)
-            && let Some(case) = edef.cases.get(variant_idx.index())
-            && let Some(field) = case.payload_fields.get(field_idx.index())
+            && let Some(field) = edef
+                .logical_fields(variant_idx.index())
+                .get(field_idx.index())
         {
             let mut field_ty = field.ty;
             if !type_args.is_empty() {

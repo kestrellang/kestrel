@@ -17,8 +17,9 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Callable, NodeKind, ReceiverKind, Settable};
+use kestrel_ast_builder::{Callable, MutatingRead, NodeKind, ReceiverKind, Settable};
 use kestrel_hir::body::*;
+use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -115,6 +116,7 @@ impl BodyCheck for AccessModeAnalyzer {
             match expr {
                 HirExpr::Call { callee, args, .. } => {
                     check_mutating_kind_call(cx, *callee, &mut diags);
+                    check_modifying_read(cx, expr_id, *callee, "subscript", &mut diags);
                     // Resolve callee entity from typed resolutions
                     let callee_entity = match &cx.hir.exprs[*callee] {
                         HirExpr::Def(entity, _, _) => Some(*entity),
@@ -142,18 +144,24 @@ impl BodyCheck for AccessModeAnalyzer {
                 } => {
                     check_borrow_init(cx, *inner, *mutating, span, &mut diags);
                 },
+                // A read of a `modifying` member (`c.next`, `c(i)`) mutates
+                // the receiver. Method-call-shaped reads (`x.items(i)`) are
+                // covered by `check_call_args` through the Callable receiver.
+                HirExpr::Field { base, name, .. } => {
+                    check_modifying_read(cx, expr_id, *base, name.as_str_or_empty(), &mut diags);
+                },
+
                 HirExpr::Match {
                     scrutinee,
                     arms,
+                    source,
                     span,
-                    ..
                 } => {
                     // `&mutating v` patterns need a MUTABLE scrutinee place
                     // (E495's predicate family) — writes through the binding
                     // must land in real storage, not a match-scoped temp.
-                    if arms
-                        .iter()
-                        .any(|arm| pat_has_mutating_ref_binder(cx, arm.pattern))
+                    if cx.hir.arms_borrow_mode(arms) == Some(true)
+                        && !for_item_is_mut_ref(cx, *scrutinee, *source)
                         && !matches!(classify_mutability(cx, *scrutinee), MutClass::Mutable)
                     {
                         diags.push(AnalyzeDiagnostic {
@@ -179,6 +187,19 @@ impl BodyCheck for AccessModeAnalyzer {
 
         diags
     }
+}
+
+/// A `for` over `&mutating T` items (`mutableRefs()`): the loop's
+/// `iter.next()` scrutinee is a temp, but each item is a ref into real
+/// storage, so `&mutating` binders inside the item pattern write through it.
+fn for_item_is_mut_ref(cx: &BodyContext<'_>, scrutinee: HirExprId, source: MatchSource) -> bool {
+    if source != MatchSource::ForLoop {
+        return false;
+    }
+    let Some(ResolvedTy::Named { args, .. }) = cx.typed.expr_types.get(&scrutinee) else {
+        return false;
+    };
+    matches!(args.first(), Some(ResolvedTy::Ref { mutating: true, .. }))
 }
 
 /// Borrow-initializer legality (`let r = &expr;`, stage 1.5 item 2): a
@@ -222,6 +243,18 @@ fn check_borrow_init(
             .query(kestrel_hir_lower::PlaceAccessors { entity: member })
             .is_none_or(|info| info.mutating_ref_accessor.is_none())
     {
+        if kestrel_type_infer::captures::is_observed_field(cx.query, member) {
+            let name = util::entity_name(cx.query, member);
+            push(
+                diags,
+                "E210",
+                format!("cannot take a `&mutating` borrow of observed property '{name}'"),
+                "its `willSet` / `didSet` run on every write, and writes through a borrow \
+                 would skip them; assign to it or call a `mutating` method on it instead"
+                    .to_string(),
+            );
+            return;
+        }
         push(
             diags,
             "E210",
@@ -316,7 +349,7 @@ fn check_call_args(
 fn arg_is_closure_value(cx: &BodyContext<'_>, arg_id: HirExprId) -> bool {
     matches!(
         cx.typed.expr_types.get(&arg_id),
-        Some(kestrel_type_infer::result::ResolvedTy::Function { .. })
+        Some(ResolvedTy::Function { .. })
     )
 }
 
@@ -342,7 +375,7 @@ fn check_mutating_kind_call(
 ) {
     if !matches!(
         cx.typed.expr_types.get(&callee),
-        Some(kestrel_type_infer::result::ResolvedTy::Function {
+        Some(ResolvedTy::Function {
             kind: kestrel_ast::FnTypeKind::Mutating,
             ..
         })
@@ -398,6 +431,12 @@ fn check_mutating_receiver(
     recv_id: HirExprId,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
+    // A failable member is reported once, by the assignment analyzer (E214)
+    // for compound assignment; a mutating method on one mutates the
+    // optional temporary its read produced.
+    if util::failable_member(cx, recv_id).is_some() {
+        return;
+    }
     let span = util::expr_span(cx.hir, recv_id);
     match classify_mutability(cx, recv_id) {
         MutClass::Mutable | MutClass::Temporary => {}, // ok — owned or mutable place
@@ -440,6 +479,53 @@ fn check_mutating_receiver(
             });
         },
     }
+}
+
+/// A read of a member whose read provider is `modifying get` /
+/// `modifying ref` ([`MutatingRead`]) mutates its receiver, so the receiver
+/// must be a mutable place — the same rule as a `mutating` method call
+/// (temporaries are fine: the caller owns them).
+fn check_modifying_read(
+    cx: &BodyContext<'_>,
+    expr_id: HirExprId,
+    base: HirExprId,
+    member_name: &str,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
+        return;
+    };
+    if !cx.query.has::<MutatingRead>(member)
+        || !matches!(
+            cx.query.get::<NodeKind>(member),
+            Some(NodeKind::Field | NodeKind::Subscript)
+        )
+    {
+        return;
+    }
+    let span = util::expr_span(cx.hir, base);
+    let (code, what) = match classify_mutability(cx, base) {
+        MutClass::Mutable | MutClass::Temporary => return,
+        MutClass::SharedRef => ("E207", "a shared reference".to_string()),
+        MutClass::ImmutableLocal(name) => ("E203", format!("immutable binding '{name}'")),
+        MutClass::ImmutableField(name) => ("E204", format!("immutable field '{name}'")),
+    };
+    let d = descriptor(code);
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message: format!("cannot read 'modifying' member '{member_name}' through {what}"),
+        labels: vec![DiagLabel {
+            span,
+            message: "reading this member mutates its receiver".into(),
+            is_primary: true,
+        }],
+        notes: vec![
+            "the member's read accessor is `modifying`; read it through a `var` or a \
+             `mutating` receiver"
+                .into(),
+        ],
+    });
 }
 
 /// Check that an argument to a `mutating` parameter is a mutable lvalue.
@@ -528,7 +614,41 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
     // a ref-provider member's READ types `&T`, which would wrongly
     // classify the projection as SharedRef.
     if let Some(base) = util::accessor_place_mut_base(cx, expr_id) {
-        return classify_mutability(cx, base);
+        let class = classify_mutability(cx, base);
+        // A pointer-derived `ref` (`tmp.offset(by: i).value` on a
+        // `Pointer`) lends storage the receiver only points at, so a
+        // temporary receiver doesn't make the place a temporary.
+        if matches!(class, MutClass::Temporary) && pointer_derived_read(cx, expr_id) {
+            return MutClass::SharedRef;
+        }
+        return class;
+    }
+    // A field-subscript (`self.items(at: i)`: a subscript on a stored field,
+    // method-call shaped) with a write provider is a projection of the
+    // field: mutable iff the field is `var` and its base is mutable. Without
+    // this arm its `&T` read type classified it SharedRef, so
+    // `&mutating self.items(at: i)` in a `mutating` method was E210.
+    // Through a stored REF field (`self.base(i)`, `base: &mutating T`) the
+    // place is the referent's: the ref kind decides, not the field's
+    // `let`/`var` — but a `&mutating` one still needs a mutable base.
+    match util::field_subscript_ref(cx, expr_id) {
+        Some(true) => return mutating_ref_class(cx, expr_id),
+        Some(false) => return MutClass::SharedRef,
+        None => {},
+    }
+    if let HirExpr::MethodCall { receiver, .. } = &cx.hir.exprs[expr_id]
+        && let Some(&field) = cx.typed.field_subscripts.get(&expr_id)
+        && util::member_has_write_provider(cx, expr_id)
+    {
+        if !cx.query.has::<Settable>(field) {
+            let name = cx
+                .query
+                .get::<kestrel_ast_builder::Name>(field)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            return MutClass::ImmutableField(name);
+        }
+        return classify_mutability(cx, *receiver);
     }
     // Stage-1 refs next, before the syntactic walk: a `&mutating T` call
     // result is a mutable place (it would fall to Temporary below and
@@ -536,7 +656,7 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
     // the receiver check ACCEPTS temporaries, so without this consult a
     // mutating method on a shared ref would silently pass (const-cast hole).
     match util::ref_place(cx, expr_id) {
-        Some(true) => return MutClass::Mutable,
+        Some(true) => return mutating_ref_class(cx, expr_id),
         Some(false) => return MutClass::SharedRef,
         None => {},
     }
@@ -571,27 +691,34 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
     }
 }
 
-/// Does this pattern (recursively) contain a `&mutating name` binder?
-fn pat_has_mutating_ref_binder(cx: &BodyContext<'_>, pat: kestrel_hir::body::HirPatId) -> bool {
-    use kestrel_hir::body::HirPat;
-    match &cx.hir.pats[pat] {
-        HirPat::Binding { by_ref, .. } => *by_ref == Some(true),
-        HirPat::At { subpattern, .. } => pat_has_mutating_ref_binder(cx, *subpattern),
-        HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => prefix
-            .iter()
-            .chain(suffix)
-            .any(|&p| pat_has_mutating_ref_binder(cx, p)),
-        HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => args
-            .iter()
-            .any(|a| pat_has_mutating_ref_binder(cx, a.pattern)),
-        HirPat::Struct { fields, .. } => fields.iter().any(|f| {
-            f.pattern
-                .is_some_and(|p| pat_has_mutating_ref_binder(cx, p))
-        }),
-        HirPat::Or { alternatives, .. } => alternatives
-            .iter()
-            .any(|&p| pat_has_mutating_ref_binder(cx, p)),
-        _ => false,
+/// Does member expression `expr_id` read through a `ref` accessor whose
+/// result is pointer-derived (`kestrel_type_infer::RetRefPointerDerived`)?
+fn pointer_derived_read(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
+        return false;
+    };
+    cx.query
+        .query(kestrel_hir_lower::PlaceAccessors { entity: member })
+        .and_then(|info| info.ref_accessor)
+        .is_some_and(|entity| {
+            cx.query.query(kestrel_type_infer::RetRefPointerDerived {
+                entity,
+                root: cx.root,
+            })
+        })
+}
+
+/// A `&mutating` place is mutable, unless it is reached through a stored
+/// ref field (`v.p`, `self.base(i)`): no interior mutability, so the field's
+/// base must be mutable (see `util::stored_ref_field_base`). A temporary
+/// holder is owned, so writing through it is fine.
+fn mutating_ref_class(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
+    let Some(base) = util::stored_ref_field_base(cx, expr_id) else {
+        return MutClass::Mutable;
+    };
+    match classify_mutability(cx, base) {
+        MutClass::Temporary => MutClass::Mutable,
+        class => class,
     }
 }
 

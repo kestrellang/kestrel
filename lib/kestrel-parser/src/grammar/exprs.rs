@@ -4,10 +4,11 @@
 //! expr      = binary (('=' | op'=') expr)?            // ExprAssignment / ExprCompoundAssignment
 //! binary    = operand (binop operand | 'is' 'not'? Ty | 'as?' Ty)*  // ExprBinary / ExprTypeTest / ExprCast
 //! operand   = 'try' postfix                           // ExprTry
+//!           | 'unsafe' (unop+ postfix | postfix)      // ExprUnsafe
 //!           | 'consuming' postfix 'as?' Ty            // ExprCast (consuming downcast)
 //!           | unop+ postfix                           // ExprUnary
 //!           | postfix
-//! postfix   = stmt_like tight*                        // if/while/loop/for/match/return/throw
+//! postfix   = stmt_like tight*                        // if/while/loop/for/match/return/throw/unsafe {
 //!           | primary tight* trailing* ('.' member tight*)*
 //! tight     = '(' args ')'                            // no line break before `(`
 //!           | '.' member                              // `.` touching the operand
@@ -67,6 +68,7 @@ pub(super) fn at_expr_start(p: &Parser<'_>) -> bool {
         K::Return,
         K::Throw,
         K::Try,
+        K::Unsafe,
         K::Consuming,
         K::Minus,
         K::Plus,
@@ -269,6 +271,19 @@ fn operand(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
         p.bump(K::Try);
         postfix(p, cond);
         return Some(finish2(p, m, K::ExprTry));
+    }
+    // `unsafe {` is the block form (a stmt-like primary, see `postfix`);
+    // anything else after `unsafe` is its operand.
+    if p.at(K::Unsafe) && !p.nth_at(1, K::LBrace) {
+        let m = start2(p);
+        p.bump(K::Unsafe);
+        // The operand may itself start with a prefix operator (`unsafe &x`).
+        if is_unary_op(p.current()) {
+            unary(p, cond);
+        } else {
+            postfix(p, cond);
+        }
+        return Some(finish2(p, m, K::ExprUnsafe));
     }
     if is_unary_op(p.current()) {
         return Some(unary(p, cond));
@@ -493,7 +508,7 @@ fn argument(p: &mut Parser<'_>) {
 /// A trailing closure follows on the same line: `{ … }` or `label: { … }`.
 fn at_trailing_closure(p: &Parser<'_>) -> bool {
     if p.at(K::LBrace) {
-        return !p.nl_before();
+        return !p.nl_before() && !super::items::at_observer_block(p);
     }
     p.at(K::Identifier)
         && !p.nl_before()
@@ -536,6 +551,7 @@ fn trailing_closures(p: &mut Parser<'_>, chain: Chain) -> Chain {
 fn at_stmt_like(p: &Parser<'_>) -> bool {
     match p.current() {
         Some(K::If | K::While | K::Loop | K::For | K::Match | K::Return | K::Throw) => true,
+        Some(K::Unsafe) => p.nth_at(1, K::LBrace),
         Some(K::Identifier) => {
             p.nth_at(1, K::Colon) && p.at_any_nth(2, &[K::While, K::Loop, K::For])
         },
@@ -548,8 +564,17 @@ fn stmt_like(p: &mut Parser<'_>) -> ExprInfo {
         Some(K::If) => if_expr(p),
         Some(K::Match) => match_expr(p),
         Some(K::Return | K::Throw) => return_or_throw(p),
+        Some(K::Unsafe) => unsafe_block(p),
         _ => loop_expr(p),
     }
+}
+
+/// `unsafe { … }`: a block (not a closure) whose items are an unsafe context.
+fn unsafe_block(p: &mut Parser<'_>) -> ExprInfo {
+    let m = start2(p);
+    p.bump(K::Unsafe);
+    blocks::inline_block(p);
+    finish2(p, m, K::ExprUnsafeBlock)
 }
 
 fn primary(p: &mut Parser<'_>) -> Option<Chain> {

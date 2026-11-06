@@ -13,8 +13,8 @@ constant-time random access, amortized constant-time `append`, and
 arbitrary-position insert/remove via shifting. Storage is shared between
 copies until one of them mutates, at which point that copy lazily clones
 the buffer (see "Memory Model" below). For non-owning views over an
-existing buffer use `ArraySlice[T]`; for fixed-size or set-like collections
-see `ArraySlice[T]`, `Set`, or `Dictionary`.
+existing buffer use `UnsafeSlice[T]`; for fixed-size or set-like collections
+see `UnsafeSlice[T]`, `Set`, or `Dictionary`.
 
 ### Examples
 
@@ -34,22 +34,19 @@ let pivot = names.partition(by: { (n) in n.count > 3 });
 ### Indexing
 
 The default subscript `arr(i)` panics on out-of-bounds. Variants exist
-for every common policy: `arr(checked: i)` returns `T?`,
-`arr(unchecked: i)` skips the bounds check (UB on OOB),
-`arr(wrapped: i)` wraps with modulo (and supports negative indices),
-and `arr(clamped: i)` clamps to `[0, count-1]`. Range arguments use the
-same labels — `arr(0..<3)`, `arr(checked: r)`, `arr(unchecked: r)`,
-`arr(clamped: r)` — dispatched through the unified `SeqIndex[T]`,
-`SeqClampable[T]`, and `SeqWrappable[T]` protocols. `Int64` and range
-types share each label; the result type varies (`T?` vs `ArraySlice[T]`
-for `clamped:`).
+for every common policy, each an in-place place: `arr(checked: i)` is
+`.None` when out of range, `arr(unchecked: i)` skips the bounds check
+(UB on OOB), `arr(wrapped: i)` wraps with modulo (negative indices count
+from the end), and `arr(clamped: i)` saturates into `[0, count-1]`.
+Ranges take `arr(0..<3)`, `arr(checked: r)` and `arr(unchecked: r)`,
+and `arr(within: r)` lends the part of `r` inside the array.
 
 ### Capacity & Reallocation
 
 `count` is the number of elements; `capacity` is how many can fit
 without reallocating. When `append` would exceed capacity the buffer
 doubles (starting from 4 if previously zero). Use
-`reserveCapacity(minimumCapacity:)` to pre-allocate, and
+`reserveCapacity(_:)` to pre-allocate, and
 `shrinkToFit()` to release excess.
 
 ### Representation
@@ -149,7 +146,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### initializer `From Iterable`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I.Item == T
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == T
 ```
 
 Creates an array by collecting every element produced by an iterable.
@@ -280,7 +277,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(contentsOf: some Slice[T])
+public mutating func append(contentsOf: &some Sliceable[T] and not Static and not Copyable and not Sized)
 ```
 
 Appends every element of `other` to the end of this array.
@@ -305,7 +302,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append[I](from: I) where I: Iterable, I.Item == T
+public mutating func append[I](from: I) where I: Iterable, I: not Static, I.Item == T
 ```
 
 Appends every element produced by an arbitrary iterable.
@@ -323,30 +320,15 @@ arr.append(from: 3..<6);  // [1, 2, 3, 4, 5]
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `atProbe`
+#### function `asMutableSlice`
 
 ```kestrel
-public func atProbe(index: Int64) -> T
+public mutating func asMutableSlice() -> &mutating Slice[T]
 ```
 
-In-place element access (stage-1.5 place accessors): reads borrow
-the element — no copy, no clone, no `T: Cloneable` requirement —
-and writes, `+=`, and mutating methods go through the element's
-address. Binding the read (`let x = arr(at: i)`) stores an owned
-copy instead (binding decay). Panics if out of bounds, like
-`arr(index)`.
-
-The mutating accessor ensures unique (COW) storage BEFORE the
-place is fabricated, so writes through it never touch a sibling
-copy's buffer. Copying `self` inside the same expression that
-uses the place (`f(arr(at: 0), arr)` with a mutating first arg)
-re-shares the buffer and can make the write observable through
-the copy — accepted stage-1 behavior, recorded in the references
-semantics.
-
-The unlabeled subscripts (`arr(i)`, `arr(1..<3)`, `checked:`,
-`unchecked:`, `clamped:`, `wrapped:`) live on `extend Slice[T]`
-and keep get/set semantics; `at:` is the labeled in-place form.
+The elements as a writable slice, in place. Runs the copy-on-write
+check first, so writes never reach a copy's buffer. The slice can
+change elements, never the array's length.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -359,6 +341,16 @@ public var capacity: Int64 { get }
 The number of elements the buffer can hold without reallocating.
 
 _Defined in `lang/std/collections/array.ks`._
+
+#### function `chunks`
+
+```kestrel
+public func chunks(of: Int64) -> ChunksView[T]
+```
+
+See `Slice.chunks(of:)`.
+
+_Defined in `lang/std/collections/views.ks`._
 
 #### function `clear`
 
@@ -424,6 +416,36 @@ duplicates collapse.
 
 _Defined in `lang/std/collections/array.ks`._
 
+#### function `drop`
+
+```kestrel
+public func drop(first: Int64) -> &Slice[T]
+```
+
+See `Slice.drop(first:)`.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `drop`
+
+```kestrel
+public func drop(last: Int64) -> &Slice[T]
+```
+
+See `Slice.drop(last:)`.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `ensureUnique`
+
+```kestrel
+public mutating func ensureUnique()
+```
+
+COW write barrier — deep-copies storage if shared.
+
+_Defined in `lang/std/collections/array.ks`._
+
 #### function `flatten`
 
 ```kestrel
@@ -479,6 +501,17 @@ arr.insert(9, at: 99); // PANIC
 
 _Defined in `lang/std/collections/array.ks`._
 
+#### function `iterRange`
+
+```kestrel
+internal func iterRange(start: Int64, count: Int64) -> ArrayIterator[T]
+```
+
+Iterator over elements `[start, start + count)`, sharing the storage
+(the slices' `iter()`). The caller has checked the range fits.
+
+_Defined in `lang/std/collections/array.ks`._
+
 #### function `joined`
 
 ```kestrel
@@ -504,29 +537,27 @@ debug form (`"[1, 2, 3]"`), use `format()` directly.
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `mutableRefs`
+#### function `mutatingRefs`
 
 ```kestrel
-public mutating func mutableRefs() -> MutRefSliceIterator[T]
+public mutating func mutatingRefs() -> ArrayMutatingRefsIterator[T]
 ```
 
-Returns an iterator yielding MUTABLE REFERENCES (`&mutating T`)
-to the elements — in-place mutation without writeback. Runs the
-COW barrier first, so writes never leak into shared storage.
-Structural mutation (append, removal) during iteration
-invalidates the yielded references.
+Iterator over MUTABLE REFERENCES (`&mutating T`) to the elements,
+for in-place updates without writeback. Each write runs the
+copy-on-write check, so writes never leak into shared storage.
 
 ##### Examples
 
 ```
 var xs = [1, 2, 3];
-for x in xs.mutableRefs() {
+for x in xs.mutatingRefs() {
     x += 1;
 }
 // xs == [2, 3, 4]
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice_algorithms.ks`._
 
 #### function `partition`
 
@@ -625,16 +656,24 @@ arr.popFirst();  // Some(2), arr is [3]
 
 _Defined in `lang/std/collections/array.ks`._
 
+#### function `prefix`
+
+```kestrel
+public func prefix(Int64) -> &Slice[T]
+```
+
+See `Slice.prefix(count:)`.
+
+_Defined in `lang/std/collections/slice.ks`._
+
 #### function `refs`
 
 ```kestrel
-public func refs() -> RefSliceIterator[T]
+public func refs() -> ArrayRefsIterator[T]
 ```
 
-Returns an iterator yielding SHARED REFERENCES (`&T`) to the
-elements in place — no copies, no clones. References are
-read-only views; they alias the array's buffer, so structural
-mutation (append, removal) during iteration invalidates them.
+Iterator over SHARED REFERENCES (`&T`) to the elements, in place —
+no copies, no clones. It borrows the array, so it can't outlive it.
 
 ##### Examples
 
@@ -645,7 +684,7 @@ for w in words.refs() {
 }
 ```
 
-_Defined in `lang/std/collections/array.ks`._
+_Defined in `lang/std/collections/slice_algorithms.ks`._
 
 #### function `remove`
 
@@ -889,6 +928,16 @@ arr.reverse();  // [3, 2, 1]
 
 _Defined in `lang/std/collections/array.ks`._
 
+#### function `reversed`
+
+```kestrel
+public func reversed() -> ReversedView[T]
+```
+
+See `Slice.reversed()`.
+
+_Defined in `lang/std/collections/views.ks`._
+
 #### function `rotate`
 
 ```kestrel
@@ -1121,13 +1170,111 @@ let byLen = words.sorted(byKey: { (w) in w.count });
 
 _Defined in `lang/std/collections/array.ks`._
 
+#### function `split`
+
+```kestrel
+public func split(where: consuming escaping (T) -> Bool) -> ArraySplitWhereView[T]
+```
+
+See `Slice.split(where:)`.
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `split`
+
+```kestrel
+public func split(T) -> ArraySplitView[T] where T: Equatable
+```
+
+See `Slice.split(separator:)`.
+
+_Defined in `lang/std/collections/views.ks`._
+
 #### subscript `subscript`
 
 ```kestrel
-public subscript(at: Int64) -> T { ref mutating ref }
+public subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
 ```
 
+Element access and sub-slicing, in place: `xs(2)` is a reference to
+an element (`let x = xs(2)` binds a copy), `xs(1..<3)` a `Slice` of
+the array's elements. Writes (`xs(0) = v`, `xs(0) += 1`,
+`xs(0..<2).sort()`) run the copy-on-write check first. Panics when
+the index or range doesn't fit.
+
+Copying the array inside the same expression that uses the place
+(`f(xs(0), xs)` with a mutating first argument) re-shares the buffer,
+so the write can show through the copy: accepted stage-1 behavior,
+recorded in the references semantics.
+
 _Defined in `lang/std/collections/array.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
+```
+
+Like `xs(index)`, without the bounds check (undefined behavior when
+out of range).
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref mutating ref }
+```
+
+Like `xs(index)`, but the place may not exist: `.None` instead of a
+panic when out of range. Reading copies the element out (`T?`) or
+lends the slice; `if let .Some(&mutating v) = xs(checked: i)` writes
+in place.
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(clamped: Int64) -> T? { ref mutating ref }
+```
+
+The element at `index` saturated into `0..<count`, in place, or
+`.None` for an empty array.
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
+```
+
+The part of `range` that lies within the array, in place (always
+valid, possibly empty).
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(wrapped: Int64) -> T? { ref mutating ref }
+```
+
+The element at `index` modulo `count` (negative indices count from
+the end), in place, or `.None` for an empty array.
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### function `suffix`
+
+```kestrel
+public func suffix(Int64) -> &Slice[T]
+```
+
+See `Slice.suffix(count:)`.
+
+_Defined in `lang/std/collections/slice.ks`._
 
 #### function `swap`
 
@@ -1155,25 +1302,26 @@ arr.swap(at: 0, with: 9);  // PANIC
 
 _Defined in `lang/std/collections/array.ks`._
 
-### Implements `Slice`
+#### function `windows`
+
+```kestrel
+public func windows(of: Int64) -> WindowsView[T]
+```
+
+See `Slice.windows(of:)`.
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Implements `Sliceable`
 
 #### function `asSlice`
 
 ```kestrel
-public func asSlice() -> ArraySlice[T]
+public func asSlice() -> &Slice[T]
 ```
 
-Slice protocol kernel — borrows the array's buffer as an ArraySlice.
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `ensureUnique`
-
-```kestrel
-public mutating func ensureUnique()
-```
-
-COW write barrier — deep-copies storage if shared.
+The elements as a slice, in place. Valid until the array next
+reallocates or is dropped.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -1192,7 +1340,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### typealias `TargetIterator`
 
 ```kestrel
-type TargetIterator = ArraySliceIterator[T]
+type TargetIterator = ArrayIterator[T]
 ```
 
 `Iterable` iterator type — the concrete iterator returned by `iter()`.
@@ -1202,10 +1350,12 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `iter`
 
 ```kestrel
-public func iter() -> ArraySliceIterator[T]
+public func iter() -> ArrayIterator[T]
 ```
 
-Returns a forward iterator over the array's elements.
+Returns a forward iterator over the array's elements, as they are now:
+the iterator shares the storage, so later mutation of the array copies
+first and the iteration is unaffected.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -1268,6 +1418,16 @@ _Conditional: `where T: Equatable`._
 
 ### Implements `ArrayMatchable`
 
+#### typealias `Rest`
+
+```kestrel
+type Rest = &Slice[T]
+```
+
+`..rest` binds a slice of the array's elements.
+
+_Defined in `lang/std/collections/array.ks`._
+
 #### function `matchGet`
 
 ```kestrel
@@ -1301,7 +1461,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `matchSlice`
 
 ```kestrel
-public func matchSlice(Int64, Int64) -> ArraySlice[T]
+public func matchSlice(Int64, Int64) -> &Slice[T]
 ```
 
 Pattern-matcher hook returning the half-open `[from, to)` slice.
@@ -1410,17 +1570,18 @@ _Defined in `lang/std/collections/builder.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(contentsOf: ArraySlice[T])
+public mutating func append(contentsOf: &some Sliceable[T] and not Static and not Copyable and not Sized)
 ```
 
-Appends every element of `slice`.
+Appends every element of `other` (an `Array`, `Slice`, or any
+other `Sliceable`), copying in a single pass.
 
 _Defined in `lang/std/collections/builder.ks`._
 
 #### function `append`
 
 ```kestrel
-public mutating func append[I](from: I) where I: Iterable, I.Item == T
+public mutating func append[I](from: I) where I: Iterable, I: not Static, I.Item == T
 ```
 
 Appends every element produced by `iterable`.
@@ -1478,20 +1639,126 @@ True when nothing has been written.
 
 _Defined in `lang/std/collections/builder.ks`._
 
+## struct `ArrayIterator`
+
+```kestrel
+public struct ArrayIterator[T] { /* private fields */ }
+```
+
+Forward iterator over an `Array[T]`: an `UnsafeSliceIterator[T]` cursor plus
+a share of the array's storage.
+
+The share keeps the buffer alive and marks it shared, so the iterator sees
+the array's value at the moment `iter()` was called (value semantics, as in
+Swift): appending to or reassigning the array while iterating copies or
+drops the array's own buffer, never the one being read, and an iterator
+returned from a function outlives the array it came from.
+
+### Representation
+
+A `CowBox` share (one refcount) and the `(ptr, remaining)` cursor.
+
+_Defined in `lang/std/collections/array.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> Optional[T]
+```
+
+Yields the next element, or `.None` at the end.
+
+_Defined in `lang/std/collections/array.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> ArrayIterator[T]
+```
+
+An independent cursor at the same position, holding its own share.
+
+_Defined in `lang/std/collections/array.ks`._
+
+## struct `ArrayMutatingRefsIterator`
+
+```kestrel
+public struct ArrayMutatingRefsIterator[T] { /* private fields */ }
+```
+
+Iterator over `&mutating T` references to an array's elements, for
+in-place updates (`for x in xs.mutatingRefs() { x += 1 }`). Returned by
+`Array.mutatingRefs()`. Each write goes through the array's own
+element accessor, so it runs the copy-on-write check: a copy of the
+array taken during the loop keeps its old contents.
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = &mutating T
+```
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> Optional[&mutating T]
+```
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+## struct `ArrayRefsIterator`
+
+```kestrel
+public struct ArrayRefsIterator[T] { /* private fields */ }
+```
+
+Iterator over `&T` references to a range of an array's elements.
+Returned by `Array.refs()`. It borrows the
+array and reads each element through it, so a reference can't
+outlive the array. Stops early if the array gets shorter.
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+### Implements `Iterator`
+
+#### typealias `Item`
+
+```kestrel
+type Item = &T
+```
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### function `next`
+
+```kestrel
+public mutating func next() -> Optional[&T]
+```
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
 ## struct `ArraySplitIterator`
 
 ```kestrel
 public struct ArraySplitIterator[T] where T: Equatable { /* private fields */ }
-```
-
-_Defined in `lang/std/collections/views.ks`._
-
-### Members
-
-#### initializer `init`
-
-```kestrel
-public init(ptr: Pointer[T], remaining: Int64, separator: T, done: Bool)
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1501,7 +1768,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### typealias `Item`
 
 ```kestrel
-type Item = ArraySlice[T]
+type Item = &Slice[T]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1509,7 +1776,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### function `next`
 
 ```kestrel
-public mutating func next() -> Optional[ArraySlice[T]]
+public mutating func next() -> Optional[&Slice[T]]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1536,14 +1803,6 @@ public var count: Int64 { get }
 
 _Defined in `lang/std/collections/views.ks`._
 
-#### initializer `init`
-
-```kestrel
-public init(slice: ArraySlice[T], separator: T)
-```
-
-_Defined in `lang/std/collections/views.ks`._
-
 #### field `isEmpty`
 
 ```kestrel
@@ -1555,8 +1814,10 @@ _Defined in `lang/std/collections/views.ks`._
 #### function `toArray`
 
 ```kestrel
-public func toArray() -> Array[ArraySlice[T]]
+public func toArray() -> Array[Array[T]]
 ```
+
+Copies every segment into an owned array.
 
 _Defined in `lang/std/collections/views.ks`._
 
@@ -1565,7 +1826,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### typealias `Item`
 
 ```kestrel
-type Item = ArraySlice[T]
+type Item = &Slice[T]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1594,22 +1855,12 @@ public struct ArraySplitWhereIterator[T] { /* private fields */ }
 
 _Defined in `lang/std/collections/views.ks`._
 
-### Members
-
-#### initializer `init`
-
-```kestrel
-public init(ptr: Pointer[T], remaining: Int64, predicate: consuming escaping (T) -> Bool, done: Bool)
-```
-
-_Defined in `lang/std/collections/views.ks`._
-
 ### Implements `Iterator`
 
 #### typealias `Item`
 
 ```kestrel
-type Item = ArraySlice[T]
+type Item = &Slice[T]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1617,7 +1868,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### function `next`
 
 ```kestrel
-public mutating func next() -> Optional[ArraySlice[T]]
+public mutating func next() -> Optional[&Slice[T]]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1645,14 +1896,6 @@ public var count: Int64 { get }
 
 _Defined in `lang/std/collections/views.ks`._
 
-#### initializer `init`
-
-```kestrel
-public init(slice: ArraySlice[T], predicate: consuming escaping (T) -> Bool)
-```
-
-_Defined in `lang/std/collections/views.ks`._
-
 #### field `isEmpty`
 
 ```kestrel
@@ -1664,8 +1907,10 @@ _Defined in `lang/std/collections/views.ks`._
 #### function `toArray`
 
 ```kestrel
-public func toArray() -> Array[ArraySlice[T]]
+public func toArray() -> Array[Array[T]]
 ```
+
+Copies every segment into an owned array.
 
 _Defined in `lang/std/collections/views.ks`._
 
@@ -1674,7 +1919,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### typealias `Item`
 
 ```kestrel
-type Item = ArraySlice[T]
+type Item = &Slice[T]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1725,22 +1970,12 @@ public struct ChunksIterator[T] { /* private fields */ }
 
 _Defined in `lang/std/collections/views.ks`._
 
-### Members
-
-#### initializer `init`
-
-```kestrel
-public init(ptr: Pointer[T], remaining: Int64, chunkSize: Int64)
-```
-
-_Defined in `lang/std/collections/views.ks`._
-
 ### Implements `Iterator`
 
 #### typealias `Item`
 
 ```kestrel
-type Item = ArraySlice[T]
+type Item = &Slice[T]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1748,7 +1983,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### function `next`
 
 ```kestrel
-public mutating func next() -> Optional[ArraySlice[T]]
+public mutating func next() -> Optional[&Slice[T]]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1759,8 +1994,8 @@ _Defined in `lang/std/collections/views.ks`._
 public struct ChunksView[T] { /* private fields */ }
 ```
 
-Multi-pass lazy view over non-overlapping `chunkSize`-sized
-`ArraySlice[T]` segments.
+Multi-pass lazy view over non-overlapping `chunkSize`-sized segments.
+The last chunk is shorter when the count isn't a multiple of the size.
 
 _Defined in `lang/std/collections/views.ks`._
 
@@ -1777,15 +2012,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### field `first`
 
 ```kestrel
-public var first: Optional[ArraySlice[T]] { get }
-```
-
-_Defined in `lang/std/collections/views.ks`._
-
-#### initializer `init`
-
-```kestrel
-public init(slice: ArraySlice[T], chunkSize: Int64)
+public var first: Optional[&Slice[T]] { get }
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1801,7 +2028,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### field `last`
 
 ```kestrel
-public var last: Optional[ArraySlice[T]] { get }
+public var last: Optional[&Slice[T]] { get }
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1809,16 +2036,20 @@ _Defined in `lang/std/collections/views.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript(Int64) -> ArraySlice[T] { get }
+public subscript(Int64) -> Slice[T] { ref }
 ```
+
+Chunk `index`. Panics when out of range.
 
 _Defined in `lang/std/collections/views.ks`._
 
 #### function `toArray`
 
 ```kestrel
-public func toArray() -> Array[ArraySlice[T]]
+public func toArray() -> Array[Array[T]]
 ```
+
+Copies every chunk into an owned array.
 
 _Defined in `lang/std/collections/views.ks`._
 
@@ -1827,7 +2058,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### typealias `Item`
 
 ```kestrel
-type Item = ArraySlice[T]
+type Item = &Slice[T]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1941,7 +2172,7 @@ _Defined in `lang/std/collections/hashing.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(ArraySlice[UInt8])
+public mutating func write(Slice[UInt8])
 ```
 
 Folds every byte of `bytes` into the running hash state.
@@ -1954,9 +2185,9 @@ Safe to call with an empty slice (no-op).
 
 ```
 var h = DefaultHasher();
-h.write(bytes: "hello".utf8Bytes());
-h.write(bytes: " world".utf8Bytes());
-// Equivalent to a single write of "hello world".utf8Bytes()
+h.write("hello".asByteSlice());
+h.write(" world".asByteSlice());
+// Equivalent to a single write of "hello world".asByteSlice()
 ```
 
 _Defined in `lang/std/collections/hashing.ks`._
@@ -2032,7 +2263,7 @@ _Defined in `lang/std/collections/deque.ks`._
 #### initializer `From Iterable`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I.Item == T
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == T
 ```
 
 Creates a deque by collecting every element from an iterable.
@@ -2054,7 +2285,7 @@ _Defined in `lang/std/collections/deque.ks`._
 #### subscript `Indexed`
 
 ```kestrel
-subscript(Int64) -> T { get set }
+public subscript(Int64) -> T { ref mutating ref }
 ```
 
 O(1) random access by logical index.
@@ -2104,16 +2335,16 @@ _Defined in `lang/std/collections/deque.ks`._
 #### function `asSlices`
 
 ```kestrel
-public func asSlices() -> (ArraySlice[T], ArraySlice[T])
+public func asSlices() -> (&Slice[T], &Slice[T])
 ```
 
 Returns the two contiguous slices that make up the ring buffer.
 
 If the buffer doesn't wrap, the first slice contains all elements
 and the second is empty. If it wraps, the first slice covers
-head-to-end and the second covers start-to-tail. Useful for
-bulk operations that need pointer-contiguous access without
-copying.
+head-to-end and the second covers start-to-tail. Both lend the
+deque's storage in place: nothing is copied, and they are only
+valid until the deque next changes.
 
 ##### Examples
 
@@ -2186,10 +2417,10 @@ _Defined in `lang/std/collections/deque.ks`._
 #### function `first`
 
 ```kestrel
-public func first() -> T?
+public func first() -> Optional[&T]
 ```
 
-Returns the front element without removing it, or `.None` if empty.
+Lends the front element without removing it, or `.None` if empty.
 
 O(1). The removing counterpart is `popFront()`.
 
@@ -2223,10 +2454,10 @@ _Defined in `lang/std/collections/deque.ks`._
 #### function `last`
 
 ```kestrel
-public func last() -> T?
+public func last() -> Optional[&T]
 ```
 
-Returns the back element without removing it, or `.None` if empty.
+Lends the back element without removing it, or `.None` if empty.
 
 O(1). The removing counterpart is `popBack()`.
 
@@ -2333,13 +2564,13 @@ _Defined in `lang/std/collections/deque.ks`._
 #### function `reserveCapacity`
 
 ```kestrel
-public mutating func reserveCapacity(minimumCapacity: Int64)
+public mutating func reserveCapacity(Int64)
 ```
 
 Ensures the buffer can hold at least `capacity` elements without
 reallocating.
 
-If the current capacity already meets or exceeds `capacity`, this
+If the current capacity already meets or exceeds `minimumCapacity`, this
 is a no-op. Otherwise the ring buffer is reallocated and
 linearized. Useful before a burst of `pushBack`/`pushFront` calls
 when the final size is known in advance.
@@ -2348,7 +2579,27 @@ when the final size is known in advance.
 
 ```
 var d = Deque[Int64]();
-d.reserveCapacity(minimumCapacity: 100);
+d.reserveCapacity(100);
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(checked: Int64) -> T? { ref mutating ref }
+```
+
+Like `d(index)`, but the place may not exist: `.None` instead of a
+panic when out of range. `if let .Some(&mutating v) = d(checked: i)`
+writes in place.
+
+##### Examples
+
+```
+var d = Deque[Int64](from: [10, 20]);
+d(checked: 1);  // .Some(20)
+d(checked: 5);  // .None
 ```
 
 _Defined in `lang/std/collections/deque.ks`._
@@ -2613,7 +2864,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `From Pairs`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I.Item == (K, V)
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == (K, V)
 ```
 
 Creates a dictionary by inserting every `(key, value)` pair
@@ -2637,7 +2888,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `Grouping`
 
 ```kestrel
-public init[I, E](grouping: I, by: (E) -> K) where I: Iterable, I.Item == E, V == Array[E]
+public init[I, E](grouping: I, by: (E) -> K) where I: Iterable, I: not Static, I.Item == E, V == Array[E]
 ```
 
 Buckets each element of an iterable into an array under the key
@@ -2685,16 +2936,15 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### subscript `Lookup`
 
 ```kestrel
-public subscript(K) -> V? { get set }
+public subscript(K) -> V? { ref mutating ref }
 ```
 
-Reads the value for `key` (or `None` if absent), or assigns
-to insert/remove the entry.
+The value stored for `key`, in place, or `.None` when absent.
 
-The assignment form treats `Some(v)` as insert/update and
-`None` as delete — so `dict(k) = None` is the inline form of
-`dict.remove(k)`. For a non-`Optional` getter use
-`dict(key, default: ...)` or `dict(unwrap: key)`.
+Reads lend `Optional[&V]` (a binding copies it out); a `&mutating`
+payload binder updates the stored value in place with one lookup.
+The place never inserts or removes: use `insert(key, value)`,
+`remove(key)`, or `dict(key, default: v)` to insert when missing.
 
 ##### Examples
 
@@ -2702,8 +2952,7 @@ The assignment form treats `Some(v)` as insert/update and
 var dict = ["a": 1, "b": 2];
 dict("a");           // Some(1)
 dict("z");           // None
-dict("c") = 3;       // inserts "c": 3
-dict("a") = None;    // removes "a"
+if let .Some(&mutating v) = dict("a") { v += 10; }  // "a": 11
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -2711,7 +2960,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### initializer `Unique Keys`
 
 ```kestrel
-public init[I](uniquePairs: I) where I: Iterable, I.Item == (K, V)
+public init[I](uniquePairs: I) where I: Iterable, I: not Static, I.Item == (K, V)
 ```
 
 Creates a dictionary from key-value pairs, panicking on any
@@ -2740,29 +2989,27 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### subscript `Unwrap`
 
 ```kestrel
-public subscript(unwrap: K) -> V { get set }
+public subscript(unwrap: K) -> V { ref mutating ref }
 ```
 
-Reads or writes the value for `key`, panicking on the read
-when the key is absent.
+The value for `key`, in place, panicking when the key is absent.
 
-Use when you've already verified the key exists (or when its
-absence indicates a bug). The setter is equivalent to
-`insert(key, newValue)` and never panics. For a non-panicking
-read use `dict(key)` or `dict(key, default: ...)`.
+Use when absence is a bug. Reads lend `&V` and writes update the
+stored value in place; assigning to a missing key panics too, so
+insert with `insert(key, value)` or `dict(key, default: v)`.
 
 ##### Errors
 
-Read panics with
-`"Dictionary subscript(unwrap:): key not found"` when the key
-is absent.
+Panics with `"Dictionary subscript(unwrap:): key not found"` when
+the key is absent.
 
 ##### Examples
 
 ```
-let dict = ["a": 1, "b": 2];
-dict(unwrap: "a");  // 1
-dict(unwrap: "z");  // PANIC: key not found
+var dict = ["a": 1, "b": 2];
+dict(unwrap: "a");       // 1
+dict(unwrap: "a") += 1;  // "a": 2
+dict(unwrap: "z");       // PANIC: key not found
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -2793,23 +3040,21 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### subscript `With Default`
 
 ```kestrel
-public subscript(K, default: V) -> V { get }
+public subscript(K, default: V) -> V { get mutating ref }
 ```
 
-Reads the value for `key`, falling back to `defaultValue` when
-the key is absent.
+The value for `key`, or `defaultValue` when absent.
 
-Read-only and *non-inserting* — the default value is returned
-but never stored. To upsert with a default, use `upsert(...)`
-or `update(...)`.
+Reading never stores the default. Writing inserts `defaultValue`
+first when the key is missing, then updates the stored value in
+place, so `counts(word, default: 0) += 1` is one lookup.
 
 ##### Examples
 
 ```
-let dict = ["a": 1, "b": 2];
-dict("a", default: 0);  // 1
-dict("z", default: 0);  // 0
-dict("z");              // still None — default wasn't stored
+var dict = ["a": 1];
+dict("z", default: 0);       // 0, nothing stored
+dict("z", default: 0) += 5;  // inserts "z": 5
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3098,11 +3343,10 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `first`
 
 ```kestrel
-public func first(where: (K, V) -> Bool) -> (K, V)?
+public func first(where: (K, V) -> Bool) -> Optional[(&K, &V)]
 ```
 
-Returns *some* entry matching `predicate(key, value)`, or
-`None`.
+Lends *some* entry matching `predicate(key, value)`, or `None`.
 
 "First" is determined by bucket order, which is hash-dependent
 and unspecified — treat the result as arbitrary among matching
@@ -3149,8 +3393,9 @@ Inserts `(key, value)`, replacing any existing entry for `key`,
 and returns the old value (or `None`) on update.
 
 Triggers `ensureCapacity()` and may resize before the insert
-lands. The cached hash is computed once here. For
-transform-based updates see `update(...)` and `upsert(...)`.
+lands. The cached hash is computed once here. To update a value in
+place use `if let .Some(&mutating v) = dict(key)` or
+`dict(key, default: v) += …`.
 
 ##### Examples
 
@@ -3179,6 +3424,17 @@ Reads more naturally than the comparison.
 [:].isEmpty;           // true
 ["a": 1].isEmpty;      // false
 ```
+
+_Defined in `lang/std/collections/dictionary.ks`._
+
+#### function `keyAt`
+
+```kestrel
+internal func keyAt(consuming Int64) -> Optional[&K]
+```
+
+Lends the key in bucket `slot`, or `.None` for an empty or deleted
+slot, or one out of range.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
@@ -3257,7 +3513,7 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `merge`
 
 ```kestrel
-public mutating func merge[I](from: I, uniquingKeysWith: (V, V) -> V) where I: Iterable, I.Item == (K, V)
+public mutating func merge[I](from: I, uniquingKeysWith: (V, V) -> V) where I: Iterable, I: not Static, I.Item == (K, V)
 ```
 
 Merges every `(key, value)` pair from an arbitrary iterable into
@@ -3297,33 +3553,6 @@ let b = ["y": 20, "z": 30];
 let merged = a.merging(b) { (_, new) in new };
 // merged == ["x": 1, "y": 20, "z": 30]
 // a is unchanged
-```
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-#### function `modify`
-
-```kestrel
-public mutating func modify[R](K, (V) -> R) -> R?
-```
-
-Mutates the value for `key` in place and returns the closure's
-result, or `None` (without invoking `body`) if the key is absent.
-
-The interim form of in-place value access — the conditional
-ref-returning lookup (`find(key:) -> Optional[&V]`) waits for
-`Optional[&T]`. Today this is a bucket read → mutate → write-back
-under the hood; it can upgrade to true in-place mutation later with
-no API change. One probe (no re-hash on write-back, unlike
-`update(...)`); triggers COW only when the key is present.
-
-##### Examples
-
-```
-var dict = ["a": 1];
-dict.modify("a") { (mutating v) in v = v + 1 };  // .Some(())
-dict.modify("z") { (mutating v) in v = v + 1 };  // .None; body not invoked
-dict("a");  // Some(2)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3465,6 +3694,16 @@ dict.shrinkToFit();  // capacity drops from 1024 to 8
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
+#### field `slotCount`
+
+```kestrel
+internal var slotCount: Int64 { get }
+```
+
+Number of bucket slots, for slot-wise key scans (`Set`).
+
+_Defined in `lang/std/collections/dictionary.ks`._
+
 #### function `sumValues`
 
 ```kestrel
@@ -3482,58 +3721,6 @@ Empty dictionaries return `V()` — for `Int64` that's `0`, for
 ```
 ["a": 1, "b": 2, "c": 3].sumValues();  // 6
 [:].sumValues();                        // 0 — V's default
-```
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-#### function `update`
-
-```kestrel
-public mutating func update(K, with: (V) -> V) -> Bool
-```
-
-Applies `transform` to the existing value for `key` and writes
-the result back; returns whether the key was found.
-
-**Deprecated:** prefer `modify(...)`, which mutates in place with
-a single probe (no re-hash on write-back) and returns the
-closure's result. `update` will be removed in a future release.
-
-No-op when the key is absent — for "update or insert" semantics
-use `upsert(...)`. Internally re-uses `insert(...)`, so the
-hash is recomputed.
-
-##### Examples
-
-```
-var dict = ["a": 1, "b": 2];
-dict.update("a") { (v) in v * 10 };  // true;  dict("a") == Some(10)
-dict.update("z") { (v) in v * 10 };  // false; dict unchanged
-```
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-#### function `upsert`
-
-```kestrel
-public mutating func upsert(K, default: V, with: (V) -> V)
-```
-
-Inserts `transform(defaultValue)` for a new key, or
-`transform(existing)` for an existing one.
-
-The classic "increment-or-set-to-1" pattern. `defaultValue` is
-passed through `transform` even on the insert path, so the same
-closure handles both branches uniformly. For the no-insert
-variant see `update(...)`.
-
-##### Examples
-
-```
-var counts: [String: Int64] = [:];
-counts.upsert("apple", default: 0) { (n) in n + 1 };
-counts.upsert("apple", default: 0) { (n) in n + 1 };
-counts("apple");  // Some(2)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3937,7 +4124,7 @@ _Defined in `lang/std/collections/heap.ks`._
 #### initializer `From Iterable`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I.Item == T
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == T
 ```
 
 Builds a min-heap by collecting elements then heapifying in O(n).
@@ -4103,13 +4290,13 @@ _Defined in `lang/std/collections/heap.ks`._
 #### function `reserveCapacity`
 
 ```kestrel
-public mutating func reserveCapacity(minimumCapacity: Int64)
+public mutating func reserveCapacity(Int64)
 ```
 
 Ensures the backing array can hold at least `capacity` elements
 without reallocating.
 
-If the current capacity already meets or exceeds `capacity`, this
+If the current capacity already meets or exceeds `minimumCapacity`, this
 is a no-op. Otherwise the backing array grows to accommodate the
 requested number of slots.
 
@@ -4117,7 +4304,7 @@ requested number of slots.
 
 ```
 var h = Heap[Int64]();
-h.reserveCapacity(minimumCapacity: 100);
+h.reserveCapacity(100);
 ```
 
 _Defined in `lang/std/collections/heap.ks`._
@@ -4137,7 +4324,7 @@ _Defined in `lang/std/collections/heap.ks`._
 #### typealias `TargetIterator`
 
 ```kestrel
-type TargetIterator = ArraySliceIterator[T]
+type TargetIterator = ArrayIterator[T]
 ```
 
 `Iterable` iterator type — reuses the backing array's iterator.
@@ -4147,7 +4334,7 @@ _Defined in `lang/std/collections/heap.ks`._
 #### function `iter`
 
 ```kestrel
-public func iter() -> ArraySliceIterator[T]
+public func iter() -> ArrayIterator[T]
 ```
 
 Returns an iterator over elements in storage order (NOT sorted).
@@ -4356,16 +4543,6 @@ public struct ReversedSliceIterator[T] { /* private fields */ }
 
 _Defined in `lang/std/collections/views.ks`._
 
-### Members
-
-#### initializer `init`
-
-```kestrel
-public init(ptr: Pointer[T], remaining: Int64)
-```
-
-_Defined in `lang/std/collections/views.ks`._
-
 ### Implements `Iterator`
 
 #### typealias `Item`
@@ -4390,8 +4567,7 @@ _Defined in `lang/std/collections/views.ks`._
 public struct ReversedView[T] { /* private fields */ }
 ```
 
-Multi-pass lazy view that iterates a contiguous collection
-back-to-front without allocating.
+Multi-pass lazy view that iterates back-to-front without allocating.
 
 _Defined in `lang/std/collections/views.ks`._
 
@@ -4409,14 +4585,6 @@ _Defined in `lang/std/collections/views.ks`._
 
 ```kestrel
 public var first: Optional[T] { get }
-```
-
-_Defined in `lang/std/collections/views.ks`._
-
-#### initializer `init`
-
-```kestrel
-public init(slice: ArraySlice[T])
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -4443,6 +4611,8 @@ _Defined in `lang/std/collections/views.ks`._
 public subscript(Int64) -> T { get }
 ```
 
+Element `index` counted from the back. Panics when out of range.
+
 _Defined in `lang/std/collections/views.ks`._
 
 #### function `toArray`
@@ -4450,6 +4620,8 @@ _Defined in `lang/std/collections/views.ks`._
 ```kestrel
 public func toArray() -> Array[T]
 ```
+
+Copies the elements, back to front, into an owned array.
 
 _Defined in `lang/std/collections/views.ks`._
 
@@ -4490,7 +4662,7 @@ collection length. Used by `removeSubrange` and `replaceSubrange` so
 they accept `Range`, `ClosedRange`, `RangeFrom`, `RangeUpTo`, and
 `RangeThrough` through a single generic parameter.
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Members
 
@@ -4500,7 +4672,7 @@ _Defined in `lang/std/collections/slice.ks`._
 func resolve(Int64) -> Range[Int64]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ## struct `Set`
 
@@ -4632,7 +4804,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### initializer `From Iterable`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I.Item == T
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == T
 ```
 
 Creates a set by inserting every element produced by an
@@ -4970,10 +5142,10 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `first`
 
 ```kestrel
-public func first(where: (T) -> Bool) -> T?
+public func first(where: (T) -> Bool) -> Optional[&T]
 ```
 
-Returns *some* element matching `predicate`, or `None`.
+Lends *some* element matching `predicate`, or `None`.
 
 "First" is determined by iteration order, which is
 unspecified — treat the result as arbitrary among matching
@@ -5138,7 +5310,7 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `insert`
 
 ```kestrel
-public mutating func insert[I](contentsOf: I) where I: Iterable, I.Item == T
+public mutating func insert[I](contentsOf: I) where I: Iterable, I: not Static, I.Item == T
 ```
 
 Inserts every element produced by an iterable; duplicates
@@ -5345,10 +5517,10 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `max`
 
 ```kestrel
-public func max() -> T? where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
+public func max() -> Optional[&T] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
 ```
 
-Returns the largest element, or `None` for an empty set.
+Lends the largest element, or `None` for an empty set.
 
 Single linear pass. Mirror of `min()`.
 
@@ -5364,10 +5536,10 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `min`
 
 ```kestrel
-public func min() -> T? where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
+public func min() -> Optional[&T] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
 ```
 
-Returns the smallest element, or `None` for an empty set.
+Lends the smallest element, or `None` for an empty set.
 
 Single linear pass; ties go to the first occurrence in
 iteration order (which is unspecified, so equally-minimal
@@ -5831,33 +6003,672 @@ it.next();  // None
 
 _Defined in `lang/std/collections/set.ks`._
 
-## protocol `Slice`
+## struct `Slice`
 
 ```kestrel
-public protocol Slice[T]
+public struct Slice[T]: not Copyable { /* private fields */ }
 ```
 
-Shared read-only protocol for contiguous collections.
+A run of `T`s laid out back to back, viewed in place.
 
-`Slice[T]` is the contiguous-collection counterpart to `Str` in
-`std.text`: one kernel method (`asSlice`), all read-only logic in a
-protocol extension. Both `Array[T]` and `ArraySlice[T]` conform, so
-generic code constrained to `S: Slice[T]` accepts either without
-overloading.
+`Slice[T]` is unsized: you only ever hold one behind a reference,
+`&Slice[T]` or `&mutating Slice[T]`, which is two words (the first
+element's address and the count). `xs(1..<3)` on an `Array` or on
+another slice lends one; nothing is copied.
+
+A slice doesn't own its elements and doesn't keep the buffer alive. A
+slice of an `Array` is only valid until the array next reallocates
+(`append`, `reserveCapacity`, …) or is dropped; using it after that
+reads freed memory. The compiler does not check this.
 
 ### Examples
 
 ```
-func sum[S](s: S) -> Int64 where S: Slice[Int64] {
+var xs = [1, 2, 3, 4, 5];
+let mid = &xs(1..<4);   // [2, 3, 4]
+mid(0);                 // 2
+mid(1..<3);             // [3, 4], a slice of the same elements
+xs(1..<4)(0) = 20;      // xs == [1, 20, 3, 4, 5]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Members
+
+#### function `asUnsafeSlice`
+
+```kestrel
+public func asUnsafeSlice() -> UnsafeSlice[T]
+```
+
+The elements as a raw `(pointer, count)` view.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `assign`
+
+```kestrel
+public mutating func assign(from: &some Sliceable[T] and not Static and not Copyable and not Sized) where T: Copyable
+```
+
+Overwrites every element with the matching element of `other`.
+Panics if the counts differ.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `chunks`
+
+```kestrel
+public func chunks(of: Int64) -> ChunksView[T]
+```
+
+Multi-pass lazy view over non-overlapping `size`-sized chunks. The
+last chunk is shorter when `count` isn't a multiple of `size`.
+Panics if `size <= 0`.
+
+```
+let v = [1, 2, 3, 4, 5].chunks(of: 2);
+v.count;          // 3
+v(2).count;       // 1
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### field `count`
+
+```kestrel
+public var count: Int64 { get }
+```
+
+Element count.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `drop`
+
+```kestrel
+public func drop(first: Int64) -> &Slice[T]
+```
+
+Everything after the first `count` elements.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `drop`
+
+```kestrel
+public func drop(last: Int64) -> &Slice[T]
+```
+
+Everything before the last `count` elements.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `fill`
+
+```kestrel
+public mutating func fill(with: T) where T: Copyable
+```
+
+Sets every element of the slice to `value`.
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+`true` when `count == 0`.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lend`
+
+```kestrel
+public static func lend(start: consuming Pointer[T], count: consuming Int64) -> &Slice[T]
+```
+
+Lends the `count` elements starting at `start` as a slice. The
+caller is responsible for `count` live elements being there for as
+long as the slice is used.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendClamped`
+
+```kestrel
+internal func lendClamped(consuming Int64) -> Optional[&T]
+```
+
+Lends the element `xs(clamped: index)` names.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutating`
+
+```kestrel
+public static func lendMutating(start: consuming Pointer[T], count: consuming Int64) -> &mutating Slice[T]
+```
+
+Like `lend(start:count:)`, for writing through.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingClamped`
+
+```kestrel
+internal mutating func lendMutatingClamped(consuming Int64) -> Optional[&mutating T]
+```
+
+Like `lendClamped`, lent mutably.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingWrapped`
+
+```kestrel
+internal mutating func lendMutatingWrapped(consuming Int64) -> Optional[&mutating T]
+```
+
+Like `lendWrapped`, lent mutably.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendWrapped`
+
+```kestrel
+internal func lendWrapped(consuming Int64) -> Optional[&T]
+```
+
+Lends the element `xs(wrapped: index)` names.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `partition`
+
+```kestrel
+public mutating func partition(by: (T) -> Bool) -> Int64
+```
+
+Reorders the slice so every element matching `predicate` comes
+first; returns how many match (the index of the first non-match).
+Unstable.
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### field `pointer`
+
+```kestrel
+public var pointer: Pointer[T] { get }
+```
+
+Pointer to the first element.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `prefix`
+
+```kestrel
+public func prefix(Int64) -> &Slice[T]
+```
+
+The first `count` elements. Panics if `count > self.count`.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `reverse`
+
+```kestrel
+public mutating func reverse()
+```
+
+Reverses the slice in place. O(n).
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### function `reversed`
+
+```kestrel
+public func reversed() -> ReversedView[T]
+```
+
+Multi-pass lazy view that reads back to front.
+
+```
+let v = [1, 2, 3].reversed();
+v(0);           // 3
+v.toArray();    // [3, 2, 1]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `rotate`
+
+```kestrel
+public mutating func rotate(by: Int64)
+```
+
+Rotates the slice left by `amount` (negative rotates right; the
+amount wraps modulo `count`). Three-reversal algorithm: O(n) time,
+O(1) space.
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### function `shuffle`
+
+```kestrel
+public mutating func shuffle(using: mutating some RandomNumberGenerator)
+```
+
+Shuffles the slice in place with `rng` (Fisher-Yates: every
+permutation equally likely for a uniform generator; a seeded `rng`
+gives a deterministic shuffle).
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### function `shuffle`
+
+```kestrel
+public mutating func shuffle()
+```
+
+Shuffles the slice in place with a fresh system RNG.
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### function `sort`
+
+```kestrel
+public mutating func sort(by: (T, T) -> Bool)
+```
+
+Sorts the slice in place with a `<`-style comparator. Introsort
+(quicksort, heapsort past 2·log₂(n) depth, insertion sort for runs
+of ≤ 16): O(n log n) worst case, unstable.
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### function `sort`
+
+```kestrel
+public mutating func sort[K](byKey: consuming (T) -> K) where K: Comparable
+```
+
+Sorts the slice in place by an extracted `Comparable` key.
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### function `sort`
+
+```kestrel
+public mutating func sort() where T: Comparable
+```
+
+Sorts the slice in place, ascending (introsort; see `sort(by:)`).
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### function `split`
+
+```kestrel
+public func split(where: consuming escaping (T) -> Bool) -> ArraySplitWhereView[T]
+```
+
+Multi-pass lazy view over the segments between elements matching
+`predicate`. The matching elements are dropped.
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### function `split`
+
+```kestrel
+public func split(T) -> ArraySplitView[T] where T: Equatable
+```
+
+Multi-pass lazy view over the segments between occurrences of
+`separator`. `toArray()` copies them into owned arrays.
+
+```
+[1, 0, 2, 0, 3].split(0).toArray();   // [[1], [2], [3]]
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
+```
+
+Element access and sub-slicing, in place: `s(2)` is a reference to
+an element, `s(1..<3)` a narrower slice of the same elements. Panics
+when the index or range doesn't fit.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
+```
+
+Like `self(index)`, without the bounds check (undefined behavior when
+out of range).
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref mutating ref }
+```
+
+Like `self(index)`, but the place may not exist: `.None` instead of
+a panic when out of range. Reading copies the element out (`T?`) or
+lends the slice; `if let .Some(&mutating v) = s(checked: i)` writes
+in place.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(clamped: Int64) -> T? { ref mutating ref }
+```
+
+The element at `index` saturated into `0..<count`, in place, or
+`.None` for an empty slice.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
+```
+
+The part of `range` that lies within the slice, in place (always
+valid, possibly empty).
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(wrapped: Int64) -> T? { ref mutating ref }
+```
+
+The element at `index` modulo `count` (negative indices count from
+the end), in place, or `.None` for an empty slice.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `suffix`
+
+```kestrel
+public func suffix(Int64) -> &Slice[T]
+```
+
+The last `count` elements. Panics if `count > self.count`.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `swap`
+
+```kestrel
+public mutating func swap(at: Int64, with: Int64)
+```
+
+Swaps elements `i` and `j` of the slice. Panics if either is out of
+range.
+
+_Defined in `lang/std/collections/slice_algorithms.ks`._
+
+#### function `toArray`
+
+```kestrel
+public func toArray() -> Array[T] where T: Copyable
+```
+
+An owned copy of the elements.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `windows`
+
+```kestrel
+public func windows(of: Int64) -> WindowsView[T]
+```
+
+Multi-pass lazy view over overlapping `size`-sized sliding windows.
+Empty when there are fewer than `size` elements. Panics if
+`size <= 0`.
+
+```
+[1, 2, 3, 4].windows(of: 2).count;   // 3
+```
+
+_Defined in `lang/std/collections/views.ks`._
+
+### Implements `Sliceable`
+
+#### function `asSlice`
+
+```kestrel
+public func asSlice() -> &Slice[T]
+```
+
+Itself: a slice is already the in-place view.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `Iterable`
+
+#### typealias `Item`
+
+```kestrel
+type Item = T
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = UnsafeSliceIterator[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> UnsafeSliceIterator[T]
+```
+
+Forward iterator over the elements.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Implements `Equatable`
+
+_Conditional: `where T: Equatable`._
+
+### Implements `ArrayMatchable`
+
+#### typealias `Element`
+
+```kestrel
+type Element = T
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### typealias `Rest`
+
+```kestrel
+type Rest = &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `matchGet`
+
+```kestrel
+public func matchGet(Int64) -> T
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `matchLength`
+
+```kestrel
+public func matchLength() -> Int64
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `matchSlice`
+
+```kestrel
+public func matchSlice(Int64, Int64) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+## protocol `SliceClampable`
+
+```kestrel
+public protocol SliceClampable[T]
+```
+
+A range that `xs(within: range)` clamps into the slice and lends.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Members
+
+#### function `lendMutatingWithin`
+
+```kestrel
+static func lendMutatingWithin(consuming Self, mutating Slice[T]) -> &mutating Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendWithin`
+
+```kestrel
+static func lendWithin(consuming Self, Slice[T]) -> &Slice[T]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+## protocol `SliceIndex`
+
+```kestrel
+public protocol SliceIndex[T]
+```
+
+An index into a `Slice[T]`: an `Int64` lends an element (`&T`), a range
+lends a narrower `Slice[T]`.
+
+The requirements are static so the lent reference is rooted at `base`
+(a method's returned reference is rooted at its receiver, which would be
+the index).
+
+_Defined in `lang/std/collections/slice.ks`._
+
+### Members
+
+#### typealias `SliceOutput`
+
+```kestrel
+type SliceOutput
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lend`
+
+```kestrel
+static func lend(consuming Self, Slice[T]) -> &SliceOutput
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendChecked`
+
+```kestrel
+static func lendChecked(consuming Self, Slice[T]) -> Optional[&SliceOutput]
+```
+
+`.None` when the index or range doesn't fit.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutating`
+
+```kestrel
+static func lendMutating(consuming Self, mutating Slice[T]) -> &mutating SliceOutput
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+static func lendMutatingChecked(consuming Self, mutating Slice[T]) -> Optional[&mutating SliceOutput]
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingUnchecked`
+
+```kestrel
+static func lendMutatingUnchecked(consuming Self, mutating Slice[T]) -> &mutating SliceOutput
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendUnchecked`
+
+```kestrel
+static func lendUnchecked(consuming Self, Slice[T]) -> &SliceOutput
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+## protocol `Sliceable`
+
+```kestrel
+public protocol Sliceable[T]
+```
+
+Shared read-only protocol for contiguous collections.
+
+`Sliceable[T]` is the contiguous-collection counterpart to `Str` in
+`std.text`: a conformer lends itself as a `Slice` (`asSlice`) and its
+index places; all read-only logic lives in a protocol extension.
+`Array[T]`, `Slice[T]` and `UnsafeSlice[T]` conform, so generic code
+constrained to `S: Sliceable[T]` accepts any of them without
+overloading, and `s(i)` borrows the element rather than copying it.
+
+### Examples
+
+```
+func sum[S](s: &S) -> Int64 where S: Sliceable[Int64], S: not Static, S: not Copyable, S: not Sized {
     var total: Int64 = 0;
     for elem in s { total = total + elem }
     total
 }
 sum([1, 2, 3]);              // works with Array
-sum([1, 2, 3].asSlice());    // works with ArraySlice
+sum([1, 2, 3](1..<3));       // works with Slice
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Members
 
@@ -5879,7 +6690,7 @@ collections.
 [2, 3, 6].all(where: { it % 2 == 0 });  // false
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `any`
 
@@ -5899,7 +6710,7 @@ collections.
 [1, 2, 3].any(where: { it > 5 });  // false
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `asPointer`
 
@@ -5914,15 +6725,30 @@ buffer; do not outlive the source or mutate through it.
 
 Reading past `count` is undefined behavior.
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `asSlice`
 
 ```kestrel
-func asSlice() -> ArraySlice[T]
+func asSlice() -> &Slice[T]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+The elements as a `Slice`, in place. Every shared algorithm reads
+through it.
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### function `asUnsafeSlice`
+
+```kestrel
+public func asUnsafeSlice() -> UnsafeSlice[T]
+```
+
+The elements as a raw `(pointer, count)` view, for algorithms that
+walk the buffer directly. Only valid until the collection next
+changes, so never hand it out.
+
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `binarySearch`
 
@@ -5946,34 +6772,7 @@ unsorted data won't crash but may produce false negatives.
 [1, 2, 3, 4, 5].binarySearch(6);  // None
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `chunks`
-
-```kestrel
-public func chunks(of: Int64) -> ChunksView[T]
-```
-
-Multi-pass lazy view over non-overlapping `size`-sized chunks.
-
-The trailing chunk may be shorter than `size`. Multi-pass: query
-`count`, index with `view.get(i)`, and iterate repeatedly without
-re-creating the view.
-
-##### Errors
-
-Panics if `size <= 0`.
-
-##### Examples
-
-```
-let v = [1, 2, 3, 4, 5].chunks(of: 2);
-v.count;          // 3
-v.get(2);          // ArraySlice[5]
-for c in v { ... }
-```
-
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `compactMap`
 
@@ -5990,7 +6789,7 @@ O(n).
 ["1", "x", "3"].compactMap { Int64.parse(it) };  // [1, 3]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `contains`
 
@@ -6009,7 +6808,7 @@ Linear scan; short-circuits on the first match.
 [1, 2, 3].contains(5);  // false
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### field `count`
 
@@ -6026,7 +6825,7 @@ Element count. O(1).
 [].count;          // 0
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `countItems`
 
@@ -6042,12 +6841,12 @@ Number of elements for which `predicate` is true. O(n).
 [1, 2, 3, 4, 5].countItems(where: { it % 2 == 0 });  // 2
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `drop`
 
 ```kestrel
-public func drop(first: Int64) -> ArraySlice[T]
+public func drop(first: Int64) -> &Slice[T]
 ```
 
 Returns a slice with the first `count` elements skipped. O(1).
@@ -6061,15 +6860,15 @@ Panics if `count > self.count`.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].drop(first: 2);  // ArraySlice[3, 4, 5]
+[1, 2, 3, 4, 5].drop(first: 2);  // [3, 4, 5]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `drop`
 
 ```kestrel
-public func drop(last: Int64) -> ArraySlice[T]
+public func drop(last: Int64) -> &Slice[T]
 ```
 
 Returns a slice with the last `count` elements skipped. O(1).
@@ -6083,19 +6882,19 @@ Panics if `count > self.count`.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].drop(last: 2);  // ArraySlice[1, 2, 3]
+[1, 2, 3, 4, 5].drop(last: 2);  // [1, 2, 3]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `ends`
 
 ```kestrel
-public func ends(with: some Slice[T]) -> Bool where T: Equatable
+public func ends(with: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool where T: Equatable
 ```
 
 `true` if the trailing elements match `suffix`. O(k) where k is
-the suffix length. Accepts any `Slice[T]` conformer.
+the suffix length. Accepts any `Sliceable[T]` conformer.
 
 ##### Examples
 
@@ -6105,15 +6904,7 @@ the suffix length. Accepts any `Slice[T]` conformer.
 [1, 2, 3].ends(with: []);       // true (vacuous)
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `ensureUnique`
-
-```kestrel
-mutating func ensureUnique()
-```
-
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `filter`
 
@@ -6130,15 +6921,16 @@ O(n). Result size is unknown; uses geometric growth.
 [1, 2, 3, 4].filter(where: { it % 2 == 0 });  // [2, 4]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `first`
 
 ```kestrel
-public func first() -> T?
+public func first() -> Optional[&T]
 ```
 
-First element, or `.None` for an empty collection. O(1).
+Lends the first element in place, or `.None` for an empty collection.
+O(1). A binding (`let f = xs.first()`) copies it out.
 
 Read-only — to remove the first element from an `Array`, use
 `popFirst()`.
@@ -6150,15 +6942,15 @@ Read-only — to remove the first element from an `Array`, use
 [].first();          // None
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `first`
 
 ```kestrel
-public func first(where: (T) -> Bool) -> T?
+public func first(where: (T) -> Bool) -> Optional[&T]
 ```
 
-First element matching `predicate`, or `None`. O(n).
+Lends the first element matching `predicate`, or `None`. O(n).
 
 ##### Examples
 
@@ -6166,7 +6958,7 @@ First element matching `predicate`, or `None`. O(n).
 [1, 2, 3, 4, 5].first(where: { it > 3 });  // Some(4)
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `firstIndex`
 
@@ -6186,7 +6978,7 @@ Short-circuits on the first match. For value-based search on
 [1, 2, 3].firstIndex(where: { it > 10 });         // None
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `firstIndex`
 
@@ -6203,7 +6995,7 @@ Index of the first element equal to `element`, or `None`. O(n).
 [1, 2, 3].firstIndex(of: 5);      // None
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `flatMap`
 
@@ -6220,7 +7012,7 @@ into one flat array. O(n + total_output).
 [1, 2, 3].flatMap { [it, it * 10] };  // [1, 10, 2, 20, 3, 30]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `format`
 
@@ -6237,7 +7029,7 @@ Renders as `"[e1, e2, ...]"`. Empty collections render as `"[]"`.
 [].format();          // "[]"
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### field `indices`
 
@@ -6253,7 +7045,7 @@ Half-open range `0..<count`.
 [10, 20, 30].indices;  // 0..<3
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### field `isEmpty`
 
@@ -6270,7 +7062,7 @@ public var isEmpty: Bool { get }
 [1].isEmpty;  // false
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `isEqual`
 
@@ -6289,7 +7081,7 @@ Short-circuits on the first mismatch. Order matters.
 [1, 2, 3].isEqual(to: [3, 2, 1]);  // false
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `isSorted`
 
@@ -6311,12 +7103,12 @@ collections are vacuously sorted.
 [].isSorted();          // true
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
-#### function `isValidIndex`
+#### function `isValid`
 
 ```kestrel
-public func isValidIndex(Int64) -> Bool
+public func isValid(index: Int64) -> Bool
 ```
 
 `true` if `index` is in `[0, count)`.
@@ -6324,20 +7116,21 @@ public func isValidIndex(Int64) -> Bool
 ##### Examples
 
 ```
-[10, 20, 30].isValidIndex(2);   // true
-[10, 20, 30].isValidIndex(3);   // false
-[10, 20, 30].isValidIndex(-1);  // false
+[10, 20, 30].isValid(index: 2);   // true
+[10, 20, 30].isValid(index: 3);   // false
+[10, 20, 30].isValid(index: -1);  // false
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `last`
 
 ```kestrel
-public func last() -> T?
+public func last() -> Optional[&T]
 ```
 
-Last element, or `.None` for an empty collection. O(1).
+Lends the last element in place, or `.None` for an empty collection.
+O(1).
 
 Read-only — to remove the last element from an `Array`, use
 `pop()`.
@@ -6349,15 +7142,15 @@ Read-only — to remove the last element from an `Array`, use
 [].last();          // None
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `last`
 
 ```kestrel
-public func last(where: (T) -> Bool) -> T?
+public func last(where: (T) -> Bool) -> Optional[&T]
 ```
 
-Last element matching `predicate`, or `None`. O(n).
+Lends the last element matching `predicate`, or `None`. O(n).
 
 ##### Examples
 
@@ -6365,7 +7158,7 @@ Last element matching `predicate`, or `None`. O(n).
 [1, 2, 3, 2, 1].last(where: { it > 1 });  // Some(2)
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `lastIndex`
 
@@ -6383,7 +7176,7 @@ Scans from the back; short-circuits on the first match.
 [1, 2, 3, 2, 1].lastIndex(where: { it == 2 });  // Some(3)
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `lastIndex`
 
@@ -6400,7 +7193,7 @@ Index of the last element equal to `element`, or `None`. O(n).
 [1, 2, 3].lastIndex(of: 5);      // None
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `map`
 
@@ -6420,15 +7213,15 @@ the lazy version that fuses into a chain, use `iter().map { ... }`.
 [1, 2, 3].map { it.format() };  // ["1", "2", "3"]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `max`
 
 ```kestrel
-public func max() -> T? where T: Comparable
+public func max() -> Optional[&T] where T: Comparable
 ```
 
-Largest element, or `None` if empty. O(n).
+Lends the largest element, or `None` if empty. O(n).
 
 Ties go to the first occurrence.
 
@@ -6439,15 +7232,15 @@ Ties go to the first occurrence.
 [].max();          // None
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `min`
 
 ```kestrel
-public func min() -> T? where T: Comparable
+public func min() -> Optional[&T] where T: Comparable
 ```
 
-Smallest element, or `None` if empty. O(n).
+Lends the smallest element, or `None` if empty. O(n).
 
 Ties go to the first occurrence.
 
@@ -6458,12 +7251,12 @@ Ties go to the first occurrence.
 [].min();          // None
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `prefix`
 
 ```kestrel
-public func prefix(Int64) -> ArraySlice[T]
+public func prefix(Int64) -> &Slice[T]
 ```
 
 Returns a slice over the first `count` elements. O(1).
@@ -6475,11 +7268,11 @@ Panics if `count > self.count`.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].prefix(3);  // ArraySlice[1, 2, 3]
+[1, 2, 3, 4, 5].prefix(3);  // [1, 2, 3]
 [1, 2].prefix(0);            // empty slice
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `randomElement`
 
@@ -6501,7 +7294,7 @@ var rng = Lcg64(seed: 42);
 [].randomElement(using: rng);          // None
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `randomElement`
 
@@ -6518,26 +7311,7 @@ empty collection. O(1).
 ["red", "green", "blue"].randomElement();  // e.g. Some("green")
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `reversed`
-
-```kestrel
-public func reversed() -> ReversedView[T]
-```
-
-Multi-pass lazy reversed view. Iterates back-to-front and
-supports indexed access in O(1).
-
-##### Examples
-
-```
-let v = [1, 2, 3].reversed();
-v.first();        // Some(3)
-v.toArray();       // [3, 2, 1] — eager copy
-```
-
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `sorted`
 
@@ -6555,60 +7329,16 @@ arr.sorted();  // [1, 1, 3, 4, 5]
 // arr is still [3, 1, 4, 1, 5]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `split`
-
-```kestrel
-public func split(where: consuming escaping (T) -> Bool) -> ArraySplitWhereView[T]
-```
-
-Multi-pass lazy view over the segments produced by splitting at
-each element matching `predicate`. Matching elements are dropped.
-
-##### Examples
-
-```
-let v = [1, -1, 2, 3, -1, 4].split(where: { it < 0 });
-for seg in v { ... }
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `split`
-
-```kestrel
-public func split(T) -> ArraySplitView[T] where T: Equatable
-```
-
-Multi-pass lazy view over the segments produced by splitting on
-each occurrence of `separator`. Separators are dropped; empty
-runs between adjacent separators are preserved.
-
-Use `view.toArray()` to materialize all segments into an owned
-`Array[ArraySlice[T]]`.
-
-##### Examples
-
-```
-let v = [1, 0, 2, 0, 3].split(separator: 0);
-for seg in v { ... }            // ArraySlice[1], ArraySlice[2], ArraySlice[3]
-v.toArray();                     // eager: 3 segments
-
-[1, 2, 3].split(separator: 0).toArray();
-// [ArraySlice[1, 2, 3]] — separator not found, single segment
-```
-
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `starts`
 
 ```kestrel
-public func starts(with: some Slice[T]) -> Bool where T: Equatable
+public func starts(with: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool where T: Equatable
 ```
 
 `true` if the leading elements match `prefix`. O(k) where k is
-the prefix length. Accepts any `Slice[T]` conformer.
+the prefix length. Accepts any `Sliceable[T]` conformer.
 
 ##### Examples
 
@@ -6618,52 +7348,60 @@ the prefix length. Accepts any `Slice[T]` conformer.
 [1, 2, 3].starts(with: []);          // true (vacuous)
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](I) -> I.SeqOutput where I: SeqIndex[T] { get set }
+subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref }
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](checked: I) -> I.SeqOutput? where I: SeqIndex[T] { get }
+subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref }
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](unchecked: I) -> I.SeqOutput where I: SeqIndex[T] { get set }
+subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.SeqClampedOutput where I: SeqClampable[T] { get set }
+subscript(clamped: Int64) -> T? { ref }
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](wrapped: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] { get set }
+subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref }
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+subscript(wrapped: Int64) -> T? { ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `suffix`
 
 ```kestrel
-public func suffix(Int64) -> ArraySlice[T]
+public func suffix(Int64) -> &Slice[T]
 ```
 
 Returns a slice over the last `count` elements. O(1).
@@ -6675,10 +7413,10 @@ Panics if `count > self.count`.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].suffix(2);  // ArraySlice[4, 5]
+[1, 2, 3, 4, 5].suffix(2);  // [4, 5]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 #### function `unique`
 
@@ -6697,40 +7435,14 @@ For the mutating variant on `Array`, see `removeDuplicates()`.
 [1, 2, 1, 3, 2, 4].unique();  // [1, 2, 3, 4]
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
-
-#### function `windows`
-
-```kestrel
-public func windows(of: Int64) -> WindowsView[T]
-```
-
-Multi-pass lazy view over overlapping `size`-sized sliding
-windows.
-
-Adjacent windows overlap by `size - 1` elements. Empty when the
-source has fewer than `size` elements.
-
-##### Errors
-
-Panics if `size <= 0`.
-
-##### Examples
-
-```
-let v = [1, 2, 3, 4].windows(of: 2);
-v.count;          // 3
-for w in v { ... }
-```
-
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `Iterable`
 
 #### function `iter`
 
 ```kestrel
-public func iter() -> ArraySliceIterator[T]
+public func iter() -> UnsafeSliceIterator[T]
 ```
 
 Forward iterator over the elements.
@@ -6741,7 +7453,7 @@ Forward iterator over the elements.
 for item in [1, 2, 3] { ... }
 ```
 
-_Defined in `lang/std/collections/slice.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ## struct `ValuesIterator`
 
@@ -6907,22 +7619,12 @@ public struct WindowsIterator[T] { /* private fields */ }
 
 _Defined in `lang/std/collections/views.ks`._
 
-### Members
-
-#### initializer `init`
-
-```kestrel
-public init(ptr: Pointer[T], totalCount: Int64, windowSize: Int64)
-```
-
-_Defined in `lang/std/collections/views.ks`._
-
 ### Implements `Iterator`
 
 #### typealias `Item`
 
 ```kestrel
-type Item = ArraySlice[T]
+type Item = &Slice[T]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -6930,7 +7632,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### function `next`
 
 ```kestrel
-public mutating func next() -> Optional[ArraySlice[T]]
+public mutating func next() -> Optional[&Slice[T]]
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -6958,15 +7660,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### field `first`
 
 ```kestrel
-public var first: Optional[ArraySlice[T]] { get }
-```
-
-_Defined in `lang/std/collections/views.ks`._
-
-#### initializer `init`
-
-```kestrel
-public init(slice: ArraySlice[T], windowSize: Int64)
+public var first: Optional[&Slice[T]] { get }
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -6982,7 +7676,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### field `last`
 
 ```kestrel
-public var last: Optional[ArraySlice[T]] { get }
+public var last: Optional[&Slice[T]] { get }
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -6990,16 +7684,20 @@ _Defined in `lang/std/collections/views.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript(Int64) -> ArraySlice[T] { get }
+public subscript(Int64) -> Slice[T] { ref }
 ```
+
+Window `index`. Panics when out of range.
 
 _Defined in `lang/std/collections/views.ks`._
 
 #### function `toArray`
 
 ```kestrel
-public func toArray() -> Array[ArraySlice[T]]
+public func toArray() -> Array[Array[T]]
 ```
+
+Copies every window into an owned array.
 
 _Defined in `lang/std/collections/views.ks`._
 
@@ -7008,7 +7706,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### typealias `Item`
 
 ```kestrel
-type Item = ArraySlice[T]
+type Item = &Slice[T]
 ```
 
 _Defined in `lang/std/collections/views.ks`._

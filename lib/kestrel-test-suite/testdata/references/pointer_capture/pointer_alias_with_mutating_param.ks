@@ -15,7 +15,7 @@ import std.numeric.(Int64)
 // the captured pointer alias the same storage.
 func bumpThroughBoth(mutating n: Int64, p: Pointer[Int64]) {
     n = n + 1;        // through the mutating param: 5 -> 6
-    p.write(p.read() + 10); // through the alias: 6 -> 16
+    unsafe p.write(p.read() + 10); // through the alias: 6 -> 16
 }
 
 @main
@@ -28,6 +28,6 @@ func main() -> lang.i64 {
 
     // And the pointer still observes a direct write to `x` afterwards.
     x = 99;
-    if p.read() != 99 { return 2; }
+    if unsafe p.read() != 99 { return 2; }
     0
 }

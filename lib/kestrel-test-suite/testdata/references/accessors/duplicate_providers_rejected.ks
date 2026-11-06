@@ -11,24 +11,24 @@ import std.numeric.(Int64)
 struct BothReads {
     var p: Pointer[Int64]
     subscript(at index: Int64) -> Int64 { // ERROR(E619)
-        get { self.p.offset(by: index).value }
-        ref { self.p.offset(by: index).value }
+        get { unsafe self.p.offset(by: index).value }
+        ref { unsafe self.p.offset(by: index).value }
     }
 }
 
 struct BothWrites {
     var p: Pointer[Int64]
     subscript(at index: Int64) -> Int64 { // ERROR(E620)
-        ref { self.p.offset(by: index).value }
-        set { self.p.offset(by: index).write(newValue); }
-        mutating ref { self.p.offset(by: index).mutatingValue }
+        ref { unsafe self.p.offset(by: index).value }
+        set { unsafe self.p.offset(by: index).write(newValue); }
+        mutating ref { unsafe self.p.offset(by: index).mutatingValue }
     }
 }
 
 struct BothOnProperty {
     var p: Pointer[Int64]
     var value: Int64 { // ERROR(E619)
-        get { self.p.value }
-        ref { self.p.value }
+        get { unsafe self.p.value }
+        ref { unsafe self.p.value }
     }
 }

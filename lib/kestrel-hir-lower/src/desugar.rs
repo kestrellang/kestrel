@@ -26,7 +26,8 @@ use crate::syntax::{BlockSyntax, Cond, ExprSrc, PatSrc, expr_children, first_exp
 pub(crate) fn is_place_syntax(expr: &SyntaxNode) -> bool {
     match expr.kind() {
         SyntaxKind::ExprPath | SyntaxKind::ExprTupleIndex => true,
-        SyntaxKind::ExprGrouping => first_expr(expr)
+        // `unsafe p.value += 1`: the prefix marks a region, the place is its operand.
+        SyntaxKind::ExprGrouping | SyntaxKind::ExprUnsafe => first_expr(expr)
             .map(|inner| crate::syntax::unwrap_expr(&inner))
             .is_some_and(|inner| is_place_syntax(&inner)),
         _ => false,
@@ -196,9 +197,13 @@ impl LowerCtx<'_> {
         // but only the typed layer can tell it apart from a temporary — the
         // assignment analyzer rejects the non-ref ones.
         let lhs_node = lhs.inner();
-        let call_shaped = lhs_node
-            .as_ref()
-            .is_some_and(|n| n.kind() == SyntaxKind::ExprCall);
+        let call_shaped = lhs_node.as_ref().is_some_and(|n| {
+            let n = match n.kind() {
+                SyntaxKind::ExprUnsafe => first_expr(n).map(|i| crate::syntax::unwrap_expr(&i)),
+                _ => Some(n.clone()),
+            };
+            n.is_some_and(|n| n.kind() == SyntaxKind::ExprCall)
+        });
         if !lhs_node.as_ref().is_some_and(is_place_syntax) && !call_shaped {
             self.ctx.accumulate(
                 Diagnostic::error()
@@ -777,6 +782,7 @@ impl LowerCtx<'_> {
             owner: None,
             name: HirName::name("fromResidual"),
             args: Some(vec![HirCallArg {
+                trailing_closure: false,
                 label: None,
                 value: early_ref,
             }]),
@@ -835,6 +841,7 @@ impl LowerCtx<'_> {
             owner: None,
             name: HirName::name("Err"),
             args: Some(vec![HirCallArg {
+                trailing_closure: false,
                 label: None,
                 value: lowered_value,
             }]),
@@ -940,10 +947,12 @@ impl LowerCtx<'_> {
             name: HirName::name("init"),
             args: Some(vec![
                 HirCallArg {
+                    trailing_closure: false,
                     label: Some("literalCapacity".to_string()),
                     value: lit_cap,
                 },
                 HirCallArg {
+                    trailing_closure: false,
                     label: Some("interpolationCount".to_string()),
                     value: interp_count,
                 },
@@ -981,6 +990,7 @@ impl LowerCtx<'_> {
                         method: HirName::name("appendLiteral"),
                         type_args: None,
                         args: vec![HirCallArg {
+                            trailing_closure: false,
                             label: None,
                             value: str_lit,
                         }],
@@ -999,6 +1009,7 @@ impl LowerCtx<'_> {
                     let lowered = self.lower_expr_src(expr);
 
                     let mut args = vec![HirCallArg {
+                        trailing_closure: false,
                         label: None,
                         value: lowered,
                     }];
@@ -1008,6 +1019,7 @@ impl LowerCtx<'_> {
                         && let Some(opts_expr) = self.build_format_options_from_spec(spec_str, span)
                     {
                         args.push(HirCallArg {
+                            trailing_closure: false,
                             label: None,
                             value: opts_expr,
                         });
@@ -1036,6 +1048,7 @@ impl LowerCtx<'_> {
             owner: None,
             name: HirName::name("init"),
             args: Some(vec![HirCallArg {
+                trailing_closure: false,
                 label: Some("interpolation".to_string()),
                 value: dsi_ref,
             }]),
@@ -1127,6 +1140,7 @@ impl LowerCtx<'_> {
                 owner: None,
                 name: HirName::name("Some"),
                 args: Some(vec![HirCallArg {
+                    trailing_closure: false,
                     label: None,
                     value: int_lit,
                 }]),
@@ -1146,6 +1160,7 @@ impl LowerCtx<'_> {
                 owner: None,
                 name: HirName::name("Some"),
                 args: Some(vec![HirCallArg {
+                    trailing_closure: false,
                     label: None,
                     value: int_lit,
                 }]),
@@ -1301,6 +1316,7 @@ impl LowerCtx<'_> {
         let args = args
             .into_iter()
             .map(|value| HirCallArg {
+                trailing_closure: false,
                 label: op_req.label.map(str::to_string),
                 value,
             })

@@ -98,27 +98,6 @@ impl LowerCtx<'_> {
                 let by_ref = (node.kind() == SyntaxKind::RefBindingPattern)
                     .then(|| has_token(node, SyntaxKind::Mutating));
                 let is_mut = by_ref.is_none() && has_token(node, SyntaxKind::Var);
-                // `&`/`&mutating` binder patterns (stage 1.5 item 2) are
-                // match-arm constructs: the place-mode lowering needs a
-                // pinnable scrutinee place. Everywhere else (let/for
-                // destructures, if/while-let conditions, params) they
-                // reject (E211) and degrade to a plain binding so
-                // downstream diagnostics stay useful.
-                let allowed = self.ref_patterns_allowed;
-                if by_ref.is_some() && !allowed {
-                    self.ctx.accumulate(
-                        kestrel_reporting::Diagnostic::error()
-                            .with_code("E211")
-                            .with_message("`&` pattern bindings are not supported in this position")
-                            .with_labels(vec![
-                                kestrel_reporting::Label::primary(span.file_id, span.range())
-                                    .with_message("`&` binder pattern"),
-                            ])
-                            .with_notes(vec![
-                                "`&` binders are supported in `match` arm patterns".to_string(),
-                            ]),
-                    );
-                }
                 // A binder whose name the parser could not find binds nothing.
                 let Some(name) = token(node, SyntaxKind::Identifier) else {
                     return self.alloc_pat(HirPat::Error { span });
@@ -126,7 +105,7 @@ impl LowerCtx<'_> {
                 let local = self.define_named_local(node, &name, is_mut || force_mut, span.clone());
                 self.alloc_pat(HirPat::Binding {
                     local,
-                    by_ref: if allowed { by_ref } else { None },
+                    by_ref,
                     span,
                 })
             },
@@ -577,10 +556,10 @@ impl LowerCtx<'_> {
                     .get::<kestrel_ast_builder::Name>(entity)
                     .map(|n| n.0.clone())
                     .unwrap_or_default();
-                // Validate pattern fields against struct's actual fields
-                // Only stored instance fields are bindable: a pattern destructures
-                // storage, and this set must match the layout roster used to
-                // assign sub-pattern indices.
+                // Validate pattern fields against struct's actual fields.
+                // Only declared storage is bindable: a pattern destructures
+                // storage (sub-pattern indices come from the layout roster),
+                // and a `lazy var`'s hidden cache is never named or required.
                 use kestrel_ast_builder::{FieldClass, Name};
                 let struct_field_names: Vec<String> = self
                     .ctx
@@ -589,7 +568,7 @@ impl LowerCtx<'_> {
                     .filter(|&&c| {
                         self.ctx
                             .get::<FieldClass>(c)
-                            .is_some_and(FieldClass::is_stored_instance)
+                            .is_some_and(FieldClass::is_declared_storage)
                     })
                     .filter_map(|&c| self.ctx.get::<Name>(c).map(|n| n.0.clone()))
                     .collect();
@@ -671,11 +650,16 @@ impl LowerCtx<'_> {
                 self.alloc_pat(HirPat::Wildcard { span: span.clone() })
             },
 
-            kestrel_ast_builder::ParamPattern::Binding { name, is_mut } => {
-                let local = self.define_local(name, *is_mut || force_mut, span.clone());
+            kestrel_ast_builder::ParamPattern::Binding {
+                name,
+                is_mut,
+                by_ref,
+            } => {
+                let is_mut = by_ref.is_none() && (*is_mut || force_mut);
+                let local = self.define_local(name, is_mut, span.clone());
                 self.alloc_pat(HirPat::Binding {
                     local,
-                    by_ref: None,
+                    by_ref: *by_ref,
                     span: span.clone(),
                 })
             },

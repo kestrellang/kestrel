@@ -21,8 +21,8 @@ public struct Scrypt {
     /// `parallelism` are at least 1 with `blockSize × parallelism < 2^30`;
     /// throws `.InvalidLength` for a negative `length`.
     public static func deriveKey(
-        password: some Slice[UInt8],
-        salt salt: some Slice[UInt8],
+        password: &some Sliceable[UInt8] and not Static and not Copyable and not Sized,
+        salt salt: &some Sliceable[UInt8] and not Static and not Copyable and not Sized,
         logN logN: Int64,
         blockSize r: Int64,
         parallelism p: Int64,
@@ -110,12 +110,12 @@ public struct Scrypt {
             Scrypt.step(w, 12, 15, 14, 7); Scrypt.step(w, 13, 12, 15, 9);
             Scrypt.step(w, 14, 13, 12, 13); Scrypt.step(w, 15, 14, 13, 18);
         }
-        for i in 0..<16 { x(i) = x(i) + w(i); }
+        for i in 0..<16 { x(i) = x(i).addWrapping(w(i)); }
     }
 
     /// One Salsa20 step: `w[target] ^= (w[a] + w[b]) <<< shift`.
     static func step(mutating w: Array[UInt32], target: Int64, a: Int64, b: Int64, shift: Int64) {
-        w(target) = w(target) ^ (w(a) + w(b)).rotateLeft(by: shift);
+        w(target) = w(target) ^ (w(a).addWrapping(w(b))).rotateLeft(by: shift);
     }
 
     static func wordsFromBytes(bytes: Array[UInt8]) -> Array[UInt32] {
@@ -132,7 +132,7 @@ public struct Scrypt {
     static func bytesFromWords(words: Array[UInt32]) -> Array[UInt8] {
         var bytes: [UInt8] = [];
         for w in words {
-            bytes.append(contentsOf: w.toBytesLittleEndian().asSlice());
+            bytes.append(contentsOf: w.toBytesLittleEndian().asUnsafeSlice());
         }
         bytes
     }

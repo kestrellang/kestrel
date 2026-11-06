@@ -62,6 +62,7 @@ pub(super) static RULES: &[(K, R)] = &[
         R::Seq(&[
             R::Opt(&R::Kind(K::AttributeList)),
             R::Kind(K::Visibility),
+            R::Opt(&R::Kind(K::UnsafeModifier)),
             R::Kind(K::Protocol),
             R::Kind(K::Name),
             R::Opt(&R::Kind(K::TypeParameterList)),
@@ -103,6 +104,7 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Opt(&R::Kind(K::AttributeList)),
             R::Kind(K::Visibility),
             R::Opt(&R::Kind(K::StaticModifier)),
+            R::Opt(&R::Kind(K::UnsafeModifier)),
             R::Opt(&R::Alt(&[R::Kind(K::Mutating), R::Kind(K::Consuming)])),
             R::Kind(K::Func),
             R::Kind(K::Name),
@@ -119,9 +121,11 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Opt(&R::Kind(K::AttributeList)),
             R::Kind(K::Visibility),
             R::Opt(&R::Kind(K::StaticModifier)),
+            R::Opt(&R::Kind(K::UnsafeModifier)),
             R::Kind(K::Subscript),
             R::Opt(&R::Kind(K::TypeParameterList)),
             R::Kind(K::ParameterList),
+            R::Opt(&R::Kind(K::FailableMarker)),
             R::Kind(K::ReturnType),
             R::Opt(&R::Kind(K::WhereClause)),
             R::Kind(K::SubscriptBody),
@@ -133,12 +137,24 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Opt(&R::Kind(K::AttributeList)),
             R::Kind(K::Visibility),
             R::Opt(&R::Kind(K::StaticModifier)),
+            R::Opt(&R::Kind(K::UnsafeModifier)),
+            R::Opt(&R::Kind(K::LazyModifier)),
             R::Alt(&[R::Kind(K::Let), R::Kind(K::Var)]),
             R::Kind(K::Name),
+            R::Opt(&R::Kind(K::FailableMarker)),
             R::Kind(K::Colon),
             R::Kind(K::Ty),
-            R::Opt(&R::Kind(K::PropertyAccessors)),
-            R::Opt(&R::Seq(&[R::Kind(K::Equals), R::Kind(K::Expression)])),
+            R::Opt(&R::Alt(&[
+                R::Seq(&[
+                    R::Kind(K::PropertyAccessors),
+                    R::Opt(&R::Seq(&[R::Kind(K::Equals), R::Kind(K::Expression)])),
+                ]),
+                R::Seq(&[
+                    R::Kind(K::Equals),
+                    R::Kind(K::Expression),
+                    R::Opt(&R::Kind(K::PropertyAccessors)),
+                ]),
+            ])),
             R::Opt(&R::Kind(K::Semicolon)),
         ]),
     ),
@@ -161,6 +177,7 @@ pub(super) static RULES: &[(K, R)] = &[
         R::Seq(&[
             R::Opt(&R::Kind(K::AttributeList)),
             R::Kind(K::Visibility),
+            R::Opt(&R::Kind(K::UnsafeModifier)),
             R::Kind(K::Init),
             R::Opt(&R::Kind(K::TypeParameterList)),
             R::Kind(K::ParameterList),
@@ -272,6 +289,7 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Kind(K::Fileprivate),
         ])),
     ),
+    (K::UnsafeModifier, R::Kind(K::Unsafe)),
     (K::Name, R::Kind(K::Identifier)),
     (
         K::TypeParameterList,
@@ -441,6 +459,8 @@ pub(super) static RULES: &[(K, R)] = &[
             K::ExprReturn,
             K::ExprThrow,
             K::ExprTry,
+            K::ExprUnsafe,
+            K::ExprUnsafeBlock,
             K::ExprClosure,
             K::ExprMatch,
             K::ExprCast,
@@ -451,6 +471,7 @@ pub(super) static RULES: &[(K, R)] = &[
             K::ExprOptionalChain,
         ]),
     ),
+    (K::FailableMarker, R::Kind(K::Question)),
     (
         K::SubscriptBody,
         R::Alt(&[R::Kind(K::CodeBlock), R::Kind(K::PropertyAccessors)]),
@@ -471,12 +492,17 @@ pub(super) static RULES: &[(K, R)] = &[
                     K::SetterClause,
                     K::RefClause,
                     K::MutatingRefClause,
+                    K::ModifyingGetterClause,
+                    K::ModifyingRefClause,
+                    K::WillSetClause,
+                    K::DidSetClause,
                 ])),
                 R::Kind(K::RBrace),
             ]),
             R::Kind(K::CodeBlock),
         ]),
     ),
+    (K::LazyModifier, R::Kind(K::Identifier)),
     (
         K::GetterClause,
         R::Seq(&[R::Kind(K::Get), R::Kind(K::CodeBlock)]),
@@ -487,15 +513,39 @@ pub(super) static RULES: &[(K, R)] = &[
     ),
     (
         K::RefClause,
-        R::Seq(&[R::Kind(K::Identifier), R::Kind(K::CodeBlock)]),
+        R::Seq(&[R::Kind(K::Identifier), R::Opt(&R::Kind(K::CodeBlock))]),
     ),
     (
         K::MutatingRefClause,
         R::Seq(&[
             R::Kind(K::Mutating),
             R::Kind(K::Identifier),
+            R::Opt(&R::Kind(K::CodeBlock)),
+        ]),
+    ),
+    (
+        K::ModifyingGetterClause,
+        R::Seq(&[
+            R::Kind(K::Identifier),
+            R::Kind(K::Get),
             R::Kind(K::CodeBlock),
         ]),
+    ),
+    (
+        K::ModifyingRefClause,
+        R::Seq(&[
+            R::Kind(K::Identifier),
+            R::Kind(K::Identifier),
+            R::Kind(K::CodeBlock),
+        ]),
+    ),
+    (
+        K::WillSetClause,
+        R::Seq(&[R::Kind(K::Identifier), R::Kind(K::CodeBlock)]),
+    ),
+    (
+        K::DidSetClause,
+        R::Seq(&[R::Kind(K::Identifier), R::Kind(K::CodeBlock)]),
     ),
     (
         K::AssociatedTypeTarget,
@@ -594,7 +644,11 @@ pub(super) static RULES: &[(K, R)] = &[
     ),
     (
         K::ConformanceItem,
-        R::Alt(&[R::Kind(K::NegativeConformance), R::Kind(K::Ty)]),
+        R::Alt(&[
+            R::Kind(K::NegativeConformance),
+            R::Kind(K::UnsafeConformance),
+            R::Kind(K::Ty),
+        ]),
     ),
     (
         K::NegativeConformance,
@@ -605,6 +659,10 @@ pub(super) static RULES: &[(K, R)] = &[
                 R::Seq(&[R::Kind(K::Path), R::Opt(&R::Kind(K::TypeArgumentList))]),
             ]),
         ]),
+    ),
+    (
+        K::UnsafeConformance,
+        R::Seq(&[R::Kind(K::Unsafe), R::Kind(K::Ty)]),
     ),
     (
         K::TypeArgumentList,
@@ -677,6 +735,7 @@ pub(super) static RULES: &[(K, R)] = &[
     (
         K::TyFunction,
         R::Seq(&[
+            R::Opt(&R::Kind(K::Attribute)),
             R::Opt(&R::Alt(&[
                 R::Kind(K::Mutating),
                 R::Kind(K::Consuming),
@@ -721,7 +780,7 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Kind(K::Some),
             R::Kind(K::Ty),
             R::Rep(&R::Seq(&[R::Kind(K::And), R::Kind(K::Ty)])),
-            R::Opt(&R::Seq(&[R::Kind(K::And), R::Kind(K::NegativeConformance)])),
+            R::Rep(&R::Seq(&[R::Kind(K::And), R::Kind(K::NegativeConformance)])),
         ]),
     ),
     (
@@ -1104,6 +1163,14 @@ pub(super) static RULES: &[(K, R)] = &[
     (
         K::ExprTry,
         R::Seq(&[R::Kind(K::Try), R::Kind(K::Expression)]),
+    ),
+    (
+        K::ExprUnsafe,
+        R::Seq(&[R::Kind(K::Unsafe), R::Kind(K::Expression)]),
+    ),
+    (
+        K::ExprUnsafeBlock,
+        R::Seq(&[R::Kind(K::Unsafe), R::Kind(K::CodeBlock)]),
     ),
     (
         K::ExprClosure,

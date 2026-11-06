@@ -1,10 +1,12 @@
 //! Lowering context — central state during HIR → MIR lowering.
 
 use kestrel_ast_builder::{
-    Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, Subscript,
+    Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, ReceiverKind, Subscript,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
-use kestrel_mir::{FieldIdx, MirModule, MirTy, TyId, VariantIdx, WitnessMethodKey};
+use kestrel_mir::{
+    FieldIdx, MirModule, MirTy, ParamConvention, TyId, VariantIdx, WitnessMethodKey,
+};
 use kestrel_name_res::ExtensionTargetEntity;
 
 use kestrel_ast_builder::qualified_name;
@@ -37,6 +39,14 @@ impl<'w> LowerCtx<'w> {
         });
         module.cloneable_protocol = query.query(kestrel_name_res::ResolveBuiltin {
             builtin: kestrel_hir::Builtin::Cloneable,
+            root,
+        });
+        module.static_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Static,
+            root,
+        });
+        module.sized_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Sized,
             root,
         });
         // Implicit-condition lowering needs both of these at *every* branch
@@ -106,6 +116,23 @@ impl<'w> LowerCtx<'w> {
         Some(FieldIdx::new(idx))
     }
 
+    /// The `NodeKind::Field` member of nominal `owner` named `name` (stored
+    /// or computed).
+    pub fn field_named(&self, owner: Entity, name: &str) -> Option<Entity> {
+        self.world.children_of(owner).iter().copied().find(|&c| {
+            self.world.get::<NodeKind>(c) == Some(&NodeKind::Field)
+                && self.world.get::<Name>(c).is_some_and(|n| n.0 == name)
+        })
+    }
+
+    /// The `FieldIdx` of stored field entity `field` in its owner's lowered
+    /// struct.
+    pub fn field_idx_of(&self, field: Entity) -> Option<FieldIdx> {
+        let owner = self.world.parent_of(field)?;
+        let name = &self.world.get::<Name>(field)?.0;
+        self.resolve_field_idx(owner, name)
+    }
+
     pub fn resolve_field_ty(&self, struct_entity: Entity, field_idx: FieldIdx) -> Option<TyId> {
         let def = self.module.structs.get(&struct_entity)?;
         def.fields.get(field_idx.index()).map(|f| f.ty)
@@ -134,6 +161,9 @@ impl<'w> LowerCtx<'w> {
     /// Uses the entity's Name + Callable param labels to construct a key
     /// that matches the witness table's binding keys.
     pub fn witness_method_key(&self, entity: Entity) -> WitnessMethodKey {
+        if self.world.get::<NodeKind>(entity) == Some(&NodeKind::RefAccessor) {
+            return self.witness_ref_key(entity);
+        }
         let name = self
             .world
             .get::<Name>(entity)
@@ -199,6 +229,22 @@ impl<'w> LowerCtx<'w> {
         WitnessMethodKey::new(format!("{}.set", parent_key.name), parent_key.labels)
     }
 
+    /// Build a WitnessMethodKey for a RefAccessor entity: `"{parent}.ref"` or
+    /// `"{parent}.mutref"`, with the parent's labels, like the setter key.
+    /// Witness tables bind the same keys (witness_lower.rs).
+    pub fn witness_ref_key(&self, accessor: Entity) -> WitnessMethodKey {
+        let parent_key = self
+            .world
+            .parent_of(accessor)
+            .map(|p| self.witness_method_key(p))
+            .unwrap_or_else(|| WitnessMethodKey::simple("unknown"));
+        let mutating = self.world.get::<MutatingAccessor>(accessor).is_some();
+        WitnessMethodKey::new(
+            ref_witness_name(&parent_key.name, mutating),
+            parent_key.labels,
+        )
+    }
+
     /// Find a `NodeKind::Setter` child of a Field or Subscript entity.
     pub fn find_setter_child(&self, parent: Entity) -> Option<Entity> {
         self.world
@@ -217,10 +263,40 @@ impl<'w> LowerCtx<'w> {
         })
     }
 
+    /// The receiver convention a member READ passes to its provider (`get`
+    /// body or `ref` accessor): `MutBorrow` for a `modifying get` /
+    /// `modifying ref` provider, whose receiver is mutable, else `Borrow`.
+    pub fn read_receiver_convention(&self, provider: Entity) -> ParamConvention {
+        let mutating = self
+            .world
+            .get::<Callable>(provider)
+            .and_then(|c| c.receiver.as_ref())
+            .is_some_and(|r| matches!(r, ReceiverKind::Mutating));
+        if mutating {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        }
+    }
+
     /// Consume the context and return the built MIR module.
     pub fn finish(self) -> MirModule {
         self.module
     }
+}
+
+/// The witness slot name of a place requirement's `ref` / `mutating ref`
+/// accessor: `"{member}.ref"` / `"{member}.mutref"`.
+pub fn ref_witness_name(member: &str, mutating: bool) -> String {
+    format!("{member}.{}", if mutating { "mutref" } else { "ref" })
+}
+
+/// The inverse of [`ref_witness_name`]: `(member, mutating)` for a ref
+/// accessor slot name, `None` for any other key.
+pub fn parse_ref_witness_name(name: &str) -> Option<(&str, bool)> {
+    name.strip_suffix(".mutref")
+        .map(|m| (m, true))
+        .or_else(|| name.strip_suffix(".ref").map(|m| (m, false)))
 }
 
 // === IsProtocolMethod query ===

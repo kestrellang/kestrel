@@ -4,11 +4,11 @@ module std.io.write
 
 import std.numeric.(Int64, UInt8)
 import std.result.(Result)
-import std.memory.(ArraySlice, Pointer)
-import std.collections.(Array)
+import std.memory.(UnsafeSlice, Pointer)
+import std.collections.(Array, Slice)
 import std.text.(String)
 import std.core.(Bool)
-import std.io.error.(IoError, brokenPipe)
+import std.io.error.(IoError)
 
 // ============================================================================
 // WRITE PROTOCOL
@@ -26,7 +26,7 @@ import std.io.error.(IoError, brokenPipe)
 /// ```
 /// public struct CountingSink: Writable {
 ///     var written: Int64 = 0
-///     public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
+///     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
 ///         self.written = self.written + buf.count;
 ///         .Ok(buf.count)
 ///     }
@@ -38,7 +38,7 @@ public protocol Writable {
     /// `.Ok(0)` indicates the sink could accept no more right now (full
     /// buffer / would-block); other amounts are partial successes that
     /// the caller may retry.
-    mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError]
+    mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError]
 
     /// Pushes any internally buffered bytes to the underlying destination.
     /// Unbuffered writers may implement this as a no-op. Errors here can
@@ -63,7 +63,7 @@ public struct Sink: Writable {
     public init() {}
 
     /// Returns `.Ok(buf.count)` without storing the bytes.
-    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         .Ok(buf.count)
     }
 
@@ -119,10 +119,10 @@ public struct Buffer: Writable, Cloneable {
     }
 
     /// Appends every byte from `buf`. Always succeeds with `.Ok(buf.count)`.
-    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         var i: Int64 = 0;
         while i < buf.count {
-            self.data.append(buf.pointer.offset(by: i).read());
+            self.data.append(unsafe buf.pointer.offset(by: i).read());
             i = i + 1
         }
         .Ok(buf.count)
@@ -152,10 +152,10 @@ public struct Buffer: Writable, Cloneable {
         self.data.clear()
     }
 
-    /// Returns a non-owning slice view over the buffered bytes. The slice
-    /// dangles once the buffer is mutated again — copy via `toArray` if
-    /// you need to outlive the next write.
-    public func asSlice() -> ArraySlice[UInt8] {
+    /// A read-only slice of the buffered bytes. It borrows the buffer, so
+    /// the compiler keeps it from outliving it; copy via `toArray` to keep
+    /// the bytes.
+    public func asSlice() -> &Slice[UInt8] {
         self.data.asSlice()
     }
 
@@ -184,7 +184,7 @@ public struct Buffer: Writable, Cloneable {
 // ============================================================================
 
 /// Writes every byte in `buf`, looping until the full slice has been
-/// consumed. Returns `.Err(brokenPipe())` if the writer reports `0` bytes
+/// consumed. Returns `.Err(IoError.brokenPipe())` if the writer reports `0` bytes
 /// written before the slice is exhausted (matches Rust's
 /// `WriteAll`/`ErrorKind::WriteZero`).
 ///
@@ -194,13 +194,12 @@ public struct Buffer: Writable, Cloneable {
 /// var file = try File.create("output.bin");
 /// try writeAll(file, from: data.asSlice());
 /// ```
-public func writeAll[W](mutating writer: W, from buf: ArraySlice[UInt8]) -> Result[(), IoError] where W: Writable, W: not Copyable {
+public func writeAll[W](mutating writer: W, from buf: Slice[UInt8]) -> Result[(), IoError] where W: Writable, W: not Copyable {
     var written: Int64 = 0;
     while written < buf.count {
-        let remaining = ArraySlice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
-        let n = try writer.write(from: remaining);
+        let n = try writer.write(from: buf(unchecked: written..));
         if n == 0 {
-            return .Err(brokenPipe())
+            return .Err(IoError.brokenPipe())
         }
         written = written + n
     };
@@ -211,8 +210,7 @@ public func writeAll[W](mutating writer: W, from buf: ArraySlice[UInt8]) -> Resu
 public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), IoError] where W: Writable, W: not Copyable {
     var buf = Array[UInt8](capacity: 1);
     buf.append(byte);
-    let slice = ArraySlice(pointer: buf.asPointer(), count: 1);
-    writeAll(writer, from: slice)
+    writeAll(writer, from: buf.asSlice())
 }
 
 /// Writes the UTF-8 encoding of `s`. Empty strings short-circuit.
@@ -225,7 +223,8 @@ public func writeString[W](mutating writer: W, s: String) -> Result[(), IoError]
     if s.isEmpty {
         return .Ok(())
     }
-    writeAll(writer, from: s.asByteSlice())
+    let bytes = s.asByteSlice();
+    writeAll(writer, from: Slice.lend(start: bytes.pointer, count: bytes.count))
 }
 
 /// Writes `s` followed by a single `\n`. Does not append `\r` on any

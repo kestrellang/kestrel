@@ -12,11 +12,11 @@ struct Bcrypt {
     static func digest(password: Array[UInt8], salt: Array[UInt8], cost: Int64) -> Array[UInt8] {
         // The key is the password plus its NUL terminator, cut at 72 bytes.
         var key: [UInt8] = [];
-        key.append(contentsOf: password.asSlice());
+        key.append(contentsOf: password.asUnsafeSlice());
         key.append(0);
         if key.count > 72 {
             var cut: [UInt8] = [];
-            cut.append(contentsOf: key.asSlice().prefix(72));
+            cut.append(contentsOf: key.asUnsafeSlice().prefix(72));
             key = cut;
         }
 
@@ -43,10 +43,10 @@ struct Bcrypt {
 
         var result: [UInt8] = [];
         for word in text {
-            result.append(contentsOf: word.toBytesBigEndian().asSlice());
+            result.append(contentsOf: word.toBytesBigEndian().asUnsafeSlice());
         }
         var digest: [UInt8] = [];
-        digest.append(contentsOf: result.asSlice().prefix(23));
+        digest.append(contentsOf: result.asUnsafeSlice().prefix(23));
         digest
     }
 
@@ -93,7 +93,7 @@ struct Bcrypt {
             bits = bits + 6;
             if bits >= 8 {
                 bits = bits - 8;
-                if result.count < count { result.append(UInt8(from: (buffer >> bits) & 0xff)); }
+                if result.count < count { result.append(UInt8(truncating: (buffer >> bits) & 0xff)); }
                 buffer = buffer & ((1 << bits) - 1);
             }
         }
@@ -103,9 +103,9 @@ struct Bcrypt {
     static func value(c: UInt8) -> Int64? {
         if c == 0x2e { return 0; }                                           // .
         if c == 0x2f { return 1; }                                           // /
-        if c >= 0x41 and c <= 0x5a { return Int64(from: c - 0x41) + 2; }    // A-Z
-        if c >= 0x61 and c <= 0x7a { return Int64(from: c - 0x61) + 28; }   // a-z
-        if c >= 0x30 and c <= 0x39 { return Int64(from: c - 0x30) + 54; }   // 0-9
+        if c >= 0x41 and c <= 0x5a { return Int64(from: c.subtractWrapping(0x41)) + 2; }    // A-Z
+        if c >= 0x61 and c <= 0x7a { return Int64(from: c.subtractWrapping(0x61)) + 28; }   // a-z
+        if c >= 0x30 and c <= 0x39 { return Int64(from: c.subtractWrapping(0x30)) + 54; }   // 0-9
         return null;
     }
 }
@@ -127,7 +127,7 @@ struct Blowfish {
         let b = self.s(256 + Int64(from: (x >> 16) & 0xff));
         let c = self.s(512 + Int64(from: (x >> 8) & 0xff));
         let d = self.s(768 + Int64(from: x & 0xff));
-        ((a + b) ^ c) + d
+        ((a.addWrapping(b)) ^ c).addWrapping(d)
     }
 
     /// Encrypts one 64-bit block, as two 32-bit halves.

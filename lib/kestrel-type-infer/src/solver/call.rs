@@ -82,8 +82,18 @@ pub(super) fn solve_call(
             // an in-place side effect), capturing the first mismatch. We still
             // run every `coerce` so the param/return types unify regardless —
             // reporting the convention error without a spurious cascade.
+            // A named function's arguments fill the parameters their labels
+            // bind them to; any other callee's fill them in order.
+            let slots = ctx
+                .call_arg_slots
+                .get(&expr)
+                .cloned()
+                .unwrap_or_else(|| (0..args.len()).collect());
             let mut conv_err: Option<InferError> = None;
-            for (index, (arg, param)) in args.iter().zip(params.iter()).enumerate() {
+            for (arg, &index) in args.iter().zip(slots.iter()) {
+                let Some(param) = params.get(index) else {
+                    continue;
+                };
                 let e = reconcile_fn_convention(ctx, arg, *param, &span);
                 if conv_err.is_none() {
                     conv_err = e;
@@ -95,7 +105,7 @@ pub(super) fn solve_call(
             // Ref-aware: a direct callee's Function type carries `ret: &T`
             // (intrinsics like lang.ptr_ref); the result may already be
             // pinned to the pointee by an earlier return-position coerce.
-            bind_call_result(ctx, result, ret, expr, span);
+            bind_call_result(ctx, result, ret, expr, span, true);
             if let Some(err) = conv_err {
                 ctx.report_error(err);
             }
@@ -222,8 +232,14 @@ pub(crate) fn skipped_default_types(
                 return None;
             }
             let default = callable.params.get(slot)?.default_entity?;
-            let hir = qctx.query(kestrel_hir_lower::LowerBody { entity: default, root: ctx.root })?;
-            let typed = qctx.query(crate::InferBody { entity: default, root: ctx.root })?;
+            let hir = qctx.query(kestrel_hir_lower::LowerBody {
+                entity: default,
+                root: ctx.root,
+            })?;
+            let typed = qctx.query(crate::InferBody {
+                entity: default,
+                root: ctx.root,
+            })?;
             let ty = typed.expr_types.get(&hir.tail_expr?)?;
             let default_ty = crate::conformance::resolved_ty_to_hir(ty);
             kestrel_debug::ktrace!(
@@ -253,7 +269,7 @@ pub(super) fn solve_overloaded_call(
         .map(|n| n.0.clone())
         .unwrap_or_else(|| "<overloaded>".into());
 
-    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
 
     // Step 1: filter candidates by label/arity
     let matched: Vec<Entity> = candidates
@@ -327,12 +343,8 @@ pub(crate) fn binding_plan_for(
     args: &[CallArg],
 ) -> Option<Vec<Binding>> {
     let callable = qctx.get::<Callable>(entity)?;
-    let bind_params: Vec<BindParam> = callable
-        .params
-        .iter()
-        .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
-        .collect();
-    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let bind_params: Vec<BindParam> = callable.params.iter().map(BindParam::of).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
     bind_arguments(&bind_params, &arg_labels).ok()
 }
 
@@ -344,7 +356,13 @@ pub(crate) fn binding_plan_for(
 ///   and only ever see owned types);
 /// - a result already pinned to a non-ref (an early Coerce ran before the
 ///   member resolved — `let x: Int = late.peek()`) unifies with the pointee
-///   instead of erroring.
+///   instead of erroring;
+/// - a BINDING keeps the ref when the pointee is unsized (`Slice[T]`):
+///   there is no value to copy out;
+/// - a call ARGUMENT decays (`call_arg_exprs`), unless its param is a ref
+///   (a memberwise init of a ref field): a generic param must not adopt the
+///   pending ref (`m(s(i))`). Only calls and subscripts (`args_decay`) — a
+///   ref-typed stored field read stays the ref it is.
 ///
 /// Consequence: a ref-returning call's recorded type is `&T` in the common
 /// solve order but `T` in the pinned/scrutinee orders — consumers key
@@ -355,8 +373,25 @@ pub(super) fn bind_call_result(
     ret_tv: TyVar,
     expr: kestrel_hir::body::HirExprId,
     span: Span,
+    args_decay: bool,
 ) {
+    ctx.call_return_tvs.insert(expr, ret_tv);
     let rr = ctx.resolve(ret_tv);
+    // A return not known yet (`-> I.Ref` before `I` resolves) may still turn
+    // out a ref: an unannotated binding decides once it does (the deferred
+    // decay). An annotated one (`let a: Int64 = pick()`) must flow its type
+    // into the return now — that is how `T` gets inferred.
+    if matches!(ctx.slot(rr), TySlot::Unresolved { literal: None })
+        && ctx.binding_init_exprs.contains(&expr)
+        && matches!(
+            ctx.slot(ctx.resolve(result)),
+            TySlot::Unresolved { literal: None }
+        )
+        && !ctx.annotated_init_exprs.contains(&expr)
+    {
+        ctx.equal_decayed(ret_tv, result, span);
+        return;
+    }
     if matches!(ctx.slot(rr), TySlot::Resolved(TyKind::Ref { .. })) {
         kestrel_debug::ktrace!(
             "arm-decay",
@@ -374,17 +409,54 @@ pub(super) fn bind_call_result(
             ctx.slot(ctx.resolve(result)),
             TySlot::Resolved(k) if !matches!(k, TyKind::Ref { .. })
         );
+        // An unsized pointee (`let mid = xs(1..<3)`, a `Slice[T]`) has no
+        // value to copy out: the binding keeps the reference. A pointee not
+        // yet resolved (`I.SliceOutput` before `I` is known) decides later:
+        // the deferred decay keeps the ref only if it turns out unsized
+        // (`apply_ref_decay_defaults`).
+        if ctx.binding_init_exprs.contains(&expr) && !pinned_non_ref {
+            match super::pointee_sizedness(ctx, pointee) {
+                None => {
+                    ctx.equal_decayed(ret_tv, result, span);
+                    return;
+                },
+                Some(false) => {
+                    ctx.equal(result, ret_tv, span);
+                    return;
+                },
+                Some(true) => {},
+            }
+        }
         if ctx.scrutinee_exprs.contains(&expr)
             || ctx.binding_init_exprs.contains(&expr)
             || ctx.assign_target_exprs.contains(&expr)
             || ctx.always_decay_exprs.contains(&expr)
+            || (args_decay && ctx.call_arg_exprs.contains(&expr) && !arg_targets_ref(ctx, expr))
             || pinned_non_ref
         {
             ctx.equal(result, pointee, span);
             return;
         }
     }
+    // A bound or passed `Optional[&T]` (a failable read whose receiver
+    // resolved after the binding's own Coerce already merged its var with
+    // `result`): route through Coerce so it still decays to `Optional[T]`
+    // (arm 1b).
+    if super::equality::optional_ref_decay_site(ctx, expr)
+        && super::equality::optional_ref_pointee(ctx, rr).is_some()
+    {
+        ctx.coerce(ret_tv, result, expr, span);
+        return;
+    }
     ctx.equal(result, ret_tv, span);
+}
+
+/// Is the argument `expr` already coerced into a ref-typed param?
+fn arg_targets_ref(ctx: &InferCtx<'_>, expr: kestrel_hir::body::HirExprId) -> bool {
+    ctx.constraints.iter().any(|c| {
+        matches!(c, Constraint::Coerce { expr: e, to, .. } if *e == expr
+            && matches!(ctx.slot(ctx.resolve(*to)), TySlot::Resolved(TyKind::Ref { .. })))
+    })
 }
 
 pub(super) fn emit_resolved_call(
@@ -527,7 +599,9 @@ pub(super) fn emit_resolved_call(
                         ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
                     }
                 }
-                for (param_ty, default_ty) in skipped_default_types(ctx, entity, &plan, &param_hir_tys) {
+                for (param_ty, default_ty) in
+                    skipped_default_types(ctx, entity, &plan, &param_hir_tys)
+                {
                     let param_tv = lower_hir_ty_sub(ctx, &param_ty, None, TyVar(0), &subs);
                     let default_tv = lower_hir_ty_sub(ctx, &default_ty, None, TyVar(0), &subs);
                     ctx.equal(param_tv, default_tv, span.clone());
@@ -569,10 +643,10 @@ pub(super) fn emit_resolved_call(
             let final_ty = wrap_init_call_result(ctx, entity, parent_ty, &subs, &span);
             ctx.equal(result, final_ty, span);
         } else {
-            bind_call_result(ctx, result, ret_tv, expr, span);
+            bind_call_result(ctx, result, ret_tv, expr, span, true);
         }
     } else {
-        bind_call_result(ctx, result, ret_tv, expr, span);
+        bind_call_result(ctx, result, ret_tv, expr, span, true);
     }
 
     SolveResult::Solved

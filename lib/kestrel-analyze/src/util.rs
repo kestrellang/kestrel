@@ -50,6 +50,13 @@ pub fn is_mut_borrow_param(cx: &BodyContext<'_>, local: LocalId) -> bool {
 /// var to the pointee type before the member resolves), and the resolved
 /// callee's `CallableRefReturn` (entity-keyed ground truth).
 pub fn ref_place(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<bool> {
+    // A member with a `mutating ref` accessor (`xs(at: i)`, `box.value`) is a
+    // place like a stored field, not a reference value: its writability
+    // follows its base. Its read type is the `ref` accessor's `&T`, which
+    // would otherwise make `xs(at: 0).x = 1` look like a write through `&T`.
+    if member_has_mutating_ref(cx, expr_id) {
+        return None;
+    }
     if let Some(ResolvedTy::Ref { mutating, .. }) = cx.typed.expr_types.get(&expr_id) {
         return Some(*mutating);
     }
@@ -70,6 +77,59 @@ pub fn ref_place(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<bool> {
             root: cx.root,
         })
         .map(|r| r.mutating)
+}
+
+/// The base a place reaches a STORED REFERENCE field through: `v` for
+/// `v.p` and for the field subscript `v.base(i)`, when `p` / `base` is a
+/// stored instance field of type `&T` / `&mutating T`. `None` otherwise.
+///
+/// A `&mutating` field gives no interior mutability: writing through it is
+/// a write to the holder, so it needs the same mutable base a write to any
+/// other field does (`let v: View` or a borrowing `self` can only read
+/// through `v.p`). Shared by the assignment (E201) and access-mode (E204)
+/// analyzers, which gate a `&mutating` [`ref_place`] /
+/// [`field_subscript_ref`] answer on this base's mutability.
+pub fn stored_ref_field_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<HirExprId> {
+    let (field, base) = match &cx.hir.exprs[expr_id] {
+        HirExpr::Field { base, .. } => (*cx.typed.resolutions.get(&expr_id)?, *base),
+        HirExpr::MethodCall { receiver, .. } => {
+            (*cx.typed.field_subscripts.get(&expr_id)?, *receiver)
+        },
+        _ => return None,
+    };
+    let stored = cx
+        .query
+        .get::<kestrel_ast_builder::FieldClass>(field)
+        .is_some_and(|c| c.is_stored_instance());
+    let ann = cx.query.get::<kestrel_ast_builder::TypeAnnotation>(field)?;
+    (stored && matches!(ann.0, kestrel_ast::AstType::Ref { .. })).then_some(base)
+}
+
+/// A subscript on a stored REFERENCE field (`self.base(i)` with
+/// `let base: &mutating Array[T]`): the place lives in the referent, so its
+/// mutability is the field's reference kind — not the field's `let`/`var`
+/// or its base's. `Some(true)` = through `&mutating`, `Some(false)` = through
+/// shared `&`, `None` = not a field subscript, or the field isn't a ref.
+/// Shared by the assignment (E201/E202/E208) and access-mode (E204/E207)
+/// analyzers, mirroring how a plain `self.base` field read is classified by
+/// [`ref_place`].
+pub fn field_subscript_ref(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<bool> {
+    if !matches!(cx.hir.exprs[expr_id], HirExpr::MethodCall { .. }) {
+        return None;
+    }
+    let field = *cx.typed.field_subscripts.get(&expr_id)?;
+    // Gate the forced lowering on the syntax (see `ast_contains_ref`).
+    let ann = cx.query.get::<kestrel_ast_builder::TypeAnnotation>(field)?;
+    if !matches!(ann.0, kestrel_ast::AstType::Ref { .. }) {
+        return None;
+    }
+    match cx.query.query(kestrel_hir_lower::LowerTypeAnnotation {
+        entity: field,
+        root: cx.root,
+    })? {
+        kestrel_hir::ty::HirTy::Ref { mutating, .. } => Some(mutating),
+        _ => None,
+    }
 }
 
 /// Stage 1.5 accessor places: when `expr` is a member expression (`x(i)`,
@@ -99,6 +159,46 @@ pub fn accessor_place_mut_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> Opti
     if cx.query.has::<kestrel_ast_builder::Static>(member) {
         return None;
     }
+    member_has_write_provider(cx, expr_id).then_some(base)
+}
+
+/// The effectful member a member expression resolves to, if any: failable
+/// (`var first?: T`, `subscript(...)? -> T`) or throwing (`-> T throws E`).
+/// Such a place may not exist (see `kestrel_ast_builder::is_effectful_place`).
+pub fn failable_member(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<kestrel_hecs::Entity> {
+    if !matches!(
+        cx.hir.exprs[expr_id],
+        HirExpr::Field { .. } | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+    ) {
+        return None;
+    }
+    let member = cx.typed.resolutions.get(&expr_id).copied()?;
+    kestrel_ast_builder::is_effectful_place(cx.query, member).then_some(member)
+}
+
+/// Does the member `expr_id` resolves to (a subscript or computed property)
+/// have a `mutating ref` accessor.
+pub fn member_has_mutating_ref(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    if !matches!(
+        cx.hir.exprs[expr_id],
+        HirExpr::Field { .. } | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+    ) {
+        return false;
+    }
+    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
+        return false;
+    };
+    cx.query
+        .query(kestrel_hir_lower::PlaceAccessors { entity: member })
+        .is_some_and(|info| info.mutating_ref_accessor.is_some())
+}
+
+/// Does the member `expr_id` resolves to (a subscript or computed property)
+/// have a WRITE provider: a `mutating ref` accessor or a setter.
+pub fn member_has_write_provider(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
+        return false;
+    };
     let has_mutating_ref = cx
         .query
         .query(kestrel_hir_lower::PlaceAccessors { entity: member })
@@ -108,7 +208,7 @@ pub fn accessor_place_mut_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> Opti
         .children_of(member)
         .iter()
         .any(|&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::Setter));
-    (has_mutating_ref || has_setter_child).then_some(base)
+    has_mutating_ref || has_setter_child
 }
 
 /// Syntactic pre-check: does this annotation mention a reference type

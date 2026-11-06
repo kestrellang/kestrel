@@ -19,10 +19,12 @@ lang/jessup/jessup
 examples/breakout/breakout
 examples/counter/counter
 examples/life/life
+examples/aerie/aerie
 examples/pong/pong
 examples/sdl_pong/pong
 examples/sdl_pong/sdl_pong
 examples/snake/snake
+examples/wgpu_compute/wgpu_compute
 examples/weather/weather
 
 # Cloudflare Wrangler local state
@@ -56,3 +58,5 @@ examples/life/bench/*.a
 examples/life/bench/life_bench_c_O*
 examples/life/bench/life_bench_ks
 target-linux/
+examples/aerie/*.aerie
+examples/aerie/web/out/

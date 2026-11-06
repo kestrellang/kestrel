@@ -1,5 +1,6 @@
 // Float64 - 64-bit floating point (double precision)
-// Generated from float.ks.template - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/float.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 // ============================================================================
 // FLOAT64
@@ -205,9 +206,9 @@ public struct Float64:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.f64` bit pattern. Internal; used
-    /// by intrinsics.
-    init(raw value: lang.f64) {
+    /// Wraps an existing `lang.f64` value. The FFI counterpart of
+    /// `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.f64) {
         self.raw = value
     }
 
@@ -566,7 +567,7 @@ public struct Float64:
 
     /// Real cube root. Defined for negatives — `(-8.0).cbrt() == -2.0`.
     public func cbrt() -> Float64 {
-        Float64(raw: libm_cbrt(self.raw))
+        Float64(raw: unsafe libm_cbrt(self.raw))
     }
 
     /// Hypotenuse — `sqrt(self² + other²)`, computed via libm in a way that
@@ -578,7 +579,7 @@ public struct Float64:
     /// (3.0).hypot(4.0);  // 5.0
     /// ```
     public func hypot(other: Float64) -> Float64 {
-        Float64(raw: libm_hypot(self.raw, other.raw))
+        Float64(raw: unsafe libm_hypot(self.raw, other.raw))
     }
 
     // ========================================================================
@@ -586,14 +587,14 @@ public struct Float64:
     // ========================================================================
 
     /// `e^self` via libm. `(-inf).exp()` is `0.0`; `(inf).exp()` is `inf`.
-    public func exp() -> Float64 { Float64(raw: libm_exp(self.raw)) }
+    public func exp() -> Float64 { Float64(raw: unsafe libm_exp(self.raw)) }
 
     /// `2^self`. Useful for binary scaling.
-    public func exp2() -> Float64 { Float64(raw: libm_exp2(self.raw)) }
+    public func exp2() -> Float64 { Float64(raw: unsafe libm_exp2(self.raw)) }
 
     /// `e^self - 1`, computed without the cancellation that hurts
     /// `self.exp() - 1.0` for small `self`.
-    public func expm1() -> Float64 { Float64(raw: libm_expm1(self.raw)) }
+    public func expm1() -> Float64 { Float64(raw: unsafe libm_expm1(self.raw)) }
 
     /// Natural logarithm. Negatives return NaN; zero returns `-inf`.
     ///
@@ -605,17 +606,17 @@ public struct Float64:
     /// (0.0).ln();           // -inf
     /// (-1.0).ln();          //  nan
     /// ```
-    public func ln() -> Float64 { Float64(raw: libm_log(self.raw)) }
+    public func ln() -> Float64 { Float64(raw: unsafe libm_log(self.raw)) }
 
     /// `ln(1 + self)`, accurate for small `self` where `(1.0 + self).ln()`
     /// would lose digits.
-    public func ln1p() -> Float64 { Float64(raw: libm_log1p(self.raw)) }
+    public func ln1p() -> Float64 { Float64(raw: unsafe libm_log1p(self.raw)) }
 
     /// Base-2 logarithm.
-    public func log2() -> Float64 { Float64(raw: libm_log2(self.raw)) }
+    public func log2() -> Float64 { Float64(raw: unsafe libm_log2(self.raw)) }
 
     /// Base-10 logarithm.
-    public func log10() -> Float64 { Float64(raw: libm_log10(self.raw)) }
+    public func log10() -> Float64 { Float64(raw: unsafe libm_log10(self.raw)) }
 
     /// Logarithm with arbitrary base, computed as `self.ln() / base.ln()`.
     /// Pick `log2` or `log10` directly when you can — they avoid the second
@@ -635,7 +636,7 @@ public struct Float64:
     /// (-2.0).pow(0.5);   // nan
     /// ```
     public func pow(exponent: Float64) -> Float64 {
-        Float64(raw: libm_pow(self.raw, exponent.raw))
+        Float64(raw: unsafe libm_pow(self.raw, exponent.raw))
     }
 
     /// Integer-exponent power via repeated squaring. Faster and more accurate
@@ -669,25 +670,25 @@ public struct Float64:
     // ========================================================================
 
     /// Sine of `self` in radians.
-    public func sin() -> Float64 { Float64(raw: libm_sin(self.raw)) }
+    public func sin() -> Float64 { Float64(raw: unsafe libm_sin(self.raw)) }
 
     /// Cosine of `self` in radians.
-    public func cos() -> Float64 { Float64(raw: libm_cos(self.raw)) }
+    public func cos() -> Float64 { Float64(raw: unsafe libm_cos(self.raw)) }
 
     /// Tangent of `self` in radians. Diverges to ±large near `π/2 + kπ`.
-    public func tan() -> Float64 { Float64(raw: libm_tan(self.raw)) }
+    public func tan() -> Float64 { Float64(raw: unsafe libm_tan(self.raw)) }
 
     /// Arc sine, result in radians on `[-π/2, π/2]`. Returns NaN outside
     /// `[-1.0, 1.0]`.
-    public func asin() -> Float64 { Float64(raw: libm_asin(self.raw)) }
+    public func asin() -> Float64 { Float64(raw: unsafe libm_asin(self.raw)) }
 
     /// Arc cosine, result in radians on `[0, π]`. Returns NaN outside
     /// `[-1.0, 1.0]`.
-    public func acos() -> Float64 { Float64(raw: libm_acos(self.raw)) }
+    public func acos() -> Float64 { Float64(raw: unsafe libm_acos(self.raw)) }
 
     /// Arc tangent, result in radians on `[-π/2, π/2]`. For full-quadrant
     /// recovery use `atan2`.
-    public func atan() -> Float64 { Float64(raw: libm_atan(self.raw)) }
+    public func atan() -> Float64 { Float64(raw: unsafe libm_atan(self.raw)) }
 
     /// Two-argument arctangent — angle of the point `(x, self)` measured
     /// from the positive x-axis, on `[-π, π]`. Disambiguates quadrant where
@@ -701,7 +702,7 @@ public struct Float64:
     /// (-1.0).atan2(-1.0);  // -3π/4  (Q3)
     /// (-1.0).atan2(1.0);   // -π/4   (Q4)
     /// ```
-    public func atan2(x: Float64) -> Float64 { Float64(raw: libm_atan2(self.raw, x.raw)) }
+    public func atan2(x: Float64) -> Float64 { Float64(raw: unsafe libm_atan2(self.raw, x.raw)) }
 
     /// Sine and cosine in one call. Implemented via two libm calls today;
     /// kept for ergonomics and as a future optimisation point.
@@ -720,22 +721,22 @@ public struct Float64:
     // ========================================================================
 
     /// Hyperbolic sine.
-    public func sinh() -> Float64 { Float64(raw: libm_sinh(self.raw)) }
+    public func sinh() -> Float64 { Float64(raw: unsafe libm_sinh(self.raw)) }
 
     /// Hyperbolic cosine.
-    public func cosh() -> Float64 { Float64(raw: libm_cosh(self.raw)) }
+    public func cosh() -> Float64 { Float64(raw: unsafe libm_cosh(self.raw)) }
 
     /// Hyperbolic tangent. Saturates at ±1 for large magnitudes.
-    public func tanh() -> Float64 { Float64(raw: libm_tanh(self.raw)) }
+    public func tanh() -> Float64 { Float64(raw: unsafe libm_tanh(self.raw)) }
 
     /// Inverse hyperbolic sine. Defined on all real inputs.
-    public func asinh() -> Float64 { Float64(raw: libm_asinh(self.raw)) }
+    public func asinh() -> Float64 { Float64(raw: unsafe libm_asinh(self.raw)) }
 
     /// Inverse hyperbolic cosine. Returns NaN for inputs less than `1.0`.
-    public func acosh() -> Float64 { Float64(raw: libm_acosh(self.raw)) }
+    public func acosh() -> Float64 { Float64(raw: unsafe libm_acosh(self.raw)) }
 
     /// Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
-    public func atanh() -> Float64 { Float64(raw: libm_atanh(self.raw)) }
+    public func atanh() -> Float64 { Float64(raw: unsafe libm_atanh(self.raw)) }
 
     // ========================================================================
     // IEEE 754 OPERATIONS
@@ -762,19 +763,19 @@ public struct Float64:
     /// Next representable value greater than `self`. `+inf` and `nan` are
     /// fixed points; the largest finite value steps up to `+inf`.
     public func nextUp() -> Float64 {
-        Float64(raw: libm_nextafter(self.raw, lang.f64_infinity()))
+        Float64(raw: unsafe libm_nextafter(self.raw, lang.f64_infinity()))
     }
 
     /// Next representable value less than `self`. Mirror of `nextUp`.
     public func nextDown() -> Float64 {
-        Float64(raw: libm_nextafter(self.raw, lang.f64_neg(lang.f64_infinity())))
+        Float64(raw: unsafe libm_nextafter(self.raw, lang.f64_neg(lang.f64_infinity())))
     }
 
     /// IEEE 754 remainder — uses round-to-nearest division, not truncation.
     /// Differs from `%`: `(5.0).remainder(dividingBy: 3.0)` is `-1.0`, not
     /// `2.0`.
     public func remainder(dividingBy other: Float64) -> Float64 {
-        Float64(raw: libm_remainder(self.raw, other.raw))
+        Float64(raw: unsafe libm_remainder(self.raw, other.raw))
     }
 
     // ========================================================================
@@ -977,8 +978,8 @@ public struct Float64:
         var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
-            mantissa = bnMulSmall(mantissa, UInt32(from: 10));
-            mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+            mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
+            mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
             hasDigits = true;
             index = index + 1;
             if index < len {
@@ -991,8 +992,8 @@ public struct Float64:
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
-                    mantissa = bnMulSmall(mantissa, UInt32(from: 10));
-                    mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+                    mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
+                    mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
                     fracCount = fracCount + 1;
                     hasDigits = true;
                     index = index + 1;
@@ -1071,13 +1072,13 @@ public struct Float64:
         let parts = floatRoundDecimal(mantissa, k, 52, -1074, 971);
         var rawBits = UInt64.zero;
         if parts.overflow {
-            rawBits = UInt64(from: 2047).shiftLeft(by: 52)
+            rawBits = UInt64(truncating: 2047).shiftLeft(by: 52)
         } else if parts.m == UInt64.zero {
             rawBits = UInt64.zero
-        } else if parts.m >= UInt64(from: 4503599627370496) {
+        } else if parts.m >= UInt64(truncating: 4503599627370496) {
             let rawExp = parts.e + 1075;
-            rawBits = UInt64(from: rawExp).shiftLeft(by: 52)
-                .bitwiseOr(parts.m.bitwiseAnd(UInt64(from: 4503599627370495)))
+            rawBits = UInt64(truncating: rawExp).shiftLeft(by: 52)
+                .bitwiseOr(parts.m.bitwiseAnd(UInt64(truncating: 4503599627370495)))
         } else {
             rawBits = parts.m
         }
@@ -1157,15 +1158,15 @@ public struct Float64:
             // Exact IEEE-754 decomposition of the non-negative `value` into
             // m * 2^e (m an integer significand, e a binary exponent).
             let bits = UInt64(raw: lang.f64_to_bits(value.raw));
-            let rawExp = Int64(from: bits.shiftRight(by: 52).bitwiseAnd(UInt64(from: 2047)));
-            let rawMant = bits.bitwiseAnd(UInt64(from: 4503599627370495));
+            let rawExp = Int64(truncating: bits.shiftRight(by: 52).bitwiseAnd(UInt64(truncating: 2047)));
+            let rawMant = bits.bitwiseAnd(UInt64(truncating: 4503599627370495));
             var m = UInt64.zero;
             var e: Int64 = 0;
             if rawExp == 0 {
                 m = rawMant;
                 e = -1074
             } else {
-                m = rawMant.bitwiseOr(UInt64(from: 4503599627370496));
+                m = rawMant.bitwiseOr(UInt64(truncating: 4503599627370496));
                 e = rawExp - 1075
             }
 

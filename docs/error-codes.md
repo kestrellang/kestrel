@@ -18,13 +18,15 @@ the type checker, and the code is assigned in one place,
 - [E100–E141 — Type checking, names, parameters & literals](#e100e141--type-checking-names-parameters--literals)
 - [E200–E213 — Mutability, access modes & assignment](#e200e213--mutability-access-modes--assignment)
 - [E300–E321 — Patterns & exhaustiveness](#e300e321--patterns--exhaustiveness)
-- [E400, E411–E479 — Declarations, generics & protocol conformance](#e400-e411e479--declarations-generics--protocol-conformance)
+- [E400–E409, E411–E479 — Declarations, generics & protocol conformance](#e400e409-e411e479--declarations-generics--protocol-conformance)
 - [E480–E499 — References & escape checking](#e480e499--references--escape-checking)
 - [E500–E509 — Moves & ownership](#e500e509--moves--ownership)
 - [E600–E614, E623 — Closures, externs & declaration shape](#e600e614-e623--closures-externs--declaration-shape)
 - [E615–E618 — Entry point](#e615e618--entry-point)
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
 - [E624–E626 — Closure kinds](#e624e626--closure-kinds)
+- [E641–E646 — `unsafe`](#e641e646--unsafe)
+- [E647 — C callbacks](#e647--c-callbacks)
 - [E700–E710 — String & character literals, escapes, format specs](#e700e710--string--character-literals-escapes-format-specs)
 - [E800–E811 — Syntax](#e800e811--syntax)
 - [E900–E999 — Attributes & derives](#e900e999--attributes--derives)
@@ -61,9 +63,9 @@ the type checker, and the code is assigned in one place,
 | E107 | does not conform to protocol | A type does not satisfy a required conformance or where clause. |
 | E108 | implicit 'it' parameter requires single-parameter context | `it` was used where the closure's expected type does not take exactly one parameter. |
 | E109 | type mismatch | The value's type is not the one the context requires (also: a mutating closure where a non-mutating one is expected). |
-| E113 | wrong number of arguments / wrong label / no matching overload | The call's shape (arity, argument labels, type-argument count) fits no declaration. |
+| E113 | wrong number of arguments / wrong label / no matching overload / ambiguous trailing closure | The call's shape (arity, argument labels, type-argument count) fits no declaration, or a trailing closure could fill more than one closure-typed parameter. |
 | E114 | literal not accepted | The literal's kind cannot be written as the expected type. |
-| E115 | member '{name}' is not accessible | Visibility forbids the access from this scope. |
+| E115 | member '{name}' is not accessible / '{name}' can only be used through its syntax | Visibility forbids the access from this scope, or the member is (or implements) a `@sugarOnly` requirement named outside its protocol's module. |
 | E116 | wrong kind of member use | A static member used on an instance, an instance method on a type, a type parameter as a value, or a method not called. |
 | E117 | infinite type | Unification would build a recursive type. |
 | E118 | opaque return type error | A circular `some P` return, or a `some P` that hides a non-`Copyable` type. |
@@ -88,7 +90,7 @@ the type checker, and the code is assigned in one place,
 | E137 | undeclared variable '{name}' | An assignment target names no binding in scope. |
 | E138 | 'Self' is not valid in this scope | `Self` in a type position outside any type scope. |
 | E139 | '{name}' is not a type | A type annotation names a value or module. |
-| E140 | negative bound on an opaque type must be 'Copyable' | `some P and not Q` only supports `not Copyable`. |
+| E140 | negative bound on an opaque type must be 'Copyable' or 'Static' | `some P and not Q` only supports `not Copyable` and `not Static`. |
 | E141 | {name} is not defined | A type operator's lang item (`Optional`, `Result`, …) or the default existential box (`DefaultBox`, for plain `any P`) is missing; is the standard library imported? |
 | E142 *(warning)* | implicit parameter 'it' shadows the 'it' of an enclosing closure | A closure written without a parameter list uses `it` inside another such closure; the inner `it` is the inner closure's own parameter. Name one of the parameters to make the intent explicit. |
 | E143 *(warning)* | implicit parameter 'it' shadows the outer binding 'it' | A closure's implicit `it` hides an outer `let it` or parameter named `it`; the closure uses its own parameter, never the outer binding. |
@@ -103,6 +105,7 @@ the type checker, and the code is assigned in one place,
 | E152 | 'is' needs an existential on the left: '{T}' {is known at compile time / is a generic parameter} | `x is T` (and `as?`, `is` patterns) only test an existential's payload. A concrete type's answer is static; a generic parameter is rejected for now. |
 | E153 | an 'is' pattern binds a borrow of the payload, so it cannot be 'var' | `var c is Circle`: the binding refers to the payload in place. |
 | E154 | '{type}' in an 'any' bound is not a protocol | Every bound of `any` must be a protocol. |
+| E156 | a slice cannot be assigned as a whole | The target of an assignment is unsized (`xs(1..<3) = ys`, a `Slice[T]` place), as in Rust. Copy into it with `xs(1..<3).assign(from: ys)` (lengths must match) or resize with `replaceSubrange`. |
 | E157 | \`?.\` requires a type that conforms to \`OptionalChain\`, found '{T}' | `a?.b` on a value with no payload to chain on (not an `Optional`, a `Result`, or another `OptionalChain` type). Use `.` for a non-optional value. Emitted by type inference. |
 | E158 | can't consume through \`?.\` on a place | A chain on a variable or field lends its payload by reference, so a `consuming` method or argument can't take it. Move the value out first: `a.take()?.…`. Emitted by the `optional_chain` analyzer. |
 
@@ -136,7 +139,8 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E208 | cannot assign through a shared reference | Writing through `&T` is not allowed; take `&mutating` instead. |
 | E209 | a ref binding must be a simple \`let\` | A borrow initializer (`let r = &x`) can't be combined with `var` or a destructuring pattern. |
 | E210 | cannot take a \`&mutating\` borrow of immutable variable '{name}' | Mutable borrows need a mutable place (`var`, mutable field, or `Pointer.mutatingValue`). |
-| E211 | \`&\` pattern bindings are not supported in this position | `&` patterns are only allowed in match-arm patterns, not in `let`/`for`/conditions/params. |
+| E211 | *(retired)* | Was "\`&\` pattern bindings are not supported in this position". `&` binders are now allowed in every pattern position; a `let` destructure of a temporary is rejected as E499 instead. |
+| E214 | cannot assign to failable/throwing place '{name}' | A failable (`var first?: T`, `subscript(...)? -> T`) or throwing (`-> T throws E`) property or subscript can't be assigned: the place may not exist. Write through its `mutating ref` with a `&mutating` payload binder. |
 | E213 | left-hand side of compound assignment is not assignable | `a op= b` needs a place (variable, field, subscript) on the left. |
 | E212 | *(retired)* | Was "closure cannot capture non-Static binding '{name}'". Retired with closure kinds (docs/design/closures.md): a view-kind closure's environment is frame-bound, so it may capture ref bindings and non-`Static` values freely. The owning tier keeps the rejection under E624. |
 
@@ -177,7 +181,7 @@ func unwrap(opt: Int64?) -> Int64 {
 }
 ```
 
-## E400, E411–E479 — Declarations, generics & protocol conformance
+## E400–E409, E411–E479 — Declarations, generics & protocol conformance
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -186,6 +190,11 @@ func unwrap(opt: Int64?) -> Int64 {
 | E402 | '{B}' cannot box an existential: {reason} | `any[B] P` names a box that cannot hold a raw existential. `B` needs exactly one type parameter declared `not Sized`, a conformance to `ExistentialBox`, and no stored field holding `T` by value. Reasons: `it must have exactly one type parameter`, `its type parameter is not declared 'not Sized'`, `it does not conform to 'ExistentialBox'`, `field '{f}' stores '{T}' by value`. |
 | E403 | '{T}' may be unsized here ('where {T}: not Sized'), so it can only be used behind a pointer or as the last stored field | A `not Sized` type parameter used by value in a signature or a non-tail field. Move by-value members into an extension `where T: Sized`. |
 | E404 | the box in 'any[...]' is written without type arguments: '{suggestion}' / must name a box type | `any[B] P` takes the box unapplied (`any[RcBox] P`, not `any[RcBox[T]] P`), and it must be a type name. Emitted by HIR lowering. |
+| E405 | property '{name}' must lend a reference (\`ref\` / \`mutating ref\`) to satisfy protocol '{proto}' | The protocol requires `{ ref }` or `{ ref mutating ref }`, and the witness is a computed property without that accessor (a `get` returns a copy, not the place). Declare the ref accessor, or make the property stored. |
+| E406 | indirect enums require the standard library | Boxing a recursive case uses `std.memory.OwnedBox`, which `--no-std` programs lack. |
+| E407 | indirect enum '{name}' contains itself with different type arguments | Polymorphic recursion (`case Nest(Nested[Array[T]])` in `Nested[T]`): every level would need a new instantiation. |
+| E408 | opaque return type of '{name}' contains itself | Functions whose `some P` bodies wrap each other's opaque returns (`g` returns `W(inner: h())`, `h` returns `W(inner: g())`) describe an infinite type. |
+| E409 | `indirect` has no effect: enum '{name}' has no recursive case | *(warning)* An `indirect enum` none of whose cases contains the enum boxes nothing. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |
@@ -203,7 +212,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E426 | duplicate {kind} signature: {signature} | Two functions/inits/subscripts have identical signatures — overloads must differ. |
 | E427 | duplicate enum case '{case_name}' | The same case name is declared twice in one enum. |
 | E428 | duplicate label '{label}' in case '{case_name}' | An enum case payload uses the same label twice. |
-| E429 | enum '{name}' is recursive without 'indirect' | A case payload contains the enum itself; recursion needs `indirect` (heap boxing). |
+| E429 | recursive enum requires `indirect` | A case payload contains the enum itself by value (directly, or through a tuple, struct field or `Optional`); mark the enum `indirect` to box its recursive cases. |
 | E430 | return type of '{name}' is less visible than the function | A `public` function can't expose a non-public type in its return. |
 | E431 | parameter type in '{name}' is less visible than the function | A `public` function can't take a non-public parameter type. |
 | E432 | aliased type in '{name}' is less visible than the type alias | A `public` alias can't point at a non-public type. |
@@ -239,7 +248,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E462 | conflicting associated type '{name}' inherited by protocol '{proto}' | Two inherited protocols declare incompatible versions of the same associated type. |
 | E463 | method '{name}' is ambiguous: satisfies requirements of multiple protocols ({list}) | One method would witness several unrelated protocols; implement each conformance in its own `extend Type: Protocol` block. |
 | E464 | init has wrong effect for protocol '{proto}' | A witness `init`'s failability/throwing effect doesn't match the protocol requirement. |
-| E465 | indirect enums are not yet supported | `indirect` is recognized but not implemented in this version. |
+| E465 | *(retired in 0.19)* | Was "indirect enums are not yet supported"; `indirect enum` is implemented. The ID stays reserved. |
 | E466 | 'some' (opaque type) is not allowed in a field type | Opaque `some P` types can only appear in return position. |
 | E467 | method '{name}' shadows the stored field '{name}' of '{type}' | A zero-arg extension method with a stored field's name would recurse instead of reading the field. |
 | E469 | parameter '{param}' of method '{name}' has the wrong convention for protocol '{proto}' | A witness parameter's convention (`consuming`/`mutating`/plain) must match the requirement's exactly, like the receiver (E477). |
@@ -247,7 +256,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E474 | duplicate definition of {kind} '{name}' | Two declarations of the same kind share a name in the same scope. |
 | E475 | '{name}' is already defined as a {original_kind} | A name is reused by a declaration of a different kind (e.g. struct vs func). |
 | E476 | cannot find type '{name}' in this scope | A type annotation names a type that doesn't resolve. (Also emitted by HIR lowering for the same condition.) |
-| E477 | method '{name}' has wrong receiver kind for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) must match the requirement's exactly — a plain method no longer satisfies a `mutating` or `consuming` requirement. |
+| E477 | method '{name}' has wrong receiver kind for protocol '{proto}' · '{name}' satisfies a \`{ get }\` requirement with a \`modifying\` accessor for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) must match the requirement's exactly — a plain method no longer satisfies a `mutating` or `consuming` requirement, and a property whose read mutates `self` can't satisfy a `{ get }` requirement. |
 | E478 | 'static' is redundant here | Global (module-level) properties are already static. |
 | E479 | associated type '{name}' in where clause is ambiguous: '{type}' is bound by {protocols}, which each declare '{name}' | An equality clause `T.X = Y` where two or more protocols bound on `T` in the same clause each declare `X`. A where-clause path has no protocol-qualified form, so the clause is ignored. |
 
@@ -264,9 +273,14 @@ extend Box { func show() -> String { "b" } }  // error[E412]: duplicate method '
 ### Example — E429 (recursive enum)
 
 ```kestrel
-enum Tree {
+enum Tree {             // error[E429]: recursive enum requires `indirect`
     case leaf(Int64)
-    case node(Tree, Tree)  // error[E429]: enum 'Tree' is recursive without 'indirect'
+    case node(Tree, Tree)
+}
+
+indirect enum Tree2 {   // OK: `node` is stored behind a box
+    case leaf(Int64)
+    case node(Tree2, Tree2)
 }
 ```
 
@@ -298,7 +312,7 @@ protocol/extension-target arguments, where-clause types).
 
 | Code | Message | Explanation |
 |---|---|---|
-| E480 | parameters are not reference-typed; spell the convention instead | **Permanent.** `x: T` borrows and `mutating x: T` mutably borrows — conventions are the only spelling. Covers function-type and closure parameters too. |
+| E480 | a reference-typed parameter must be written `x: &T` or `x: &mutating T` | `x: &T` borrows like `x: T`, `x: &mutating T` mutably borrows like `mutating x: T` (also in function types and closure params). Rejected when combined with a `mutating`/`consuming` keyword or written through a type alias. |
 | E481 | reference return types are not supported yet | Legal since stage 1; the code is retained for the positions still rejected. |
 | E482 | references cannot be stored in bindings | A `var`/`let` annotation may not be `&T`. An aggregate that *wraps* a reference is legal. |
 | E483 | references cannot be stored in fields | Struct/enum fields, including enum case payloads (payloads classify as Field, not Param). Legal since 2b except from STRICT entries. |
@@ -309,7 +323,7 @@ protocol/extension-target arguments, where-clause types).
 | E489 | reference types cannot be used here | The catch-all position — alias RHS, where-clause types, protocol bounds. |
 | E488 | a borrow expression is only allowed as a \`let\` initializer | `&x` is not a free-standing expression; parameters already borrow by signature. |
 | E490 | a throwing function cannot return a reference | `throws` wraps the return in `Result`, and a reference can't live in an enum payload. |
-| E491 | a reference-returning function cannot be used as a value | `-> &T` is a return convention, not part of a function type; call it instead of storing it. |
+| E491 | a reference-returning function cannot be used as a value | `-> &T` is a return convention, not part of a function type; call it instead of storing it. A function type may take refs (`xs.refs().map { … }`); only returning one is rejected. |
 | E492 | a reference cannot be a generic type argument | That would store the reference; bind the value first to store an owned copy. |
 | E493 | ambiguous borrow source for the returned reference | The compiler can't tell which parameter the returned `&T` borrows from. |
 | E494 | cannot return this reference/closure: it borrows local '{name}', which does not outlive the call | A reference (or a closure/value carrying one) rooted in a local would dangle after return. |
@@ -317,7 +331,7 @@ protocol/extension-target arguments, where-clause types).
 | E496 | cannot return a reference rooted at consuming parameter '{name}': it is destroyed when the call returns | Consuming parameters die with the call, so references into them can't escape. |
 | E497 | a reference cannot stay live across a control-flow merge in this version | A reference may not cross an `if`/`match`/loop boundary (current-version limitation). |
 | E498 | cannot consume {value} while a reference into it is live | Destroying or moving a value would leave an outstanding reference dangling. |
-| E499 | cannot borrow a temporary value | `&` needs a named place; temporaries and get/set members have no stable storage to borrow. |
+| E499 | cannot borrow a temporary value · \`&\` pattern binding would borrow a temporary | `&` needs a named place; temporaries and get/set members have no stable storage to borrow. A `let` destructure with `&` binders must destructure a named place. |
 
 ### Example — E494 (escaping reference)
 
@@ -439,7 +453,7 @@ func outlives() -> Int64 {
 | E608 | subscript must have a body | Subscript declarations outside protocols need an implementation. |
 | E609 | @extern functions cannot be generic | Generic functions have no stable ABI to export. |
 | E610 | @extern functions cannot have a body | Extern functions are implemented in external code. |
-| E611 | @extern function parameter '{name}' must use consuming access mode | Extern functions receive values, not references. |
+| E611 | @{extern\|export} function parameter '{name}' must be passed by value (consuming) or by reference (&T) | `mutating x: T` on an `@extern` or `@export` function. C takes `x: T` by value; write `x: &mutating T` for a `T*`. |
 | E612 | '@extern' needs a calling convention: '@extern(.C)' | Reported by attribute validation (the registry's missing-argument check, keeping its pre-registry code). |
 | E613 | required parameter '{name}' cannot follow parameter '{default_name}' which has a default value | Defaulted parameters must come last. |
 | E614 | default value cannot reference parameter '{name}' | Defaults are evaluated at each call site and can't see other parameters. |
@@ -497,17 +511,23 @@ func other() -> String {  // error[E616]: String does not conform to Exitable
 // an executable build with no `@main` at all    → error[E618]
 ```
 
-## E619–E622 — Place accessors
+## E619–E622, E636–E639 — Accessors, observers and `lazy`
 
-These govern `get` / `set` / `ref` / `mutating ref` accessor blocks on
-computed members.
+These govern `get` / `modifying get` / `set` / `ref` / `modifying ref` /
+`mutating ref` accessor blocks, `willSet` / `didSet` observers, failable
+members and `lazy` properties.
 
 | Code | Message | Explanation |
 |---|---|---|
-| E619 | duplicate read provider: this member declares both \`get\` and \`ref\` | Reads need exactly one provider — keep `get` or `ref`, not both. |
+| E619 | duplicate read provider: this member declares more than one of \`get\`, \`modifying get\`, \`ref\` and \`modifying ref\` | Reads need exactly one provider. |
 | E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. |
-| E621 | \`ref\` accessors are not allowed in protocols or protocol extensions | Declare `ref` accessors on concrete types only. |
-| E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a `get` or `ref`; add a read provider. |
+| E621 | a protocol requires \`ref\` / \`mutating ref\` with bodyless clauses, and only a protocol extension gives their bodies; \`modifying\` accessors are not allowed in either | A protocol requires a place with bodyless clauses (`var value: T { ref mutating ref }`), and a protocol extension may give default bodies (`extend P { var value: T { ref { … } } }`). A body in the protocol itself, a bodyless clause in an extension, and `modifying` accessors are rejected. |
+| E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a read provider; add one. |
+| E636 | \`modifying\` accessors need an instance receiver | A static member or global has no `self` to modify; use a plain `get` / `ref`. |
+| E637 | a failable/throwing member needs a read accessor · a failable/throwing place cannot have a \`set\` accessor | A failable member (`var x?: T`, `subscript(...)? -> T`) reads as `Optional`, a throwing one (`-> T throws E` with accessors) as `Result`; neither can be assigned. Write through it with a `mutating ref` (`Optional[&mutating T]` / `Result[&mutating T, E]`) and a `&mutating` payload binder. |
+| E638 | (varies) | `willSet` / `didSet` on anything but an instance stored `var` of a struct or enum: a `let`, static or global property, a subscript, a failable member, a protocol member, or mixed with `get`/`set`/`ref`. Also `return` in an observer body, which would skip the store. |
+| E639 | (varies) | `lazy` on anything but an instance `var` of a struct or enum with a type annotation and an `= expr` initializer and no accessors; also a `lazy` property whose type isn't Copyable. |
+| E640 | a \`ref\` accessor needs a body outside a protocol | A bodyless `ref` / `mutating ref` only declares a protocol requirement. Write `ref { … }`, or drop the accessor block for a stored property. |
 
 ## E624–E626 — Closure kinds
 
@@ -550,6 +570,29 @@ func each(action: mutating (Int64) -> ()) { }
 
 func eachOk(mutating action: mutating (Int64) -> ()) { }   // ok
 ```
+
+## E641–E646 — `unsafe`
+
+See [language/unsafe.md](language/unsafe.md). An unsafe context is the operand of `unsafe expr` or the body of `unsafe { … }`; the body of an `unsafe func` is not one.
+
+| Code | Message | Explanation |
+|---|---|---|
+| E641 | [extern function ]'{name}' is unsafe and requires an \`unsafe\` expression or block | A use (call, property read, initializer, subscript, or naming it as a value) of an `unsafe` declaration, a pointer-access `lang` intrinsic, or an `@extern` function, outside an unsafe context. |
+| E641 | calling a C function value is unsafe and requires an \`unsafe\` expression or block | A call through a value of C function type (`@extern(.C) (…) -> …`) outside an unsafe context: nothing checks that its address is a live C function of that type. |
+| E642 | unnecessary \`unsafe\`: it covers no unsafe operation | **Warning.** The region contains no unsafe use. A use marks only the innermost `unsafe` around it, so an `unsafe` wrapping another one is reported too. |
+| E643 | '{name}' is unsafe, but the requirement it satisfies in protocol '{proto}' is not | Generic code calls the requirement without `unsafe`, so its witness can't need it. Mark the requirement `unsafe` or make the witness safe. |
+| E644 | '{proto}' is an unsafe protocol; write the conformance as \`unsafe {proto}\` | Conforming to an `unsafe protocol` vouches for its contract (e.g. `ArrayMatchable`'s in-bounds indices), so it is written `T: unsafe P`. |
+| E645 | '{proto}' is not an unsafe protocol; \`unsafe\` here has no effect | **Warning.** `unsafe P` on a safe protocol. |
+| E646 | only a computed property can be \`unsafe\` | `unsafe` on a stored field. Unsafe fields aren't supported; keep the field private and expose an `unsafe` computed property. |
+
+## E647 — C callbacks
+
+See [language/functions.md](language/functions.md#callbacks).
+
+| Code | Message | Explanation |
+|---|---|---|
+| E647 | '{name}' has no C entry point; a C function type needs a function declared '@export(.C)' or '@extern(.C)' | A C function type `@extern(.C) (…) -> …` holds a C address, so only a function with a C entry point can be named as one. Mark the function `@export(.C)`. (A closure literal has no address at all; that is E624.) |
+| E647 | 'NullableCFunction' needs a C function type '@extern(.C) (…) -> …' | `NullableCFunction[F]` holds a C function pointer, so `F` must be a C function type. |
 
 ## E700–E710 — String & character literals, escapes, format specs
 

@@ -615,7 +615,7 @@ impl ThunkBuilder {
 /// For every box over a raw existential the module mentions
 /// (`B[rawany P]`), a witness of each protocol `Q` in the bounds' refinement
 /// closure whose self-conformance holds: each requirement forwards to the
-/// payload — peel the box (`pointeeRef`, or `pointeeMutRef` for `mutating`)
+/// payload — peel the box (`value`'s `ref`, or `mutating ref` for `mutating`)
 /// and call through the table. This is what lets a generic `T: P` (and
 /// operators / `for-in`) take an existential with `T = any P`.
 pub(crate) fn lower_self_conformance_witnesses(ctx: &mut LowerCtx) {
@@ -784,20 +784,19 @@ fn forwarder(
     if receiver == ParamConvention::Consuming {
         return None;
     }
-    let accessor = if receiver == ParamConvention::MutBorrow {
-        kestrel_hir::Builtin::MutableIndirectionPointeeMutRef
-    } else {
-        kestrel_hir::Builtin::IndirectionPointeeRef
-    };
-    // The box's witness of the tagged accessor — exactly one, never the first
-    // member spelled alike.
-    let accessor = ctx.query.query(kestrel_name_res::ResolveBuiltin {
-        builtin: accessor,
-        root: ctx.root,
-    })?;
-    let [peel] = ctx.witness_candidates(boxed, accessor)[..] else {
-        return None;
-    };
+    // The box's own `value` accessor (every stdlib box declares `ref` /
+    // `mutating ref`): `mutating ref` for a `mutating` requirement.
+    let place = ctx
+        .query
+        .query(kestrel_name_res::TypeMembersByName {
+            type_entity: boxed,
+            name: kestrel_hir::INDIRECTION_PLACE.to_string(),
+            context: boxed,
+            root: ctx.root,
+        })
+        .first()?
+        .entity;
+    let peel = ctx.find_ref_accessor_child(place, receiver == ParamConvention::MutBorrow)?;
     let raw = match ctx.module.ty_arena.get(box_ty) {
         MirTy::Named { type_args, .. } => *type_args.first()?,
         _ => return None,

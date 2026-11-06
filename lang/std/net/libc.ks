@@ -37,7 +37,7 @@ public func IPPROTO_TCP() -> Int32 { 6 }
 @extern(.C, mangleName: "__error")
 func __errno_ptr() -> Pointer[Int32]
 
-@platform(.Linux)
+@platform(.Linux, .Emscripten)
 @extern(.C, mangleName: "__errno_location")
 func __errno_ptr() -> Pointer[Int32]
 
@@ -54,7 +54,7 @@ func __errno_ptr() -> Pointer[Int32]
 public func SOL_SOCKET() -> Int32 { 0xFFFF }
 
 /// Linux-specific definition of `SOL_SOCKET` (`1`).
-@platform(.Linux)
+@platform(.Linux, .Emscripten)
 public func SOL_SOCKET() -> Int32 { 1 }
 
 /// `SO_REUSEADDR` — allow rebinding to an address still in `TIME_WAIT`.
@@ -67,7 +67,7 @@ public func SOL_SOCKET() -> Int32 { 1 }
 public func SO_REUSEADDR() -> Int32 { 0x0004 }
 
 /// Linux-specific definition of `SO_REUSEADDR` (`2`).
-@platform(.Linux)
+@platform(.Linux, .Emscripten)
 public func SO_REUSEADDR() -> Int32 { 2 }
 
 /// `TCP_NODELAY` — disable Nagle's algorithm on a TCP socket.
@@ -148,7 +148,7 @@ func libc_freeaddrinfo(res: RawPointer)
 /// if fd < 0 { /* errno() */ }
 /// ```
 public func socket(domain: Int32, type_: Int32, proto: Int32) -> Int32 {
-    libc_socket(domain, type_, proto)
+    unsafe libc_socket(domain, type_, proto)
 }
 
 /// Wraps `bind(2)` — assigns a local address to `sockfd`.
@@ -157,7 +157,7 @@ public func socket(domain: Int32, type_: Int32, proto: Int32) -> Int32 {
 /// appropriate layout) of length `addrlen`. Returns `0` on success,
 /// `-1` on error.
 public func bind(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int32 {
-    libc_bind(sockfd, addr.asRaw(), addrlen)
+    unsafe libc_bind(sockfd, addr.asRaw(), addrlen)
 }
 
 /// Wraps `listen(2)` — marks `sockfd` as accepting incoming connections.
@@ -166,7 +166,7 @@ public func bind(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int32 {
 /// connection queue; once full, further connect attempts are
 /// refused. Returns `0` on success, `-1` on error.
 public func listen(sockfd: Int32, backlog: Int32) -> Int32 {
-    libc_listen(sockfd, backlog)
+    unsafe libc_listen(sockfd, backlog)
 }
 
 /// Wraps `accept(2)` — pulls the next connection off `sockfd`'s queue.
@@ -175,7 +175,7 @@ public func listen(sockfd: Int32, backlog: Int32) -> Int32 {
 /// on success, `-1` on error. Pass null pointers for `addr` and
 /// `addrlen` if you don't need the client's address.
 public func accept(sockfd: Int32, addr: Pointer[UInt8], addrlen: Pointer[Int32]) -> Int32 {
-    libc_accept(sockfd, addr.asRaw(), addrlen.asRaw())
+    unsafe libc_accept(sockfd, addr.asRaw(), addrlen.asRaw())
 }
 
 /// Wraps `recv(2)` — reads up to `len` bytes from `sockfd` into `buf`.
@@ -184,7 +184,7 @@ public func accept(sockfd: Int32, addr: Pointer[UInt8], addrlen: Pointer[Int32])
 /// `0` on orderly shutdown by the peer, or `-1` on error. `flags`
 /// is a bitmask of `MSG_*` modifiers (`0` for the default).
 public func recv(sockfd: Int32, buf: Pointer[UInt8], len: Int64, flags: Int32) -> Int64 {
-    libc_recv(sockfd, buf.asRaw(), len, flags)
+    unsafe libc_recv(sockfd, buf.asRaw(), len, flags)
 }
 
 /// Wraps `send(2)` — writes up to `len` bytes from `buf` to `sockfd`.
@@ -193,7 +193,7 @@ public func recv(sockfd: Int32, buf: Pointer[UInt8], len: Int64, flags: Int32) -
 /// caller must loop until the buffer is drained. Returns the byte
 /// count on success or `-1` on error.
 public func send(sockfd: Int32, buf: Pointer[UInt8], len: Int64, flags: Int32) -> Int64 {
-    libc_send(sockfd, buf.asRaw(), len, flags)
+    unsafe libc_send(sockfd, buf.asRaw(), len, flags)
 }
 
 /// Wraps `close(2)` — releases a file descriptor.
@@ -202,7 +202,7 @@ public func send(sockfd: Int32, buf: Pointer[UInt8], len: Int64, flags: Int32) -
 /// success, `-1` on error. After `close`, `fd` becomes available for
 /// reuse by the kernel — do not use the value again.
 public func close(fd: Int32) -> Int32 {
-    libc_close(fd)
+    unsafe libc_close(fd)
 }
 
 /// Wraps `setsockopt(2)` — configures one option on `sockfd`.
@@ -212,7 +212,7 @@ public func close(fd: Int32) -> Int32 {
 /// `optlen` describe the value. Returns `0` on success, `-1` on
 /// error.
 public func setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: Pointer[UInt8], optlen: Int32) -> Int32 {
-    libc_setsockopt(sockfd, level, optname, optval.asRaw(), optlen)
+    unsafe libc_setsockopt(sockfd, level, optname, optval.asRaw(), optlen)
 }
 
 /// Wraps `htons(3)` — host-to-network byte order for 16-bit values.
@@ -221,7 +221,7 @@ public func setsockopt(sockfd: Int32, level: Int32, optname: Int32, optval: Poin
 /// hosts it is the identity. Use to convert a port number before
 /// writing it into a `sockaddr_in.sin_port` field.
 public func htons(hostshort: UInt16) -> UInt16 {
-    libc_htons(hostshort)
+    unsafe libc_htons(hostshort)
 }
 
 /// Wraps `connect(2)` — initiates a connection on `sockfd` to the address at `addr`.
@@ -229,7 +229,7 @@ public func htons(hostshort: UInt16) -> UInt16 {
 /// Blocks until the handshake completes (for connection-oriented
 /// sockets). Returns `0` on success, `-1` on error.
 public func connect(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int32 {
-    libc_connect(sockfd, addr.asRaw(), addrlen)
+    unsafe libc_connect(sockfd, addr.asRaw(), addrlen)
 }
 
 /// Wraps `getaddrinfo(3)` — DNS / service-name resolution.
@@ -255,7 +255,7 @@ public func connect(sockfd: Int32, addr: Pointer[UInt8], addrlen: Int32) -> Int3
 ///   offset 40: ai_next     (ptr)
 /// ```
 public func getaddrinfo(node: Pointer[UInt8], service: Pointer[UInt8], hints: Pointer[UInt8], res: Pointer[Pointer[UInt8]]) -> Int32 {
-    libc_getaddrinfo(node.asRaw(), service.asRaw(), hints.asRaw(), res.asRaw())
+    unsafe libc_getaddrinfo(node.asRaw(), service.asRaw(), hints.asRaw(), res.asRaw())
 }
 
 /// Wraps `freeaddrinfo(3)` — frees the linked list returned by `getaddrinfo`.
@@ -265,7 +265,7 @@ public func getaddrinfo(node: Pointer[UInt8], service: Pointer[UInt8], hints: Po
 /// Always pair every successful `getaddrinfo` with one
 /// `freeaddrinfo` to avoid leaking the resolver's allocation.
 public func freeaddrinfo(res: Pointer[UInt8]) {
-    libc_freeaddrinfo(res.asRaw())
+    unsafe libc_freeaddrinfo(res.asRaw())
 }
 
 /// Returns the current value of `errno` for the calling thread.
@@ -275,5 +275,5 @@ public func freeaddrinfo(res: Pointer[UInt8]) {
 /// it. Implementation forwards to the platform-specific accessor:
 /// `__error` on darwin, `__errno_location` on linux.
 public func errno() -> Int32 {
-    __errno_ptr().read()
+    unsafe __errno_ptr().read()
 }

@@ -15,7 +15,7 @@ public struct SHA224: Digest {
         ]);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         self.core.update(bytes);
     }
 
@@ -41,7 +41,7 @@ public struct SHA384: Digest {
         ]);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         self.core.update(bytes);
     }
 
@@ -68,7 +68,7 @@ public struct SHA512_256: Digest {
         ]);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         self.core.update(bytes);
     }
 
@@ -80,6 +80,6 @@ public struct SHA512_256: Digest {
 /// The first `count` bytes of a full-width digest.
 func truncated(full: DigestOutput, count: Int64) -> DigestOutput {
     var result: [UInt8] = [];
-    result.append(contentsOf: full.bytes.asSlice().prefix(count));
+    result.append(contentsOf: full.bytes.asUnsafeSlice().prefix(count));
     DigestOutput(bytes: result)
 }

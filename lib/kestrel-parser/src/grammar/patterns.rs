@@ -319,7 +319,13 @@ pub(super) fn param_pattern(p: &mut Parser<'_>) {
 
 /// Tokens that can begin a parameter pattern.
 pub(super) fn at_param_pattern_start(p: &Parser<'_>) -> bool {
-    p.at_any(&[K::LParen, K::Identifier, K::Underscore, K::Var])
+    p.at_any(&[
+        K::LParen,
+        K::Identifier,
+        K::Underscore,
+        K::Var,
+        K::Ampersand,
+    ])
 }
 
 fn param_pat(p: &mut Parser<'_>) {
@@ -336,6 +342,12 @@ fn param_pat(p: &mut Parser<'_>) {
         Some(K::Underscore) => {
             p.bump(K::Underscore);
             K::WildcardPattern
+        },
+        Some(K::Ampersand) => {
+            p.bump(K::Ampersand);
+            p.eat(K::Mutating);
+            p.expect(K::Identifier);
+            K::RefBindingPattern
         },
         Some(K::Var | K::Identifier) => {
             p.eat(K::Var);

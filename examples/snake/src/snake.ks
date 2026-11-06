@@ -413,6 +413,6 @@ func main() {
         }
 
     // ~10 FPS for classic snake feel
-    usleep(100000);
+    unsafe usleep(100000);
     }
 }

@@ -45,6 +45,7 @@ walkdir = "2"
 members = [
     "lib/kestrel-hecs",
     "lib/kestrel-copy-fold",
+    "lib/kestrel-structural",
     "lib/kestrel-entail",
     "lib/kestrel-span",
     "lib/kestrel-lexer",
@@ -64,6 +65,7 @@ members = [
     "lib/kestrel-debug",
     "lib/kestrel-reporting",
     "lib/kestrel-codegen",
+    "lib/kestrel-target",
     "lib/kestrel-doc",
     "lib/kestrel-lsp",
     "lib/kestrel-mir",

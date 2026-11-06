@@ -8,44 +8,13 @@
 use inkwell::context::Context;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, FunctionType};
 use kestrel_mir::mono::{MonoFunction, MonoModule};
-use kestrel_mir::{ParamConvention, TyArena};
+use kestrel_mir::{ParamConvention, TyArena, TyId};
 
-use crate::ty::{ScalarTy, TypeCache, TypeRepr};
+use crate::ty::{Llvm, TypeCache};
 
-#[derive(Debug, Clone, Copy)]
-pub enum PassMode {
-    ByVal(ScalarTy),
-    ByRef,
-    Zst,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ReturnMode {
-    Direct(ScalarTy),
-    Sret,
-    Void,
-}
-
-pub fn param_pass_mode(convention: ParamConvention, repr: TypeRepr) -> PassMode {
-    match convention {
-        ParamConvention::Borrow | ParamConvention::MutBorrow => PassMode::ByRef,
-        ParamConvention::Consuming => match repr {
-            TypeRepr::Scalar(t) => PassMode::ByVal(t),
-            TypeRepr::Aggregate { .. } => PassMode::ByRef,
-            TypeRepr::Zst => PassMode::Zst,
-        },
-    }
-}
-
-pub fn return_mode(repr: TypeRepr) -> ReturnMode {
-    // The `@main` entry point is an ordinary `i64`-returning function (the
-    // MIR-synthesized wrapper), so no entry-point special-casing is needed here.
-    match repr {
-        TypeRepr::Scalar(t) => ReturnMode::Direct(t),
-        TypeRepr::Aggregate { .. } => ReturnMode::Sret,
-        TypeRepr::Zst => ReturnMode::Void,
-    }
-}
+pub type PassMode = kestrel_codegen::PassMode<Llvm>;
+pub type ReturnMode = kestrel_codegen::ReturnMode<Llvm>;
+pub use kestrel_codegen::{param_pass_mode, return_mode};
 
 fn finish_fn_type<'ctx>(
     cx: &'ctx Context,
@@ -65,30 +34,14 @@ pub fn build_signature<'ctx>(
     module: &MonoModule,
     cx: &'ctx Context,
 ) -> FunctionType<'ctx> {
-    let ptr_scalar = tc.ptr_scalar;
-    let mut params: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
-
-    let ret_repr = tc.repr(func.ret, arena, module);
-    let ret_mode = return_mode(ret_repr);
-
-    if matches!(ret_mode, ReturnMode::Sret) {
-        params.push(ptr_scalar.llvm(cx).into());
-    }
-
-    for param in &func.params {
-        let repr = tc.repr(param.ty, arena, module);
-        match param_pass_mode(param.convention, repr) {
-            PassMode::ByVal(t) => params.push(t.llvm(cx).into()),
-            PassMode::ByRef => params.push(ptr_scalar.llvm(cx).into()),
-            PassMode::Zst => {},
-        }
-    }
-
-    finish_fn_type(cx, ret_mode, &params)
+    let kparams: Vec<_> = func.params.iter().map(|p| (p.ty, p.convention)).collect();
+    build_signature_parts(&kparams, func.ret, tc, arena, module, cx)
 }
 
-pub fn build_extern_signature<'ctx>(
-    func: &MonoFunction,
+/// The Kestrel-ABI function type of `(type, convention)` params and `ret`.
+pub fn build_signature_parts<'ctx>(
+    kparams: &[(TyId, ParamConvention)],
+    ret: TyId,
     tc: &mut TypeCache,
     arena: &TyArena,
     module: &MonoModule,
@@ -97,24 +50,21 @@ pub fn build_extern_signature<'ctx>(
     let ptr_scalar = tc.ptr_scalar;
     let mut params: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
 
-    let ret_repr = tc.repr(func.ret, arena, module);
+    let ret_repr = tc.repr(ret, arena, module);
+    let ret_mode = return_mode(ret_repr);
 
-    if ret_repr.is_aggregate() {
+    if matches!(ret_mode, ReturnMode::Sret) {
         params.push(ptr_scalar.llvm(cx).into());
     }
 
-    for param in &func.params {
-        let repr = tc.repr(param.ty, arena, module);
-        match repr {
-            TypeRepr::Scalar(t) => params.push(t.llvm(cx).into()),
-            TypeRepr::Aggregate { .. } => params.push(ptr_scalar.llvm(cx).into()),
-            TypeRepr::Zst => {},
+    for &(ty, convention) in kparams {
+        let repr = tc.repr(ty, arena, module);
+        match param_pass_mode(convention, repr) {
+            PassMode::ByVal(t) => params.push(t.llvm(cx).into()),
+            PassMode::ByRef => params.push(ptr_scalar.llvm(cx).into()),
+            PassMode::Zst => {},
         }
     }
 
-    let ret_mode = match ret_repr {
-        TypeRepr::Scalar(t) => ReturnMode::Direct(t),
-        _ => ReturnMode::Void,
-    };
     finish_fn_type(cx, ret_mode, &params)
 }

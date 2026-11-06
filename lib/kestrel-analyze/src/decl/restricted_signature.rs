@@ -83,7 +83,7 @@ impl DeclCheck for RestrictedSignatureAnalyzer {
         }
         if let Some(Conformances(items)) = q.get::<Conformances>(cx.entity) {
             for item in items {
-                let (ConformanceItem::Positive(ty, _) | ConformanceItem::Negative(ty, _)) = item;
+                let (ConformanceItem::Positive(ty, ..) | ConformanceItem::Negative(ty, _)) = item;
                 walk.ty(ty);
             }
         }

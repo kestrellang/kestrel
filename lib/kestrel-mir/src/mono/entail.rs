@@ -22,11 +22,14 @@ use crate::TyId;
 use crate::item::function::WhereConstraint;
 use crate::item::witness::WitnessDef;
 use crate::ty::{MirTy, TyArena};
+use crate::ty_query::TypeEnv;
 
 use super::witness::match_pattern;
 
 pub(crate) struct MonoLayer<'a> {
     arena: &'a TyArena,
+    /// Defs and builtin ids, for the structural protocols no witness declares.
+    env: &'a TypeEnv<'a>,
     witnesses: &'a [WitnessDef],
     /// Kernel type → the arena type it was converted from, so `supply` can
     /// run mono's own matcher on it.
@@ -34,9 +37,14 @@ pub(crate) struct MonoLayer<'a> {
 }
 
 impl<'a> MonoLayer<'a> {
-    pub(crate) fn new(arena: &'a TyArena, witnesses: &'a [WitnessDef]) -> Self {
+    pub(crate) fn new(
+        arena: &'a TyArena,
+        env: &'a TypeEnv<'a>,
+        witnesses: &'a [WitnessDef],
+    ) -> Self {
         Self {
             arena,
+            env,
             witnesses,
             origin: RefCell::new(HashMap::new()),
         }
@@ -122,6 +130,13 @@ impl EntailLayer for MonoLayer<'_> {
         let Some(&concrete) = self.origin.borrow().get(ty) else {
             return Supply::Decided(Tri::Holds);
         };
+        // Copyable / Cloneable / Static / Sized are structural: decided from
+        // the concrete type, never supplied by a witness.
+        if let Some(holds) =
+            crate::ty_query::structural_conformance(self.arena, self.env, concrete, protocol)
+        {
+            return Supply::Decided(Tri::from_bool(holds));
+        }
         let sources = self
             .witnesses
             .iter()
@@ -178,6 +193,7 @@ impl EntailLayer for MonoLayer<'_> {
 /// unbound or unreducible position) permits — mono's conservative rule.
 pub(crate) fn witness_constraints_hold(
     arena: &TyArena,
+    env: &TypeEnv<'_>,
     witnesses: &[WitnessDef],
     witness: &WitnessDef,
     bindings: &HashMap<Entity, TyId>,
@@ -185,7 +201,7 @@ pub(crate) fn witness_constraints_hold(
     if witness.constraints.is_empty() {
         return true;
     }
-    let layer = MonoLayer::new(arena, witnesses);
+    let layer = MonoLayer::new(arena, env, witnesses);
     let goals = layer.goals(witness, bindings);
     let verdict = Tri::all(goals.iter().map(|g| kestrel_entail::entails(&layer, g)));
     if verdict == Tri::Unknown {

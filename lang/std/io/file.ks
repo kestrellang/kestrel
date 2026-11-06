@@ -4,8 +4,8 @@ module std.io.file
 
 import std.numeric.(Int64, Int32, UInt8)
 import std.result.(Result, Optional)
-import std.memory.(ArraySlice, Pointer)
-import std.collections.(Array)
+import std.memory.(UnsafeSlice, Pointer)
+import std.collections.(Array, Slice)
 import std.text.(String)
 import std.core.(Bool, Copyable)
 import std.io.libc
@@ -222,8 +222,9 @@ public struct File: Readable, Writable, not Copyable {
     /// returned. Short reads (`n < buf.count`) are normal — keep calling
     /// until `0` is returned (EOF) or an error fires. Use `readAll`/
     /// `readExact` from `std.io.read` when looping by hand isn't wanted.
-    public mutating func read(into buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let n = libc.read(self.fd, buf.pointer, buf.count);
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        let raw = buf.asUnsafeSlice();
+        let n = libc.read(self.fd, raw.pointer, raw.count);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -232,7 +233,7 @@ public struct File: Readable, Writable, not Copyable {
 
     /// Calls `write(2)`. May write fewer bytes than supplied — wrap with
     /// `writeAll` from `std.io.write` to loop until done.
-    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(self.fd, buf.pointer, buf.count);
         if n < 0 {
             return .Err(IoError.last())

@@ -66,6 +66,15 @@ pub enum InferError {
         span: Span,
     },
 
+    /// The member is (or implements) a `@sugarOnly` requirement of
+    /// `protocol`, and is named outside that protocol's module.
+    SugarOnlyMember {
+        receiver: TyVar,
+        name: String,
+        protocol: String,
+        span: Span,
+    },
+
     /// Member exists but is static — cannot be accessed on an instance.
     MemberIsStatic {
         receiver: TyVar,
@@ -93,6 +102,11 @@ pub enum InferError {
     /// bind the value first (`let x = ...`) to store the decayed copy.
     RefInTypeArgument { span: Span },
 
+    /// E156: an assignment whose target is unsized (`xs(1..<3) = ys`, a
+    /// `Slice[T]` place). A slice can't be assigned as a whole; copy into it
+    /// (`assign(from:)`) or resize the owner (`replaceSubrange`).
+    UnsizedAssign { target: TyVar, span: Span },
+
     /// Error propagated from HIR (HirExpr::Error, HirPat::Error, etc.)
     FromHir { span: Span },
 
@@ -114,6 +128,13 @@ pub enum InferError {
     LabelMismatch {
         expected: Option<String>,
         got: Option<String>,
+        span: Span,
+    },
+
+    /// E113: an unlabeled trailing closure could fill more than one
+    /// closure-typed parameter (labels in `candidates`, `None` = unlabeled).
+    AmbiguousTrailingClosure {
+        candidates: Vec<Option<String>>,
         span: Span,
     },
 
@@ -306,6 +327,7 @@ pub fn describe_fn_kind(kind: kestrel_ast::FnTypeKind) -> String {
     match kind {
         kestrel_ast::FnTypeKind::Normal => "a normal closure".into(),
         kestrel_ast::FnTypeKind::Escaping => "an 'escaping' closure".into(),
+        kestrel_ast::FnTypeKind::C => "a C function".into(),
         // `keyword()` is the single source of truth for the spelling.
         other => format!("a '{}' closure", other.keyword().unwrap_or("")),
     }
@@ -356,6 +378,9 @@ fn kind_mismatch_note(
             "an 'escaping' closure is shared (aliases may exist), so its calls are not exclusive"
                 .into()
         },
+        // Only a named `@export(.C)` / `@extern(.C)` function has a C address.
+        (_, C) => "a closure has no C address; name an '@export(.C)' function instead".into(),
+        (C, _) => "a C function can't be used as a Kestrel closure yet".into(),
         _ => "see the closure passing table in the language reference".into(),
     }
 }
@@ -447,6 +472,11 @@ impl InferError {
                 vis_label(visibility)
             )),
 
+            Self::SugarOnlyMember { name, protocol, .. } => labeled(
+                format!("'{name}' can only be used through its syntax"),
+                format!("'{name}' is a sugar-only requirement of '{protocol}'"),
+            ),
+
             Self::MemberIsStatic { name, .. } => labeled(
                 format!("'{name}' is a static member and cannot be used on an instance"),
                 format!("use the type name to call '{name}'"),
@@ -477,6 +507,23 @@ impl InferError {
             )),
 
             Self::LabelMismatch { .. } => detailed("wrong argument label".into()),
+
+            Self::AmbiguousTrailingClosure { candidates, .. } => {
+                let names: Vec<String> = candidates
+                    .iter()
+                    .map(|l| match l {
+                        Some(l) => format!("`{l}:`"),
+                        None => "the unlabeled parameter".into(),
+                    })
+                    .collect();
+                labeled(
+                    format!(
+                        "ambiguous trailing closure: it could fill {}",
+                        names.join(" or ")
+                    ),
+                    "pass it inside the parentheses with its label".into(),
+                )
+            },
 
             Self::InstanceMethodAsStatic { name, .. } => {
                 detailed(format!("instance method '{name}' cannot be called on a type"))
@@ -702,6 +749,18 @@ impl InferError {
                 ],
                 secondary: Vec::new(),
             },
+
+            Self::UnsizedAssign { .. } => RenderedInferError {
+                code: self.code(),
+                message: "a slice cannot be assigned as a whole".into(),
+                label: Some("this place is unsized".into()),
+                notes: vec![
+                    "copy into it with `.assign(from: other)` (the lengths must match), or \
+                     resize the owner with `replaceSubrange`"
+                        .into(),
+                ],
+                secondary: Vec::new(),
+            },
         }
     }
 
@@ -743,12 +802,13 @@ impl InferError {
             Self::TypeMismatch { .. } | Self::ConventionMismatch { .. } => "E109",
             Self::ArgCountMismatch { .. }
             | Self::LabelMismatch { .. }
+            | Self::AmbiguousTrailingClosure { .. }
             | Self::MemberwiseInitArity { .. }
             | Self::MemberwiseInitLabel { .. }
             | Self::NoMatchingOverload { .. }
             | Self::TypeArgCountMismatch { .. } => "E113",
             Self::LiteralNotAccepted { .. } => "E114",
-            Self::MemberNotVisible { .. } => "E115",
+            Self::MemberNotVisible { .. } | Self::SugarOnlyMember { .. } => "E115",
             Self::MemberIsStatic { .. }
             | Self::InstanceMethodAsStatic { .. }
             | Self::TypeParamAsValue { .. }
@@ -761,6 +821,7 @@ impl InferError {
             Self::KindMismatch { .. } => "E624",
             Self::RefFunctionAsValue { .. } => "E491",
             Self::RefInTypeArgument { .. } => "E492",
+            Self::UnsizedAssign { .. } => "E156",
             Self::FromHir { .. } => "E100",
         }
     }
@@ -774,6 +835,7 @@ impl InferError {
             },
             Self::NoMember { receiver, .. }
             | Self::MemberNotVisible { receiver, .. }
+            | Self::SugarOnlyMember { receiver, .. }
             | Self::MemberIsStatic { receiver, .. } => vec![*receiver],
             Self::AmbiguousMember { receiver, .. } => receiver.iter().copied().collect(),
             Self::NoAssociatedType { container, .. } => vec![*container],
@@ -789,6 +851,7 @@ impl InferError {
             | Self::NoMember { span, .. }
             | Self::AmbiguousMember { span, .. }
             | Self::MemberNotVisible { span, .. }
+            | Self::SugarOnlyMember { span, .. }
             | Self::MemberIsStatic { span, .. }
             | Self::NoAssociatedType { span, .. }
             | Self::InfiniteType { span }
@@ -796,6 +859,7 @@ impl InferError {
             | Self::ImplicitMemberNotFound { span, .. }
             | Self::ArgCountMismatch { span, .. }
             | Self::LabelMismatch { span, .. }
+            | Self::AmbiguousTrailingClosure { span, .. }
             | Self::InstanceMethodAsStatic { span, .. }
             | Self::TypeParamAsValue { span }
             | Self::TypeMustBeKnown { span, .. }
@@ -822,6 +886,7 @@ impl InferError {
             | Self::OpaqueUnderlierNotCopyable { span, .. }
             | Self::RefFunctionAsValue { span }
             | Self::RefInTypeArgument { span }
+            | Self::UnsizedAssign { span, .. }
             | Self::ConventionMismatch { span }
             | Self::KindMismatch { span, .. } => span,
         }
@@ -860,5 +925,39 @@ impl Reason {
         if !span.is_synthetic() {
             r.secondary.push((span.clone(), text.into()));
         }
+    }
+}
+
+/// The error for naming a `@sugarOnly` `requirement` (or a witness of it) as
+/// `name` outside its protocol's module.
+pub(crate) fn sugar_only_error(
+    qctx: &kestrel_hecs::QueryContext<'_>,
+    requirement: kestrel_hecs::Entity,
+    name: &str,
+    receiver: TyVar,
+    span: &Span,
+) -> InferError {
+    let protocol = qctx
+        .parent_of(requirement)
+        .and_then(|p| qctx.get::<kestrel_ast_builder::Name>(p))
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    // A nameless init reads better with its labels: `init(intLiteral:)`.
+    let name = match qctx.get::<kestrel_ast_builder::Callable>(requirement) {
+        Some(c) if name == "init" => {
+            let labels: String = c
+                .params
+                .iter()
+                .map(|p| format!("{}:", p.label.as_deref().unwrap_or("_")))
+                .collect();
+            format!("init({labels})")
+        },
+        _ => name.to_string(),
+    };
+    InferError::SugarOnlyMember {
+        receiver,
+        name,
+        protocol,
+        span: span.clone(),
     }
 }

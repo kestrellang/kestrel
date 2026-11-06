@@ -24,6 +24,7 @@ public protocol Coalesce[Default] {
     type Output
 
     /// Returns the contained value, or the result of `default()` if absent.
+    @sugarOnly
     @builtin(.CoalesceOperatorMethod)
     consuming func coalesce(default: () -> Default) -> Output
 }

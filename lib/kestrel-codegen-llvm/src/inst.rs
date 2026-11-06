@@ -15,14 +15,13 @@ use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, IntValue, PointerValue};
 use inkwell::{AtomicOrdering, AtomicRMWBinOp, FloatPredicate, IntPredicate};
 
-use kestrel_hecs::Entity;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::{CallArg, InstKind};
-use kestrel_mir::mono::{MonoEnum, MonoModule, MonoStruct};
+use kestrel_mir::mono::MonoModule;
 use kestrel_mir::value::Ownership;
 use kestrel_mir::{
     DivGuard, FieldIdx, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy, Op,
-    ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
+    ParamConvention, Signedness, StructLayout, TyId, ValueId, VariantIdx,
 };
 
 use crate::abi::{self, PassMode, ReturnMode};
@@ -30,7 +29,11 @@ use crate::error::CodegenError;
 use crate::func::FuncCompiler;
 use crate::mem;
 use crate::terminator::emit_trap;
-use crate::ty::{ScalarTy, TypeRepr, float_bits_to_scalar, int_bits_to_scalar};
+use crate::ty::{Llvm, ScalarTy, TypeRepr};
+use kestrel_codegen::layout::{
+    discriminant_width, find_mono_enum, ret_ty_is_never, struct_field_offset, struct_field_type,
+    tuple_elem_offset,
+};
 
 /// Returns true if the instruction diverges (call to a !-returning function).
 pub fn compile_inst<'ctx>(
@@ -241,7 +244,7 @@ pub fn compile_inst<'ctx>(
                 .tc
                 .repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let is_guaranteed = fc.body.values[operand.index()].ownership == Ownership::Guaranteed;
-            let disc_scalar = discriminant_width(
+            let disc_scalar = discriminant_width::<Llvm>(
                 operand_ty,
                 fc.body.values[result.index()].ty,
                 &fc.ctx.module.ty_arena,
@@ -652,7 +655,7 @@ fn compile_op1<'ctx>(
         Op::IntWiden(_, to) => builder
             .build_int_s_extend(
                 arg.into_int_value(),
-                int_bits_to_scalar(to).llvm(cx).into_int_type(),
+                ScalarTy::from_int_bits(to).llvm(cx).into_int_type(),
                 "sext",
             )
             .unwrap()
@@ -660,7 +663,7 @@ fn compile_op1<'ctx>(
         Op::IntUnsignedWiden(_, to) => builder
             .build_int_z_extend(
                 arg.into_int_value(),
-                int_bits_to_scalar(to).llvm(cx).into_int_type(),
+                ScalarTy::from_int_bits(to).llvm(cx).into_int_type(),
                 "zext",
             )
             .unwrap()
@@ -668,7 +671,7 @@ fn compile_op1<'ctx>(
         Op::IntTruncate(_, to) => builder
             .build_int_truncate(
                 arg.into_int_value(),
-                int_bits_to_scalar(to).llvm(cx).into_int_type(),
+                ScalarTy::from_int_bits(to).llvm(cx).into_int_type(),
                 "tr",
             )
             .unwrap()
@@ -676,7 +679,7 @@ fn compile_op1<'ctx>(
         Op::IntToFloat(_, fb) => builder
             .build_signed_int_to_float(
                 arg.into_int_value(),
-                float_bits_to_scalar(fb).llvm(cx).into_float_type(),
+                ScalarTy::from_float_bits(fb).llvm(cx).into_float_type(),
                 "i2f",
             )
             .unwrap()
@@ -685,8 +688,8 @@ fn compile_op1<'ctx>(
         // NaN -> 0, +inf -> INT_MAX, -inf -> INT_MIN, out-of-range clamped.
         // Uses llvm.fptosi.sat (available since LLVM 13) to avoid UB.
         Op::FloatToInt(fb, ib) => {
-            let int_ty: BasicTypeEnum = int_bits_to_scalar(ib).llvm(cx);
-            let float_ty: BasicTypeEnum = float_bits_to_scalar(fb).llvm(cx);
+            let int_ty: BasicTypeEnum = ScalarTy::from_int_bits(ib).llvm(cx);
+            let float_ty: BasicTypeEnum = ScalarTy::from_float_bits(fb).llvm(cx);
             call_intrinsic(
                 &fc.ctx.llmod,
                 builder,
@@ -698,20 +701,20 @@ fn compile_op1<'ctx>(
         // Pure bitcast (no value conversion): float ↔ same-width integer.
         Op::FloatToBits(fb) => {
             let int_ty: BasicTypeEnum = match fb {
-                kestrel_mir::FloatBits::F32 => int_bits_to_scalar(kestrel_mir::IntBits::I32),
-                _ => int_bits_to_scalar(kestrel_mir::IntBits::I64),
+                kestrel_mir::FloatBits::F32 => ScalarTy::from_int_bits(kestrel_mir::IntBits::I32),
+                _ => ScalarTy::from_int_bits(kestrel_mir::IntBits::I64),
             }
             .llvm(cx);
             builder.build_bit_cast(arg, int_ty, "f2bits").unwrap()
         },
         Op::BitsToFloat(fb) => {
-            let float_ty: BasicTypeEnum = float_bits_to_scalar(fb).llvm(cx);
+            let float_ty: BasicTypeEnum = ScalarTy::from_float_bits(fb).llvm(cx);
             builder.build_bit_cast(arg, float_ty, "bits2f").unwrap()
         },
         Op::FloatWiden(_, to) => builder
             .build_float_ext(
                 arg.into_float_value(),
-                float_bits_to_scalar(to).llvm(cx).into_float_type(),
+                ScalarTy::from_float_bits(to).llvm(cx).into_float_type(),
                 "fext",
             )
             .unwrap()
@@ -719,7 +722,7 @@ fn compile_op1<'ctx>(
         Op::FloatTruncate(_, to) => builder
             .build_float_trunc(
                 arg.into_float_value(),
-                float_bits_to_scalar(to).llvm(cx).into_float_type(),
+                ScalarTy::from_float_bits(to).llvm(cx).into_float_type(),
                 "ftr",
             )
             .unwrap()
@@ -770,6 +773,10 @@ fn compile_op1<'ctx>(
             cmp_to_bool(cx, builder, cmp)
         },
         Op::PtrNull(_) => mem::null_ptr(cx).into(),
+        Op::OverflowChecks => cx
+            .i8_type()
+            .const_int(u64::from(fc.ctx.options.overflow_checks()), false)
+            .into(),
         Op::PtrTo(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let slot = fc.alloca(repr.size(), repr.align());
@@ -1283,7 +1290,7 @@ fn compile_enum<'ctx>(
             let type_args = type_args.clone();
             if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module) {
                 (
-                    int_bits_to_scalar(e.discriminant_width),
+                    ScalarTy::from_int_bits(e.discriminant_width),
                     e.payload_offset(),
                     e.cases[variant.index()].discriminant as i64,
                 )
@@ -1550,15 +1557,11 @@ fn compile_struct_extract<'ctx>(
         // Stage 2b ref slot extracted as a POINTEE-typed result: load the
         // stored address. A REF-typed result (clone/drop shim projections)
         // keeps the slot's address per the representation contract.
-        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-            && !matches!(
-                fc.ctx
-                    .module
-                    .ty_arena
-                    .get(fc.body.values[result.index()].ty),
-                MirTy::Ref { .. }
-            )
-        {
+        if kestrel_codegen::ref_slot_loads_pointee(
+            fc.ctx.module,
+            field_ty,
+            fc.body.values[result.index()].ty,
+        ) {
             return Ok(mem::load(
                 builder,
                 cx.ptr_type(inkwell::AddressSpace::default()),
@@ -1612,15 +1615,11 @@ fn compile_tuple_extract<'ctx>(
     if is_borrowed {
         // Stage 2b ref slot with a POINTEE-typed result: load the stored
         // address (see compile_struct_extract).
-        if matches!(fc.ctx.module.ty_arena.get(elem_ty), MirTy::Ref { .. })
-            && !matches!(
-                fc.ctx
-                    .module
-                    .ty_arena
-                    .get(fc.body.values[result.index()].ty),
-                MirTy::Ref { .. }
-            )
-        {
+        if kestrel_codegen::ref_slot_loads_pointee(
+            fc.ctx.module,
+            elem_ty,
+            fc.body.values[result.index()].ty,
+        ) {
             return Ok(mem::load(
                 builder,
                 cx.ptr_type(inkwell::AddressSpace::default()),
@@ -1687,15 +1686,11 @@ fn compile_enum_payload<'ctx>(
     if is_borrowed {
         // Stage 2b ref slot with a POINTEE-typed result: load the stored
         // address (see compile_struct_extract).
-        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-            && !matches!(
-                fc.ctx
-                    .module
-                    .ty_arena
-                    .get(fc.body.values[result.index()].ty),
-                MirTy::Ref { .. }
-            )
-        {
+        if kestrel_codegen::ref_slot_loads_pointee(
+            fc.ctx.module,
+            field_ty,
+            fc.body.values[result.index()].ty,
+        ) {
             return Ok(mem::load(
                 builder,
                 cx.ptr_type(inkwell::AddressSpace::default()),
@@ -1717,10 +1712,6 @@ fn compile_enum_payload<'ctx>(
 // Calls
 // ======================================================================
 
-fn ret_ty_is_never(module: &MonoModule, ret: TyId) -> bool {
-    matches!(module.ty_arena.get(ret), MirTy::Never)
-}
-
 fn compile_call<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
@@ -1731,6 +1722,7 @@ fn compile_call<'ctx>(
     match callee {
         Callee::Resolved(mono_id) => compile_resolved_call(fc, builder, *mono_id, args, result),
         Callee::Thin(func_val_id) => compile_thin_call(fc, builder, *func_val_id, args, result),
+        Callee::C(func_val_id) => compile_c_call(fc, builder, *func_val_id, args, result),
         Callee::Thick(closure_val_id) => {
             compile_thick_call(fc, builder, *closure_val_id, args, result)
         },
@@ -1930,8 +1922,6 @@ fn compile_thin_call<'ctx>(
     args: &[CallArg],
     result: Option<ValueId>,
 ) -> Result<bool, CodegenError> {
-    let cx = fc.ctx.cx;
-    let ptr_scalar = fc.ctx.tc.ptr_scalar;
     let module: &'ctx MonoModule = fc.ctx.module;
 
     let func_ptr = fc.get_value(func_val_id).into_pointer_value();
@@ -1949,6 +1939,52 @@ fn compile_thin_call<'ctx>(
             "thin call on non-FuncThin".into(),
         ));
     };
+    emit_kestrel_indirect_call(fc, builder, func_ptr, &param_tys, ret_ty, args, result)
+}
+
+/// A call through a C function value: call its type's bridge (Kestrel ABI)
+/// with the address first; the bridge makes the C call and inlines away.
+fn compile_c_call<'ctx>(
+    fc: &mut FuncCompiler<'_, 'ctx>,
+    builder: &Builder<'ctx>,
+    func_val_id: ValueId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let module: &'ctx MonoModule = fc.ctx.module;
+    let func_ty = fc.body.values[func_val_id.index()].ty;
+    let MirTy::FuncC { params, ret, .. } = module.ty_arena.get(func_ty) else {
+        return Err(CodegenError::Unsupported("C call on non-FuncC".into()));
+    };
+    let addr = (func_ty, ParamConvention::Consuming);
+    let param_tys: Vec<_> = std::iter::once(addr)
+        .chain(params.iter().copied())
+        .collect();
+    let addr_arg = CallArg {
+        value: func_val_id,
+        convention: ParamConvention::Consuming,
+    };
+    let args: Vec<CallArg> = std::iter::once(addr_arg)
+        .chain(args.iter().cloned())
+        .collect();
+    let bridge = crate::c_bridge::call_bridge(fc.ctx, func_ty);
+    let bridge_ptr = bridge.as_global_value().as_pointer_value();
+    emit_kestrel_indirect_call(fc, builder, bridge_ptr, &param_tys, *ret, &args, result)
+}
+
+/// Call `func_ptr`, a Kestrel-ABI function of `param_tys` and `ret_ty`.
+fn emit_kestrel_indirect_call<'ctx>(
+    fc: &mut FuncCompiler<'_, 'ctx>,
+    builder: &Builder<'ctx>,
+    func_ptr: PointerValue<'ctx>,
+    param_tys: &[(TyId, ParamConvention)],
+    ret_ty: TyId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let cx = fc.ctx.cx;
+    let ptr_scalar = fc.ctx.tc.ptr_scalar;
+    let module: &'ctx MonoModule = fc.ctx.module;
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, &module.ty_arena, module);
     let ret_mode = abi::return_mode(ret_repr);
@@ -1958,7 +1994,7 @@ fn compile_thin_call<'ctx>(
     if matches!(ret_mode, ReturnMode::Sret) {
         params.push(ptr_scalar.llvm(cx).into());
     }
-    for (ty, convention) in &param_tys {
+    for (ty, convention) in param_tys {
         let repr = fc.ctx.tc.repr(*ty, &module.ty_arena, module);
         match abi::param_pass_mode(*convention, repr) {
             PassMode::ByVal(t) => params.push(t.llvm(cx).into()),
@@ -2164,91 +2200,3 @@ fn compile_thick_call<'ctx>(
 // ======================================================================
 // Layout helpers
 // ======================================================================
-
-/// Width of a `Discriminant` read: an enum's tag width, else the result
-/// type's (an integer switch reads its value at its own width; see
-/// `emit_int_discriminant`), else the 32-bit tag default. Twin of the
-/// Cranelift `discriminant_width`.
-fn discriminant_width(ty: TyId, result_ty: TyId, arena: &TyArena, module: &MonoModule) -> ScalarTy {
-    if let MirTy::Named { entity, type_args } = arena.get(ty) {
-        let entity = *entity;
-        let type_args = type_args.clone();
-        if let Some(e) = find_mono_enum(&entity, &type_args, module) {
-            return int_bits_to_scalar(e.discriminant_width);
-        }
-    }
-    match arena.get(result_ty) {
-        MirTy::I8 => ScalarTy::I8,
-        MirTy::I16 => ScalarTy::I16,
-        MirTy::I64 => ScalarTy::I64,
-        _ => ScalarTy::I32,
-    }
-}
-
-fn struct_field_offset(
-    container_ty: TyId,
-    field_idx: FieldIdx,
-    arena: &TyArena,
-    module: &MonoModule,
-) -> u64 {
-    if let MirTy::Named { entity, type_args } = arena.get(container_ty) {
-        let entity = *entity;
-        let type_args = type_args.clone();
-        if let Some(s) = find_mono_struct(&entity, &type_args, module)
-            && let Some(Layout::Struct(sl)) = &s.type_info.layout
-        {
-            return sl.field_offsets[field_idx.index()];
-        }
-    }
-    0
-}
-
-fn struct_field_type(
-    container_ty: TyId,
-    field_idx: FieldIdx,
-    arena: &TyArena,
-    module: &MonoModule,
-) -> TyId {
-    if let MirTy::Named { entity, type_args } = arena.get(container_ty) {
-        let entity = *entity;
-        let type_args = type_args.clone();
-        if let Some(s) = find_mono_struct(&entity, &type_args, module) {
-            return s.fields[field_idx.index()].ty;
-        }
-    }
-    container_ty
-}
-
-fn tuple_elem_offset(
-    tc: &mut crate::ty::TypeCache,
-    arena: &TyArena,
-    module: &MonoModule,
-    elems: &[TyId],
-    index: u32,
-) -> (u64, TyId) {
-    let mut layout = StructLayout::new();
-    for (i, &elem) in elems.iter().enumerate() {
-        let repr = tc.repr(elem, arena, module);
-        layout.append_field(StructLayout::scalar(repr.size(), repr.align()));
-        if i == index as usize {
-            return (layout.field_offsets[i], elem);
-        }
-    }
-    (0, elems[index as usize])
-}
-
-pub fn find_mono_struct<'m>(
-    entity: &Entity,
-    type_args: &[TyId],
-    module: &'m MonoModule,
-) -> Option<&'m MonoStruct> {
-    module.structs.get(&(*entity, type_args.to_vec()))
-}
-
-pub fn find_mono_enum<'m>(
-    entity: &Entity,
-    type_args: &[TyId],
-    module: &'m MonoModule,
-) -> Option<&'m MonoEnum> {
-    module.enums.get(&(*entity, type_args.to_vec()))
-}

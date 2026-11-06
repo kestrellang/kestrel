@@ -85,7 +85,7 @@ pub(crate) struct BoxBinding {
 /// pick the wrong one here would already have failed E454/E458 in the stdlib.
 ///
 /// Pure and ECS-free on purpose — this is the part worth unit-testing.
-fn is_box_init_shape(c: &Callable) -> bool {
+pub(crate) fn is_box_init_shape(c: &Callable) -> bool {
     matches!(c.params.as_slice(), [p] if p.label.is_none() && p.is_consuming)
 }
 
@@ -193,7 +193,10 @@ impl OssaBodyCtx<'_, '_> {
     /// `MirTy::Pointer` is reached, returning `(wrappers outermost-first, raw
     /// pointer type)`. `RcBox[E]` → `std.memory.Pointer[RcBoxStorage[E]]` →
     /// `MirTy::Pointer(RcBoxStorage[E])`.
-    fn unwrap_handle_to_pointer(&mut self, handle_ty: TyId) -> Option<(Vec<TyId>, TyId)> {
+    pub(crate) fn unwrap_handle_to_pointer(
+        &mut self,
+        handle_ty: TyId,
+    ) -> Option<(Vec<TyId>, TyId)> {
         let mut wrappers = Vec::new();
         let mut cur = handle_ty;
         // Small bound: a handle is a thin wrapper, not a deep tower.
@@ -248,6 +251,53 @@ impl OssaBodyCtx<'_, '_> {
             return requirement;
         }
         exactly_one_box_member(&matches, what)
+    }
+
+    /// Find the ONE member of `entity` (or its extensions) whose shape
+    /// matches `pred`. Only for boxes with no `@builtin` tags yet (the
+    /// indirect-enum `OwnedBox`); a tagged box uses [`Self::find_box_member`].
+    /// Missing or duplicated matches are a broken stdlib (ICE).
+    pub(crate) fn find_box_member_by_shape(
+        &mut self,
+        entity: Entity,
+        kind: kestrel_ast_builder::NodeKind,
+        requirement: &str,
+        pred: impl Fn(&Callable, &str) -> bool,
+    ) -> Entity {
+        let mut parents = vec![entity];
+        parents.extend(
+            self.ctx
+                .query
+                .query(kestrel_name_res::extensions::ExtensionsFor {
+                    target: entity,
+                    root: self.ctx.root,
+                }),
+        );
+        // Collect ALL matches rather than taking the first: "first hit wins"
+        // is what made the selection depend on declaration order (F4).
+        let mut matches = Vec::new();
+        for parent in parents {
+            for &child in self.ctx.query.children_of(parent).iter() {
+                if self.ctx.query.get::<kestrel_ast_builder::NodeKind>(child) != Some(&kind) {
+                    continue;
+                }
+                let name = self
+                    .ctx
+                    .query
+                    .get::<kestrel_ast_builder::Name>(child)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_default();
+                if self
+                    .ctx
+                    .query
+                    .get::<Callable>(child)
+                    .is_some_and(|c| pred(c, &name))
+                {
+                    matches.push(child);
+                }
+            }
+        }
+        exactly_one_box_member(&matches, requirement)
     }
 
     /// Move `env` (an @owned environment struct) into managed storage and
@@ -742,6 +792,7 @@ mod tests {
             pattern: None,
             is_mut: false,
             is_consuming,
+            by_ref: false,
         }
     }
 

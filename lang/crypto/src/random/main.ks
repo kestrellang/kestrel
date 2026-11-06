@@ -24,7 +24,7 @@ public struct SecureRandom: RandomNumberGenerator {
     /// Returns 8 cryptographically secure random bytes as a `UInt64`.
     public mutating func nextUInt64() -> UInt64 {
         var value: UInt64 = 0;
-        arc4random_buf(Pointer(to: value).asRaw(), 8);
+        unsafe arc4random_buf(Pointer(to: value).asRaw(), 8);
         value
     }
 }
@@ -32,6 +32,6 @@ public struct SecureRandom: RandomNumberGenerator {
 /// Fills an array with cryptographically secure random bytes.
 public func randomBytes(count count: Int64) -> Array[UInt8] {
     var buf = Array[UInt8](repeating: 0, count: count);
-    arc4random_buf(buf.asSlice().pointer.asRaw(), count);
+    unsafe arc4random_buf(buf.asUnsafeSlice().pointer.asRaw(), count);
     return buf;
 }

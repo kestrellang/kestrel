@@ -94,6 +94,12 @@ pub struct MirModule {
     /// stdlib — the same answer the name scan gave in those cases.
     pub copyable_protocol: Option<Entity>,
     pub cloneable_protocol: Option<Entity>,
+    /// The `@builtin(.Static)` / `@builtin(.Sized)` protocol entities, on the
+    /// same terms. Mono decides a witness's `where T: Static` / `T: Sized`
+    /// clause structurally (no witness ever declares them), so it needs to
+    /// recognize them.
+    pub static_protocol: Option<Entity>,
+    pub sized_protocol: Option<Entity>,
     /// The `@builtin(.BooleanConditional)` protocol and the `@builtin(.Bool)`
     /// struct entities, resolved once in mir-lower via `ResolveBuiltin`.
     ///
@@ -126,6 +132,20 @@ pub struct MirModule {
 }
 
 impl MirModule {
+    /// Is `ty` unsized (a raw existential, a `lang.slice[T]`, or a struct
+    /// ending in one), judged on the generic struct defs? A type parameter
+    /// is `false` here: whether it's unsized is only known after mono.
+    pub fn is_unsized(&mut self, ty: TyId) -> bool {
+        crate::ty::is_unsized(
+            &mut crate::mono::GenericTails {
+                arena: &mut self.ty_arena,
+                structs: &self.structs,
+                witnesses: &self.witnesses,
+            },
+            ty,
+        )
+    }
+
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -139,6 +159,8 @@ impl MirModule {
             entity_names: IndexMap::new(),
             copyable_protocol: None,
             cloneable_protocol: None,
+            static_protocol: None,
+            sized_protocol: None,
             boolean_conditional_protocol: None,
             bool_struct: None,
             observable_drop: IndexSet::new(),

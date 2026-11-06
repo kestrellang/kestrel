@@ -36,6 +36,8 @@ _Defined in `lang/std/io/libc.ks`._
 public func O_CREAT() -> Int32
 ```
 
+Create file if it doesn't exist.
+
 _Defined in `lang/std/io/libc.ks`._
 
 ## function `O_EXCL`

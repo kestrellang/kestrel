@@ -44,11 +44,11 @@ use kestrel_ast_builder::{
     Callable, ConformanceItem, Conformances, NodeKind, ReceiverKind, WhereClause as AstWhereClause,
     WhereConstraint,
 };
-use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
+use kestrel_copy_fold::CopyLayer;
 use kestrel_hecs::Entity;
-use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
+use kestrel_hir::{Builtin, HirTy};
 use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_semantics::{
     ConditionalCopyableParams, CopyRequirement, CopySemantics, ExplicitlyNegatesProtocol,
@@ -139,6 +139,10 @@ impl Describe for MoveTrackingAnalyzer {
 
 impl BodyCheck for MoveTrackingAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
+        // A non-Copyable `lazy` getter is rejected as a whole (E639).
+        if crate::decl::lazy::is_non_copyable_lazy_getter(cx) {
+            return Vec::new();
+        }
         // Copyable is resolved via the builtin registry where possible, with a
         // name-based fallback. Minimal test inputs (`stdlib: false`) sometimes
         // can't resolve the builtin, but still declare `: not Copyable`
@@ -521,7 +525,12 @@ fn analyze_expr(
             {
                 let dest_depth = state.local_depth.get(&tid).copied().unwrap_or(0);
                 check_outlives(mcx, &mut state, diags, &carried, dest_depth, *value);
-                state.carriers.entry(tid).or_default().extend(carried);
+                let set = state.carriers.entry(tid).or_default();
+                for p in carried {
+                    if !set.contains(&p) {
+                        set.push(p);
+                    }
+                }
             }
             // The value is moved into the target (`x = y`, `x = p.a`), except
             // a self-assignment `x = x`, which moves nothing.
@@ -1961,15 +1970,6 @@ fn check_call_arg_outlives(
             dests.push(arg.value);
         }
     }
-    // The shallowest writable destination bounds them all.
-    let Some(dest_depth) = dests
-        .iter()
-        .filter_map(|&d| place_root(mcx.cx.hir, d))
-        .map(|local| state.local_depth.get(&local).copied().unwrap_or(0))
-        .min()
-    else {
-        return;
-    };
     for (i, arg) in args.iter().enumerate() {
         if callable
             .params
@@ -1982,8 +1982,45 @@ fn check_call_arg_outlives(
         if carried.is_empty() {
             continue;
         }
+        // Only a destination whose type can hold the argument's type is where
+        // it may come to rest (`r.read(into: rest.mutatingSlice(0..))` on a
+        // plain struct `r` stores nothing). The shallowest one bounds them all.
+        let Some(dest_depth) = dests
+            .iter()
+            .filter(|&&d| dest_may_hold(mcx, d, arg.value))
+            .filter_map(|&d| place_root(mcx.cx.hir, d))
+            .map(|local| state.local_depth.get(&local).copied().unwrap_or(0))
+            .min()
+        else {
+            continue;
+        };
         check_outlives(mcx, state, diags, &carried, dest_depth, arg.value);
     }
+}
+
+/// Whether the writable destination `dest` may come to hold `value`, by their
+/// settled types. Unknown types may hold anything. A closure always may: a
+/// function type is `Static` whatever its value captures, so neither
+/// staticness nor the type structure says where a view closure can rest.
+/// Otherwise a `Static` destination holds no reference-carrying value, and
+/// the rest is the shared ref-source rule (`Rep` can't hold a slice).
+fn dest_may_hold(mcx: &MoveCtx<'_>, dest: HirExprId, value: HirExprId) -> bool {
+    let cx = mcx.cx;
+    let types = &cx.typed.expr_types;
+    let (Some(d), Some(v)) = (types.get(&dest), types.get(&value)) else {
+        return true;
+    };
+    if matches!(v, ResolvedTy::Function { .. }) {
+        return true;
+    }
+    if crate::staticness::resolved_ty_is_static(cx.query, d, cx.entity, cx.root) {
+        return false;
+    }
+    let mut layer = kestrel_semantics::HirRefSources {
+        ctx: mcx.cx.query,
+        root: mcx.cx.root,
+    };
+    kestrel_semantics::may_contain(&mut layer, &resolved_to_hir(d), &resolved_to_hir(v))
 }
 
 /// The root local of a place chain (`x`, `x.f`, `x.f.0`), or `None` for
@@ -2114,6 +2151,26 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
                 for arg in args {
                     collect_carried(mcx, state, arg.value, out);
                 }
+            } else if result_carries_refs(mcx, expr) {
+                // A function returning a ref-carrying value (`mk(xs, 0, 1)`
+                // -> a slice): it can only have rooted its references at the
+                // arguments that may hold what it points at — the same
+                // sources MIR lowering joins into the result's root.
+                let arg_exprs: Vec<HirExprId> = args.iter().map(|a| a.value).collect();
+                for arg in ref_sources(mcx, expr, &arg_exprs) {
+                    collect_borrowed_arg(mcx, state, arg, out);
+                }
+            }
+        },
+        // A METHOD returning a ref-carrying value views its receiver, plus
+        // any argument that may hold what it points at: `xs.slice(0)` views
+        // `xs` alone.
+        HirExpr::MethodCall { receiver, args, .. } if result_carries_refs(mcx, expr) => {
+            let arg_exprs: Vec<HirExprId> = std::iter::once(*receiver)
+                .chain(args.iter().map(|a| a.value))
+                .collect();
+            for arg in ref_sources(mcx, expr, &arg_exprs) {
+                collect_borrowed_arg(mcx, state, arg, out);
             }
         },
         HirExpr::ImplicitMember {
@@ -2144,6 +2201,77 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
         },
         _ => {},
     }
+}
+
+/// Does this call's RESULT carry references by value (a non-`Static`
+/// aggregate such as a slice struct holding `&Array[T]`)? A bare `&T` result
+/// is excluded: in every storing position it decays to an owned copy.
+fn result_carries_refs(mcx: &MoveCtx<'_>, call: HirExprId) -> bool {
+    let cx = mcx.cx;
+    match cx.typed.expr_types.get(&call) {
+        None | Some(ResolvedTy::Ref { .. }) => false,
+        Some(ty) => !crate::staticness::resolved_ty_is_static(cx.query, ty, cx.entity, cx.root),
+    }
+}
+
+/// The arguments of `call` its ref-carrying result may borrow from: those
+/// whose type can hold what the result points at
+/// (`kestrel_semantics::ref_source_mask`, the same rule MIR lowering joins
+/// roots by). An argument with no settled type counts as a source.
+fn ref_sources(mcx: &MoveCtx<'_>, call: HirExprId, args: &[HirExprId]) -> Vec<HirExprId> {
+    let types = &mcx.cx.typed.expr_types;
+    let Some(result) = types.get(&call).map(resolved_to_hir) else {
+        return args.to_vec();
+    };
+    let arg_tys: Vec<HirTy> = args
+        .iter()
+        .map(|a| types.get(a).map_or_else(opaque_hir_ty, resolved_to_hir))
+        .collect();
+    let mut layer = kestrel_semantics::HirRefSources {
+        ctx: mcx.cx.query,
+        root: mcx.cx.root,
+    };
+    let mask = kestrel_semantics::ref_source_mask(&mut layer, &result, &arg_tys);
+    args.iter()
+        .zip(mask)
+        .filter_map(|(a, m)| m.then_some(*a))
+        .collect()
+}
+
+/// A settled expression type as a `HirTy`, for the shared ref-source rule.
+/// Only the structure that rule reads is kept; the rest is opaque.
+fn resolved_to_hir(ty: &ResolvedTy) -> HirTy {
+    let sp = kestrel_span::Span::new(0, 0..0);
+    match ty {
+        ResolvedTy::Named { entity, args } => HirTy::Struct {
+            entity: *entity,
+            args: args.iter().map(resolved_to_hir).collect(),
+            span: sp,
+        },
+        ResolvedTy::Param { entity } => HirTy::Param(*entity, sp),
+        ResolvedTy::Tuple(elems) => HirTy::Tuple(elems.iter().map(resolved_to_hir).collect(), sp),
+        ResolvedTy::Ref { pointee, mutating } => HirTy::Ref {
+            inner: Box::new(resolved_to_hir(pointee)),
+            mutating: *mutating,
+            span: sp,
+        },
+        ResolvedTy::Never => HirTy::Never(sp),
+        _ => opaque_hir_ty(),
+    }
+}
+
+fn opaque_hir_ty() -> HirTy {
+    HirTy::Infer(kestrel_span::Span::new(0, 0..0))
+}
+
+/// What a call's result views through one borrowed argument: the argument's
+/// place itself (arguments borrow by signature), plus whatever the argument
+/// already carries (`s.narrow(1)` on a slice `s` views what `s` views).
+fn collect_borrowed_arg(mcx: &MoveCtx<'_>, state: &State, arg: HirExprId, out: &mut Vec<PlaceKey>) {
+    if let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, arg) {
+        out.push(place);
+    }
+    collect_carried(mcx, state, arg, out);
 }
 
 /// Per-instantiation copyability of an EXPRESSION's settled type — the
@@ -2225,7 +2353,7 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
             .semantics
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, kestrel_copy_fold::ConditionalCopy> {
         Cow::Owned(self.cx.query.query(ConditionalCopyableParams {
             entity,
             root: self.cx.root,
@@ -2237,61 +2365,53 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
     }
 
     fn member_semantics(&self, ty: &ResolvedTy) -> CopySemantics {
+        kestrel_semantics::ty_copy_semantics(self, ty)
+    }
+}
+
+impl kestrel_semantics::CopyShapeLayer for MoveCopyLayer<'_, '_> {
+    fn query(&self) -> &kestrel_hecs::QueryContext<'_> {
+        self.cx.query
+    }
+
+    fn root(&self) -> Entity {
+        self.cx.root
+    }
+
+    // HOOK: the body owner scopes both lookups.
+    fn param_context(&self, _: Entity) -> Entity {
+        self.cx.entity
+    }
+
+    fn self_context(&self) -> Entity {
+        self.cx.entity
+    }
+
+    fn copy_shape<'t>(&self, ty: &'t ResolvedTy) -> kestrel_semantics::CopyShape<'t, ResolvedTy> {
+        use kestrel_semantics::CopyShape;
         match ty {
-            ResolvedTy::Named { entity, args } => instance_semantics(self, *entity, args),
-            // A protocol's abstract `Self` is only as copyable as the protocol
-            // (or a `where Self:` bound) guarantees; a concrete `Self` is its nominal.
-            ResolvedTy::SelfType { entity } => kestrel_semantics::self_type_copy_semantics(
-                self.cx.query,
-                *entity,
-                self.cx.entity,
-                self.cx.root,
-            ),
-            // HOOK: body-owner context scopes the bound lookup.
-            ResolvedTy::Param { entity } => self
-                .cx
-                .query
-                .query(TypeParamCopyRequirement {
-                    param: *entity,
-                    context: self.cx.entity,
-                    root: self.cx.root,
-                })
-                .into(),
-            ResolvedTy::Tuple(elems) => {
-                fold_members(elems.iter().map(|e| self.member_semantics(e)))
+            ResolvedTy::Named { entity, args } => CopyShape::Nominal {
+                entity: *entity,
+                args: Cow::Borrowed(args),
             },
-            // `some P and not Copyable` hides a possibly move-only underlier —
-            // uses must move. A plain `some P` guarantees a duplicable
-            // underlier (enforced on the defining body post-solve).
-            ResolvedTy::Opaque { not_copyable, .. } => {
-                if *not_copyable {
-                    CopySemantics::NotCopyable
-                } else {
-                    CopySemantics::Copyable
-                }
+            ResolvedTy::SelfType { entity } => CopyShape::SelfType(*entity),
+            ResolvedTy::Param { entity } => CopyShape::Param(*entity),
+            ResolvedTy::Tuple(elems) => CopyShape::Tuple(Cow::Borrowed(elems)),
+            ResolvedTy::Opaque { not_copyable, .. } => CopyShape::Opaque {
+                not_copyable: *not_copyable,
             },
-            // A closure value's copy class is fixed by its KIND (plan D6):
-            // binding a `mutating`/`consuming` closure to a second name is a
-            // MOVE, and an `escaping` one clones (shares) its environment.
-            ResolvedTy::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),
+            ResolvedTy::Function { kind, .. } => CopyShape::Function(*kind),
             ResolvedTy::RawExistential { bounds, .. } => {
-                kestrel_semantics::raw_existential_copy_semantics(
-                    self.cx.query,
-                    bounds.iter().map(|(protocol, _)| *protocol),
-                    self.cx.root,
-                )
+                CopyShape::RawExistential(bounds.iter().map(|(protocol, _)| *protocol).collect())
             },
             // Assoc projections are Copyable-by-default (matches
             // `hir_type_copy_semantics`); never/error are recovery — all
-            // Copyable. Explicit so a future ResolvedTy variant forces a
-            // decision here.
-            // A ref (stage 1) is a borrow: copying it duplicates the pointer,
-            // never the pointee — Copyable, the same answer nightly's old
-            // catch-all gave.
+            // Copyable. A ref (stage 1) is a borrow: copying it duplicates the
+            // pointer, never the pointee.
             ResolvedTy::AssocProjection { .. }
             | ResolvedTy::Never
             | ResolvedTy::Ref { .. }
-            | ResolvedTy::Error => CopySemantics::Copyable,
+            | ResolvedTy::Error => CopyShape::Leaf(CopySemantics::Copyable),
         }
     }
 }
@@ -2421,11 +2541,16 @@ fn join_freeze_state<'a>(out: &mut State, branches: impl Iterator<Item = &'a Sta
     for b in branches {
         out.frozen
             .extend(b.frozen.iter().map(|(k, v)| (k.clone(), v.clone())));
+        // Union, not append: the out state already holds the pre-branch
+        // places, and appending them again doubled each list per branch
+        // (2^k after k `if`s).
         for (local, places) in &b.carriers {
-            out.carriers
-                .entry(*local)
-                .or_default()
-                .extend(places.iter().cloned());
+            let set = out.carriers.entry(*local).or_default();
+            for p in places {
+                if !set.contains(p) {
+                    set.push(p.clone());
+                }
+            }
         }
         out.local_depth.extend(b.local_depth.iter());
         out.freeze_reported

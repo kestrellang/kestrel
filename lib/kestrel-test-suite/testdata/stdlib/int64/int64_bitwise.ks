@@ -8,32 +8,32 @@ module Test
             // bitwiseAnd: 0b1100 & 0b1010 = 0b1000 = 8
             let a: std.numeric.Int64 = 12;
             let b: std.numeric.Int64 = 10;
-            if a.bitwiseAnd(b) != 8 { return 1 }
+            if (a & b) != 8 { return 1 }
 
             // bitwiseOr: 0b1100 | 0b1010 = 0b1110 = 14
-            if a.bitwiseOr(b) != 14 { return 2 }
+            if (a | b) != 14 { return 2 }
 
             // bitwiseXor: 0b1100 ^ 0b1010 = 0b0110 = 6
-            if a.bitwiseXor(b) != 6 { return 3 }
+            if (a ^ b) != 6 { return 3 }
 
             // bitwiseNot: ~0 = -1
             let zero: std.numeric.Int64 = 0;
-            if zero.bitwiseNot() != -1 { return 4 }
+            if (!zero) != -1 { return 4 }
             // bitwiseNot: ~(-1) = 0
             let negOne: std.numeric.Int64 = -1;
-            if negOne.bitwiseNot() != 0 { return 5 }
+            if (!negOne) != 0 { return 5 }
 
             // shiftLeft: 1 << 4 = 16
             let one: std.numeric.Int64 = 1;
-            if one.shiftLeft(by: 4) != 16 { return 6 }
+            if (one << 4) != 16 { return 6 }
 
             // shiftRight: 16 >> 2 = 4
             let sixteen: std.numeric.Int64 = 16;
-            if sixteen.shiftRight(by: 2) != 4 { return 7 }
+            if (sixteen >> 2) != 4 { return 7 }
 
             // shiftRight with negative preserves sign: -16 >> 2 = -4
             let negSixteen: std.numeric.Int64 = -16;
-            if negSixteen.shiftRight(by: 2) != -4 { return 8 }
+            if (negSixteen >> 2) != -4 { return 8 }
 
             // rotateLeft
             // rotate 1 left by 1: should be 2

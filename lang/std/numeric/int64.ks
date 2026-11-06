@@ -1,32 +1,34 @@
 // Int64 - 64-bit signed integer
-// Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/integer.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 module std.numeric
 
 import std.ffi.(FFISafe)
 import std.core.(
     Equatable, Comparable, Ordering, Bool, Matchable, Hashable, Hasher,
-    Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
+    Addable, Subtractable, Multipliable, Divisible, Remainder, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
-    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible, Defaultable,
+    ExpressibleByIntLiteral, Convertible, LossyConvertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
 import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
-import std.memory.(ArraySlice, Pointer)
-import std.collections.(Slice)
+import std.memory.(UnsafeSlice, Pointer)
+import std.collections.(Sliceable, Slice)
 import std.numeric.(UInt8, Int64, UInt64)
 
 /// A 64-bit signed integer.
 ///
 /// Int64 is the 64-bit member of the integer family. The same surface
 /// area is provided across all widths; switch widths to trade range for memory
-/// or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-/// `*Checked` variants for overflow detection or `*Saturating` to clamp to
-/// `minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+/// or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+/// optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+/// `*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+/// that holds in every build. The type is `FFISafe` and lays out as a single
 /// `lang.i64` so it can cross C boundaries unchanged.
 ///
 /// # Examples
@@ -61,7 +63,7 @@ public struct Int64:
     Subtractable,
     Multipliable,
     Divisible,
-    Modulo,
+    Remainder,
     Negatable,
     BitwiseAnd,
     BitwiseOr,
@@ -73,7 +75,7 @@ public struct Int64:
     SubtractAssign,
     MultiplyAssign,
     DivideAssign,
-    ModuloAssign,
+    RemainderAssign,
     BitwiseAndAssign,
     BitwiseOrAssign,
     BitwiseXorAssign,
@@ -93,7 +95,8 @@ public struct Int64:
     Convertible[UInt8],
     Convertible[UInt16],
     Convertible[UInt32],
-    Convertible[UInt64]
+    Convertible[UInt64],
+    LossyConvertible[UInt64]
 {
     /// The underlying primitive `lang.i64` value. Exposed for FFI
     /// and intrinsic use; prefer the typed surface for everything else.
@@ -155,40 +158,61 @@ public struct Int64:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.i64` without conversion. Internal
-    /// constructor used by intrinsics; not part of the public API.
-    init(raw value: lang.i64) {
+    /// Wraps an existing `lang.i64` without conversion. The FFI
+    /// counterpart of `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.i64) {
         self.raw = value
     }
 
     /// @name From Integer
-    /// Converts from `Int8`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `Int8`. Lossless: every `Int8` fits in `Int64`.
     public init(from other: Int8) { self.raw = lang.cast_i8_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `Int16`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `Int16`. Lossless: every `Int16` fits in `Int64`.
     public init(from other: Int16) { self.raw = lang.cast_i16_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `Int32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `Int32`. Lossless: every `Int32` fits in `Int64`.
     public init(from other: Int32) { self.raw = lang.cast_i32_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `UInt8`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `UInt8`. Lossless: every `UInt8` fits in `Int64`.
     public init(from other: UInt8) { self.raw = lang.cast_u8_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `UInt16`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `UInt16`. Lossless: every `UInt16` fits in `Int64`.
     public init(from other: UInt16) { self.raw = lang.cast_u16_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `UInt32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `UInt32`. Lossless: every `UInt32` fits in `Int64`.
     public init(from other: UInt32) { self.raw = lang.cast_u32_i64(other.raw) }
     /// @name From Integer
-    /// Converts from `UInt64`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt64) { self.raw = other.raw }
+    /// Converts from `UInt64`, trapping when the value doesn't fit in
+    /// `Int64`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `Int64.minValue...Int64.maxValue`.
+    public init(from other: UInt64) {
+        if other > UInt64(truncating: Int64.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in Int64")
+        }
+        self.raw = other.raw
+    }
+    /// @name Truncating
+    /// Converts from `UInt64` keeping only the low bits, reinterpreted as
+    /// `Int64`. Never traps.
+    public init(truncating other: UInt64) { self.raw = other.raw }
+    /// @name Clamping
+    /// Converts from `UInt64`, saturating to `Int64.minValue` / `Int64.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: UInt64) {
+        if other > UInt64(truncating: Int64.maxValue) {
+            self.raw = Int64.maxValue.raw
+        } else {
+            self.raw = other.raw
+        }
+    }
+    /// @name Bit Pattern
+    /// Reinterprets the bits of a same-width `UInt64` as `Int64`. Never traps.
+    public init(bitPattern other: UInt64) { self.raw = other.raw }
 
     // ========================================================================
     // SIGN INSPECTION (Properties)
@@ -326,18 +350,18 @@ public struct Int64:
     // STEPPING
     // ========================================================================
 
-    /// Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+    /// Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
     /// integer ranges.
     public func successor() -> Int64 { self.add(Int64.one) }
 
-    /// Predecessor — `self - 1`. Wraps at `minValue`.
+    /// Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
     public func predecessor() -> Int64 { self.subtract(Int64.one) }
 
     /// Number of `successor()` steps from `self` to `other` — `other - self`
     /// widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
     /// ranges iterate with a counter instead of a "finished" flag.
     public func distance(to other: Int64) -> Int64 {
-        Int64(raw: lang.i64_sub(other.raw, self.raw))
+        other.subtract(self)
     }
 
     /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.
@@ -373,7 +397,7 @@ public struct Int64:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(ArraySlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[Int64]().size))
+        hasher.write(Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[Int64]().size))
     }
 
     // ========================================================================
@@ -384,7 +408,7 @@ public struct Int64:
     type Subtractable.Output = Int64
     type Multipliable.Output = Int64
     type Divisible.Output = Int64
-    type Modulo.Output = Int64
+    type Remainder.Output = Int64
     type Negatable.Output = Int64
     type BitwiseAnd.Output = Int64
     type BitwiseOr.Output = Int64
@@ -399,27 +423,99 @@ public struct Int64:
     type RangeThroughConstructible.Output = RangeThrough[Int64]
 
     // ========================================================================
-    // ARITHMETIC (Wrapping - Default)
+    // ARITHMETIC (Overflow-checked)
     // ========================================================================
 
-    /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
-    /// `addSaturating` to clamp.
-    public consuming func add(consuming other: Int64) -> Int64 { Int64(raw: lang.i64_add(self.raw, other.raw)) }
+    /// `self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+    /// `addSaturating` or `addOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `Int64` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func add(consuming other: Int64) -> Int64 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i64_signed_add_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: Int64 +")
+        }
+        Int64(raw: lang.i64_add(self.raw, other.raw))
+    }
 
-    /// `self - other`, wrapping on overflow.
-    public consuming func subtract(consuming other: Int64) -> Int64 { Int64(raw: lang.i64_sub(self.raw, other.raw)) }
+    /// `self + other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func addWrapping(other: Int64) -> Int64 { Int64(raw: lang.i64_add(self.raw, other.raw)) }
 
-    /// `self * other`, wrapping on overflow.
-    public consuming func multiply(consuming other: Int64) -> Int64 { Int64(raw: lang.i64_mul(self.raw, other.raw)) }
+    /// `self + other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `addWrapping`.
+    public func addOverflowing(other: Int64) -> (Int64, Bool) {
+        (Int64(raw: lang.i64_add(self.raw, other.raw)), Bool(boolLiteral: lang.i64_signed_add_overflows(self.raw, other.raw)))
+    }
+
+    /// `self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+    /// `subtractSaturating` or `subtractOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `Int64` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func subtract(consuming other: Int64) -> Int64 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i64_signed_sub_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: Int64 -")
+        }
+        Int64(raw: lang.i64_sub(self.raw, other.raw))
+    }
+
+    /// `self - other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func subtractWrapping(other: Int64) -> Int64 { Int64(raw: lang.i64_sub(self.raw, other.raw)) }
+
+    /// `self - other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `subtractWrapping`.
+    public func subtractOverflowing(other: Int64) -> (Int64, Bool) {
+        (Int64(raw: lang.i64_sub(self.raw, other.raw)), Bool(boolLiteral: lang.i64_signed_sub_overflows(self.raw, other.raw)))
+    }
+
+    /// `self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+    /// `multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `Int64` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func multiply(consuming other: Int64) -> Int64 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i64_signed_mul_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: Int64 *")
+        }
+        Int64(raw: lang.i64_mul(self.raw, other.raw))
+    }
+
+    /// `self * other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func multiplyWrapping(other: Int64) -> Int64 { Int64(raw: lang.i64_mul(self.raw, other.raw)) }
+
+    /// `self * other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `multiplyWrapping`.
+    public func multiplyOverflowing(other: Int64) -> (Int64, Bool) {
+        (Int64(raw: lang.i64_mul(self.raw, other.raw)), Bool(boolLiteral: lang.i64_signed_mul_overflows(self.raw, other.raw)))
+    }
 
     /// Truncating integer division (`self / other`). For signed types,
-    /// `minValue / -1` wraps; use `divideChecked` to detect.
+    /// `minValue / -1` traps when overflow checks are on (and wraps
+    /// when off); use `divideWrapping` or `divideChecked`.
     ///
     /// # Errors
     ///
     /// Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
     /// process aborts before producing a result).
-    public consuming func divide(consuming other: Int64) -> Int64 { Int64(raw: lang.i64_signed_div(self.raw, other.raw)) }
+    public consuming func divide(consuming other: Int64) -> Int64 {
+        if Bool(boolLiteral: lang.overflow_checks()) and self == Int64.minValue and other == -1 {
+            fatalError("arithmetic overflow: Int64.minValue / -1")
+        }
+        Int64(raw: lang.i64_signed_div(self.raw, other.raw))
+    }
+
+    /// `self / other`, with `minValue / -1` wrapping to `minValue`.
+    /// Still traps on division by zero.
+    public func divideWrapping(other: Int64) -> Int64 { Int64(raw: lang.i64_signed_div(self.raw, other.raw)) }
 
     /// `self % other` — truncated remainder; the result has the sign of
     /// `self` for signed types.
@@ -427,7 +523,31 @@ public struct Int64:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public consuming func modulo(consuming other: Int64) -> Int64 { Int64(raw: lang.i64_signed_rem(self.raw, other.raw)) }
+    public consuming func remainder(consuming other: Int64) -> Int64 { Int64(raw: lang.i64_signed_rem(self.raw, other.raw)) }
+
+    /// Euclidean modulo: the result is always in `0..<|other|`, whatever
+    /// the signs. Differs from `%` (`remainder`) only when `self` is
+    /// negative: `(-7) % 3` is `-1`, `(-7).modulo(by: 3)` is `2`.
+    ///
+    /// # Errors
+    ///
+    /// Traps on division by zero, like `remainder`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (-7).modulo(by: 3);   // 2
+    /// (7).modulo(by: -3);   // 1
+    /// (-7).modulo(by: -3);  // 2
+    /// ```
+    public func modulo(by other: Int64) -> Int64 {
+        let r = self.remainder(other);
+        if r >= 0 {
+            return r
+        }
+        // |r| < |other|, so neither branch overflows (even for minValue).
+        if other < 0 { r - other } else { r + other }
+    }
 
     /// `self / other` without the divide-by-zero and `minValue / -1` guards —
     /// the bare hardware divide. Faster in hot loops, but **undefined
@@ -447,37 +567,47 @@ public struct Int64:
     /// # Safety
     ///
     /// UB when `other == 0`, or signed `minValue % -1`.
-    public consuming func moduloUnchecked(consuming other: Int64) -> Int64 { Int64(raw: lang.i64_signed_rem_unchecked(self.raw, other.raw)) }
+    public consuming func remainderUnchecked(consuming other: Int64) -> Int64 { Int64(raw: lang.i64_signed_rem_unchecked(self.raw, other.raw)) }
 
-    /// Two's-complement negation. Wraps at the minimum value:
-    /// `Int64.minValue.negate() == Int64.minValue`. Use
-    /// `negateChecked` to surface the overflow.
-    public consuming func negate() -> Int64 { Int64(raw: lang.i64_neg(self.raw)) }
-    /// Absolute value. Wraps at the minimum value
-    /// (`Int64.minValue.abs() == Int64.minValue`); use
-    /// `absChecked` if that's a problem.
+    /// Two's-complement negation. Traps at the minimum value, which has
+    /// no positive counterpart, when overflow checks are on (wraps when off); use `negateWrapping`, `negateChecked` or
+    /// `negateSaturating` there.
+    public consuming func negate() -> Int64 {
+        if Bool(boolLiteral: lang.overflow_checks()) and self == Int64.minValue {
+            fatalError("arithmetic overflow: -Int64.minValue")
+        }
+        Int64(raw: lang.i64_neg(self.raw))
+    }
+
+    /// `-self`, with `-minValue` wrapping back to `minValue`.
+    public func negateWrapping() -> Int64 { Int64(raw: lang.i64_neg(self.raw)) }
+    /// Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
+    /// `absChecked` or `absSaturating` there.
     public func abs() -> Int64 { if Bool(boolLiteral: lang.i64_signed_lt(self.raw, 0)) { self.negate() } else { self } }
+
+    /// `|self|`, with `minValue.absWrapping()` wrapping to `minValue`.
+    public func absWrapping() -> Int64 { if Bool(boolLiteral: lang.i64_signed_lt(self.raw, 0)) { self.negateWrapping() } else { self } }
 
     // ========================================================================
     // ARITHMETIC (Checked - Returns Optional)
     // ========================================================================
 
-    /// Wrapping addition that returns `None` instead of overflowing.
+    /// `self + other`, or `None` on overflow.
     public func addChecked(other: Int64) -> Int64? {
         if Bool(boolLiteral: lang.i64_signed_add_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.add(other))
+        .Some(self.addWrapping(other))
     }
 
-    /// Wrapping subtraction that returns `None` instead of overflowing.
+    /// `self - other`, or `None` on overflow.
     public func subtractChecked(other: Int64) -> Int64? {
         if Bool(boolLiteral: lang.i64_signed_sub_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.subtract(other))
+        .Some(self.subtractWrapping(other))
     }
 
-    /// Wrapping multiplication that returns `None` instead of overflowing.
+    /// `self * other`, or `None` on overflow.
     public func multiplyChecked(other: Int64) -> Int64? {
         if Bool(boolLiteral: lang.i64_signed_mul_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.multiply(other))
+        .Some(self.multiplyWrapping(other))
     }
 
     /// Division that returns `None` for divide-by-zero or for the
@@ -490,7 +620,7 @@ public struct Int64:
         if self == Int64.minValue and other == Int64(intLiteral: lang.i64_neg(1)) {
             return .None
         };
-        .Some(self.divide(other))
+        .Some(self.divideWrapping(other))
     }
 
     /// Negation that returns `None` for `minValue` (whose negation overflows).
@@ -498,7 +628,7 @@ public struct Int64:
         if self == Int64.minValue {
             return .None
         };
-        .Some(self.negate())
+        .Some(self.negateWrapping())
     }
 
     /// Absolute value that returns `None` for `minValue` (whose absolute
@@ -507,9 +637,8 @@ public struct Int64:
         if self == Int64.minValue {
             return .None
         };
-        .Some(self.abs())
+        .Some(self.absWrapping())
     }
-
 
     // ========================================================================
     // ARITHMETIC (Saturating - Clamps to Bounds)
@@ -565,40 +694,90 @@ public struct Int64:
         }
     }
 
-
     // ========================================================================
     // ARITHMETIC (Extended)
     // ========================================================================
 
-    /// Raises `self` to `exponent` via binary exponentiation. Wraps on
-    /// overflow. Negative exponents return zero (integer truncation of
-    /// the would-be fraction).
+    /// Raises `self` to `exponent` via binary exponentiation.
+    ///
+    /// # Errors
+    ///
+    /// Panics on a negative exponent, and on overflow when overflow checks
+    /// are on (wraps when off); see `powChecked`,
+    /// `powWrapping` and `powSaturating`.
     ///
     /// # Examples
     ///
     /// ```
     /// (2).pow(10);  // 1024
     /// (3).pow(4);   // 81
-    /// (5).pow(-1);  // 0
     /// ```
     public func pow(exponent: Int64) -> Int64 {
+        if Bool(boolLiteral: lang.i1_not(lang.overflow_checks())) {
+            return self.powWrapping(exponent)
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+            .None => fatalError("arithmetic overflow: Int64.pow")
+        }
+    }
+
+    /// `self` raised to `exponent`, or `None` on overflow or a negative
+    /// exponent.
+    public func powChecked(exponent: Int64) -> Int64? {
         if exponent < 0 {
-            return Int64.zero
-        };
-        if exponent == 0 {
-            return Int64.one
-        };
-        var result = Int64.one;
+            return .None
+        }
+        var result: Int64 = 1;
         var base = self;
         var exp = exponent;
         while exp > 0 {
             if exp % 2 == 1 {
-                result = result.multiply(base)
-            };
-            base = base.multiply(base);
+                let next = result.multiplyChecked(base);
+                if next.isNone { return .None }
+                result = next.unwrap()
+            }
+            exp = exp / 2;
+            // Square only when another bit remains, so the last step can't
+            // overflow a result that fits.
+            if exp > 0 {
+                let squared = base.multiplyChecked(base);
+                if squared.isNone { return .None }
+                base = squared.unwrap()
+            }
+        }
+        .Some(result)
+    }
+
+    /// `self` raised to `exponent`, wrapping on overflow. A negative
+    /// exponent traps.
+    public func powWrapping(exponent: Int64) -> Int64 {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        var result: Int64 = 1;
+        var base = self;
+        var exp = exponent;
+        while exp > 0 {
+            if exp % 2 == 1 {
+                result = result.multiplyWrapping(base)
+            }
+            base = base.multiplyWrapping(base);
             exp = exp / 2
-        };
+        }
         result
+    }
+
+    /// `self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+    /// overflow. A negative exponent traps.
+    public func powSaturating(exponent: Int64) -> Int64 {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+            .None => if self < 0 and exponent % 2 == 1 { Int64.minValue } else { Int64.maxValue }
+        }
     }
 
     /// Greatest common divisor via Euclidean algorithm. For signed types
@@ -612,17 +791,17 @@ public struct Int64:
     /// (-12).gcd(8);  // 4
     /// ```
     public func gcd(other: Int64) -> Int64 {
-        var a = self.abs();
-        var b = other.abs();
+        var a = self.absWrapping();
+        var b = other.absWrapping();
         // `minValue.abs()` wraps to `minValue`, so a remainder can come out
         // negative: keep each remainder's magnitude so the result is
         // non-negative (only `gcd(minValue, 0)` = 2^(n-1) is unrepresentable).
         while b != Int64.zero {
             let t = b;
-            b = a.modulo(b).abs();
+            b = a.remainder(b).absWrapping();
             a = t
         };
-        a.abs()
+        a.absWrapping()
     }
 
     /// Least common multiple, computed as `|self| / gcd(self, other) * |other|`
@@ -700,7 +879,7 @@ public struct Int64:
     /// MSB re-enter at the LSB.
     public func rotateLeft(by count: Int64) -> Int64 {
         let bits: Int64 = 64;
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftLeft(by: c).bitwiseOr(self.shiftRight(by: bits - c)) }
     }
@@ -709,7 +888,7 @@ public struct Int64:
     /// `rotateLeft`.
     public func rotateRight(by count: Int64) -> Int64 {
         let bits: Int64 = 64;
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftRight(by: c).bitwiseOr(self.shiftLeft(by: bits - c)) }
     }
@@ -727,7 +906,7 @@ public struct Int64:
     /// `self /= other`
     public mutating func divideAssign(other: Int64) { self = self.divide(other) }
     /// `self %= other`
-    public mutating func modAssign(other: Int64) { self = self.modulo(other) }
+    public mutating func remainderAssign(other: Int64) { self = self.remainder(other) }
     /// `self &= other`
     public mutating func bitwiseAndAssign(other: Int64) { self = self.bitwiseAnd(other) }
     /// `self |= other`
@@ -758,7 +937,7 @@ public struct Int64:
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
         while i < 8 {
-            result.append(ptr.offset(by: i).read());
+            result.append(unsafe ptr.offset(by: i).read());
             i = i + 1
         }
         result
@@ -768,13 +947,13 @@ public struct Int64:
     /// significant byte first — i.e. network byte order).
     public func toBytesBigEndian() -> std.collections.Array[UInt8] {
         var result = std.collections.Array[UInt8](capacity: 8);
-        let value = UInt64(from: self);
+        let value = UInt64(truncating: self);
         let mask: UInt64 = 255;
         var i: Int64 = 0;
         while i < 8 {
             let shift = (8 - 1 - i) * 8;
             let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
-            result.append(UInt8(from: byteVal));
+            result.append(UInt8(truncating: byteVal));
             i = i + 1
         }
         result
@@ -784,13 +963,13 @@ public struct Int64:
     /// significant byte first).
     public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
         var result = std.collections.Array[UInt8](capacity: 8);
-        let value = UInt64(from: self);
+        let value = UInt64(truncating: self);
         let mask: UInt64 = 255;
         var i: Int64 = 0;
         while i < 8 {
             let shift = i * 8;
             let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
-            result.append(UInt8(from: byteVal));
+            result.append(UInt8(truncating: byteVal));
             i = i + 1
         }
         result
@@ -799,8 +978,8 @@ public struct Int64:
     /// @name From Bytes
     /// Reassembles a `Int64` from 8 bytes in native byte order.
     /// Returns `null` if the input is not exactly 8 bytes long.
-    public init[S](fromBytes fromBytes: S)? where S: Slice[UInt8] {
-        let bytes = fromBytes.asSlice();
+    public init[S](fromBytes fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromBytes.asUnsafeSlice();
         if bytes.count != 8 {
             return null
         }
@@ -808,7 +987,7 @@ public struct Int64:
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
         while i < 8 {
-            ptr.offset(by: i).write(bytes(unchecked: i));
+            unsafe ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }
         self.raw = value.raw;
@@ -817,8 +996,8 @@ public struct Int64:
     /// @name From Bytes Big Endian
     /// Reassembles a `Int64` from 8 bytes in big-endian order.
     /// Returns `null` if the input is not exactly 8 bytes long.
-    public init[S](fromBytesBigEndian fromBytesBigEndian: S)? where S: Slice[UInt8] {
-        let bytes = fromBytesBigEndian.asSlice();
+    public init[S](fromBytesBigEndian fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromBytesBigEndian.asUnsafeSlice();
         if bytes.count != 8 {
             return null
         }
@@ -829,14 +1008,14 @@ public struct Int64:
             result = (result << 8) | byteVal;
             i = i + 1
         }
-        self.raw = Int64(from: result).raw;
+        self.raw = Int64(truncating: result).raw;
     }
 
     /// @name From Bytes Little Endian
     /// Reassembles a `Int64` from 8 bytes in little-endian order.
     /// Returns `null` if the input is not exactly 8 bytes long.
-    public init[S](fromBytesLittleEndian fromBytesLittleEndian: S)? where S: Slice[UInt8] {
-        let bytes = fromBytesLittleEndian.asSlice();
+    public init[S](fromBytesLittleEndian fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromBytesLittleEndian.asUnsafeSlice();
         if bytes.count != 8 {
             return null
         }
@@ -848,7 +1027,7 @@ public struct Int64:
             result = result | (byteVal << shift);
             i = i + 1
         }
-        self.raw = Int64(from: result).raw;
+        self.raw = Int64(truncating: result).raw;
     }
 
     // ========================================================================
@@ -892,9 +1071,9 @@ public struct Int64:
         // Accumulate the positive magnitude in UInt64 so that minValue's
         // magnitude (maxValue+1) is representable; convert + negate at the end.
         let maxMagnitude: UInt64 = if isNegative {
-            UInt64(from: Int64.maxValue) + 1
+            UInt64(truncating: Int64.maxValue) + 1
         } else {
-            UInt64(from: Int64.maxValue)
+            UInt64(truncating: Int64.maxValue)
         };
 
         var result: UInt64 = 0;
@@ -908,7 +1087,7 @@ public struct Int64:
             }
 
             let digit = byteVal - 48;
-            let digitU: UInt64 = UInt64(from: digit);
+            let digitU: UInt64 = UInt64(truncating: digit);
 
             if result > (maxMagnitude - digitU) / 10 {
                 return null
@@ -918,9 +1097,9 @@ public struct Int64:
             index = index + 1
         }
 
-        let typedResult = Int64(from: result);
+        let typedResult = Int64(truncating: result);
         if isNegative {
-            self.raw = typedResult.negate().raw
+            self.raw = typedResult.negateWrapping().raw
         } else {
             self.raw = typedResult.raw
         }
@@ -962,11 +1141,11 @@ public struct Int64:
             return null
         }
 
-        let radixU: UInt64 = UInt64(from: radix);
+        let radixU: UInt64 = UInt64(truncating: radix);
         let maxMagnitude: UInt64 = if isNegative {
-            UInt64(from: Int64.maxValue) + 1
+            UInt64(truncating: Int64.maxValue) + 1
         } else {
-            UInt64(from: Int64.maxValue)
+            UInt64(truncating: Int64.maxValue)
         };
 
         var result: UInt64 = 0;
@@ -989,7 +1168,7 @@ public struct Int64:
                 return null
             }
 
-            let digitU: UInt64 = UInt64(from: digit);
+            let digitU: UInt64 = UInt64(truncating: digit);
             if result > (maxMagnitude - digitU) / radixU {
                 return null
             }
@@ -997,9 +1176,9 @@ public struct Int64:
             index = index + 1
         }
 
-        let typedResult = Int64(from: result);
+        let typedResult = Int64(truncating: result);
         if isNegative {
-            self.raw = typedResult.negate().raw
+            self.raw = typedResult.negateWrapping().raw
         } else {
             self.raw = typedResult.raw
         }
@@ -1041,15 +1220,15 @@ public struct Int64:
         // Convert to unsigned magnitude so minValue formats correctly.
         // negate() overflows on minValue; unsigned subtraction from zero does not.
         let mag: UInt64 = if isNegative {
-            UInt64.zero - UInt64(from: n)
+            UInt64.zero.subtractWrapping(UInt64(truncating: n))
         } else {
-            UInt64(from: n)
+            UInt64(truncating: n)
         };
-        let radixVal: UInt64 = UInt64(from: radix);
+        let radixVal: UInt64 = UInt64(truncating: radix);
         var m = mag;
         while m != UInt64.zero {
             let digit: UInt64 = m % radixVal;
-            let digitVal: Int64 = Int64(from: digit);
+            let digitVal: Int64 = Int64(truncating: digit);
             let charCode: Int64 = if digitVal < 10 {
                 digitVal + 48
             } else if options.uppercase {
@@ -1057,7 +1236,7 @@ public struct Int64:
             } else {
                 digitVal - 10 + 97
             };
-            digits.appendByte(UInt8(from: charCode));
+            digits.appendByte(UInt8(truncating: charCode));
             m = m / radixVal
         }
         }

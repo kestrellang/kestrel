@@ -1522,6 +1522,11 @@ pub(crate) fn try_intrinsic(
             let unit = bctx.emit_literal(Immediate::unit());
             return Some(bctx.emit_op1(op, unit, result_ty));
         },
+        "overflow_checks" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let unit = bctx.emit_literal(Immediate::unit());
+            return Some(bctx.emit_op1(Op::OverflowChecks, unit, result_ty));
+        },
         "ptr_null" => {
             let ty_arg = *type_args.first()?;
             let result_ty = bctx.resolve_expr_type(expr_id);
@@ -1533,6 +1538,29 @@ pub(crate) fn try_intrinsic(
             let result_ty = bctx.resolve_expr_type(expr_id);
             let arg = bctx.lower_expr(args.first()?.value);
             return Some(bctx.emit_op1(Op::PtrTo(ty_arg), arg, result_ty));
+        },
+        // `(ptr, count)` viewed as a fat `ptr[slice[T]]`: the count sits in
+        // the word a raw existential keeps its table in.
+        "slice_from_parts" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let ptr = bctx.lower_expr(args.first()?.value);
+            let count = bctx.lower_expr(args.get(1)?.value);
+            let i8_ty = bctx.ctx.module.ty_arena.i8();
+            let raw = bctx.ctx.module.ty_arena.pointer(i8_ty);
+            let data = bctx.emit_op1(Op::PtrCast(i8_ty), ptr, raw);
+            let meta = bctx.emit_op1(Op::PtrFromAddress(i8_ty), count, raw);
+            let pair_ty = bctx.ctx.module.ty_arena.tuple(vec![raw, raw]);
+            let pair = bctx.emit_tuple(pair_ty, vec![data, meta]);
+            return Some(bctx.emit_op1(Op::FatPtr(result_ty), pair, result_ty));
+        },
+        // A fat slice pointer's second word, as an integer.
+        "slice_count" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let ptr = bctx.lower_expr(args.first()?.value);
+            let i8_ty = bctx.ctx.module.ty_arena.i8();
+            let raw = bctx.ctx.module.ty_arena.pointer(i8_ty);
+            let meta = bctx.emit_op1(Op::FatWord(1), ptr, raw);
+            return Some(bctx.emit_op1(Op::PtrToAddress, meta, result_ty));
         },
         "ptr_from_address" => {
             let ty_arg = *type_args.first()?;

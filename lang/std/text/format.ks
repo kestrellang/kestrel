@@ -371,7 +371,7 @@ public struct FormatOptions: Equatable {
 /// points. `StringBuilder` is the default implementation; streaming sinks can
 /// implement this protocol without forcing an intermediate `String`.
 public protocol Formatter {
-    mutating func append(other: some Str)
+    mutating func append(other: some Str and not Static)
     mutating func append(char c: Char)
 }
 
@@ -501,6 +501,7 @@ public protocol Interpolatable {
     /// `literalCapacity` is the total byte count of the static segments;
     /// `interpolationCount` is the number of `\{...}` holes. Implementors
     /// can use these to preallocate.
+    @sugarOnly
     @builtin(.InterpolatableInit)
     init(literalCapacity literalCapacity: Int64, interpolationCount interpolationCount: Int64)
 
@@ -530,6 +531,7 @@ public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
     ///
     /// Takes the accumulator by value, so an implementation can move its
     /// buffer out without copying (accumulators need not be `Cloneable`).
+    @sugarOnly
     @builtin(.StringInterpolationInit)
     init(consuming interpolation: Interpolation)
 }

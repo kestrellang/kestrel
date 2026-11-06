@@ -263,32 +263,43 @@ fn lower_structural_type(
                 .iter()
                 .map(|b| lower_bound_type(ctx, owner, root, b))
                 .collect();
-            // The only legal negative bound is `Copyable` (same rule as the
-            // E424 conformance-list check). Recovery keeps the flag set so a
-            // bad negative doesn't cascade into "underlier must be Copyable".
-            let not_copyable = match negative {
-                None => false,
-                Some(neg) => {
-                    if !negative_bound_is_copyable(ctx, owner, root, neg) {
-                        let neg_span = ast_type_span(neg);
-                        ctx.accumulate(
-                            Diagnostic::error()
-                                .with_code("E140")
-                                .with_message("negative bound on an opaque type must be 'Copyable'")
-                                .with_labels(vec![
-                                    Label::primary(neg_span.file_id, neg_span.range())
-                                        .with_message("only 'not Copyable' is supported here"),
-                                ])
-                                .with_notes(vec![
-                                    "`not` is only legal on builtin protocols with implicit \
-                                     conformance (e.g. `Copyable`)"
-                                        .into(),
-                                ]),
-                        );
-                    }
-                    true
-                },
-            };
+            // The legal negative bounds are the implicit builtins: `Copyable`,
+            // `Static` and `Sized` (`some Sliceable[T] and not Static and not
+            // Sized` takes a borrowed slice view; the param desugar turns each
+            // into a where-clause bound). Only `not Copyable` changes the
+            // opaque itself. Recovery sets the flag so a bad negative doesn't
+            // cascade into "underlier must be Copyable".
+            let mut not_copyable = false;
+            for neg in negative {
+                if [Builtin::Static, Builtin::Sized]
+                    .into_iter()
+                    .any(|b| negative_bound_is(ctx, owner, root, neg, b))
+                {
+                    continue;
+                }
+                not_copyable = true;
+                if negative_bound_is(ctx, owner, root, neg, Builtin::Copyable) {
+                    continue;
+                }
+                let neg_span = ast_type_span(neg);
+                ctx.accumulate(
+                    Diagnostic::error()
+                        .with_code("E140")
+                        .with_message(
+                            "negative bound on an opaque type must be 'Copyable', 'Static' or 'Sized'",
+                        )
+                        .with_labels(vec![
+                            Label::primary(neg_span.file_id, neg_span.range()).with_message(
+                                "only 'not Copyable', 'not Static' and 'not Sized' are supported here",
+                            ),
+                        ])
+                        .with_notes(vec![
+                            "`not` is only legal on builtin protocols with implicit \
+                             conformance (e.g. `Copyable`)"
+                                .into(),
+                        ]),
+                );
+            }
             HirTy::Opaque {
                 bounds: hir_bounds,
                 not_copyable,
@@ -876,8 +887,10 @@ fn override_span(ty: &mut HirTy, span: &Span) {
 /// generic arg, function-type param/return) structurally as it descends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RefPosition {
-    /// Parameter position — the one PERMANENT rejection (references-gaps.md
-    /// §10.6): conventions are the only parameter spelling, forever.
+    /// Parameter position. A param may spell its access mode with a ref
+    /// type (`x: &T`) instead of a keyword — the AST builder strips that ref
+    /// from the written type — so a ref still here was combined with
+    /// `mutating` / `consuming`, or came through a type alias.
     Param,
     /// Return position — carved out (made legal) in stage 1.
     Return,
@@ -898,10 +911,9 @@ pub enum RefPosition {
 impl RefPosition {
     fn code_and_message(self) -> (&'static str, &'static str) {
         match self {
-            // Permanent rule — worded as "are not", never "not yet".
             RefPosition::Param => (
                 "E480",
-                "parameters are not reference-typed; spell the convention instead — `x: T` borrows, `mutating x: T` mutably borrows",
+                "a reference-typed parameter must be written `x: &T` or `x: &mutating T`: without a `mutating` / `consuming` keyword, and not through a type alias",
             ),
             RefPosition::Return => ("E481", "reference return types are not supported yet"),
             RefPosition::Binding => ("E482", "references cannot be stored in bindings"),
@@ -1410,8 +1422,13 @@ impl QueryFn for LowerTypeAnnotation {
         // stage 2b accepts aggregate positions everywhere EXCEPT alias
         // RHS / other annotations, which stay Strict).
         let (pos, policy) = match nk {
+            // A failable member's ref accessor lends `Optional[&T]`.
             Some(
-                NodeKind::Function | NodeKind::Initializer | NodeKind::Subscript | NodeKind::Deinit,
+                NodeKind::Function
+                | NodeKind::Initializer
+                | NodeKind::Subscript
+                | NodeKind::Deinit
+                | NodeKind::RefAccessor,
             ) => (RefPosition::Return, RefPolicy::AllowAggregate),
             Some(NodeKind::Field | NodeKind::EnumCase) => {
                 (RefPosition::Field, RefPolicy::AllowAggregate)
@@ -1506,6 +1523,20 @@ pub struct PlaceAccessorInfo {
     pub ref_accessor: Option<Entity>,
     /// The `mutating ref { … }` child (write/RMW provider), if declared.
     pub mutating_ref_accessor: Option<Entity>,
+}
+
+impl PlaceAccessorInfo {
+    /// The accessor a FAILABLE member's read calls. A read that a
+    /// `&mutating` payload binder writes through (`if let .Some(&mutating
+    /// v) = b.first`) takes the `mutating ref` (`Optional[&mutating T]`);
+    /// every other read takes `ref`. A missing `mutating ref` falls back to
+    /// `ref`, and analyze rejects the binder (E210).
+    pub fn failable_read_accessor(&self, mutating: bool) -> Option<Entity> {
+        match (mutating, self.mutating_ref_accessor) {
+            (true, Some(accessor)) => Some(accessor),
+            _ => self.ref_accessor,
+        }
+    }
 }
 
 /// Query: the place-accessor children of a Subscript/Field member.
@@ -1690,11 +1721,14 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
 /// Entity comparison is the source of truth; the last-segment string match is
 /// a fallback for stdlib-less fixtures where the builtin entity isn't
 /// registered (mirrors `nominal_copy_semantics_impl` in kestrel-semantics).
-fn negative_bound_is_copyable(
+/// Whether the negative bound `neg` names the implicit builtin `builtin`
+/// (`Copyable` or `Static`).
+fn negative_bound_is(
     ctx: &QueryContext<'_>,
     owner: Entity,
     root: Entity,
     neg: &AstType,
+    builtin: Builtin,
 ) -> bool {
     let AstType::Named { segments, .. } = neg else {
         return false;
@@ -1705,12 +1739,9 @@ fn negative_bound_is_copyable(
         context: owner,
         root,
     }) {
-        return ctx.query(ResolveBuiltin {
-            builtin: Builtin::Copyable,
-            root,
-        }) == Some(entity);
+        return ctx.query(ResolveBuiltin { builtin, root }) == Some(entity);
     }
-    segments.last().is_some_and(|s| s.name == "Copyable")
+    segments.last().is_some_and(|s| s.name == builtin.name())
 }
 
 fn ast_type_span(ty: &AstType) -> Span {

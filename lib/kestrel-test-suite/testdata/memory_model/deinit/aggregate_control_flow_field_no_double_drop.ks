@@ -27,13 +27,13 @@ import std.core.(Bool)
 
 struct Resource: not Copyable {
     var cell: Pointer[Int64]
-    func value() -> Int64 { self.cell.read() }
-    deinit { self.cell.write(self.cell.read() - 1); }
+    func value() -> Int64 { unsafe self.cell.read() }
+    deinit { unsafe self.cell.write(self.cell.read() - 1); }
 }
 
 func mk(value v: Int64) -> Resource {
     let p = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    p.write(v);
+    unsafe p.write(v);
     Resource(cell: p)
 }
 

@@ -3,7 +3,7 @@
 // backends: cranelift,llvm
 
 // Indirection mutating-method peel (R4): a `mutating` method on the pointee
-// selects `pointeeMutRef()`; the side effect persists in the wrapped value.
+// selects `value`'s `mutating ref`; the side effect persists in the wrapped value.
 module Test
 
 import std.memory.(RcBox)

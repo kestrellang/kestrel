@@ -122,16 +122,13 @@ impl OssaBodyCtx<'_, '_> {
                 && let Some(field_ty) = self.ctx.resolve_field_ty(se, field_idx)
                 && matches!(
                     self.ctx.module.ty_arena.get(field_ty),
-                    MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+                    MirTy::FuncThick { .. } | MirTy::FuncThin { .. } | MirTy::FuncC { .. }
                 )
             {
                 let base_val = self.lower_expr_for_borrow(receiver_expr);
                 let field_val = self.emit_struct_extract(base_val, field_idx, field_ty);
-                let call_args = self.lower_call_args_default(args);
-                let callee = match self.ctx.module.ty_arena.get(field_ty) {
-                    MirTy::FuncThin { .. } => Callee::Thin(field_val),
-                    _ => Callee::Thick(field_val),
-                };
+                let call_args = self.lower_value_call_args(field_ty, args);
+                let callee = self.value_callee(field_ty, field_val);
                 return self.emit_call_returning(callee, call_args, result_ty);
             }
         }
@@ -150,14 +147,11 @@ impl OssaBodyCtx<'_, '_> {
         // Function-typed receiver: indirect call (all Borrow by ABI)
         if matches!(
             self.ctx.module.ty_arena.get(receiver_ty),
-            MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+            MirTy::FuncThick { .. } | MirTy::FuncThin { .. } | MirTy::FuncC { .. }
         ) {
             let receiver_val = self.lower_expr(receiver_expr);
-            let call_args = self.lower_call_args_default(args);
-            let callee = match self.ctx.module.ty_arena.get(receiver_ty) {
-                MirTy::FuncThin { .. } => Callee::Thin(receiver_val),
-                _ => Callee::Thick(receiver_val),
-            };
+            let call_args = self.lower_value_call_args(receiver_ty, args);
+            let callee = self.value_callee(receiver_ty, receiver_val);
             let result = self.emit_call_returning(callee, call_args, result_ty);
             // Lockstep twin of `lower_indirect_call`: calling a `consuming`
             // value CONSUMES it, so this is its last owner — release the unique
@@ -205,7 +199,7 @@ impl OssaBodyCtx<'_, '_> {
             self.prepare_closure_arg_snapshots(Some((receiver_expr, recv_conv)), args, &arg_convs);
             // Indirection method peel: `wrapper.method()` where the wrapper has
             // no `method` → dispatch to the pointee, reached via
-            // `pointeeRef()` / `pointeeMutRef()`. A mutating method (recv_conv
+            // `value`'s `ref` / `mutating ref`. A mutating method (recv_conv
             // == MutBorrow) peels through the mutating accessor. `receiver_ty`
             // is retargeted to the pointee so the callee's type args resolve
             // against the pointee, not the wrapper.
@@ -296,7 +290,7 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        let result = self.emit_call_returning(callee, call_args, result_ty);
+        let result = self.emit_call_for_expr(expr_id, callee, call_args, result_ty);
         self.drain_writebacks(wb_mark);
 
         // Failable-init delegation (#144): `self.init(...)` to a failable/throwing
@@ -464,7 +458,45 @@ impl OssaBodyCtx<'_, '_> {
                 }
             }
 
+            // A stored REFERENCE field (`let base: &Array[T]`) subscripted in
+            // place (`s.base(i)`): the receiver is the referent, not the
+            // field's own slot. Load the stored address via the ref-slot
+            // extract and dispatch on the POINTEE type — the solver already
+            // peeled the receiver (`solve_member`'s transparent-place peel),
+            // so the witness must be keyed on `T`, never `&T`.
+            if !call_args.is_empty()
+                && let MirTy::Ref { pointee, .. } = *self.ctx.module.ty_arena.get(field_ty)
+            {
+                // Extract from the receiver borrow itself: its source may be
+                // a stack ADDRESS (`begin_borrow_addr` of a local), which is
+                // not a struct value to extract from.
+                let old_receiver = call_args[0].value;
+                let view = self.emit_struct_extract(old_receiver, field_idx, field_ty);
+                call_args[0] = CallArg {
+                    value: view,
+                    convention: receiver_convention,
+                };
+                return (pointee, call_args);
+            }
+
             if !call_args.is_empty() {
+                // A mutating receiver (`modifying get`) on an observed field
+                // mutates a writeback slot; the observer setter stores it
+                // back when the call's writebacks drain.
+                if receiver_convention == ParamConvention::MutBorrow
+                    && let Some(slot) =
+                        self.observed_field_slot(receiver_expr, recv_entity, field_name, field_ty)
+                {
+                    let old_receiver = call_args[0].value;
+                    if self.body.value(old_receiver).borrow_source.is_some() {
+                        self.emit_end_borrow(old_receiver);
+                    }
+                    call_args[0] = CallArg {
+                        value: self.lend_writeback_slot(slot, field_ty),
+                        convention: receiver_convention,
+                    };
+                    return (field_ty, call_args);
+                }
                 // Borrow-like receiver (subscript get/set): borrow the field
                 // IN PLACE via its address when the base is addressable
                 // (a var / field chain). `emit_struct_extract` would yield a
@@ -474,18 +506,34 @@ impl OssaBodyCtx<'_, '_> {
                 // bitwise-aliases heap elements and then over-releases them
                 // (corrupting `bag.items(i)` on a struct field). The address
                 // path mirrors how `bag.field.prop` (e.g. `.count`) is lowered.
-                if matches!(
-                    receiver_convention,
-                    ParamConvention::Borrow | ParamConvention::MutBorrow
-                ) && let Some(base_addr) = self.try_field_addr_chain(receiver_expr)
+                // A receiver that is already a writeback slot (`o.pos.c(5)`
+                // with `pos` observed): project into that slot.
+                let old_receiver = call_args[0].value;
+                if receiver_convention == ParamConvention::MutBorrow
+                    && let Some(borrow) =
+                        self.relend_lent_field(old_receiver, receiver_ty, field_idx, field_ty)
                 {
-                    let old_receiver = call_args[0].value;
+                    call_args[0] = CallArg {
+                        value: borrow,
+                        convention: receiver_convention,
+                    };
+                    return (field_ty, call_args);
+                }
+                let wb_mark = self.pending_writebacks.len();
+                let base_addr = match receiver_convention {
+                    ParamConvention::Borrow => {
+                        self.field_addr_chain(receiver_expr, crate::body::place::Access::Read)
+                    },
+                    ParamConvention::MutBorrow => self.write_place_addr(receiver_expr),
+                    _ => None,
+                };
+                if let Some(base_addr) = base_addr {
                     if self.body.value(old_receiver).borrow_source.is_some() {
                         self.emit_end_borrow(old_receiver);
                     }
                     let faddr = self.emit_field_addr(base_addr, receiver_ty, field_idx);
                     let borrow = if receiver_convention == ParamConvention::MutBorrow {
-                        self.emit_begin_mut_borrow_addr(faddr, field_ty)
+                        self.mut_borrow_write_addr(faddr, field_ty, wb_mark)
                     } else {
                         self.emit_begin_borrow_addr(faddr, field_ty)
                     };
@@ -516,13 +564,13 @@ impl OssaBodyCtx<'_, '_> {
 
         // Computed property: call the getter
         if self.ctx.world.get::<Gettable>(field_entity).is_some() {
-            let field_ty = crate::ty::resolve_type_annotation(self.ctx, field_entity);
-            self.ctx.register_name(field_entity);
-            let type_args = self.prepend_receiver_type_args(receiver_ty, vec![]);
-            let callee = Callee::direct_with_args(field_entity, type_args, None);
             let old_receiver = call_args.remove(0);
-            let getter_result = self.emit_call_returning(callee, vec![old_receiver], field_ty);
-            let field_arg = self.prepare_call_arg(getter_result, receiver_convention);
+            let (field_arg, field_ty) = self.computed_prefix_receiver(
+                old_receiver,
+                receiver_ty,
+                field_entity,
+                receiver_convention,
+            );
             call_args.insert(0, field_arg);
             return (field_ty, call_args);
         }
@@ -550,8 +598,12 @@ impl OssaBodyCtx<'_, '_> {
         {
             return self.lower_expr(receiver_expr);
         }
-        let receiver_ty = self.resolve_expr_type(receiver_expr);
+        let mut receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
+        // `xs.first() ?? 0`: the operator works on the copied-out `Optional[T]`.
+        if self.decays_optional_ref(receiver_expr) {
+            receiver_ty = self.decayed_optional_ty(receiver_ty);
+        }
 
         self.ctx.register_name(protocol);
         let method_type_args = self.resolve_type_args(expr_id);
@@ -594,7 +646,7 @@ impl OssaBodyCtx<'_, '_> {
             method_type_args,
         };
 
-        let result = self.emit_call_returning(callee, call_args, result_ty);
+        let result = self.emit_call_for_expr(expr_id, callee, call_args, result_ty);
         self.drain_writebacks(wb_mark);
         result
     }
@@ -763,7 +815,7 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        let result = self.emit_call_returning(callee, call_args, result_ty);
+        let result = self.emit_call_for_expr(expr_id, callee, call_args, result_ty);
         self.drain_writebacks(wb_mark);
         result
     }
@@ -845,6 +897,11 @@ impl OssaBodyCtx<'_, '_> {
                 (idx, val)
             })
             .collect();
+        // `lazy var` caches are never arguments: they start empty.
+        let mut fields = fields;
+        if known_struct {
+            fields.extend(self.empty_lazy_caches(result_ty));
+        }
 
         self.emit_struct(result_ty, fields)
     }
@@ -1079,6 +1136,27 @@ impl OssaBodyCtx<'_, '_> {
         result_param
     }
 
+    /// How to call a function VALUE of type `ty`: a thin code pointer, a
+    /// closure, or a C function address (called with the C ABI).
+    fn value_callee(&self, ty: TyId, val: ValueId) -> Callee {
+        match self.ctx.module.ty_arena.get(ty) {
+            MirTy::FuncThin { .. } => Callee::Thin(val),
+            MirTy::FuncC { .. } => Callee::C(val),
+            _ => Callee::Thick(val),
+        }
+    }
+
+    /// Arguments of a call through a function value of type `ty`. A C
+    /// function takes its params by their own conventions (by value, or a
+    /// pointer for `&T`); Kestrel function values borrow every argument.
+    fn lower_value_call_args(&mut self, ty: TyId, args: &[HirCallArg]) -> Vec<CallArg> {
+        let MirTy::FuncC { params, .. } = self.ctx.module.ty_arena.get(ty) else {
+            return self.lower_call_args_default(args);
+        };
+        let convs: Vec<ParamConvention> = params.iter().map(|(_, c)| *c).collect();
+        self.lower_call_args(args, &convs, 0)
+    }
+
     fn lower_indirect_call(
         &mut self,
         expr_id: HirExprId,
@@ -1109,7 +1187,9 @@ impl OssaBodyCtx<'_, '_> {
             },
             _ => Vec::new(),
         };
-        let call_args = if convs.contains(&ParamConvention::MutBorrow) {
+        let call_args = if matches!(self.ctx.module.ty_arena.get(callee_ty), MirTy::FuncC { .. }) {
+            self.lower_value_call_args(callee_ty, args)
+        } else if convs.contains(&ParamConvention::MutBorrow) {
             let mapped: Vec<ParamConvention> = convs
                 .iter()
                 .map(|c| {
@@ -1125,10 +1205,7 @@ impl OssaBodyCtx<'_, '_> {
             self.lower_call_args_default(args)
         };
 
-        let callee = match self.ctx.module.ty_arena.get(callee_ty) {
-            MirTy::FuncThin { .. } => Callee::Thin(callee_val),
-            _ => Callee::Thick(callee_val),
-        };
+        let callee = self.value_callee(callee_ty, callee_val);
 
         let result = self.emit_call_returning(callee, call_args, result_ty);
 

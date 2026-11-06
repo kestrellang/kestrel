@@ -41,7 +41,7 @@ module Test
             var done: std.core.Bool = false;
             while done == false {
                 let next = iter.next();
-                if next.isSome() {
+                if next.isSome {
                     sum = sum + next.unwrap()
                 } else {
                     done = true
@@ -55,7 +55,7 @@ module Test
             var singleDone: std.core.Bool = false;
             while singleDone == false {
                 let next = singleIter.next();
-                if next.isSome() {
+                if next.isSome {
                     singleSum = singleSum + next.unwrap()
                 } else {
                     singleDone = true
@@ -69,7 +69,7 @@ module Test
             var emptyDone: std.core.Bool = false;
             while emptyDone == false {
                 let next = emptyIter.next();
-                if next.isSome() {
+                if next.isSome {
                     emptySum = emptySum + next.unwrap()
                 } else {
                     emptyDone = true

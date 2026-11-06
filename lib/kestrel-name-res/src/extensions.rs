@@ -403,6 +403,7 @@ pub fn sugar_builtin(ty: &kestrel_ast::AstType) -> Option<(kestrel_hir::Builtin,
         kestrel_ast::AstType::Array(..) => (Builtin::ArrayTypeOperator, "Array"),
         kestrel_ast::AstType::Optional(..) => (Builtin::OptionalTypeOperator, "Optional"),
         kestrel_ast::AstType::Dictionary(..) => (Builtin::DictionaryTypeOperator, "Dictionary"),
+        kestrel_ast::AstType::Result { .. } => (Builtin::ResultTypeOperator, "Result"),
         _ => return None,
     })
 }

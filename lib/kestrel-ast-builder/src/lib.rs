@@ -15,6 +15,7 @@ pub mod derive;
 pub mod lang_module;
 pub mod qualified_name;
 pub mod syntax;
+pub mod unsafety;
 
 // Re-export the type syntax declarations are built from.
 pub use kestrel_ast::{AstType, FnTypeKind, PathSegment};

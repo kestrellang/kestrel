@@ -4,7 +4,7 @@ module std.collections
 
 import std.core.(Hasher, Hashable, Defaultable)
 import std.numeric.(UInt8, UInt64, Int64)
-import std.memory.(ArraySlice)
+import std.collections.(Slice)
 
 // ============================================================================
 // DEFAULT HASHER
@@ -86,20 +86,20 @@ public struct DefaultHasher: Hasher, Defaultable {
     ///
     /// ```
     /// var h = DefaultHasher();
-    /// h.write(bytes: "hello".utf8Bytes());
-    /// h.write(bytes: " world".utf8Bytes());
-    /// // Equivalent to a single write of "hello world".utf8Bytes()
+    /// h.write("hello".asByteSlice());
+    /// h.write(" world".asByteSlice());
+    /// // Equivalent to a single write of "hello world".asByteSlice()
     /// ```
-    public mutating func write(bytes: ArraySlice[UInt8]) {
+    public mutating func write(bytes: Slice[UInt8]) {
         let count = bytes.count;
         let ptr = bytes.pointer;
         // FNV prime, reused as the per-byte multiplier.
         let mult = 1099511628211;
         var i: Int64 = 0;
         while i < count {
-            let byte = ptr.offset(by: i).read();
+            let byte = unsafe ptr.offset(by: i).read();
             self.state = self.state.bitwiseXor(UInt64(from: byte));
-            self.state = self.state.multiply(mult);
+            self.state = self.state.multiplyWrapping(mult);
             // Per-byte avalanche: mix high bits down so adjacent
             // states diverge faster than plain FNV-1a.
             self.state = self.state.bitwiseXor(self.state.shiftRight(by: 32));
@@ -124,9 +124,9 @@ public struct DefaultHasher: Hasher, Defaultable {
         let m2 = 14181476777654086739;  // 0xc4ceb9fe1a85ec53
         var x = self.state;
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        x = x.multiply(m1);
+        x = x.multiplyWrapping(m1);
         x = x.bitwiseXor(x.shiftRight(by: 33));
-        x = x.multiply(m2);
+        x = x.multiplyWrapping(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
         self.state = x;
         x

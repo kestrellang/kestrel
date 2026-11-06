@@ -20,22 +20,22 @@ public struct SHA1: Digest {
         self.blocks = BlockBuffer(function: SHA1State(words: initial), blockLength: 64);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
-        self.blocks.update(bytes.asSlice());
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        self.blocks.update(bytes.asUnsafeSlice());
     }
 
     public func finalize() -> DigestOutput {
         let words = self.blocks.finishedWithLengthPadding(.BigEndian64).words;
         var result: [UInt8] = [];
         for i in 0..<5 {
-            result.append(contentsOf: words(i).toBytesBigEndian().asSlice());
+            result.append(contentsOf: words(i).toBytesBigEndian().asUnsafeSlice());
         }
         DigestOutput(bytes: result)
     }
 
     // --- internals ---
 
-    static func compress(block: ArraySlice[UInt8], mutating state: Array[UInt32]) {
+    static func compress(block: UnsafeSlice[UInt8], mutating state: Array[UInt32]) {
         // Message schedule: 16 big-endian words, expanded to 80.
         var w = Array[UInt32](repeating: 0, count: 80);
         for i in 0..<16 {
@@ -72,7 +72,7 @@ public struct SHA1: Digest {
                 f = b ^ c ^ d;
                 k = 0xca62c1d6;
             }
-            let temp = a.rotateLeft(by: 5) + f + e + k + w(i);
+            let temp = (a.rotateLeft(by: 5)).addWrapping(f).addWrapping(e).addWrapping(k).addWrapping(w(i));
             e = d;
             d = c;
             c = b.rotateLeft(by: 30);
@@ -80,11 +80,11 @@ public struct SHA1: Digest {
             a = temp;
         }
 
-        state(0) = state(0) + a;
-        state(1) = state(1) + b;
-        state(2) = state(2) + c;
-        state(3) = state(3) + d;
-        state(4) = state(4) + e;
+        state(0) = state(0).addWrapping(a);
+        state(1) = state(1).addWrapping(b);
+        state(2) = state(2).addWrapping(c);
+        state(3) = state(3).addWrapping(d);
+        state(4) = state(4).addWrapping(e);
     }
 }
 
@@ -96,7 +96,7 @@ struct SHA1State: BlockFunction {
         self.words = words;
     }
 
-    mutating func compress(block: ArraySlice[UInt8]) {
+    mutating func compress(block: UnsafeSlice[UInt8]) {
         SHA1.compress(block, self.words);
     }
 }

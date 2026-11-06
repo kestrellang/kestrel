@@ -1,0 +1,7 @@
+[package]
+name = "wgpu_triangle"
+version = "0.1.0"
+description = "Renders a triangle offscreen with wgpu and saves it as a PPM image"
+
+[dependencies]
+wgpu = { path = "../../lang/wgpu" }

@@ -4,8 +4,8 @@ module std.net.socket
 
 import std.numeric.(Int64, Int32, UInt8, UInt16)
 import std.result.(Result)
-import std.memory.(ArraySlice, Pointer, RcBox)
-import std.collections.(Array)
+import std.memory.(UnsafeSlice, Pointer, RcBox)
+import std.collections.(Array, Slice)
 import std.text.(String)
 import std.core.(Bool)
 import std.net.libc
@@ -18,7 +18,7 @@ import std.io.write.(Writable)
 func ADDRINFO_SIZE() -> Int64 { 48 }
 
 /// Size in bytes of `struct addrinfo` on linux (`48`).
-@platform(.Linux)
+@platform(.Linux, .Emscripten)
 func ADDRINFO_SIZE() -> Int64 { 48 }
 
 /// Byte offset of the `ai_addr` pointer within `addrinfo` on darwin.
@@ -26,7 +26,7 @@ func ADDRINFO_SIZE() -> Int64 { 48 }
 func AI_ADDR_OFFSET() -> Int64 { 32 }
 
 /// Byte offset of the `ai_addr` pointer within `addrinfo` on linux. Differs from darwin because of `ai_canonname` ordering.
-@platform(.Linux)
+@platform(.Linux, .Emscripten)
 func AI_ADDR_OFFSET() -> Int64 { 24 }
 
 /// Builds a 16-byte `sockaddr_in` for binding to the wildcard IPv4 address on `port`.
@@ -57,7 +57,7 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
 }
 
 /// Linux variant of `buildSockaddrIn` — `sin_family` is a 16-bit field with no leading `sin_len`.
-@platform(.Linux)
+@platform(.Linux, .Emscripten)
 func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
     var addr = Array[UInt8]();
     // sin_family = AF_INET (2) as little-endian uint16
@@ -67,8 +67,8 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
     let port64 = Int64(from: port);
     let portHi = port64 / 256;
     let portLo = port64 % 256;
-    addr.append(UInt8(from: portHi));
-    addr.append(UInt8(from: portLo));
+    addr.append(UInt8(truncating: portHi));
+    addr.append(UInt8(truncating: portLo));
     // sin_addr = INADDR_ANY + zero padding (12 bytes)
     var pad: Int64 = 0;
     while pad < 12 {
@@ -152,8 +152,9 @@ public struct TcpStream: Readable, Writable, Cloneable {
     ///
     /// Returns `Err(IoError)` from the captured `errno` if `recv`
     /// returns `-1`.
-    public mutating func read(into buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let n = libc.recv(self.conn.getValue(), buf.pointer, buf.count, 0);
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        let raw = buf.asUnsafeSlice();
+        let n = libc.recv(self.conn.value, raw.pointer, raw.count, 0);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -170,8 +171,8 @@ public struct TcpStream: Readable, Writable, Cloneable {
     ///
     /// Returns `Err(IoError)` from the captured `errno` if `send`
     /// returns `-1`.
-    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let n = libc.send(self.conn.getValue(), buf.pointer, buf.count, 0);
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        let n = libc.send(self.conn.value, buf.pointer, buf.count, 0);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -192,7 +193,7 @@ public struct TcpStream: Readable, Writable, Cloneable {
     /// not expose (`fcntl`, `setsockopt`, …). Do not close it
     /// yourself — the deinit still will.
     public func rawFd() -> Int32 {
-        self.conn.getValue()
+        self.conn.value
     }
 
     /// Releases ownership of the fd and returns it.
@@ -202,18 +203,16 @@ public struct TcpStream: Readable, Writable, Cloneable {
     /// closing the returned fd. Use this when handing the fd to another
     /// owner (e.g. an event loop, a child process, or a TLS stream).
     public mutating func detachFd() -> Int32 {
-        self.conn.modify { (mutating fd) in
-            let old = fd;
-            fd = -1;
-            old
-        }
+        let old = self.conn.value;
+        self.conn.mutatingValue = -1;
+        old
     }
 
     /// Closes the owned fd once, when the last shared handle drops.
     /// The `-1` sentinel set by `detachFd` makes the close a no-op.
     deinit {
-        if self.conn.isUnique() {
-            let fd = self.conn.getValue();
+        if self.conn.isUnique {
+            let fd = self.conn.value;
             if fd >= 0 {
                  libc.close(fd);
             }
@@ -262,11 +261,11 @@ extend TcpStream {
         }
         // ai_family = AF_INET (2) at offset 4
         let hintsPtr = hints.asPointer();
-        hintsPtr.offset(by: 4).cast[Int32]().write(libc.AF_INET());
+        unsafe hintsPtr.offset(by: 4).cast[Int32]().write(libc.AF_INET());
         // ai_socktype = SOCK_STREAM (1) at offset 8
-        hintsPtr.offset(by: 8).cast[Int32]().write(libc.SOCK_STREAM());
+        unsafe hintsPtr.offset(by: 8).cast[Int32]().write(libc.SOCK_STREAM());
         // ai_protocol = IPPROTO_TCP (6) at offset 12
-        hintsPtr.offset(by: 12).cast[Int32]().write(libc.IPPROTO_TCP());
+        unsafe hintsPtr.offset(by: 12).cast[Int32]().write(libc.IPPROTO_TCP());
 
         // Null-terminate host and port strings for C
         var hostBuf = Array[UInt8]();
@@ -303,11 +302,11 @@ extend TcpStream {
         // ai_family at offset 4, ai_socktype at offset 8, ai_protocol at offset 12
         // ai_addrlen at offset 16, ai_addr offset is platform-specific
         let infoPtr = resultPtr;
-        let family = infoPtr.offset(by: 4).cast[Int32]().read();
-        let socktype = infoPtr.offset(by: 8).cast[Int32]().read();
-        let proto = infoPtr.offset(by: 12).cast[Int32]().read();
-        let addrlen = infoPtr.offset(by: 16).cast[Int32]().read();
-        let addrPtr = infoPtr.offset(by: AI_ADDR_OFFSET()).cast[Pointer[UInt8]]().read();
+        let family = unsafe infoPtr.offset(by: 4).cast[Int32]().read();
+        let socktype = unsafe infoPtr.offset(by: 8).cast[Int32]().read();
+        let proto = unsafe infoPtr.offset(by: 12).cast[Int32]().read();
+        let addrlen = unsafe infoPtr.offset(by: 16).cast[Int32]().read();
+        let addrPtr = unsafe infoPtr.offset(by: AI_ADDR_OFFSET()).cast[Pointer[UInt8]]().read();
 
         // Create socket
         let fd = libc.socket(family, socktype, proto);

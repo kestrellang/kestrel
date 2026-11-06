@@ -85,7 +85,7 @@ fn collect_positive_conformances(cx: &DeclContext<'_>, entity: Entity) -> Vec<En
         .0
         .iter()
         .filter_map(|item| {
-            let ConformanceItem::Positive(ast_type, _) = item else {
+            let ConformanceItem::Positive(ast_type, ..) = item else {
                 return None;
             };
             resolve_conformance_type(cx, entity, ast_type)

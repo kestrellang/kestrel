@@ -5,8 +5,8 @@ module std.text
 import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral, Hashable, Hasher, RangeMatchable)
 import std.numeric.(Int64, UInt8, UInt32)
 import std.result.(Optional)
-import std.collections.(Array)
-import std.memory.(ArraySlice, Pointer)
+import std.collections.(Array, Slice)
+import std.memory.(Pointer)
 import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.text.unicode as unicode
 
@@ -459,7 +459,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// use the result for content-addressed storage.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self._value;
-        hasher.write(ArraySlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
+        hasher.write(Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
     }
 
     /// Returns true if `self >= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.
@@ -798,7 +798,7 @@ public struct Utf8DecodeResult {
 func readByteAt(ptr: lang.ptr[lang.i8], offset: Int64) -> lang.i32 {
     let rawOffset: lang.i64 = offset.raw;
     let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](ptr, rawOffset);
-    let signedByte: lang.i8 = lang.ptr_read(bytePtr);
+    let signedByte: lang.i8 = unsafe lang.ptr_read(bytePtr);
     let asI32: lang.i32 = lang.cast_i8_i32(signedByte);
     lang.i32_and(asI32, 0xFF)
 }
@@ -812,7 +812,7 @@ func readByteAt(ptr: lang.ptr[lang.i8], offset: Int64) -> lang.i32 {
 func writeByteAt(ptr: lang.ptr[lang.i8], offset: Int64, byte: lang.i8) {
     let rawOffset: lang.i64 = offset.raw;
     let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](ptr, rawOffset);
-    lang.ptr_write(bytePtr, byte)
+    unsafe lang.ptr_write(bytePtr, byte)
 }
 
 /// Decodes one UTF-8 character starting at `index` inside the buffer of `length` bytes pointed to by `ptr`.

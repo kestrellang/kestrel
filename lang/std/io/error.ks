@@ -136,8 +136,8 @@ public enum IoErrorKind {
 /// Returned in the `Err` arm of every `Result` produced by `Read`, `Write`,
 /// `File`, `stdio`, and the `os.fs` helpers. Pattern-match on `kind` for
 /// programmatic dispatch; call `description()` for a short human-readable
-/// phrase. The convenience constructors at the bottom (`notFound()`,
-/// `permissionDenied()`, etc.) build common kinds without spelling the enum.
+/// phrase. The static constructors at the bottom (`IoError.notFound()`,
+/// `IoError.permissionDenied()`, etc.) build common kinds without spelling the enum.
 ///
 /// # Examples
 ///
@@ -217,23 +217,25 @@ extend IoError: Formattable {
 // Convenience shorthands for the most-used kinds. Equivalent to
 // `IoError(kind: .NotFound)` etc., but read more naturally at error sites.
 
-/// `ENOENT` — the path does not exist.
-public func notFound() -> IoError { IoError(kind: .NotFound) }
+extend IoError {
+    /// `ENOENT` — the path does not exist.
+    public static func notFound() -> IoError { IoError(kind: .NotFound) }
 
-/// `EACCES` — caller lacks permission for the operation.
-public func permissionDenied() -> IoError { IoError(kind: .PermissionDenied) }
+    /// `EACCES` — caller lacks permission for the operation.
+    public static func permissionDenied() -> IoError { IoError(kind: .PermissionDenied) }
 
-/// `EEXIST` — the path already exists (e.g. `O_CREAT | O_EXCL`).
-public func alreadyExists() -> IoError { IoError(kind: .AlreadyExists) }
+    /// `EEXIST` — the path already exists (e.g. `O_CREAT | O_EXCL`).
+    public static func alreadyExists() -> IoError { IoError(kind: .AlreadyExists) }
 
-/// `EINVAL` — invalid argument to a libc call.
-public func invalidInput() -> IoError { IoError(kind: .InvalidInput) }
+    /// `EINVAL` — invalid argument to a libc call.
+    public static func invalidInput() -> IoError { IoError(kind: .InvalidInput) }
 
-/// `EAGAIN` — non-blocking call would have blocked.
-public func wouldBlock() -> IoError { IoError(kind: .WouldBlock) }
+    /// `EAGAIN` — non-blocking call would have blocked.
+    public static func wouldBlock() -> IoError { IoError(kind: .WouldBlock) }
 
-/// `EINTR` — operation interrupted by a signal.
-public func interrupted() -> IoError { IoError(kind: .Interrupted) }
+    /// `EINTR` — operation interrupted by a signal.
+    public static func interrupted() -> IoError { IoError(kind: .Interrupted) }
 
-/// `EPIPE` — write to a pipe with no reader.
-public func brokenPipe() -> IoError { IoError(kind: .BrokenPipe) }
+    /// `EPIPE` — write to a pipe with no reader.
+    public static func brokenPipe() -> IoError { IoError(kind: .BrokenPipe) }
+}

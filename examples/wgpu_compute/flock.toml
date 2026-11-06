@@ -1,0 +1,7 @@
+[package]
+name = "wgpu_compute"
+version = "0.1.0"
+description = "Doubles numbers on the GPU with a WGSL compute shader, headless"
+
+[dependencies]
+wgpu = { path = "../../lang/wgpu" }

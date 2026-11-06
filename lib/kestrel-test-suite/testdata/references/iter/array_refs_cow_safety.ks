@@ -2,7 +2,7 @@
 // backends: cranelift,llvm
 // stdlib: true
 
-// Stage 2d stdlib surface: `mutableRefs()` runs the COW barrier BEFORE
+// Stage 2d stdlib surface: `mutatingRefs()` runs the COW barrier BEFORE
 // handing out the buffer — writes through the yielded references never
 // leak into a shared copy.
 module Test
@@ -11,7 +11,7 @@ module Test
 func main() -> lang.i64 {
     var c = [5, 6];
     let snapshot = c;
-    for x in c.mutableRefs() {
+    for x in c.mutatingRefs() {
         x = 0;
     }
     if c(0) != 0 { return 1; }

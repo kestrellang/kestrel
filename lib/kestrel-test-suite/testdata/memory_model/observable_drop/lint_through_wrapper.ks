@@ -12,7 +12,7 @@ import std.numeric.(Int32)
 func sys_close(fd: Int32) -> Int32
 
 func closeFd(fd: Int32) -> Int32 {
-    sys_close(fd)
+    unsafe sys_close(fd)
 }
 
 struct Handle: Cloneable { // WARN: has a `deinit` that calls `closeFd`

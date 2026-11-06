@@ -18,7 +18,7 @@ public struct BLAKE2b512: Digest {
         self.core = BLAKE2b(validLength: 64);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         self.core.update(bytes);
     }
 
@@ -40,7 +40,7 @@ public struct BLAKE2b256: Digest {
         self.core = BLAKE2b(validLength: 32);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         self.core.update(bytes);
     }
 
@@ -87,7 +87,7 @@ public struct BLAKE2b {
 
     /// One-shot hash with a chosen output length, or null unless
     /// `outputLength` is between 1 and 64.
-    public static func hash(bytes: some Slice[UInt8], outputLength outputLength: Int64) -> DigestOutput? {
+    public static func hash(bytes: &some Sliceable[UInt8] and not Static and not Copyable and not Sized, outputLength outputLength: Int64) -> DigestOutput? {
         guard let some hasher = BLAKE2b(outputLength: outputLength) else { return null; }
         var h = hasher;
         h.update(bytes);
@@ -107,12 +107,12 @@ public struct BLAKE2b {
     /// length, no key, fanout 1, depth 1 (RFC 7693 §2.5).
     static func initialState(outputLength: Int64) -> Array[UInt64] {
         var h = BLAKE2b.IV;
-        h(0) = h(0) ^ 0x01010000 ^ UInt64(from: outputLength);
+        h(0) = h(0) ^ 0x01010000 ^ UInt64(truncating: outputLength);
         h
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
-        let sl = bytes.asSlice();
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let sl = bytes.asUnsafeSlice();
         var offset: Int64 = 0;
 
         if self.buffer.count > 0 {
@@ -125,13 +125,13 @@ public struct BLAKE2b {
             self.incrementCounter(128);
             var block = self.buffer;
             self.buffer = Array[UInt8]();
-            BLAKE2b.compress(block.asSlice(), self.state, self.t0, self.t1, false);
+            BLAKE2b.compress(block.asUnsafeSlice(), self.state, self.t0, self.t1, false);
             offset = needed;
         }
 
         while offset + 128 < sl.count {
             self.incrementCounter(128);
-            BLAKE2b.compress(sl.drop(first: offset).prefix(128), self.state, self.t0, self.t1, false);
+            BLAKE2b.compress(sl.drop(first: offset).prefix(128).asUnsafeSlice(), self.state, self.t0, self.t1, false);
             offset = offset + 128;
         }
 
@@ -147,20 +147,20 @@ public struct BLAKE2b {
 
         // Pad the remaining buffer with zeros
         var buf: [UInt8] = [];
-        buf.append(contentsOf: self.buffer.asSlice());
-        let remaining = UInt64(from: buf.count);
+        buf.append(contentsOf: self.buffer.asUnsafeSlice());
+        let remaining = UInt64(truncating: buf.count);
 
         // Increment counter by remaining bytes
-        ct0 = ct0 + remaining;
+        ct0 = ct0.addWrapping(remaining);
         if ct0 < remaining {
-            ct1 = ct1 + 1;
+            ct1 = ct1.addWrapping(1);
         }
 
         while buf.count < 128 {
             buf.append(0);
         }
 
-        BLAKE2b.compress(buf.asSlice(), st, ct0, ct1, true);
+        BLAKE2b.compress(buf.asUnsafeSlice(), st, ct0, ct1, true);
 
         // Extract output bytes (little-endian)
         var result: [UInt8] = [];
@@ -193,15 +193,15 @@ public struct BLAKE2b {
     }
 
     mutating func incrementCounter(n: Int64) {
-        let add = UInt64(from: n);
-        self.t0 = self.t0 + add;
+        let add = UInt64(truncating: n);
+        self.t0 = self.t0.addWrapping(add);
         if self.t0 < add {
-            self.t1 = self.t1 + 1;
+            self.t1 = self.t1.addWrapping(1);
         }
     }
 
     static func compress(
-        block: ArraySlice[UInt8],
+        block: UnsafeSlice[UInt8],
         mutating state: Array[UInt64],
         t0: UInt64,
         t1: UInt64,
@@ -281,13 +281,13 @@ public struct BLAKE2b {
         a: Int64, b: Int64, c: Int64, d: Int64,
         x: UInt64, y: UInt64
     ) {
-        v(a) = v(a) + v(b) + x;
+        v(a) = v(a).addWrapping(v(b)).addWrapping(x);
         v(d) = (v(d) ^ v(a)).rotateRight(by: 32);
-        v(c) = v(c) + v(d);
+        v(c) = v(c).addWrapping(v(d));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 24);
-        v(a) = v(a) + v(b) + y;
+        v(a) = v(a).addWrapping(v(b)).addWrapping(y);
         v(d) = (v(d) ^ v(a)).rotateRight(by: 16);
-        v(c) = v(c) + v(d);
+        v(c) = v(c).addWrapping(v(d));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 63);
     }
 }

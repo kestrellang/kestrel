@@ -200,6 +200,20 @@ impl Constructor {
         root: Entity,
         parent_ty: &ResolvedTy,
     ) -> Vec<ResolvedTy> {
+        // Patterns never see a ref: a `&T` field (an `Optional[&T]`
+        // payload, a ref-typed tuple element) is matched as its pointee.
+        self.raw_field_types(query, root, parent_ty)
+            .into_iter()
+            .map(|ty| crate::pattern_ty(&ty).clone())
+            .collect()
+    }
+
+    fn raw_field_types(
+        &self,
+        query: &QueryContext<'_>,
+        root: Entity,
+        parent_ty: &ResolvedTy,
+    ) -> Vec<ResolvedTy> {
         match (self, parent_ty) {
             (Constructor::Tuple { .. }, ResolvedTy::Tuple(elems)) => elems.clone(),
             (Constructor::TypeTest(target), _) => vec![target.clone()],

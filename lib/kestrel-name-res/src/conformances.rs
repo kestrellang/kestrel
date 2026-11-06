@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
     ConformanceItem, Conformances, ExtensionTarget, Name, NodeKind, QualifiedTarget,
+    TypeAnnotation, TypeParams,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
@@ -191,7 +192,7 @@ fn gather_protocol_instantiations(
         };
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(resolved) = resolve_conformance_entity(ctx, ast_ty, entity, root) else {
@@ -210,6 +211,32 @@ fn gather_protocol_instantiations(
         }
 
         instantiations.push((resolved, entity, type_args));
+    }
+}
+
+/// A conformance's protocol args with the protocol's declared defaults
+/// filling the unwritten tail: `: Multipliable` is `: Multipliable[Self]`
+/// (`Multipliable[Other = Self]`). The defaults are the protocol's own AST,
+/// so the caller lowers them in the conforming declaration's scope, where
+/// `Self` is the conforming type. Returns `written` unchanged when any
+/// unwritten param has no default (the implicit-positional `Array[T]: Slice`).
+pub fn conformance_args_with_defaults(
+    ctx: &QueryContext<'_>,
+    protocol: Entity,
+    written: Vec<AstType>,
+) -> Vec<AstType> {
+    let params = ctx
+        .get::<TypeParams>(protocol)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let defaults: Option<Vec<AstType>> = params
+        .iter()
+        .skip(written.len())
+        .map(|&p| ctx.get::<TypeAnnotation>(p).map(|t| t.0.clone()))
+        .collect();
+    match defaults {
+        Some(defaults) if !defaults.is_empty() => written.into_iter().chain(defaults).collect(),
+        _ => written,
     }
 }
 
@@ -317,7 +344,7 @@ fn declared_conformance_protocols(
         .0
         .iter()
         .filter_map(|item| {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
+            let ConformanceItem::Positive(ast_ty, ..) = item else {
                 return None;
             };
             resolve_conformance_entity(ctx, ast_ty, entity, root)
@@ -509,7 +536,7 @@ fn written_conformances(ctx: &QueryContext<'_>, root: Entity, owner: Entity) -> 
         .0
         .iter()
         .filter_map(|item| {
-            let ConformanceItem::Positive(AstType::Named { segments, .. }, _) = item else {
+            let ConformanceItem::Positive(AstType::Named { segments, .. }, ..) = item else {
                 return None;
             };
             match ctx.query(ResolveTypePath {
@@ -586,7 +613,7 @@ mod tests {
     }
 
     fn positive(name: &str) -> ConformanceItem {
-        ConformanceItem::Positive(named_ast(name), fake_syntax())
+        ConformanceItem::Positive(named_ast(name), fake_syntax(), false)
     }
 
     fn spawn_protocol(world: &mut World, parent: Entity, name: &str) -> Entity {

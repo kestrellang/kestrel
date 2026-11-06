@@ -105,6 +105,11 @@ pub enum ParsedAttr {
         abi: Abi,
         mangle_name: Option<String>,
     },
+    /// `@export(.C, mangleName:)`: a Kestrel body C calls by symbol.
+    Export {
+        abi: Abi,
+        mangle_name: Option<String>,
+    },
     /// The builtin and its name as written (`.AddOperatorProtocol` and
     /// `Addable` are one builtin).
     Builtin(kestrel_hir::Builtin, String),
@@ -119,6 +124,8 @@ pub enum ParsedAttr {
     NonExhaustive,
     /// `@observabledrop` on a struct or enum.
     ObservableDrop,
+    /// `@sugarOnly` on a protocol requirement.
+    SugarOnly,
     /// `@derive(P, Q)`: the protocol paths as written.
     Derive(Vec<Vec<String>>),
     /// `@default` on an enum case.

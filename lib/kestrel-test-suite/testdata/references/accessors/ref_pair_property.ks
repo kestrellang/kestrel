@@ -13,15 +13,15 @@ struct Cell {
     var p: Pointer[Int64]
 
     var value: Int64 {
-        ref { self.p.value }
-        mutating ref { self.p.mutatingValue }
+        ref { unsafe self.p.value }
+        mutating ref { unsafe self.p.mutatingValue }
     }
 }
 
 @main
 func main() -> lang.i64 {
     let p = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    p.write(5);
+    unsafe p.write(5);
     var c = Cell(p: p);
 
     if c.value != 5 { return 1; }

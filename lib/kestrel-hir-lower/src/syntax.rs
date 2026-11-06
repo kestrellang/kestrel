@@ -580,25 +580,37 @@ pub(crate) fn type_args(list: &SyntaxNode, file_id: usize) -> Vec<AstType> {
 pub(crate) struct ArgSyntax {
     pub label: Option<String>,
     pub value: ExprSrc,
+    /// An unlabeled closure written after the call's `)` (or with no
+    /// parentheses at all): `f(x) { … }`, `f { … }`.
+    pub trailing_closure: bool,
 }
 
 /// The arguments of an `ArgumentList` (parenthesised and trailing closures,
-/// in source order).
+/// in source order). Trailing closures are the arguments after the list's
+/// `)`, or every argument when the list has no parentheses.
 pub(crate) fn arguments(list: &SyntaxNode, file_id: usize) -> Vec<ArgSyntax> {
-    list.children()
-        .filter_map(ast::Argument::cast)
-        .map(|arg| {
-            let label = arg
-                .colon_token()
-                .and(arg.label())
-                .map(|t| t.text().to_string());
-            let span = get_node_span(arg.syntax(), file_id);
-            ArgSyntax {
-                label,
-                value: ExprSrc::or_error(first_expr(arg.syntax()), &span),
-            }
-        })
-        .collect()
+    let mut trailing = !has_token(list, SyntaxKind::LParen);
+    let mut out = Vec::new();
+    for el in list.children_with_tokens() {
+        if el.kind() == SyntaxKind::RParen {
+            trailing = true;
+            continue;
+        }
+        let Some(arg) = el.into_node().and_then(ast::Argument::cast) else {
+            continue;
+        };
+        let label = arg
+            .colon_token()
+            .and(arg.label())
+            .map(|t| t.text().to_string());
+        let span = get_node_span(arg.syntax(), file_id);
+        out.push(ArgSyntax {
+            trailing_closure: trailing && label.is_none(),
+            label,
+            value: ExprSrc::or_error(first_expr(arg.syntax()), &span),
+        });
+    }
+    out
 }
 
 // ===== Closures =====
@@ -625,13 +637,25 @@ pub(crate) fn closure_params(
             .filter(|c| c.kind() == SyntaxKind::ClosureParam)
             .map(|param| {
                 let span = get_node_span(&param, file_id);
+                let mut ty = param
+                    .children()
+                    .find(|c| c.kind().is_type())
+                    .and_then(|c| ast_type_from_cst(&c, file_id));
+                let mut is_mut = has_token(&param, SyntaxKind::Mutating);
+                // `(x: &T)` / `(x: &mutating T)` spell the access mode with
+                // the type, as a declared param does: the param is the pointee.
+                if !is_mut
+                    && let Some((inner, mutating)) =
+                        ty.as_ref().and_then(kestrel_ast::AstType::param_ref)
+                {
+                    let inner = inner.clone();
+                    ty = Some(inner);
+                    is_mut = mutating;
+                }
                 ClosureParamSyntax {
                     pat: PatSrc::or_error(first_pat(&param), &span),
-                    ty: param
-                        .children()
-                        .find(|c| c.kind().is_type())
-                        .and_then(|c| ast_type_from_cst(&c, file_id)),
-                    is_mut: has_token(&param, SyntaxKind::Mutating),
+                    ty,
+                    is_mut,
                 }
             })
             .collect(),

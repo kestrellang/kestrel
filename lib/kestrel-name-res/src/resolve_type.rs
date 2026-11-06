@@ -703,7 +703,7 @@ pub fn resolve_assoc_type_nested(
             .0
             .iter()
             .filter_map(|item| {
-                let ConformanceItem::Positive(ast_type, _) = item else {
+                let ConformanceItem::Positive(ast_type, ..) = item else {
                     return None;
                 };
                 Some(ast_type.clone())

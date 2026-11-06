@@ -84,7 +84,7 @@ module Test
             var h6 = std.collections.Heap[std.numeric.Int64]();
             h6.push(99);
             if h6.pop().unwrap() != 99 { return 30 }
-            if h6.pop().isSome() { return 31 }
+            if h6.pop().isSome { return 31 }
 
             // From-iterable preserves heap property
             var arr = std.collections.Array[std.numeric.Int64]();
@@ -106,7 +106,7 @@ module Test
                 if val < prev { return 32 }
                 prev = val
             }
-            if h7.pop().isSome() { return 33 }
+            if h7.pop().isSome { return 33 }
 
             0
         }

@@ -87,6 +87,7 @@ Additional docs cover specific subsystems in depth. Each crate chooses topics ba
 | `kestrel-hir-lower` | architecture, design |
 | `kestrel-type-infer` | architecture, design |
 | `kestrel-compiler` | architecture |
+| `kestrel-target` | architecture |
 
 ## Writing Guidelines
 

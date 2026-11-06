@@ -40,6 +40,7 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     seed_scalar(world, lang, "f64");
     seed_scalar(world, lang, "str");
     seed_ptr(world, lang);
+    seed_slice(world, lang);
     // Structural singletons. `()` and `!` have no nominal entity of their own,
     // so seed synthetic ones (named "()" / "!") to make them extension targets.
     // MIR lowering maps these entities back to `MirTy::Tuple([])` / `MirTy::Never`
@@ -68,8 +69,47 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     seed_pointer_ops(world, lang);
     seed_string_ops(world, lang);
     seed_misc_ops(world, lang);
+    mark_unsafe_intrinsics(world, lang);
 
     lang
+}
+
+/// Intrinsics that read, write or drop through a pointer. Using one needs an
+/// unsafe context; making, offsetting, casting or comparing a pointer does
+/// not. Read through `UnsafetyOf`, like any `unsafe func`.
+pub const UNSAFE_INTRINSICS: &[&str] = &[
+    "ptr_read",
+    "ptr_take",
+    "ptr_write",
+    "ptr_ref",
+    "ptr_mut_ref",
+    "ptr_mut_borrow",
+    "drop_in_place",
+    "clone_val_into",
+    "sizeof_val",
+    "alignof_val",
+];
+
+fn mark_unsafe_intrinsics(world: &mut World, lang: Entity) {
+    let unsafe_fns: Vec<Entity> = world
+        .children_of(lang)
+        .iter()
+        .copied()
+        .filter(|&e| {
+            world.get::<NodeKind>(e) == Some(&NodeKind::Function)
+                && world
+                    .get::<Name>(e)
+                    .is_some_and(|n| UNSAFE_INTRINSICS.contains(&n.0.as_str()))
+        })
+        .collect();
+    debug_assert_eq!(
+        unsafe_fns.len(),
+        UNSAFE_INTRINSICS.len(),
+        "every listed intrinsic is seeded"
+    );
+    for e in unsafe_fns {
+        world.set(e, IsUnsafe);
+    }
 }
 
 // ===== Type seeding =====
@@ -101,6 +141,26 @@ fn seed_ptr(world: &mut World, lang: Entity) {
     world.set_parent(t, ptr);
 
     world.set(ptr, TypeParams(vec![t]));
+}
+
+/// Create `lang.slice[T]` — a run of `T`s whose count is known only at
+/// runtime. Unsized (`kestrel_semantics::sizedness`): it is only ever held
+/// behind a pointer or ref, which is two words, (data, count).
+fn seed_slice(world: &mut World, lang: Entity) {
+    let slice = world.spawn();
+    world.set(slice, NodeKind::Struct);
+    world.set(slice, Name("slice".into()));
+    world.set(slice, Vis::Public);
+    world.set(slice, Typed);
+    world.set(slice, Intrinsic);
+    world.set_parent(slice, lang);
+
+    let t = world.spawn();
+    world.set(t, NodeKind::TypeParameter);
+    world.set(t, Name("T".into()));
+    world.set_parent(t, slice);
+
+    world.set(slice, TypeParams(vec![t]));
 }
 
 /// Create `lang.&` / `lang.&mutating` — generic synthetic entities for the
@@ -247,6 +307,7 @@ fn seed_fn(world: &mut World, lang: Entity, name: &str, params: &[(&str, AstType
                     pattern: None,
                     is_mut: false,
                     is_consuming: false,
+                    by_ref: false,
                 })
                 .collect(),
             receiver: None,
@@ -309,6 +370,7 @@ fn seed_generic_fn_multi(
                     pattern: None,
                     is_mut: false,
                     is_consuming: false,
+                    by_ref: false,
                 })
                 .collect(),
             receiver: None,
@@ -352,6 +414,8 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
         );
     }
     seed_fn(world, lang, "i1_not", &[("a", i1.clone())], i1.clone());
+    // Whether `+ - *` trap on overflow in this build (on at -O0 by default).
+    seed_fn(world, lang, "overflow_checks", &[], i1.clone());
 
     for ty_name in int_types {
         let ty = lang_ty(ty_name);
@@ -389,7 +453,7 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
             );
         }
         // Unchecked signed div/rem: same signature, no safety guards (UB on
-        // divide-by-zero / min/-1). Back `divideUnchecked`/`moduloUnchecked`.
+        // divide-by-zero / min/-1). Back `divideUnchecked`/`remainderUnchecked`.
         for op in ["div", "rem"] {
             seed_fn(
                 world,
@@ -773,6 +837,39 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
         "clone_val_into",
         &[("src", ptr_t.clone()), ("dst", ptr_t.clone())],
         unit_ty(),
+    );
+
+    // Slices: pack a thin pointer and a count into a fat `ptr[slice[T]]`,
+    // and read the count back. The data pointer is `cast_ptr[_, T]`, which
+    // reads a fat pointer's first word.
+    let slice_ptr = ptr_of(AstType::Named {
+        segments: vec![
+            PathSegment {
+                name: "lang".into(),
+                type_args: vec![],
+                span: Span::synthetic(0),
+            },
+            PathSegment {
+                name: "slice".into(),
+                type_args: vec![t.clone()],
+                span: Span::synthetic(0),
+            },
+        ],
+        span: Span::synthetic(0),
+    });
+    seed_generic_fn(
+        world,
+        lang,
+        "slice_from_parts",
+        &[("ptr", ptr_t.clone()), ("count", i64_ty.clone())],
+        slice_ptr.clone(),
+    );
+    seed_generic_fn(
+        world,
+        lang,
+        "slice_count",
+        &[("ptr", slice_ptr)],
+        i64_ty.clone(),
     );
 
     // Pointer queries (generic — work on any ptr[T])

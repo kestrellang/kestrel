@@ -12,8 +12,8 @@ errno.
 Returned in the `Err` arm of every `Result` produced by `Read`, `Write`,
 `File`, `stdio`, and the `os.fs` helpers. Pattern-match on `kind` for
 programmatic dispatch; call `description()` for a short human-readable
-phrase. The convenience constructors at the bottom (`notFound()`,
-`permissionDenied()`, etc.) build common kinds without spelling the enum.
+phrase. The static constructors at the bottom (`IoError.notFound()`,
+`IoError.permissionDenied()`, etc.) build common kinds without spelling the enum.
 
 ### Examples
 
@@ -52,6 +52,26 @@ Builds an error for a categorized kind.
 
 _Defined in `lang/std/io/error.ks`._
 
+#### function `alreadyExists`
+
+```kestrel
+public static func alreadyExists() -> IoError
+```
+
+`EEXIST` — the path already exists (e.g. `O_CREAT | O_EXCL`).
+
+_Defined in `lang/std/io/error.ks`._
+
+#### function `brokenPipe`
+
+```kestrel
+public static func brokenPipe() -> IoError
+```
+
+`EPIPE` — write to a pipe with no reader.
+
+_Defined in `lang/std/io/error.ks`._
+
 #### function `description`
 
 ```kestrel
@@ -76,6 +96,26 @@ between `.Other` codes.
 
 _Defined in `lang/std/io/error.ks`._
 
+#### function `interrupted`
+
+```kestrel
+public static func interrupted() -> IoError
+```
+
+`EINTR` — operation interrupted by a signal.
+
+_Defined in `lang/std/io/error.ks`._
+
+#### function `invalidInput`
+
+```kestrel
+public static func invalidInput() -> IoError
+```
+
+`EINVAL` — invalid argument to a libc call.
+
+_Defined in `lang/std/io/error.ks`._
+
 #### field `kind`
 
 ```kestrel
@@ -93,6 +133,36 @@ public static func last() -> IoError
 Snapshots the current value of the platform's `errno` thread-local.
 Call immediately after a failed libc call — any other libc activity
 in between can clobber the value.
+
+_Defined in `lang/std/io/error.ks`._
+
+#### function `notFound`
+
+```kestrel
+public static func notFound() -> IoError
+```
+
+`ENOENT` — the path does not exist.
+
+_Defined in `lang/std/io/error.ks`._
+
+#### function `permissionDenied`
+
+```kestrel
+public static func permissionDenied() -> IoError
+```
+
+`EACCES` — caller lacks permission for the operation.
+
+_Defined in `lang/std/io/error.ks`._
+
+#### function `wouldBlock`
+
+```kestrel
+public static func wouldBlock() -> IoError
+```
+
+`EAGAIN` — non-blocking call would have blocked.
 
 _Defined in `lang/std/io/error.ks`._
 
@@ -311,76 +381,6 @@ public static func fromErrno(Int32) -> IoErrorKind
 ```
 
 Classifies a POSIX errno. Unknown codes fall through to `.Other(c)`.
-
-_Defined in `lang/std/io/error.ks`._
-
-## function `alreadyExists`
-
-```kestrel
-public func alreadyExists() -> IoError
-```
-
-`EEXIST` — the path already exists (e.g. `O_CREAT | O_EXCL`).
-
-_Defined in `lang/std/io/error.ks`._
-
-## function `brokenPipe`
-
-```kestrel
-public func brokenPipe() -> IoError
-```
-
-`EPIPE` — write to a pipe with no reader.
-
-_Defined in `lang/std/io/error.ks`._
-
-## function `interrupted`
-
-```kestrel
-public func interrupted() -> IoError
-```
-
-`EINTR` — operation interrupted by a signal.
-
-_Defined in `lang/std/io/error.ks`._
-
-## function `invalidInput`
-
-```kestrel
-public func invalidInput() -> IoError
-```
-
-`EINVAL` — invalid argument to a libc call.
-
-_Defined in `lang/std/io/error.ks`._
-
-## function `notFound`
-
-```kestrel
-public func notFound() -> IoError
-```
-
-`ENOENT` — the path does not exist.
-
-_Defined in `lang/std/io/error.ks`._
-
-## function `permissionDenied`
-
-```kestrel
-public func permissionDenied() -> IoError
-```
-
-`EACCES` — caller lacks permission for the operation.
-
-_Defined in `lang/std/io/error.ks`._
-
-## function `wouldBlock`
-
-```kestrel
-public func wouldBlock() -> IoError
-```
-
-`EAGAIN` — non-blocking call would have blocked.
 
 _Defined in `lang/std/io/error.ks`._
 

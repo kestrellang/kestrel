@@ -48,7 +48,7 @@ func main() {
     check("digestSize matches output 512", "\(BLAKE2b512.digestSize == BLAKE2b512.hash(abc).bytes.count)", "true");
     check("hmac-blake2b512 length", "\(HMAC[BLAKE2b512].authenticate(abc, using: SymmetricKey(bytes: bytes("k"))).bytes.count)", "64");
     // 200 bytes over two updates, crossing the 128-byte block, vs one-shot
-    var big: [UInt8] = []; for i in 0..<200 { big.append(UInt8(from: i)); }
+    var big: [UInt8] = []; for i in 0..<200 { big.append(UInt8(truncating: i)); }
     var inc = BLAKE2b512();
     inc.update(big.asSlice().prefix(100)); inc.update(big.asSlice().drop(first: 100));
     check("blake2b512 incremental == one-shot", "\(inc.finalize() == BLAKE2b512.hash(big))", "true");
@@ -66,12 +66,12 @@ func main() {
     check("pbkdf2-sha256 c=1", hex(pk.bytes), "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b");
     // RFC 5869 A.1
     var ikm: [UInt8] = []; for _ in 0..<22 { ikm.append(0x0b); }
-    var salt: [UInt8] = []; for i in 0..<13 { salt.append(UInt8(from: i)); }
-    var info: [UInt8] = []; for i in 0..<10 { info.append(UInt8(from: 0xf0 + i)); }
+    var salt: [UInt8] = []; for i in 0..<13 { salt.append(UInt8(truncating: i)); }
+    var info: [UInt8] = []; for i in 0..<10 { info.append(UInt8(truncating: 0xf0 + i)); }
     let okm = HKDF[SHA256].deriveKey(SymmetricKey(bytes: ikm), length: 42, salt: salt, info: info).expect("hkdf");
     check("hkdf-sha256 rfc5869 A.1", hex(okm.bytes), "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865");
     // AEAD roundtrip + tamper
-    var kb: [UInt8] = []; for i in 0..<32 { kb.append(UInt8(from: 0x80 + i)); }
+    var kb: [UInt8] = []; for i in 0..<32 { kb.append(UInt8(truncating: 0x80 + i)); }
     let key = SymmetricKey(bytes: kb);
     let msg = bytes("Ladies and Gentlemen of the class of '99");
     let sealed = ChaCha20Poly1305.seal(msg, using: key, authenticating: bytes("hdr")).expect("seal");
@@ -149,7 +149,7 @@ func main() {
 
     // --- #1 / #5 ---
     check("generic H.hash", genericHex[SHA256](abc), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    check("hash ArraySlice input", SHA256.hash(abc.asSlice()).hexString, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    check("hash UnsafeSlice input", SHA256.hash(abc.asSlice()).hexString, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     check("hash string bytes", SHA256.hash("abc".asByteSlice()).hexString, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     let s1 = ChaCha20Poly1305.seal(msg, using: key).expect("s1");
     let s2 = ChaCha20Poly1305.seal(msg, using: key).expect("s2");

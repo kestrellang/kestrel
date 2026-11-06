@@ -2,7 +2,7 @@
 // stdlib: true
 // expect-exit: 0
 
-// `g(arr, arr(at: 0))`: the container passed `mutating` and one of its elements
+// `g(arr, arr(0))`: the container passed `mutating` and one of its elements
 // passed as a borrowed argument through the `at:` accessor. Borrow-convention
 // arguments are place contexts (references-gaps.md §10.5), so `b` is a view
 // into the heap buffer; `a = []` frees that buffer while `b` is still live.
@@ -30,7 +30,7 @@ func g(mutating a: [String], b: String) -> Int64 {
 @main
 func main() -> lang.i64 {
     var arr = ["first heap-allocated string, long enough to avoid inline storage"];
-    let n = g(arr, arr(at: 0));
+    let n = g(arr, arr(0));
     if n != 64 { return 1; }
     if arr.count != 0 { return 2; }
     0

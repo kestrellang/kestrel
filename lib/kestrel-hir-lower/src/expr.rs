@@ -359,6 +359,19 @@ impl LowerCtx<'_> {
                 let operand = ExprSrc::or_error(first_expr(node), &span);
                 self.desugar_try(&operand, &span)
             },
+            // `unsafe` adds no HIR node: the operand lowers in place and the
+            // region is recorded for the unsafe-use analyzer.
+            SyntaxKind::ExprUnsafe => {
+                self.unsafe_regions.push(span.clone());
+                let operand = ExprSrc::or_error(first_expr(node), &span);
+                self.lower_expr_src(&operand)
+            },
+            SyntaxKind::ExprUnsafeBlock => {
+                self.unsafe_regions.push(span.clone());
+                let body = BlockSyntax::of(code_block(node), self.file_id);
+                let body = self.lower_block(&body);
+                self.alloc_expr(HirExpr::Block { body, span })
+            },
             SyntaxKind::ExprClosure => self.lower_closure(node, &span),
             SyntaxKind::ExprMatch => self.lower_match(node, &span),
             SyntaxKind::ExprCast => self.desugar_cast(node, &span),
@@ -1943,11 +1956,7 @@ impl LowerCtx<'_> {
                 };
 
                 self.push_scope();
-                // `&` binder patterns are legal exactly here — user-match
-                // arm patterns (the place-mode lowering's domain).
-                let prev = std::mem::replace(&mut self.ref_patterns_allowed, true);
                 let pattern = self.lower_pat(&pat);
-                self.ref_patterns_allowed = prev;
                 let guard = guard.map(|g| self.lower_expr_src(&g));
                 let arm_body = match &body {
                     ArmBody::Expr(expr) => self.lower_expr_src(expr),

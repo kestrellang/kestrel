@@ -242,9 +242,9 @@ public struct PasswordHash {
         if cost < 4 or cost > 31 { return null; }
         let chars = rest.toBytes();
         var saltChars: [UInt8] = [];
-        saltChars.append(contentsOf: chars.asSlice().prefix(22));
+        saltChars.append(contentsOf: chars.asUnsafeSlice().prefix(22));
         var keyChars: [UInt8] = [];
-        keyChars.append(contentsOf: chars.asSlice().drop(first: 22));
+        keyChars.append(contentsOf: chars.asUnsafeSlice().drop(first: 22));
         guard let some saltBytes = Bcrypt.decode(String(fromUtf8Unchecked: saltChars), 16) else { return null; }
         guard let some keyBytes = Bcrypt.decode(String(fromUtf8Unchecked: keyChars), 23) else { return null; }
         guard let some salt = Salt(bytes: saltBytes) else { return null; }

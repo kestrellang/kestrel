@@ -13,7 +13,7 @@ import std.memory.(Pointer)
 ///
 /// # Representation
 ///
-/// A `Pointer[T]` plus a remaining count. No `Slice` indirection — the
+/// A `Pointer[T]` plus a remaining count. No `Sliceable` indirection — the
 /// iterator is what `LiteralSlice` hands out instead of exposing its
 /// pointer directly.
 public struct LiteralSliceIterator[T]: Iterator {
@@ -33,7 +33,7 @@ public struct LiteralSliceIterator[T]: Iterator {
     /// Yields the next element, or `.None` once the buffer is exhausted.
     public mutating func next() -> T? {
         if self.remaining > 0 {
-            let value = self.ptr.read();
+            let value = unsafe self.ptr.read();
             self.ptr = self.ptr.offset(by: 1);
             self.remaining = self.remaining - 1;
             .Some(value)
@@ -113,7 +113,7 @@ public struct LiteralSlice[T]: Iterable {
             if index < 0 or index >= self.len {
                 fatalError("LiteralSlice index out of bounds")
             }
-            self.ptr.offset(by: index).read()
+            unsafe self.ptr.offset(by: index).read()
         }
     }
 
@@ -124,7 +124,7 @@ public struct LiteralSlice[T]: Iterable {
             if index < 0 or index >= self.len {
                 .None
             } else {
-                .Some(self.ptr.offset(by: index).read())
+                .Some(unsafe self.ptr.offset(by: index).read())
             }
         }
     }
@@ -140,7 +140,7 @@ public struct LiteralSlice[T]: Iterable {
     /// `count` first.
     public subscript(unchecked index: Int64) -> T {
         get {
-            self.ptr.offset(by: index).read()
+            unsafe self.ptr.offset(by: index).read()
         }
     }
 }

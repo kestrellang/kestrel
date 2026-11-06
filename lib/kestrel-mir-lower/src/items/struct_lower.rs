@@ -28,6 +28,17 @@ pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) {
         entity,
         root: ctx.root,
     });
+    def.staticness = ctx
+        .query
+        .query(kestrel_semantics::NominalStaticness {
+            entity,
+            root: ctx.root,
+        })
+        .staticness;
+    def.sizedness = ctx.query.query(kestrel_semantics::NominalSizedness {
+        entity,
+        root: ctx.root,
+    });
     def.layout_attrs = lower_layout_attrs(ctx, entity);
 
     // Stored instance fields only. This loop DEFINES every FieldIdx, so it must

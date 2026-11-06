@@ -125,6 +125,9 @@ fn lower_member_functions(ctx: &mut LowerCtx, parent: Entity) {
             NodeKind::Field if ctx.world.get::<Static>(child).is_some() => {
                 static_lower::lower_static(ctx, child);
             },
+            // A stored instance field: its only function is an observer
+            // setter (`willSet` / `didSet`), when it has one.
+            NodeKind::Field => lower_functions(ctx, child),
             // A type nested in this one: lower its members too.
             NodeKind::Struct | NodeKind::Enum => lower_member_functions(ctx, child),
             _ => {},

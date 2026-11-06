@@ -24,18 +24,18 @@ module Test
             if ptr.isNull { return 3 }
 
             // Test read
-            if ptr.read() != 100 { return 4 }
+            if unsafe ptr.read() != 100 { return 4 }
 
             // Test offset and read
             let ptr1 = ptr.offset(by: 1);
-            if ptr1.read() != 200 { return 5 }
+            if unsafe ptr1.read() != 200 { return 5 }
 
             let ptr2 = ptr.offset(by: 2);
-            if ptr2.read() != 300 { return 6 }
+            if unsafe ptr2.read() != 300 { return 6 }
 
             // Test write
-            ptr1.write(999);
-            if ptr1.read() != 999 { return 7 }
+            unsafe ptr1.write(999);
+            if unsafe ptr1.read() != 999 { return 7 }
             // Verify the array was modified through the pointer
             if arr(unchecked: 1) != 999 { return 8 }
 

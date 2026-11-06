@@ -31,8 +31,8 @@ public struct PBKDF2[H] where H: Digest {
     /// (2³² − 1) × digest size (RFC 8018 §5.2) — past that the 32-bit
     /// block index would wrap.
     public static func deriveKey(
-        password: some Slice[UInt8],
-        salt salt: some Slice[UInt8],
+        password: &some Sliceable[UInt8] and not Static and not Copyable and not Sized,
+        salt salt: &some Sliceable[UInt8] and not Static and not Copyable and not Sized,
         iterations iterations: Int64,
         length length: Int64
     ) -> SymmetricKey throws CryptoError {
@@ -41,7 +41,7 @@ public struct PBKDF2[H] where H: Digest {
         if length < 0 or length > 4294967295 * hashLen { throw CryptoError.InvalidLength; }
         let blocks = (length + hashLen - 1) / hashLen;
         var passwordBytes: [UInt8] = [];
-        passwordBytes.append(contentsOf: password.asSlice());
+        passwordBytes.append(contentsOf: password.asUnsafeSlice());
         let passwordKey = SymmetricKey(bytes: passwordBytes);
 
         var okm: [UInt8] = [];
@@ -49,8 +49,8 @@ public struct PBKDF2[H] where H: Digest {
         for blockIndex in 1..=blocks {
             // U_1 = HMAC(password, salt || INT_32_BE(blockIndex))
             var mac = HMAC[H](key: passwordKey);
-            mac.update(salt.asSlice());
-            let be = UInt32(from: blockIndex).toBytesBigEndian();
+            mac.update(salt.asUnsafeSlice());
+            let be = UInt32(truncating: blockIndex).toBytesBigEndian();
             mac.update(be);
             var u = mac.finalize().bytes;
             var result = u;
@@ -66,7 +66,7 @@ public struct PBKDF2[H] where H: Digest {
                 }
             }
 
-            okm.append(contentsOf: result.asSlice());
+            okm.append(contentsOf: result.asUnsafeSlice());
         }
 
         var truncated: [UInt8] = [];

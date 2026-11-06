@@ -63,7 +63,7 @@ impl Ctx {
 }
 
 const VISIBILITY: &[K] = &[K::Public, K::Private, K::Internal, K::Fileprivate];
-const MODIFIERS: &[K] = &[K::Static, K::Mutating, K::Consuming, K::Indirect];
+const MODIFIERS: &[K] = &[K::Static, K::Unsafe, K::Mutating, K::Consuming, K::Indirect];
 
 /// Tokens that can begin an item (or its header).
 fn at_item_start(p: &Parser<'_>) -> bool {
@@ -85,6 +85,12 @@ fn at_item_start(p: &Parser<'_>) -> bool {
         K::At,
     ]) || p.at_any(VISIBILITY)
         || p.at_any(MODIFIERS)
+        || at_lazy_modifier(p, 0)
+}
+
+/// Contextual `lazy` at token offset `n`, introducing `lazy let|var`.
+fn at_lazy_modifier(p: &Parser<'_>, n: usize) -> bool {
+    p.nth_is_contextual(n, "lazy") && (p.nth_at(n + 1, K::Var) || p.nth_at(n + 1, K::Let))
 }
 
 /// The keyword introducing the item at the cursor, looking past
@@ -109,6 +115,9 @@ fn scan_head(p: &Parser<'_>) -> (Option<K>, bool) {
         i += 1;
     }
     while p.kind_at(i).is_some_and(|k| MODIFIERS.contains(&k)) {
+        i += 1;
+    }
+    if at_lazy_modifier(p, i - start) {
         i += 1;
     }
     (p.kind_at(i), i != start)
@@ -236,6 +245,15 @@ fn opt_static(p: &mut Parser<'_>) {
         let m = p.start();
         p.bump(K::Static);
         m.complete(p, K::StaticModifier);
+    }
+}
+
+/// `UnsafeModifier` node, if `unsafe` is next.
+fn opt_unsafe(p: &mut Parser<'_>) {
+    if p.at(K::Unsafe) {
+        let m = p.start();
+        p.bump(K::Unsafe);
+        m.complete(p, K::UnsafeModifier);
     }
 }
 
@@ -372,6 +390,9 @@ fn type_decl(p: &mut Parser<'_>, kw: K) {
         p.bump(K::Indirect);
         i.complete(p, K::IndirectModifier);
     }
+    if kw == K::Protocol {
+        opt_unsafe(p);
+    }
     stray_modifiers(p);
     p.expect(kw);
     name(p);
@@ -426,6 +447,7 @@ fn init_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     visibility(p);
+    opt_unsafe(p);
     stray_modifiers(p);
     p.expect(K::Init);
     opt_type_parameter_list(p);
@@ -457,12 +479,13 @@ fn deinit_decl(p: &mut Parser<'_>) {
     m.complete(p, K::DeinitDeclaration);
 }
 
-/// `static? (mutating|consuming)? func name[T](params) (-> R)? (where …)? body?`
+/// `static? unsafe? (mutating|consuming)? func name[T](params) (-> R)? (where …)? body?`
 fn function_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     visibility(p);
     opt_static(p);
+    opt_unsafe(p);
     if p.at_any(&[K::Mutating, K::Consuming]) {
         p.bump_any();
     }
@@ -490,10 +513,12 @@ fn subscript_decl(p: &mut Parser<'_>) {
     attribute_list(p);
     visibility(p);
     opt_static(p);
+    opt_unsafe(p);
     stray_modifiers(p);
     p.expect(K::Subscript);
     opt_type_parameter_list(p);
     parameter_list(p);
+    opt_failable_marker(p);
     if p.at(K::Arrow) {
         opt_return_type(p);
     } else {
@@ -512,29 +537,70 @@ fn field_decl(p: &mut Parser<'_>) {
     attribute_list(p);
     visibility(p);
     opt_static(p);
+    opt_unsafe(p);
     stray_modifiers(p);
+    if at_lazy_modifier(p, 0) {
+        let l = p.start();
+        p.bump(K::Identifier);
+        l.complete(p, K::LazyModifier);
+    }
     p.bump_any(); // let / var
     name(p);
+    opt_failable_marker(p);
     p.expect(K::Colon);
     ty(p);
-    if p.at(K::LBrace) {
+    let has_accessors = p.at(K::LBrace);
+    if has_accessors {
         accessor_body(p, true);
     }
     if p.at(K::Equals) {
         p.bump(K::Equals);
         expr(p);
+        // Swift order for observers: `var x: T = 0 { didSet { … } }`.
+        if !has_accessors && at_observer_block(p) {
+            accessor_body(p, true);
+        }
     }
     p.eat(K::Semicolon);
     m.complete(p, K::FieldDeclaration);
 }
 
+/// `{ willSet {` / `{ didSet {`: an observer block, which an initializer
+/// expression must not swallow as a trailing closure.
+pub(super) fn at_observer_block(p: &Parser<'_>) -> bool {
+    p.at(K::LBrace)
+        && (p.nth_is_contextual(1, "willSet") || p.nth_is_contextual(1, "didSet"))
+        && p.nth_at(2, K::LBrace)
+}
+
+/// `FailableMarker` node, if `?` is next (a failable place).
+fn opt_failable_marker(p: &mut Parser<'_>) {
+    if p.at(K::Question) {
+        let m = p.start();
+        p.bump(K::Question);
+        m.complete(p, K::FailableMarker);
+    }
+}
+
 /// The accessor clause keyword(s) at token offset `n`, if a clause starts
-/// there: `get {`, `set {`, `ref {`, `mutating ref {`.
+/// there: `get {`, `set {`, `ref {`, `mutating ref {`, `modifying get {`,
+/// `modifying ref {`, `willSet {`, `didSet {`, or a bodyless `ref` /
+/// `mutating ref` requirement.
 fn at_accessor_clause(p: &Parser<'_>, n: usize) -> bool {
     match p.nth(n) {
         Some(K::Get | K::Set) => p.nth_at(n + 1, K::LBrace),
-        Some(K::Mutating) => p.nth_is_contextual(n + 1, "ref") && p.nth_at(n + 2, K::LBrace),
-        Some(K::Identifier) => p.nth_is_contextual(n, "ref") && p.nth_at(n + 1, K::LBrace),
+        Some(K::Mutating) => p.nth_is_contextual(n + 1, "ref") && at_ref_clause_end(p, n + 2),
+        Some(K::Identifier) if p.nth_is_contextual(n, "ref") => at_ref_clause_end(p, n + 1),
+        Some(K::Identifier) if p.nth_is_contextual(n, "modifying") => {
+            (p.nth_at(n + 1, K::Get) || p.nth_is_contextual(n + 1, "ref"))
+                && p.nth_at(n + 2, K::LBrace)
+        },
+        Some(K::Identifier) => {
+            ["willSet", "didSet"]
+                .iter()
+                .any(|kw| p.nth_is_contextual(n, kw))
+                && p.nth_at(n + 1, K::LBrace)
+        },
         _ => false,
     }
 }
@@ -578,6 +644,13 @@ fn accessor_body(p: &mut Parser<'_>, field: bool) {
     }
 }
 
+/// What may follow a `ref` / `mutating ref` keyword: its body, or — for a
+/// bodyless protocol requirement (`{ ref mutating ref }`) — the next
+/// requirement clause or the block's closing brace.
+fn at_ref_clause_end(p: &Parser<'_>, n: usize) -> bool {
+    p.nth_at(n, K::LBrace) || p.nth_at(n, K::RBrace) || p.nth_at(n, K::Mutating)
+}
+
 fn accessor_clause(p: &mut Parser<'_>) {
     let m = p.start();
     let kind = match p.current() {
@@ -594,12 +667,33 @@ fn accessor_clause(p: &mut Parser<'_>) {
             p.bump(K::Identifier);
             K::MutatingRefClause
         },
-        _ => {
+        _ if p.nth_is_contextual(0, "modifying") => {
             p.bump(K::Identifier);
-            K::RefClause
+            if p.at(K::Get) {
+                p.bump(K::Get);
+                K::ModifyingGetterClause
+            } else {
+                p.bump(K::Identifier);
+                K::ModifyingRefClause
+            }
+        },
+        _ => {
+            let kind = if p.nth_is_contextual(0, "willSet") {
+                K::WillSetClause
+            } else if p.nth_is_contextual(0, "didSet") {
+                K::DidSetClause
+            } else {
+                K::RefClause
+            };
+            p.bump(K::Identifier);
+            kind
         },
     };
-    top_block(p);
+    // Only a ref clause may be bodyless (`at_accessor_clause` admits no
+    // other clause without a `{`).
+    if p.at(K::LBrace) {
+        top_block(p);
+    }
     m.complete(p, kind);
 }
 

@@ -80,6 +80,9 @@ pub fn build_function(
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
+    if node.unsafe_modifier().is_some() {
+        world.set(entity, IsUnsafe);
+    }
     set_documentation(world, entity, syntax);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);
@@ -152,6 +155,9 @@ pub fn build_initializer(
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
+    if node.unsafe_modifier().is_some() {
+        world.set(entity, IsUnsafe);
+    }
     set_documentation(world, entity, syntax);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);
@@ -252,10 +258,10 @@ fn desugar_opaque_params(
 
             // `some P and not Copyable` in param position desugars to the
             // existing `where __opaque_N: not Copyable` machinery.
-            if let Some(negative) = negative {
+            for negative in negative {
                 new_where_constraints.push(WhereConstraint::NegativeBound {
                     subject: tp_ast.clone(),
-                    protocol: (**negative).clone(),
+                    protocol: negative.clone(),
                     node: SyntaxNodePtr::new(cst_node),
                 });
             }

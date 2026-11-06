@@ -13,7 +13,7 @@
 module Test
 
 import std.core.ArrayMatchable
-import std.memory.ArraySlice
+import std.memory.UnsafeSlice
 
 struct Trio {
     var a: Int64
@@ -21,14 +21,15 @@ struct Trio {
     var c: Int64
 }
 
-extend Trio: ArrayMatchable {
+extend Trio: unsafe ArrayMatchable {
     type Element = Int64
+    type Rest = UnsafeSlice[Int64]
     public func matchLength() -> Int64 { 3 }
     public func matchGet(index: Int64) -> Int64 {
         if index == 0 { self.a } else if index == 1 { self.b } else { self.c }
     }
-    public func matchSlice(from: Int64, to: Int64) -> ArraySlice[Int64] {
-        ArraySlice(pointer: Pointer(to: self.a).offset(by: from), count: to - from)
+    public func matchSlice(from: Int64, to: Int64) -> UnsafeSlice[Int64] {
+        unsafe UnsafeSlice(pointer: Pointer(to: self.a).offset(by: from), count: to - from)
     }
 }
 

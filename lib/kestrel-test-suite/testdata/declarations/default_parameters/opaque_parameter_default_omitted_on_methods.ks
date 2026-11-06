@@ -11,16 +11,16 @@ module Test
 import std.numeric.(Int64, UInt8)
 struct Summer {
     var base: Int64
-    func total(data: some Slice[UInt8], extra extra: some Slice[UInt8] = Array[UInt8]()) -> Int64 {
+    func total(data: some Sliceable[UInt8], extra extra: some Sliceable[UInt8] = Array[UInt8]()) -> Int64 {
         var sum: Int64 = self.base;
-        for b in data.asSlice() { sum = sum + Int64(from: b); }
-        for b in extra.asSlice() { sum = sum + Int64(from: b); }
+        for b in data.asUnsafeSlice() { sum = sum + Int64(from: b); }
+        for b in extra.asUnsafeSlice() { sum = sum + Int64(from: b); }
         sum
     }
-    static func seal(data: some Slice[UInt8], aad aad: some Slice[UInt8] = Array[UInt8](), nonce nonce: Int64 = 5) -> Int64 {
+    static func seal(data: some Sliceable[UInt8], aad aad: some Sliceable[UInt8] = Array[UInt8](), nonce nonce: Int64 = 5) -> Int64 {
         var sum: Int64 = nonce;
-        for b in data.asSlice() { sum = sum + Int64(from: b); }
-        for b in aad.asSlice() { sum = sum + Int64(from: b); }
+        for b in data.asUnsafeSlice() { sum = sum + Int64(from: b); }
+        for b in aad.asUnsafeSlice() { sum = sum + Int64(from: b); }
         sum
     }
 }

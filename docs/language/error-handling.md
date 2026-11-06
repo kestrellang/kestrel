@@ -18,7 +18,7 @@ The case names are `.Ok` and `.Err`. Handle one with `match`, or use the API sur
 ```kestrel
 let r: Result[Int64, String] = .Ok(42);
 
-r.isOk();             // true
+r.isOk;             // true
 r.unwrap();           // 42 — panics if Err
 r.unwrap(or: 0);      // 42, or the default on Err
 r.map({ it * 2 });    // Result[Int64, String] = .Ok(84)

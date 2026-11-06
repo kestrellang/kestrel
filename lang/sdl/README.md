@@ -22,7 +22,15 @@ sdl = { path = "../../lang/sdl" }
   - `clear(color: Color)`, `setColor(color: Color)`
   - `fill(rect: Rectangle, color: Color)`, `fillRect(rect: Rectangle)` (uses current color)
   - `drawText(text: String, x: Int64, y: Int64, scale: Int64)` (built-in bitmap font)
-- **Event** - `.Quit`, `.KeyDown(Key)`, `.KeyUp(Key)`, `.MouseDown(x, y)`, `.MouseMove(x, y)`
+- **SDLWindow** (`not Copyable`) - a resizable, high-DPI window with no SDL renderer, for a GPU API such as `wgpu` to draw into
+  - `init(title: String, width: Int64, height: Int64)`
+  - `drawableSize: (Int64, Int64)` - the size in pixels, which can exceed the window size on high-DPI screens
+  - `nativeWindow: NativeWindow` - the platform handles to make a GPU surface from
+  - `pollEvent() -> Event?` (mutating), `delay(ms: Milliseconds)`
+  - `setRelativeMouseMode(enabled: Bool)` - capture the mouse for mouse look (pointer lock in a browser)
+- **NativeWindow** - `.Xlib(display, window)`, `.Wayland(display, surface)`, `.MetalLayer(layer)`, `.Windows(hinstance, hwnd)`, or `.Unsupported`
+- **Event** - `.Quit`, `.KeyDown(Key)`, `.KeyUp(Key)`, `.MouseDown(MouseButton, x, y)`, `.MouseUp(MouseButton, x, y)`, `.MouseMove(x, y, dx, dy)`, `.MouseWheel(clicks)`, `.Resized(width, height)`
+- **MouseButton** - `.Left`, `.Middle`, `.Right`, or `.Other(Int64)`
 - **Key** - letters, digits, F1-F12, arrows, modifiers, navigation, punctuation, and `.Other(Int32)` for unmapped scancodes
 - **Color** - `r/g/b/a` fields plus presets: `Color.black()`, `.white()`, `.red()`, `.green()`, `.blue()`, `.yellow()`, `.cyan()`, `.magenta()`
 - **Rectangle** - `x`, `y`, `width`, `height`
@@ -71,3 +79,21 @@ func main() -> lang.i32 {
 ```
 
 Drawing many same-colored rects (e.g. a tile grid): call `setColor` once, then `fillRect` per tile to avoid a per-rect color syscall.
+
+## GPU windows
+
+`SDLWindow` gives a GPU API the native handles it needs. With `wgpu` (see `examples/wgpu_cube`):
+
+```kestrel
+var window = SDLWindow(title: "Cube", width: 800, height: 600);
+let source = match window.nativeWindow {
+    .Xlib(display, id) => SurfaceSource.Xlib(display, id),
+    .Wayland(display, surface) => SurfaceSource.Wayland(display, surface),
+    .MetalLayer(layer) => SurfaceSource.MetalLayer(layer),
+    .Windows(hinstance, hwnd) => SurfaceSource.Windows(hinstance, hwnd),
+    .Unsupported => { return 1 }
+};
+let surface = instance.createSurface(source);
+```
+
+Configure the surface again with the new `drawableSize` on `.Resized`.

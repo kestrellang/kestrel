@@ -83,7 +83,7 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
         let result: RawPointer? = allocator.allocate(layout);
         if let .Some(rawPtr) = result {
             self.ptr = rawPtr.cast[UniqueBoxStorage[T]]();
-            self.ptr.write(UniqueBoxStorage(live: 1, value: value));
+            unsafe self.ptr.write(UniqueBoxStorage(live: 1, value: value));
         } else {
             fatalError("UniqueBox allocation failed")
         }
@@ -114,8 +114,8 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     @builtin(.UniqueBoxTakeValue)
     public func takeValue() -> T {
         let livePtr = self.ptr.asRaw().cast[Int64]();
-        livePtr.write(0);
-        self.valuePtr().take()
+        unsafe livePtr.write(0);
+        unsafe self.valuePtr().take()
     }
 
     /// Drops the payload (if it is still present) and frees the block. This is
@@ -128,8 +128,8 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     @builtin(.UniqueBoxDestroy)
     public func destroy() {
         let livePtr = self.ptr.asRaw().cast[Int64]();
-        if livePtr.read() == 1 {
-            self.valuePtr().dropInPlace();
+        if unsafe livePtr.read() == 1 {
+            unsafe self.valuePtr().dropInPlace();
         };
         self.free()
     }
@@ -138,6 +138,6 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     private func free() {
         let layout: Layout = Layout.of[UniqueBoxStorage[T]]();
         var allocator: SystemAllocator = SystemAllocator();
-        allocator.deallocate(self.ptr.asRaw(), layout)
+        unsafe allocator.deallocate(self.ptr.asRaw(), layout)
     }
 }

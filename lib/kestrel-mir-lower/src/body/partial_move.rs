@@ -153,6 +153,12 @@ impl OssaBodyCtx<'_, '_> {
             let mut moves = Vec::new();
             let mut root = None;
             for (binding, place) in places {
+                // A ref binding (a `&T` tuple/payload slot) copies the stored
+                // address and never moves: `resolve_local_type` peels it to
+                // the pointee, which may be NotCopyable (`&Slice[T]`).
+                if self.local_is_ref(binding) {
+                    continue;
+                }
                 let ty = self.resolve_local_type(binding);
                 if !(self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty)) {
                     continue;
@@ -249,7 +255,7 @@ impl OssaBodyCtx<'_, '_> {
                 out.push(*v);
             }
         }
-        for (id, expr) in self.hir.exprs.iter() {
+        for (_, expr) in self.hir.exprs.iter() {
             match expr {
                 HirExpr::Assign { value, .. } => out.push(*value),
                 HirExpr::Return { value: Some(v), .. } => out.push(*v),
@@ -271,15 +277,32 @@ impl OssaBodyCtx<'_, '_> {
                 HirExpr::ImplicitMember { args: Some(a), .. } => {
                     out.extend(a.iter().map(|a| a.value));
                 },
+                _ => {},
+            }
+        }
+        self.for_each_call(|callee, receiver, args| {
+            self.consuming_args(callee, receiver, args, &mut out);
+        });
+        out
+    }
+
+    /// Every call in the body, as (resolved callee, receiver, args): plain
+    /// calls, method calls and protocol calls (operators, compound assigns).
+    fn for_each_call(
+        &self,
+        mut f: impl FnMut(Option<kestrel_hecs::Entity>, Option<HirExprId>, &[HirCallArg]),
+    ) {
+        for (id, expr) in self.hir.exprs.iter() {
+            match expr {
                 HirExpr::Call { callee, args, .. } => {
                     let entity = match &self.hir.exprs[*callee] {
                         HirExpr::Def(e, _, _) => Some(*e),
                         _ => self.typed_resolution(*callee),
                     };
-                    self.consuming_args(entity, None, args, &mut out);
+                    f(entity, None, args);
                 },
                 HirExpr::MethodCall { receiver, args, .. } => {
-                    self.consuming_args(self.typed_resolution(id), Some(*receiver), args, &mut out);
+                    f(self.typed_resolution(id), Some(*receiver), args);
                 },
                 HirExpr::ProtocolCall {
                     receiver,
@@ -296,12 +319,51 @@ impl OssaBodyCtx<'_, '_> {
                         method.as_str_or_empty(),
                         args,
                     );
-                    self.consuming_args(entity, Some(*receiver), args, &mut out);
+                    f(entity, Some(*receiver), args);
                 },
                 _ => {},
             }
         }
-        out
+    }
+
+    /// Locals written in place through a projection or a `mutating`
+    /// operand: `x.f = v`, `x.f += v`, `x.bump()`, `f(mutating: x.f)`,
+    /// `let r = &mutating x`. Assigning the whole local (`x = v`) rebinds
+    /// it and is not listed.
+    fn locals_mutated_in_place(&self) -> HashSet<HirLocalId> {
+        let mut places: Vec<HirExprId> = Vec::new();
+        for (_, expr) in self.hir.exprs.iter() {
+            match expr {
+                HirExpr::Assign { target, .. }
+                    if !matches!(self.hir.exprs[*target], HirExpr::Local(..)) =>
+                {
+                    places.push(*target);
+                },
+                HirExpr::Borrow {
+                    inner,
+                    mutating: true,
+                    ..
+                } => places.push(*inner),
+                _ => {},
+            }
+        }
+        self.for_each_call(|callee, receiver, args| {
+            let Some(callable) = callee.and_then(|c| self.ctx.world.get::<Callable>(c)) else {
+                return;
+            };
+            if let (Some(r), Some(ReceiverKind::Mutating)) = (receiver, &callable.receiver) {
+                places.push(r);
+            }
+            for (arg, param) in args.iter().zip(&callable.params) {
+                if param.is_mut && !param.is_consuming {
+                    places.push(arg.value);
+                }
+            }
+        });
+        places
+            .into_iter()
+            .filter_map(|p| self.hir.place_root(p))
+            .collect()
     }
 
     fn typed_resolution(&self, expr: HirExprId) -> Option<kestrel_hecs::Entity> {
@@ -345,7 +407,8 @@ impl OssaBodyCtx<'_, '_> {
             }) if paths.iter().any(|p| p.path == path) => {},
             _ => return None,
         }
-        let addr = self.try_field_addr_chain(expr)?;
+        // Moving out empties the storage, so it is a write.
+        let addr = self.field_addr_chain(expr, super::place::Access::Write)?;
         let ty = self.resolve_expr_type(expr);
         let value = self.emit_take(addr, ty);
         self.record_var_path(local, &path, VarInit::DefUninit);
@@ -374,9 +437,13 @@ impl OssaBodyCtx<'_, '_> {
         else {
             return false;
         };
-        let addr = match self.try_field_addr_chain(target) {
-            Some(a) if !path.is_empty() => a,
-            _ => self.whole_slot_addr(slot),
+        let addr = if path.is_empty() {
+            self.whole_slot_addr(slot)
+        } else {
+            match self.field_addr_chain(target, super::place::Access::Write) {
+                Some(a) => a,
+                None => return false,
+            }
         };
         let ty = self.resolve_expr_type(target);
         // The state of the target place itself: its own tracked path, else
@@ -443,27 +510,16 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// Give a var slot to each owned SSA param that needs real storage: one
-    /// with planned partial moves, or one whose fields the body assigns
-    /// (`consuming func finish() { self.live = 0 }`). An SSA value has no
-    /// address to store into — the write landed on a throwaway copy, and the
-    /// value that drops (and runs `deinit`) kept the old field.
+    /// with planned partial moves, or one the body mutates in place
+    /// (`consuming func finish() { self.live = 0 }`, `s.bump()`, `s.n += 1`).
+    /// An SSA value has no address to store into — the write landed on a
+    /// throwaway copy, and later reads (and the value that drops, running
+    /// `deinit`) kept the old contents.
     pub(crate) fn spill_partially_moved_params(&mut self, params_len: usize) {
         let params: Vec<HirLocalId> = self.hir.params.iter().take(params_len).copied().collect();
-        let assigned_through: Vec<HirLocalId> = self
-            .hir
-            .exprs
-            .iter()
-            .filter_map(|(_, e)| match e {
-                HirExpr::Assign { target, .. }
-                    if !matches!(self.hir.exprs[*target], HirExpr::Local(..)) =>
-                {
-                    self.hir.place_root(*target)
-                },
-                _ => None,
-            })
-            .collect();
+        let mutated = self.locals_mutated_in_place();
         for local in params {
-            if self.partial.paths_of(local).is_empty() && !assigned_through.contains(&local) {
+            if self.partial.paths_of(local).is_empty() && !mutated.contains(&local) {
                 continue;
             }
             let Some(super::LocalBinding::Ssa(value)) = self.local_map.get(&local).copied() else {

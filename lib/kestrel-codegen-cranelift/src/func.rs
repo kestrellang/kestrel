@@ -155,23 +155,13 @@ pub fn compile_function(
 
     let call_conv = ctx.isa.default_call_conv();
 
-    let sig = if func.extern_info.is_some() {
-        crate::abi::build_extern_signature(
-            func,
-            &mut ctx.tc,
-            &ctx.module.ty_arena,
-            ctx.module,
-            call_conv,
-        )
-    } else {
-        crate::abi::build_signature(
-            func,
-            &mut ctx.tc,
-            &ctx.module.ty_arena,
-            ctx.module,
-            call_conv,
-        )
-    };
+    let sig = crate::abi::build_signature(
+        func,
+        &mut ctx.tc,
+        &ctx.module.ty_arena,
+        ctx.module,
+        call_conv,
+    );
 
     let ptr_ty = ctx.ptr_ty;
 
@@ -234,7 +224,7 @@ pub fn compile_function(
         let value_id = ValueId::new(i);
         let param_ty = body.values[i].ty;
         let repr = ctx.tc.repr(param_ty, &ctx.module.ty_arena, ctx.module);
-        let pass = abi::param_pass_mode(func.params[i].convention, repr, ptr_ty);
+        let pass = abi::param_pass_mode(func.params[i].convention, repr);
         match pass {
             PassMode::ByVal(_) => {
                 value_map.insert(value_id, block_params_entry[param_idx]);

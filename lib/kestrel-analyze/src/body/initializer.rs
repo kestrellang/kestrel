@@ -176,6 +176,14 @@ impl BodyCheck for InitializerAnalyzer {
             {
                 continue;
             }
+            // A `lazy var`'s cache starts empty in every initializer.
+            if cx
+                .query
+                .get::<kestrel_ast_builder::FieldClass>(child)
+                .is_some_and(|c| c.lazy_cache)
+            {
+                continue;
+            }
             // Skip fields with default values — they don't need explicit init
             if cx.query.get::<kestrel_ast_builder::Valued>(child).is_some() {
                 continue;

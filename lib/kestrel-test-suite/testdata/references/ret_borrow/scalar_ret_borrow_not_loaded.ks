@@ -19,9 +19,9 @@ func bump(mutating x: Int64) {
 @main
 func main() -> lang.i64 {
     let cell = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    cell.write(7);
+    unsafe cell.write(7);
 
-    bump(cell.mutatingValue);
-    if cell.read() != 42 { return 1; }
+    bump(unsafe cell.mutatingValue);
+    if unsafe cell.read() != 42 { return 1; }
     0
 }

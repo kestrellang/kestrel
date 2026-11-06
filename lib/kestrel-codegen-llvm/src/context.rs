@@ -26,7 +26,7 @@ use crate::CodegenOptions;
 use crate::abi;
 use crate::error::CodegenError;
 use crate::func;
-use crate::ty::TypeCache;
+use crate::ty::{ScalarTy, TypeCache};
 
 pub struct CodegenCtx<'ctx> {
     /// The LLVM context (lifetime root). `&'ctx` because the MIR module is
@@ -39,8 +39,24 @@ pub struct CodegenCtx<'ctx> {
     pub machine: TargetMachine,
     pub tc: TypeCache,
     pub ptr_size: u64,
+    /// Emit the entry point as a C `int main(int, char**)` wrapper around the
+    /// Kestrel `main`. WebAssembly checks call signatures, so Emscripten's
+    /// `main(argc, argv)` call traps on the argument-less Kestrel entry.
+    pub c_main_wrapper: bool,
+    /// Emit LLVM bitcode instead of an object. Emscripten's own (newer) LLVM
+    /// then generates the wasm, so the object conventions (e.g. wasm64
+    /// table indices) match its libraries rather than this compiler's LLVM.
+    pub emit_bitcode: bool,
 
     pub func_ids: Vec<Option<FunctionValue<'ctx>>>,
+    /// The target's C struct-passing rules (`kestrel_codegen::c_abi`).
+    pub c_abi: kestrel_codegen::c_abi::CAbi,
+    /// Per mono function crossing the C boundary, its C-ABI symbol: the
+    /// imported C function of an `@extern`, the wrapper of an `@export`.
+    /// C function values (`MonoCFunctionRef`) take these.
+    pub c_symbols: HashMap<usize, FunctionValue<'ctx>>,
+    /// Call bridges for calls through C function values, per `FuncC` type.
+    pub c_call_bridges: HashMap<kestrel_mir::TyId, FunctionValue<'ctx>>,
     pub string_data: HashMap<String, GlobalValue<'ctx>>,
     pub static_data: HashMap<Entity, GlobalValue<'ctx>>,
     /// Existential function tables, indexed like `MonoModule::vtables`.
@@ -55,17 +71,34 @@ impl<'ctx> CodegenCtx<'ctx> {
         target: &TargetConfig,
         options: &'ctx CodegenOptions,
     ) -> Result<Self, CodegenError> {
-        Target::initialize_native(&InitializationConfig::default())
-            .map_err(|e| CodegenError::ModuleCreation(format!("native target init: {e}")))?;
+        if target.is_wasm() {
+            Target::initialize_webassembly(&InitializationConfig::default());
+        } else {
+            Target::initialize_native(&InitializationConfig::default())
+                .map_err(|e| CodegenError::ModuleCreation(format!("native target init: {e}")))?;
+        }
 
         let triple = TargetTriple::create(&target.triple.to_string());
         let target_obj = Target::from_triple(&triple)
             .map_err(|e| CodegenError::ModuleCreation(format!("target from triple: {e}")))?;
 
-        // Host CPU/features matches the Cranelift backend's native ISA. (Kestrel
-        // codegen is host-targeted; cross-compiling would want generic here.)
-        let cpu = TargetMachine::get_host_cpu_name().to_string();
-        let features = TargetMachine::get_host_cpu_features().to_string();
+        // Host CPU/features matches the Cranelift backend's native ISA; a
+        // cross target (e.g. WebAssembly) gets the generic CPU.
+        let (cpu, features) = if target.is_host() {
+            (
+                TargetMachine::get_host_cpu_name().to_string(),
+                TargetMachine::get_host_cpu_features().to_string(),
+            )
+        } else {
+            ("generic".to_string(), String::new())
+        };
+        // WebAssembly has no position-independent code outside dynamic
+        // linking; Emscripten links static objects.
+        let reloc = if target.is_wasm() {
+            RelocMode::Static
+        } else {
+            RelocMode::PIC
+        };
 
         let opt = match options.opt_level {
             0 => OptimizationLevel::None,
@@ -74,22 +107,21 @@ impl<'ctx> CodegenCtx<'ctx> {
         };
 
         let machine = target_obj
-            .create_target_machine(
-                &triple,
-                &cpu,
-                &features,
-                opt,
-                RelocMode::PIC,
-                CodeModel::Default,
-            )
+            .create_target_machine(&triple, &cpu, &features, opt, reloc, CodeModel::Default)
             .ok_or_else(|| CodegenError::ModuleCreation("create_target_machine failed".into()))?;
 
         let llmod = cx.create_module("kestrel_module");
         llmod.set_triple(&triple);
         llmod.set_data_layout(&machine.get_target_data().get_data_layout());
 
+        // Pointer-width scalars are the LLVM `ptr`. `ScalarTy::Ptr::bytes()` is
+        // hardcoded to 8, so a non-64-bit target would mis-size pointer fields.
         let ptr_size = target.pointer_size();
-        let tc = TypeCache::new(module, ptr_size);
+        debug_assert_eq!(
+            ptr_size, 8,
+            "ScalarTy::Ptr currently assumes 8-byte pointers"
+        );
+        let tc = TypeCache::new(module, ScalarTy::Ptr, ptr_size);
 
         Ok(Self {
             cx,
@@ -99,7 +131,12 @@ impl<'ctx> CodegenCtx<'ctx> {
             machine,
             tc,
             ptr_size,
+            c_main_wrapper: target.is_wasm(),
+            emit_bitcode: target.is_wasm(),
             func_ids: vec![None; module.functions.len()],
+            c_abi: target.c_abi(),
+            c_symbols: HashMap::new(),
+            c_call_bridges: HashMap::new(),
             string_data: HashMap::new(),
             static_data: HashMap::new(),
             vtable_data: Vec::new(),
@@ -112,6 +149,50 @@ impl<'ctx> CodegenCtx<'ctx> {
         self.declare_all_functions()?;
         self.define_all_vtables();
         self.define_all_functions()?;
+        if self.c_main_wrapper {
+            self.define_c_main()?;
+        }
+        Ok(())
+    }
+
+    /// `int main(int argc, char **argv)` calling the Kestrel entry point and
+    /// truncating its `Int64` exit code (see `c_main_wrapper`).
+    fn define_c_main(&mut self) -> Result<(), CodegenError> {
+        let Some(entry) = self
+            .module
+            .functions
+            .iter()
+            .position(|f| self.is_main_function(f))
+            .and_then(|i| self.func_ids[i])
+        else {
+            return Ok(()); // a library build has no entry point
+        };
+        if entry.count_params() != 0 {
+            return Err(CodegenError::ModuleCreation(
+                "C main wrapper: the entry point takes parameters".into(),
+            ));
+        }
+        let i32t = self.cx.i32_type();
+        let ptr = self.cx.ptr_type(inkwell::AddressSpace::default());
+        let main = self.llmod.add_function(
+            "main",
+            i32t.fn_type(&[i32t.into(), ptr.into()], false),
+            Some(Linkage::External),
+        );
+        let builder = self.cx.create_builder();
+        builder.position_at_end(self.cx.append_basic_block(main, "entry"));
+        let call = builder
+            .build_call(entry, &[], "code")
+            .map_err(|e| CodegenError::ModuleCreation(e.to_string()))?;
+        let code = match call.try_as_basic_value().basic() {
+            Some(v) if v.is_int_value() => builder
+                .build_int_truncate_or_bit_cast(v.into_int_value(), i32t, "exit")
+                .map_err(|e| CodegenError::ModuleCreation(e.to_string()))?,
+            _ => i32t.const_zero(),
+        };
+        builder
+            .build_return(Some(&code))
+            .map_err(|e| CodegenError::ModuleCreation(e.to_string()))?;
         Ok(())
     }
 
@@ -158,13 +239,21 @@ impl<'ctx> CodegenCtx<'ctx> {
             .emit_ir
             .then(|| self.llmod.print_to_string().to_string());
 
-        let buffer = self
-            .machine
-            .write_to_memory_buffer(&self.llmod, FileType::Object)
-            .map_err(|e| CodegenError::ModuleFinish(e.to_string()))?;
+        let buffer = if self.emit_bitcode {
+            self.llmod.write_bitcode_to_memory()
+        } else {
+            self.machine
+                .write_to_memory_buffer(&self.llmod, FileType::Object)
+                .map_err(|e| CodegenError::ModuleFinish(e.to_string()))?
+        };
+
+        // inkwell's `as_slice` includes LLVM's trailing NUL terminator. ELF and
+        // Mach-O readers ignore the extra byte; the wasm reader rejects it.
+        let bytes = buffer.as_slice();
+        let object = bytes.strip_suffix(&[0]).unwrap_or(bytes);
 
         Ok(crate::CompilationResult {
-            object_bytes: buffer.as_slice().to_vec(),
+            object_bytes: object.to_vec(),
             ir_text: self.ir_outputs,
             module_ir,
         })
@@ -312,25 +401,39 @@ impl<'ctx> CodegenCtx<'ctx> {
     // -- Functions --
 
     fn declare_all_functions(&mut self) -> Result<(), CodegenError> {
-        // Extern imports sharing a symbol must share one FunctionValue. Local
-        // functions always get a unique (mono-suffixed) name.
-        let mut extern_declared: HashMap<String, FunctionValue<'ctx>> = HashMap::new();
+        // Imports sharing a symbol share one C declaration; each mono extern
+        // still gets its own Kestrel-ABI thunk around it.
+        let mut c_imports: HashMap<String, FunctionValue<'ctx>> = HashMap::new();
         for i in 0..self.module.functions.len() {
-            let ext_symbol = self.module.functions[i]
-                .extern_info
-                .as_ref()
-                .map(|e| e.symbol_name.clone());
-            if let Some(sym) = &ext_symbol
-                && let Some(&existing) = extern_declared.get(sym)
-            {
-                self.func_ids[i] = Some(existing);
+            let fn_value = self.declare_function(i)?;
+            self.func_ids[i] = Some(fn_value);
+            let module: &'ctx MonoModule = self.module;
+            let func = &module.functions[i];
+            let Some(ext) = &func.extern_info else {
+                continue;
+            };
+            let decl = kestrel_codegen::c_abi::CDecl::of_function(func);
+            let cty = crate::c_bridge::c_fn_type(self, &decl);
+            if ext.export {
+                let wrapper =
+                    self.llmod
+                        .add_function(&ext.symbol_name, cty.fn_type, Some(Linkage::External));
+                cty.apply_to_fn(wrapper);
+                crate::c_bridge::define_export_wrapper(self, &decl, wrapper, fn_value, &cty);
+                self.c_symbols.insert(i, wrapper);
                 continue;
             }
-            let fn_value = self.declare_function(i)?;
-            if let Some(sym) = ext_symbol {
-                extern_declared.insert(sym, fn_value);
-            }
-            self.func_ids[i] = Some(fn_value);
+            let c_fn = *c_imports.entry(ext.symbol_name.clone()).or_insert_with(|| {
+                let f =
+                    self.llmod
+                        .add_function(&ext.symbol_name, cty.fn_type, Some(Linkage::External));
+                cty.apply_to_fn(f);
+                f
+            });
+            let target = crate::c_bridge::CTarget::Symbol(c_fn);
+            crate::c_bridge::define_import_thunk(self, &decl, fn_value, target, &cty);
+            self.add_inline_attribute(fn_value, InlineMode::Always);
+            self.c_symbols.insert(i, c_fn);
         }
         Ok(())
     }
@@ -341,19 +444,18 @@ impl<'ctx> CodegenCtx<'ctx> {
         let is_main = self.is_main_function(func);
         let cx = self.cx;
 
-        let (fn_type, linkage, name) = if let Some(ext) = &func.extern_info {
-            let sig = abi::build_extern_signature(func, &mut self.tc, &module.ty_arena, module, cx);
-            (sig, Linkage::External, ext.symbol_name.clone())
+        // Every function, an `@extern` thunk included, has the Kestrel ABI.
+        let sig = abi::build_signature(func, &mut self.tc, &module.ty_arena, module, cx);
+        let (linkage, name) = if is_main && self.c_main_wrapper {
+            (Linkage::Internal, "kestrel.main".to_string())
         } else if is_main {
-            let sig = abi::build_signature(func, &mut self.tc, &module.ty_arena, module, cx);
-            (sig, Linkage::External, "main".to_string())
+            (Linkage::External, "main".to_string())
         } else {
-            let sig = abi::build_signature(func, &mut self.tc, &module.ty_arena, module, cx);
             // Mono suffix guarantees a unique LLVM symbol within the module.
-            (sig, Linkage::Internal, format!("{}.mono{}", func.name, idx))
+            (Linkage::Internal, format!("{}.mono{}", func.name, idx))
         };
 
-        let fn_value = self.llmod.add_function(&name, fn_type, Some(linkage));
+        let fn_value = self.llmod.add_function(&name, sig, Some(linkage));
         if let Some(mode) = func.inline {
             self.add_inline_attribute(fn_value, mode);
         }
@@ -361,7 +463,7 @@ impl<'ctx> CodegenCtx<'ctx> {
     }
 
     /// `@inline` → `inlinehint` / `alwaysinline` / `noinline`.
-    fn add_inline_attribute(&self, fn_value: FunctionValue<'ctx>, mode: InlineMode) {
+    pub(crate) fn add_inline_attribute(&self, fn_value: FunctionValue<'ctx>, mode: InlineMode) {
         let name = match mode {
             InlineMode::Hint => "inlinehint",
             InlineMode::Always => "alwaysinline",

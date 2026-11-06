@@ -4,7 +4,8 @@ module std.collections
 
 import std.core.(Bool, fatalError)
 import std.numeric.(Int64)
-import std.memory.(Layout, Pointer, ArraySlice, SystemAllocator, CowBox)
+import std.memory.(Layout, Pointer, SystemAllocator, CowBox)
+import std.collections.(Sliceable)
 import std.iter.(Iterable)
 
 /// Write-only buffer for efficient array construction. No COW, no
@@ -86,11 +87,11 @@ public struct ArrayBuilder[T] {
             // Move (`take`), not `read()`: the old buffer is freed without
             // dropping its elements, so a copy here leaked one per grow.
             for i in 0..<self.len {
-                newPtr.offset(by: i).write(self.ptr.offset(by: i).take())
+                unsafe newPtr.offset(by: i).write(self.ptr.offset(by: i).take())
             }
             if self.cap > 0 {
                 let oldLayout = Layout.array[T](self.cap);
-                allocator.deallocate(self.ptr.asRaw(), oldLayout)
+                unsafe allocator.deallocate(self.ptr.asRaw(), oldLayout)
             }
             self.ptr = newPtr;
             self.cap = newCap
@@ -104,24 +105,26 @@ public struct ArrayBuilder[T] {
     /// Appends a single element.
     public mutating func append(element: T) {
         self.grow(self.len + 1);
-        self.ptr.offset(by: self.len).write(element);
+        unsafe self.ptr.offset(by: self.len).write(element);
         self.len = self.len + 1
     }
 
-    /// Appends every element of `slice`.
-    public mutating func append(contentsOf slice: ArraySlice[T]) {
-        let n = slice.count;
+    /// Appends every element of `other` (an `Array`, `Slice`, or any
+    /// other `Sliceable`), copying in a single pass.
+    public mutating func append(contentsOf other: &some Sliceable[T] and not Static and not Copyable and not Sized) {
+        let sl = other.asUnsafeSlice();
+        let n = sl.count;
         if n == 0 { return }
         self.grow(self.len + n);
-        let src = slice.pointer;
+        let src = sl.pointer;
         for i in 0..<n {
-            self.ptr.offset(by: self.len + i).write(src.offset(by: i).read())
+            unsafe self.ptr.offset(by: self.len + i).write(src.offset(by: i).read())
         }
         self.len = self.len + n
     }
 
     /// Appends every element produced by `iterable`.
-    public mutating func append[I](from iterable: I) where I: Iterable, I.Item = T {
+    public mutating func append[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
         var iter = iterable.iter();
         while let .Some(item) = iter.next() {
             self.append(item)
@@ -175,12 +178,12 @@ public struct ArrayBuilder[T] {
         if self.cap > 0 {
             var i: Int64 = 0;
             while i < self.len {
-                self.ptr.offset(by: i).dropInPlace();
+                unsafe self.ptr.offset(by: i).dropInPlace();
                 i = i + 1
             };
             let layout = Layout.array[T](self.cap);
             var allocator = SystemAllocator();
-            allocator.deallocate(self.ptr.asRaw(), layout)
+            unsafe allocator.deallocate(self.ptr.asRaw(), layout)
         }
     }
 }

@@ -1,4 +1,4 @@
-use kestrel_ast_builder::arg_binding::{BindParam, Binding, bind_arguments};
+use kestrel_ast_builder::arg_binding::{BindArg, BindParam, Binding, bind_arguments};
 use kestrel_ast_builder::attrs::attrs_of;
 use kestrel_ast_builder::{Callable, DeclSpan, NodeKind};
 use kestrel_hecs::Entity;
@@ -18,23 +18,14 @@ use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_type_infer::captures::CaptureKind;
 
 fn conventions_from_callable(callable: &Callable, is_extern: bool) -> Vec<ParamConvention> {
-    if is_extern {
-        let count = callable.receiver.as_ref().map_or(0, |_| 1) + callable.params.len();
-        return vec![ParamConvention::Consuming; count];
-    }
     let mut convs = Vec::new();
     if let Some(recv) = &callable.receiver {
         convs.push(receiver_convention(recv));
     }
     for param in &callable.params {
-        let conv = if param.is_consuming {
-            ParamConvention::Consuming
-        } else if param.is_mut {
-            ParamConvention::MutBorrow
-        } else {
-            ParamConvention::Borrow
-        };
-        convs.push(conv);
+        convs.push(crate::items::function_sig::param_convention(
+            param, is_extern,
+        ));
     }
     convs
 }
@@ -99,23 +90,18 @@ impl OssaBodyCtx<'_, '_> {
     ) -> Vec<CallArg> {
         // Snapshot the parameter shape (owned) so the world borrow is released
         // before we lower any argument expressions.
-        let shape: Option<Vec<(Option<String>, Option<Entity>)>> =
-            self.ctx.world.get::<Callable>(callee_entity).map(|c| {
-                c.params
-                    .iter()
-                    .map(|p| (p.label.clone(), p.default_entity))
-                    .collect()
-            });
+        let shape: Option<Vec<kestrel_ast_builder::AstParam>> = self
+            .ctx
+            .world
+            .get::<Callable>(callee_entity)
+            .map(|c| c.params.clone());
         let Some(shape) = shape else {
             // No parameter metadata: lower in source order (no defaults to fill).
             return self.lower_call_args(args, conventions, conv_offset);
         };
 
-        let bind_params: Vec<BindParam> = shape
-            .iter()
-            .map(|(label, default)| BindParam::new(label.as_deref(), default.is_some()))
-            .collect();
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let bind_params: Vec<BindParam> = shape.iter().map(BindParam::of).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let plan = match bind_arguments(&bind_params, &arg_labels) {
             Ok(plan) => plan,
             // Binding was already validated during inference; if it somehow fails
@@ -166,7 +152,7 @@ impl OssaBodyCtx<'_, '_> {
                     }
                 },
                 Binding::Default => {
-                    let Some(default_entity) = shape[pi].1 else {
+                    let Some(default_entity) = shape[pi].default_entity else {
                         continue; // required-but-missing: impossible post-typecheck
                     };
                     let param_ty = resolve_type_annotation(self.ctx, default_entity);
@@ -202,12 +188,8 @@ impl OssaBodyCtx<'_, '_> {
         let plan = callee_entity
             .and_then(|e| self.ctx.world.get::<Callable>(e))
             .and_then(|c| {
-                let params: Vec<BindParam> = c
-                    .params
-                    .iter()
-                    .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
-                    .collect();
-                let labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+                let params: Vec<BindParam> = c.params.iter().map(BindParam::of).collect();
+                let labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
                 bind_arguments(&params, &labels).ok()
             });
         let Some(plan) = plan else {
@@ -391,7 +373,7 @@ impl OssaBodyCtx<'_, '_> {
         (!subst.type_params.is_empty()).then_some(subst)
     }
 
-    fn lower_default_arg_inline(
+    pub(crate) fn lower_default_arg_inline(
         &mut self,
         default_entity: Entity,
         _param_ty: TyId,
@@ -503,21 +485,14 @@ impl OssaBodyCtx<'_, '_> {
     pub(crate) fn collect_conventions(&self, callee_entity: Entity) -> Vec<ParamConvention> {
         // Try MIR FunctionDef first
         if let Some(callee) = self.ctx.module.functions.get(&callee_entity) {
-            if callee.extern_info.is_some() {
-                return callee
-                    .params
-                    .iter()
-                    .map(|_| ParamConvention::Consuming)
-                    .collect();
-            }
             return callee.params.iter().map(|p| p.convention).collect();
         }
         // ECS fallback
         let Some(callable) = self.ctx.world.get::<Callable>(callee_entity) else {
             return Vec::new();
         };
-        let is_extern = attrs_of(&self.ctx.query, callee_entity).is_extern();
-        conventions_from_callable(callable, is_extern)
+        let attrs = attrs_of(&self.ctx.query, callee_entity);
+        conventions_from_callable(callable, attrs.is_extern() || attrs.is_export())
     }
 
     /// Look up param conventions for a witness (protocol method) call.
@@ -574,6 +549,13 @@ impl OssaBodyCtx<'_, '_> {
         protocol: Entity,
         method: &WitnessMethodKey,
     ) -> Option<Entity> {
+        // A ref accessor slot (`value.ref`) names the requirement's
+        // RefAccessor child, which carries the ref return.
+        if let Some((member, mutating)) = crate::context::parse_ref_witness_name(&method.name) {
+            let key = WitnessMethodKey::new(member.to_string(), method.labels.clone());
+            let parent = self.find_protocol_method_entity(protocol, &key)?;
+            return self.ctx.find_ref_accessor_child(parent, mutating);
+        }
         let members = self
             .ctx
             .query

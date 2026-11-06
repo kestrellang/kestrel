@@ -51,10 +51,10 @@ public struct Layout: Equatable {
     /// Layout of the value at `pointer` — the one way to measure a payload
     /// that may be unsized (a raw existential, whose size and alignment
     /// live in its function table). For a sized `T` this is `of[T]()`.
-    public static func ofValue[T](at pointer: Pointer[T]) -> Layout where T: not Copyable, T: not Sized, T: not Static {
+    public static unsafe func ofValue[T](at pointer: Pointer[T]) -> Layout where T: not Copyable, T: not Sized, T: not Static {
         Layout(
-            size: Int64(intLiteral: lang.sizeof_val(pointer.raw)),
-            alignment: Int64(intLiteral: lang.alignof_val(pointer.raw))
+            size: Int64(intLiteral: unsafe lang.sizeof_val(pointer.raw)),
+            alignment: Int64(intLiteral: unsafe lang.alignof_val(pointer.raw))
         )
     }
 

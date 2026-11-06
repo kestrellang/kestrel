@@ -443,14 +443,8 @@ fn conformance_binding(
     // `Multipliable[Int64]`, so `Int64 * Int64` selects it over a sibling
     // `Multipliable[Meters]` (a written-args-only compare never could).
     let mut selected = conformances.into_iter().filter(|(source, ast_ty)| {
-        let written = kestrel_name_res::extract_ast_type_args(ast_ty);
-        let args = kestrel_hir_lower::conformance_protocol_args(
-            ctx.query_ctx,
-            ctx.root,
-            protocol,
-            *source,
-            &written,
-        );
+        let args = effective_conformance_args(ctx, *source, protocol, ast_ty);
+        // A defaulted `Self` arg names the conformer itself, not the protocol.
         args.len() == protocol_args.len()
             && args.iter().zip(protocol_args).all(|(arg, &tv)| match arg {
                 kestrel_hir::ty::HirTy::SelfType(..) => {
@@ -463,18 +457,7 @@ fn conformance_binding(
         return ConformancePick::Unselected;
     };
 
-    let binding = ctx
-        .query_ctx
-        .children_of(source)
-        .iter()
-        .copied()
-        .find(|&child| {
-            ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-                && ctx
-                    .query_ctx
-                    .get::<Name>(child)
-                    .is_some_and(|n| n.0 == name)
-        });
+    let binding = conformance_assoc_alias(ctx, source, protocol, name);
     let Some(resolved) = binding.and_then(|alias| {
         ctx.query_ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
             entity: alias,
@@ -489,6 +472,70 @@ fn conformance_binding(
     })
 }
 
+/// A conformance's protocol args as HIR types, defaults filled
+/// (`conformance_args_with_defaults`) and lowered in the declaring scope.
+fn effective_conformance_args(
+    ctx: &InferCtx<'_>,
+    source: Entity,
+    protocol: Entity,
+    ast_ty: &kestrel_ast_builder::AstType,
+) -> Vec<kestrel_hir::ty::HirTy> {
+    let written = kestrel_name_res::extract_ast_type_args(ast_ty);
+    kestrel_name_res::conformance_args_with_defaults(ctx.query_ctx, protocol, written)
+        .iter()
+        .map(|arg| kestrel_hir_lower::lower_ast_type(ctx.query_ctx, source, ctx.root, arg))
+        .collect()
+}
+
+/// The `name` alias a conformance's declaration binds for `protocol`: one
+/// qualified to it (`type Mul.Output = N`), else an unqualified one
+/// (`type Output = Meters` in `extend N: Mul[Meters]`). A type body that
+/// binds several protocols' `Output` must not answer with the first.
+fn conformance_assoc_alias(
+    ctx: &InferCtx<'_>,
+    source: Entity,
+    protocol: Entity,
+    name: &str,
+) -> Option<Entity> {
+    let aliases = ctx
+        .query_ctx
+        .children_of(source)
+        .iter()
+        .copied()
+        .filter(|&child| {
+            ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
+                && ctx
+                    .query_ctx
+                    .get::<Name>(child)
+                    .is_some_and(|n| n.0 == name)
+        });
+    let mut unqualified = None;
+    for alias in aliases {
+        let Some(target) = ctx
+            .query_ctx
+            .get::<kestrel_ast_builder::QualifiedTarget>(alias)
+        else {
+            unqualified = unqualified.or(Some(alias));
+            continue;
+        };
+        let kestrel_ast_builder::AstType::Named { segments, .. } = &target.0 else {
+            continue;
+        };
+        let path = segments.iter().map(|s| s.name.clone()).collect();
+        if matches!(
+            ctx.query_ctx.query(kestrel_name_res::ResolveTypePath {
+                segments: path,
+                context: source,
+                root: ctx.root,
+            }),
+            kestrel_name_res::TypeResolution::Found(p) if p == protocol
+        ) {
+            return Some(alias);
+        }
+    }
+    unqualified
+}
+
 /// Whether a conformance's written protocol arg (`Meters` in
 /// `Subtractable[Meters]`) is the solved `tv`. An extension's own type param
 /// matches anything; an unresolved or unmodelled position does not match, so
@@ -500,6 +547,7 @@ fn written_arg_matches(ctx: &InferCtx<'_>, written: &kestrel_hir::ty::HirTy, tv:
     };
     match (written, kind) {
         (HirTy::Param(..), _) => true,
+        (HirTy::SelfType(entity, _), kind) => kind.entity() == Some(*entity),
         (HirTy::Struct { entity, args, .. }, TyKind::Struct { entity: e, args: a })
         | (HirTy::Enum { entity, args, .. }, TyKind::Enum { entity: e, args: a }) => {
             entity == e

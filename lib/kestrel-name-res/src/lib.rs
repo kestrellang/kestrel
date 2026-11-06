@@ -7,6 +7,7 @@
 //! All resolution is implemented as incremental queries against the
 //! kestrel-hecs world.
 
+pub mod annotation;
 pub mod conformances;
 pub mod extensions;
 pub mod helpers;
@@ -17,16 +18,17 @@ pub mod resolve_name;
 pub mod resolve_type;
 pub mod resolve_value;
 pub mod scope;
+pub mod sugar_only;
 pub mod traversal;
 pub mod type_members;
 pub mod visibility;
 
 // Re-export primary query types
+pub use annotation::{SelfTypeEntity, annotation_entity, container_type, resolve_annotation};
 pub use conformances::{
     AssociatedTypeBinding, ConformingProtocolInstantiations, ConformingProtocols, alias_binds,
-    writes_conformance,
-    expand_protocol_closure,
-    expand_protocol_closure_in_place, extract_ast_type_args, protocol_parents,
+    conformance_args_with_defaults, expand_protocol_closure, expand_protocol_closure_in_place,
+    extract_ast_type_args, protocol_parents, writes_conformance,
 };
 pub use extensions::{
     ExtensionLhsParams, ExtensionOwnTypeParams, ExtensionPatternParams, ExtensionTargetEntity,
@@ -45,8 +47,9 @@ pub use resolve_name::{NameResolution, ResolveName};
 pub use resolve_type::{ResolveTypePath, TypePathChain, TypeResolution, resolve_type_path_chain};
 pub use resolve_value::{ResolveValuePath, ValueResolution};
 pub use scope::{Scope, ScopeFor};
+pub use sugar_only::{SugarOnlyRequirement, sugar_only_hidden};
 pub use traversal::MemberMap;
 pub use type_members::{
     TypeMember, TypeMemberMap, TypeMemberSource, TypeMembers, TypeMembersByName,
 };
-pub use visibility::{IsVisibleFrom, VisibleChildrenByName, internal_boundary};
+pub use visibility::{IsVisibleFrom, VisibleChildrenByName, effective_vis, internal_boundary};

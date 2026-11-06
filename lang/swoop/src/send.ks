@@ -121,8 +121,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
     var headerEnd: Int64 = -1;
 
     loop {
-        let slice = ArraySlice(pointer: chunk.asPointer(), count: 4096);
-        let n = match recvStream.read(into: slice) {
+        let n = match recvStream.read(into: chunk(..<4096)) {
             .Ok(bytes) => bytes,
             .Err(_) => throw SwoopError.connectionFailed("failed to read response")
         };
@@ -133,7 +132,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
             break
         }
 
-        let readSlice = chunk.asSlice()(0..<n);
+        let readSlice = &chunk(0..<n);
         buf.append(contentsOf: readSlice);
 
         headerEnd = findHeaderEnd(buf);
@@ -150,7 +149,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
         throw SwoopError.invalidResponse("no header terminator found")
     }
 
-    let headerStr = String(fromUtf8: buf.asSlice()(0..<headerEnd)) ?? String();
+    let headerStr = String(fromUtf8: buf(0..<headerEnd)) ?? String();
 
     let hdrSlice = headerStr.asSlice();
     guard let .Some(firstLineEnd) = headerStr.firstIndex(of: "\r\n") else {
@@ -175,7 +174,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
     let bodyStart = headerEnd + 4;
     var rawBuf = [];
 
-    let initialBody = buf.asSlice()(bodyStart..<buf.count);
+    let initialBody = &buf(bodyStart..<buf.count);
     rawBuf.append(contentsOf: initialBody);
 
     let isChunked = match headers.value(forName: "Transfer-Encoding") {
@@ -192,29 +191,27 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
                 readSize = remaining
             }
             var bodyChunk = Array[UInt8](repeating: 0, count: readSize);
-            let bodySlice = ArraySlice(pointer: bodyChunk.asPointer(), count: readSize);
-            let bn = match recvStream.read(into: bodySlice) {
+            let bn = match recvStream.read(into: bodyChunk(..<readSize)) {
                 .Ok(bytes) => bytes,
                 .Err(_) => break
             };
             if bn <= 0 {
                 break
             }
-            let chunkSlice = bodyChunk.asSlice()(0..<bn);
+            let chunkSlice = &bodyChunk(0..<bn);
             rawBuf.append(contentsOf: chunkSlice);
         }
     } else {
         loop {
             var readChunk = Array[UInt8](repeating: 0, count: 4096);
-            let readSlice = ArraySlice(pointer: readChunk.asPointer(), count: 4096);
-            let rn = match recvStream.read(into: readSlice) {
+            let rn = match recvStream.read(into: readChunk(..<4096)) {
                 .Ok(bytes) => bytes,
                 .Err(_) => break
             };
             if rn <= 0 {
                 break
             }
-            let chunkSlice = readChunk.asSlice()(0..<rn);
+            let chunkSlice = &readChunk(0..<rn);
             rawBuf.append(contentsOf: chunkSlice);
         }
     }
@@ -247,10 +244,7 @@ func sendAllBytes[S](mutating stream: S, buf: [UInt8]) -> () throws IoError wher
     let len = buf.count;
     var sent: Int64 = 0;
     while sent < len {
-        let ptr = buf.asPointer().offset(by: sent);
-        let remaining = len - sent;
-        let slice = ArraySlice(pointer: ptr, count: remaining);
-        let n = try stream.write(from: slice);
+        let n = try stream.write(from: buf(sent..));
         if n == 0 {
             throw IoError(code: 32)
         }

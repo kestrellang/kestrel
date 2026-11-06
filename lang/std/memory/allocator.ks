@@ -37,13 +37,13 @@ public protocol Allocator {
     /// `ptr` must have been produced by this allocator (or a clone of it)
     /// for `layout`. Mismatching the layout, double-freeing, or freeing a
     /// pointer from another allocator is undefined behavior.
-    mutating func deallocate(ptr: RawPointer, layout: Layout)
+    unsafe mutating func deallocate(ptr: RawPointer, layout: Layout)
 
     /// Resizes the allocation at `ptr` from `oldLayout` to `newLayout`.
     /// On failure the original allocation is left intact and `.None` is
     /// returned. On success the old pointer must not be reused — use the
     /// returned pointer instead.
-    mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer?
+    unsafe mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer?
 }
 
 /// `Allocator` backed by libc `malloc`/`free`/`realloc`. Used as the
@@ -68,7 +68,7 @@ public struct SystemAllocator: Allocator {
 
         let naturalAlignment = Layout.of[RawPointer]().alignment;
         if layout.alignment <= naturalAlignment {
-            let ptr = malloc(layout.size);
+            let ptr = unsafe malloc(layout.size);
             if ptr.isNull {
                 .None
             } else {
@@ -76,7 +76,7 @@ public struct SystemAllocator: Allocator {
             }
         } else {
             var ptr = RawPointer.nullPointer();
-            let status = posixMemalign(
+            let status = unsafe posixMemalign(
                 Pointer(to: ptr).asRaw(),
                 layout.alignment,
                 layout.size
@@ -91,14 +91,14 @@ public struct SystemAllocator: Allocator {
 
     /// Calls `free(ptr)`. The `layout` argument is ignored — kept for
     /// protocol conformance; allocators that need it (arenas) use it.
-    public mutating func deallocate(ptr: RawPointer, layout: Layout) {
-        free(ptr)
+    public unsafe mutating func deallocate(ptr: RawPointer, layout: Layout) {
+        unsafe free(ptr)
     }
 
     /// Resizes while preserving the requested alignment. When either layout
     /// is over-aligned, this allocates a new block, copies the common prefix,
     /// and frees the old block only after allocation succeeds.
-    public mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer? {
+    public unsafe mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer? {
         if oldLayout.size < 0 or not oldLayout.alignment.isPowerOfTwo or
             newLayout.size < 0 or not newLayout.alignment.isPowerOfTwo {
             return .None
@@ -106,7 +106,7 @@ public struct SystemAllocator: Allocator {
 
         let naturalAlignment = Layout.of[RawPointer]().alignment;
         if oldLayout.alignment <= naturalAlignment and newLayout.alignment <= naturalAlignment {
-            let newPtr = realloc(ptr, newLayout.size);
+            let newPtr = unsafe realloc(ptr, newLayout.size);
             if newPtr.isNull {
                 .None
             } else {
@@ -121,9 +121,9 @@ public struct SystemAllocator: Allocator {
                         newLayout.size
                     };
                     if copySize > 0 {
-                        memcpy(newPtr, ptr, copySize);
+                        unsafe memcpy(newPtr, ptr, copySize);
                     };
-                    free(ptr);
+                    unsafe free(ptr);
                     .Some(newPtr)
                 },
                 .None => .None

@@ -31,8 +31,9 @@ import std.memory.(ExistentialBox, Layout, Pointer, RawPointer, Allocator, Syste
 ///
 /// # Memory Model
 ///
-/// Single owner, no counting. `OwnedBox` is not `Copyable`; it is
-/// `Cloneable` when its payload is, and a clone allocates a new block.
+/// Single owner, no counting. `OwnedBox` is never bit-copied; it is
+/// `Cloneable` when its payload can be copied at all (bitwise or by its own
+/// `clone()`), and a clone allocates a new block holding that copy.
 ///
 /// # Guarantees
 ///
@@ -63,7 +64,7 @@ public struct OwnedBox[T]: not Copyable where T: not Copyable, T: not Sized, T: 
         let result: RawPointer? = allocator.allocate(layout);
         if let .Some(rawPtr) = result {
             self.ptr = rawPtr.cast[T]();
-            self.ptr.write(value);
+            unsafe self.ptr.write(value);
             self.live = true;
         } else {
             fatalError("OwnedBox allocation failed")
@@ -71,23 +72,30 @@ public struct OwnedBox[T]: not Copyable where T: not Copyable, T: not Sized, T: 
     }
 
     /// Pointer to the payload. Valid while the box is alive.
-    public func valuePtr() -> Pointer[T] {
+    internal func valuePtr() -> Pointer[T] {
         self.ptr
+    }
+
+    /// The payload, in place: `&b.value` borrows it, `b.value.x = 1` writes
+    /// it. The box is its only owner, so a write needs a mutable box.
+    public var value: T {
+        ref { unsafe self.ptr.value }
+        mutating ref { unsafe self.ptr.mutatingValue }
     }
 
     // Frees the block without touching the payload. Measured from the
     // payload so an unsized one works too.
     fileprivate func free() {
-        let layout = Layout.ofValue(at: self.ptr);
+        let layout = unsafe Layout.ofValue(at: self.ptr);
         var allocator = SystemAllocator();
-        allocator.deallocate(self.ptr.asRaw(), layout)
+        unsafe allocator.deallocate(self.ptr.asRaw(), layout)
     }
 
     /// Drops the payload and frees the block, unless `consumePointee`
     /// already took the payload out.
     deinit {
         if self.live {
-            self.ptr.dropInPlace();
+            unsafe self.ptr.dropInPlace();
             self.free()
         }
     }
@@ -95,8 +103,6 @@ public struct OwnedBox[T]: not Copyable where T: not Copyable, T: not Sized, T: 
 
 extend OwnedBox[T]: MutableIndirection {
     type Target = T
-    public func pointeeRef() -> &T { self.ptr.value }
-    public mutating func pointeeMutRef() -> &mutating T { self.ptr.mutatingValue }
 }
 
 // The box owns its payload alone, so it can give it up.
@@ -118,14 +124,14 @@ extend OwnedBox[T]: ExistentialBox {}
 // Moves the payload out and frees the block.
 extend OwnedBox[T] where T: Sized {
     public consuming func takeValue() -> T {
-        self.consumePointee { (p) in p.take() }
+        self.consumePointee { (p) in unsafe p.take() }
     }
 }
 
-// A clone allocates a fresh block holding a clone of the payload. An unsized
-// payload clones through its function table (existentials M4).
-extend OwnedBox[T]: Cloneable where T: Cloneable, T: Sized {
+// A clone allocates a fresh block holding a copy of the payload — a bit-copy
+// or the payload's own `clone()`, whichever copying `T` means.
+extend OwnedBox[T]: Cloneable where T: Copyable, T: Sized {
     public func clone() -> OwnedBox[T] {
-        OwnedBox(self.ptr.value.clone())
+        OwnedBox(unsafe self.ptr.value)
     }
 }

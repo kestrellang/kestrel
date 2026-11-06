@@ -246,6 +246,36 @@ pub static REGISTRY: &[AttrDef] = &[
         doc: "A placeholder with no effect, used by parser tests.",
     },
     AttrDef {
+        name: "export",
+        targets: TargetSet::of(&[T::FreeFunction]),
+        params: &[
+            ParamDef {
+                label: None,
+                kind: ParamKind::Cases("calling convention", &["C"]),
+                required: true,
+                variadic: false,
+                missing_code: Some("E612"),
+                what: "a calling convention: '@export(.C)'",
+            },
+            labeled("mangleName", ParamKind::Str, "a symbol name"),
+        ],
+        repeatable: false,
+        phase: AttrPhase::Lowering,
+        conflicts: &[
+            Conflict {
+                with: "extern",
+                reason: "a function is either defined outside Kestrel or exported from it",
+            },
+            Conflict {
+                with: "main",
+                reason: "the entry point is exported as 'main' already",
+            },
+        ],
+        needs_body: true,
+        repeat_hint: None,
+        doc: "Defines a Kestrel function that C code can call, with the given calling convention, under the function's name or 'mangleName:'. Name it where a C function type '@extern(.C) (…) -> …' is expected to pass it to C as a callback.",
+    },
+    AttrDef {
         name: "extern",
         targets: TargetSet::of(&[T::FreeFunction]),
         params: &[
@@ -267,7 +297,7 @@ pub static REGISTRY: &[AttrDef] = &[
         }],
         needs_body: false,
         repeat_hint: None,
-        doc: "Declares a function implemented outside Kestrel, called with the given calling convention.",
+        doc: "Declares a function implemented outside Kestrel, called with the given calling convention. Calling it always needs `unsafe`.",
     },
     AttrDef {
         name: "fileconstant",
@@ -369,7 +399,10 @@ pub static REGISTRY: &[AttrDef] = &[
         // warning (E914) for one release.
         params: &[ParamDef {
             label: None,
-            kind: ParamKind::Cases("platform", &["Darwin", "Linux", "darwin", "linux"]),
+            kind: ParamKind::Cases(
+                "platform",
+                &["Darwin", "Linux", "Emscripten", "darwin", "linux"],
+            ),
             required: true,
             variadic: true,
             missing_code: None,
@@ -383,6 +416,20 @@ pub static REGISTRY: &[AttrDef] = &[
         needs_body: false,
         repeat_hint: Some("list every platform in one '@platform(...)'"),
         doc: "Compiles the declaration only when building for one of the given platforms: '@platform(.Linux, .Darwin)'.",
+    },
+    AttrDef {
+        name: "sugarOnly",
+        // An init requirement classifies as `Initializer`; the rule only
+        // reads the attribute on protocol members (`kestrel-name-res`'s
+        // `SugarOnlyRequirement`).
+        targets: TargetSet::of(&[T::Requirement, T::Initializer]),
+        params: &[],
+        repeatable: false,
+        phase: AttrPhase::NameRes,
+        conflicts: &[],
+        needs_body: false,
+        repeat_hint: None,
+        doc: "Marks a protocol requirement that is reached only through its syntax ('+=', 'try', '?.', literals, patterns). Conformers still implement it, but outside the protocol's module no code may call it, or any type's implementation of it, by name.",
     },
     AttrDef {
         name: "unavailable",

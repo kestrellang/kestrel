@@ -79,40 +79,40 @@ bb7(%v71: @owned Int64, %v72: @owned Int64, %v73: @owned Pointer[std.numeric.Int
     %v90 = enum_payload %v89, variant 0, .0  // @guaranteed Test.Counter
     %v91 = copy_value %v90  // @owned Test.Counter
     end_borrow %v89
-    %v92 = copy_value %v91  // @owned Test.Counter
-    %v93 = uninit Test.Counter  // @owned Pointer[Test.Counter]
-    store_init %v93, %v92
-    %v94 = field_addr %v93, Test.Counter, .0  // @owned Pointer[std.numeric.Int64]
-    %v95 = begin_borrow_addr %v94, std.numeric.Int64  // @guaranteed std.numeric.Int64
-    %v96 = copy_value %v95  // @owned std.numeric.Int64
-    end_borrow %v95
-    %v97 = call @witness std.core.FromValue.from(_:) for std.result.Optional[std.numeric.Int64][std.numeric.Int64](%v96)  // @owned std.result.Optional[std.numeric.Int64]
-    destroy_value %v94
-    destroy_addr %v93, Test.Counter
+    %v92 = uninit Test.Counter  // @owned Pointer[Test.Counter]
+    store_init %v92, %v91
+    %v93 = field_addr %v92, Test.Counter, .0  // @owned Pointer[std.numeric.Int64]
+    %v94 = begin_borrow_addr %v93, std.numeric.Int64  // @guaranteed std.numeric.Int64
+    %v95 = copy_value %v94  // @owned std.numeric.Int64
+    end_borrow %v94
+    %v96 = call std.result.Optional.from[std.numeric.Int64](%v95)  // @owned std.result.Optional[std.numeric.Int64]
     destroy_value %v93
-    destroy_value %v91
-    jump bb9(%v97, %v71, %v72, %v73, %v74, %v75, %v76, %v77, %v78)
+    destroy_addr %v92, Test.Counter
+    destroy_value %v92
+    jump bb9(%v96, %v71, %v72, %v73, %v74, %v75, %v76, %v77, %v78)
 
 bb8(%v80: @owned Int64, %v81: @owned Int64, %v82: @owned Pointer[std.numeric.Int64], %v83: @owned Pointer[std.result.Optional[Test.Counter]], %v84: @owned std.result.Optional[&Test.Counter], %v85: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v86: @owned std.result.Optional[&mutating Test.Counter], %v87: @owned std.result.Optional[Test.Counter], %v88: @owned Int32):
     destroy_value %v88
-    %v98 = enum std.result.Optional[std.numeric.Int64].1  // @owned std.result.Optional[std.numeric.Int64]
-    jump bb9(%v98, %v80, %v81, %v82, %v83, %v84, %v85, %v86, %v87)
+    %v97 = enum std.result.Optional[std.numeric.Int64].1  // @owned std.result.Optional[std.numeric.Int64]
+    jump bb9(%v97, %v80, %v81, %v82, %v83, %v84, %v85, %v86, %v87)
 
-bb9(%v99: @owned std.result.Optional[std.numeric.Int64], %v100: @owned Int64, %v101: @owned Int64, %v102: @owned Pointer[std.numeric.Int64], %v103: @owned Pointer[std.result.Optional[Test.Counter]], %v104: @owned std.result.Optional[&Test.Counter], %v105: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v106: @owned std.result.Optional[&mutating Test.Counter], %v107: @owned std.result.Optional[Test.Counter]):
-    %v108 = uninit std.result.Optional[std.numeric.Int64]  // @owned Pointer[std.result.Optional[std.numeric.Int64]]
-    store_init %v108, %v99
-    %v109 = literal ()  // @owned ()
-    destroy_addr %v108, std.result.Optional[std.numeric.Int64]
-    destroy_value %v108
+bb9(%v98: @owned std.result.Optional[std.numeric.Int64], %v99: @owned Int64, %v100: @owned Int64, %v101: @owned Pointer[std.numeric.Int64], %v102: @owned Pointer[std.result.Optional[Test.Counter]], %v103: @owned std.result.Optional[&Test.Counter], %v104: @owned Pointer[std.result.Optional[std.numeric.Int64]], %v105: @owned std.result.Optional[&mutating Test.Counter], %v106: @owned std.result.Optional[Test.Counter]):
+    %v107 = uninit std.result.Optional[std.numeric.Int64]  // @owned Pointer[std.result.Optional[std.numeric.Int64]]
+    store_init %v107, %v98
+    %v108 = literal ()  // @owned ()
+    destroy_addr %v107, std.result.Optional[std.numeric.Int64]
     destroy_value %v107
     destroy_value %v106
     destroy_addr %v35, std.result.Optional[std.numeric.Int64]
     destroy_value %v105
+    destroy_addr %v35, std.result.Optional[std.numeric.Int64]
     destroy_value %v104
     destroy_addr %v7, std.result.Optional[Test.Counter]
     destroy_value %v103
+    destroy_addr %v7, std.result.Optional[Test.Counter]
     destroy_value %v102
     destroy_value %v101
     destroy_value %v100
-    return %v109
+    destroy_value %v99
+    return %v108
 

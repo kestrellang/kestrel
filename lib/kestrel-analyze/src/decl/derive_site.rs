@@ -518,7 +518,7 @@ fn declared_protocols(cx: &DeclContext<'_>, decl: Entity) -> Vec<Entity> {
         .0
         .iter()
         .filter_map(|item| {
-            let ConformanceItem::Positive(AstType::Named { segments, .. }, _) = item else {
+            let ConformanceItem::Positive(AstType::Named { segments, .. }, ..) = item else {
                 return None;
             };
             match cx.query.query(ResolveTypePath {

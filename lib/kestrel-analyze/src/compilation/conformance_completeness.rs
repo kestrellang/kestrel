@@ -24,6 +24,11 @@
 //! ### E460 -- `missing_property_setter` (Error, Correctness)
 //! **Message:** "property '{name}' requires a setter to satisfy protocol '{proto}'"
 //!
+//! ### E405 -- `missing_property_ref_accessor` (Error, Correctness)
+//! **Message:** "property '{name}' must lend a reference (`ref`) to satisfy protocol '{proto}'"
+//! A `{ ref }` / `{ mutating ref }` requirement met by a computed property
+//! without the matching ref accessor (a `get` returns a copy, not the place).
+//!
 //! ### E462 -- `conflicting_associated_type` (Error, Correctness)
 //! **Message:** "conflicting associated type '{name}' inherited by protocol '{proto}'"
 //!
@@ -32,6 +37,19 @@
 //!
 //! ### E469 -- `wrong_parameter_convention` (Error, Correctness)
 //! **Message:** "parameter '{param}' of method '{name}' has the wrong convention for protocol '{proto}'"
+//!
+//! ### E643 -- `unsafe_witness_for_safe_requirement` (Error, Correctness)
+//! **Message:** "'{name}' is unsafe, but the requirement it satisfies in protocol '{proto}' is not"
+//! Generic code calls the requirement without `unsafe`, so its witness must
+//! not need it. Primary label: the witness (`util::entity_span`).
+//!
+//! ### E644 -- `missing_unsafe_conformance` (Error, Correctness)
+//! **Message:** "'{proto}' is an unsafe protocol; write the conformance as `unsafe {proto}`"
+//! Primary label: the conformance item (its `ConformanceItem` syntax range).
+//!
+//! ### E645 -- `unnecessary_unsafe_conformance` (Warning, Usage)
+//! **Message:** "'{proto}' is not an unsafe protocol; `unsafe` here has no effect"
+//! Primary label: the conformance item.
 
 use std::collections::{HashMap, HashSet};
 
@@ -40,10 +58,11 @@ use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
+use kestrel_ast_builder::unsafety::{UnsafetyOf, is_unsafe_protocol};
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, ExtensionTarget, InitEffect, NodeKind,
-    QualifiedTarget, ReceiverKind, Settable, TypeAnnotation, TypeParams, WhereClause,
-    WhereConstraint,
+    Callable, Computed, ConformanceItem, Conformances, ExtensionTarget, InitEffect,
+    MutatingAccessor, MutatingRead, NodeKind, QualifiedTarget, ReceiverKind, Settable,
+    TypeAnnotation, TypeParams, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
@@ -134,6 +153,30 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E405",
+        name: "missing_property_ref_accessor",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E643",
+        name: "unsafe_witness_for_safe_requirement",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E644",
+        name: "missing_unsafe_conformance",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E645",
+        name: "unnecessary_unsafe_conformance",
+        default_severity: Severity::Warning,
+        category: Category::Usage,
+    },
 ];
 
 pub struct ConformanceCompletenessAnalyzer;
@@ -203,7 +246,7 @@ fn check_type_conformances(
     };
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(protocol) = resolve_conformance(cx, ast_ty, conforming_entity) else {
@@ -212,6 +255,7 @@ fn check_type_conformances(
         if cx.query.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
             continue;
         }
+        check_conformance_unsafety(cx, item, protocol, conforming_entity, diags);
 
         let proto_param_subs =
             build_proto_param_subs(cx, entity, protocol, ast_ty, conforming_entity);
@@ -238,7 +282,7 @@ fn check_extension_conformances(
     };
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(protocol) = resolve_conformance(cx, ast_ty, extension) else {
@@ -247,6 +291,7 @@ fn check_extension_conformances(
         if cx.query.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
             continue;
         }
+        check_conformance_unsafety(cx, item, protocol, extension, diags);
 
         let proto_param_subs = build_proto_param_subs(cx, target, protocol, ast_ty, extension);
         check_protocol_requirements(cx, target, protocol, extension, &proto_param_subs, diags);
@@ -465,6 +510,7 @@ fn check_protocol_requirements(
                 }
 
                 if let Some(impl_method) = matched_impl {
+                    check_witness_unsafety(cx, child, impl_method, &name, &proto_name, diags);
                     // Init return types are derived from the effect ((), ()?, () throws E),
                     // so skip the structural return type check — check_init_effect validates
                     // effect compatibility instead. Without this skip, widening (non-failable
@@ -501,12 +547,31 @@ fn check_protocol_requirements(
             Some(NodeKind::Field) => {
                 // Required property — check if provided with matching type
                 if let Some(&field_entity) = provided.fields.get(name.as_str()) {
+                    check_witness_unsafety(cx, child, field_entity, &name, &proto_name, diags);
                     // Setter requirement: if the protocol declares `{ get set }`
                     // the impl must also be settable (either a `var` stored
                     // property or a computed property with a `set` accessor).
+                    // A `{ get }` requirement reads without changing `self`;
+                    // a `modifying` read provider needs a mutable receiver, so
+                    // a borrowed witness call could not honor it.
+                    if cx.query.has::<MutatingRead>(field_entity) {
+                        diags.push(modifying_witness_diag(&name, &proto_name, &decl_span));
+                    }
+                    // A missing `mutating ref` is the precise report; E460's
+                    // "needs a setter" would point at the wrong fix.
+                    let ref_diag = missing_ref_accessor_diag(
+                        cx,
+                        child,
+                        field_entity,
+                        &name,
+                        &proto_name,
+                        &decl_span,
+                    );
+                    let missing_ref = ref_diag.is_some();
+                    diags.extend(ref_diag);
                     let proto_needs_set = cx.query.get::<Settable>(child).is_some();
                     let impl_has_set = cx.query.get::<Settable>(field_entity).is_some();
-                    if proto_needs_set && !impl_has_set {
+                    if proto_needs_set && !impl_has_set && !missing_ref {
                         diags.push(AnalyzeDiagnostic {
                             descriptor_id: DESCRIPTORS[6].id,
                             severity: DESCRIPTORS[6].default_severity,
@@ -626,7 +691,7 @@ fn check_associated_type_conflicts(
 
     let mut by_name: HashMap<String, Vec<(Entity, Entity)>> = HashMap::new();
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(parent_protocol) = resolve_conformance(cx, ast_ty, protocol) else {
@@ -709,7 +774,7 @@ fn collect_declared_associated_types(
         return;
     };
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(parent_protocol) = resolve_conformance(cx, ast_ty, protocol) else {
@@ -1615,40 +1680,16 @@ fn resolve_conformance_type_arg(
     }
 }
 
-/// Resolve an AstType to an entity for type comparison.
-/// When `self_type` is provided, `Self` resolves to that entity.
+/// Resolve an AstType to an entity for type comparison. `Self` stays
+/// unresolved, as it always has here: in a protocol requirement it means the
+/// conformer, not the declaring protocol.
 fn resolve_type_entity(
     cx: &CompilationContext<'_>,
     ast_ty: &kestrel_ast::AstType,
     context: Entity,
 ) -> Option<Entity> {
-    resolve_type_entity_with_self(cx, ast_ty, context, None)
-}
-
-/// Resolve an AstType to an entity, substituting `Self` with `self_type` if provided.
-fn resolve_type_entity_with_self(
-    cx: &CompilationContext<'_>,
-    ast_ty: &kestrel_ast::AstType,
-    context: Entity,
-    self_type: Option<Entity>,
-) -> Option<Entity> {
-    let segments: Vec<String> = match ast_ty {
-        kestrel_ast::AstType::Named { segments, .. } => {
-            segments.iter().map(|s| s.name.clone()).collect()
-        },
-        kestrel_ast::AstType::Array(_, _) => vec!["Array".into()],
-        kestrel_ast::AstType::Dictionary(_, _, _) => vec!["Dictionary".into()],
-        kestrel_ast::AstType::Optional(_, _) => vec!["Optional".into()],
-        kestrel_ast::AstType::Result { .. } => vec!["Result".into()],
-        _ => return None,
-    };
-    match cx.query.query(ResolveTypePath {
-        segments,
-        context,
-        root: cx.root,
-    }) {
+    match kestrel_name_res::resolve_annotation(cx.query, ast_ty, context, cx.root) {
         TypeResolution::Found(entity) => Some(entity),
-        TypeResolution::SelfType => self_type,
         _ => None,
     }
 }
@@ -1657,6 +1698,78 @@ fn resolve_type_entity_with_self(
 /// Types are checked separately by `check_method_return_type`; param types
 /// aren't compared here because type-param / Self substitution isn't modeled
 /// by entity equality.
+/// E405 when the protocol property `requirement` requires `ref` / `mutating
+/// ref` and the computed `witness` lacks the matching accessor. A stored
+/// field lends itself in place (witness_lower synthesizes the accessor);
+/// a stored `let` missing `mutating ref` is already E460 (no setter).
+fn missing_ref_accessor_diag(
+    cx: &CompilationContext<'_>,
+    requirement: Entity,
+    witness: Entity,
+    name: &str,
+    proto_name: &str,
+    decl_span: &kestrel_span::Span,
+) -> Option<AnalyzeDiagnostic> {
+    if !cx.query.has::<Computed>(witness) {
+        return None;
+    }
+    let ref_kinds = |e: Entity| -> Vec<bool> {
+        cx.query
+            .children_of(e)
+            .iter()
+            .filter(|&&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::RefAccessor))
+            .map(|&c| cx.query.has::<MutatingAccessor>(c))
+            .collect()
+    };
+    let provided = ref_kinds(witness);
+    let missing = ref_kinds(requirement)
+        .into_iter()
+        .find(|m| !provided.contains(m))?;
+    let accessor = if missing { "mutating ref" } else { "ref" };
+    let descriptor = DESCRIPTORS.iter().find(|d| d.id == "E405")?;
+    Some(AnalyzeDiagnostic {
+        descriptor_id: descriptor.id,
+        severity: descriptor.default_severity,
+        message: format!(
+            "property '{name}' must lend a reference (`{accessor}`) to satisfy protocol \
+             '{proto_name}'"
+        ),
+        labels: vec![DiagLabel {
+            span: decl_span.clone(),
+            message: format!("'{name}' has no `{accessor}` accessor"),
+            is_primary: true,
+        }],
+        notes: vec![format!(
+            "the requirement lends the place itself; declare `{accessor} {{ … }}` or make \
+             '{name}' a stored property"
+        )],
+    })
+}
+
+/// E477 for a property/subscript witness whose read provider is `modifying`.
+fn modifying_witness_diag(
+    name: &str,
+    proto_name: &str,
+    span: &kestrel_span::Span,
+) -> AnalyzeDiagnostic {
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[5].id, // E477
+        severity: DESCRIPTORS[5].default_severity,
+        message: format!(
+            "'{name}' satisfies a `{{ get }}` requirement with a `modifying` accessor \
+             for protocol '{proto_name}'"
+        ),
+        labels: vec![DiagLabel {
+            span: span.clone(),
+            message: format!("'{name}' mutates its receiver when read"),
+            is_primary: true,
+        }],
+        notes: vec![
+            "protocol reads borrow `self`; use a plain `get` or `ref` for the witness".into(),
+        ],
+    }
+}
+
 fn signatures_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
     let (Some(proto), Some(imp)) = (proto, imp) else {
         // If either side lacks a Callable component we can't prove a mismatch —
@@ -2042,7 +2155,7 @@ fn find_conformance_declaration(
             continue;
         };
         for item in &conformances.0 {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
+            let ConformanceItem::Positive(ast_ty, ..) = item else {
                 continue;
             };
             if resolve_conformance(cx, ast_ty, decl) == Some(target_proto) {
@@ -2342,4 +2455,97 @@ fn check_ambiguous_method_satisfaction(
             }
         }
     }
+}
+
+fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
+    DESCRIPTORS
+        .iter()
+        .find(|d| d.id == id)
+        .expect("conformance_completeness descriptor")
+}
+
+/// E644 / E645: an unsafe protocol's conformance must say `unsafe P`, and a
+/// safe protocol's should not.
+fn check_conformance_unsafety(
+    cx: &CompilationContext<'_>,
+    item: &ConformanceItem,
+    protocol: Entity,
+    decl: Entity,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let ConformanceItem::Positive(_, syntax, written_unsafe) = item else {
+        return;
+    };
+    let needs_unsafe = is_unsafe_protocol(cx.query, protocol);
+    if needs_unsafe == *written_unsafe {
+        return;
+    }
+    let proto = util::entity_name(cx.query, protocol);
+    let (d, message, label) = if needs_unsafe {
+        (
+            descriptor("E644"),
+            format!("'{proto}' is an unsafe protocol; write the conformance as `unsafe {proto}`"),
+            "conformance to an unsafe protocol",
+        )
+    } else {
+        (
+            descriptor("E645"),
+            format!("'{proto}' is not an unsafe protocol; `unsafe` here has no effect"),
+            "unnecessary `unsafe`",
+        )
+    };
+    let decl_span = util::entity_span(cx.query, decl);
+    let range = syntax.text_range();
+    let span = kestrel_span::Span::new(
+        decl_span.file_id,
+        usize::from(range.start())..usize::from(range.end()),
+    );
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message,
+        labels: vec![DiagLabel {
+            span,
+            message: label.into(),
+            is_primary: true,
+        }],
+        notes: vec![],
+    });
+}
+
+/// E643: a witness may not need `unsafe` when its requirement doesn't —
+/// generic code reaches the witness through the safe requirement.
+fn check_witness_unsafety(
+    cx: &CompilationContext<'_>,
+    requirement: Entity,
+    witness: Entity,
+    name: &str,
+    proto_name: &str,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let unsafe_of = |entity| cx.query.query(UnsafetyOf { entity }).is_some();
+    if !unsafe_of(witness) || unsafe_of(requirement) {
+        return;
+    }
+    let d = descriptor("E643");
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message: format!(
+            "'{name}' is unsafe, but the requirement it satisfies in protocol '{proto_name}' is not"
+        ),
+        labels: vec![
+            DiagLabel {
+                span: util::entity_span(cx.query, witness),
+                message: "unsafe witness".into(),
+                is_primary: true,
+            },
+            DiagLabel {
+                span: util::entity_span(cx.query, requirement),
+                message: "safe requirement".into(),
+                is_primary: false,
+            },
+        ],
+        notes: vec!["mark the requirement `unsafe`, or make the witness safe".into()],
+    });
 }

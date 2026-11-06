@@ -22,6 +22,7 @@ public protocol Equal[Other = Self] {
     type Output
 
     /// Returns the equality result as `Output` — typically `Bool`.
+    @sugarOnly
     @builtin(.EqualsOperatorMethod)
     func equal(to other: Other) -> Output
 }
@@ -35,6 +36,7 @@ public protocol NotEqual[Other = Self] {
     type Output
 
     /// Returns the inequality result as `Output` — typically `Bool`.
+    @sugarOnly
     @builtin(.NotEqualsOperatorMethod)
     func notEqual(to other: Other) -> Output
 }
@@ -49,6 +51,7 @@ public protocol Less[Other = Self] {
     type Output
 
     /// Returns the less-than result as `Output` — typically `Bool`.
+    @sugarOnly
     @builtin(.LessThanOperatorMethod)
     func lessThan(other: Other) -> Output
 }
@@ -59,6 +62,7 @@ public protocol LessOrEqual[Other = Self] {
     type Output
 
     /// Returns the less-than-or-equal result as `Output` — typically `Bool`.
+    @sugarOnly
     @builtin(.LessOrEqualOperatorMethod)
     func lessThanOrEqual(other: Other) -> Output
 }
@@ -69,6 +73,7 @@ public protocol Greater[Other = Self] {
     type Output
 
     /// Returns the greater-than result as `Output` — typically `Bool`.
+    @sugarOnly
     @builtin(.GreaterThanOperatorMethod)
     func greaterThan(other: Other) -> Output
 }
@@ -79,6 +84,7 @@ public protocol GreaterOrEqual[Other = Self] {
     type Output
 
     /// Returns the greater-than-or-equal result as `Output` — typically `Bool`.
+    @sugarOnly
     @builtin(.GreaterOrEqualOperatorMethod)
     func greaterThanOrEqual(other: Other) -> Output
 }

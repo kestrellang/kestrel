@@ -165,6 +165,91 @@ func processPoint(p: Point) -> Int32
 
 _Defined in `lang/std/ffi/ffi.ks`._
 
+## struct `NullableCFunction`
+
+```kestrel
+public struct NullableCFunction[F] where F: not Static { /* private fields */ }
+```
+
+A C function of type `F` (`@extern(.C) (…) -> …`), or C's `NULL`.
+
+A C function type is never null, so a C API whose callback is optional
+takes a `NullableCFunction` instead: an `FFISafe` struct field or
+`@extern` parameter of this type has exactly the layout of a C function
+pointer, and the `null` literal is `NULL`.
+
+### Examples
+
+```
+@export(.C, mangleName: "on_log")
+func onLog(level: Int32, message: CString) { ... }
+
+var hooks = Hooks(log: NullableCFunction(onLog), panic: null)
+if let .Some(log) = hooks.log.function {
+    unsafe log(1, message)
+}
+```
+
+`F` must be a C function type (E646).
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+### Members
+
+#### initializer `From Function`
+
+```kestrel
+public init(F)
+```
+
+`f`, never null.
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+#### initializer `Null Literal`
+
+```kestrel
+public init()
+```
+
+C's `NULL` (`null`), for a callback left unset.
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+#### field `function`
+
+```kestrel
+public var function: F? { get }
+```
+
+The C function, or `None` when this is `null`.
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+#### field `isNull`
+
+```kestrel
+public var isNull: Bool { get }
+```
+
+Whether this is `null`.
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+#### field `pointer`
+
+```kestrel
+public var pointer: RawPointer { get }
+```
+
+The address as an untyped pointer.
+
+_Defined in `lang/std/ffi/nullable_cfunction.ks`._
+
+### Implements `FFISafe`
+
+### Implements `ExpressibleByNullLiteral`
+
 ## function `free`
 
 ```kestrel

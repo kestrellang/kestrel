@@ -24,7 +24,7 @@ struct Tracked: Cloneable {
     var payload: String
     var clones: Pointer[Int64]
     func clone() -> Tracked {
-        self.clones.write(self.clones.read() + 1);
+        unsafe self.clones.write(self.clones.read() + 1);
         Tracked(payload: self.payload.clone(), clones: self.clones)
     }
 }
@@ -66,15 +66,15 @@ func main() -> lang.i64 {
     // measured as the baseline below so this pin survives if that cost
     // is ever optimized away.)
     let clones = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    clones.write(0);
+    unsafe clones.write(0);
     let h = THolder(t: Tracked(payload: "alpha", clones: clones));
-    let before = clones.read();
+    let before = unsafe clones.read();
     let plain = [Tracked(payload: "beta", clones: clones)];
-    let mid = clones.read();
+    let mid = unsafe clones.read();
     let viaRef = [h.peek()];
-    let after = clones.read();
+    let after = unsafe clones.read();
     if after - mid != (mid - before) + 1 { return 10; }
-    if viaRef(at: 0).payload != "alpha" { return 11; }
-    if plain(at: 0).payload != "beta" { return 12; }
+    if viaRef(0).payload != "alpha" { return 11; }
+    if plain(0).payload != "beta" { return 12; }
     0
 }

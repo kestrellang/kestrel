@@ -4,7 +4,7 @@
 
 // G13, the guard on the OTHER side of the fix. Teaching `type_satisfies` to
 // enforce `where T: Copyable` (see
-// `stdlib/rcbox/get_value_rejects_noncopyable_payload.ks`) must not make it
+// `stdlib/rcbox/deep_clone_rejects_noncopyable_payload.ks`) must not make it
 // reject when the substituted argument is ABSTRACT.
 //
 // `type_satisfies` is a best-effort completeness gate whose module contract is
@@ -21,10 +21,10 @@
 //
 //   Wrap.read()  — `self.inner.fetch()` where `inner: Cell[T]` and `T` is the
 //                  enclosing extension's own Param. The user-level analog of
-//                  lang/std/memory/cowbox.ks:52, whose `read()` calls
-//                  `self.inner.getValue()` on `RcBox[T]` — the exact call the
-//                  permit keeps alive in the shipped stdlib.
-//   CowBox.read() — that stdlib call itself.
+//                  the old `CowBox.read()`, which called `RcBox.getValue()`
+//                  on `RcBox[T]` (both since removed).
+//   copyBox()    — the same shape on the shipped stdlib: `deepClone()`, gated
+//                  by `extend RcBox[T] where T: Copyable`, with `T` abstract.
 //   Cell.one()   — the same bound gating a whole added CONFORMANCE
 //                  (`extend Cell[T]: HasOne where T: Copyable`) rather than a
 //                  bare member, so the frontend has to permit it on the
@@ -46,7 +46,7 @@ module Test
 
 import std.numeric.Int64
 import std.text.String
-import std.memory.CowBox
+import std.memory.RcBox
 
 struct Cell[T] {
     var v: T;
@@ -74,15 +74,19 @@ extend Cell[T]: HasOne where T: Copyable {
     public func one() -> Int64 { 1 }
 }
 
+func copyBox[T](box: RcBox[T]) -> RcBox[T] where T: Cloneable {
+    box.deepClone()
+}
+
 @main
 func main() -> lang.i32 {
     let w = Wrap[Int64](inner: Cell[Int64](v: 6));
     if w.read() != 6 { return 10 }
 
-    // The shipped stdlib path: `CowBox[T].read()` -> `RcBox[T].getValue()`,
-    // gated by `extend RcBox[T] where T: Copyable`, with `T` abstract.
-    var cb = CowBox[String]("hi");
-    if cb.read() != "hi" { return 11 }
+    // The shipped stdlib path: `RcBox[T].deepClone()`, gated by
+    // `extend RcBox[T] where T: Copyable`, with `T` abstract.
+    let cb = copyBox(RcBox[String]("hi"));
+    if cb.value != "hi" { return 11 }
 
     let c = Cell[Int64](v: 2);
     if c.one() != 1 { return 12 }

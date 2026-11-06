@@ -57,6 +57,8 @@ pub(crate) struct LowerCtx<'a> {
     pub while_conditions: Vec<HirExprId>,
     /// Every `|>` lowered so far (`HirBody::pipes`).
     pub pipes: Vec<kestrel_hir::body::PipeSite>,
+    /// Every `unsafe` region lowered so far (`HirBody::unsafe_regions`).
+    pub unsafe_regions: Vec<Span>,
 
     /// Stack of active loop labels (innermost last). `None` = unlabeled loop.
     /// Used to validate break/continue labels during lowering.
@@ -64,11 +66,6 @@ pub(crate) struct LowerCtx<'a> {
 
     /// Maps LocalId → scope depth at creation (for closure capture detection).
     local_depths: HashMap<LocalId, usize>,
-
-    /// True while lowering a user-`match` arm pattern — the one position
-    /// where `&`/`&mutating` binder patterns are legal (stage 1.5 item 2;
-    /// the place-mode lowering needs a pinnable scrutinee place).
-    pub ref_patterns_allowed: bool,
 
     /// True while lowering the path in a call's *callee* position. A path
     /// there names something to invoke, so it is exempt from the
@@ -117,10 +114,10 @@ impl<'a> LowerCtx<'a> {
             scopes: vec![HashMap::new()], // start with one scope for params
             guard_stmts: Vec::new(),
             pipes: Vec::new(),
+            unsafe_regions: Vec::new(),
             while_conditions: Vec::new(),
             loop_labels: Vec::new(),
             local_depths: HashMap::new(),
-            ref_patterns_allowed: false,
             in_callee_position: false,
             or_reuse: None,
             implicit_it_locals: HashMap::new(),
@@ -281,6 +278,7 @@ impl<'a> LowerCtx<'a> {
             owner: None,
             name: HirName::name(wrapper_name),
             args: Some(vec![HirCallArg {
+                trailing_closure: false,
                 label: None,
                 value: unit_expr,
             }]),

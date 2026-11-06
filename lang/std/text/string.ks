@@ -6,9 +6,9 @@ import std.core.(Bool, Equal, NotEqual, Equatable, Matchable, Comparable, Clonea
 import std.text.(Formattable, Formatter, StringBuilder, _writePadded)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, CowBox, ArraySlice)
+import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, CowBox, UnsafeSlice)
 import std.iter.(Iterator, Iterable)
-import std.collections.(Slice)
+import std.collections.(Sliceable, Slice)
 import std.numeric.(UInt32)
 import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, CharsIterator, GraphemesView, LinesView, CharsSubstringIndex, StringSlice, Str, SplitView, SplitWhereView)
 import std.text.unicode as unicode
@@ -24,7 +24,7 @@ func _memcpyBytes(dst dst: Pointer[UInt8], src src: Pointer[UInt8], n n: Int64) 
     if n <= 0 {
         return
     }
-     memcpy(dst.asRaw(), src.asRaw(), n);
+     unsafe memcpy(dst.asRaw(), src.asRaw(), n);
 }
 
 /// Byte-wise equality of two regions via libc `memcmp`. Caller ensures
@@ -33,7 +33,7 @@ func _bytesEqual(a a: Pointer[UInt8], b b: Pointer[UInt8], n n: Int64) -> Bool {
     if n <= 0 {
         return true
     }
-    memcmp(a.asRaw(), b.asRaw(), n) == 0
+    unsafe memcmp(a.asRaw(), b.asRaw(), n) == 0
 }
 
 /// Allocates a typed `Pointer[UInt8]` of `layout` bytes, panicking on
@@ -50,7 +50,7 @@ func _textAlloc(layout: Layout) -> Pointer[UInt8] {
 /// Frees a buffer previously returned by `_textAlloc`.
 func _textDealloc(ptr: Pointer[UInt8], layout: Layout) {
     var allocator = SystemAllocator();
-    allocator.deallocate(ptr.asRaw(), layout)
+    unsafe allocator.deallocate(ptr.asRaw(), layout)
 }
 
 /// Lexicographic byte-wise comparison via libc `memcmp`. Returns the
@@ -59,7 +59,7 @@ func _bytesCompare(a a: Pointer[UInt8], b b: Pointer[UInt8], n n: Int64) -> Orde
     if n <= 0 {
         return .Equal
     }
-    let r = memcmp(a.asRaw(), b.asRaw(), n);
+    let r = unsafe memcmp(a.asRaw(), b.asRaw(), n);
     if r < 0 {
         .Less
     } else if r > 0 {
@@ -200,11 +200,9 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     private var storage: CowBox[StringStorage]
 
     // Helper accessors for storage fields
-    private func ptr() -> Pointer[UInt8] {
-        self.storage.valuePtr().with { (storage) in storage.ptr }
-    }
-    private func len() -> Int64 { self.storage.valuePtr().with { (s) in s.len } }
-    private func cap() -> Int64 { self.storage.valuePtr().with { (s) in s.cap } }
+    private func ptr() -> Pointer[UInt8] { self.storage.value.ptr }
+    private func len() -> Int64 { self.storage.value.len }
+    private func cap() -> Int64 { self.storage.value.cap }
 
     // ========================================================================
     // CONSTRUCTORS
@@ -283,7 +281,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         let byteLen = Int64(intLiteral: length);
         if byteLen > 0 {
             let newPtr = _textAlloc(Layout.array[UInt8](byteLen));
-             memcpy(newPtr.asRaw(), RawPointer(raw: ptr), byteLen);
+             unsafe memcpy(newPtr.asRaw(), RawPointer(raw: ptr), byteLen);
             self.storage = CowBox(StringStorage(
                 ptr: newPtr,
                 len: byteLen,
@@ -316,8 +314,8 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// ```
     /// let s = String(fromUtf8: "héllo".bytes);  // Some("héllo")
     /// ```
-    public init[S](fromUtf8 fromUtf8: S)? where S: Slice[UInt8] {
-        let bytes = fromUtf8.asSlice();
+    public init[S](fromUtf8 fromUtf8: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromUtf8.asUnsafeSlice();
         let count = bytes.count;
         if count == 0 {
             self.storage = CowBox(StringStorage(
@@ -346,8 +344,8 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// # Safety
     ///
     /// The caller must ensure the bytes are valid UTF-8.
-    public init[S](fromUtf8Unchecked fromUtf8Unchecked: S) where S: Slice[UInt8] {
-        let bytes = fromUtf8Unchecked.asSlice();
+    public init[S](fromUtf8Unchecked fromUtf8Unchecked: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromUtf8Unchecked.asUnsafeSlice();
         let count = bytes.count;
         if count == 0 {
             self.storage = CowBox(StringStorage(
@@ -371,8 +369,8 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// ```
     /// let s = String(fromUtf8Lossy: mixedBytes);  // invalid bytes become '�'
     /// ```
-    public init[S](fromUtf8Lossy fromUtf8Lossy: S) where S: Slice[UInt8] {
-        let bytes = fromUtf8Lossy.asSlice();
+    public init[S](fromUtf8Lossy fromUtf8Lossy: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromUtf8Lossy.asUnsafeSlice();
         let count = bytes.count;
         if count == 0 {
             self.storage = CowBox(StringStorage(
@@ -446,11 +444,18 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     // STR CONFORMANCE
     // ========================================================================
 
-    /// Returns a `StringSlice` covering this string's entire buffer.
-    /// Shares storage via refcount — zero-copy.
+    /// Returns a `StringSlice` covering the whole string. It borrows the
+    /// string — zero-copy, no refcount.
     public func asSlice() -> StringSlice {
-        StringSlice(source: self.storage.shareBox(), start: 0, end: self.len())
+        let b = &self;
+        StringSlice(base: b, start: 0, end: self.len())
     }
+
+    /// The current byte buffer, for `StringSlice` reads.
+    func _bytePtr() -> Pointer[UInt8] { self.ptr() }
+
+    /// The current byte count, for `StringSlice` bounds checks.
+    func _byteCount() -> Int64 { self.len() }
 
     // ========================================================================
     // SIZE & CAPACITY
@@ -487,9 +492,14 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
 
         let newLayout = Layout.array[UInt8](newCap);
         let newPtr = _textAlloc(newLayout);
-        let oldStorage = self.storage.write();
-        _memcpyBytes(dst: newPtr, src: oldStorage.ptr, n: oldStorage.len);
-        self.storage.setValue(StringStorage(ptr: newPtr, len: oldStorage.len, cap: newCap))
+        // Writing through `value` forks shared storage first.
+        let s = &mutating self.storage.value;
+        _memcpyBytes(dst: newPtr, src: s.ptr, n: s.len);
+        if s.cap > 0 {
+            _textDealloc(s.ptr, Layout.array[UInt8](s.cap))
+        }
+        s.ptr = newPtr;
+        s.cap = newCap
     }
 
     // ========================================================================
@@ -508,7 +518,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// s.append(", world");
     /// s;  // "hello, world"
     /// ```
-    public mutating func append(other: some Str) {
+    public mutating func append(other: some Str and not Static) {
         let slice = other.asSlice();
         let otherLen = (slice.end - slice.start);
         if otherLen == 0 {
@@ -517,10 +527,9 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
         let myLen = self.len();
         self.grow(myLen + otherLen);
         let srcPtr = slice._rawPtr().offset(by: slice.start);
-        self.storage.modify { (mutating s) in
-            _memcpyBytes(dst: s.ptr.offset(by: s.len), src: srcPtr, n: otherLen);
-            s.len = s.len + otherLen
-        }
+        let s = &mutating self.storage.value;
+        _memcpyBytes(dst: s.ptr.offset(by: s.len), src: srcPtr, n: otherLen);
+        s.len = s.len + otherLen
     }
 
     /// Appends a single code point, encoding it as UTF-8.
@@ -539,12 +548,11 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     public mutating func append(char c: Char) {
         let utf8Len = c.utf8Length();
         self.grow(self.len() + utf8Len);
-        self.storage.modify { (mutating s) in
-            // Encode to buffer
-            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](s.ptr.asRaw().raw);
-            let written = encodeUtf8(c, rawPtr, at: s.len);
-            s.len = s.len + written
-        }
+        let s = &mutating self.storage.value;
+        // Encode to buffer
+        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](s.ptr.asRaw().raw);
+        let written = encodeUtf8(c, rawPtr, at: s.len);
+        s.len = s.len + written
     }
 
     /// Appends a raw byte. Internal — caller ensures UTF-8 validity.
@@ -554,10 +562,9 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// inside the stdlib (e.g. an encoder that already produced bytes).
     internal mutating func appendByte(byte: UInt8) {
         self.grow(self.len() + 1);
-        self.storage.modify { (mutating s) in
-            s.ptr.offset(by: s.len).write(byte);
-            s.len = s.len + 1
-        }
+        let s = &mutating self.storage.value;
+        unsafe s.ptr.offset(by: s.len).write(byte);
+        s.len = s.len + 1
     }
 
     /// Appends `n` bytes from `ptr` via `memcpy`. Internal — caller
@@ -572,10 +579,9 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
             return
         }
         self.grow(self.len() + n);
-        self.storage.modify { (mutating s) in
-            _memcpyBytes(dst: s.ptr.offset(by: s.len), src: ptr, n: n);
-            s.len = s.len + n
-        }
+        let s = &mutating self.storage.value;
+        _memcpyBytes(dst: s.ptr.offset(by: s.len), src: ptr, n: n);
+        s.len = s.len + n
     }
 
     /// Internal substring by byte range. Returns empty for invalid ranges.
@@ -597,7 +603,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Capacity is unchanged, so this is the right primitive for
     /// reusing a buffer in a hot loop.
     public mutating func clear() {
-        self.storage.modify { (mutating s) in s.len = 0 }
+        self.storage.value.len = 0
     }
 
     // ========================================================================
@@ -674,15 +680,14 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// ```
     public mutating func lowercaseAscii() {
         let myLen = self.len();
-        self.storage.modify { (mutating s) in
-            for i in 0..<myLen {
-                let byte = s.ptr.offset(by: i).read();
-                let v: lang.i32 = lang.cast_i8_i32(byte.raw);
-                // A-Z: 65-90 -> a-z: 97-122
-                let isUppercase = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
-                if Bool(boolLiteral: isUppercase) {
-                    s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_add(v, 32))))
-                }
+        let s = &mutating self.storage.value;
+        for i in 0..<myLen {
+            let byte = unsafe s.ptr.offset(by: i).read();
+            let v: lang.i32 = lang.cast_i8_i32(byte.raw);
+            // A-Z: 65-90 -> a-z: 97-122
+            let isUppercase = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
+            if Bool(boolLiteral: isUppercase) {
+                unsafe s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_add(v, 32))))
             }
         }
     }
@@ -690,15 +695,14 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Uppercases ASCII letters in place; non-ASCII bytes are left untouched.
     public mutating func uppercaseAscii() {
         let myLen = self.len();
-        self.storage.modify { (mutating s) in
-            for i in 0..<myLen {
-                let byte = s.ptr.offset(by: i).read();
-                let v: lang.i32 = lang.cast_i8_i32(byte.raw);
-                // a-z: 97-122 -> A-Z: 65-90
-                let isLowercase = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
-                if Bool(boolLiteral: isLowercase) {
-                    s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_sub(v, 32))))
-                }
+        let s = &mutating self.storage.value;
+        for i in 0..<myLen {
+            let byte = unsafe s.ptr.offset(by: i).read();
+            let v: lang.i32 = lang.cast_i8_i32(byte.raw);
+            // a-z: 97-122 -> A-Z: 65-90
+            let isLowercase = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
+            if Bool(boolLiteral: isLowercase) {
+                unsafe s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_sub(v, 32))))
             }
         }
     }
@@ -725,7 +729,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     // ========================================================================
 
     /// Replaces every occurrence of `pattern` with `replacement`, in place.
-    public mutating func replace(pattern: some Str, with replacement: some Str) {
+    public mutating func replace(pattern: some Str and not Static, with replacement: some Str and not Static) {
         self = self.replaced(pattern, with: replacement)
     }
 
@@ -738,7 +742,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Required by `Iterable`. Each call returns a fresh iterator;
     /// the string itself is reusable.
     public func iter() -> CharsIterator {
-        CharsIterator(ptr: lang.cast_ptr[_, lang.i8](self.ptr().asRaw().raw), length: self.len(), byteIndex: 0)
+        CharsIterator(source: self.asSlice(), length: self.len(), byteIndex: 0)
     }
 
     // ========================================================================
@@ -749,7 +753,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// When `self` is uniquely owned (refcount 1), appends in place —
     /// no allocation. Otherwise builds a fresh string with both halves.
     public consuming func add(consuming other: String) -> String {
-        if self.storage.isUnique() {
+        if self.storage.isUnique {
             var result = self;
             result.append(other);
             result
@@ -846,7 +850,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Sends the whole buffer in a single `write` so the hasher gets
     /// to choose how to consume it.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(ArraySlice(pointer: self.ptr(), count: self.len()))
+        hasher.write(Slice.lend(start: self.ptr(), count: self.len()))
     }
 
     /// Returns a shallow clone — storage is shared until either side mutates.
@@ -893,7 +897,7 @@ extend String {
     /// let upper = String(from: "hello".chars.iter().map { it.toUpper() }.collect());
     /// // "HELLO"
     /// ```
-    public init[I](from chars: I) where I: Iterable, I.Item = Char {
+    public init[I](from chars: I) where I: Iterable, I: not Static, I.Item = Char {
         var b = StringBuilder();
         var iter = chars.iter();
         while let .Some(c) = iter.next() {

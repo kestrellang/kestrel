@@ -380,6 +380,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::NoMember { .. } => "NoMember",
         InferError::AmbiguousMember { .. } => "AmbiguousMember",
         InferError::MemberNotVisible { .. } => "MemberNotVisible",
+        InferError::SugarOnlyMember { .. } => "SugarOnlyMember",
         InferError::MemberIsStatic { .. } => "MemberIsStatic",
         InferError::NoAssociatedType { .. } => "NoAssociatedType",
         InferError::InfiniteType { .. } => "InfiniteType",
@@ -387,6 +388,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::ImplicitMemberNotFound { .. } => "ImplicitMemberNotFound",
         InferError::ArgCountMismatch { .. } => "ArgCountMismatch",
         InferError::LabelMismatch { .. } => "LabelMismatch",
+        InferError::AmbiguousTrailingClosure { .. } => "AmbiguousTrailingClosure",
         InferError::InstanceMethodAsStatic { .. } => "InstanceMethodAsStatic",
         InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
         InferError::TypeMustBeKnown { .. } => "TypeMustBeKnown",
@@ -413,6 +415,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::KindMismatch { .. } => "KindMismatch",
         InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
         InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
+        InferError::UnsizedAssign { .. } => "UnsizedAssign",
         InferError::OptionalChainNotConforming { .. } => "OptionalChainNotConforming",
         InferError::PipeFixIt { .. } => "PipeFixIt",
     }
@@ -452,6 +455,12 @@ fn format_error(err: &InferError) -> String {
                 name, span.file_id, span.start
             )
         },
+        InferError::SugarOnlyMember { name, .. } => {
+            format!(
+                "SugarOnlyMember '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
         InferError::MemberIsStatic { name, .. } => {
             format!(
                 "MemberIsStatic '{}' at {}:{}",
@@ -488,6 +497,10 @@ fn format_error(err: &InferError) -> String {
                 expected, got, span.file_id, span.start
             )
         },
+        InferError::AmbiguousTrailingClosure { candidates, .. } => format!(
+            "AmbiguousTrailingClosure candidates={:?} at {}:{}",
+            candidates, span.file_id, span.start
+        ),
         InferError::InstanceMethodAsStatic { name, .. } => {
             format!(
                 "InstanceMethodAsStatic '{}' at {}:{}",
@@ -607,6 +620,9 @@ fn format_error(err: &InferError) -> String {
         },
         InferError::RefInTypeArgument { .. } => {
             format!("RefInTypeArgument at {}:{}", span.file_id, span.start)
+        },
+        InferError::UnsizedAssign { .. } => {
+            format!("UnsizedAssign at {}:{}", span.file_id, span.start)
         },
     }
 }
