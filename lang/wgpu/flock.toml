@@ -1,0 +1,12 @@
+[package]
+name = "wgpu"
+version = "0.1.0"
+description = "WebGPU bindings for Kestrel, over wgpu-native"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[build]
+# Links wgpu-native's static library from $WGPU_NATIVE_DIR (an unpacked
+# wgpu-native release: `include/`, `lib/`), defaulting to /usr/local.
+link-cmd = "echo -l:${WGPU_NATIVE_DIR:-/usr/local}/lib/libwgpu_native.a -lm -ldl -lpthread"

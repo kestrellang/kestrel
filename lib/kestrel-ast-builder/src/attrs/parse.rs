@@ -596,6 +596,13 @@ fn build(def: &AttrDef, args: &Args) -> Option<ParsedAttr> {
         "nonExhaustive" => ParsedAttr::NonExhaustive,
         "observabledrop" => ParsedAttr::ObservableDrop,
         "sugarOnly" => ParsedAttr::SugarOnly,
+        "export" => ParsedAttr::Export {
+            abi: match args.case(0)? {
+                "C" => Abi::C,
+                _ => return None,
+            },
+            mangle_name: args.str(1),
+        },
         "extern" => ParsedAttr::Extern {
             abi: match args.case(0)? {
                 "C" => Abi::C,

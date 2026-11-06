@@ -749,6 +749,17 @@ pub(super) fn reconcile_fn_kinds(
     // `gen_expr` propagates outward through `Block`/`Sugar` wrappers — a
     // trailing-closure call site carries the WRAPPER's id in the `Coerce`.
     if ctx.closure_literal_exprs.contains(&expr) {
+        // A closure literal has no C address, whatever it captures.
+        if to_kind == kestrel_ast::FnTypeKind::C {
+            ctx.errored_coerce_exprs.insert(expr);
+            // Report the literal as what it is, a closure, even when its
+            // kind was already taken from the expected type.
+            return Some(SolveResult::Error(InferError::KindMismatch {
+                expected: to_kind,
+                actual: kestrel_ast::FnTypeKind::Normal,
+                span: span.clone(),
+            }));
+        }
         if from_kind != to_kind {
             ctx.set_function_kind(fr, to_kind);
         }
@@ -760,7 +771,11 @@ pub(super) fn reconcile_fn_kinds(
     if from_flex || to_flex {
         if from_flex && !to_flex && from_kind != to_kind {
             ctx.set_function_kind(fr, to_kind);
-            ctx.kind_coercions.insert(expr, (from_kind, to_kind));
+            // A named function adopting C is built as its C address outright
+            // (no widening of a 2-word value), so there is nothing to replay.
+            if to_kind != kestrel_ast::FnTypeKind::C {
+                ctx.kind_coercions.insert(expr, (from_kind, to_kind));
+            }
         } else if to_flex && !from_flex && from_kind != to_kind {
             ctx.set_function_kind(tr, from_kind);
         }

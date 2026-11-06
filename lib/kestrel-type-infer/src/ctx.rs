@@ -128,6 +128,12 @@ pub struct InferCtx<'a> {
     /// the E491 function-as-value check in `validate_ref_placement`.
     pub(crate) direct_callee_exprs: HashSet<HirExprId>,
 
+    /// For a direct call of a named function, the parameter slot each
+    /// argument fills, in argument order. Skipping a defaulted parameter
+    /// shifts later arguments past it, so the solver's `Function` arm reads
+    /// this instead of pairing arguments with parameters by position.
+    pub(crate) call_arg_slots: HashMap<HirExprId, Vec<usize>>,
+
     /// Call expressions whose callee NAMES a type (`T(...)`, `Self(...)`,
     /// `B.Item(...)`) rather than holding a value. The callee's type can't
     /// tell them apart — `T` and a `t: T` are both `Param` — so `solve_call`
@@ -358,6 +364,10 @@ pub struct InferCtx<'a> {
     pub(crate) kind_coercions:
         HashMap<HirExprId, (kestrel_ast::FnTypeKind, kestrel_ast::FnTypeKind)>,
 
+    /// A method call that calls a field's value (`s.callback(x)`): the type
+    /// of the value called. Surfaced on `TypedBody.field_callee_types`.
+    pub(crate) field_callee_types: HashMap<HirExprId, TyVar>,
+
     /// Existential conversions accepted at check leaves (`T → any P`,
     /// `B[T] → any[B] P`, `any Q → any P`), keyed by the converted
     /// expression. Surfaced on `TypedBody.existential_conversions`; the
@@ -500,6 +510,7 @@ impl<'a> InferCtx<'a> {
             always_decay_exprs: HashSet::default(),
             call_arg_exprs: HashSet::default(),
             direct_callee_exprs: HashSet::default(),
+            call_arg_slots: HashMap::default(),
             type_callee_calls: HashSet::default(),
             binding_init_exprs: HashSet::default(),
             annotated_init_exprs: HashSet::default(),
@@ -540,6 +551,7 @@ impl<'a> InferCtx<'a> {
             closure_it: HashSet::default(),
             kind_flex: HashSet::default(),
             kind_coercions: HashMap::default(),
+            field_callee_types: HashMap::default(),
             existential_conversions: HashMap::default(),
             type_tests: HashMap::default(),
             closure_literal_exprs: HashSet::default(),

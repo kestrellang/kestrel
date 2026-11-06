@@ -158,6 +158,7 @@ pub fn copy_behavior_in(
         | MirTy::Str
         | MirTy::Pointer(_)
         | MirTy::FuncThin { .. }
+        | MirTy::FuncC { .. }
         // Ref never appears as a value type (signature-only; results register
         // as @guaranteed pointee values), so copy/drop on it is vacuous — a
         // pointer-scalar bit-copy keeps any defensive path harmless.
@@ -427,6 +428,7 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
         | MirTy::Str
         | MirTy::Pointer(_)
         | MirTy::FuncThin { .. }
+        | MirTy::FuncC { .. }
         // Ref: a borrow view (signature or stage-2b payload/field slot) —
         // never owns its pointee, never drops.
         | MirTy::RawExistential { .. }
@@ -559,6 +561,7 @@ impl kestrel_structural::StaticLayer for MirStructuralLayer<'_> {
             // an address, not a `T` (the unsafe escape hatch, as in the
             // front end); primitives, projections and errors never block.
             MirTy::FuncThin { .. }
+            | MirTy::FuncC { .. }
             | MirTy::Pointer(_)
             | MirTy::AssociatedProjection { .. }
             | MirTy::I8

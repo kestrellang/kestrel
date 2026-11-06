@@ -460,7 +460,7 @@ impl<'a> CollectionContext<'a> {
                 }
             },
 
-            Callee::Thin(_) | Callee::Thick(_) | Callee::Resolved(_) => {},
+            Callee::Thin(_) | Callee::Thick(_) | Callee::C(_) | Callee::Resolved(_) => {},
         }
     }
 
@@ -476,6 +476,12 @@ impl<'a> CollectionContext<'a> {
             func,
             type_args,
             self_type,
+        }
+        | ImmediateKind::CFunctionRef {
+            func,
+            type_args,
+            self_type,
+            ..
         } = imm
         {
             if !self.functions.contains_key(func) {
@@ -908,6 +914,26 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
                 .collect();
             if new != elems { arena.tuple(new) } else { ty }
         },
+        MirTy::FuncC {
+            params,
+            ret,
+            unsigned,
+        } => {
+            let new_params: Vec<(TyId, crate::ty::ParamConvention)> = params
+                .iter()
+                .map(|&(p, c)| (deep_resolve(arena, witnesses, p, depth + 1), c))
+                .collect();
+            let new_ret = deep_resolve(arena, witnesses, ret, depth + 1);
+            if new_params != params || new_ret != ret {
+                arena.intern(MirTy::FuncC {
+                    params: new_params,
+                    ret: new_ret,
+                    unsigned,
+                })
+            } else {
+                ty
+            }
+        },
         MirTy::FuncThin { params, ret }
         | MirTy::FuncThick {
             params,
@@ -963,6 +989,7 @@ fn references_type_param(arena: &TyArena, ty: TyId, entity: Entity) -> bool {
             .iter()
             .any(|&a| references_type_param(arena, a, entity)),
         MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
         | MirTy::FuncThick {
             params,
             ret,
@@ -987,6 +1014,7 @@ pub fn has_type_param(arena: &TyArena, ty: TyId) -> bool {
         MirTy::Tuple(elems) => elems.iter().any(|&e| has_type_param(arena, e)),
         MirTy::Named { type_args, .. } => type_args.iter().any(|&a| has_type_param(arena, a)),
         MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
         | MirTy::FuncThick {
             params,
             ret,
@@ -1033,7 +1061,9 @@ fn ty_depth(arena: &TyArena, ty: TyId, cap: usize) -> usize {
         MirTy::Named { type_args, .. } => type_args.clone(),
         MirTy::Tuple(elems) => elems.clone(),
         MirTy::Pointer(inner) => vec![*inner],
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret, .. } => params
+        MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
+        | MirTy::FuncThick { params, ret, .. } => params
             .iter()
             .map(|(t, _)| *t)
             .chain(std::iter::once(*ret))

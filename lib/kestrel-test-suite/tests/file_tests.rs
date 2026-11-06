@@ -200,6 +200,10 @@ fn run_ks_test_inner(
         tc.add_source(&include_file.to_string_lossy(), &include_source);
     }
 
+    for c_source in &config.c_sources {
+        tc.add_c_source(path.parent().unwrap().join(c_source));
+    }
+
     let file_path = path.to_string_lossy();
     let entity = tc.add_source(&file_path, source);
     let file_id = entity.index();

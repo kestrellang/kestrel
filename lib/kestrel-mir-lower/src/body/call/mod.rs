@@ -120,16 +120,13 @@ impl OssaBodyCtx<'_, '_> {
                 && let Some(field_ty) = self.ctx.resolve_field_ty(se, field_idx)
                 && matches!(
                     self.ctx.module.ty_arena.get(field_ty),
-                    MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+                    MirTy::FuncThick { .. } | MirTy::FuncThin { .. } | MirTy::FuncC { .. }
                 )
             {
                 let base_val = self.lower_expr_for_borrow(receiver_expr);
                 let field_val = self.emit_struct_extract(base_val, field_idx, field_ty);
-                let call_args = self.lower_call_args_default(args);
-                let callee = match self.ctx.module.ty_arena.get(field_ty) {
-                    MirTy::FuncThin { .. } => Callee::Thin(field_val),
-                    _ => Callee::Thick(field_val),
-                };
+                let call_args = self.lower_value_call_args(field_ty, args);
+                let callee = self.value_callee(field_ty, field_val);
                 return self.emit_call_returning(callee, call_args, result_ty);
             }
         }
@@ -148,14 +145,11 @@ impl OssaBodyCtx<'_, '_> {
         // Function-typed receiver: indirect call (all Borrow by ABI)
         if matches!(
             self.ctx.module.ty_arena.get(receiver_ty),
-            MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+            MirTy::FuncThick { .. } | MirTy::FuncThin { .. } | MirTy::FuncC { .. }
         ) {
             let receiver_val = self.lower_expr(receiver_expr);
-            let call_args = self.lower_call_args_default(args);
-            let callee = match self.ctx.module.ty_arena.get(receiver_ty) {
-                MirTy::FuncThin { .. } => Callee::Thin(receiver_val),
-                _ => Callee::Thick(receiver_val),
-            };
+            let call_args = self.lower_value_call_args(receiver_ty, args);
+            let callee = self.value_callee(receiver_ty, receiver_val);
             let result = self.emit_call_returning(callee, call_args, result_ty);
             // Lockstep twin of `lower_indirect_call`: calling a `consuming`
             // value CONSUMES it, so this is its last owner — release the unique
@@ -1140,6 +1134,27 @@ impl OssaBodyCtx<'_, '_> {
         result_param
     }
 
+    /// How to call a function VALUE of type `ty`: a thin code pointer, a
+    /// closure, or a C function address (called with the C ABI).
+    fn value_callee(&self, ty: TyId, val: ValueId) -> Callee {
+        match self.ctx.module.ty_arena.get(ty) {
+            MirTy::FuncThin { .. } => Callee::Thin(val),
+            MirTy::FuncC { .. } => Callee::C(val),
+            _ => Callee::Thick(val),
+        }
+    }
+
+    /// Arguments of a call through a function value of type `ty`. A C
+    /// function takes its params by their own conventions (by value, or a
+    /// pointer for `&T`); Kestrel function values borrow every argument.
+    fn lower_value_call_args(&mut self, ty: TyId, args: &[HirCallArg]) -> Vec<CallArg> {
+        let MirTy::FuncC { params, .. } = self.ctx.module.ty_arena.get(ty) else {
+            return self.lower_call_args_default(args);
+        };
+        let convs: Vec<ParamConvention> = params.iter().map(|(_, c)| *c).collect();
+        self.lower_call_args(args, &convs, 0)
+    }
+
     fn lower_indirect_call(
         &mut self,
         expr_id: HirExprId,
@@ -1170,7 +1185,9 @@ impl OssaBodyCtx<'_, '_> {
             },
             _ => Vec::new(),
         };
-        let call_args = if convs.contains(&ParamConvention::MutBorrow) {
+        let call_args = if matches!(self.ctx.module.ty_arena.get(callee_ty), MirTy::FuncC { .. }) {
+            self.lower_value_call_args(callee_ty, args)
+        } else if convs.contains(&ParamConvention::MutBorrow) {
             let mapped: Vec<ParamConvention> = convs
                 .iter()
                 .map(|c| {
@@ -1186,10 +1203,7 @@ impl OssaBodyCtx<'_, '_> {
             self.lower_call_args_default(args)
         };
 
-        let callee = match self.ctx.module.ty_arena.get(callee_ty) {
-            MirTy::FuncThin { .. } => Callee::Thin(callee_val),
-            _ => Callee::Thick(callee_val),
-        };
+        let callee = self.value_callee(callee_ty, callee_val);
 
         let result = self.emit_call_returning(callee, call_args, result_ty);
 

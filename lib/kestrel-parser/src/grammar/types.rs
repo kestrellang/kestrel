@@ -8,6 +8,7 @@
 //!           | '!'                                     // TyNever
 //!           | '_'                                     // TyInferred
 //!           | kind '(' elems ')' '->' Ty              // TyFunction with kind
+//!           | '@' 'extern' '(' '.' 'C' ')' '(' elems ')' '->' Ty   // C function type
 //!           | '(' elems ')' ('->' Ty)?                // TyUnit / grouping / TyTuple / TyFunction
 //!           | '[' Ty (':' Ty)? ']'                    // TyArray / TyDictionary
 //!           | Path TypeArgumentList?                  // TyPath
@@ -41,6 +42,7 @@ pub(super) fn at_type_start(p: &Parser<'_>) -> bool {
             | K::Underscore
             | K::LParen
             | K::LBracket
+            | K::At
             | K::Identifier,
         ) => true,
         Some(K::Mutating | K::Consuming) => at_kinded_fn(p),
@@ -114,6 +116,7 @@ fn base_ty(p: &mut Parser<'_>) -> Option<CompletedMarker> {
         Some(K::Identifier) if p.nth_text(0) == "escaping" && at_kinded_fn(p) => Some(kinded_fn(p)),
         Some(K::Identifier) if at_any_type(p) => Some(any_type(p)),
         Some(K::LParen) => paren_type(p),
+        Some(K::At) => Some(c_fn(p)),
         Some(K::LBracket) => Some(array_or_dict(p)),
         Some(K::Identifier) => Some(path_type(p)),
         _ => {
@@ -156,6 +159,27 @@ fn kinded_fn(p: &mut Parser<'_>) -> CompletedMarker {
     } else {
         p.bump_any();
     }
+    fn_params(p);
+    p.expect(K::Arrow);
+    ty(p);
+    f.complete(p, K::TyFunction);
+    m.complete(p, K::Ty)
+}
+
+/// `@extern(.C) (T) -> R`: a C function type. The convention is an
+/// `Attribute` child of the `TyFunction`; only `@extern(.C)` is accepted.
+fn c_fn(p: &mut Parser<'_>) -> CompletedMarker {
+    let is_extern_c = p.nth_text(1) == "extern"
+        && p.nth_at(2, K::LParen)
+        && p.nth_at(3, K::Dot)
+        && p.nth_text(4) == "C"
+        && p.nth_at(5, K::RParen);
+    let m = p.start();
+    let f = p.start();
+    if !is_extern_c {
+        p.error_expected_what("`@extern(.C)` (the only convention a function type takes)");
+    }
+    super::attrs::attribute(p);
     fn_params(p);
     p.expect(K::Arrow);
     ty(p);

@@ -105,6 +105,11 @@ pub enum ParsedAttr {
         abi: Abi,
         mangle_name: Option<String>,
     },
+    /// `@export(.C, mangleName:)`: a Kestrel body C calls by symbol.
+    Export {
+        abi: Abi,
+        mangle_name: Option<String>,
+    },
     /// The builtin and its name as written (`.AddOperatorProtocol` and
     /// `Addable` are one builtin).
     Builtin(kestrel_hir::Builtin, String),

@@ -121,3 +121,80 @@ void Kestrel_DrawText(void* renderer, const char* text, int64_t x, int64_t y, in
         cur_x += 6 * (int)scale;
     }
 }
+
+// --- Windows for GPU APIs (wgpu) ---
+#include <SDL_syswm.h>
+
+// A window with no SDL_Renderer, for a GPU API to draw into. On Apple
+// platforms it is Metal-backed so it can host a CAMetalLayer.
+void* Kestrel_CreateGPUWindow(const char* title, int64_t w, int64_t h) {
+    Uint32 flags = SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+#ifdef __APPLE__
+    flags |= SDL_WINDOW_METAL;
+#endif
+    return SDL_CreateWindow(title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, (int)w, (int)h, flags);
+}
+
+// The window's drawable size in pixels (larger than its size on HiDPI).
+void Kestrel_GetDrawableSize(void* window, int64_t* w, int64_t* h) {
+    int iw = 0, ih = 0;
+#if SDL_VERSION_ATLEAST(2, 26, 0)
+    SDL_GetWindowSizeInPixels((SDL_Window*)window, &iw, &ih);
+#else
+    SDL_GetWindowSize((SDL_Window*)window, &iw, &ih);
+#endif
+    *w = iw;
+    *h = ih;
+}
+
+// The platform handles behind a window. Returns 1 for X11 (a = Display*,
+// id = Window), 2 for Wayland (a = wl_display*, b = wl_surface*), 3 for a
+// Metal layer (a = CAMetalLayer*, made on first call), 4 for Windows
+// (a = HINSTANCE, b = HWND), 0 when unsupported.
+int32_t Kestrel_GetNativeWindow(void* window, void** a, void** b, uint64_t* id) {
+    SDL_Window* win = (SDL_Window*)window;
+    *a = NULL;
+    *b = NULL;
+    *id = 0;
+#ifdef __APPLE__
+    SDL_MetalView view = SDL_Metal_CreateView(win);
+    if (!view) return 0;
+    *a = SDL_Metal_GetLayer(view);
+    return 3;
+#else
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(win, &info)) return 0;
+    switch (info.subsystem) {
+#if defined(SDL_VIDEO_DRIVER_X11)
+    case SDL_SYSWM_X11:
+        *a = info.info.x11.display;
+        *id = (uint64_t)info.info.x11.window;
+        return 1;
+#endif
+#if defined(SDL_VIDEO_DRIVER_WAYLAND)
+    case SDL_SYSWM_WAYLAND:
+        *a = info.info.wl.display;
+        *b = info.info.wl.surface;
+        return 2;
+#endif
+#if defined(SDL_VIDEO_DRIVER_WINDOWS)
+    case SDL_SYSWM_WINDOWS:
+        *a = info.info.win.hinstance;
+        *b = info.info.win.window;
+        return 4;
+#endif
+    default:
+        return 0;
+    }
+#endif
+}
+
+// For a window event: the SDL_WindowEventID, with the new size for a
+// resize. 0 for any other event.
+int32_t Kestrel_GetWindowEvent(SDL_Event* event, int64_t* w, int64_t* h) {
+    if (event->type != SDL_WINDOWEVENT) return 0;
+    *w = event->window.data1;
+    *h = event->window.data2;
+    return event->window.event;
+}

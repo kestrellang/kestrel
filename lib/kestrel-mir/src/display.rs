@@ -291,6 +291,14 @@ fn fmt_ty(ty: TyId, arena: &TyArena, module: &dyn NameResolver) -> String {
             )
         },
 
+        MirTy::FuncC { params, ret, .. } => {
+            let ps: Vec<_> = params
+                .iter()
+                .map(|(t, _)| fmt_ty(*t, arena, module))
+                .collect();
+            format!("@c ({}) -> {}", ps.join(", "), fmt_ty(*ret, arena, module))
+        },
+
         MirTy::FuncThick { kind, params, ret } => {
             let ps: Vec<_> = params
                 .iter()
@@ -873,6 +881,9 @@ fn fmt_callee(callee: &Callee, arena: &TyArena, module: &dyn NameResolver) -> St
         Callee::Thin(v) => {
             format!("@thin {}", fmt_value(*v))
         },
+        Callee::C(v) => {
+            format!("@c {}", fmt_value(*v))
+        },
         Callee::Thick(v) => {
             format!("@thick {}", fmt_value(*v))
         },
@@ -962,6 +973,12 @@ fn fmt_immediate(
         },
         ImmediateKind::MonoFunctionRef(id) => {
             format!("mono_func_ref @mono({})", id.index())
+        },
+        ImmediateKind::CFunctionRef { func, .. } => {
+            format!("c_func_ref {}", module.resolve_name(*func))
+        },
+        ImmediateKind::MonoCFunctionRef(id, _) => {
+            format!("mono_c_func_ref @mono({})", id.index())
         },
         ImmediateKind::NullPtr(ty) => {
             format!("null_ptr {}", fmt_ty(*ty, arena, module))

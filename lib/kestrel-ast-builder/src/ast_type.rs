@@ -208,6 +208,10 @@ fn lower_fn_type(f: &ast::TyFunction, span: Span, file_id: usize) -> AstType {
 /// The kind keyword before the parameter list. `escaping` is contextual,
 /// so it arrives as an `Identifier` and is matched by text.
 fn fn_type_kind(f: &ast::TyFunction) -> FnTypeKind {
+    // The parser only builds a convention attribute for `@extern(.C)`.
+    if f.convention().is_some() {
+        return FnTypeKind::C;
+    }
     let Some(tok) = f.kind_token() else {
         return FnTypeKind::Normal;
     };

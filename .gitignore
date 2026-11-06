@@ -23,6 +23,7 @@ examples/pong/pong
 examples/sdl_pong/pong
 examples/sdl_pong/sdl_pong
 examples/snake/snake
+examples/wgpu_compute/wgpu_compute
 examples/weather/weather
 
 # Cloudflare Wrangler local state

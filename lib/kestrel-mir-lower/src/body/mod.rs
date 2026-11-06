@@ -3608,6 +3608,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let callee = match callee {
             Callee::Thin(v) => Callee::Thin(self.resolve_value(v)),
             Callee::Thick(v) => Callee::Thick(self.resolve_value(v)),
+            Callee::C(v) => Callee::C(self.resolve_value(v)),
             other => other,
         };
         // ret_borrow callee? Only Direct callees can be: function values

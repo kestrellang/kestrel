@@ -321,7 +321,7 @@ TyParen =
 // A kind keyword (`mutating`/`consuming`, contextual `escaping`) then the
 // parameter list. `mutating` inside the list marks a by-reference parameter.
 TyFunction =
-  ('mutating' | 'consuming' | 'ident')? TyList '->' Ty
+  Attribute? ('mutating' | 'consuming' | 'ident')? TyList '->' Ty
 
 TyList =
   '(' ('mutating'? Ty (',' 'mutating'? Ty)* ','?)? ')'

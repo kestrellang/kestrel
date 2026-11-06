@@ -26,6 +26,7 @@ the type checker, and the code is assigned in one place,
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
 - [E624–E626 — Closure kinds](#e624e626--closure-kinds)
 - [E641–E646 — `unsafe`](#e641e646--unsafe)
+- [E647 — C callbacks](#e647--c-callbacks)
 - [E700–E710 — String & character literals, escapes, format specs](#e700e710--string--character-literals-escapes-format-specs)
 - [E800–E811 — Syntax](#e800e811--syntax)
 - [E900–E999 — Attributes & derives](#e900e999--attributes--derives)
@@ -452,7 +453,7 @@ func outlives() -> Int64 {
 | E608 | subscript must have a body | Subscript declarations outside protocols need an implementation. |
 | E609 | @extern functions cannot be generic | Generic functions have no stable ABI to export. |
 | E610 | @extern functions cannot have a body | Extern functions are implemented in external code. |
-| E611 | @extern function parameter '{name}' must use consuming access mode | Extern functions receive values, not references. |
+| E611 | @{extern\|export} function parameter '{name}' must be passed by value (consuming) or by reference (&T) | `mutating x: T` on an `@extern` or `@export` function. C takes `x: T` by value; write `x: &mutating T` for a `T*`. |
 | E612 | '@extern' needs a calling convention: '@extern(.C)' | Reported by attribute validation (the registry's missing-argument check, keeping its pre-registry code). |
 | E613 | required parameter '{name}' cannot follow parameter '{default_name}' which has a default value | Defaulted parameters must come last. |
 | E614 | default value cannot reference parameter '{name}' | Defaults are evaluated at each call site and can't see other parameters. |
@@ -577,11 +578,21 @@ See [language/unsafe.md](language/unsafe.md). An unsafe context is the operand o
 | Code | Message | Explanation |
 |---|---|---|
 | E641 | [extern function ]'{name}' is unsafe and requires an \`unsafe\` expression or block | A use (call, property read, initializer, subscript, or naming it as a value) of an `unsafe` declaration, a pointer-access `lang` intrinsic, or an `@extern` function, outside an unsafe context. |
+| E641 | calling a C function value is unsafe and requires an \`unsafe\` expression or block | A call through a value of C function type (`@extern(.C) (…) -> …`) outside an unsafe context: nothing checks that its address is a live C function of that type. |
 | E642 | unnecessary \`unsafe\`: it covers no unsafe operation | **Warning.** The region contains no unsafe use. A use marks only the innermost `unsafe` around it, so an `unsafe` wrapping another one is reported too. |
 | E643 | '{name}' is unsafe, but the requirement it satisfies in protocol '{proto}' is not | Generic code calls the requirement without `unsafe`, so its witness can't need it. Mark the requirement `unsafe` or make the witness safe. |
 | E644 | '{proto}' is an unsafe protocol; write the conformance as \`unsafe {proto}\` | Conforming to an `unsafe protocol` vouches for its contract (e.g. `ArrayMatchable`'s in-bounds indices), so it is written `T: unsafe P`. |
 | E645 | '{proto}' is not an unsafe protocol; \`unsafe\` here has no effect | **Warning.** `unsafe P` on a safe protocol. |
 | E646 | only a computed property can be \`unsafe\` | `unsafe` on a stored field. Unsafe fields aren't supported; keep the field private and expose an `unsafe` computed property. |
+
+## E647 — C callbacks
+
+See [language/functions.md](language/functions.md#callbacks).
+
+| Code | Message | Explanation |
+|---|---|---|
+| E647 | '{name}' has no C entry point; a C function type needs a function declared '@export(.C)' or '@extern(.C)' | A C function type `@extern(.C) (…) -> …` holds a C address, so only a function with a C entry point can be named as one. Mark the function `@export(.C)`. (A closure literal has no address at all; that is E624.) |
+| E647 | 'NullableCFunction' needs a C function type '@extern(.C) (…) -> …' | `NullableCFunction[F]` holds a C function pointer, so `F` must be a C function type. |
 
 ## E700–E710 — String & character literals, escapes, format specs
 

@@ -246,6 +246,36 @@ pub static REGISTRY: &[AttrDef] = &[
         doc: "A placeholder with no effect, used by parser tests.",
     },
     AttrDef {
+        name: "export",
+        targets: TargetSet::of(&[T::FreeFunction]),
+        params: &[
+            ParamDef {
+                label: None,
+                kind: ParamKind::Cases("calling convention", &["C"]),
+                required: true,
+                variadic: false,
+                missing_code: Some("E612"),
+                what: "a calling convention: '@export(.C)'",
+            },
+            labeled("mangleName", ParamKind::Str, "a symbol name"),
+        ],
+        repeatable: false,
+        phase: AttrPhase::Lowering,
+        conflicts: &[
+            Conflict {
+                with: "extern",
+                reason: "a function is either defined outside Kestrel or exported from it",
+            },
+            Conflict {
+                with: "main",
+                reason: "the entry point is exported as 'main' already",
+            },
+        ],
+        needs_body: true,
+        repeat_hint: None,
+        doc: "Defines a Kestrel function that C code can call, with the given calling convention, under the function's name or 'mangleName:'. Name it where a C function type '@extern(.C) (…) -> …' is expected to pass it to C as a callback.",
+    },
+    AttrDef {
         name: "extern",
         targets: TargetSet::of(&[T::FreeFunction]),
         params: &[

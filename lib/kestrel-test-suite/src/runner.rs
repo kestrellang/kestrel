@@ -62,7 +62,11 @@ pub struct RunResult {
 ///
 /// Returns Err if compilation or linking fails.
 /// The temporary directory is cleaned up after execution.
-pub fn compile_and_run(compiler: &Compiler, backend: Backend) -> Result<RunResult, String> {
+pub fn compile_and_run(
+    compiler: &Compiler,
+    backend: Backend,
+    extra_c_sources: &[PathBuf],
+) -> Result<RunResult, String> {
     // Skip execution if env var is set (for CI speed)
     if std::env::var("KESTREL_SKIP_CODEGEN").is_ok() {
         return Ok(RunResult {
@@ -77,9 +81,13 @@ pub fn compile_and_run(compiler: &Compiler, backend: Backend) -> Result<RunResul
 
     let exe_path = temp_dir.join(if cfg!(windows) { "test.exe" } else { "test" });
 
+    let c_sources: Vec<PathBuf> = stdlib_c_sources()
+        .into_iter()
+        .chain(extra_c_sources.iter().cloned())
+        .collect();
     let link_result = if backend == Backend::Llvm {
         let options = kestrel_codegen_llvm::CodegenOptions {
-            c_sources: stdlib_c_sources(),
+            c_sources: c_sources.clone(),
             ..Default::default()
         };
         compiler
@@ -87,7 +95,7 @@ pub fn compile_and_run(compiler: &Compiler, backend: Backend) -> Result<RunResul
             .map_err(|e| format!("{e}"))
     } else {
         let options = kestrel_codegen_cranelift::CodegenOptions {
-            c_sources: stdlib_c_sources(),
+            c_sources,
             ..Default::default()
         };
         compiler

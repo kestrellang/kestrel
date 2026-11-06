@@ -127,9 +127,10 @@ impl<M: ScalarModel> TypeCache<M> {
 
             // Ref appears on ret_borrow signatures only (never a value type);
             // its ABI is a pointer to the pointee.
-            MirTy::Pointer(_) | MirTy::FuncThin { .. } | MirTy::Ref { .. } => {
-                TypeRepr::Scalar(ptr_scalar)
-            },
+            MirTy::Pointer(_)
+            | MirTy::FuncThin { .. }
+            | MirTy::FuncC { .. }
+            | MirTy::Ref { .. } => TypeRepr::Scalar(ptr_scalar),
 
             MirTy::Never => TypeRepr::Zst,
 

@@ -905,6 +905,23 @@ impl OssaBodyCtx<'_, '_> {
         match kind {
             Some(NodeKind::Function | NodeKind::Initializer) => {
                 let inferred_ty = self.resolve_expr_type(expr_id);
+                // Named where an `@extern(.C) (…) -> …` is expected: the C
+                // address of an `@export(.C)` / `@extern(.C)` function. Any
+                // other function is E647, reported by the analyzer.
+                if matches!(
+                    self.ctx.module.ty_arena.get(inferred_ty),
+                    MirTy::FuncC { .. }
+                ) {
+                    let type_args = self.resolve_type_args(expr_id);
+                    return self.emit_literal(Immediate::new(
+                        kestrel_mir::ImmediateKind::CFunctionRef {
+                            func: entity,
+                            type_args,
+                            self_type: None,
+                            ty: inferred_ty,
+                        },
+                    ));
+                }
                 // If the expression is used as a thick function value (closure),
                 // wrap it in ApplyPartial with no captures.
                 if matches!(

@@ -761,6 +761,20 @@ fn substitute_immediate(
                 *st = resolve(arena, *st);
             }
         },
+        ImmediateKind::CFunctionRef {
+            type_args,
+            self_type,
+            ty,
+            ..
+        } => {
+            for ta in type_args.iter_mut() {
+                *ta = resolve(arena, *ta);
+            }
+            if let Some(st) = self_type {
+                *st = resolve(arena, *st);
+            }
+            *ty = resolve(arena, *ty);
+        },
         _ => {},
     }
 }
@@ -872,17 +886,32 @@ fn rewrite_callees(
             for (_, callee) in inst.kind.callees_mut() {
                 rewrite_callee(callee, func_id_map, functions);
             }
-            if let InstKind::Literal { value, .. } = &mut inst.kind
-                && let ImmediateKind::FunctionRef {
+            let InstKind::Literal { value, .. } = &mut inst.kind else {
+                continue;
+            };
+            match &value.kind {
+                ImmediateKind::FunctionRef {
                     func,
                     type_args,
                     self_type,
-                } = &value.kind
-            {
-                let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
-                if let Some(&mono_id) = func_id_map.get(&key) {
-                    value.kind = ImmediateKind::MonoFunctionRef(mono_id);
-                }
+                } => {
+                    let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                    if let Some(&mono_id) = func_id_map.get(&key) {
+                        value.kind = ImmediateKind::MonoFunctionRef(mono_id);
+                    }
+                },
+                ImmediateKind::CFunctionRef {
+                    func,
+                    type_args,
+                    self_type,
+                    ty,
+                } => {
+                    let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                    if let Some(&mono_id) = func_id_map.get(&key) {
+                        value.kind = ImmediateKind::MonoCFunctionRef(mono_id, *ty);
+                    }
+                },
+                _ => {},
             }
         }
     }
@@ -2001,6 +2030,7 @@ mod tests {
             extern_info: Some(crate::item::function::ExternInfo {
                 calling_convention: crate::item::function::CallingConvention::C,
                 symbol_name: "malloc".into(),
+                ..crate::item::function::ExternInfo::c("malloc")
             }),
             is_main: false,
             provides_protocol_default: false,

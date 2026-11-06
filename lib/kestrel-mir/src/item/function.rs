@@ -134,10 +134,22 @@ impl InlineMode {
     }
 }
 
+/// A function that crosses the C boundary: an `@extern` import (no body, the
+/// symbol is defined elsewhere) or an `@export` (a Kestrel body that C calls
+/// through `symbol_name`). Codegen bridges the Kestrel ABI and the C ABI on
+/// this signature in both directions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExternInfo {
     pub calling_convention: CallingConvention,
     pub symbol_name: String,
+    /// `@export(.C)`: Kestrel defines the symbol. `false` for `@extern` imports.
+    pub export: bool,
+    /// Per declared param, whether its integer is
+    /// unsigned (`UIntN`, `Bool`). C wants 8- and 16-bit args widened by the
+    /// caller, zero- or sign-extended by this.
+    pub unsigned_params: Vec<bool>,
+    /// The same for the return value.
+    pub unsigned_ret: bool,
 }
 
 impl ExternInfo {
@@ -145,7 +157,15 @@ impl ExternInfo {
         Self {
             calling_convention: CallingConvention::C,
             symbol_name: symbol_name.into(),
+            export: false,
+            unsigned_params: Vec::new(),
+            unsigned_ret: false,
         }
+    }
+
+    /// An `@extern` declaration: the body lives outside Kestrel.
+    pub fn is_import(&self) -> bool {
+        !self.export
     }
 }
 

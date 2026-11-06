@@ -18,23 +18,14 @@ use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_type_infer::captures::CaptureKind;
 
 fn conventions_from_callable(callable: &Callable, is_extern: bool) -> Vec<ParamConvention> {
-    if is_extern {
-        let count = callable.receiver.as_ref().map_or(0, |_| 1) + callable.params.len();
-        return vec![ParamConvention::Consuming; count];
-    }
     let mut convs = Vec::new();
     if let Some(recv) = &callable.receiver {
         convs.push(receiver_convention(recv));
     }
     for param in &callable.params {
-        let conv = if param.is_consuming {
-            ParamConvention::Consuming
-        } else if param.is_mut {
-            ParamConvention::MutBorrow
-        } else {
-            ParamConvention::Borrow
-        };
-        convs.push(conv);
+        convs.push(crate::items::function_sig::param_convention(
+            param, is_extern,
+        ));
     }
     convs
 }
@@ -494,21 +485,14 @@ impl OssaBodyCtx<'_, '_> {
     pub(crate) fn collect_conventions(&self, callee_entity: Entity) -> Vec<ParamConvention> {
         // Try MIR FunctionDef first
         if let Some(callee) = self.ctx.module.functions.get(&callee_entity) {
-            if callee.extern_info.is_some() {
-                return callee
-                    .params
-                    .iter()
-                    .map(|_| ParamConvention::Consuming)
-                    .collect();
-            }
             return callee.params.iter().map(|p| p.convention).collect();
         }
         // ECS fallback
         let Some(callable) = self.ctx.world.get::<Callable>(callee_entity) else {
             return Vec::new();
         };
-        let is_extern = attrs_of(&self.ctx.query, callee_entity).is_extern();
-        conventions_from_callable(callable, is_extern)
+        let attrs = attrs_of(&self.ctx.query, callee_entity);
+        conventions_from_callable(callable, attrs.is_extern() || attrs.is_export())
     }
 
     /// Look up param conventions for a witness (protocol method) call.

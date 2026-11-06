@@ -57,7 +57,7 @@ fn required_convention(kind: FnTypeKind) -> Option<&'static str> {
     match kind {
         FnTypeKind::Mutating => Some("mutating"),
         FnTypeKind::Consuming => Some("consuming"),
-        FnTypeKind::Normal | FnTypeKind::Escaping => None,
+        FnTypeKind::Normal | FnTypeKind::Escaping | FnTypeKind::C => None,
     }
 }
 

@@ -52,6 +52,10 @@ pub enum FnTypeKind {
     Consuming,
     /// `escaping (T) -> R` — owned shared snapshot, Cloneable, may outlive the frame.
     Escaping,
+    /// `@extern(.C) (T) -> R` — the address of a C-ABI function: no
+    /// environment, Copyable, FFISafe when its params and result are.
+    /// Only a named `@export(.C)` / `@extern(.C)` function makes one.
+    C,
 }
 
 impl FnTypeKind {
@@ -71,6 +75,7 @@ impl FnTypeKind {
             FnTypeKind::Mutating => Some("mutating"),
             FnTypeKind::Consuming => Some("consuming"),
             FnTypeKind::Escaping => Some("escaping"),
+            FnTypeKind::C => None,
         }
     }
 
@@ -82,6 +87,7 @@ impl FnTypeKind {
             FnTypeKind::Mutating => "mutating ",
             FnTypeKind::Consuming => "consuming ",
             FnTypeKind::Escaping => "escaping ",
+            FnTypeKind::C => "@extern(.C) ",
         }
     }
 }

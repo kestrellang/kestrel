@@ -258,6 +258,9 @@ pub enum Builtin {
     ArrayStruct,
     SliceStruct,
     ManuallyDropStruct,
+    /// `std.ffi.NullableCFunction[F]`: `F` must be a C function type
+    /// (`@extern(.C) (…) -> …`), checked by the analyzer (E647).
+    NullableCFunctionStruct,
 
     // ===== String interpolation =====
     DefaultStringInterpolation,
@@ -531,6 +534,7 @@ impl Builtin {
             Self::ArrayStruct => "ArrayStruct",
             Self::SliceStruct => "SliceStruct",
             Self::ManuallyDropStruct => "ManuallyDrop",
+            Self::NullableCFunctionStruct => "NullableCFunction",
 
             // String interpolation
             Self::DefaultStringInterpolation => "DefaultStringInterpolation",
@@ -778,6 +782,7 @@ impl Builtin {
             "ArrayStruct" => Some(Self::ArrayStruct),
             "SliceStruct" => Some(Self::SliceStruct),
             "ManuallyDropStruct" => Some(Self::ManuallyDropStruct),
+            "NullableCFunctionStruct" => Some(Self::NullableCFunctionStruct),
 
             // String interpolation
             "DefaultStringInterpolation" => Some(Self::DefaultStringInterpolation),
@@ -1026,7 +1031,10 @@ impl Builtin {
             | Self::ResultTypeOperator => BuiltinKind::TypeAlias,
 
             // Builtin structs
-            Self::ArrayStruct | Self::SliceStruct | Self::ManuallyDropStruct => BuiltinKind::Struct,
+            Self::ArrayStruct
+            | Self::SliceStruct
+            | Self::ManuallyDropStruct
+            | Self::NullableCFunctionStruct => BuiltinKind::Struct,
 
             // String interpolation
             Self::DefaultStringInterpolation | Self::FormatOptions => BuiltinKind::Struct,
