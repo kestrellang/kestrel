@@ -8,6 +8,7 @@ import std.result.(Optional)
 import std.memory.(UnsafeSlice, UnsafeSliceIterator, Pointer)
 import std.iter.(Iterable)
 import std.collections.(Sliceable, SeqRange)
+import std.text.(Formattable)
 
 // ============================================================================
 // SLICE
@@ -226,6 +227,9 @@ extend Array[T] {
 /// Element-wise equality (`isEqual` comes from `extend Sliceable[T] where
 /// T: Equatable`).
 extend Slice[T]: Equatable where T: Equatable { }
+
+/// Prints as `[e1, e2, ...]`, like `Array`.
+extend Slice[T]: Formattable where T: Formattable { }
 
 /// `ArrayMatchable` conformance so a slice can appear in array patterns.
 /// `..rest` binds a narrower slice of the same elements.

@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Cloneable, Comparable, fatalError)
+import std.core.(Bool, Cloneable, Comparable, Ordering, fatalError)
 import std.numeric.(Int64)
 import std.result.(Optional)
 
@@ -296,7 +296,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
         var i = index;
         while i > 0 {
             let parent = (i - 1) / 2;
-            if self.data(i) < self.data(parent) {
+            if self.data(i).compare(self.data(parent)) == Ordering.Less {
                 self.data.swap(at: i, with: parent);
                 i = parent
             } else {
@@ -313,10 +313,10 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
             let left = 2 * i + 1;
             let right = 2 * i + 2;
             var smallest = i;
-            if left < n and self.data(left) < self.data(smallest) {
+            if left < n and self.data(left).compare(self.data(smallest)) == Ordering.Less {
                 smallest = left
             }
-            if right < n and self.data(right) < self.data(smallest) {
+            if right < n and self.data(right).compare(self.data(smallest)) == Ordering.Less {
                 smallest = right
             }
             if smallest == i { break; }

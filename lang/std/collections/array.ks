@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Comparable, Cloneable, ArrayMatchable, Defaultable, fatalError)
+import std.core.(Bool, Equatable, Comparable, Ordering, Cloneable, ArrayMatchable, Defaultable, fatalError)
 import std.core.(ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral)
 import std.core.(Range, ClosedRange, Hashable)
 import std.collections.(SeqRange)
@@ -1574,7 +1574,7 @@ extend Array[T] where T: Comparable {
     /// arr.sort();  // [1, 1, 3, 4, 5]
     /// ```
     public mutating func sort() {
-        self.sort(by: { (a, b) in a < b })
+        self.sort(by: { (a, b) in a.compare(b) == Ordering.Less })
     }
 
     // sorted(), min(), max(), isSorted(), binarySearch(): provided by extend Sliceable[T] where T: Comparable
@@ -1613,8 +1613,7 @@ extend Array[T] where T: Hashable {
     /// Removes every duplicate in place, keeping the first occurrence.
     ///
     /// Implemented by replacing storage with the result of `unique()`,
-    /// so the same O(n²) caveat applies. The non-mutating mirror is
-    /// `unique()`.
+    /// so it's O(n) expected. The non-mutating mirror is `unique()`.
     ///
     /// # Examples
     ///
@@ -1677,7 +1676,7 @@ extend Array[T] {
     /// people.sort(byKey: { (p) in p.age });
     /// ```
     public mutating func sort[K](consuming byKey key: (T) -> K) where K: Comparable {
-        self.sort(by: { (a, b) in key(a) < key(b) })
+        self.sort(by: { (a, b) in key(a).compare(key(b)) == Ordering.Less })
     }
 
     /// Returns a new array sorted by an extracted `Comparable` key;
@@ -1690,7 +1689,7 @@ extend Array[T] {
     /// let byLen = words.sorted(byKey: { (w) in w.count });
     /// ```
     public func sorted[K](consuming byKey key: (T) -> K) -> Array[T] where K: Comparable {
-        self.sorted(by: { (a, b) in key(a) < key(b) })
+        self.sorted(by: { (a, b) in key(a).compare(key(b)) == Ordering.Less })
     }
 }
 
@@ -1760,7 +1759,9 @@ extend Array[T] where T: Formattable {
     }
 }
 
-// Formattable: provided by extend Sliceable[T] where T: Formattable
+/// Prints as `[e1, e2, ...]`. The `format` body is the one on
+/// `extend Sliceable[T] where T: Formattable`.
+extend Array[T]: Formattable where T: Formattable {}
 
 // ============================================================================
 // DIRECT ITERABLE CONFORMANCE

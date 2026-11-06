@@ -392,10 +392,12 @@ public struct Float64:
         Bool(boolLiteral: lang.f64_eq(self.raw, other.raw))
     }
 
-    /// Three-way comparison returning an `Ordering`. NaN is *not* an ordered
-    /// value — comparisons against NaN currently fall through to `.Equal`,
-    /// which is wrong; gate inputs with `isNaN` if you need a well-defined
-    /// answer.
+    /// Three-way comparison returning an `Ordering`. This is a total order,
+    /// so `sort`, `min`/`max` and `binarySearch` stay consistent with NaN in
+    /// the data: every NaN is equal to every other NaN and greater than any
+    /// number, so NaNs sort last. Numbers compare as IEEE 754 does, so
+    /// `-0.0` and `0.0` are `.Equal`. The `<`, `>`, `<=` and `>=` operators
+    /// stay IEEE comparisons, which are all `false` against NaN.
     ///
     /// # Examples
     ///
@@ -404,11 +406,15 @@ public struct Float64:
     /// (2.0).compare(2.0);              // .Equal
     /// (3.0).compare(2.0);              // .Greater
     /// (1.0).compare(Float64.infinity); // .Less
+    /// Float64.nan.compare(Float64.infinity); // .Greater
     /// ```
     public func compare(other: Float64) -> Ordering {
-        if Bool(boolLiteral: lang.f64_lt(self.raw, other.raw)) { .Less }
-        else if Bool(boolLiteral: lang.f64_gt(self.raw, other.raw)) { .Greater }
-        else { .Equal }
+        if Bool(boolLiteral: lang.f64_lt(self.raw, other.raw)) { return .Less }
+        if Bool(boolLiteral: lang.f64_gt(self.raw, other.raw)) { return .Greater }
+        // Neither is less: they're equal numbers, or at least one is NaN.
+        let selfNaN = self.isNaN;
+        if selfNaN == other.isNaN { return .Equal }
+        if selfNaN { .Greater } else { .Less }
     }
 
     // ========================================================================

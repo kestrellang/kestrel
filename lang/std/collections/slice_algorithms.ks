@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Comparable, fatalError)
+import std.core.(Bool, Comparable, Ordering, fatalError)
 import std.numeric.(Int64, UInt64, RandomNumberGenerator, SystemRandom)
 import std.result.(Optional)
 import std.memory.(UnsafeSlice, Pointer)
@@ -122,7 +122,7 @@ extend Slice[T] where T: Copyable {
 
     /// Sorts the slice in place by an extracted `Comparable` key.
     public mutating func sort[K](consuming byKey key: (T) -> K) where K: Comparable {
-        self.sort(by: { (a, b) in key(a) < key(b) })
+        self.sort(by: { (a, b) in key(a).compare(key(b)) == Ordering.Less })
     }
 }
 
@@ -139,7 +139,7 @@ extend Slice[T] where T: Copyable {
 extend Slice[T] where T: Comparable {
     /// Sorts the slice in place, ascending (introsort; see `sort(by:)`).
     public mutating func sort() {
-        self.sort(by: { (a, b) in a < b })
+        self.sort(by: { (a, b) in a.compare(b) == Ordering.Less })
     }
 }
 

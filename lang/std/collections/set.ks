@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Addable, Comparable)
+import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Addable, Comparable, Ordering)
 import std.text.(Formattable, Formatter, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
 import std.result.(Optional)
@@ -1332,7 +1332,7 @@ extend Set[T, H] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable {
     /// Set[Int64]().min();    // None
     /// ```
     public func min() -> Optional[&T] {
-        self.dict.keyAt(self.bestSlot({ (a, b) in a < b }))
+        self.dict.keyAt(self.bestSlot({ (a, b) in a.compare(b) == Ordering.Less }))
     }
 
     /// Lends the largest element, or `None` for an empty set.
@@ -1346,7 +1346,7 @@ extend Set[T, H] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable {
     /// Set[Int64]().max();    // None
     /// ```
     public func max() -> Optional[&T] {
-        self.dict.keyAt(self.bestSlot({ (a, b) in a > b }))
+        self.dict.keyAt(self.bestSlot({ (a, b) in a.compare(b) == Ordering.Greater }))
     }
 
     /// The slot of the element that `better` prefers over every other
