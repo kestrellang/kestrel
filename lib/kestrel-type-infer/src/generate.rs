@@ -2437,7 +2437,7 @@ fn peel_ref_var(ctx: &InferCtx<'_>, tv: TyVar) -> TyVar {
 /// the pending constraints that produce it. Returns true on progress.
 fn default_literal_roots(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
     let mut roots = Vec::new();
-    collect_literal_roots(ctx, recv, 4, &mut roots);
+    collect_literal_roots(ctx, recv, &mut Vec::new(), &mut roots);
     let mut progress = false;
     for tv in roots {
         if let Some(lit) = open_literal(ctx, tv) {
@@ -2450,8 +2450,17 @@ fn default_literal_roots(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
 /// The open literal vars `tv` is produced from: itself, or the inputs of
 /// the pending constraint whose result it is (a call's or member's receiver
 /// and arguments, an associated type's container, an interpolation's
-/// accumulator), up to `depth` steps back.
-fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Vec<TyVar>) {
+/// accumulator), however many steps back. The walk is bounded by `seen`
+/// (each var is expanded once), not by a depth: the receiver needs its
+/// type now whatever the chain's length — `let a = xs(0); (a + b + c +
+/// d).f()` reaches the index literal five steps back, and a fixed cap
+/// turned that into a false E106.
+fn collect_literal_roots(
+    ctx: &InferCtx<'_>,
+    tv: TyVar,
+    seen: &mut Vec<TyVar>,
+    out: &mut Vec<TyVar>,
+) {
     let target = peel_ref_var(ctx, tv);
     if open_literal(ctx, target).is_some() {
         if !out.contains(&target) {
@@ -2459,9 +2468,10 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
         }
         return;
     }
-    if depth == 0 || !matches!(ctx.slot(target), TySlot::Unresolved { .. }) {
+    if seen.contains(&target) || !matches!(ctx.slot(target), TySlot::Unresolved { .. }) {
         return;
     }
+    seen.push(target);
     let produced_by = |r: &TyVar| peel_ref_var(ctx, *r) == target;
     let mut inputs: Vec<TyVar> = Vec::new();
     for c in &ctx.constraints {
@@ -2516,7 +2526,7 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
         }
     }
     for input in inputs {
-        collect_literal_roots(ctx, input, depth - 1, out);
+        collect_literal_roots(ctx, input, seen, out);
     }
 }
 

@@ -95,6 +95,7 @@ struct SavedState {
     ret_borrow: bool,
     /// Per-body value ids — same swap rationale as `value_forwarding`.
     ref_results: std::collections::HashSet<ValueId>,
+    ref_arg_borrows: HashMap<ValueId, Vec<ValueId>>,
     /// Named ref bindings are per-body too (value ids + the closure's own
     /// locals). A PARENT binding may now be captured (E212 retired): the view
     /// tier hands its target address to the env, so inside the body the
@@ -382,6 +383,7 @@ impl OssaBodyCtx<'_, '_> {
             value_forwarding: mem::take(&mut self.value_forwarding),
             ret_borrow: mem::replace(&mut self.ret_borrow, false),
             ref_results: mem::take(&mut self.ref_results),
+            ref_arg_borrows: mem::take(&mut self.ref_arg_borrows),
             ref_binding_vals: mem::take(&mut self.ref_binding_vals),
             ref_binding_remaining: mem::take(&mut self.ref_binding_remaining),
             addr_anchors: mem::take(&mut self.addr_anchors),
@@ -559,6 +561,7 @@ impl OssaBodyCtx<'_, '_> {
         self.value_forwarding = saved.value_forwarding;
         self.ret_borrow = saved.ret_borrow;
         self.ref_results = saved.ref_results;
+        self.ref_arg_borrows = saved.ref_arg_borrows;
         self.ref_binding_vals = saved.ref_binding_vals;
         self.ref_binding_remaining = saved.ref_binding_remaining;
         self.addr_anchors = saved.addr_anchors;
