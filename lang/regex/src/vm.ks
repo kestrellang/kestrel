@@ -137,7 +137,7 @@ struct Searcher {
             if matched.isNone and (not self.program.anchoredStart or pos == 0) {
                 if self.current.count == 0 and self.program.firstByte >= 0 {
                     // No thread alive: jump to where a match could start.
-                    let b = UInt8(from: self.program.firstByte);
+                    let b = UInt8(truncating: self.program.firstByte);
                     while pos < n and self.text(pos) != b { pos = pos + 1; }
                     if pos >= n { return matched; }
                 }

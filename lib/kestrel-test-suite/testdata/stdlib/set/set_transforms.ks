@@ -40,11 +40,11 @@ module Test
 
             // Test min() and max()
             let minVal = s.min();
-            if minVal.isNone() { return 11 }
+            if minVal.isNone { return 11 }
             if minVal.unwrap() != 1 { return 12 }
 
             let maxVal = s.max();
-            if maxVal.isNone() { return 13 }
+            if maxVal.isNone { return 13 }
             if maxVal.unwrap() != 5 { return 14 }
 
             // Test filter on original set unchanged

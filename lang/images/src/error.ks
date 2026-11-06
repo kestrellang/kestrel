@@ -5,7 +5,7 @@ module images
 /// A struct with named values rather than an enum, so formats can add
 /// kinds without breaking code that matches on them.
 public struct ImageErrorKind: Equatable {
-    let name: String;
+    public let name: String;
 
     public init(name name: String) { self.name = name; }
 

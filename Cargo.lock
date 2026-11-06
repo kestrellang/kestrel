@@ -1055,6 +1055,7 @@ version = "0.18.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
+ "kestrel-debug",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-lexer",

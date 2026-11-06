@@ -388,7 +388,7 @@ impl OssaBodyCtx<'_, '_> {
                     && !self.ref_binding_vals.contains_key(&base_val)
                     && self.body.value(result).ownership == kestrel_mir::value::Ownership::Owned
                 {
-                    self.emit_end_borrow(base_val);
+                    self.end_ref(base_val);
                 }
                 result
             },
@@ -447,6 +447,13 @@ impl OssaBodyCtx<'_, '_> {
                 args,
                 ..
             } => {
+                // `-128` is a negative literal, not `negate(128)`: the
+                // magnitude alone may not fit (`Int8`), and a trapping
+                // `negate` would then reject `Int8.minValue`. E121 already
+                // range-checks it as the negated value.
+                if let Some(lit) = self.negated_int_literal(*receiver, method.as_str_or_empty()) {
+                    return self.lower_literal(expr_id, &lit);
+                }
                 // A `?.` bind calls the method inference settled on.
                 let written = method.as_str_or_empty();
                 let method = match self.typed.as_ref() {
@@ -883,7 +890,7 @@ impl OssaBodyCtx<'_, '_> {
             && !self.ref_binding_vals.contains_key(&base_val)
             && self.body.value(result).ownership == kestrel_mir::value::Ownership::Owned
         {
-            self.emit_end_borrow(base_val);
+            self.end_ref(base_val);
         }
         result
     }
@@ -1394,7 +1401,7 @@ impl OssaBodyCtx<'_, '_> {
         let ptr_ty = self.ctx.module.ty_arena.pointer(pointee_ty);
         let addr = self.emit_op1(Op::PtrTo(pointee_ty), ref_val, ptr_ty);
         self.emit_store_assign(addr, rhs);
-        self.emit_end_borrow(ref_val);
+        self.end_ref(ref_val);
         self.emit_literal(Immediate::unit())
     }
 

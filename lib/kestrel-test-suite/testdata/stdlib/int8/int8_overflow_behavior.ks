@@ -13,25 +13,25 @@ module Test
             // addChecked — overflow at 127
             let addCheckZero: std.numeric.Int8 = 0;
             let addOk = maxVal.addChecked(addCheckZero);
-            if addOk.isNone() { return 1 }
+            if addOk.isNone { return 1 }
             let addOverflow = maxVal.addChecked(one);
-            if addOverflow.isSome() { return 2 }
+            if addOverflow.isSome { return 2 }
 
             // addChecked — normal case
             let ten: std.numeric.Int8 = 10;
             let five: std.numeric.Int8 = 5;
             let addNormal = ten.addChecked(five);
-            if addNormal.isNone() { return 3 }
+            if addNormal.isNone { return 3 }
             let expectedFifteen: std.numeric.Int8 = 15;
             if addNormal.unwrap() != expectedFifteen { return 4 }
 
             // subtractChecked — underflow at -128
             let subOverflow = minVal.subtractChecked(one);
-            if subOverflow.isSome() { return 5 }
+            if subOverflow.isSome { return 5 }
 
             // subtractChecked — normal case
             let subNormal = ten.subtractChecked(five);
-            if subNormal.isNone() { return 6 }
+            if subNormal.isNone { return 6 }
             let expectedFive: std.numeric.Int8 = 5;
             if subNormal.unwrap() != expectedFive { return 7 }
 
@@ -39,33 +39,33 @@ module Test
             let big: std.numeric.Int8 = 100;
             let two: std.numeric.Int8 = 2;
             let mulOverflow = big.multiplyChecked(two);
-            if mulOverflow.isSome() { return 8 }
+            if mulOverflow.isSome { return 8 }
 
             // multiplyChecked — normal case
             let three: std.numeric.Int8 = 3;
             let mulNormal = five.multiplyChecked(three);
-            if mulNormal.isNone() { return 9 }
+            if mulNormal.isNone { return 9 }
             let expectedMulFifteen: std.numeric.Int8 = 15;
             if mulNormal.unwrap() != expectedMulFifteen { return 10 }
 
             // negateChecked — overflow at -128 (no positive 128 in Int8)
             let negMin = minVal.negateChecked();
-            if negMin.isSome() { return 11 }
+            if negMin.isSome { return 11 }
 
             // negateChecked — normal case
             let negTen = ten.negateChecked();
-            if negTen.isNone() { return 12 }
+            if negTen.isNone { return 12 }
             let expectedNegTen: std.numeric.Int8 = -10;
             if negTen.unwrap() != expectedNegTen { return 13 }
 
             // absChecked — overflow at -128
             let absMin = minVal.absChecked();
-            if absMin.isSome() { return 14 }
+            if absMin.isSome { return 14 }
 
             // absChecked — normal case
             let negFive: std.numeric.Int8 = -5;
             let absFive = negFive.absChecked();
-            if absFive.isNone() { return 15 }
+            if absFive.isNone { return 15 }
             if absFive.unwrap() != five { return 16 }
 
             // addSaturating — clamps to 127

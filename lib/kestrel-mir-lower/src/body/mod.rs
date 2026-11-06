@@ -443,6 +443,13 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// sweeps spare them, and lexical scope exit / terminators own their
     /// end. Saved/restored across closures.
     pub(crate) ref_binding_vals: HashMap<ValueId, HirLocalId>,
+    /// Arg borrows a ret_borrow call left open for its result: ref → the
+    /// call's @guaranteed args. They exist only to keep the ref's possible
+    /// roots alive, so they end with the ref (`end_ref`) instead of at
+    /// scope exit — otherwise `let x = xs(0); xs` would take `xs` while
+    /// the subscript's receiver borrow is still open. Saved/restored
+    /// across closures.
+    pub(crate) ref_arg_borrows: HashMap<ValueId, Vec<ValueId>>,
     /// Remaining HIR reads per ref-binding local — decremented once per
     /// read expr (`note_binding_read`). A binding live at an inside-fn
     /// terminator with remaining > 0 is the E497 binding error (bindings
@@ -563,6 +570,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             value_forwarding: HashMap::new(),
             ret_borrow: false,
             ref_results: std::collections::HashSet::new(),
+            ref_arg_borrows: HashMap::new(),
             ref_binding_vals: HashMap::new(),
             ref_binding_remaining: HashMap::new(),
             ref_binding_reads: std::collections::HashSet::new(),
@@ -2682,8 +2690,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 _ => None,
             })
             .collect();
-        for v in stale {
-            self.emit_end_borrow(v);
+        // Newest first; a ref ended as an earlier one's kept arg is skipped.
+        for v in stale.into_iter().rev() {
+            if self.is_borrow_tracked(v) {
+                self.end_ref(v);
+            }
         }
     }
 
@@ -3807,9 +3818,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 }
             }
         }
-        // else: the arg borrows stay scope-tracked — every potential root
-        // must outlive the returned ref (cheap under may-alias); the scope
-        // machinery ends them at scope exit or the next terminator.
+        // else: the arg borrows stay open — every potential root must
+        // outlive the returned ref (cheap under may-alias). They are
+        // recorded in `ref_arg_borrows` below and end with the ref
+        // (`end_ref`); scope exit / the next terminator is the fallback.
         self.drain_deferred_borrows();
         if let (Some(ty), Some(r)) = (result_ty, result) {
             if matches!(self.ctx.module.ty_arena.get(ty), MirTy::Never) {
@@ -3821,6 +3833,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 self.track_borrow(r);
                 self.ref_results.insert(r);
                 self.note_lent_ref(&borrows, r);
+                self.ref_arg_borrows.insert(r, borrows);
             } else {
                 self.track_owned(r);
             }
@@ -4164,7 +4177,57 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// terminator. Every "the ref's single use — end it" site funnels here.
     pub fn end_ref_if_single_use(&mut self, v: ValueId) {
         if !self.ref_binding_vals.contains_key(&v) {
-            self.emit_end_borrow(v);
+            self.end_ref(v);
+        }
+    }
+
+    /// Every borrow currently scope-tracked, outermost scope first.
+    fn tracked_borrows(&self) -> Vec<ValueId> {
+        self.scope_stack
+            .iter()
+            .flat_map(|s| s.entries.iter())
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(b) => Some(*b),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn is_borrow_tracked(&self, v: ValueId) -> bool {
+        self.scope_stack.iter().any(|s| {
+            s.entries
+                .iter()
+                .any(|e| matches!(e, ScopeEntry::Borrow(b) if *b == v))
+        })
+    }
+
+    /// End ref `v` and then the arg borrows its call kept open for it
+    /// (`ref_arg_borrows`), newest first. An arg borrow is skipped when it
+    /// is no longer scope-tracked (already ended, or a param / outer value
+    /// the call borrowed directly), when it is a named ref binding (its own
+    /// lifetime rules), or when another live borrow still derives from it.
+    /// A kept arg that is itself a ref ends through this same path, so a
+    /// chain (`xs(0)(1)`) unwinds fully.
+    pub(crate) fn end_ref(&mut self, v: ValueId) {
+        self.emit_end_borrow(v);
+        let Some(args) = self.ref_arg_borrows.remove(&v) else {
+            return;
+        };
+        for a in args.into_iter().rev() {
+            let live = self.tracked_borrows();
+            if !live.contains(&a)
+                || self.ref_binding_vals.contains_key(&a)
+                || live
+                    .iter()
+                    .any(|&b| b != a && self.borrow_derives_from(b, a))
+            {
+                continue;
+            }
+            if self.ref_results.contains(&a) {
+                self.end_ref(a);
+            } else {
+                self.emit_end_borrow(a);
+            }
         }
     }
 
@@ -4245,7 +4308,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             self.ref_binding_vals.remove(&v);
             self.ref_results.remove(&v);
             self.ref_binding_remaining.remove(&local);
-            self.emit_end_borrow(v);
+            self.end_ref(v);
         }
     }
 

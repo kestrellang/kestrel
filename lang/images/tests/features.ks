@@ -19,7 +19,7 @@ func patternRaw(layout: PixelLayout, width: Int64, height: Int64) -> RawImage {
     for y in 0..<height {
         for x in 0..<width {
             for k in 0..<bpp {
-                plane.bytes((y * width + x) * bpp + k) = UInt8(from: (x * 7 + y * 13 + k * 51 + x * y) % 256);
+                plane.bytes((y * width + x) * bpp + k) = UInt8(truncating: (x * 7 + y * 13 + k * 51 + x * y) % 256);
             }
         }
     }
@@ -123,7 +123,7 @@ func testConversion() {
     // 8-bit sRGB → linear float → 8-bit sRGB is exact for every value.
     var gray = Image[Rgba8](width: 256, height: 1);
     for v in 0..<256 {
-        let b = UInt8(from: v);
+        let b = UInt8(truncating: v);
         gray(v, 0) = Rgba8(r: b, g: b, b: b, a: 255);
     }
     var toLinear = ConversionOptions();
@@ -272,7 +272,7 @@ func testHdr() {
 
 /// Little-endian TIFF bytes with one orientation entry.
 func exifWithOrientation(value: Int64) -> Array[UInt8] {
-    [73, 73, 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, UInt8(from: value), 0, 0, 0, 0, 0, 0, 0]
+    [73, 73, 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, UInt8(truncating: value), 0, 0, 0, 0, 0, 0, 0]
 }
 
 func testMetadata() {

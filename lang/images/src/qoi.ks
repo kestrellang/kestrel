@@ -159,10 +159,10 @@ struct QoiDecoder: ImageDecoder {
                 self.applyOp(op);
             }
             let at = self.x * self.channels;
-            self.row(at) = UInt8(from: self.r);
-            self.row(at + 1) = UInt8(from: self.g);
-            self.row(at + 2) = UInt8(from: self.b);
-            if self.channels == 4 { self.row(at + 3) = UInt8(from: self.a); }
+            self.row(at) = UInt8(truncating: self.r);
+            self.row(at + 1) = UInt8(truncating: self.g);
+            self.row(at + 2) = UInt8(truncating: self.b);
+            if self.channels == 4 { self.row(at + 3) = UInt8(truncating: self.a); }
             self.x = self.x + 1;
             if self.x == self.width {
                 if self.deliver {
@@ -212,10 +212,10 @@ struct QoiDecoder: ImageDecoder {
             }
         }
         let h = qoiHash(self.r, self.g, self.b, self.a) * 4;
-        self.cache(h) = UInt8(from: self.r);
-        self.cache(h + 1) = UInt8(from: self.g);
-        self.cache(h + 2) = UInt8(from: self.b);
-        self.cache(h + 3) = UInt8(from: self.a);
+        self.cache(h) = UInt8(truncating: self.r);
+        self.cache(h + 1) = UInt8(truncating: self.g);
+        self.cache(h + 2) = UInt8(truncating: self.b);
+        self.cache(h + 3) = UInt8(truncating: self.a);
     }
 }
 
@@ -226,7 +226,7 @@ func encodeQoi(image: RawImage) -> Array[UInt8] {
     appendAscii(out, "qoif");
     appendUInt32BE(out, image.width);
     appendUInt32BE(out, image.height);
-    out.append(UInt8(from: channels));
+    out.append(UInt8(truncating: channels));
     var colorspace: UInt8 = 0;
     if image.color.isLinear { colorspace = 1; }
     out.append(colorspace);
@@ -252,19 +252,19 @@ func encodeQoi(image: RawImage) -> Array[UInt8] {
             if r == pr and g == pg and b == pb and a == pa {
                 run = run + 1;
                 if run == 62 or index == total {
-                    out.append(UInt8(from: qoiOpRun | (run - 1)));
+                    out.append(UInt8(truncating: qoiOpRun | (run - 1)));
                     run = 0;
                 }
                 continue;
             }
             if run > 0 {
-                out.append(UInt8(from: qoiOpRun | (run - 1)));
+                out.append(UInt8(truncating: qoiOpRun | (run - 1)));
                 run = 0;
             }
             let packed = (r << 24) | (g << 16) | (b << 8) | a;
             let h = qoiHash(r, g, b, a);
             if cache(h) == packed {
-                out.append(UInt8(from: qoiOpIndex | h));
+                out.append(UInt8(truncating: qoiOpIndex | h));
             } else {
                 cache(h) = packed;
                 if a == pa {
@@ -274,22 +274,22 @@ func encodeQoi(image: RawImage) -> Array[UInt8] {
                     let drg = dr - dg;
                     let dbg = db - dg;
                     if dr > -3 and dr < 2 and dg > -3 and dg < 2 and db > -3 and db < 2 {
-                        out.append(UInt8(from: qoiOpDiff | ((dr + 2) << 4) | ((dg + 2) << 2) | (db + 2)));
+                        out.append(UInt8(truncating: qoiOpDiff | ((dr + 2) << 4) | ((dg + 2) << 2) | (db + 2)));
                     } else if drg > -9 and drg < 8 and dg > -33 and dg < 32 and dbg > -9 and dbg < 8 {
-                        out.append(UInt8(from: qoiOpLuma | (dg + 32)));
-                        out.append(UInt8(from: ((drg + 8) << 4) | (dbg + 8)));
+                        out.append(UInt8(truncating: qoiOpLuma | (dg + 32)));
+                        out.append(UInt8(truncating: ((drg + 8) << 4) | (dbg + 8)));
                     } else {
-                        out.append(UInt8(from: qoiOpRgb));
-                        out.append(UInt8(from: r));
-                        out.append(UInt8(from: g));
-                        out.append(UInt8(from: b));
+                        out.append(UInt8(truncating: qoiOpRgb));
+                        out.append(UInt8(truncating: r));
+                        out.append(UInt8(truncating: g));
+                        out.append(UInt8(truncating: b));
                     }
                 } else {
-                    out.append(UInt8(from: qoiOpRgba));
-                    out.append(UInt8(from: r));
-                    out.append(UInt8(from: g));
-                    out.append(UInt8(from: b));
-                    out.append(UInt8(from: a));
+                    out.append(UInt8(truncating: qoiOpRgba));
+                    out.append(UInt8(truncating: r));
+                    out.append(UInt8(truncating: g));
+                    out.append(UInt8(truncating: b));
+                    out.append(UInt8(truncating: a));
                 }
             }
             pr = r;

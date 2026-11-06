@@ -70,22 +70,22 @@ func readUInt16LE(data: Array[UInt8], i: Int64) -> Int64 {
 }
 
 func appendUInt32BE(mutating out: Array[UInt8], value: Int64) {
-    out.append(UInt8(from: value >> 24));
-    out.append(UInt8(from: value >> 16));
-    out.append(UInt8(from: value >> 8));
-    out.append(UInt8(from: value));
+    out.append(UInt8(truncating: value >> 24));
+    out.append(UInt8(truncating: value >> 16));
+    out.append(UInt8(truncating: value >> 8));
+    out.append(UInt8(truncating: value));
 }
 
 func appendUInt32LE(mutating out: Array[UInt8], value: Int64) {
-    out.append(UInt8(from: value));
-    out.append(UInt8(from: value >> 8));
-    out.append(UInt8(from: value >> 16));
-    out.append(UInt8(from: value >> 24));
+    out.append(UInt8(truncating: value));
+    out.append(UInt8(truncating: value >> 8));
+    out.append(UInt8(truncating: value >> 16));
+    out.append(UInt8(truncating: value >> 24));
 }
 
 func appendUInt16LE(mutating out: Array[UInt8], value: Int64) {
-    out.append(UInt8(from: value));
-    out.append(UInt8(from: value >> 8));
+    out.append(UInt8(truncating: value));
+    out.append(UInt8(truncating: value >> 8));
 }
 
 func appendAscii(mutating out: Array[UInt8], text: String) {

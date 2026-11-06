@@ -50,7 +50,7 @@ struct BitField {
     func extract(pixel: Int64) -> UInt8 {
         if self.mask == 0 { return 255; }
         let v = (pixel & self.mask) >> self.shift;
-        UInt8(from: (v * 255 + self.maximum / 2) / self.maximum)
+        UInt8(truncating: (v * 255 + self.maximum / 2) / self.maximum)
     }
 }
 

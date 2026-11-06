@@ -108,15 +108,15 @@ public struct MD5: Digest {
             let temp = d;
             d = c;
             c = b;
-            let sum = a + f + t(i) + m(g);
-            b = b + sum.rotateLeft(by: shifts(i));
+            let sum = a.addWrapping(f).addWrapping(t(i)).addWrapping(m(g));
+            b = b.addWrapping(sum.rotateLeft(by: shifts(i)));
             a = temp;
         }
 
-        state(0) = state(0) + a;
-        state(1) = state(1) + b;
-        state(2) = state(2) + c;
-        state(3) = state(3) + d;
+        state(0) = state(0).addWrapping(a);
+        state(1) = state(1).addWrapping(b);
+        state(2) = state(2).addWrapping(c);
+        state(3) = state(3).addWrapping(d);
     }
 }
 

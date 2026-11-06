@@ -20,14 +20,14 @@ module Test
 
             // ---- view(checked: i) ----
             let lc = s.lines(checked: 1);
-            if lc.isNone() { return 5 }
+            if lc.isNone { return 5 }
             if lc.unwrap().isEqual(to: "beta") == false { return 6 }
 
             let lOob = s.lines(checked: 100);
-            if lOob.isSome() { return 7 }
+            if lOob.isSome { return 7 }
 
             let lNeg = s.lines(checked: -1);
-            if lNeg.isSome() { return 8 }
+            if lNeg.isSome { return 8 }
 
             // ---- view(clamped: i) ----
             let lcl = s.lines(clamped: 1);
@@ -42,7 +42,7 @@ module Test
             // ---- empty view returns None on clamp ----
             let empty = std.text.String();
             let emptyClamp = empty.lines(clamped: 0);
-            if emptyClamp.isSome() { return 12 }
+            if emptyClamp.isSome { return 12 }
 
             // ---- mixed terminators ----
             let mixed: std.text.String = "a\nb\r\nc\rd";

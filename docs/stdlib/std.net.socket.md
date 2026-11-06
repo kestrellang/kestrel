@@ -272,7 +272,7 @@ _Defined in `lang/std/net/socket.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(from: UnsafeSlice[UInt8]) -> Result[Int64, IoError]
+public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Writes up to `buf.count` bytes from `buf`. Returns the byte count actually written.

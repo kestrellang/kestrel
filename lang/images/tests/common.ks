@@ -27,10 +27,10 @@ func rgba8Checksum(raw: RawImage) -> Int64 {
             for y in 0..<image.height {
                 for x in 0..<image.width {
                     let p = image(x, y);
-                    bytes.append(UInt8(from: p.r >> 8));
-                    bytes.append(UInt8(from: p.g >> 8));
-                    bytes.append(UInt8(from: p.b >> 8));
-                    bytes.append(UInt8(from: p.a >> 8));
+                    bytes.append(UInt8(truncating: p.r >> 8));
+                    bytes.append(UInt8(truncating: p.g >> 8));
+                    bytes.append(UInt8(truncating: p.b >> 8));
+                    bytes.append(UInt8(truncating: p.a >> 8));
                 }
             }
             Int64(from: Crc32.checksum(bytes))

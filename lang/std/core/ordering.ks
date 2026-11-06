@@ -57,10 +57,10 @@ public enum Ordering: Equatable, Formattable {
     /// # Examples
     ///
     /// ```
-    /// Ordering.Less.reverse()     // .Greater
-    /// Ordering.Equal.reverse()    // .Equal
+    /// Ordering.Less.reversed()     // .Greater
+    /// Ordering.Equal.reversed()    // .Equal
     /// ```
-    public func reverse() -> Ordering {
+    public func reversed() -> Ordering {
         match self {
             .Less => .Greater,
             .Equal => .Equal,

@@ -34,16 +34,16 @@ module Test
 
             // Failable init: valid value succeeds
             let valid = std.text.Char(65);
-            if valid.isNone() { return 8 }
+            if valid.isNone { return 8 }
             if valid.unwrap().isEqual(to: 'A') == false { return 9 }
 
             // Failable init: surrogate rejected
             let surrogate = std.text.Char(0xD800);
-            if surrogate.isSome() { return 10 }
+            if surrogate.isSome { return 10 }
 
             // Failable init: above U+10FFFF rejected
             let tooBig = std.text.Char(0x110000);
-            if tooBig.isSome() { return 11 }
+            if tooBig.isSome { return 11 }
 
             0
         }

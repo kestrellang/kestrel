@@ -551,7 +551,7 @@ fn is_public_top_level(world: &World, entity: Entity) -> bool {
 
 /// `@doc(.Hidden)`, on the declaration or on the `extend` that declares it.
 /// The declaration stays usable; it is only left off the docs pages.
-/// A type's implementation of a `@sugarOnly` requirement (`Int64.modAssign`):
+/// A type's implementation of a `@sugarOnly` requirement (`Int64.remainderAssign`):
 /// only its syntax can reach it, so it is left off the type's page. The
 /// requirement itself stays on the protocol's page, since conformers write it.
 fn is_sugar_only_witness(world: &World, entity: Entity) -> bool {

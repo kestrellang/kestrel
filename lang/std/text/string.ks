@@ -8,7 +8,7 @@ import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, CowBox, UnsafeSlice)
 import std.iter.(Iterator, Iterable)
-import std.collections.(Sliceable)
+import std.collections.(Sliceable, Slice)
 import std.numeric.(UInt32)
 import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, CharsIterator, GraphemesView, LinesView, CharsSubstringIndex, StringSlice, Str, SplitView, SplitWhereView)
 import std.text.unicode as unicode
@@ -850,7 +850,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Sends the whole buffer in a single `write` so the hasher gets
     /// to choose how to consume it.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(UnsafeSlice(pointer: self.ptr(), count: self.len()))
+        hasher.write(Slice.lend(start: self.ptr(), count: self.len()))
     }
 
     /// Returns a shallow clone — storage is shared until either side mutates.

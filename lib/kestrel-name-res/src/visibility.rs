@@ -25,18 +25,38 @@ impl QueryFn for IsVisibleFrom {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> bool {
         let context = derived_context(ctx, self.context);
-        match ctx.get::<Vis>(self.target) {
-            // No visibility modifier → always visible (default)
-            None => true,
-            Some(Vis::Public) => true,
-            Some(Vis::Private) => {
+        let visible = self.visible(ctx, context);
+        kestrel_debug::ktrace!(
+            "visibility",
+            "{:?} ({:?} {:?} in {:?}) from {:?} (in {:?}): {}",
+            self.target,
+            ctx.get::<NodeKind>(self.target),
+            ctx.get::<Name>(self.target).map(|n| n.0.as_str()),
+            internal_boundary(ctx, self.target)
+                .and_then(|m| ctx.get::<Name>(m))
+                .map(|n| n.0.as_str()),
+            context,
+            internal_boundary(ctx, context)
+                .and_then(|m| ctx.get::<Name>(m))
+                .map(|n| n.0.as_str()),
+            visible
+        );
+        visible
+    }
+}
+
+impl IsVisibleFrom {
+    fn visible(&self, ctx: &QueryContext<'_>, context: Entity) -> bool {
+        match effective_vis(ctx, self.target) {
+            Vis::Public => true,
+            Vis::Private => {
                 // Visible within the parent scope and all its descendants
                 let Some(scope) = ctx.parent_of(self.target) else {
                     return true;
                 };
                 is_ancestor_of(ctx, scope, context)
             },
-            Some(Vis::Fileprivate) => {
+            Vis::Fileprivate => {
                 // Visible within the same file
                 let target_file = find_file_id(ctx, self.target);
                 let context_file = find_file_id(ctx, context);
@@ -51,7 +71,7 @@ impl QueryFn for IsVisibleFrom {
                     },
                 }
             },
-            Some(Vis::Internal) => {
+            Vis::Internal => {
                 // Visible within the same top-level module subtree
                 match (
                     internal_boundary(ctx, self.target),
@@ -63,6 +83,39 @@ impl QueryFn for IsVisibleFrom {
             },
         }
     }
+}
+
+/// The visibility `target` was declared with. No keyword means `internal`
+/// (docs/language/structs.md), except where the declaration has no
+/// visibility of its own: modules are open, and protocol requirements and enum cases are as
+/// visible as their protocol or enum, which name resolution already checked
+/// to reach them.
+pub fn effective_vis(ctx: &QueryContext<'_>, target: Entity) -> Vis {
+    if let Some(vis) = ctx.get::<Vis>(target) {
+        return vis.clone();
+    }
+    // Modules and `extend` blocks have no visibility of their own; their
+    // contents carry it.
+    if matches!(
+        ctx.get::<NodeKind>(target),
+        Some(NodeKind::EnumCase | NodeKind::Module | NodeKind::Extension)
+    ) {
+        return Vis::Public;
+    }
+    // `@builtin` declarations are named by the compiler on the user's behalf
+    // (`FromValue` for `?`, `decayOptionalRef`, ...), from any module.
+    if ctx
+        .query(kestrel_ast_builder::attrs::AttrsOf { entity: target })
+        .builtin()
+        .is_some()
+    {
+        return Vis::Public;
+    }
+    let parent_kind = ctx.parent_of(target).and_then(|p| ctx.get::<NodeKind>(p));
+    if parent_kind == Some(&NodeKind::Protocol) {
+        return Vis::Public;
+    }
+    Vis::Internal
 }
 
 /// Code `@derive` generated reads the type's private fields, so it sees

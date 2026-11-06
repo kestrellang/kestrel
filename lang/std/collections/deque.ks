@@ -5,7 +5,8 @@ module std.collections
 import std.core.(Bool, Cloneable, fatalError)
 import std.numeric.(Int64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, UnsafeSlice, SystemAllocator, CowBox)
+import std.memory.(Layout, Pointer, SystemAllocator, CowBox)
+import std.collections.(Slice)
 import std.iter.(Iterator, Iterable)
 
 // ============================================================================
@@ -384,7 +385,7 @@ public struct Deque[T]: Iterable, Cloneable {
     /// Ensures the buffer can hold at least `capacity` elements without
     /// reallocating.
     ///
-    /// If the current capacity already meets or exceeds `capacity`, this
+    /// If the current capacity already meets or exceeds `minimumCapacity`, this
     /// is a no-op. Otherwise the ring buffer is reallocated and
     /// linearized. Useful before a burst of `pushBack`/`pushFront` calls
     /// when the final size is known in advance.
@@ -393,11 +394,11 @@ public struct Deque[T]: Iterable, Cloneable {
     ///
     /// ```
     /// var d = Deque[Int64]();
-    /// d.reserveCapacity(minimumCapacity: 100);
+    /// d.reserveCapacity(100);
     /// ```
-    public mutating func reserveCapacity(minimumCapacity capacity: Int64) {
-        if capacity > self.cap() {
-            self.grow(minCapacity: capacity)
+    public mutating func reserveCapacity(minimumCapacity: Int64) {
+        if minimumCapacity > self.cap() {
+            self.grow(minCapacity: minimumCapacity)
         }
     }
 
@@ -585,7 +586,7 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d(1) = 99;
     /// d(1);  // 99
     /// ```
-    subscript(index: Int64) -> T {
+    public subscript(index: Int64) -> T {
         ref {
             let phys = self.physicalIndex(index);
             if phys < 0 { fatalError("Deque: index out of bounds") }
@@ -612,7 +613,7 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d(checked: 1);  // .Some(20)
     /// d(checked: 5);  // .None
     /// ```
-    subscript(checked index: Int64)? -> T {
+    public subscript(checked index: Int64)? -> T {
         ref {
             let phys = self.physicalIndex(index);
             if phys < 0 { return null; }
@@ -638,9 +639,9 @@ public struct Deque[T]: Iterable, Cloneable {
     ///
     /// If the buffer doesn't wrap, the first slice contains all elements
     /// and the second is empty. If it wraps, the first slice covers
-    /// head-to-end and the second covers start-to-tail. Useful for
-    /// bulk operations that need pointer-contiguous access without
-    /// copying.
+    /// head-to-end and the second covers start-to-tail. Both lend the
+    /// deque's storage in place: nothing is copied, and they are only
+    /// valid until the deque next changes.
     ///
     /// # Examples
     ///
@@ -649,12 +650,12 @@ public struct Deque[T]: Iterable, Cloneable {
     /// let (a, b) = d.asSlices();
     /// // non-wrapping: a contains all 3 elements, b is empty
     /// ```
-    public func asSlices() -> (UnsafeSlice[T], UnsafeSlice[T]) {
+    public func asSlices() -> (&Slice[T], &Slice[T]) {
         let myLen = self.len();
         if myLen == 0 {
             return (
-                UnsafeSlice(pointer: Pointer[T].nullPointer(), count: 0),
-                UnsafeSlice(pointer: Pointer[T].nullPointer(), count: 0)
+                Slice.lend(start: Pointer[T].nullPointer(), count: 0),
+                Slice.lend(start: Pointer[T].nullPointer(), count: 0)
             )
         }
         let myHead = self.head();
@@ -663,14 +664,14 @@ public struct Deque[T]: Iterable, Cloneable {
         let tailEnd = myHead + myLen;
         if tailEnd <= myCap {
             return (
-                UnsafeSlice(pointer: myPtr.offset(by: myHead), count: myLen),
-                UnsafeSlice(pointer: myPtr, count: 0)
+                Slice.lend(start: myPtr.offset(by: myHead), count: myLen),
+                Slice.lend(start: myPtr, count: 0)
             )
         }
         let firstLen = myCap - myHead;
         return (
-            UnsafeSlice(pointer: myPtr.offset(by: myHead), count: firstLen),
-            UnsafeSlice(pointer: myPtr, count: myLen - firstLen)
+            Slice.lend(start: myPtr.offset(by: myHead), count: firstLen),
+            Slice.lend(start: myPtr, count: myLen - firstLen)
         )
     }
 

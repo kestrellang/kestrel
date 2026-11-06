@@ -608,12 +608,12 @@ struct PngDecoder: ImageDecoder {
             for i in 0..<pixels {
                 let v = unpackSample(row, i, depth);
                 if addAlpha {
-                    out(i * 2) = UInt8(from: v * scale);
+                    out(i * 2) = UInt8(truncating: v * scale);
                     var a: UInt8 = 255;
                     if v == self.transparent(0) { a = 0; }
                     out(i * 2 + 1) = a;
                 } else {
-                    out(i) = UInt8(from: v * scale);
+                    out(i) = UInt8(truncating: v * scale);
                 }
             }
             return out;
@@ -676,7 +676,7 @@ func unfilter(mutating row: Array[UInt8], previous: Array[UInt8], filter: Int64,
             var left: Int64 = 0;
             if i >= stride { left = Int64(from: p.offset(by: i - stride).read()); }
             let avg = (left + Int64(from: up.offset(by: i).read())) / 2;
-            p.offset(by: i).write(p.offset(by: i).read() + UInt8(from: avg));
+            p.offset(by: i).write(p.offset(by: i).read() + UInt8(truncating: avg));
         }
     } else {
         for i in 0..<n {
@@ -687,7 +687,7 @@ func unfilter(mutating row: Array[UInt8], previous: Array[UInt8], filter: Int64,
                 corner = Int64(from: up.offset(by: i - stride).read());
             }
             let above = Int64(from: up.offset(by: i).read());
-            p.offset(by: i).write(p.offset(by: i).read() + UInt8(from: paeth(left, above, corner)));
+            p.offset(by: i).write(p.offset(by: i).read() + UInt8(truncating: paeth(left, above, corner)));
         }
     }
 }
@@ -777,8 +777,8 @@ func encodePng(image: RawImage, level: CompressionLevel, keepMetadata: Bool) -> 
     var header: [UInt8] = [];
     appendUInt32BE(header, image.width);
     appendUInt32BE(header, image.height);
-    header.append(UInt8(from: sampleBytes * 8));
-    header.append(UInt8(from: pngColorType(layout)));
+    header.append(UInt8(truncating: sampleBytes * 8));
+    header.append(UInt8(truncating: pngColorType(layout)));
     header.append(0);
     header.append(0);
     header.append(0);
@@ -788,7 +788,7 @@ func encodePng(image: RawImage, level: CompressionLevel, keepMetadata: Bool) -> 
         let c = image.color;
         var fullRange: UInt8 = 0;
         if c.fullRange { fullRange = 1; }
-        let body: [UInt8] = [UInt8(from: c.primaries), UInt8(from: c.transfer), UInt8(from: c.matrix), fullRange];
+        let body: [UInt8] = [UInt8(truncating: c.primaries), UInt8(truncating: c.transfer), UInt8(truncating: c.matrix), fullRange];
         appendChunk(out, "cICP", body);
     }
     let meta = image.metadata;
@@ -869,7 +869,7 @@ func encodePng(image: RawImage, level: CompressionLevel, keepMetadata: Bool) -> 
                 candidate = swap;
             }
         }
-        filtered.append(UInt8(from: bestFilter));
+        filtered.append(UInt8(truncating: bestFilter));
         filtered.append(contentsOf: best);
         let swap = previous;
         previous = row;
@@ -916,7 +916,7 @@ func applyFilter(row: Array[UInt8], previous: Array[UInt8], filter: Int64, strid
         if filter == 3 { predicted = (a + b) / 2; }
         if filter == 4 { predicted = paeth(a, b, c); }
         let v = (x - predicted) & 0xFF;
-        o.offset(by: i).write(UInt8(from: v));
+        o.offset(by: i).write(UInt8(truncating: v));
         if v < 128 { cost = cost + v; } else { cost = cost + 256 - v; }
     }
     cost

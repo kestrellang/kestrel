@@ -15,7 +15,7 @@ func main() -> lang.i64 {
     let present: Optional[Int64] = .Some(42);
     let tapped = present.inspect({ (x) in seen = x });
     if seen != 42 { return 1 }
-    if tapped.isSome() == false { return 2 }
+    if tapped.isSome == false { return 2 }
     if tapped.unwrap() != 42 { return 3 }
 
     // None: the tap never runs, so the captured place keeps its old value.
@@ -23,7 +23,7 @@ func main() -> lang.i64 {
     let none: Optional[Int64] = .None;
     let passed = none.inspect({ (x) in untouched = 0 });
     if untouched != 7 { return 4 }
-    if passed.isSome() { return 5 }
+    if passed.isSome { return 5 }
 
     0
 }

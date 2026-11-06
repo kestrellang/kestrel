@@ -50,7 +50,7 @@ public struct PBKDF2[H] where H: Digest {
             // U_1 = HMAC(password, salt || INT_32_BE(blockIndex))
             var mac = HMAC[H](key: passwordKey);
             mac.update(salt.asUnsafeSlice());
-            let be = UInt32(from: blockIndex).toBytesBigEndian();
+            let be = UInt32(truncating: blockIndex).toBytesBigEndian();
             mac.update(be);
             var u = mac.finalize().bytes;
             var result = u;

@@ -60,28 +60,28 @@ extend ExitCode: Exitable {
 // ============================================================================
 
 extend Int8: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend Int16: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend Int32: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend Int64: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend UInt8: Exitable {
     consuming func report() -> ExitCode { ExitCode(self) }
 }
 extend UInt16: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend UInt32: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend UInt64: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 
 // ============================================================================

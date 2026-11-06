@@ -201,10 +201,10 @@ public struct ChaCha20Poly1305 {
         mutating state: Array[UInt32],
         a: Int64, b: Int64, c: Int64, d: Int64
     ) {
-        state(a) = state(a) + state(b); state(d) = (state(d) ^ state(a)).rotateLeft(by: 16);
-        state(c) = state(c) + state(d); state(b) = (state(b) ^ state(c)).rotateLeft(by: 12);
-        state(a) = state(a) + state(b); state(d) = (state(d) ^ state(a)).rotateLeft(by: 8);
-        state(c) = state(c) + state(d); state(b) = (state(b) ^ state(c)).rotateLeft(by: 7);
+        state(a) = state(a).addWrapping(state(b)); state(d) = (state(d) ^ state(a)).rotateLeft(by: 16);
+        state(c) = state(c).addWrapping(state(d)); state(b) = (state(b) ^ state(c)).rotateLeft(by: 12);
+        state(a) = state(a).addWrapping(state(b)); state(d) = (state(d) ^ state(a)).rotateLeft(by: 8);
+        state(c) = state(c).addWrapping(state(d)); state(b) = (state(b) ^ state(c)).rotateLeft(by: 7);
     }
 
     static func chachaBlock(
@@ -244,12 +244,12 @@ public struct ChaCha20Poly1305 {
         }
 
         for i in 0..<16 {
-            let val = w(i) + state(i);
+            let val = w(i).addWrapping(state(i));
             let off = i * 4;
-            out(off) = UInt8(from: val);
-            out(off + 1) = UInt8(from: val >> 8);
-            out(off + 2) = UInt8(from: val >> 16);
-            out(off + 3) = UInt8(from: val >> 24);
+            out(off) = UInt8(truncating: val);
+            out(off + 1) = UInt8(truncating: val >> 8);
+            out(off + 2) = UInt8(truncating: val >> 16);
+            out(off + 3) = UInt8(truncating: val >> 24);
         }
     }
 
@@ -266,7 +266,7 @@ public struct ChaCha20Poly1305 {
 
         while offset < data.count {
             ChaCha20Poly1305.chachaBlock(key, nonce, counter, block);
-            counter = counter + 1;
+            counter = counter.addWrapping(1);
             var j: Int64 = 0;
             while j < 64 and offset < data.count {
                 result.append(data(offset) ^ block(j));
@@ -294,8 +294,8 @@ public struct ChaCha20Poly1305 {
         while mac.count % 16 != 0 { mac.append(0); }
         mac.append(contentsOf: ciphertext);
         while mac.count % 16 != 0 { mac.append(0); }
-        mac.append(contentsOf: UInt64(from: aad.count).toBytesLittleEndian().asUnsafeSlice());
-        mac.append(contentsOf: UInt64(from: ciphertext.count).toBytesLittleEndian().asUnsafeSlice());
+        mac.append(contentsOf: UInt64(truncating: aad.count).toBytesLittleEndian().asUnsafeSlice());
+        mac.append(contentsOf: UInt64(truncating: ciphertext.count).toBytesLittleEndian().asUnsafeSlice());
         ChaCha20Poly1305.poly1305(key, mac.asUnsafeSlice())
     }
 
@@ -310,10 +310,10 @@ public struct ChaCha20Poly1305 {
         let r2 = (UInt64(from: loadLE32(key, 6)) >> 4) & 0x3ffc0ff;
         let r3 = (UInt64(from: loadLE32(key, 9)) >> 6) & 0x3f03fff;
         let r4 = (UInt64(from: loadLE32(key, 12)) >> 8) & 0x00fffff;
-        let s1 = r1 * 5;
-        let s2 = r2 * 5;
-        let s3 = r3 * 5;
-        let s4 = r4 * 5;
+        let s1 = r1.multiplyWrapping(5);
+        let s2 = r2.multiplyWrapping(5);
+        let s3 = r3.multiplyWrapping(5);
+        let s4 = r4.multiplyWrapping(5);
 
         var h0: UInt64 = 0;
         var h1: UInt64 = 0;
@@ -336,47 +336,47 @@ public struct ChaCha20Poly1305 {
                 hibit = 0;
             }
 
-            h0 = h0 + (UInt64(from: loadLE32(block, 0)) & mask);
-            h1 = h1 + ((UInt64(from: loadLE32(block, 3)) >> 2) & mask);
-            h2 = h2 + ((UInt64(from: loadLE32(block, 6)) >> 4) & mask);
-            h3 = h3 + ((UInt64(from: loadLE32(block, 9)) >> 6) & mask);
-            h4 = h4 + ((UInt64(from: loadLE32(block, 12)) >> 8) | hibit);
+            h0 = h0.addWrapping((UInt64(from: loadLE32(block, 0)) & mask));
+            h1 = h1.addWrapping(((UInt64(from: loadLE32(block, 3)) >> 2) & mask));
+            h2 = h2.addWrapping(((UInt64(from: loadLE32(block, 6)) >> 4) & mask));
+            h3 = h3.addWrapping(((UInt64(from: loadLE32(block, 9)) >> 6) & mask));
+            h4 = h4.addWrapping(((UInt64(from: loadLE32(block, 12)) >> 8) | hibit));
 
             // h *= r (mod 2^130 - 5)
-            let d0 = h0 * r0 + h1 * s4 + h2 * s3 + h3 * s2 + h4 * s1;
-            var d1 = h0 * r1 + h1 * r0 + h2 * s4 + h3 * s3 + h4 * s2;
-            var d2 = h0 * r2 + h1 * r1 + h2 * r0 + h3 * s4 + h4 * s3;
-            var d3 = h0 * r3 + h1 * r2 + h2 * r1 + h3 * r0 + h4 * s4;
-            var d4 = h0 * r4 + h1 * r3 + h2 * r2 + h3 * r1 + h4 * r0;
+            let d0 = h0.multiplyWrapping(r0).addWrapping(h1.multiplyWrapping(s4)).addWrapping(h2.multiplyWrapping(s3)).addWrapping(h3.multiplyWrapping(s2)).addWrapping(h4.multiplyWrapping(s1));
+            var d1 = h0.multiplyWrapping(r1).addWrapping(h1.multiplyWrapping(r0)).addWrapping(h2.multiplyWrapping(s4)).addWrapping(h3.multiplyWrapping(s3)).addWrapping(h4.multiplyWrapping(s2));
+            var d2 = h0.multiplyWrapping(r2).addWrapping(h1.multiplyWrapping(r1)).addWrapping(h2.multiplyWrapping(r0)).addWrapping(h3.multiplyWrapping(s4)).addWrapping(h4.multiplyWrapping(s3));
+            var d3 = h0.multiplyWrapping(r3).addWrapping(h1.multiplyWrapping(r2)).addWrapping(h2.multiplyWrapping(r1)).addWrapping(h3.multiplyWrapping(r0)).addWrapping(h4.multiplyWrapping(s4));
+            var d4 = h0.multiplyWrapping(r4).addWrapping(h1.multiplyWrapping(r3)).addWrapping(h2.multiplyWrapping(r2)).addWrapping(h3.multiplyWrapping(r1)).addWrapping(h4.multiplyWrapping(r0));
 
             var c = d0 >> 26;
             h0 = d0 & mask;
-            d1 = d1 + c; c = d1 >> 26; h1 = d1 & mask;
-            d2 = d2 + c; c = d2 >> 26; h2 = d2 & mask;
-            d3 = d3 + c; c = d3 >> 26; h3 = d3 & mask;
-            d4 = d4 + c; c = d4 >> 26; h4 = d4 & mask;
-            h0 = h0 + c * 5; c = h0 >> 26; h0 = h0 & mask;
-            h1 = h1 + c;
+            d1 = d1.addWrapping(c); c = d1 >> 26; h1 = d1 & mask;
+            d2 = d2.addWrapping(c); c = d2 >> 26; h2 = d2 & mask;
+            d3 = d3.addWrapping(c); c = d3 >> 26; h3 = d3 & mask;
+            d4 = d4.addWrapping(c); c = d4 >> 26; h4 = d4 & mask;
+            h0 = h0.addWrapping(c.multiplyWrapping(5)); c = h0 >> 26; h0 = h0 & mask;
+            h1 = h1.addWrapping(c);
 
             offset = offset + 16;
         }
 
         // Fully carry h.
         var c = h1 >> 26; h1 = h1 & mask;
-        h2 = h2 + c; c = h2 >> 26; h2 = h2 & mask;
-        h3 = h3 + c; c = h3 >> 26; h3 = h3 & mask;
-        h4 = h4 + c; c = h4 >> 26; h4 = h4 & mask;
-        h0 = h0 + c * 5; c = h0 >> 26; h0 = h0 & mask;
-        h1 = h1 + c;
+        h2 = h2.addWrapping(c); c = h2 >> 26; h2 = h2 & mask;
+        h3 = h3.addWrapping(c); c = h3 >> 26; h3 = h3 & mask;
+        h4 = h4.addWrapping(c); c = h4 >> 26; h4 = h4 & mask;
+        h0 = h0.addWrapping(c.multiplyWrapping(5)); c = h0 >> 26; h0 = h0 & mask;
+        h1 = h1.addWrapping(c);
 
         // g = h + 5 - 2^130; if it doesn't go negative, h >= p and g is h mod p.
-        var g0 = h0 + 5; c = g0 >> 26; g0 = g0 & mask;
-        var g1 = h1 + c; c = g1 >> 26; g1 = g1 & mask;
-        var g2 = h2 + c; c = g2 >> 26; g2 = g2 & mask;
-        var g3 = h3 + c; c = g3 >> 26; g3 = g3 & mask;
-        let top = h4 + c;
+        var g0 = h0.addWrapping(5); c = g0 >> 26; g0 = g0 & mask;
+        var g1 = h1.addWrapping(c); c = g1 >> 26; g1 = g1 & mask;
+        var g2 = h2.addWrapping(c); c = g2 >> 26; g2 = g2 & mask;
+        var g3 = h3.addWrapping(c); c = g3 >> 26; g3 = g3 & mask;
+        let top = h4.addWrapping(c);
         if top >= 1 << 26 {
-            h0 = g0; h1 = g1; h2 = g2; h3 = g3; h4 = top - (1 << 26);
+            h0 = g0; h1 = g1; h2 = g2; h3 = g3; h4 = top.subtractWrapping((1 << 26));
         }
 
         // Repack into four 32-bit words and add s (mod 2^128).
@@ -385,14 +385,14 @@ public struct ChaCha20Poly1305 {
         let w2 = ((h2 >> 12) | (h3 << 14)) & 0xffffffff;
         let w3 = ((h3 >> 18) | (h4 << 8)) & 0xffffffff;
 
-        var f = w0 + UInt64(from: loadLE32(key, 16));
-        let t0 = UInt32(from: f & 0xffffffff);
-        f = (f >> 32) + w1 + UInt64(from: loadLE32(key, 20));
-        let t1 = UInt32(from: f & 0xffffffff);
-        f = (f >> 32) + w2 + UInt64(from: loadLE32(key, 24));
-        let t2 = UInt32(from: f & 0xffffffff);
-        f = (f >> 32) + w3 + UInt64(from: loadLE32(key, 28));
-        let t3 = UInt32(from: f & 0xffffffff);
+        var f = w0.addWrapping(UInt64(from: loadLE32(key, 16)));
+        let t0 = UInt32(truncating: f & 0xffffffff);
+        f = (f >> 32).addWrapping(w1).addWrapping(UInt64(from: loadLE32(key, 20)));
+        let t1 = UInt32(truncating: f & 0xffffffff);
+        f = (f >> 32).addWrapping(w2).addWrapping(UInt64(from: loadLE32(key, 24)));
+        let t2 = UInt32(truncating: f & 0xffffffff);
+        f = (f >> 32).addWrapping(w3).addWrapping(UInt64(from: loadLE32(key, 28)));
+        let t3 = UInt32(truncating: f & 0xffffffff);
 
         var tag: [UInt8] = [];
         tag.append(contentsOf: t0.toBytesLittleEndian().asUnsafeSlice());

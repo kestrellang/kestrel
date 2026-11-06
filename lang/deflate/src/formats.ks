@@ -17,17 +17,17 @@ func readUInt32BigEndian(bytes: Array[UInt8], offset: Int64) -> UInt32 {
 }
 
 func appendUInt32LittleEndian(mutating bytes: Array[UInt8], value: UInt32) {
-    bytes.append(UInt8(from: value & 0xFF));
-    bytes.append(UInt8(from: (value >> 8) & 0xFF));
-    bytes.append(UInt8(from: (value >> 16) & 0xFF));
-    bytes.append(UInt8(from: (value >> 24) & 0xFF));
+    bytes.append(UInt8(truncating: value & 0xFF));
+    bytes.append(UInt8(truncating: (value >> 8) & 0xFF));
+    bytes.append(UInt8(truncating: (value >> 16) & 0xFF));
+    bytes.append(UInt8(truncating: (value >> 24) & 0xFF));
 }
 
 func appendUInt32BigEndian(mutating bytes: Array[UInt8], value: UInt32) {
-    bytes.append(UInt8(from: (value >> 24) & 0xFF));
-    bytes.append(UInt8(from: (value >> 16) & 0xFF));
-    bytes.append(UInt8(from: (value >> 8) & 0xFF));
-    bytes.append(UInt8(from: value & 0xFF));
+    bytes.append(UInt8(truncating: (value >> 24) & 0xFF));
+    bytes.append(UInt8(truncating: (value >> 16) & 0xFF));
+    bytes.append(UInt8(truncating: (value >> 8) & 0xFF));
+    bytes.append(UInt8(truncating: value & 0xFF));
 }
 
 // ============================================================================

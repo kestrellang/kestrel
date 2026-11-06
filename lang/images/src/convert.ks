@@ -418,15 +418,15 @@ struct PixelCodec {
         if self.sampleBytes == 2 {
             var bits = to16(value);
             if self.isFloat { bits = floatToHalf(value); }
-            at.write(UInt8(from: bits));
-            at.offset(by: 1).write(UInt8(from: bits >> 8));
+            at.write(UInt8(truncating: bits));
+            at.offset(by: 1).write(UInt8(truncating: bits >> 8));
             return;
         }
         let bits = value.bitPattern;
-        at.write(UInt8(from: bits));
-        at.offset(by: 1).write(UInt8(from: bits >> 8));
-        at.offset(by: 2).write(UInt8(from: bits >> 16));
-        at.offset(by: 3).write(UInt8(from: bits >> 24));
+        at.write(UInt8(truncating: bits));
+        at.offset(by: 1).write(UInt8(truncating: bits >> 8));
+        at.offset(by: 2).write(UInt8(truncating: bits >> 16));
+        at.offset(by: 3).write(UInt8(truncating: bits >> 24));
     }
 
     func read(p: Pointer[UInt8]) -> RgbaF32 {

@@ -23,7 +23,7 @@ func quantize(value: Float32, maximum: Float32) -> Int64 {
     let clamped = value.clamp(0.0, 1.0);
     (clamped * maximum + 0.5).toInt64() ?? 0
 }
-func to8(value: Float32) -> UInt8 { UInt8(from: quantize(value, 255.0)) }
+func to8(value: Float32) -> UInt8 { UInt8(truncating: quantize(value, 255.0)) }
 func to16(value: Float32) -> UInt16 { UInt16(from: quantize(value, 65535.0)) }
 
 /// IEEE half-precision bits to a float.

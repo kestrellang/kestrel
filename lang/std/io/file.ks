@@ -233,7 +233,7 @@ public struct File: Readable, Writable, not Copyable {
 
     /// Calls `write(2)`. May write fewer bytes than supplied — wrap with
     /// `writeAll` from `std.io.write` to loop until done.
-    public mutating func write(from buf: UnsafeSlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(self.fd, buf.pointer, buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -364,7 +364,7 @@ public func writeFileString(path: String, content: String) -> Result[(), IoError
 /// Binary equivalent of `writeFileString`.
 public func writeFileBytes(path: String, content: Array[UInt8]) -> Result[(), IoError] {
     var file = try File.create(path);
-    writeAll(file, from: content.asUnsafeSlice())
+    writeAll(file, from: content.asSlice())
 }
 
 /// Appends `content` to `path` as UTF-8, creating the file if absent.
@@ -380,5 +380,5 @@ public func appendFileString(path: String, content: String) -> Result[(), IoErro
 /// `appendFileString`.
 public func appendFileBytes(path: String, content: Array[UInt8]) -> Result[(), IoError] {
     var file = try File.openAppend(path);
-    writeAll(file, from: content.asUnsafeSlice())
+    writeAll(file, from: content.asSlice())
 }

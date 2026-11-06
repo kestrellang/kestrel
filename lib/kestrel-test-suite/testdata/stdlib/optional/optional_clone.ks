@@ -10,12 +10,12 @@ module Test
 
             // Clone of Some
             let clonedSome = someOpt.clone();
-            if clonedSome.isNone() { return 1 }
+            if clonedSome.isNone { return 1 }
             if clonedSome.unwrap() != 42 { return 2 }
 
             // Clone of None
             let clonedNone = none.clone();
-            if clonedNone.isSome() { return 3 }
+            if clonedNone.isSome { return 3 }
 
             0
         }

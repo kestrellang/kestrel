@@ -82,7 +82,7 @@ impl OssaBodyCtx<'_, '_> {
 
     /// Did inference type the binding as a reference (`&T` / `&mutating T`)?
     /// (MIR represents the borrow itself as a `@guaranteed` pointee value.)
-    fn local_is_ref(&self, local: kestrel_hir::LocalId) -> bool {
+    pub(crate) fn local_is_ref(&self, local: kestrel_hir::LocalId) -> bool {
         self.typed.as_ref().is_some_and(|t| {
             matches!(
                 t.local_types.get(&local),

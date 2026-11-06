@@ -4107,13 +4107,12 @@ _Defined in `lang/std/text/str.ks`._
 #### function `asByteSlice`
 
 ```kestrel
-public func asByteSlice() -> UnsafeSlice[UInt8]
+public func asByteSlice() -> &Slice[UInt8]
 ```
 
-Returns a non-owning `UnsafeSlice[UInt8]` view over this string's
-raw UTF-8 bytes — no copy, no allocation. The slice borrows the
-live string buffer, so it must not outlive the string (or any
-mutation of it). O(1).
+Returns a borrowed `Slice[UInt8]` view over this string's raw
+UTF-8 bytes — no copy, no allocation. The view borrows the live
+string buffer, so it can't outlive the string. O(1).
 
 Use this to hand the bytes to a sink (a socket, a hasher, an
 FFI call) without materializing an `Array[UInt8]` via `toBytes()`.
@@ -4417,10 +4416,10 @@ Unicode case mapping, use `lowercased()`.
 
 _Defined in `lang/std/text/str.ks`._
 
-#### function `pad`
+#### function `padded`
 
 ```kestrel
-public func pad(leading: Int64, with: Char) -> String
+public func padded(leading: Int64, with: Char) -> String
 ```
 
 Returns the string padded at the start with `char` so the
@@ -4432,15 +4431,15 @@ returns a copy unchanged.
 ##### Examples
 
 ```
-"42".pad(leading: 5, with: '0');  // "00042"
+"42".padded(leading: 5, with: '0');  // "00042"
 ```
 
 _Defined in `lang/std/text/str.ks`._
 
-#### function `pad`
+#### function `padded`
 
 ```kestrel
-public func pad(trailing: Int64, with: Char) -> String
+public func padded(trailing: Int64, with: Char) -> String
 ```
 
 Returns the string padded at the end with `char` so the
@@ -4452,7 +4451,7 @@ returns a copy unchanged.
 ##### Examples
 
 ```
-"42".pad(trailing: 5, with: '.');  // "42..."
+"42".padded(trailing: 5, with: '.');  // "42..."
 ```
 
 _Defined in `lang/std/text/str.ks`._

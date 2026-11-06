@@ -25,16 +25,16 @@ module Test
 
             // ---- chars(checked: Range) ----
             let checked = s.chars(checked: std.core.Range[std.numeric.Int64](0, 5));
-            if checked.isNone() { return 5 }
+            if checked.isNone { return 5 }
             if checked.unwrap().toString().isEqual(to: "hello") == false { return 6 }
 
             // Out of bounds returns None
             let oob = s.chars(checked: std.core.Range[std.numeric.Int64](0, 100));
-            if oob.isSome() { return 7 }
+            if oob.isSome { return 7 }
 
             // Empty range
             let empty = s.chars(checked: std.core.Range[std.numeric.Int64](3, 3));
-            if empty.isNone() { return 8 }
+            if empty.isNone { return 8 }
             if empty.unwrap().toString().isEmpty == false { return 9 }
 
             0

@@ -55,7 +55,7 @@ impl OssaBodyCtx<'_, '_> {
         // The receiver view (a `value` ref accessor result) was used
         // only for its words: end it now, as a direct call ends a borrowed
         // ref argument, so it can't reach a control-flow merge (E497).
-        if self.ref_results.contains(&recv) && !self.ref_binding_vals.contains_key(&recv) {
+        if self.ref_results.contains(&recv) {
             self.end_ref_and_sources(recv);
         }
         Some(result)
@@ -445,8 +445,8 @@ impl OssaBodyCtx<'_, '_> {
     /// End a view from [`Self::emit_existential_view`] once only its words
     /// were read.
     fn end_existential_view(&mut self, view: ValueId) {
-        if self.ref_results.contains(&view) && !self.ref_binding_vals.contains_key(&view) {
-            self.emit_end_borrow(view);
+        if self.ref_results.contains(&view) {
+            self.end_ref_if_single_use(view);
         }
     }
 

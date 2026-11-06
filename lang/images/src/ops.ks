@@ -61,7 +61,7 @@ extend RawImage {
 
 /// How `resized` samples the source.
 public struct ResizeFilter: Equatable {
-    let name: String;
+    public let name: String;
     /// How far the filter reaches, in source pixels at 1:1.
     let support: Float32;
 

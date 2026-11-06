@@ -140,7 +140,7 @@ public struct Inflater: Decompressor {
                         self.bitOffset = reader.bitOffset - 8;
                         return .Ok(());
                     }
-                    output.append(UInt8(from: byte));
+                    output.append(UInt8(truncating: byte));
                     self.storedRemaining = self.storedRemaining - 1;
                 }
                 self.endBlock();
@@ -227,7 +227,7 @@ public struct Inflater: Decompressor {
             }
             if symbol < 0 { return .Err(.InvalidHuffmanCode); }
             if symbol < 256 {
-                output.append(UInt8(from: symbol));
+                output.append(UInt8(truncating: symbol));
                 continue;
             }
             if symbol == 256 { return .Ok(true); }

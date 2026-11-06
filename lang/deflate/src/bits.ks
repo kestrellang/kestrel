@@ -91,7 +91,7 @@ struct BitWriter {
         self.buffer = self.buffer | (value << self.bitCount);
         self.bitCount = self.bitCount + count;
         while self.bitCount >= 8 {
-            self.bytes.append(UInt8(from: self.buffer & 0xFF));
+            self.bytes.append(UInt8(truncating: self.buffer & 0xFF));
             self.buffer = self.buffer >> 8;
             self.bitCount = self.bitCount - 8;
         }

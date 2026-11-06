@@ -6,6 +6,7 @@ module std.core
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
 import std.text.(String)
 import std.memory.(Pointer)
+import std.collections.(Slice)
 import std.numeric.(UInt64, Int64)
 
 /// Protocol for types whose values can be compared for equality.
@@ -244,7 +245,7 @@ public protocol Hashable: Equatable {
 /// `Dictionary`, and any structure that wants stable hashes.
 public protocol Hasher {
     /// Mixes `bytes` into the running hash state.
-    mutating func write(bytes: UnsafeSlice[UInt8])
+    mutating func write(bytes: Slice[UInt8])
     /// Returns the finalised hash. After calling `finish` the hasher's
     /// state is unspecified — don't reuse it.
     mutating func finish() -> UInt64

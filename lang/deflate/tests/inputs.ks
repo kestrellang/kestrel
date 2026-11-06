@@ -4,7 +4,7 @@ module deflate_tests_fixtures
 
 func pattern(n: Int64) -> Array[UInt8] {
     var out: [UInt8] = [];
-    for i in 0..<n { out.append(UInt8(from: i % 251)); }
+    for i in 0..<n { out.append(UInt8(truncating: i % 251)); }
     out
 }
 
@@ -27,7 +27,7 @@ func noise(n: Int64) -> Array[UInt8] {
     var out: [UInt8] = [];
     for _ in 0..<n {
         state = (state * 1103515245 + 12345) & 0x7FFFFFFF;
-        out.append(UInt8(from: (state >> 16) & 0xFF));
+        out.append(UInt8(truncating: (state >> 16) & 0xFF));
     }
     out
 }
@@ -49,7 +49,7 @@ func fromHex(hex: String) -> Array[UInt8] {
     var out: [UInt8] = [];
     var i: Int64 = 0;
     while i + 1 < digits.count {
-        out.append(UInt8(from: hexValue(digits(i)) * 16 + hexValue(digits(i + 1))));
+        out.append(UInt8(truncating: hexValue(digits(i)) * 16 + hexValue(digits(i + 1))));
         i = i + 2;
     }
     out

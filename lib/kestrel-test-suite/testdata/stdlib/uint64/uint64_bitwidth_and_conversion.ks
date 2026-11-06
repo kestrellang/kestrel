@@ -57,25 +57,25 @@ module Test
 
             // parse — valid large value
             let parsed = std.numeric.UInt64(parsing: "18446744073709551615");
-            if parsed.isNone() { return 13 }
+            if parsed.isNone { return 13 }
             if parsed.unwrap().isEqual(to: std.numeric.UInt64.maxValue) == false { return 14 }
 
             // parse — zero
             let parsedZero = std.numeric.UInt64(parsing: "0");
-            if parsedZero.isNone() { return 15 }
+            if parsedZero.isNone { return 15 }
             if parsedZero.unwrap().isEqual(to: std.numeric.UInt64.zero) == false { return 16 }
 
             // parse — out of range (18446744073709551616 > max)
             let parsedOver = std.numeric.UInt64(parsing: "18446744073709551616");
-            if parsedOver.isSome() { return 17 }
+            if parsedOver.isSome { return 17 }
 
             // parse — negative not allowed for unsigned
             let parsedNeg = std.numeric.UInt64(parsing: "-1");
-            if parsedNeg.isSome() { return 18 }
+            if parsedNeg.isSome { return 18 }
 
             // parse — empty string
             let parsedEmpty = std.numeric.UInt64(parsing: "");
-            if parsedEmpty.isSome() { return 19 }
+            if parsedEmpty.isSome { return 19 }
 
             0
         }
