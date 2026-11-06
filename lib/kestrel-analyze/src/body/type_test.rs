@@ -143,7 +143,7 @@ fn check_type_test(
         diags.push(diag(0, message, span, "not an existential"));
         return;
     };
-    let target = kestrel_type_infer::compare::resolve_hir_type(cx.query, cx.root, target);
+    let target = kestrel_type_infer::compare::resolve_hir_type(cx.query, target);
     let Some(blocker) = kestrel_type_infer::type_test_blocker(cx.query, &target, &bounds, cx.root)
     else {
         return;

@@ -30,13 +30,13 @@ func errorMessage(db: RawPointer) -> String {
 func bindParams(stmt: RawPointer, bindings: Array[SqliteValue]) -> () throws SqliteError {
     var i: Int64 = 0;
     while i < bindings.count {
-        let paramIndex = Int32(from: i + 1);
+        let paramIndex = Int32(truncating: i + 1);
         let bindResult = match bindings(i) {
             .Integer(v) => ffi.sqlite3_bind_int64(stmt, paramIndex, v),
             .Real(v) => ffi.sqlite3_bind_double(stmt, paramIndex, v.raw),
             .Text(v) => {
                 let cstr = v.toCString();
-                let byteCount = Int32(from: v.bytes.count);
+                let byteCount = Int32(truncating: v.bytes.count);
                 let r = ffi.sqlite3_bind_text(stmt, paramIndex, cstr.raw.asRaw(), byteCount, SQLITE_TRANSIENT());
                 cstr.free();
                 r
@@ -58,7 +58,7 @@ func executeOnDb(db: RawPointer, sql: SQL) -> () throws SqliteError {
     let prepResult = ffi.sqlite3_prepare_v2(
         db,
         ctemplate.raw.asRaw(),
-        Int32(from: -1),
+        Int32(truncating: -1),
         Pointer(to: stmtRaw).asRaw(),
         RawPointer.nullPointer()
     );
@@ -86,7 +86,7 @@ func queryOnDb[R](db: RawPointer, sql: SQL) -> Array[R] throws SqliteError where
     let prepResult = ffi.sqlite3_prepare_v2(
         db,
         ctemplate.raw.asRaw(),
-        Int32(from: -1),
+        Int32(truncating: -1),
         Pointer(to: stmtRaw).asRaw(),
         RawPointer.nullPointer()
     );
@@ -132,7 +132,7 @@ func getCachedStmt(
     cache: RcBox[Dictionary[String, RawPointer]],
     template: String
 ) -> RawPointer throws SqliteError {
-    let cached = cache.valuePtr().with { (d) in d(template) };
+    let cached = cache.value(template);
     match cached {
         .Some(stmt) => {
              ffi.sqlite3_reset(stmt);
@@ -144,7 +144,7 @@ func getCachedStmt(
             let prepResult = ffi.sqlite3_prepare_v2(
                 db,
                 ctemplate.raw.asRaw(),
-                Int32(from: -1),
+                Int32(truncating: -1),
                 Pointer(to: stmtRaw).asRaw(),
                 RawPointer.nullPointer()
             );
@@ -152,7 +152,7 @@ func getCachedStmt(
             if prepResult != ffi.SQLITE_OK() {
                 throw SqliteError.Error(errorMessage(db));
             }
-            cache.modify { (mutating d) in let _ = d.insert(template, stmtRaw); };
+            let _ = cache.mutatingValue.insert(template, stmtRaw);
             .Ok(stmtRaw)
         }
     }
@@ -205,11 +205,9 @@ func queryCachedOnDb[R](
 // Finalizes every cached statement. Call once, before `sqlite3_close` (open
 // statements make `sqlite3_close` fail and leak the handle).
 func finalizeCachedStmts(cache: RcBox[Dictionary[String, RawPointer]]) {
-    cache.valuePtr().with { (d) in
-        for entry in d.iter() {
-             ffi.sqlite3_finalize(entry.1);
-        }
-    };
+    for entry in cache.value.iter() {
+         ffi.sqlite3_finalize(entry.1);
+    }
 }
 
 // Helper: run a raw SQL string (for BEGIN/COMMIT/ROLLBACK)
@@ -242,7 +240,7 @@ func readRow(stmt: RawPointer) -> Row {
     var columns = [];
     var i: Int64 = 0;
     while i < colCount {
-        let col = Int32(from: i);
+        let col = Int32(truncating: i);
         let colType = ffi.sqlite3_column_type(stmt, col);
         if colType == ffi.SQLITE_INTEGER() {
             columns.append(SqliteValue.Integer(ffi.sqlite3_column_int64(stmt, col)));

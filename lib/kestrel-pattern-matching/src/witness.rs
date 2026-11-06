@@ -54,7 +54,7 @@ impl Witness {
         Witness::Bool(value)
     }
 
-    pub fn integer(value: i64) -> Self {
+    pub fn integer(value: i128) -> Self {
         Witness::Literal(value.to_string())
     }
 

@@ -61,21 +61,26 @@ impl<'q, 'c> FrontEndLayer<'q, 'c> {
                 entity: *entity,
                 args: args.iter().map(|a| self.hir_to_ety(a)).collect(),
             },
-            HirTy::Tuple(elems, _) => ETy::Tuple(elems.iter().map(|a| self.hir_to_ety(a)).collect()),
+            HirTy::Tuple(elems, _) => {
+                ETy::Tuple(elems.iter().map(|a| self.hir_to_ety(a)).collect())
+            },
             HirTy::Never(_) => ETy::Never,
             HirTy::Param(e, _) => ETy::Param(*e),
             HirTy::AssocProjection { base, assoc, .. } => ETy::Proj {
                 base: Box::new(self.hir_to_ety(base)),
                 assoc: *assoc,
             },
-            HirTy::Ref { inner, mutating, .. } => ETy::Ref {
+            HirTy::Ref {
+                inner, mutating, ..
+            } => ETy::Ref {
                 inner: Box::new(self.hir_to_ety(inner)),
                 mutating: *mutating,
             },
             HirTy::Infer(_) => ETy::Var,
             HirTy::Error(_) => ETy::Poison,
+            HirTy::Alias { expanded, .. } => self.hir_to_ety(expanded),
             HirTy::Function { .. }
-            | HirTy::AliasUse { .. }
+            | HirTy::AbstractAssoc { .. }
             | HirTy::SelfType(..)
             | HirTy::Opaque { .. }
             | HirTy::RawExistential { .. } => self.abstract_of(ty.clone()),
@@ -107,7 +112,9 @@ impl<'q, 'c> FrontEndLayer<'q, 'c> {
                     },
                 }
             },
-            ETy::Tuple(elems) => HirTy::Tuple(elems.iter().map(|a| self.ety_to_hir(a)).collect(), span),
+            ETy::Tuple(elems) => {
+                HirTy::Tuple(elems.iter().map(|a| self.ety_to_hir(a)).collect(), span)
+            },
             ETy::Never => HirTy::Never(span),
             ETy::Param(e) => HirTy::Param(*e, span),
             ETy::Proj { base, assoc } => HirTy::AssocProjection {
@@ -337,7 +344,8 @@ impl EntailLayer for FrontEndLayer<'_, '_> {
                 return Supply::Decided(Tri::Holds);
             }
             let hir = self.ety_to_hir(ty);
-            let sem = kestrel_semantics::hir_type_copy_semantics(self.ctx, &hir, self.root, self.root);
+            let sem =
+                kestrel_semantics::hir_type_copy_semantics(self.ctx, &hir, self.root, self.root);
             let ok = if cloneable {
                 sem == kestrel_semantics::CopySemantics::Cloneable
             } else {
@@ -463,7 +471,12 @@ impl FrontEndLayer<'_, '_> {
         }
         let pinned: Vec<Entity> = bindings.iter().map(|b| b.assoc).collect();
         let needs = kestrel_semantics::self_conformance(self.ctx, protocol, &pinned, self.root);
-        kestrel_debug::ktrace!("existential", "  pinned {:?}; self-conformance: {:?}", pinned, needs);
+        kestrel_debug::ktrace!(
+            "existential",
+            "  pinned {:?}; self-conformance: {:?}",
+            pinned,
+            needs
+        );
 
         if needs.blocker.is_some() {
             return Some(Supply::Decided(Tri::Fails));
@@ -540,22 +553,26 @@ impl FrontEndLayer<'_, '_> {
     /// `Addable.Output`, not `Equal.Output`).
     fn assoc_binding_in(&self, owner: Entity, name: &str, assoc: Entity) -> Option<ETy> {
         let declaring = self.ctx.parent_of(assoc);
-        self.ctx.children_of(owner).iter().copied().find_map(|child| {
-            let named = self.ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-                && self
-                    .ctx
-                    .get::<kestrel_ast_builder::Name>(child)
-                    .is_some_and(|n| n.0 == name);
-            if !named || !self.qualifier_matches(child, declaring) {
-                return None;
-            }
-            self.ctx
-                .query(kestrel_hir_lower::LowerTypeAnnotation {
-                    entity: child,
-                    root: self.root,
-                })
-                .map(|t| self.hir_to_ety(&t))
-        })
+        self.ctx
+            .children_of(owner)
+            .iter()
+            .copied()
+            .find_map(|child| {
+                let named = self.ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
+                    && self
+                        .ctx
+                        .get::<kestrel_ast_builder::Name>(child)
+                        .is_some_and(|n| n.0 == name);
+                if !named || !self.qualifier_matches(child, declaring) {
+                    return None;
+                }
+                self.ctx
+                    .query(kestrel_hir_lower::LowerTypeAnnotation {
+                        entity: child,
+                        root: self.root,
+                    })
+                    .map(|t| self.hir_to_ety(&t))
+            })
     }
 
     /// Does alias `child`'s qualifier (if any) name `protocol`?
@@ -566,11 +583,13 @@ impl FrontEndLayer<'_, '_> {
         let kestrel_ast::AstType::Named { segments, .. } = &target.0 else {
             return true;
         };
-        let resolved = self.ctx.query(kestrel_name_res::resolve_type::ResolveTypePath {
-            segments: segments.iter().map(|s| s.name.clone()).collect(),
-            context: child,
-            root: self.root,
-        });
+        let resolved = self
+            .ctx
+            .query(kestrel_name_res::resolve_type::ResolveTypePath {
+                segments: segments.iter().map(|s| s.name.clone()).collect(),
+                context: child,
+                root: self.root,
+            });
         match resolved {
             kestrel_name_res::resolve_type::TypeResolution::Found(e) => Some(e) == protocol,
             _ => true,

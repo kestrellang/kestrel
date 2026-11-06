@@ -118,7 +118,7 @@ fn nested_interpolation_and_it_in_holes() {
 
 #[test]
 fn broken_hole_is_an_error_node_with_an_interpolation_error() {
-    let result = parse("func f() { let _ = \"v=\\(n.0.0)\"; }\n");
+    let result = parse("func f() { let _ = \"v=\\(n + * 2)\"; }\n");
     assert!(!result.errors.is_empty());
     for e in &result.errors {
         assert!(
@@ -146,9 +146,9 @@ fn unterminated_string_does_not_swallow_the_file() {
 
 #[test]
 fn broken_hole_reports_once() {
-    // `n.0.0` lexes as `n` `.` `0.0`: the hole's first error is the cause;
-    // the leftover tokens are its cascade, not a second diagnostic.
-    let result = parse("func f() { let _ = \"v=\\(n.0.0)\"; }\n");
+    // `n + * 2` has no operand after `+`: the hole's first error is the
+    // cause; the leftover tokens are its cascade, not a second diagnostic.
+    let result = parse("func f() { let _ = \"v=\\(n + * 2)\"; }\n");
     assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
 }
 

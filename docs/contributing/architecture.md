@@ -77,8 +77,8 @@ Source text
 ┌──────────────────────────────────────────────────────┐
 │  CODEGEN         …-cranelift or …-llvm               │
 │  Monomorphization and mangling already ran as MIR    │
-│  passes; emit Cranelift IR (default) or LLVM IR      │
-│  (--backend llvm), link.                             │
+│  passes; emit Cranelift IR (-O0) or LLVM IR          │
+│  (-O1/-O2), link.                                    │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -131,9 +131,10 @@ The authoritative catalogue is `lib/kestrel-ast-builder/src/components.rs`.
 | `kestrel-pattern-matching` | Exhaustiveness checking. |
 | `kestrel-mir` | OSSA MIR types: `MirModule`, `FunctionDef`, `OssaBody`, `ValueId`, `Instruction`, `BasicBlock`, `Terminator`. SSA, not place-based (no `Place`/`Rvalue`/`Statement`). Also owns the MIR pass pipeline, monomorphization, type layout, and symbol mangling. |
 | `kestrel-mir-lower` | Entities + typed bodies → MIR via plain functions (entry: `lower_module`), not a query; its only query is `IsProtocolMethod`. |
-| `kestrel-codegen` | Tiny backend-agnostic crate: target configuration (`TargetConfig`). Layout and mangling now live in `kestrel-mir`. |
+| `kestrel-target` | The one compilation target (`TargetConfig`: triple, pointer width, `@platform` OS). Built once from `--target` or the host and read by the AST builder, MIR layout and both backends — never add a second copy. |
+| `kestrel-codegen` | Backend-agnostic codegen rules shared by Cranelift and LLVM, generic over each backend's scalar type (`ScalarModel`): MIR type → `TypeRepr` classification, ABI pass/return modes, field/tuple offset lookups. Put a rule here rather than in one backend, or `-O0` and `-O1` can disagree. Layout itself and mangling live in `kestrel-mir`. |
 | `kestrel-codegen-cranelift` | Cranelift backend (default): lowers the already-monomorphized OSSA MIR → machine code and links. |
-| `kestrel-codegen-llvm` | LLVM 18 backend (via inkwell): consumes the same monomorphized MIR and produces a linkable object file (plus optional textual LLVM IR). Selected via the CLI `--backend llvm` flag (`Backend` enum in `src/main.rs`; `KESTREL_BACKEND` env var overrides). |
+| `kestrel-codegen-llvm` | LLVM 18 backend (via inkwell): consumes the same monomorphized MIR and produces a linkable object file (plus optional textual LLVM IR). Selected by optimization level: `-O1`/`-O2` build with LLVM, `-O0` with Cranelift (`Backend::for_opt` in `src/main.rs`). |
 | `kestrel-compiler` | Low-level compiler / query engine. Owns the `World`. |
 | `kestrel-compiler-driver` | High-level orchestration used by the CLI and tests. |
 | `kestrel-debug` | Introspection utilities. |

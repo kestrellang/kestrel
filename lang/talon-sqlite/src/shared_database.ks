@@ -30,6 +30,10 @@ struct SharedDbStorage {
 ///
 /// Use this instead of `Database` when the connection must live inside a
 /// `Cloneable` context (e.g. a Perch `AppCtx`).
+///
+/// Marked `@observabledrop`: since the last drop closes the handle, the
+/// compiler keeps every copy alive until the end of its scope.
+@observabledrop
 public struct SharedDatabase: Cloneable, SqliteExecutor {
     private var ptr: Pointer[SharedDbStorage]
     // Prepared-statement cache, shared across clones (one sqlite3* handle ⇒ one

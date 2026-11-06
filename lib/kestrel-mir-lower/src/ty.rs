@@ -163,7 +163,9 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
             ctx.register_name(*entity);
             ctx.intern(MirTy::TypeParam(*entity))
         },
-        HirTy::AliasUse { .. } => ctx.module.ty_arena.error(),
+        // Aliases arrive expanded; bounds were checked by inference.
+        HirTy::Alias { expanded, .. } => lower_type(ctx, expanded),
+        HirTy::AbstractAssoc { .. } => ctx.module.ty_arena.error(),
         HirTy::AssocProjection { base, assoc, .. } => lower_assoc_projection(ctx, base, *assoc),
         HirTy::Opaque { .. } => ctx.module.ty_arena.error(),
         HirTy::RawExistential {
@@ -310,7 +312,12 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
                 .iter()
                 .map(|(p, args)| {
                     ctx.register_name(*p);
-                    (*p, args.iter().map(|a| lower_resolved_ty_preserving(ctx, a)).collect())
+                    (
+                        *p,
+                        args.iter()
+                            .map(|a| lower_resolved_ty_preserving(ctx, a))
+                            .collect(),
+                    )
                 })
                 .collect();
             let bindings: Vec<(Entity, TyId)> = bindings
@@ -408,6 +415,10 @@ fn try_lang_primitive(ctx: &mut LowerCtx, entity: Entity, type_args: &[TyId]) ->
             let inner = type_args.first().copied()?;
             Some(ctx.module.ty_arena.pointer(inner))
         },
+        "slice" => {
+            let elem = type_args.first().copied()?;
+            Some(ctx.module.ty_arena.slice(elem))
+        },
         // Synthetic ref-extension targets: the type layer always uses
         // `MirTy::Ref` — the entities exist only for decl/name-res.
         "&" => {
@@ -500,10 +511,10 @@ fn lower_type_replacing_opaque(ctx: &mut LowerCtx, ty: &HirTy, concrete: &Resolv
 fn contains_opaque(ty: &HirTy) -> bool {
     match ty {
         HirTy::Opaque { .. } => true,
-        HirTy::Struct { args, .. }
-        | HirTy::Enum { args, .. }
-        | HirTy::Protocol { args, .. }
-        | HirTy::AliasUse { args, .. } => args.iter().any(contains_opaque),
+        HirTy::Struct { args, .. } | HirTy::Enum { args, .. } | HirTy::Protocol { args, .. } => {
+            args.iter().any(contains_opaque)
+        },
+        HirTy::Alias { expanded, .. } => contains_opaque(expanded),
         HirTy::Tuple(elems, _) => elems.iter().any(contains_opaque),
         HirTy::Function { params, ret, .. } => {
             params.iter().any(contains_opaque) || contains_opaque(ret)

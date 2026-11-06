@@ -4,7 +4,7 @@
 module Test
 
 struct Provider[T] {
-    let provide: () -> T
+    let provide: escaping () -> T
 }
 
 @main

@@ -11,8 +11,8 @@ bb0:
     %v6 = literal false  // @owned Bool
     store_assign %v3, %v6
     %v7 = call Test.take(%v5)  // @owned ()
-    %v8 = literal ()  // @owned ()
     destroy_value %v7
+    %v8 = literal ()  // @owned ()
     destroy_value %v3
     destroy_value %v2
     return %v8

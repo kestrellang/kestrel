@@ -18,6 +18,7 @@ use crate::ty::resolve_callable_types;
 pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) {
     let name = ctx.register_name(entity);
     let mut def = EnumDef::new(entity, &name);
+    ctx.record_observable_drop(entity);
 
     def.type_params = collect_type_params(ctx, entity);
     def.type_info = TypeInfo {
@@ -32,6 +33,13 @@ pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) {
             entity,
             root: ctx.root,
         });
+    def.staticness = ctx
+        .query
+        .query(kestrel_semantics::NominalStaticness {
+            entity,
+            root: ctx.root,
+        })
+        .staticness;
     def.layout_attrs = lower_layout_attrs(ctx, entity);
 
     let boxed = ctx.query.query(kestrel_semantics::IndirectCases {

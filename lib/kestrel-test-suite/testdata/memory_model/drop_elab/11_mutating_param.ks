@@ -8,7 +8,6 @@
 // has no other locals; the MIR should be drop-free.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

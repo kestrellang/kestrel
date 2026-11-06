@@ -4,7 +4,7 @@
 module Test
 
 enum OptionalTransform[T] {
-    case Some(f: (T) -> T)
+    case Some(f: escaping (T) -> T)
     case None
 }
 

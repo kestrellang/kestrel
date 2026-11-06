@@ -119,10 +119,20 @@ pub struct InferCtx<'a> {
     /// never see a ref. Patterns stay wired directly to the scrutinee var.
     pub(crate) scrutinee_exprs: HashSet<HirExprId>,
 
+    /// The scrutinees whose arms write through a `&mutating` binder: a
+    /// failable member read there goes through its `mutating ref`.
+    pub(crate) mutating_scrutinee_exprs: HashSet<HirExprId>,
+
     /// HirExprIds that are a `Call`'s direct callee. A direct callee Def
     /// legitimately carries `TyKind::Function { ret: Ref }` — exempted from
     /// the E491 function-as-value check in `validate_ref_placement`.
     pub(crate) direct_callee_exprs: HashSet<HirExprId>,
+
+    /// Call expressions whose callee NAMES a type (`T(...)`, `Self(...)`,
+    /// `B.Item(...)`) rather than holding a value. The callee's type can't
+    /// tell them apart — `T` and a `t: T` are both `Param` — so `solve_call`
+    /// reads this to dispatch an init versus an instance subscript.
+    pub(crate) type_callee_calls: HashSet<HirExprId>,
 
     /// HirExprIds that initialize a `let`/`var` binding. Bindings are VALUE
     /// contexts (decay): a ref-returning call here binds its result to the
@@ -131,6 +141,11 @@ pub struct InferCtx<'a> {
     /// would defeat the coerce-side decay arm).
     pub(crate) binding_init_exprs: HashSet<HirExprId>,
 
+    /// The `binding_init_exprs` whose binding has a type annotation: its type
+    /// flows into the initializer (a generic return infers from it), so a
+    /// not-yet-known return never waits on the deferred decay.
+    pub(crate) annotated_init_exprs: HashSet<HirExprId>,
+
     /// HirExprIds that are an `Assign`'s TARGET. A `&mutating T`-returning
     /// target (`arr.mutableAt(index: i) = v`) types as the POINTEE so the
     /// value's Coerce just works — order-independently (the value side may
@@ -138,6 +153,12 @@ pub struct InferCtx<'a> {
     /// for the analyzer and MIR comes from the resolved callee's
     /// `CallableRefReturn`, not from this expression's recorded type.
     pub(crate) assign_target_exprs: HashSet<HirExprId>,
+
+    /// The VALUE exprs of assignments whose target is a call / member
+    /// access (`d(k) = v`), so `solve_assign_target` can tell a lent
+    /// failable place (never assignable: the analyzer reports E214) from an
+    /// `Optional[&T]` local being rebound.
+    pub(crate) place_assign_values: HashSet<HirExprId>,
 
     /// HirExprIds in ALWAYS-DECAY value positions: `if`/`match` ARM VALUES
     /// (refs cannot cross merges) and array/tuple/dict LITERAL ELEMENTS
@@ -148,6 +169,14 @@ pub struct InferCtx<'a> {
     /// bidirectional back-flow (annotation → arms/elements, literal
     /// defaulting, ExpressibleByArrayLiteral targeting) is untouched.
     pub(crate) always_decay_exprs: HashSet<HirExprId>,
+
+    /// HirExprIds that are a call's ARGUMENT. Params never carry ref types
+    /// (E480), so an argument's value type is the POINTEE: a ref-returning
+    /// call here binds its result to the pointee in `bind_call_result`,
+    /// before a generic param (`m(s(i))`, `I` of the outer subscript) can
+    /// adopt the pending ref wholesale. The place itself still reaches MIR
+    /// through `ref_return_calls`.
+    pub(crate) call_arg_exprs: HashSet<HirExprId>,
 
     /// Check-mode leaves whose type comes from their OWN pending constraint
     /// (a call, method call or operator — bidi §2.1 synth). While
@@ -172,6 +201,15 @@ pub struct InferCtx<'a> {
     /// Nesting depth of string-interpolation desugarings being generated;
     /// their accumulator calls are exempt from the known-receiver rule.
     pub(crate) interpolation_depth: u32,
+    /// Nesting depth of `solver::try_solve`. Constraints the walker emits
+    /// (depth 0) are decided on the spot (bidi P5); constraints the solver
+    /// emits while deciding another one — an overload candidate's parameter
+    /// equalities, say — stay queued, since that decision may still back out.
+    pub(crate) solving_depth: u32,
+    /// Off while the body's assumptions Γ (params, where clauses) are being
+    /// set up: those constraints are interdependent and settle as one batch.
+    /// On once the walker starts (bidi P5).
+    pub(crate) eager: bool,
 
     /// HirExprIds of `HirExpr::ProtocolCall` nodes that sit inside a
     /// `HirExpr::Sugar` wrapper (the desugaring's primary call). When the
@@ -181,6 +219,24 @@ pub struct InferCtx<'a> {
     /// errors inside the desugared subtree. Populated by Sugar's per-kind
     /// gen helpers before they recurse into `inner`.
     pub(crate) poison_protocol_call_recv_on_failure: HashSet<HirExprId>,
+
+    /// The `Iterable.iter()` ProtocolCall of each `for` loop. Its `gen_expr`
+    /// arm emits `Constraint::ForLoopIterator` instead of a plain protocol
+    /// call, which picks "the iterable is the iterator" vs `iter()` once the
+    /// iterable's type is known. Populated by `mark_sugar_primary`.
+    pub(crate) for_loop_iter_calls: HashSet<HirExprId>,
+
+    /// The `for_loop_iter_calls` whose iterable is itself an `Iterator`.
+    /// Surfaced on `TypedBody.direct_iterators`.
+    pub(crate) direct_iterators: HashSet<HirExprId>,
+
+    /// Expressions whose `Optional[&T]` value decays to `Optional[T]`: bound
+    /// initializers and operator receivers. Surfaced on `TypedBody.optional_ref_decays`.
+    pub(crate) optional_ref_decays: HashSet<HirExprId>,
+
+    /// Every resolved call's instantiated return var (`bind_call_result`).
+    /// Those that resolve to a ref surface as `TypedBody.ref_return_calls`.
+    pub(crate) call_return_tvs: HashMap<HirExprId, TyVar>,
 
     /// Member-access exprs that came from a desugared `ProtocolCall`
     /// (operators, for-in, try). The lazy `Indirection` peel in `solve_member`
@@ -197,6 +253,11 @@ pub struct InferCtx<'a> {
     /// Maps the expr to its operator protocol (`Addable`, `Equal`, …), which
     /// Rule L checks the right operand against.
     pub(crate) operator_members: HashMap<HirExprId, Entity>,
+    /// Operator call → its receiver (left operand) expression.
+    pub(crate) operator_receivers: HashMap<HirExprId, HirExprId>,
+    /// Receivers of instance method calls (`xs.first().map(f)`): a lent
+    /// `Optional[&T]` there decays to `Optional[T]` (`optional_ref_decay_site`).
+    pub(crate) method_receiver_exprs: HashSet<HirExprId>,
 
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
@@ -225,6 +286,15 @@ pub struct InferCtx<'a> {
     /// the solver.
     pub(crate) type_arg_spans: HashMap<HirExprId, Span>,
 
+    /// Source span of each collection-literal TyVar (array / dictionary), so
+    /// the type it defaults to (`Array[?E]`) is well-formedness-checked at
+    /// the literal, like an annotation.
+    pub(crate) literal_spans: HashMap<TyVar, Span>,
+
+    /// Type-arg vars created for collection-literal defaults (`?E` in
+    /// `Array[?E]`); see `report_unsolved`.
+    pub(crate) literal_default_args: Vec<TyVar>,
+
     // === Bookkeeping ===
     /// Type assigned to each HirExpr during constraint generation.
     pub(crate) expr_types: HashMap<HirExprId, TyVar>,
@@ -239,7 +309,6 @@ pub struct InferCtx<'a> {
     pub(crate) return_ty_span: Option<Span>,
 
     /// Entity being inferred (function/init/getter).
-    #[allow(dead_code)]
     pub(crate) owner: Entity,
     pub(crate) root: Entity,
 
@@ -379,7 +448,6 @@ pub struct InferCtx<'a> {
     /// wins. Keyed structurally, not by TyVar, because the duplicate sites
     /// form independent TyVar trees for the same concrete type.
     pub(crate) reported_typearg_conformance: HashSet<(String, Entity)>,
-
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -426,24 +494,39 @@ impl<'a> InferCtx<'a> {
             error_is_cascade: Vec::new(),
             errored_coerce_exprs: HashSet::default(),
             scrutinee_exprs: HashSet::default(),
+            mutating_scrutinee_exprs: HashSet::default(),
             assign_target_exprs: HashSet::default(),
+            place_assign_values: HashSet::default(),
             always_decay_exprs: HashSet::default(),
+            call_arg_exprs: HashSet::default(),
             direct_callee_exprs: HashSet::default(),
+            type_callee_calls: HashSet::default(),
             binding_init_exprs: HashSet::default(),
+            annotated_init_exprs: HashSet::default(),
             synth_pending_exprs: HashSet::default(),
             optional_chain_leaves: HashSet::default(),
             chain_modes: HashMap::default(),
             synth_gate: true,
             interpolation_depth: 0,
+            solving_depth: 0,
+            eager: false,
             poison_protocol_call_recv_on_failure: HashSet::default(),
+            for_loop_iter_calls: HashSet::default(),
+            direct_iterators: HashSet::default(),
+            optional_ref_decays: HashSet::default(),
+            call_return_tvs: HashMap::default(),
             protocol_dispatch_members: HashSet::default(),
             operator_members: HashMap::default(),
+            operator_receivers: HashMap::default(),
+            method_receiver_exprs: HashSet::default(),
             resolutions: HashMap::default(),
             indirection_peels: HashMap::default(),
             field_subscripts: HashMap::default(),
             promotions: HashMap::default(),
             type_args: HashMap::default(),
             type_arg_spans: HashMap::default(),
+            literal_spans: HashMap::default(),
+            literal_default_args: Vec::new(),
             expr_types: HashMap::default(),
             local_types: HashMap::default(),
             return_ty: TyVar(0),
@@ -511,6 +594,25 @@ impl<'a> InferCtx<'a> {
             }
         }
         None
+    }
+
+    /// The protocol `member` belongs to: declared in its body (a requirement)
+    /// or in an extension of it (a default). `None` for any other member.
+    pub fn declaring_protocol(&self, member: Entity) -> Option<Entity> {
+        use kestrel_ast_builder::NodeKind;
+        let parent = self.query_ctx.parent_of(member)?;
+        let protocol = match self.query_ctx.get::<NodeKind>(parent) {
+            Some(NodeKind::Protocol) => parent,
+            Some(NodeKind::Extension) => {
+                self.query_ctx
+                    .query(kestrel_name_res::ExtensionTargetEntity {
+                        extension: parent,
+                        root: self.root,
+                    })?
+            },
+            _ => return None,
+        };
+        (self.query_ctx.get::<NodeKind>(protocol) == Some(&NodeKind::Protocol)).then_some(protocol)
     }
 
     // ===== TyVar creation =====
@@ -633,6 +735,28 @@ impl<'a> InferCtx<'a> {
     pub fn project_associated(&mut self, base: TyVar, assoc: Entity, span: Span) -> TyVar {
         let result = self.fresh();
         self.associated_entity(base, assoc, result, span);
+        result
+    }
+
+    /// [`Self::project_associated`] through the conformance `protocol_args`
+    /// select (see [`AssocKey::Conformance`](crate::constraint::AssocKey)).
+    pub fn project_conformance_associated(
+        &mut self,
+        base: TyVar,
+        assoc: Entity,
+        protocol_args: Vec<TyVar>,
+        span: Span,
+    ) -> TyVar {
+        let result = self.fresh();
+        self.emit(Constraint::Associated {
+            container: base,
+            key: crate::constraint::AssocKey::Conformance {
+                assoc,
+                protocol_args,
+            },
+            result,
+            span,
+        });
         result
     }
 
@@ -879,7 +1003,17 @@ impl<'a> InferCtx<'a> {
     pub fn report_error(&mut self, err: InferError) -> TyVar {
         let err = self.reword_conformance(err);
         let detail = crate::result::describe_error(self, &err);
-        let cascade = err.mentioned_types().into_iter().any(|tv| self.contains_error(tv));
+        kestrel_debug::ktrace!(
+            "infer-err",
+            "{detail:?} in {:?}",
+            self.query_ctx
+                .get::<kestrel_ast_builder::Name>(self.owner)
+                .map(|n| n.0.clone())
+        );
+        let cascade = err
+            .mentioned_types()
+            .into_iter()
+            .any(|tv| self.contains_error(tv));
         self.errors.push(err);
         self.error_details.push(detail);
         self.error_is_cascade.push(cascade);
@@ -892,9 +1026,9 @@ impl<'a> InferCtx<'a> {
     /// operator's words.
     fn reword_conformance(&self, err: InferError) -> InferError {
         match err {
-            InferError::DoesNotConform { ty, protocol, span }
-                if self.resolver.builtin(Builtin::OptionalChainProtocol) == Some(protocol) =>
-            {
+            InferError::DoesNotConform {
+                ty, protocol, span, ..
+            } if self.resolver.builtin(Builtin::OptionalChainProtocol) == Some(protocol) => {
                 InferError::OptionalChainNotConforming { ty, span }
             },
             other => other,
@@ -956,14 +1090,18 @@ impl<'a> InferCtx<'a> {
             | TyKind::Protocol { args, .. }
             | TyKind::TypeAlias { args, .. } => args.clone(),
             TyKind::Tuple(elems) => elems.clone(),
-            TyKind::Function { params, ret, .. } => {
-                params.iter().copied().chain(std::iter::once(*ret)).collect()
-            },
+            TyKind::Function { params, ret, .. } => params
+                .iter()
+                .copied()
+                .chain(std::iter::once(*ret))
+                .collect(),
             TyKind::Ref { pointee, .. } => vec![*pointee],
             TyKind::AssocProjection { base, .. } => vec![*base],
             _ => Vec::new(),
         };
-        children.into_iter().any(|c| self.contains_error_at(c, depth + 1))
+        children
+            .into_iter()
+            .any(|c| self.contains_error_at(c, depth + 1))
     }
 
     pub fn poison(&mut self, tv: TyVar) {
@@ -986,14 +1124,25 @@ impl<'a> InferCtx<'a> {
 
     // ===== Constraint emission =====
 
+    /// Bidi P5: a constraint the walker emits is decided where it is emitted;
+    /// only one still blocked on an open var reaches the end-of-body flush.
+    /// Inside the solver, or while Γ is set up, it is queued (see
+    /// `solving_depth`, `eager`).
+    fn emit(&mut self, c: Constraint) {
+        if self.eager && self.solving_depth == 0 {
+            crate::solver::solve_now(self, c);
+        } else {
+            self.constraints.push(c);
+        }
+    }
+
     pub fn equal(&mut self, a: TyVar, b: TyVar, span: Span) {
         self.equal_because(a, b, span, Reason::Unspecified);
     }
 
     /// `equal` with the user-facing cause of the expectation on `a`.
     pub fn equal_because(&mut self, a: TyVar, b: TyVar, span: Span, reason: Reason) {
-        self.constraints
-            .push(Constraint::Equal { a, b, span, reason });
+        self.emit(Constraint::Equal { a, b, span, reason });
     }
 
     pub fn coerce(&mut self, from: TyVar, to: TyVar, expr: HirExprId, span: Span) {
@@ -1009,7 +1158,7 @@ impl<'a> InferCtx<'a> {
         span: Span,
         reason: Reason,
     ) {
-        self.constraints.push(Constraint::Coerce {
+        self.emit(Constraint::Coerce {
             from,
             to,
             expr,
@@ -1019,7 +1168,7 @@ impl<'a> InferCtx<'a> {
     }
 
     pub fn borrow_pointee(&mut self, inner: TyVar, pointee: TyVar, span: Span) {
-        self.constraints.push(Constraint::BorrowPointee {
+        self.emit(Constraint::BorrowPointee {
             inner,
             pointee,
             span,
@@ -1039,7 +1188,7 @@ impl<'a> InferCtx<'a> {
         span: Span,
         reason: Reason,
     ) {
-        self.constraints.push(Constraint::EqualDecayed {
+        self.emit(Constraint::EqualDecayed {
             value,
             target,
             span,
@@ -1049,7 +1198,7 @@ impl<'a> InferCtx<'a> {
 
     /// Assignment into a local target — see `Constraint::AssignTarget`.
     pub fn assign_target(&mut self, value: TyVar, target: TyVar, expr: HirExprId, span: Span) {
-        self.constraints.push(Constraint::AssignTarget {
+        self.emit(Constraint::AssignTarget {
             value,
             target,
             expr,
@@ -1058,25 +1207,71 @@ impl<'a> InferCtx<'a> {
     }
 
     pub fn conforms(&mut self, ty: TyVar, protocol: Entity, span: Span) {
-        self.constraints.push(Constraint::Conforms {
+        self.emit(Constraint::Conforms {
             ty,
             protocol,
             span,
             poison_ty_on_failure: false,
             origin: crate::constraint::ConformsOrigin::Expr,
+            protocol_args: Vec::new(),
         });
+    }
+
+    /// `ty: protocol[protocol_args]` — a value-level conformance whose
+    /// protocol args must match one of the receiver's declared
+    /// instantiations (a call resolved through a generic protocol's member).
+    pub fn conforms_with_args(
+        &mut self,
+        ty: TyVar,
+        protocol: Entity,
+        protocol_args: Vec<TyVar>,
+        span: Span,
+    ) {
+        self.emit(Constraint::Conforms {
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure: false,
+            origin: crate::constraint::ConformsOrigin::Expr,
+            protocol_args,
+        });
+    }
+
+    /// A `where T: P[Args]` bound: the TYPE-ARGUMENT conformance obligation
+    /// carrying its protocol args (checked against the declared
+    /// instantiations), plus the args recorded for `solve_associated`'s
+    /// projection through `extend Concrete: P[FreeParams]`.
+    pub fn bound_typearg(
+        &mut self,
+        ty: TyVar,
+        protocol: Entity,
+        protocol_args: Vec<TyVar>,
+        span: Span,
+    ) {
+        self.emit(Constraint::Conforms {
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure: false,
+            origin: crate::constraint::ConformsOrigin::TypeArg,
+            protocol_args: protocol_args.clone(),
+        });
+        if !protocol_args.is_empty() {
+            self.record_witness_args(ty, protocol, protocol_args);
+        }
     }
 
     /// Conforms variant for TYPE-ARGUMENT obligations (where-clause bounds,
     /// formation wellformedness, alias bounds): a ref judged here is the
     /// ref ITSELF, never its pointee — see `ConformsOrigin`.
     pub fn conforms_typearg(&mut self, ty: TyVar, protocol: Entity, span: Span) {
-        self.constraints.push(Constraint::Conforms {
+        self.emit(Constraint::Conforms {
             ty,
             protocol,
             span,
             poison_ty_on_failure: false,
             origin: crate::constraint::ConformsOrigin::TypeArg,
+            protocol_args: Vec::new(),
         });
     }
 
@@ -1084,13 +1279,32 @@ impl<'a> InferCtx<'a> {
     /// primary-constraint emission so cascading Member/ImplicitMember errors
     /// inside the desugared subtree absorb silently when the receiver type
     /// doesn't conform to the expected protocol.
+    /// A `for` loop's iterator source — see `Constraint::ForLoopIterator`.
+    pub fn for_loop_iterator(
+        &mut self,
+        iterable: TyVar,
+        result: TyVar,
+        protocol: Entity,
+        expr: HirExprId,
+        span: Span,
+    ) {
+        self.emit(Constraint::ForLoopIterator {
+            iterable,
+            result,
+            protocol,
+            expr,
+            span,
+        });
+    }
+
     pub fn conforms_poisoning(&mut self, ty: TyVar, protocol: Entity, span: Span) {
-        self.constraints.push(Constraint::Conforms {
+        self.emit(Constraint::Conforms {
             ty,
             protocol,
             span,
             poison_ty_on_failure: true,
             origin: crate::constraint::ConformsOrigin::Expr,
+            protocol_args: Vec::new(),
         });
     }
 
@@ -1098,7 +1312,7 @@ impl<'a> InferCtx<'a> {
     /// [`AssocKey::Name`](crate::constraint::AssocKey). Anything holding the
     /// associated type's entity uses [`Self::associated_entity`].
     pub fn associated(&mut self, container: TyVar, name: &str, result: TyVar, span: Span) {
-        self.constraints.push(Constraint::Associated {
+        self.emit(Constraint::Associated {
             container,
             key: crate::constraint::AssocKey::Name(name.to_string()),
             result,
@@ -1110,7 +1324,8 @@ impl<'a> InferCtx<'a> {
     /// for diagnostics, and for a concrete conformer's by-name binding.
     pub(crate) fn assoc_key_name(&self, key: &crate::constraint::AssocKey) -> String {
         match key {
-            crate::constraint::AssocKey::Entity(e) => {
+            crate::constraint::AssocKey::Entity(e)
+            | crate::constraint::AssocKey::Conformance { assoc: e, .. } => {
                 crate::resolve::assoc_name(self.query_ctx, *e)
             },
             crate::constraint::AssocKey::Name(n) => n.clone(),
@@ -1126,7 +1341,7 @@ impl<'a> InferCtx<'a> {
         result: TyVar,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Associated {
+        self.emit(Constraint::Associated {
             container,
             key: crate::constraint::AssocKey::Entity(assoc),
             result,
@@ -1144,7 +1359,7 @@ impl<'a> InferCtx<'a> {
         is_call: bool,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Member {
+        self.emit(Constraint::Member {
             receiver,
             name: name.to_string(),
             args,
@@ -1170,7 +1385,7 @@ impl<'a> InferCtx<'a> {
         explicit_type_args: Vec<kestrel_hir::ty::HirTy>,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Member {
+        self.emit(Constraint::Member {
             receiver,
             name: name.to_string(),
             args,
@@ -1197,7 +1412,7 @@ impl<'a> InferCtx<'a> {
         explicit_type_args: Vec<kestrel_hir::ty::HirTy>,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Member {
+        self.emit(Constraint::Member {
             receiver,
             name: name.to_string(),
             args,
@@ -1218,7 +1433,7 @@ impl<'a> InferCtx<'a> {
         expr: HirExprId,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Call {
+        self.emit(Constraint::Call {
             callee,
             args,
             result,
@@ -1236,7 +1451,7 @@ impl<'a> InferCtx<'a> {
         expr: HirExprId,
         span: Span,
     ) {
-        self.constraints.push(Constraint::OverloadedCall {
+        self.emit(Constraint::OverloadedCall {
             candidates,
             type_args,
             args,
@@ -1249,7 +1464,7 @@ impl<'a> InferCtx<'a> {
     /// Emit a constraint that reduces a TypeAlias TyVar to its substituted
     /// definition (and emits bound obligations).
     pub fn reduce(&mut self, alias: TyVar, result: TyVar, span: Span) {
-        self.constraints.push(Constraint::Reduce {
+        self.emit(Constraint::Reduce {
             alias,
             result,
             span,
@@ -1265,7 +1480,7 @@ impl<'a> InferCtx<'a> {
         expr: HirExprId,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Implicit {
+        self.emit(Constraint::Implicit {
             expected,
             name: name.to_string(),
             args,
@@ -1276,7 +1491,7 @@ impl<'a> InferCtx<'a> {
     }
 
     pub fn interpolation_link(&mut self, result_tv: TyVar, acc_tv: TyVar, span: Span) {
-        self.constraints.push(Constraint::InterpolationLink {
+        self.emit(Constraint::InterpolationLink {
             result_tv,
             acc_tv,
             span,

@@ -11,9 +11,8 @@
 // Expected semantics (value semantics, as Swift evaluates a by-value argument
 // before the inout access begins): `src` is the array's value at the call,
 // so the loop visits the two original elements.
-// EXPECTED TO FAIL until a `mutating` argument may not alias another argument
-// of the same call — either rejected statically, or the overlapping borrow
-// copied first. If the fix is static rejection, this becomes a diagnostics test.
+// Fixed: the borrowed argument is copied at the call when it overlaps a
+// `mutating` argument (docs/memory-model/access-modes.md).
 
 module Test
 

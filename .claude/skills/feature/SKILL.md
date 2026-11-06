@@ -179,7 +179,7 @@ Files: `lib/kestrel-hir-lower/src/{syntax,expr,stmt,pat,ty,desugar}.rs`
 ### Phase 7 — Type inference
 Files: `lib/kestrel-type-infer/src/...`
 - [ ] New `Constraint` kind (if existing ones don't cover this) plus solver
-      handling in `solver.rs` / `resolve.rs`.
+      handling in `solver/` / `resolve.rs`.
 - [ ] Oracle method (`kestrel-semantics` side) if the feature needs a query
       the solver doesn't have today.
 - [ ] Ensure Error paths **poison** result TyVars instead of unifying silently

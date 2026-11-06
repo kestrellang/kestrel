@@ -66,10 +66,10 @@ func bad() -> &Int64 {
 
 | Restriction | Code |
 |-------------|------|
-| Ref types in **parameter** position — access modes are the only spelling (permanent by design) | E480 |
+| A ref-typed parameter with a `mutating`/`consuming` keyword, or through a type alias | E480 |
 | `&x` at a **call site** — borrowing is the callee's convention, never spelled by the caller | E488 |
 | Ref type in a `let`/`var` **annotation** — write `let r = &x;`, not `let r: &Int64 = ...` | E482 |
-| Ref types inside **function types** (params or returns) | E480/E486 |
+| Ref returns inside **function types** | E486 |
 | Nested references (`&&T`) | E487 |
 | Refs in **globals / static storage** — long-lived storage requires `Static` types | E505 |
 | Ref-returning functions as **first-class values** | E491/E492 |
@@ -80,6 +80,7 @@ func bad() -> &Int64 {
 
 - **Zero-copy iterators yielding references** — iteration is by value; `for x in xs` copies/clones elements (ref-based iteration composes with accessors, e.g. `&arr(at: i)`, but there is no `Iterator` over `&T` elements in the stdlib's main loop path yet).
 - **Long-lived views** — a struct holding `&T` cannot itself be stored long-term (non-`Static`); views are for passing down and across, not for keeping.
+- **Unchecked: changing the owner of a live heap reference** — `let e = &xs(at: 0)` points into `xs`'s heap buffer. Calling a `mutating` method (`xs.append(..)`), reassigning `xs`, or `deinit xs` while `e` is still used can reallocate or free that buffer, leaving `e` dangling. The compiler does not reject this: Kestrel has no exclusivity rule, and a fix waits on a future exclusive-access feature. Copy the element (`let e = xs(at: 0)`) or use the reference within one expression instead. References to locals and their fields (`&x`, `&s.name`) are not affected — that storage stays put for the whole scope.
 
 ---
 

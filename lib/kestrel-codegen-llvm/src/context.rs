@@ -26,7 +26,7 @@ use crate::CodegenOptions;
 use crate::abi;
 use crate::error::CodegenError;
 use crate::func;
-use crate::ty::TypeCache;
+use crate::ty::{ScalarTy, TypeCache};
 
 pub struct CodegenCtx<'ctx> {
     /// The LLVM context (lifetime root). `&'ctx` because the MIR module is
@@ -88,8 +88,14 @@ impl<'ctx> CodegenCtx<'ctx> {
         llmod.set_triple(&triple);
         llmod.set_data_layout(&machine.get_target_data().get_data_layout());
 
+        // Pointer-width scalars are the LLVM `ptr`. `ScalarTy::Ptr::bytes()` is
+        // hardcoded to 8, so a non-64-bit target would mis-size pointer fields.
         let ptr_size = target.pointer_size();
-        let tc = TypeCache::new(module, ptr_size);
+        debug_assert_eq!(
+            ptr_size, 8,
+            "ScalarTy::Ptr currently assumes 8-byte pointers"
+        );
+        let tc = TypeCache::new(module, ScalarTy::Ptr, ptr_size);
 
         Ok(Self {
             cx,
@@ -119,10 +125,11 @@ impl<'ctx> CodegenCtx<'ctx> {
         // Best-effort whole-module verify (per-function verify already ran during
         // definition; this catches inter-function/declaration issues).
         if let Err(e) = self.llmod.verify()
-            && std::env::var("KESTREL_VERBOSE_CODEGEN").is_ok()
+            && kestrel_debug::is_enabled("llvm-verify")
         {
-            eprintln!(
-                "warning: LLVM module verification failed:\n{}",
+            kestrel_debug::ktrace!(
+                "llvm-verify",
+                " LLVM module verification failed:\n{}",
                 e.to_string()
             );
         }
@@ -151,10 +158,11 @@ impl<'ctx> CodegenCtx<'ctx> {
             }
         }
 
-        // Debug: dump the final (post-optimization) module IR for inspection.
-        if let Ok(path) = std::env::var("KESTREL_DUMP_LLVM_IR") {
-            let _ = std::fs::write(&path, self.llmod.print_to_string().to_string());
-        }
+        // Final (post-optimization) module IR, for `kestrel dump llvm`.
+        let module_ir = self
+            .options
+            .emit_ir
+            .then(|| self.llmod.print_to_string().to_string());
 
         let buffer = self
             .machine
@@ -164,6 +172,7 @@ impl<'ctx> CodegenCtx<'ctx> {
         Ok(crate::CompilationResult {
             object_bytes: buffer.as_slice().to_vec(),
             ir_text: self.ir_outputs,
+            module_ir,
         })
     }
 
@@ -208,9 +217,10 @@ impl<'ctx> CodegenCtx<'ctx> {
                     kestrel_mir::mono::MonoVTableEntry::Size(ty) => {
                         int(self.tc.repr(*ty, &self.module.ty_arena, self.module).size())
                     },
-                    kestrel_mir::mono::MonoVTableEntry::Align(ty) => {
-                        int(self.tc.repr(*ty, &self.module.ty_arena, self.module).align())
-                    },
+                    kestrel_mir::mono::MonoVTableEntry::Align(ty) => int(self
+                        .tc
+                        .repr(*ty, &self.module.ty_arena, self.module)
+                        .align()),
                     kestrel_mir::mono::MonoVTableEntry::Table(t) => {
                         self.vtable_data[t.index()].as_pointer_value()
                     },
@@ -389,14 +399,15 @@ impl<'ctx> CodegenCtx<'ctx> {
             }));
             match result {
                 Ok(Ok(())) => {
-                    let print_verify = std::env::var("KESTREL_VERBOSE_CODEGEN").is_ok();
+                    let print_verify = kestrel_debug::is_enabled("llvm-verify");
                     if !fn_value.verify(print_verify) {
                         if print_verify {
                             // The LLVM verifier message above is terse; also dump
                             // the whole broken function so the offending instruction
                             // has context (the function is about to be trap-stubbed).
                             use inkwell::values::AnyValue;
-                            eprintln!(
+                            kestrel_debug::ktrace!(
+                                "llvm-verify",
                                 "=== broken fn {func_name} ===\n{}",
                                 fn_value.print_to_string().to_string()
                             );

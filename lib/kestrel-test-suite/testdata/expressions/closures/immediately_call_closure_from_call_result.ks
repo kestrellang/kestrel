@@ -18,8 +18,8 @@ struct S {
 }
 
 struct Provider {
-    var f: () -> Int64
-    subscript(i: Int64) -> () -> Int64 { get { self.f } }
+    var f: escaping () -> Int64
+    subscript(i: Int64) -> escaping () -> Int64 { get { self.f } }
 }
 
 @main
@@ -29,7 +29,7 @@ func main() -> lang.i64 {
     if s.mk()() != 7 { return 1 }
 
     // #176a: array-subscript-returned closure, called immediately.
-    let fs: [() -> Int64] = [{ () in 42 }];
+    let fs: [escaping () -> Int64] = [{ () in 42 }];
     if fs(0)() != 42 { return 2 }
 
     // #176b: user-subscript-returned closure, called immediately.

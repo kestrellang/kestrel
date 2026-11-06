@@ -2,7 +2,6 @@
 // stdlib: true
 
 module Test
-import Prelude
 
 struct Ptr: FFISafe {}
 

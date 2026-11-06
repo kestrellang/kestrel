@@ -17,7 +17,7 @@ struct Plain {
 }
 
 func needsBox[B](box: B) -> Bool where B: SharedBox {
-    box.isUnique()
+    box.isUnique
 }
 
 func test() -> Bool {

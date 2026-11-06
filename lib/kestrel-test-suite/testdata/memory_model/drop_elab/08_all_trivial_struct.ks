@@ -7,7 +7,6 @@
 // entirely — no drops in the MIR text.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

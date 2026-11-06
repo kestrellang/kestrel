@@ -9,11 +9,11 @@ module Test
             let none: std.result.Optional[std.numeric.Int64] = .None;
             let other: std.result.Optional[std.numeric.Int64] = .Some(20);
 
-            // Test then (and combinator)
-            let andResult = someOpt.then(other);
+            // Test andValue (and combinator)
+            let andResult = someOpt.andValue(other);
             if andResult.unwrap() != 20 { return 1 }
-            let andNone = none.then(other);
-            if andNone.isSome() { return 2 }
+            let andNone = none.andValue(other);
+            if andNone.isSome { return 2 }
 
             // Test orElse (without closure capture to avoid codegen bug)
             let orResult: std.result.Optional[std.numeric.Int64] = none.orElse({ () in .Some(99) });

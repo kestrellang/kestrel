@@ -365,6 +365,9 @@ impl SubscriptDeclaration {
     pub fn parameter_list(&self) -> Option<ParameterList> {
         support::child(&self.syntax)
     }
+    pub fn failable_marker(&self) -> Option<FailableMarker> {
+        support::child(&self.syntax)
+    }
     pub fn return_type(&self) -> Option<ReturnType> {
         support::child(&self.syntax)
     }
@@ -404,6 +407,9 @@ impl FieldDeclaration {
     pub fn static_modifier(&self) -> Option<StaticModifier> {
         support::child(&self.syntax)
     }
+    pub fn lazy_modifier(&self) -> Option<LazyModifier> {
+        support::child(&self.syntax)
+    }
     pub fn let_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Let)
     }
@@ -413,20 +419,23 @@ impl FieldDeclaration {
     pub fn name(&self) -> Option<Name> {
         support::child(&self.syntax)
     }
+    pub fn failable_marker(&self) -> Option<FailableMarker> {
+        support::child(&self.syntax)
+    }
     pub fn colon_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Colon)
     }
     pub fn ty(&self) -> Option<Ty> {
         support::child(&self.syntax)
     }
-    pub fn property_accessors(&self) -> Option<PropertyAccessors> {
-        support::child(&self.syntax)
+    pub fn property_accessorses(&self) -> AstChildren<PropertyAccessors> {
+        support::children(&self.syntax)
     }
     pub fn equals_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Equals)
     }
-    pub fn expression(&self) -> Option<Expression> {
-        support::child(&self.syntax)
+    pub fn expressions(&self) -> AstChildren<Expression> {
+        support::children(&self.syntax)
     }
     pub fn semicolon_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Semicolon)
@@ -1267,6 +1276,30 @@ impl AstNode for Expression {
     }
 }
 
+/// `FailableMarker` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FailableMarker {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl FailableMarker {
+    pub fn question_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Question)
+    }
+}
+
+impl AstNode for FailableMarker {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::FailableMarker
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
 /// `SubscriptBody` node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SubscriptBody {
@@ -1324,6 +1357,30 @@ impl PropertyAccessors {
 impl AstNode for PropertyAccessors {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::PropertyAccessors
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `LazyModifier` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LazyModifier {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl LazyModifier {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+}
+
+impl AstNode for LazyModifier {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::LazyModifier
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -1435,6 +1492,117 @@ impl MutatingRefClause {
 impl AstNode for MutatingRefClause {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::MutatingRefClause
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ModifyingGetterClause` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ModifyingGetterClause {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ModifyingGetterClause {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+    pub fn get_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Get)
+    }
+    pub fn code_block(&self) -> Option<CodeBlock> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ModifyingGetterClause {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ModifyingGetterClause
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ModifyingRefClause` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ModifyingRefClause {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ModifyingRefClause {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+    pub fn code_block(&self) -> Option<CodeBlock> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ModifyingRefClause {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ModifyingRefClause
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `WillSetClause` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WillSetClause {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl WillSetClause {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+    pub fn code_block(&self) -> Option<CodeBlock> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for WillSetClause {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::WillSetClause
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `DidSetClause` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DidSetClause {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl DidSetClause {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+    pub fn code_block(&self) -> Option<CodeBlock> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for DidSetClause {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::DidSetClause
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -2318,8 +2486,8 @@ impl TySome {
     pub fn and_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::And)
     }
-    pub fn negative_conformance(&self) -> Option<NegativeConformance> {
-        support::child(&self.syntax)
+    pub fn negative_conformances(&self) -> AstChildren<NegativeConformance> {
+        support::children(&self.syntax)
     }
 }
 
@@ -4514,6 +4682,9 @@ pub struct LiteralPattern {
 }
 
 impl LiteralPattern {
+    pub fn minus_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Minus)
+    }
     pub fn integer_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Integer)
     }
@@ -4550,6 +4721,9 @@ pub struct RangePattern {
 }
 
 impl RangePattern {
+    pub fn minus_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Minus)
+    }
     pub fn integer_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Integer)
     }
@@ -5026,13 +5200,17 @@ impl AstNode for ArrayPatternRest {
     }
 }
 
-/// One of: GetterClause, SetterClause, RefClause, MutatingRefClause.
+/// One of: GetterClause, SetterClause, RefClause, MutatingRefClause, ModifyingGetterClause, ModifyingRefClause, WillSetClause, DidSetClause.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AccessorClause {
     GetterClause(GetterClause),
     SetterClause(SetterClause),
     RefClause(RefClause),
     MutatingRefClause(MutatingRefClause),
+    ModifyingGetterClause(ModifyingGetterClause),
+    ModifyingRefClause(ModifyingRefClause),
+    WillSetClause(WillSetClause),
+    DidSetClause(DidSetClause),
 }
 
 impl AstNode for AccessorClause {
@@ -5043,6 +5221,10 @@ impl AstNode for AccessorClause {
                 | SyntaxKind::SetterClause
                 | SyntaxKind::RefClause
                 | SyntaxKind::MutatingRefClause
+                | SyntaxKind::ModifyingGetterClause
+                | SyntaxKind::ModifyingRefClause
+                | SyntaxKind::WillSetClause
+                | SyntaxKind::DidSetClause
         )
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
@@ -5053,6 +5235,14 @@ impl AstNode for AccessorClause {
             SyntaxKind::MutatingRefClause => {
                 AccessorClause::MutatingRefClause(MutatingRefClause { syntax })
             },
+            SyntaxKind::ModifyingGetterClause => {
+                AccessorClause::ModifyingGetterClause(ModifyingGetterClause { syntax })
+            },
+            SyntaxKind::ModifyingRefClause => {
+                AccessorClause::ModifyingRefClause(ModifyingRefClause { syntax })
+            },
+            SyntaxKind::WillSetClause => AccessorClause::WillSetClause(WillSetClause { syntax }),
+            SyntaxKind::DidSetClause => AccessorClause::DidSetClause(DidSetClause { syntax }),
             _ => return None,
         })
     }
@@ -5062,6 +5252,10 @@ impl AstNode for AccessorClause {
             AccessorClause::SetterClause(it) => &it.syntax,
             AccessorClause::RefClause(it) => &it.syntax,
             AccessorClause::MutatingRefClause(it) => &it.syntax,
+            AccessorClause::ModifyingGetterClause(it) => &it.syntax,
+            AccessorClause::ModifyingRefClause(it) => &it.syntax,
+            AccessorClause::WillSetClause(it) => &it.syntax,
+            AccessorClause::DidSetClause(it) => &it.syntax,
         }
     }
 }
@@ -5087,6 +5281,30 @@ impl From<RefClause> for AccessorClause {
 impl From<MutatingRefClause> for AccessorClause {
     fn from(node: MutatingRefClause) -> AccessorClause {
         AccessorClause::MutatingRefClause(node)
+    }
+}
+
+impl From<ModifyingGetterClause> for AccessorClause {
+    fn from(node: ModifyingGetterClause) -> AccessorClause {
+        AccessorClause::ModifyingGetterClause(node)
+    }
+}
+
+impl From<ModifyingRefClause> for AccessorClause {
+    fn from(node: ModifyingRefClause) -> AccessorClause {
+        AccessorClause::ModifyingRefClause(node)
+    }
+}
+
+impl From<WillSetClause> for AccessorClause {
+    fn from(node: WillSetClause) -> AccessorClause {
+        AccessorClause::WillSetClause(node)
+    }
+}
+
+impl From<DidSetClause> for AccessorClause {
+    fn from(node: DidSetClause) -> AccessorClause {
+        AccessorClause::DidSetClause(node)
     }
 }
 

@@ -7,8 +7,8 @@ module Test
         func main() -> lang.i64 {
             // Test first and last on empty deque
             var d = std.collections.Deque[std.numeric.Int64]();
-            if d.first().isSome() { return 1 }
-            if d.last().isSome() { return 2 }
+            if d.first().isSome { return 1 }
+            if d.last().isSome { return 2 }
 
             // Test first and last with one element
             d.pushBack(42);

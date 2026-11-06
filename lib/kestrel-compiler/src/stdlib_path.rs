@@ -28,7 +28,10 @@ impl std::fmt::Display for StdLookupError {
         for (source, path) in &self.tried {
             writeln!(f, "  tried {}: {}", source, path.display())?;
         }
-        write!(f, "  set KESTREL_STD to the directory containing the stdlib")
+        write!(
+            f,
+            "  set KESTREL_STD to the directory containing the stdlib"
+        )
     }
 }
 

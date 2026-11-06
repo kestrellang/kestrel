@@ -4,7 +4,7 @@
 module Main
 
 struct Handler[T] {
-    let handle: (T) -> T
+    let handle: escaping (T) -> T
 }
 
 func test() -> lang.i64 {

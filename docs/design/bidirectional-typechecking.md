@@ -56,12 +56,26 @@ they need the operator rule below rather than a known receiver.
 - **N4 is not fixed by the checker**; see the overflow ruling.
 - D3's E106 now also fires for numeric literal receivers (0 sites measured).
 
-## Implementation status (2026-10-20)
+## Implementation status (2026-10-24)
 
-All phases are developed on branch `bidi-p0-clean`. Suites are run with
-`cargo test --release -p kestrel-test-suite` (triage is not installed in the
-cloud containers); baseline = this branch at P0 (`157533d6`):
-**3857 ok / 25 failed**, every failure a pinned "EXPECTED TO FAIL" test.
+**Current: `bidi-p0-clean` @ `50497c65` — 3891 ok / 2 failed** (full suite,
+release, 2026-10-24). P0–P5 are done (P5: every walker constraint decided where
+it is emitted; `solver.rs` split into `solver/`). Of the 18 pinned non-bidi
+bugs taken on before merging to nightly, 16 are fixed: static members through
+type params and projections ×4; view-closure escapes ×3 (outer field, call
+result, `mutating` method — the last two by
+[closure-fields.md](closure-fields.md)); projected snapshot capture then
+consume; `deinit` while a ref is live; the 7 aliasing use-after-frees (array
+iterators share their storage, overlapping call arguments are copied — see
+docs/memory-model/access-modes.md). Found and fixed along the way: generic
+bodies copied non-Copyable payloads (`Optional.take`/`replace`); post-mono
+verify now rejects any such copy.
+
+The 2 left stay pinned by maintainer decision: a named ref into an array
+element (`let e = &xs(at: 0)`) dangles when `xs` is appended to or reassigned
+(`references/escape/*_while_element_ref_live_rejected.ks`). Named refs are
+may-alias by the stage 1.5 ruling; a rule for refs into accessor-reached heap
+storage is future work.
 
 **P1 — done** (`1fb8442b`, `aeeb2a85`, `7308b287`): new leaf crate
 `kestrel-entail` (three-valued kernel over its own `ETy`, 11 unit tests).
@@ -166,7 +180,19 @@ against a pushed expectation is looked up on it, or on its promotion target
 (`.Red` against `Color?` is a `Color`, then promoted), and resolved at once.
 Suite 3863 ok / 24 failed, unchanged.
 
-**P5 — not started; what it needs.** After P3/P4 the end of a body still
+**P5 — done** (`5461bdf6`, `13e9147b`, `4cbe3437`, `50497c65`). `solver::solve`
+is gone: the end of a body is `obligations::finish_body`. Every constraint
+the walker emits goes through `InferCtx::emit` and is decided where it is
+emitted; the body's assumptions (where clauses) settle as one batch before
+the walk, constraints emitted inside the solver stay queued, and a
+decision's follow-ups settle before the walker moves on. What reaches the
+end of a body (probe, stdlib + one program): ~2.8k constraints waiting on
+a var that became known later (from ~19.3k), ~0.56k after the first flush:
+403 literal-pending `Conforms`, 74 operator `Member`s on open literals, 74
+`Associated`, 3 `.Case`, 2 interpolation links. Those last three kinds wait in the same
+queue; the rules live in `solver/` (one module per concern).
+
+**P5 — what remains (written before `5461bdf6`).** After P3/P4 the end of a body still
 runs `solve()`: the fixpoint over what is left, literal defaulting (levels
 0–1), type-parameter defaults, never-fallback, and the reports. In the
 design that end-of-body step remains (D2 keeps numeric literals

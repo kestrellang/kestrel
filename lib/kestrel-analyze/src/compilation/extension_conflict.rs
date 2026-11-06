@@ -16,15 +16,14 @@
 
 use std::collections::HashMap;
 
+use super::conformance_completeness::declared_instantiations;
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
-use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, ConformanceItem, Conformances, Name, NodeKind, WhereClause};
+use kestrel_ast_builder::{Callable, Name, NodeKind, WhereClause};
 use kestrel_hecs::Entity;
 use kestrel_name_res::ExtensionTargetEntity;
-use kestrel_name_res::conformances::{extract_ast_type_args, resolve_conformance_entity};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -79,11 +78,17 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
             let target_kind = cx.query.get::<NodeKind>(*target);
             let is_concrete_type = matches!(target_kind, Some(NodeKind::Struct | NodeKind::Enum));
             if is_concrete_type {
-                for (ext_name, ext_method, _ext) in &ext_methods {
-                    if let Some((_, struct_method)) = target_methods
-                        .iter()
-                        .find(|(n, m)| n == ext_name && same_labels(cx, *m, *ext_method))
-                    {
+                for (ext_name, ext_method, ext) in &ext_methods {
+                    // Witnesses of distinct instantiations of one protocol
+                    // (`struct Int64: Multipliable` + `extend Int64:
+                    // Multipliable[Meters]`) are dispatched by argument type.
+                    if let Some((_, struct_method)) = target_methods.iter().find(|(n, m)| {
+                        n == ext_name
+                            && same_labels(cx, *m, *ext_method)
+                            && !witnesses_distinct_instantiation(
+                                cx, *target, *target, *ext, ext_name,
+                            )
+                    }) {
                         diags.push(AnalyzeDiagnostic {
                             descriptor_id: DESCRIPTORS[0].id,
                             severity: DESCRIPTORS[0].default_severity,
@@ -155,7 +160,7 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
                     // protocol by argument type, not an ambiguous direct call,
                     // so this is legal — and mirrors multi-conformance declared
                     // on the type body, which this analyzer never flags.
-                    if witnesses_distinct_instantiation(cx, *ext_i, *ext_j, name_i) {
+                    if witnesses_distinct_instantiation(cx, *target, *ext_i, *ext_j, name_i) {
                         continue;
                     }
 
@@ -331,19 +336,13 @@ fn hir_ty_eq(a: &kestrel_hir::ty::HirTy, b: &kestrel_hir::ty::HirTy) -> bool {
                 args: ab,
                 ..
             },
-        )
-        | (
-            HirTy::AliasUse {
-                entity: ea,
-                args: aa,
-                ..
-            },
-            HirTy::AliasUse {
-                entity: eb,
-                args: ab,
-                ..
-            },
         ) => ea == eb && list_eq(aa, ab),
+        (HirTy::Alias { expanded, .. }, other) | (other, HirTy::Alias { expanded, .. }) => {
+            hir_ty_eq(expanded, other)
+        },
+        (HirTy::AbstractAssoc { entity: ea, .. }, HirTy::AbstractAssoc { entity: eb, .. }) => {
+            ea == eb
+        },
         (HirTy::Tuple(xa, _), HirTy::Tuple(xb, _)) => list_eq(xa, xb),
         (
             HirTy::Function {
@@ -392,91 +391,30 @@ fn hir_ty_eq(a: &kestrel_hir::ty::HirTy, b: &kestrel_hir::ty::HirTy) -> bool {
     }
 }
 
-/// True when `ext_i` and `ext_j` both declare conformance to the *same*
-/// protocol with *different* type arguments, and `method` is a requirement of
-/// that protocol. In that case the two same-named methods are witnesses to
-/// distinct protocol instantiations (e.g. `Subtractable[Duration]` and
+/// True when `decl_i` and `decl_j` (the target type or its extensions) both
+/// declare conformance to the *same* protocol with *different* type
+/// arguments, and `method` is a requirement of that protocol. In that case
+/// the two same-named methods are witnesses to distinct protocol
+/// instantiations (e.g. `Subtractable[Duration]` and
 /// `Subtractable[Instant]`), dispatched by the protocol — not a true duplicate.
 fn witnesses_distinct_instantiation(
     cx: &CompilationContext<'_>,
-    ext_i: Entity,
-    ext_j: Entity,
+    target: Entity,
+    decl_i: Entity,
+    decl_j: Entity,
     method: &str,
 ) -> bool {
-    let confs_i = extension_conformance_instantiations(cx, ext_i);
-    let confs_j = extension_conformance_instantiations(cx, ext_j);
-    for (proto_i, args_i) in &confs_i {
-        for (proto_j, args_j) in &confs_j {
-            // Same protocol entity, different instantiation arguments.
-            if proto_i == proto_j && args_i != args_j {
-                // Only a non-conflict if `method` is actually a requirement of
-                // that protocol — unrelated inherent helpers still conflict.
-                if collect_named_children(cx, *proto_i)
+    let confs_i = declared_instantiations(cx, target, decl_i);
+    let confs_j = declared_instantiations(cx, target, decl_j);
+    confs_i.iter().any(|(proto_i, args_i)| {
+        confs_j.iter().any(|(proto_j, args_j)| {
+            // Only a non-conflict if `method` is actually a requirement of
+            // that protocol — unrelated inherent helpers still conflict.
+            proto_i == proto_j
+                && args_i != args_j
+                && collect_named_children(cx, *proto_i)
                     .iter()
                     .any(|(name, _)| name == method)
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// The protocol instantiations an extension declares conformance to, as
-/// `(protocol_entity, args_key)` pairs. `args_key` is a structural string of
-/// the conformance's type arguments so distinct instantiations compare unequal.
-fn extension_conformance_instantiations(
-    cx: &CompilationContext<'_>,
-    ext: Entity,
-) -> Vec<(Entity, String)> {
-    let Some(conformances) = cx.query.get::<Conformances>(ext) else {
-        return Vec::new();
-    };
-    conformances
-        .0
-        .iter()
-        .filter_map(|item| {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
-                return None;
-            };
-            let proto = resolve_conformance_entity(cx.query, ast_ty, ext, cx.root)?;
-            if cx.query.get::<NodeKind>(proto) != Some(&NodeKind::Protocol) {
-                return None;
-            }
-            let args_key = extract_ast_type_args(ast_ty)
-                .iter()
-                .map(ast_type_key)
-                .collect::<Vec<_>>()
-                .join(",");
-            Some((proto, args_key))
         })
-        .collect()
-}
-
-/// A structural string key for an `AstType`, ignoring spans, so two type
-/// arguments compare equal iff they name the same (possibly generic) type.
-fn ast_type_key(ty: &AstType) -> String {
-    match ty {
-        AstType::Named { segments, .. } => {
-            let path = segments
-                .iter()
-                .map(|s| s.name.as_str())
-                .collect::<Vec<_>>()
-                .join(".");
-            match segments.last() {
-                Some(seg) if !seg.type_args.is_empty() => {
-                    let inner = seg
-                        .type_args
-                        .iter()
-                        .map(ast_type_key)
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    format!("{path}[{inner}]")
-                },
-                _ => path,
-            }
-        },
-        other => format!("{other:?}"),
-    }
+    })
 }

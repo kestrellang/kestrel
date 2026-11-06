@@ -1001,6 +1001,175 @@ static TABLE: &[IntrinsicEntry] = &[
         op: Op::FloatWiden(FloatBits::F32, FloatBits::F64),
         arity: 1,
     },
+    // Casts between every integer width/signedness pair and between signed
+    // integers and floats (the seeder's `cast_<from>_<to>` cross product;
+    // `seed_cast_ops` skips the pairs no `Op` can express). The SOURCE's
+    // signedness picks sign- vs zero-extension, as in the rows above.
+    IntrinsicEntry {
+        name: "cast_f32_i16",
+        op: Op::FloatToInt(FloatBits::F32, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f32_i8",
+        op: Op::FloatToInt(FloatBits::F32, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f64_i16",
+        op: Op::FloatToInt(FloatBits::F64, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f64_i32",
+        op: Op::FloatToInt(FloatBits::F64, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_f64_i8",
+        op: Op::FloatToInt(FloatBits::F64, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_f32",
+        op: Op::IntToFloat(IntBits::I16, FloatBits::F32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_f64",
+        op: Op::IntToFloat(IntBits::I16, FloatBits::F64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_u32",
+        op: Op::IntWiden(IntBits::I16, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_u64",
+        op: Op::IntWiden(IntBits::I16, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i16_u8",
+        op: Op::IntTruncate(IntBits::I16, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i32_u16",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i32_u64",
+        op: Op::IntWiden(IntBits::I32, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i32_u8",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i64_u16",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i64_u32",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i64_u8",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_f32",
+        op: Op::IntToFloat(IntBits::I8, FloatBits::F32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_f64",
+        op: Op::IntToFloat(IntBits::I8, FloatBits::F64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_u16",
+        op: Op::IntWiden(IntBits::I8, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_u32",
+        op: Op::IntWiden(IntBits::I8, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_i8_u64",
+        op: Op::IntWiden(IntBits::I8, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u16_u32",
+        op: Op::IntUnsignedWiden(IntBits::I16, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u16_u64",
+        op: Op::IntUnsignedWiden(IntBits::I16, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u16_u8",
+        op: Op::IntTruncate(IntBits::I16, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u32_u16",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u32_u64",
+        op: Op::IntUnsignedWiden(IntBits::I32, IntBits::I64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u32_u8",
+        op: Op::IntTruncate(IntBits::I32, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u64_u16",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u64_u32",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u64_u8",
+        op: Op::IntTruncate(IntBits::I64, IntBits::I8),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u8_u16",
+        op: Op::IntUnsignedWiden(IntBits::I8, IntBits::I16),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u8_u32",
+        op: Op::IntUnsignedWiden(IntBits::I8, IntBits::I32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "cast_u8_u64",
+        op: Op::IntUnsignedWiden(IntBits::I8, IntBits::I64),
+        arity: 1,
+    },
     IntrinsicEntry {
         name: "cast_f64_f32",
         op: Op::FloatTruncate(FloatBits::F64, FloatBits::F32),
@@ -1353,6 +1522,11 @@ pub(crate) fn try_intrinsic(
             let unit = bctx.emit_literal(Immediate::unit());
             return Some(bctx.emit_op1(op, unit, result_ty));
         },
+        "overflow_checks" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let unit = bctx.emit_literal(Immediate::unit());
+            return Some(bctx.emit_op1(Op::OverflowChecks, unit, result_ty));
+        },
         "ptr_null" => {
             let ty_arg = *type_args.first()?;
             let result_ty = bctx.resolve_expr_type(expr_id);
@@ -1364,6 +1538,29 @@ pub(crate) fn try_intrinsic(
             let result_ty = bctx.resolve_expr_type(expr_id);
             let arg = bctx.lower_expr(args.first()?.value);
             return Some(bctx.emit_op1(Op::PtrTo(ty_arg), arg, result_ty));
+        },
+        // `(ptr, count)` viewed as a fat `ptr[slice[T]]`: the count sits in
+        // the word a raw existential keeps its table in.
+        "slice_from_parts" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let ptr = bctx.lower_expr(args.first()?.value);
+            let count = bctx.lower_expr(args.get(1)?.value);
+            let i8_ty = bctx.ctx.module.ty_arena.i8();
+            let raw = bctx.ctx.module.ty_arena.pointer(i8_ty);
+            let data = bctx.emit_op1(Op::PtrCast(i8_ty), ptr, raw);
+            let meta = bctx.emit_op1(Op::PtrFromAddress(i8_ty), count, raw);
+            let pair_ty = bctx.ctx.module.ty_arena.tuple(vec![raw, raw]);
+            let pair = bctx.emit_tuple(pair_ty, vec![data, meta]);
+            return Some(bctx.emit_op1(Op::FatPtr(result_ty), pair, result_ty));
+        },
+        // A fat slice pointer's second word, as an integer.
+        "slice_count" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let ptr = bctx.lower_expr(args.first()?.value);
+            let i8_ty = bctx.ctx.module.ty_arena.i8();
+            let raw = bctx.ctx.module.ty_arena.pointer(i8_ty);
+            let meta = bctx.emit_op1(Op::FatWord(1), ptr, raw);
+            return Some(bctx.emit_op1(Op::PtrToAddress, meta, result_ty));
         },
         "ptr_from_address" => {
             let ty_arg = *type_args.first()?;
@@ -1449,6 +1646,7 @@ pub(crate) fn try_intrinsic(
             bctx.push_inst(kestrel_mir::inst::InstKind::DestroyAddr {
                 address: arg,
                 ty: ty_arg,
+                user_deinit: false,
             });
             return Some(bctx.emit_literal(Immediate::unit()));
         },

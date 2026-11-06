@@ -1,0 +1,820 @@
+//! Calls: `Call`, `OverloadedCall`, and binding a resolved callee's signature.
+
+use super::*;
+use kestrel_hir::HirTy;
+
+pub(super) fn solve_call(
+    ctx: &mut InferCtx<'_>,
+    callee: TyVar,
+    args: Vec<CallArg>,
+    result: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: Span,
+) -> SolveResult {
+    let resolved = ctx.resolve(callee);
+    if !ctx.is_concrete(resolved) {
+        return SolveResult::Deferred(Constraint::Call {
+            callee,
+            args,
+            result,
+            expr,
+            span,
+        });
+    }
+    if ctx.is_error(resolved) {
+        // Poison result so downstream "could not infer type" is suppressed.
+        ctx.poison(result);
+        return SolveResult::Solved;
+    }
+
+    let kind = match ctx.slot(resolved) {
+        TySlot::Resolved(k) => k.clone(),
+        _ => unreachable!(),
+    };
+
+    // Transparent-place peel for callees: paren-subscripting a ref-typed
+    // value (`h.view()(1)`) calls the POINTEE in place.
+    if let TyKind::Ref { pointee, .. } = &kind {
+        return SolveResult::Deferred(Constraint::Call {
+            callee: *pointee,
+            args,
+            result,
+            expr,
+            span,
+        });
+    }
+
+    // If the callee is a concrete TypeAlias, reduce before dispatch.
+    // This handles `type C = Counter; C(42)` — the callee is TypeAlias{C}
+    // which reduces to Struct{Counter}, and then init-call dispatch proceeds.
+    if let TyKind::TypeAlias { entity, .. } = &kind
+        && ctx
+            .query_ctx
+            .query(kestrel_hir_lower::LowerTypeAnnotation {
+                entity: *entity,
+                root: ctx.root,
+            })
+            .is_some()
+    {
+        let reduced = ctx.fresh();
+        ctx.reduce(callee, reduced, span.clone());
+        return SolveResult::Deferred(Constraint::Call {
+            callee: reduced,
+            args,
+            result,
+            expr,
+            span,
+        });
+    }
+
+    match kind {
+        TyKind::Function { params, ret, .. } => {
+            // Reject excess arguments (too few is OK — defaults may fill in)
+            if args.len() > params.len() {
+                return SolveResult::Error(InferError::ArgCountMismatch {
+                    expected: params.len(),
+                    got: args.len(),
+                    span,
+                });
+            }
+            // Normal function call — unify params and return. Reconcile each
+            // function-typed arg's conventions first (its `MutBorrow` upgrade is
+            // an in-place side effect), capturing the first mismatch. We still
+            // run every `coerce` so the param/return types unify regardless —
+            // reporting the convention error without a spurious cascade.
+            let mut conv_err: Option<InferError> = None;
+            for (index, (arg, param)) in args.iter().zip(params.iter()).enumerate() {
+                let e = reconcile_fn_convention(ctx, arg, *param, &span);
+                if conv_err.is_none() {
+                    conv_err = e;
+                }
+                // Only the function type is known here, not its declaration.
+                let reason = Reason::Param { index, decl: None };
+                ctx.coerce_because(arg.ty, *param, arg.value, span.clone(), reason);
+            }
+            // Ref-aware: a direct callee's Function type carries `ret: &T`
+            // (intrinsics like lang.ptr_ref); the result may already be
+            // pinned to the pointee by an earlier return-position coerce.
+            bind_call_result(ctx, result, ret, expr, span, true);
+            if let Some(err) = conv_err {
+                ctx.report_error(err);
+            }
+            SolveResult::Solved
+        },
+        TyKind::Param { .. } | TyKind::SelfType { .. } | TyKind::AssocProjection { .. }
+            if ctx.type_callee_calls.contains(&expr) =>
+        {
+            // `T(...)` where T is a generic param, or `Self()` whose callee
+            // already resolved to SelfType — dispatch as init on the bound.
+            // The init's declared return is () but the actual result is an
+            // instance of the type / Self.
+            let init_result = ctx.fresh();
+            let res = solve_member(
+                ctx,
+                callee,
+                "init",
+                args,
+                init_result,
+                expr,
+                true,
+                true,
+                &[],
+                span.clone(),
+            );
+            // Effectful inits: wrap T → T? or T throws E
+            let final_result = if let Some(&init_entity) = ctx.resolutions.get(&expr) {
+                wrap_init_call_result(ctx, init_entity, callee, &[], &span)
+            } else {
+                callee
+            };
+            ctx.equal(result, final_result, span);
+            res
+        },
+        TyKind::Protocol { entity, .. } => {
+            // `Self()` in a protocol body or protocol extension reaches
+            // here with the protocol entity as callee. Treat the call as
+            // an init on `Self` (the conforming type, abstract here), so
+            // monomorphization gets `MirTy::SelfType` and substitutes the
+            // caller's concrete type. The protocol entity itself is never
+            // constructible — there's no other path that lands `Def(Protocol)`
+            // as a Call callee.
+            let self_tv = ctx.self_type_ty(entity);
+            let init_result = ctx.fresh();
+            let res = solve_member(
+                ctx,
+                self_tv,
+                "init",
+                args,
+                init_result,
+                expr,
+                true,
+                true,
+                &[],
+                span.clone(),
+            );
+            let final_result = if let Some(&init_entity) = ctx.resolutions.get(&expr) {
+                wrap_init_call_result(ctx, init_entity, self_tv, &[], &span)
+            } else {
+                self_tv
+            };
+            ctx.equal(result, final_result, span);
+            res
+        },
+        TyKind::Enum { .. } if args.is_empty() => {
+            // Zero-arg call on an enum value is a no-op (e.g., Color.Red())
+            ctx.equal(result, callee, span);
+            SolveResult::Solved
+        },
+        TyKind::Struct { .. }
+        | TyKind::Enum { .. }
+        | TyKind::TypeAlias { .. }
+        | TyKind::AssocProjection { .. }
+        | TyKind::Param { .. }
+        | TyKind::SelfType { .. } => {
+            // Instance subscript call (e.g. dict(key), or t(key) on a `t: T`).
+            solve_member(
+                ctx,
+                callee,
+                "subscript",
+                args,
+                result,
+                expr,
+                true,
+                false,
+                &[],
+                span,
+            )
+        },
+        _ => {
+            // Tuples, Never, etc. are not callable
+            SolveResult::Error(InferError::NoMember {
+                receiver: callee,
+                name: "subscript".to_string(),
+                is_call: true,
+                span,
+            })
+        },
+    }
+}
+
+/// Skipped (defaulted) slots whose parameter type is one of the callee's type
+/// parameters — `extra: some Slice[UInt8] = Array[UInt8]()`, or `x: T = …` —
+/// paired with the default expression's own type. An omitted argument takes
+/// its type from its default (Swift's SE-0347); otherwise nothing pins that
+/// parameter and its bounds fail on an unresolved `_`. Each call site lowers
+/// both types in its own substitution and equates them.
+pub(crate) fn skipped_default_types(
+    ctx: &InferCtx<'_>,
+    entity: Entity,
+    plan: &[Binding],
+    param_hir_tys: &[Option<HirTy>],
+) -> Vec<(HirTy, HirTy)> {
+    let qctx = ctx.query_ctx;
+    let Some(callable) = qctx.get::<Callable>(entity) else {
+        return Vec::new();
+    };
+    plan.iter()
+        .enumerate()
+        .filter(|(_, b)| matches!(b, Binding::Default))
+        .filter_map(|(slot, _)| {
+            let param_ty = param_hir_tys.get(slot)?.as_ref()?;
+            if !matches!(param_ty, HirTy::Param(..)) {
+                return None;
+            }
+            let default = callable.params.get(slot)?.default_entity?;
+            let hir = qctx.query(kestrel_hir_lower::LowerBody {
+                entity: default,
+                root: ctx.root,
+            })?;
+            let typed = qctx.query(crate::InferBody {
+                entity: default,
+                root: ctx.root,
+            })?;
+            let ty = typed.expr_types.get(&hir.tail_expr?)?;
+            let default_ty = crate::conformance::resolved_ty_to_hir(ty);
+            kestrel_debug::ktrace!(
+                "infer",
+                "omitted default of {} slot {slot}: {param_ty:?} := {default_ty:?}",
+                kestrel_ast_builder::qualified_name(qctx, entity)
+            );
+            (!matches!(default_ty, HirTy::Infer(_))).then(|| (param_ty.clone(), default_ty))
+        })
+        .collect()
+}
+
+/// Resolve an overloaded call by label/arity filtering, then type disambiguation.
+pub(super) fn solve_overloaded_call(
+    ctx: &mut InferCtx<'_>,
+    candidates: Vec<Entity>,
+    type_args: Vec<kestrel_hir::ty::HirTy>,
+    args: Vec<CallArg>,
+    result: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: Span,
+) -> SolveResult {
+    // Get a readable name for error messages from the first candidate
+    let overload_name = candidates
+        .first()
+        .and_then(|&e| ctx.query_ctx.get::<Name>(e))
+        .map(|n| n.0.clone())
+        .unwrap_or_else(|| "<overloaded>".into());
+
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
+
+    // Step 1: filter candidates by label/arity
+    let matched: Vec<Entity> = candidates
+        .iter()
+        .copied()
+        .filter(|&c| {
+            let Some(callable) = ctx.query_ctx.get::<Callable>(c) else {
+                return false;
+            };
+            labels_match(&callable.params, &arg_labels)
+        })
+        .collect();
+
+    match matched.len() {
+        0 => SolveResult::Error(InferError::NoMatchingOverload {
+            name: overload_name,
+            span,
+        }),
+        1 => emit_resolved_call(ctx, matched[0], &type_args, args, result, expr, span),
+        _ => {
+            // Multiple label matches — need type-based disambiguation.
+            // Defer until all arg types are concrete.
+            let all_concrete = args.iter().all(|a| ctx.is_concrete(ctx.resolve(a.ty)));
+            if !all_concrete {
+                return SolveResult::Deferred(Constraint::OverloadedCall {
+                    candidates: matched,
+                    type_args,
+                    args,
+                    result,
+                    expr,
+                    span,
+                });
+            }
+
+            // Check each candidate's param types against concrete arg types
+            let compatible: Vec<Entity> = matched
+                .iter()
+                .copied()
+                .filter(|&c| types_compatible(ctx, c, &args))
+                .collect();
+
+            match compatible.len() {
+                0 => SolveResult::Error(InferError::NoMember {
+                    receiver: result,
+                    name: overload_name,
+                    is_call: true,
+                    span,
+                }),
+                1 => emit_resolved_call(ctx, compatible[0], &type_args, args, result, expr, span),
+                // Receiver-less: an overloaded module-level function call has
+                // no receiver type — `result` is the call result, not a
+                // receiver, so don't render it (#210).
+                _ => SolveResult::Error(InferError::AmbiguousMember {
+                    receiver: None,
+                    name: overload_name,
+                    span,
+                }),
+            }
+        },
+    }
+}
+
+/// Emit constraints for a resolved overloaded call: instantiate the selected
+/// function/init entity, coerce args, equate return, record resolution.
+/// Compute the argument→parameter binding plan for callable `entity` and call
+/// `args`, using `arg_binding`. `None` if the entity has no `Callable` or the
+/// arguments don't bind (wrong labels / arity). Indexed by parameter slot.
+pub(crate) fn binding_plan_for(
+    qctx: &kestrel_hecs::QueryContext<'_>,
+    entity: Entity,
+    args: &[CallArg],
+) -> Option<Vec<Binding>> {
+    let callable = qctx.get::<Callable>(entity)?;
+    let bind_params: Vec<BindParam> = callable.params.iter().map(BindParam::of).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
+    bind_arguments(&bind_params, &arg_labels).ok()
+}
+
+/// Bind a call's result var to the signature return type, ref-aware:
+/// - a match-SCRUTINEE call decays: a scrutinee is a value context, so the
+///   result binds to the POINTEE and patterns never see a ref;
+/// - an if/match ARM-VALUE call decays: refs cannot cross merges, so arm
+///   values always produce owned values (the merge `Equal`s stay untouched
+///   and only ever see owned types);
+/// - a result already pinned to a non-ref (an early Coerce ran before the
+///   member resolved — `let x: Int = late.peek()`) unifies with the pointee
+///   instead of erroring;
+/// - a BINDING keeps the ref when the pointee is unsized (`Slice[T]`):
+///   there is no value to copy out;
+/// - a call ARGUMENT decays (`call_arg_exprs`), unless its param is a ref
+///   (a memberwise init of a ref field): a generic param must not adopt the
+///   pending ref (`m(s(i))`). Only calls and subscripts (`args_decay`) — a
+///   ref-typed stored field read stays the ref it is.
+///
+/// Consequence: a ref-returning call's recorded type is `&T` in the common
+/// solve order but `T` in the pinned/scrutinee orders — consumers key
+/// place-ness on `CallableRefReturn` (entity), never on expr_types alone.
+pub(super) fn bind_call_result(
+    ctx: &mut InferCtx<'_>,
+    result: TyVar,
+    ret_tv: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: Span,
+    args_decay: bool,
+) {
+    ctx.call_return_tvs.insert(expr, ret_tv);
+    let rr = ctx.resolve(ret_tv);
+    // A return not known yet (`-> I.Ref` before `I` resolves) may still turn
+    // out a ref: an unannotated binding decides once it does (the deferred
+    // decay). An annotated one (`let a: Int64 = pick()`) must flow its type
+    // into the return now — that is how `T` gets inferred.
+    if matches!(ctx.slot(rr), TySlot::Unresolved { literal: None })
+        && ctx.binding_init_exprs.contains(&expr)
+        && matches!(
+            ctx.slot(ctx.resolve(result)),
+            TySlot::Unresolved { literal: None }
+        )
+        && !ctx.annotated_init_exprs.contains(&expr)
+    {
+        ctx.equal_decayed(ret_tv, result, span);
+        return;
+    }
+    if matches!(ctx.slot(rr), TySlot::Resolved(TyKind::Ref { .. })) {
+        kestrel_debug::ktrace!(
+            "arm-decay",
+            "bind_call_result REF expr {expr:?} owner={:?} arm_set={} scrut={} bind={} assign={}",
+            ctx.owner,
+            ctx.always_decay_exprs.contains(&expr),
+            ctx.scrutinee_exprs.contains(&expr),
+            ctx.binding_init_exprs.contains(&expr),
+            ctx.assign_target_exprs.contains(&expr),
+        );
+    }
+    if let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(rr) {
+        let pointee = *pointee;
+        let pinned_non_ref = matches!(
+            ctx.slot(ctx.resolve(result)),
+            TySlot::Resolved(k) if !matches!(k, TyKind::Ref { .. })
+        );
+        // An unsized pointee (`let mid = xs(1..<3)`, a `Slice[T]`) has no
+        // value to copy out: the binding keeps the reference. A pointee not
+        // yet resolved (`I.SliceOutput` before `I` is known) decides later:
+        // the deferred decay keeps the ref only if it turns out unsized
+        // (`apply_ref_decay_defaults`).
+        if ctx.binding_init_exprs.contains(&expr) && !pinned_non_ref {
+            match super::pointee_sizedness(ctx, pointee) {
+                None => {
+                    ctx.equal_decayed(ret_tv, result, span);
+                    return;
+                },
+                Some(false) => {
+                    ctx.equal(result, ret_tv, span);
+                    return;
+                },
+                Some(true) => {},
+            }
+        }
+        if ctx.scrutinee_exprs.contains(&expr)
+            || ctx.binding_init_exprs.contains(&expr)
+            || ctx.assign_target_exprs.contains(&expr)
+            || ctx.always_decay_exprs.contains(&expr)
+            || (args_decay && ctx.call_arg_exprs.contains(&expr) && !arg_targets_ref(ctx, expr))
+            || pinned_non_ref
+        {
+            ctx.equal(result, pointee, span);
+            return;
+        }
+    }
+    // A bound or passed `Optional[&T]` (a failable read whose receiver
+    // resolved after the binding's own Coerce already merged its var with
+    // `result`): route through Coerce so it still decays to `Optional[T]`
+    // (arm 1b).
+    if super::equality::optional_ref_decay_site(ctx, expr)
+        && super::equality::optional_ref_pointee(ctx, rr).is_some()
+    {
+        ctx.coerce(ret_tv, result, expr, span);
+        return;
+    }
+    ctx.equal(result, ret_tv, span);
+}
+
+/// Is the argument `expr` already coerced into a ref-typed param?
+fn arg_targets_ref(ctx: &InferCtx<'_>, expr: kestrel_hir::body::HirExprId) -> bool {
+    ctx.constraints.iter().any(|c| {
+        matches!(c, Constraint::Coerce { expr: e, to, .. } if *e == expr
+            && matches!(ctx.slot(ctx.resolve(*to)), TySlot::Resolved(TyKind::Ref { .. })))
+    })
+}
+
+pub(super) fn emit_resolved_call(
+    ctx: &mut InferCtx<'_>,
+    entity: Entity,
+    explicit_type_args: &[kestrel_hir::ty::HirTy],
+    args: Vec<CallArg>,
+    result: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: Span,
+) -> SolveResult {
+    let qctx = ctx.query_ctx;
+    let root = ctx.root;
+
+    // Read type params and create fresh TyVars (or use explicit type args)
+    let type_param_entities: Vec<Entity> = qctx
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let fresh_type_args: Vec<TyVar> = if !explicit_type_args.is_empty()
+        && explicit_type_args.len() == type_param_entities.len()
+    {
+        explicit_type_args
+            .iter()
+            .map(|t| crate::generate::lower_hir_ty(ctx, t))
+            .collect()
+    } else {
+        type_param_entities.iter().map(|_| ctx.fresh()).collect()
+    };
+
+    // Build substitution map: type param entity → fresh TyVar
+    let mut subs: Vec<(Entity, TyVar)> = type_param_entities
+        .iter()
+        .zip(fresh_type_args.iter())
+        .map(|(&e, &tv)| (e, tv))
+        .collect();
+
+    // For initializers and enum cases, also add parent type params
+    let kind = qctx.get::<NodeKind>(entity);
+    if matches!(kind, Some(NodeKind::Initializer | NodeKind::EnumCase))
+        && let Some(parent) = qctx.parent_of(entity)
+    {
+        let parent_tps: Vec<Entity> = qctx
+            .get::<TypeParams>(parent)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        for &tp in &parent_tps {
+            if !subs.iter().any(|(e, _)| *e == tp) {
+                let tv = ctx.fresh();
+                // Defer default: apply only if unconstrained after solving
+                if let Some(default_ty) = qctx.query(LowerTypeAnnotation { entity: tp, root }) {
+                    ctx.type_param_defaults.push((tv, default_ty));
+                }
+                subs.push((tp, tv));
+            }
+        }
+    }
+
+    // Record resolution
+    ctx.resolutions.insert(expr, entity);
+
+    // Store type args if any
+    if !fresh_type_args.is_empty() {
+        ctx.record_type_args(expr, fresh_type_args, span.clone());
+    }
+
+    // Emit where clause constraints
+    let where_clauses = qctx.query(crate::where_clauses::WhereClausesOf { entity, root });
+    for clause in where_clauses {
+        match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            crate::resolve::WhereClause::NotBound { .. } => {},
+            crate::resolve::WhereClause::Bound {
+                subject,
+                protocol,
+                protocol_type_args,
+            } => {
+                // G17 C10: a projection subject (`A.Item: P`) gets its call-site
+                // obligation here too, same as a bare `A: P`. This is the
+                // *overload-resolution* twin of the site C7 fixed in
+                // `generate::emit_where_clause_constraints_with_subs`;
+                // `emit_resolved_call`'s only callers are inside
+                // `solve_overloaded_call`, so an unambiguous call never reaches
+                // it. `Reduce`, not `Opaque`: the base is a call type-arg, so at
+                // `good(src: StrSrc(…))` the obligation is really about `String`,
+                // and an unreduced `StrSrc.Item` would be judged as an opaque
+                // projection — which permits. `lower_subject` returns `None`
+                // when the subject's root is not one of `subs`, and that skip is
+                // the deliberate conservative permit for an abstract position.
+                if let Some(tv) = crate::generate::lower_subject(
+                    ctx,
+                    &subject,
+                    SubjectRoot::Subs(&subs),
+                    crate::generate::ProjectionPolicy::Reduce(&span),
+                ) {
+                    // Cache the protocol args so solve_associated can substitute
+                    // an extension's free TypeParams when projecting through
+                    // `extend ConcreteType: Proto[FreeParams]`.
+                    let arg_tvs: Vec<TyVar> = protocol_type_args
+                        .iter()
+                        .map(|hir_ty| lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs))
+                        .collect();
+                    ctx.bound_typearg(tv, protocol, arg_tvs, span.clone());
+                }
+            },
+            crate::resolve::WhereClause::Equality { subject, rhs } => {
+                match subject.equality_lhs() {
+                    Some(EqualityLhs::Assoc { root: param, assoc }) => {
+                        if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
+                            let assoc_result = ctx.fresh();
+                            ctx.associated_entity(tv, assoc, assoc_result, span.clone());
+                            let rhs_tv = lower_hir_ty_sub(ctx, &rhs, None, TyVar(0), &subs);
+                            ctx.equal(assoc_result, rhs_tv, span.clone());
+                        }
+                    },
+                    Some(EqualityLhs::Direct(param)) => {
+                        if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
+                            let rhs_tv = lower_hir_ty_sub(ctx, &rhs, None, TyVar(0), &subs);
+                            ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
+                        }
+                    },
+                    None => {},
+                }
+            },
+        }
+    }
+
+    // Coerce each explicitly-provided arg against the type of the param it bound
+    // to (per plan). Skipped params take their defaults, checked at their def site.
+    if let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity, root }) {
+        let plan = binding_plan_for(qctx, entity, &args);
+        match plan {
+            Some(plan) => {
+                for (slot, binding) in plan.iter().enumerate() {
+                    if let Binding::Arg(ai) = binding
+                        && let Some(Some(hir_ty)) = param_hir_tys.get(slot)
+                    {
+                        let param_tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
+                        ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
+                    }
+                }
+                for (param_ty, default_ty) in
+                    skipped_default_types(ctx, entity, &plan, &param_hir_tys)
+                {
+                    let param_tv = lower_hir_ty_sub(ctx, &param_ty, None, TyVar(0), &subs);
+                    let default_tv = lower_hir_ty_sub(ctx, &default_ty, None, TyVar(0), &subs);
+                    ctx.equal(param_tv, default_tv, span.clone());
+                }
+            },
+            // No bindable plan (e.g. no Callable): fall back to positional coercion.
+            None => {
+                for (arg, param_ty) in args.iter().zip(param_hir_tys.iter()) {
+                    if let Some(hir_ty) = param_ty {
+                        let param_tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
+                        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
+                    }
+                }
+            },
+        }
+    }
+
+    // Equate result with return type. A function with no return annotation
+    // returns `()` (Swift/Rust semantics) — defaulting to a fresh TyVar would
+    // leak an unresolved slot at every no-return-type call site.
+    let ret_tv = qctx
+        .query(LowerTypeAnnotation { entity, root })
+        .map(|hir_ty| lower_opaque_aware(ctx, &hir_ty, entity, None, TyVar(0), &subs))
+        .unwrap_or_else(|| ctx.tuple(Vec::new()));
+
+    // For inits and enum cases, result type is the parent type.
+    // Effectful inits wrap through type operators: Self? or Self throws E.
+    if matches!(kind, Some(NodeKind::Initializer | NodeKind::EnumCase)) {
+        if let Some(parent) = qctx.parent_of(entity) {
+            let parent_tps: Vec<Entity> = qctx
+                .get::<TypeParams>(parent)
+                .map(|tp| tp.0.clone())
+                .unwrap_or_default();
+            let parent_args: Vec<TyVar> = parent_tps
+                .iter()
+                .filter_map(|tp| subs.iter().find(|(e, _)| e == tp).map(|&(_, tv)| tv))
+                .collect();
+            let parent_ty = ctx.named(parent, parent_args);
+            let final_ty = wrap_init_call_result(ctx, entity, parent_ty, &subs, &span);
+            ctx.equal(result, final_ty, span);
+        } else {
+            bind_call_result(ctx, result, ret_tv, expr, span, true);
+        }
+    } else {
+        bind_call_result(ctx, result, ret_tv, expr, span, true);
+    }
+
+    SolveResult::Solved
+}
+
+/// Check if a candidate's param types are compatible with concrete arg types.
+/// Does not mutate the type table — only inspects resolved types structurally.
+pub(super) fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> bool {
+    let qctx = ctx.query_ctx;
+    let root = ctx.root;
+
+    let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity, root }) else {
+        return false;
+    };
+
+    // Bind args to params (defaults skippable); reject if they don't bind.
+    let Some(plan) = binding_plan_for(qctx, entity, args) else {
+        return false;
+    };
+
+    // Build substitution map for type params
+    let type_param_entities: Vec<Entity> = qctx
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+
+    // For inits, also include parent struct type params
+    let mut all_type_params = type_param_entities;
+    let kind = qctx.get::<NodeKind>(entity);
+    if matches!(kind, Some(NodeKind::Initializer))
+        && let Some(parent) = qctx.parent_of(entity)
+    {
+        let parent_tps: Vec<Entity> = qctx
+            .get::<TypeParams>(parent)
+            .map(|tp| tp.0.clone())
+            .unwrap_or_default();
+        all_type_params.extend(parent_tps);
+    }
+
+    for (slot, binding) in plan.iter().enumerate() {
+        let Binding::Arg(ai) = binding else {
+            continue; // defaulted-and-skipped param — nothing to check
+        };
+        let arg = &args[*ai];
+        let Some(param_ty) = param_hir_tys.get(slot) else {
+            continue;
+        };
+        let Some(hir_ty) = param_ty else {
+            continue; // unannotated param — compatible with anything
+        };
+        // A bounded alias is checked as the type it expands to.
+        let hir_ty = match hir_ty {
+            kestrel_hir::ty::HirTy::Alias { expanded, .. } => expanded.as_ref(),
+            other => other,
+        };
+
+        // Get the concrete arg type
+        let mut arg_resolved = ctx.resolve(arg.ty);
+        // Transparent place: a ref-typed argument disambiguates as its
+        // POINTEE — borrow params receive the place, consuming params the
+        // decayed copy, so `f(box.peek())` matches `f(x: T)` overloads.
+        if let crate::ty::TySlot::Resolved(crate::ty::TyKind::Ref { pointee, .. }) =
+            &ctx.types[arg_resolved.0 as usize]
+        {
+            arg_resolved = ctx.resolve(*pointee);
+        }
+        let arg_kind = match &ctx.types[arg_resolved.0 as usize] {
+            crate::ty::TySlot::Resolved(k) => k,
+            _ => return false, // not concrete — shouldn't happen (caller checks)
+        };
+
+        // Check compatibility by inspecting the HirTy directly
+        match hir_ty {
+            kestrel_hir::ty::HirTy::Struct {
+                entity: param_entity,
+                ..
+            }
+            | kestrel_hir::ty::HirTy::Enum {
+                entity: param_entity,
+                ..
+            }
+            | kestrel_hir::ty::HirTy::Protocol {
+                entity: param_entity,
+                ..
+            }
+            | kestrel_hir::ty::HirTy::AbstractAssoc {
+                entity: param_entity,
+                ..
+            } => {
+                // Type parameter entity — always compatible (generic)
+                if all_type_params.contains(param_entity) {
+                    continue;
+                }
+                match arg_kind.entity() {
+                    Some(arg_entity) => {
+                        if arg_entity != *param_entity {
+                            return false;
+                        }
+                    },
+                    None => return false,
+                }
+            },
+            kestrel_hir::ty::HirTy::AssocProjection { .. } => {
+                // Treat projections as always compatible for disambiguation —
+                // member matching happens downstream after projection resolves.
+                continue;
+            },
+            kestrel_hir::ty::HirTy::Param(_, _) => {
+                // Type parameter — always compatible
+                continue;
+            },
+            kestrel_hir::ty::HirTy::Tuple(elems, _) => match arg_kind {
+                crate::ty::TyKind::Tuple(arg_elems) => {
+                    if arg_elems.len() != elems.len() {
+                        return false;
+                    }
+                },
+                _ => return false,
+            },
+            // Arity only — deliberately NOT kind-aware. A closure literal is
+            // always generated at `Normal` and only learns its real kind from
+            // the expected type during coercion, so filtering candidates on the
+            // kind here would reject every literal offered to an `escaping` /
+            // `consuming` / `mutating` parameter before the retrofit could run.
+            // Overloads that differ ONLY in a parameter's closure kind stay
+            // ambiguous at this stage and are settled by the argument coercion.
+            kestrel_hir::ty::HirTy::Function {
+                params: p_params, ..
+            } => match arg_kind {
+                crate::ty::TyKind::Function {
+                    params: a_params, ..
+                } => {
+                    if a_params.len() != p_params.len() {
+                        return false;
+                    }
+                },
+                _ => return false,
+            },
+            // Never, Infer, Error — don't use for disambiguation
+            _ => continue,
+        }
+    }
+
+    true
+}
+
+/// Wrap a TyVar for an effectful init call site: `Self` → `Self?` or `Self throws E`.
+pub(super) fn wrap_init_call_result(
+    ctx: &mut InferCtx<'_>,
+    init_entity: kestrel_hecs::Entity,
+    inner_tv: TyVar,
+    subs: &[(kestrel_hecs::Entity, TyVar)],
+    _span: &kestrel_span::Span,
+) -> TyVar {
+    let qctx = ctx.query_ctx;
+    let root = ctx.root;
+
+    if qctx.get::<InitEffect>(init_entity).is_none() {
+        return inner_tv;
+    }
+
+    let Some(hir_ty) = qctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+        entity: init_entity,
+        root,
+    }) else {
+        return inner_tv;
+    };
+
+    match &hir_ty {
+        kestrel_hir::ty::HirTy::Enum { entity, args, .. }
+        | kestrel_hir::ty::HirTy::Struct { entity, args, .. } => {
+            let mut wrapped_args = Vec::with_capacity(args.len());
+            wrapped_args.push(inner_tv);
+            for arg in args.iter().skip(1) {
+                wrapped_args.push(lower_hir_ty_sub(ctx, arg, None, TyVar(0), subs));
+            }
+            ctx.named(*entity, wrapped_args)
+        },
+        _ => inner_tv,
+    }
+}

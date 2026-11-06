@@ -14,8 +14,8 @@ bb1(%v6: @owned Pointer[Test.Handle], %v7: @owned Pointer[Bool]):
     %v11 = literal false  // @owned Bool
     store_assign %v4, %v11
     %v12 = call Test.consume(%v10)  // @owned ()
-    %v13 = literal ()  // @owned ()
     destroy_value %v12
+    %v13 = literal ()  // @owned ()
     jump bb3(%v13, %v6, %v7)
 
 bb2(%v8: @owned Pointer[Test.Handle], %v9: @owned Pointer[Bool]):

@@ -68,7 +68,7 @@ Calling one of these is E145, which names the reason. Protocol extension methods
 
 **`any P` conforms to `P`** when every requirement is dispatchable and the box grants the access each one needs. That lets you pass an existential to generic code (`func f[T](x: T) where T: P`, or a `some P` parameter). E146 names the requirement that blocks it.
 
-On an existential, the protocol's members are found before the box's own: `RcBox.isUnique()` can't hide a requirement of the same name.
+On an existential, the protocol's members are found before the box's own: `RcBox.isUnique` can't hide a requirement of the same name.
 
 ## Downcasting with `as?`
 

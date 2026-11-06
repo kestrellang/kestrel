@@ -15,6 +15,12 @@
 //! let diagnostics = compiler.diagnostics();
 //! ```
 
+/// Stack size for a thread that runs the compiler. The front end and MIR
+/// lowering recurse once per nesting level, so the default 2–8 MB overflowed
+/// on a few thousand levels (long generated `+` chains, deep `else if`
+/// ladders). 256 MB is reserved virtual memory, committed only as used.
+pub const COMPILER_STACK_SIZE: usize = 256 * 1024 * 1024;
+
 pub mod components;
 pub mod diagnostic;
 pub mod queries;
@@ -45,8 +51,13 @@ pub struct Compiler {
     files: HashMap<String, Entity>,
     /// Root module entity — parent of all top-level modules.
     root: Entity,
-    /// Compilation target for conditional filtering (@platform, etc.)
+    /// The compilation target: `@platform` filtering, MIR layout, and codegen
+    /// all read this one value so they agree on the OS and pointer width.
     target: TargetConfig,
+    /// Warnings found after monomorphization (E508), from the most recent
+    /// `monomorphize_mir`. They live outside the query system because the
+    /// mono pipeline runs outside it; read them with [`Self::mono_warnings`].
+    mono_warnings: std::sync::Mutex<Vec<codespan_reporting::diagnostic::Diagnostic<usize>>>,
 }
 
 impl Compiler {
@@ -72,6 +83,7 @@ impl Compiler {
             files: HashMap::new(),
             root,
             target: TargetConfig::host(),
+            mono_warnings: Default::default(),
         }
     }
 
@@ -86,6 +98,7 @@ impl Compiler {
             files,
             root,
             target: TargetConfig::host(),
+            mono_warnings: Default::default(),
         }
     }
 
@@ -94,10 +107,15 @@ impl Compiler {
         &self.files
     }
 
-    /// Set the compilation target for conditional filtering.
+    /// Set the compilation target (defaults to the host).
     pub fn with_target(mut self, target: TargetConfig) -> Self {
         self.target = target;
         self
+    }
+
+    /// The compilation target every stage compiles for.
+    pub fn target(&self) -> &TargetConfig {
+        &self.target
     }
 
     /// Add or update a source file. Returns the entity handle.
@@ -242,9 +260,8 @@ impl Compiler {
         &self,
     ) -> Result<kestrel_mir::MirModule, kestrel_codegen_cranelift::CodegenError> {
         let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root());
-        let target = kestrel_mir::TargetConfig::host_64();
         let mut next_entity = self.world().entity_count() as u32;
-        let errors = kestrel_mir::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+        let errors = kestrel_mir::passes::run_pipeline(&mut mir, &self.target, &mut next_entity);
         if !errors.is_empty() {
             let ctx = self.world().query_context();
             // Cascade suppression: a coded user error (escape check) makes the
@@ -252,18 +269,22 @@ impl Compiler {
             // an invalid ret_borrow body are noise — report only the coded
             // ones. Uncoded errors alone are real ICEs and surface as such.
             let has_coded = errors.iter().any(|e| e.diag.is_some());
-            for error in errors.iter().filter(|e| !has_coded || e.diag.is_some()) {
+            let reported: Vec<_> = errors
+                .iter()
+                .filter(|e| !has_coded || e.diag.is_some())
+                .collect();
+            for error in &reported {
                 ctx.accumulate(diagnostic::mir_verify_error_to_diagnostic(
                     error,
                     self.world(),
                 ));
             }
             // Coded errors are ordinary user diagnostics (escape check); only
-            // uncoded ones are internal verify failures.
-            let msg = if errors.iter().all(|e| e.diag.is_some()) {
-                format!("compilation failed with {} error(s)", errors.len())
+            // uncoded ones are internal verify failures. Count what was shown.
+            let msg = if has_coded {
+                format!("compilation failed with {} error(s)", reported.len())
             } else {
-                format!("OSSA verification failed with {} error(s)", errors.len())
+                format!("OSSA verification failed with {} error(s)", reported.len())
             };
             return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(msg));
         }
@@ -289,10 +310,9 @@ impl Compiler {
     ) {
         debug_assert!(stop.is_pre_mono());
         let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root());
-        let target = kestrel_mir::TargetConfig::host_64();
         let mut next_entity = self.world().entity_count() as u32;
         let errors =
-            kestrel_mir::passes::run_pipeline_until(&mut mir, &target, &mut next_entity, stop);
+            kestrel_mir::passes::run_pipeline_until(&mut mir, &self.target, &mut next_entity, stop);
         (mir, errors)
     }
 
@@ -335,8 +355,7 @@ impl Compiler {
         let mir = self.lower_to_mir()?;
         self.ensure_no_lowering_errors()?;
         let mono = self.monomorphize_mir(mir)?;
-        let target = kestrel_codegen::TargetConfig::host();
-        kestrel_codegen_cranelift::compile_and_link(&mono, &target, options, output_path)
+        kestrel_codegen_cranelift::compile_and_link(&mono, &self.target, options, output_path)
     }
 
     /// Same as [`Self::compile_and_link`] but uses the LLVM backend. Reuses the
@@ -354,8 +373,71 @@ impl Compiler {
         let mir = self.lower_to_mir().map_err(to_llvm)?;
         self.ensure_no_lowering_errors().map_err(to_llvm)?;
         let mono = self.monomorphize_mir(mir).map_err(to_llvm)?;
-        let target = kestrel_codegen::TargetConfig::host();
-        kestrel_codegen_llvm::compile_and_link(&mono, &target, options, output_path)
+        kestrel_codegen_llvm::compile_and_link(&mono, &self.target, options, output_path)
+    }
+
+    /// Warnings found after monomorphization by the most recent build
+    /// (currently E508 `observable_drop_unmarked`).
+    pub fn mono_warnings(&self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
+        self.mono_warnings
+            .lock()
+            .map(|w| w.clone())
+            .unwrap_or_default()
+    }
+
+    /// E508: a `Cloneable` type whose deinit reaches an observable extern but
+    /// is not `@observabledrop`. Replaces the previous build's warnings.
+    fn record_mono_warnings(&self, mono: &kestrel_mir::mono::MonoModule) {
+        use codespan_reporting::diagnostic::{Diagnostic, Label};
+        let name = |e: Entity| {
+            self.world
+                .get::<kestrel_ast_builder::Name>(e)
+                .map(|n| n.0.clone())
+                .unwrap_or_default()
+        };
+        let warnings =
+            kestrel_mir::passes::copy_lifetime::unmarked_observable_drops(mono)
+                .into_iter()
+                .filter_map(|f| {
+                    let span = self
+                        .world
+                        .get::<kestrel_ast_builder::DeclSpan>(f.type_entity)?
+                        .0
+                        .clone();
+                    // Name the first source-level function on the path (the
+                    // deinit's direct callee may be a synthesized helper).
+                    let type_name = name(f.type_entity);
+                    let callee = f
+                        .path
+                        .iter()
+                        .map(|e| name(*e))
+                        .find(|n| !n.is_empty())
+                        .unwrap_or_else(|| f.symbol.clone());
+                    let notes = if callee == f.symbol {
+                        vec![]
+                    } else {
+                        vec![format!(
+                            "`{callee}` reaches the external function `{}`",
+                            f.symbol
+                        )]
+                    };
+                    Some(
+                    Diagnostic::warning()
+                        .with_code("E508")
+                        .with_message(format!(
+                            "`Cloneable` type `{type_name}` has a `deinit` that calls `{callee}`; \
+                             mark it `@observabledrop` so its copies are not dropped early"
+                        ))
+                        .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
+                            "copies of this type may be dropped before the end of their scope",
+                        )])
+                        .with_notes(notes),
+                )
+                })
+                .collect();
+        if let Ok(mut slot) = self.mono_warnings.lock() {
+            *slot = warnings;
+        }
     }
 
     #[allow(clippy::result_large_err)]
@@ -363,10 +445,9 @@ impl Compiler {
         &self,
         mir: kestrel_mir::MirModule,
     ) -> Result<kestrel_mir::mono::MonoModule, kestrel_codegen_cranelift::CodegenError> {
-        let target = kestrel_mir::TargetConfig::host_64();
         let generic_functions = mir.functions.clone();
 
-        let mut mono = kestrel_mir::mono::monomorphize(mir, &target).map_err(|errs| {
+        let mut mono = kestrel_mir::mono::monomorphize(mir, &self.target).map_err(|errs| {
             let detail = errs
                 .iter()
                 .map(|e| e.to_string())
@@ -388,6 +469,10 @@ impl Compiler {
         // mono-dependent `consuming` value cloned-then-double-dropped class
         // (#127: array literals via `RcBox.init`).
         kestrel_mir::passes::copy_propagation::eliminate_cross_block_copies(&mut mono);
+        // Keep implicit copies from holding COW storage shared: move at last
+        // use, drop at last read, or read through a borrow instead.
+        kestrel_mir::passes::copy_lifetime::run(&mut mono);
+        self.record_mono_warnings(&mono);
         // Recover zero-copy aggregate moves: flip provably-safe Takes to aliasing
         // before expand/codegen turn them into memcpys (#219).
         kestrel_mir::passes::copy_propagation::mark_independent_takes(&mut mono);
@@ -406,7 +491,7 @@ impl Compiler {
 
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
 
-        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        // Diagnostic only; no-op unless KESTREL_DEBUG=audit-dup.
         kestrel_mir::mono::audit::run_audit(&mono);
 
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);
@@ -449,10 +534,9 @@ impl Compiler {
         kestrel_codegen_cranelift::CodegenError,
     > {
         debug_assert!(stop.is_post_mono());
-        let target = kestrel_mir::TargetConfig::host_64();
         let generic_functions = mir.functions.clone();
 
-        let mut mono = kestrel_mir::mono::monomorphize(mir, &target).map_err(|errs| {
+        let mut mono = kestrel_mir::mono::monomorphize(mir, &self.target).map_err(|errs| {
             let detail = errs
                 .iter()
                 .map(|e| e.to_string())
@@ -469,6 +553,8 @@ impl Compiler {
 
         kestrel_mir::passes::copy_propagation::eliminate_redundant_copies(&mut mono);
         kestrel_mir::passes::copy_propagation::eliminate_cross_block_copies(&mut mono);
+        kestrel_mir::passes::copy_lifetime::run(&mut mono);
+        self.record_mono_warnings(&mono);
         kestrel_mir::passes::copy_propagation::mark_independent_takes(&mut mono);
         if stop == kestrel_mir::passes::Stage::CopyProp {
             return Ok((mono, Vec::new()));
@@ -480,7 +566,7 @@ impl Compiler {
         let _mono_flow = kestrel_mir::verify::verify_mono_flow(&mono);
 
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
-        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        // Diagnostic only; no-op unless KESTREL_DEBUG=audit-dup.
         kestrel_mir::mono::audit::run_audit(&mono);
 
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);

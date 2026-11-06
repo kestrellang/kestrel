@@ -3,7 +3,7 @@
 // expect-exit: 0
 
 // The two non-iterator lazy builders that store a callback —
-// `ArraySlice.split(where:)` and `Str.split(where:)` — take `escaping` closures
+// `Slice.split(where:)` and `Str.split(where:)` — take `escaping` closures
 // (closures-stdlib-audit.md). Their view types own the snapshot, so mutating
 // the captured source var after construction cannot change what the view
 // yields (docs/design/closures.md, "Capture Rules").
@@ -23,7 +23,7 @@ func main() -> lang.i64 {
     if wordParts(unchecked: 1).toOwned().isEqual(to: "two") == false { return 4 }
     if wordParts(unchecked: 2).toOwned().isEqual(to: "three") == false { return 5 }
 
-    // ArraySlice.split(where:) — snapshot of `marker`
+    // Slice.split(where:) — snapshot of `marker`
     var marker: Int64 = -1;
     let arr = [1, -1, 2, 3, -1, 4];
     let segments = arr.split(where: { (x) in x == marker });

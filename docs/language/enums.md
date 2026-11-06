@@ -106,7 +106,7 @@ value — directly (`Tree`), inside a tuple, through a struct field, through
 case lives in one `std.memory.OwnedBox`, so a case costs one allocation however
 many fields it has. Cases that don't recurse (`Nil`, `Leaf`) stay inline and
 allocate nothing. An `indirect enum` with no recursive case boxes nothing and
-gets a warning (E405).
+gets a warning (E409).
 
 **Using one.** Construction and pattern matching look exactly like any other
 enum: `.Cons(head: 1, tail: .Nil)`, `match list { .Cons(h, t) => … }`. Matching
@@ -200,7 +200,7 @@ error: recursive enum requires `indirect` [E429]
  = add 'indirect' before the enum declaration to allow recursive cases
 ```
 
-#### E405: `indirect` has no effect (warning)
+#### E409: `indirect` has no effect (warning)
 
 ```kestrel
 indirect enum Shape {    // warning: no case contains `Shape`
@@ -210,7 +210,7 @@ indirect enum Shape {    // warning: no case contains `Shape`
 ```
 
 ```
-warning: `indirect` has no effect: enum 'Shape' has no recursive case [E405]
+warning: `indirect` has no effect: enum 'Shape' has no recursive case [E409]
 ```
 
 #### E406: Indirect enums require the standard library

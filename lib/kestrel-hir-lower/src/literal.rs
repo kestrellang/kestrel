@@ -10,9 +10,9 @@
 //! (lib/kestrel-semantic-tree-binder/src/body_resolver/expressions.rs).
 
 use kestrel_ast::escape::{Escaped, decode_escape};
-use kestrel_hir::body::{EscapeError, EscapeErrorKind};
 #[cfg(test)]
 use kestrel_hir::body::UnicodeEscapeErrorReason;
+use kestrel_hir::body::{EscapeError, EscapeErrorKind};
 use kestrel_span::Span;
 
 use crate::string_token::{self, MultilineErrorKind};

@@ -4,6 +4,7 @@ mod entail;
 pub mod expand;
 pub mod fat;
 pub mod mangle;
+mod ty_sites;
 pub mod types;
 pub mod verify;
 mod vtable;
@@ -27,7 +28,7 @@ use kestrel_hecs::Entity;
 use crate::body::OssaBody;
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
-use crate::inst::InstKind;
+use crate::inst::{InstKind, Instruction};
 use crate::item::enum_def::EnumDef;
 use crate::item::function::{FunctionDef, FunctionKind, WhereConstraint};
 use crate::item::protocol::ProtocolDef;
@@ -37,6 +38,7 @@ use crate::item::{Layout, TargetConfig};
 use crate::layout::StructLayout;
 use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
+use crate::ty_query::TypeEnv;
 use crate::value::Ownership;
 use crate::{CopyBehavior, MirModule, MonoFuncId, TyId};
 
@@ -60,14 +62,26 @@ pub fn monomorphize(
         entity_names,
         copyable_protocol,
         cloneable_protocol,
+        static_protocol,
+        sized_protocol,
         // Condition lowering is complete before mono: mir-lower has already
         // decided raw-branch vs `boolValue()` witness call, and the resulting
         // `Callee::Witness` is resolved by the ordinary witness machinery.
         boolean_conditional_protocol: _,
         bool_struct: _,
+        observable_drop,
         vtable_templates,
         existential_clone_thunk,
     } = module;
+    let env = TypeEnv {
+        structs: &structs,
+        enums: &enums,
+        protocols: &protocols,
+        cloneable_protocol,
+        copyable_protocol,
+        static_protocol,
+        sized_protocol,
+    };
 
     // Phase 1: Instantiation discovery
     let CollectionResult {
@@ -75,14 +89,10 @@ pub fn monomorphize(
         witness_cache,
     } = collect::collect_all(
         &functions,
-        &structs,
-        &enums,
-        &protocols,
+        env,
         &witnesses,
         &mut ty_arena,
         &entity_names,
-        copyable_protocol,
-        cloneable_protocol,
         &vtable_templates,
         existential_clone_thunk,
     )?;
@@ -95,7 +105,7 @@ pub fn monomorphize(
         let result = monomorphize_body(
             &mut ty_arena,
             &functions,
-            &protocols,
+            &env,
             &witnesses,
             &entity_names,
             key,
@@ -257,6 +267,7 @@ pub fn monomorphize(
     }
 
     mono_module.entity_names = entity_names;
+    mono_module.observable_drop = observable_drop;
     mono_module.vtables = vtables;
     mono_module.structs = mono_structs;
     mono_module.enums = mono_enums;
@@ -418,7 +429,7 @@ struct MonoBodyResult {
 fn monomorphize_body(
     arena: &mut TyArena,
     functions: &IndexMap<Entity, FunctionDef>,
-    protocols: &IndexMap<Entity, ProtocolDef>,
+    env: &TypeEnv<'_>,
     witnesses: &[WitnessDef],
     entity_names: &IndexMap<Entity, String>,
     key: &InstantiationKey,
@@ -432,7 +443,7 @@ fn monomorphize_body(
         &key.type_args,
         key.self_type,
         arena,
-        protocols,
+        env.protocols,
         witnesses,
     );
 
@@ -481,19 +492,55 @@ fn monomorphize_body(
     }
 
     // Walk instructions and substitute types
-    for block in &mut mono_body.blocks {
-        for inst in &mut block.insts {
+    for bi in 0..mono_body.blocks.len() {
+        let insts = std::mem::take(&mut mono_body.blocks[bi].insts);
+        let mut adapted = Vec::with_capacity(insts.len());
+        for mut inst in insts {
+            let was_witness = matches!(
+                &inst.kind,
+                InstKind::Call {
+                    callee: Callee::Witness { .. },
+                    ..
+                }
+            );
+            // `Cloneable.clone()` on an escaping closure: the closure is a
+            // shared handle with no witness function; cloning it is a retain.
+            if let Some(copy) =
+                closure_clone_as_copy(arena, &inst.kind, &subst, witnesses, env.cloneable_protocol)
+            {
+                adapted.push(Instruction {
+                    kind: copy,
+                    span: inst.span.clone(),
+                });
+                continue;
+            }
             substitute_inst(
                 arena,
                 witnesses,
-                protocols,
+                env,
                 functions,
                 entity_names,
                 &mut inst.kind,
                 &subst,
                 key.self_type,
             );
+            // Conformance requires exact receiver (E477) and parameter (E469)
+            // conventions, and setter values follow one rule
+            // (`SETTER_NEW_VALUE_MODE`), so a resolved witness takes every
+            // argument exactly the way the call site passes it. A mismatch
+            // would leak or double-drop the argument (a borrowed value stored
+            // by a consuming setter was freed twice) — fail loudly instead.
+            if was_witness && let Some(idx) = witness_convention_mismatch(&inst.kind, functions) {
+                panic!(
+                    "ICE: witness call in {:?} passes arg {idx} with a convention its witness \
+                     doesn't take — the requirement and witness disagree",
+                    func.name
+                );
+            }
+            adapted.push(inst);
         }
+        let block = &mut mono_body.blocks[bi];
+        block.insts = adapted;
         // No terminator substitution needed — MIR terminators carry ValueId only
     }
 
@@ -545,13 +592,72 @@ fn monomorphize_body(
     }
 }
 
+/// `x.clone()` dispatched through `Cloneable` at an `escaping` closure type
+/// becomes `copy_value x` (a refcount retain of the shared environment):
+/// closure types conform to `Cloneable` structurally, without a witness.
+fn closure_clone_as_copy(
+    arena: &mut TyArena,
+    kind: &InstKind,
+    subst: &SubstMap,
+    witnesses: &[WitnessDef],
+    cloneable_protocol: Option<Entity>,
+) -> Option<InstKind> {
+    let InstKind::Call {
+        result: Some(result),
+        callee:
+            Callee::Witness {
+                protocol,
+                method,
+                self_type,
+                ..
+            },
+        args,
+    } = kind
+    else {
+        return None;
+    };
+    if Some(*protocol) != cloneable_protocol || method.name != "clone" {
+        return None;
+    }
+    let concrete = collect::substitute_and_resolve(arena, witnesses, *self_type, subst);
+    let is_shared_closure = matches!(
+        arena.get(concrete),
+        MirTy::FuncThick { kind, .. } if kind.is_shared()
+    );
+    let receiver = args.first()?;
+    is_shared_closure.then_some(InstKind::CopyValue {
+        result: *result,
+        operand: receiver.value,
+    })
+}
+
+/// The first argument of a resolved witness call whose passing convention
+/// differs from the witness's parameter (`None` when they all agree).
+fn witness_convention_mismatch(
+    kind: &InstKind,
+    functions: &IndexMap<Entity, FunctionDef>,
+) -> Option<usize> {
+    let InstKind::Call {
+        callee: Callee::Direct { func, .. },
+        args,
+        ..
+    } = kind
+    else {
+        return None;
+    };
+    let target = functions.get(func)?;
+    args.iter()
+        .zip(&target.params)
+        .position(|(arg, param)| arg.convention != param.convention)
+}
+
 /// Substitute types in a single instruction (the OSSA analogue of the
 /// older place-based `substitute_rvalue` / `substitute_operand` /
 /// `substitute_terminator` helpers).
 fn substitute_inst(
     arena: &mut TyArena,
     witnesses: &[WitnessDef],
-    protocols: &IndexMap<Entity, ProtocolDef>,
+    env: &TypeEnv<'_>,
     functions: &IndexMap<Entity, FunctionDef>,
     entity_names: &IndexMap<Entity, String>,
     kind: &mut InstKind,
@@ -574,7 +680,7 @@ fn substitute_inst(
         substitute_callee_and_resolve(
             arena,
             witnesses,
-            protocols,
+            env,
             functions,
             entity_names,
             callee,
@@ -677,7 +783,7 @@ fn substitute_op_type(
 fn substitute_callee_and_resolve(
     arena: &mut TyArena,
     witnesses: &[WitnessDef],
-    protocols: &IndexMap<Entity, ProtocolDef>,
+    env: &TypeEnv<'_>,
     functions: &IndexMap<Entity, FunctionDef>,
     entity_names: &IndexMap<Entity, String>,
     callee: &mut Callee,
@@ -726,7 +832,7 @@ fn substitute_callee_and_resolve(
             let witness_result = witness::resolve_witness_call(
                 arena,
                 witnesses,
-                protocols,
+                env,
                 functions,
                 entity_names,
                 *protocol,
@@ -766,21 +872,17 @@ fn rewrite_callees(
             for (_, callee) in inst.kind.callees_mut() {
                 rewrite_callee(callee, func_id_map, functions);
             }
-            match &mut inst.kind {
-                InstKind::Literal { value, .. } => {
-                    if let ImmediateKind::FunctionRef {
-                        func,
-                        type_args,
-                        self_type,
-                    } = &value.kind
-                    {
-                        let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
-                        if let Some(&mono_id) = func_id_map.get(&key) {
-                            value.kind = ImmediateKind::MonoFunctionRef(mono_id);
-                        }
-                    }
-                },
-                _ => {},
+            if let InstKind::Literal { value, .. } = &mut inst.kind
+                && let ImmediateKind::FunctionRef {
+                    func,
+                    type_args,
+                    self_type,
+                } = &value.kind
+            {
+                let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                if let Some(&mono_id) = func_id_map.get(&key) {
+                    value.kind = ImmediateKind::MonoFunctionRef(mono_id);
+                }
             }
         }
     }
@@ -791,24 +893,22 @@ fn rewrite_callee(
     func_id_map: &HashMap<InstantiationKey, MonoFuncId>,
     functions: &IndexMap<Entity, FunctionDef>,
 ) {
-    match callee {
-        Callee::Direct {
-            func,
-            type_args,
-            self_type,
-        } => {
-            // Mirror collection's arity normalization (collect::scan_callee) so
-            // the lookup key matches the key the instance was enqueued under.
-            let mut targs = type_args.clone();
-            if let Some(f) = functions.get(&*func) {
-                collect::normalize_direct_arity(&mut targs, f.type_params.len());
-            }
-            let key = InstantiationKey::new(*func, targs, *self_type);
-            if let Some(&mono_id) = func_id_map.get(&key) {
-                *callee = Callee::Resolved(mono_id);
-            }
-        },
-        _ => {},
+    if let Callee::Direct {
+        func,
+        type_args,
+        self_type,
+    } = callee
+    {
+        // Mirror collection's arity normalization (collect::scan_callee) so
+        // the lookup key matches the key the instance was enqueued under.
+        let mut targs = type_args.clone();
+        if let Some(f) = functions.get(&*func) {
+            collect::normalize_direct_arity(&mut targs, f.type_params.len());
+        }
+        let key = InstantiationKey::new(*func, targs, *self_type);
+        if let Some(&mono_id) = func_id_map.get(&key) {
+            *callee = Callee::Resolved(mono_id);
+        }
     }
 }
 
@@ -826,13 +926,18 @@ fn resolve_types_and_layouts(
     IndexMap<MonoTypeKey, MonoStruct>,
     IndexMap<MonoTypeKey, MonoEnum>,
 ) {
-    // Collect all concrete Named types from monomorphized bodies
+    // Collect every concrete Named type each function mentions — signature
+    // included, so a bodyless `@extern` still seeds `Pointer[Tm]`. Same site
+    // list `verify_mono` checks (`ty_sites`), so anything it can flag is seeded.
     let mut concrete_types: IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind> = IndexMap::new();
 
     for body_result in mono_bodies {
-        if let Some(body) = &body_result.body {
-            collect_named_types(arena, body, &mut concrete_types, structs, enums);
-        }
+        ty_sites::for_each_fn_ty(
+            &body_result.params,
+            body_result.ret,
+            body_result.body.as_ref(),
+            |ty, _| collect_named_type_from_ty(arena, ty, &mut concrete_types, structs, enums),
+        );
     }
 
     // Compute layouts for concrete types (fixed-point loop)
@@ -1121,27 +1226,18 @@ impl CopyLayer for MonoCopyLayer<'_> {
         // invariant whenever gating is non-empty (the only case the refine
         // loop reaches), so the kernel always falls through to the gating fold
         // — exactly the former `conditional_copy` behavior.
-        let copy = self
-            .structs
-            .get(&entity)
-            .map(|s| s.type_info.copy.clone())
-            .or_else(|| self.enums.get(&entity).map(|e| e.type_info.copy.clone()))
-            .unwrap_or(CopyBehavior::Bitwise);
+        let (copy, gating) = crate::ty_query::nominal_copy_in(self.structs, self.enums, entity);
         // Checked form of the invariant above: a pass that flips a conditional
         // container's base away from None would silently skip the gating fold.
         debug_assert!(
-            self.conditional_copy(entity).is_empty() || matches!(copy, CopyBehavior::None),
+            gating.is_empty() || matches!(copy, CopyBehavior::None),
             "conditional container's generic def must keep CopyBehavior::None"
         );
         copy
     }
 
     fn conditional_copy(&self, entity: Entity) -> Cow<'_, kestrel_copy_fold::ConditionalCopy> {
-        self.structs
-            .get(&entity)
-            .map(|s| &s.conditionally_copyable)
-            .or_else(|| self.enums.get(&entity).map(|e| &e.conditionally_copyable))
-            .map_or_else(|| Cow::Owned(Default::default()), Cow::Borrowed)
+        Cow::Borrowed(crate::ty_query::nominal_copy_in(self.structs, self.enums, entity).1)
     }
 
     fn member_semantics(&self, &ty: &TyId) -> CopyBehavior {
@@ -1219,63 +1315,9 @@ enum ConcreteTypeKind {
     Enum(Entity),
 }
 
-/// Walk an OssaBody and collect all concrete Named types.
-fn collect_named_types(
-    arena: &TyArena,
-    body: &OssaBody,
-    out: &mut IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind>,
-    structs: &IndexMap<Entity, StructDef>,
-    enums: &IndexMap<Entity, EnumDef>,
-) {
-    // Walk value types
-    for value in &body.values {
-        collect_named_type_from_ty(arena, value.ty, out, structs, enums);
-    }
-    // Walk block param types
-    for block in &body.blocks {
-        for param in &block.params {
-            collect_named_type_from_ty(arena, param.ty, out, structs, enums);
-        }
-    }
-    // Walk instruction types (Struct.ty, Enum.enum_ty, Array.element_ty, Literal immediates)
-    for block in &body.blocks {
-        for inst in &block.insts {
-            match &inst.kind {
-                InstKind::Struct { ty, .. } => {
-                    collect_named_type_from_ty(arena, *ty, out, structs, enums);
-                },
-                InstKind::Enum { enum_ty, .. } => {
-                    collect_named_type_from_ty(arena, *enum_ty, out, structs, enums);
-                },
-                InstKind::Array { element_ty, .. } => {
-                    collect_named_type_from_ty(arena, *element_ty, out, structs, enums);
-                },
-                InstKind::Literal { value, .. } => match &value.kind {
-                    ImmediateKind::SizeOf(ty)
-                    | ImmediateKind::AlignOf(ty)
-                    | ImmediateKind::NullPtr(ty) => {
-                        collect_named_type_from_ty(arena, *ty, out, structs, enums);
-                    },
-                    _ => {},
-                },
-                // Op type operands. Mirrors `substitute_op_type` via the one
-                // canonical variant list in `op::op_ty_variants!`. `SizeOf`/
-                // `AlignOf` are the ops whose type genuinely escapes — nothing
-                // else in the body mentions it — but seeding all ten costs
-                // nothing and keeps the two walks in lockstep by construction.
-                InstKind::Op1 { op, .. } | InstKind::Op2 { op, .. } | InstKind::Op3 { op, .. } => {
-                    if let Some(ty) = crate::op::op_type(op) {
-                        collect_named_type_from_ty(arena, ty, out, structs, enums);
-                    }
-                },
-                // CopyAddr/Take/BeginBorrowAddr/BeginMutBorrowAddr/DestroyAddr/FieldAddr/Uninit
-                // carry ty but those are address types (Pointer), not Named
-                _ => {},
-            }
-        }
-    }
-}
-
+/// Seeds every struct/enum instantiation nested anywhere in `ty` (type args,
+/// pointees, tuple elements, function-type params/ret) — the same nodes
+/// `verify_mono` checks, via `ty_sites::for_each_ty_node`.
 fn collect_named_type_from_ty(
     arena: &TyArena,
     ty: TyId,
@@ -1283,36 +1325,20 @@ fn collect_named_type_from_ty(
     structs: &IndexMap<Entity, StructDef>,
     enums: &IndexMap<Entity, EnumDef>,
 ) {
-    match arena.get(ty) {
-        MirTy::Named { entity, type_args } => {
-            let entity = *entity;
-            let type_args = type_args.clone();
-            let key = (entity, type_args.clone());
-            if !out.contains_key(&key) {
-                if structs.contains_key(&entity) {
-                    out.insert(key, ConcreteTypeKind::Struct(entity));
-                } else if enums.contains_key(&entity) {
-                    out.insert(key, ConcreteTypeKind::Enum(entity));
-                }
-            }
-            // Recurse into type args
-            for &arg in &type_args {
-                collect_named_type_from_ty(arena, arg, out, structs, enums);
-            }
-        },
-        MirTy::Pointer(inner) => {
-            collect_named_type_from_ty(arena, *inner, out, structs, enums);
-        },
-        MirTy::Ref { pointee, .. } => {
-            collect_named_type_from_ty(arena, *pointee, out, structs, enums);
-        },
-        MirTy::Tuple(elems) => {
-            for &elem in elems {
-                collect_named_type_from_ty(arena, elem, out, structs, enums);
-            }
-        },
-        _ => {},
-    }
+    ty_sites::for_each_ty_node(arena, ty, &mut |_, node| {
+        let MirTy::Named { entity, type_args } = node else {
+            return;
+        };
+        let key = (*entity, type_args.clone());
+        if out.contains_key(&key) {
+            return;
+        }
+        if structs.contains_key(entity) {
+            out.insert(key, ConcreteTypeKind::Struct(*entity));
+        } else if enums.contains_key(entity) {
+            out.insert(key, ConcreteTypeKind::Enum(*entity));
+        }
+    });
 }
 
 fn build_type_subst(
@@ -1348,7 +1374,7 @@ fn mono_size_and_align(
         },
         ty,
     ) {
-        return Some((target.pointer_width * 2, target.pointer_width));
+        return Some((target.pointer_size() * 2, target.pointer_size()));
     }
     if let Some(sa) = primitive_size_and_align(arena.get(ty), target) {
         return Some(sa);
@@ -1380,10 +1406,10 @@ fn mono_size_and_align(
 
 /// [`crate::ty::TailLookup`] over the generic struct defs, substituting
 /// (and interning) the last field at the asked instance.
-struct GenericTails<'a> {
-    arena: &'a mut TyArena,
-    structs: &'a IndexMap<Entity, StructDef>,
-    witnesses: &'a [WitnessDef],
+pub(crate) struct GenericTails<'a> {
+    pub(crate) arena: &'a mut TyArena,
+    pub(crate) structs: &'a IndexMap<Entity, StructDef>,
+    pub(crate) witnesses: &'a [WitnessDef],
 }
 
 impl crate::ty::TailLookup for GenericTails<'_> {
@@ -1461,7 +1487,7 @@ mod tests {
         module.add_function(func);
         module.register_name(entity(1), "main");
 
-        let target = TargetConfig::host_64();
+        let target = TargetConfig::host();
         let mono = monomorphize(module, &target).unwrap();
 
         assert_eq!(mono.functions.len(), 1);
@@ -1545,7 +1571,7 @@ mod tests {
             });
             module.register_name(entity(1), "main");
 
-            let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+            let mono = monomorphize(module, &TargetConfig::host()).unwrap();
             assert_eq!(
                 mono_struct_size(&mono, (ghost, vec![i64_ty])),
                 Some(24),
@@ -1609,7 +1635,7 @@ mod tests {
         });
         module.register_name(entity(1), "main");
 
-        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let mono = monomorphize(module, &TargetConfig::host()).unwrap();
         assert_eq!(
             mono_struct_size(&mono, (inner, vec![i64_ty])),
             Some(24),
@@ -1706,7 +1732,7 @@ mod tests {
         module.register_name(entity(1), "main");
         module.register_name(entity(2), "identity");
 
-        let target = TargetConfig::host_64();
+        let target = TargetConfig::host();
         let mono = monomorphize(module, &target).unwrap();
 
         // main + identity[Int64]
@@ -1834,7 +1860,7 @@ mod tests {
             inline: None,
         });
 
-        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let mono = monomorphize(module, &TargetConfig::host()).unwrap();
         let maker = mono
             .functions
             .iter()
@@ -1937,7 +1963,7 @@ mod tests {
         });
         module.register_name(protocol_entity, "ClosureLifecycle");
 
-        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let mono = monomorphize(module, &TargetConfig::host()).unwrap();
         let main = mono
             .functions
             .iter()
@@ -1983,7 +2009,7 @@ mod tests {
         module.add_function(func);
         module.register_name(entity(1), "malloc");
 
-        let target = TargetConfig::host_64();
+        let target = TargetConfig::host();
         let mono = monomorphize(module, &target).unwrap();
 
         assert_eq!(mono.functions.len(), 1);

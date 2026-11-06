@@ -13,7 +13,7 @@ import std.memory.(Pointer)
 ///
 /// # Representation
 ///
-/// A `Pointer[T]` plus a remaining count. No `Slice` indirection — the
+/// A `Pointer[T]` plus a remaining count. No `Sliceable` indirection — the
 /// iterator is what `LiteralSlice` hands out instead of exposing its
 /// pointer directly.
 public struct LiteralSliceIterator[T]: Iterator {

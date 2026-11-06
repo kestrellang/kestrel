@@ -35,13 +35,25 @@ impl ThrowDiagnostic for QueryContext<'_> {
 
 // ===== Lex errors =====
 
-/// A lexer error — an unexpected character at a source location.
+/// A lexer error at a source location: an unexpected character, or a block
+/// comment still open at the end of the file.
 pub struct LexError {
     pub span: Span,
+    /// The source text the error covers.
+    pub text: String,
 }
 
 impl ToDiagnostic for LexError {
     fn to_diagnostic(&self) -> Diagnostic<usize> {
+        if self.text.starts_with("/*") {
+            let start = self.span.range().start;
+            return Diagnostic::error()
+                .with_message("unterminated block comment")
+                .with_labels(vec![
+                    Label::primary(self.span.file_id, start..start + 2)
+                        .with_message("this comment is never closed with `*/`"),
+                ]);
+        }
         Diagnostic::error()
             .with_message("unexpected character")
             .with_labels(vec![Label::primary(self.span.file_id, self.span.range())])

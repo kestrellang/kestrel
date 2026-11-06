@@ -119,8 +119,17 @@ public struct Cookie: Cloneable {
         result
     }
 
+    // Every field: the attributes (path, max-age, flags, same-site) are
+    // part of the cookie, and a clone that dropped them reset each to its
+    // default.
     public func clone() -> Cookie {
-        Cookie(self.name.clone(), self.value.clone())
+        var c = Cookie(self.name.clone(), self.value.clone());
+        c.path = self.path.clone();
+        c.maxAge = self.maxAge;
+        c.httpOnly = self.httpOnly;
+        c.secure = self.secure;
+        c.sameSite = self.sameSite.clone();
+        c
     }
 }
 

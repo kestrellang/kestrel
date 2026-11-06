@@ -9,7 +9,6 @@
 // inside the loop body at the `break` edge.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

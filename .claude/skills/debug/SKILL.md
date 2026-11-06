@@ -92,6 +92,7 @@ kestrel dump tokens repro.ks        # lexer output
 kestrel dump cst repro.ks           # concrete syntax tree
 kestrel dump mir repro.ks           # MIR after HIR lowering + all passes
 kestrel dump cranelift repro.ks     # Cranelift IR (CLIF), pre-optimization
+kestrel dump llvm repro.ks          # LLVM IR, post-optimization (-O0 for unoptimized)
 kestrel dump diagnostics repro.ks   # all accumulated diagnostics
 ```
 
@@ -120,7 +121,8 @@ KESTREL_DEBUG=all <repro command>
 and output is gated on `KESTREL_DEBUG` naming that category. Categories are
 free-form strings picked at the call site; those in use today are `infer`,
 `solver`, `hir-lower`, `copyable`, `static-wf`, `ref-gate`, `op-shape`,
-`dangle`, `arm-decay`. Prefer an existing one over minting a new category for
+`dangle`, `arm-decay`, `clone-shim`, `copy-prop`, `take-alias`, `audit-dup`,
+`instantiation`, `llvm-verify`, `lsp-verify`. Prefer an existing one over minting a new category for
 a single session. Project rule from `CLAUDE.md`: **don't use `eprintln!` /
 `println!` or any other flags for debugging**. Add `ktrace!` to the compiler
 source instead. Clean them up later (Step 6), or leave them if they'd help the

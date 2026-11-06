@@ -17,7 +17,7 @@ struct Account: Equatable {
 
 extend RcBox[Account]: Equatable {
     public func isEqual(to other: Self) -> Bool {
-        self.getValue() == other.getValue()
+        self.value == other.value
     }
 }
 

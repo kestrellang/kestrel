@@ -18,6 +18,6 @@ func main() -> lang.i64 {
     let ok = parse(true);
     let err = parse(false);
      println(ok.unwrap());
-     println(err.isErr());
+     println(err.isErr);
     0
 }

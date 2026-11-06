@@ -61,7 +61,7 @@ module Test
 
             // Test reserveCapacity
             var d7 = std.collections.Deque[std.numeric.Int64]();
-            d7.reserveCapacity(minimumCapacity: 100);
+            d7.reserveCapacity(100);
             if d7.count != 0 { return 20 }
             d7.pushBack(7);
             if d7.popFront().unwrap() != 7 { return 21 }

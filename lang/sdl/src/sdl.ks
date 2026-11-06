@@ -63,14 +63,14 @@ public func getTicks() -> UInt32
 public func monotonicMs() -> Int64
 
 // SDL_INIT_VIDEO
-let sdlInitVideo: UInt32 = UInt32(intLiteral: 0x20);
+let sdlInitVideo: UInt32 = 0x20;
 
 // SDL event type constants
-let sdlEventQuit: UInt32 = UInt32(intLiteral: 0x100);
-let sdlEventKeyDown: UInt32 = UInt32(intLiteral: 0x300);
-let sdlEventKeyUp: UInt32 = UInt32(intLiteral: 0x301);
-let sdlEventMouseMotion: UInt32 = UInt32(intLiteral: 0x400);
-let sdlEventMouseButtonDown: UInt32 = UInt32(intLiteral: 0x401);
+let sdlEventQuit: UInt32 = 0x100;
+let sdlEventKeyDown: UInt32 = 0x300;
+let sdlEventKeyUp: UInt32 = 0x301;
+let sdlEventMouseMotion: UInt32 = 0x400;
+let sdlEventMouseButtonDown: UInt32 = 0x401;
 
 // --- High-Level Abstractions ---
 
@@ -124,7 +124,7 @@ public struct Milliseconds {
     public var value: UInt32
 
     public init(value: Int64) {
-        self.value = UInt32(from: value);
+        self.value = UInt32(truncating: value);
     }
 }
 

@@ -5,9 +5,9 @@ module std.collections
 import std.core.(Bool, Cloneable, Comparable, fatalError)
 import std.numeric.(Int64)
 import std.result.(Optional)
-import std.memory.(ArraySliceIterator)
+
 import std.iter.(Iterator, Iterable)
-import std.collections.(Array)
+import std.collections.(Array, ArrayIterator)
 
 /// Binary min-heap backed by `Array[T]`.
 ///
@@ -47,7 +47,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
     /// `Iterable` element type.
     type Item = T
     /// `Iterable` iterator type — reuses the backing array's iterator.
-    type TargetIterator = ArraySliceIterator[T]
+    type TargetIterator = ArrayIterator[T]
 
     private var data: Array[T]
 
@@ -102,7 +102,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
     /// h.peek();   // .Some(1)
     /// h.count;    // 5
     /// ```
-    public init[I](from iterable: I) where I: Iterable, I.Item = T {
+    public init[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
         self.data = Array[T]();
         var iter = iterable.iter();
         while let .Some(item) = iter.next() {
@@ -229,7 +229,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
     /// Ensures the backing array can hold at least `capacity` elements
     /// without reallocating.
     ///
-    /// If the current capacity already meets or exceeds `capacity`, this
+    /// If the current capacity already meets or exceeds `minimumCapacity`, this
     /// is a no-op. Otherwise the backing array grows to accommodate the
     /// requested number of slots.
     ///
@@ -237,10 +237,10 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
     ///
     /// ```
     /// var h = Heap[Int64]();
-    /// h.reserveCapacity(minimumCapacity: 100);
+    /// h.reserveCapacity(100);
     /// ```
-    public mutating func reserveCapacity(minimumCapacity capacity: Int64) {
-        self.data.reserveCapacity(capacity)
+    public mutating func reserveCapacity(minimumCapacity: Int64) {
+        self.data.reserveCapacity(minimumCapacity)
     }
 
     // ========================================================================
@@ -260,7 +260,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
     /// var iter = h.iter();
     /// // yields elements in heap-array order, not 1, 3, 5
     /// ```
-    public func iter() -> ArraySliceIterator[T] {
+    public func iter() -> ArrayIterator[T] {
         self.data.iter()
     }
 

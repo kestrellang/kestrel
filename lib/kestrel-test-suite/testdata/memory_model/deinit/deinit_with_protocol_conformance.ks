@@ -2,7 +2,6 @@
 // stdlib: false
 
 module Test
-import Prelude
 
 protocol Resource {}
 

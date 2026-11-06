@@ -23,3 +23,7 @@ struct Tail[T] where T: not Sized {
 func byParam[T](x: T) where T: not Sized {} // ERROR: 'T' may be unsized here ('where T: not Sized'), so it can only be used behind a pointer or as the last stored field
 
 func byReturn[T](p: Pointer[T]) -> T where T: not Sized { fatalError("unreachable") } // ERROR: 'T' may be unsized here ('where T: not Sized'), so it can only be used behind a pointer or as the last stored field
+
+// Legal: a reference-typed param is behind a pointer.
+func byRef[T](x: &T) where T: not Sized {}
+func byMutRef[T](x: &mutating T) where T: not Sized {}

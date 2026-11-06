@@ -45,6 +45,18 @@ pub(crate) enum PlaceRepr {
     View(ValueId),
 }
 
+/// What a caller does with a place. Every place lookup names one, so a new
+/// write path can't reach storage through the read door by accident.
+/// `Write` refuses a path through an observed stored field: its writes must
+/// run the observers, so the caller takes the writeback route instead
+/// (get, mutate, observer setter). `validate::validate_observed_writes`
+/// backstops this after lowering.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Access {
+    Read,
+    Write,
+}
+
 pub(crate) struct Place {
     pub repr: PlaceRepr,
     /// The place's value type (what a read yields; refs already peeled).
@@ -56,7 +68,21 @@ impl OssaBodyCtx<'_, '_> {
     /// this policy (rvalue, call, computed member, accessor subscript, …) —
     /// the caller composes its own fallback. Read-count-neutral: callers
     /// that meter named-binding reads keep doing so themselves.
-    pub(crate) fn lower_place(&mut self, expr_id: HirExprId, views: FieldViews) -> Option<Place> {
+    pub(crate) fn lower_place(
+        &mut self,
+        expr_id: HirExprId,
+        views: FieldViews,
+        access: Access,
+    ) -> Option<Place> {
+        if access == Access::Write && self.place_crosses_observer(expr_id) {
+            return None;
+        }
+        self.lower_place_unchecked(expr_id, views)
+    }
+
+    /// [`Self::lower_place`] without the write guard; only its own walk
+    /// recurses through here (the guard already covered the whole chain).
+    fn lower_place_unchecked(&mut self, expr_id: HirExprId, views: FieldViews) -> Option<Place> {
         // Captured projected place (`self.cap` in a closure). Checked first,
         // like `lower_expr_for_borrow`. A snapshot capture's env value IS the
         // view; a VIEW capture's env field is a `Pointer[T]` into the frame,
@@ -110,14 +136,6 @@ impl OssaBodyCtx<'_, '_> {
             HirExpr::TupleIndex { base, index, .. } => {
                 self.lower_tuple_place(expr_id, base, index, views)
             },
-            // Module-level global / `static var`: the GlobalRef IS the
-            // storage address (same shape `lower_assign`'s Def arm stores
-            // through). Resolving it as an Addr place lets a `&mutating`
-            // borrow — and so the `g += 1` compound-assign receiver — write
-            // through the real global instead of `lower_expr`'s loaded
-            // snapshot, which stranded the mutation on a throwaway copy
-            // (#140). Non-global Defs (functions, enum cases) aren't storage
-            // → None, falling back to value lowering.
             // Module-level global / `static var`: the GlobalRef IS the storage
             // address (same shape `lower_assign`'s Def arm stores through).
             // Resolving it as an Addr place lets a `&mutating` borrow — and so
@@ -171,7 +189,7 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Address route: project the element's address off an addressable base.
-        if let Some(base_place) = self.lower_place(base, views) {
+        if let Some(base_place) = self.lower_place_unchecked(base, views) {
             match base_place.repr {
                 PlaceRepr::Addr(base_addr) => {
                     let elem_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
@@ -278,7 +296,7 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Address route: project the field's address off an addressable base.
-        if let Some(base_place) = self.lower_place(base, views) {
+        if let Some(base_place) = self.lower_place_unchecked(base, views) {
             match base_place.repr {
                 PlaceRepr::Addr(base_addr) => {
                     let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
@@ -365,13 +383,32 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
-    /// Walk a `Local`/`Field` chain to a var-rooted ADDRESS (the historical
-    /// `try_field_addr_chain`, now owned by the place resolver). Stops at
+    /// The var-rooted ADDRESS of a `Local`/`Field`/`TupleIndex` chain, or
+    /// `None` when there is none. A `Write` refuses a chain through an
+    /// observed stored field (see [`Access`]); callers then fall back to
+    /// [`Self::write_place_addr`] or their own writeback.
+    pub(crate) fn field_addr_chain(
+        &mut self,
+        expr_id: HirExprId,
+        access: Access,
+    ) -> Option<ValueId> {
+        if access == Access::Write && self.place_crosses_observer(expr_id) {
+            return None;
+        }
+        self.field_addr_chain_unchecked(expr_id)
+    }
+
+    /// [`Self::field_addr_chain`]'s walk, unguarded. Stops at
     /// ref slots: a `&T` field's storage is its POINTEE, not the slot — a
     /// FieldAddr there would alias the stored pointer's BITS as the pointee
     /// (the lost-write/corruption class); callers' fallbacks route through
     /// `emit_struct_extract`'s ref arm instead.
-    pub fn try_field_addr_chain(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+    fn field_addr_chain_unchecked(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        // Inside a closure body, a view-captured place IS an address into the
+        // defining frame (`p.b` captured on its own, not all of `p`).
+        if let Some(super::PlaceCapture::Addr(addr)) = self.captured_place_value(expr_id) {
+            return Some(addr);
+        }
         let expr = self.hir.exprs[expr_id].clone();
         match expr {
             HirExpr::Local(hir_local, _) => match self.local_map.get(&hir_local).copied() {
@@ -379,7 +416,7 @@ impl OssaBodyCtx<'_, '_> {
                 _ => None,
             },
             HirExpr::Field { base, name, .. } => {
-                let base_addr = self.try_field_addr_chain(base)?;
+                let base_addr = self.field_addr_chain_unchecked(base)?;
                 let base_ty = self.resolve_expr_type(base);
                 let field_name = name.as_str_or_empty();
                 let struct_entity = match self.ctx.module.ty_arena.get(base_ty) {
@@ -399,7 +436,7 @@ impl OssaBodyCtx<'_, '_> {
             // FieldIdx = the positional index. Ref-typed elements stop here
             // (their storage is the pointee, not the slot — see the Field arm).
             HirExpr::TupleIndex { base, index, .. } => {
-                let base_addr = self.try_field_addr_chain(base)?;
+                let base_addr = self.field_addr_chain_unchecked(base)?;
                 let base_ty = self.resolve_expr_type(base);
                 let slot_tys = self.tuple_elem_tys(base_ty);
                 if self.slot_is_ref(&slot_tys, index as usize) {
@@ -409,11 +446,5 @@ impl OssaBodyCtx<'_, '_> {
             },
             _ => None,
         }
-    }
-
-    /// If `expr_id` resolves to a var local (possibly through a field chain),
-    /// return its address.
-    pub fn try_var_addr(&mut self, expr_id: HirExprId) -> Option<ValueId> {
-        self.try_field_addr_chain(expr_id)
     }
 }

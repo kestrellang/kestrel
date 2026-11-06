@@ -126,6 +126,7 @@ impl LowerCtx<'_> {
                 span: span.clone(),
             });
             let none_value = self.alloc_expr(HirExpr::ImplicitMember {
+                owner: None,
                 name: HirName::name("None"),
                 args: None,
                 span: span.clone(),

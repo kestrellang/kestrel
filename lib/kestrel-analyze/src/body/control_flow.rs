@@ -221,8 +221,7 @@ pub(crate) fn block_parts_diverge(
     stmts: &[HirStmtId],
     tail: Option<HirExprId>,
 ) -> bool {
-    stmts.iter().any(|&s| stmt_diverges(cx, s))
-        || tail.is_some_and(|t| expr_diverges(cx, t))
+    stmts.iter().any(|&s| stmt_diverges(cx, s)) || tail.is_some_and(|t| expr_diverges(cx, t))
 }
 
 #[cfg(test)]

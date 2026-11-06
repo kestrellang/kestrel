@@ -16,6 +16,7 @@ pub mod param_pattern;
 pub mod access_mode;
 pub mod closure;
 pub mod definite_assignment;
+pub mod exclusive_args;
 pub mod initializer;
 // `?.` consuming through a borrowed bind (E158)
 pub mod optional_chain;

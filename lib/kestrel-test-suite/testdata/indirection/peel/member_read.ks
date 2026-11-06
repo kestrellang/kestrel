@@ -3,7 +3,7 @@
 // backends: cranelift,llvm
 
 // Indirection read peel (R1): a member missing on the wrapper resolves
-// through to the pointee. `rc.balance` == `rc.pointeeRef().balance`. RcBox
+// through to the pointee. `rc.balance` == `rc.value.balance`. RcBox
 // has no `balance`, so member lookup peels to the Account pointee.
 module Test
 

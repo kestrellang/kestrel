@@ -1,8 +1,11 @@
-// test: execution
+// test: diagnostics
 // stdlib: true
-// backends: cranelift,llvm
-// expect-exit: 0
 
+// Arrays require Copyable elements (decision for C16): an array literal of a
+// `not Copyable` type is rejected like the annotation `Array[Res]`. It used to
+// be accepted, and reading an element back out trapped at run time.
+//
+// History:
 // Regression (#127): building an array literal with a non-Copyable element
 // deinited each element TWICE — once during construction and once at scope exit
 // (double-free; corrupted output for heap payloads). Root cause was NOT the
@@ -30,7 +33,7 @@ struct Res: not Copyable {
 // Build the array in an inner scope: construction must not deinit, and the
 // array's own scope exit (this function's return) drops each element once.
 func buildAndCheck() -> lang.i64 {
-    let rs = [Res(tag: 1), Res(tag: 2), Res(tag: 3)];
+    let rs = [Res(tag: 1), Res(tag: 2), Res(tag: 3)]; // ERROR: Res !: Copyable
     if drops != 0 { return 1 };           // before fix: 3 (one per element, at construct)
     if rs.count != 3 { return 2 };
     if drops != 0 { return 3 };           // reading count does not drop

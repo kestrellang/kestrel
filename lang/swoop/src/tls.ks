@@ -6,6 +6,7 @@
 module swoop.tls
 
 import std.io.error.(IoError)
+import std.collections.(Slice)
 import std.memory.(RcBox)
 import http.wire.(stringToBytes)
 
@@ -91,11 +92,15 @@ struct SslHandles {
     var fd: Int32
 }
 
+/// `@observabledrop`: the last drop shuts the TLS session down
+/// (`SSL_shutdown`), so copies must live to the end of their scope rather than
+/// being dropped early at their last use.
+@observabledrop
 public struct TlsStream: Readable, Writable, Cloneable {
     // Shared, reference-counted handle to the live connection. Cloning a
     // `TlsStream` (e.g. passing it by value through the request pipeline)
     // bumps the refcount rather than bit-copying; the connection is torn
-    // down exactly once, by whichever handle drops last (`isUnique()`).
+    // down exactly once, by whichever handle drops last (`isUnique`).
     private var conn: RcBox[SslHandles]
 
     init(ssl: lang.ptr[lang.i8], ctx: lang.ptr[lang.i8], fd: Int32) {
@@ -115,12 +120,13 @@ public struct TlsStream: Readable, Writable, Cloneable {
         TlsStream(conn: self.conn.clone())
     }
 
-    public mutating func read(into buf: ArraySlice[UInt8]) -> Int64 throws IoError {
-        let ssl = self.conn.valuePtr().with { (c) in c.ssl };
-        let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Int64 throws IoError {
+        let raw = buf.asUnsafeSlice();
+        let ssl = self.conn.value.ssl;
+        let count32 = if raw.count > 2147483647 { 2147483647 } else { Int32(truncating: raw.count) };
         let n = Int32(raw: libc_SSL_read(
             ssl,
-            lang.cast_ptr[_, lang.i8](buf.pointer.raw),
+            lang.cast_ptr[_, lang.i8](raw.pointer.raw),
             count32.raw
         ));
         if n < 0 {
@@ -129,9 +135,9 @@ public struct TlsStream: Readable, Writable, Cloneable {
         .Ok(Int64(from: n))
     }
 
-    public mutating func write(from buf: ArraySlice[UInt8]) -> Int64 throws IoError {
-        let ssl = self.conn.valuePtr().with { (c) in c.ssl };
-        let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
+    public mutating func write(from buf: Slice[UInt8]) -> Int64 throws IoError {
+        let ssl = self.conn.value.ssl;
+        let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(truncating: buf.count) };
         let n = Int32(raw: libc_SSL_write(
             ssl,
             lang.cast_ptr[_, lang.i8](buf.pointer.raw),
@@ -146,11 +152,11 @@ public struct TlsStream: Readable, Writable, Cloneable {
     public mutating func flush() -> () throws IoError = .Ok(())
 
     // Tear the connection down once, when the last shared handle drops.
-    // Non-final handles see `isUnique() == false` and skip teardown; the
+    // Non-final handles see `isUnique == false` and skip teardown; the
     // RcBox refcount falls to zero on this same drop, freeing the storage.
     deinit {
-        if self.conn.isUnique() {
-            let h = self.conn.getValue();
+        if self.conn.isUnique {
+            let h = &self.conn.value;
             // SSL_free and SSL_CTX_free are no-ops on null in LibreSSL
              libc_SSL_shutdown(h.ssl);
             libc_SSL_free(h.ssl);

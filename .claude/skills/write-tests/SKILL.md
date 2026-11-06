@@ -1,6 +1,6 @@
 ---
 name: write-tests
-description: Write tests for a Kestrel compiler feature. Use when the user asks to add a test, write tests for a feature, cover a bug with a regression test, or when a diagnostic/behavior change needs testdata updates. Covers the lib `.ks` testdata format (`diagnostics` and `execution` kinds), the `// ERROR:` annotation style, where to place files under `lib/kestrel-test-suite/testdata/`, and how to run the tests via the `triage` skill (never `cargo test` directly).
+description: Write tests for a Kestrel compiler feature. Use when the user asks to add a test, write tests for a feature, cover a bug with a regression test, or when a diagnostic/behavior change needs testdata updates. Covers the lib `.ks` testdata format (`diagnostics` and `execution` kinds), the `// ERROR:` and `// WARN:` annotation styles, where to place files under `lib/kestrel-test-suite/testdata/`, and how to run the tests via the `triage` skill (never `cargo test` directly).
 ---
 
 # Writing Kestrel Tests (lib)
@@ -107,6 +107,31 @@ let x = foo(a: 1); // ERROR: label
 
 See `lib/kestrel-test-suite/AGENTS.md` for the authoritative rule.
 
+## `// WARN:` annotations
+
+Warnings use the same rules with `// WARN:` (not `WARNING`): substring match,
+same line as the diagnostic's primary label, full distinctive message. Bare
+`// WARN` matches any warning on that line.
+
+```
+struct Handle: Cloneable { // WARN: `Cloneable` type `Handle` has a `deinit` that calls `sys_close`
+```
+
+**Every diagnostic in a `diagnostics` test file must be annotated — warnings
+included.** An unannotated warning fails the test as "unexpected warning", so
+adding a new warning-level analyzer can break existing tests: grep testdata for
+files that would trigger it. (Diagnostics coming from the stdlib are not
+counted; only those located in the test file.) `// ERROR(E123)` matches by code
+for errors; there is no code form for warnings.
+
+**Post-monomorphization warnings (E508) are checked in `execution` tests.** They
+only exist once the program is built, so a `diagnostics` test never sees them.
+In an execution test, any `// WARN:` annotation makes the harness match the
+build's post-mono warnings two ways (unannotated ones then fail the test). To
+assert there are *none*, add the header `// warnings: checked`. Execution tests
+without either ignore those warnings. The lint only sees types the program
+uses, so instantiate the type in `@main`.
+
 ## Where to put the file
 
 `lib/kestrel-test-suite/testdata/` is organized by feature category. Pick the
@@ -188,6 +213,6 @@ No `mod.rs` update is needed — the harness discovers files by walking
 - [ ] Filename is descriptive snake_case ending in `.ks`
 - [ ] Header: `// test: ...` + `// stdlib: ...` (+ `// expect-exit:` for execution)
 - [ ] Module declaration after blank line
-- [ ] Every expected error has `// ERROR: <full distinctive message>` on the right line
+- [ ] Every expected error has `// ERROR: <full distinctive message>` (and every warning `// WARN: ...`) on the right line
 - [ ] No duplicate coverage of the same case
 - [ ] Ran via `/triage` with a targeted pattern, read the results

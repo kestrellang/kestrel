@@ -178,15 +178,8 @@ impl Walk<'_, '_> {
                     self.nominal(*entity, args, depth);
                 }
             },
-            HirTy::AliasUse { entity, args, .. } => {
-                if let Some(rhs) = self.ctx.query(LowerTypeAnnotation {
-                    entity: *entity,
-                    root: self.root,
-                }) {
-                    let rhs = substitute(&rhs, &params_of(self.ctx, *entity), args);
-                    self.ty(&rhs, depth + 1);
-                }
-            },
+            // A bounded alias always carries its expansion.
+            HirTy::Alias { expanded, .. } => self.ty(expanded, depth + 1),
             HirTy::Tuple(elems, _) => {
                 for elem in elems {
                     self.ty(elem, depth);
@@ -198,6 +191,7 @@ impl Walk<'_, '_> {
             | HirTy::Param(..)
             | HirTy::SelfType(..)
             | HirTy::AssocProjection { .. }
+            | HirTy::AbstractAssoc { .. }
             | HirTy::Opaque { .. }
             | HirTy::RawExistential { .. }
             | HirTy::Never(_)
@@ -288,15 +282,7 @@ fn substitute(ty: &HirTy, params: &[Entity], args: &[HirTy]) -> HirTy {
             args: subs(a),
             span: span.clone(),
         },
-        HirTy::AliasUse {
-            entity,
-            args: a,
-            span,
-        } => HirTy::AliasUse {
-            entity: *entity,
-            args: subs(a),
-            span: span.clone(),
-        },
+        HirTy::Alias { expanded, .. } => substitute(expanded, params, args),
         HirTy::Tuple(elems, span) => HirTy::Tuple(subs(elems), span.clone()),
         // Nothing below these is stored inline, so the walk never looks in.
         _ => ty.clone(),
@@ -307,9 +293,8 @@ fn substitute(ty: &HirTy, params: &[Entity], args: &[HirTy]) -> HirTy {
 fn canonical_args(args: &[HirTy]) -> String {
     fn canon(ty: &HirTy, out: &mut String) {
         match ty {
-            HirTy::Struct { entity, args, .. }
-            | HirTy::Enum { entity, args, .. }
-            | HirTy::AliasUse { entity, args, .. } => {
+            HirTy::Alias { expanded, .. } => canon(expanded, out),
+            HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => {
                 out.push_str(&format!("{entity:?}["));
                 for a in args {
                     canon(a, out);

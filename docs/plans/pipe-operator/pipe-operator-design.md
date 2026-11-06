@@ -1,6 +1,6 @@
 # Pipe Operator (`|>`) Design
 
-> **Status: implemented on `future/0.19`.** Milestone 0.19 ("Expression sugar").
+> **Status: shipped in 0.18.** Planned as milestone 0.19 ("Expression sugar"), folded into 0.18.
 > Base commit `def25459` (`future/0.18`). File and line anchors refer to that
 > tree. Depends on [placeholder arguments](../placeholder-arguments/placeholder-arguments-design.md)
 > for the `_` slot.
@@ -40,7 +40,7 @@ x |> f(_, 1)           // f(x, 1): fill the slot, no closure
   desugars to a protocol call (`kestrel-hir/docs/desugaring.md`). Pipe is
   function application, not an operation on the left value, so it doesn't.
 - **Method pipes** (`x |> .trim()`). That's `x.trim()`.
-- **Function composition** (`f >> g`). Not in 0.19.
+- **Function composition** (`f >> g`). Not in 0.18.
 
 ## Syntax
 

@@ -4,8 +4,8 @@ module std.net.socket
 
 import std.numeric.(Int64, Int32, UInt8, UInt16)
 import std.result.(Result)
-import std.memory.(ArraySlice, Pointer, RcBox)
-import std.collections.(Array)
+import std.memory.(UnsafeSlice, Pointer, RcBox)
+import std.collections.(Array, Slice)
 import std.text.(String)
 import std.core.(Bool)
 import std.net.libc
@@ -67,8 +67,8 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
     let port64 = Int64(from: port);
     let portHi = port64 / 256;
     let portLo = port64 % 256;
-    addr.append(UInt8(from: portHi));
-    addr.append(UInt8(from: portLo));
+    addr.append(UInt8(truncating: portHi));
+    addr.append(UInt8(truncating: portLo));
     // sin_addr = INADDR_ANY + zero padding (12 bytes)
     var pad: Int64 = 0;
     while pad < 12 {
@@ -107,7 +107,10 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
 /// Reference-counted shared ownership of the fd. Cloning is a refcount
 /// bump (the same socket), and `close(2)` runs exactly once — when the
 /// last handle drops. This is a shared handle, not a `dup(2)`; use
-/// `dup(2)` explicitly if you need an independent fd.
+/// `dup(2)` explicitly if you need an independent fd. Marked
+/// `@observabledrop`: since the last drop closes the socket, the compiler
+/// keeps every copy alive until the end of its scope.
+@observabledrop
 public struct TcpStream: Readable, Writable, Cloneable {
     // The fd lives in a reference-counted box so the socket is `close(2)`d
     // exactly once — by whichever handle drops last. A plain `var fd: Int32`
@@ -149,8 +152,9 @@ public struct TcpStream: Readable, Writable, Cloneable {
     ///
     /// Returns `Err(IoError)` from the captured `errno` if `recv`
     /// returns `-1`.
-    public mutating func read(into buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let n = libc.recv(self.conn.getValue(), buf.pointer, buf.count, 0);
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        let raw = buf.asUnsafeSlice();
+        let n = libc.recv(self.conn.value, raw.pointer, raw.count, 0);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -167,8 +171,8 @@ public struct TcpStream: Readable, Writable, Cloneable {
     ///
     /// Returns `Err(IoError)` from the captured `errno` if `send`
     /// returns `-1`.
-    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let n = libc.send(self.conn.getValue(), buf.pointer, buf.count, 0);
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        let n = libc.send(self.conn.value, buf.pointer, buf.count, 0);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -189,7 +193,7 @@ public struct TcpStream: Readable, Writable, Cloneable {
     /// not expose (`fcntl`, `setsockopt`, …). Do not close it
     /// yourself — the deinit still will.
     public func rawFd() -> Int32 {
-        self.conn.getValue()
+        self.conn.value
     }
 
     /// Releases ownership of the fd and returns it.
@@ -199,18 +203,16 @@ public struct TcpStream: Readable, Writable, Cloneable {
     /// closing the returned fd. Use this when handing the fd to another
     /// owner (e.g. an event loop, a child process, or a TLS stream).
     public mutating func detachFd() -> Int32 {
-        self.conn.modify { (mutating fd) in
-            let old = fd;
-            fd = -1;
-            old
-        }
+        let old = self.conn.value;
+        self.conn.mutatingValue = -1;
+        old
     }
 
     /// Closes the owned fd once, when the last shared handle drops.
     /// The `-1` sentinel set by `detachFd` makes the close a no-op.
     deinit {
-        if self.conn.isUnique() {
-            let fd = self.conn.getValue();
+        if self.conn.isUnique {
+            let fd = self.conn.value;
             if fd >= 0 {
                  libc.close(fd);
             }
@@ -354,8 +356,9 @@ extend TcpStream {
 ///
 /// # Memory Model
 ///
-/// Owns its fd; closed on drop.
-public struct TcpListener {
+/// Owns its fd; closed on drop. `not Copyable`: a copy would close the
+/// same fd twice. Move it, or borrow it to call `accept()`.
+public struct TcpListener: not Copyable {
     var fd: Int32
 
     /// @name From Fd

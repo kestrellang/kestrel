@@ -52,6 +52,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::initializer::InitializerAnalyzer);
     r.add_body_check(body::closure::ClosureAnalyzer);
     r.add_body_check(body::access_mode::AccessModeAnalyzer);
+    r.add_body_check(body::exclusive_args::ExclusiveArgsAnalyzer);
     r.add_body_check(body::optional_chain::OptionalChainAnalyzer);
     // TODO(move-checker): retire in favor of a MIR/OSSA-level move check.
     r.add_body_check(body::move_tracking::MoveTrackingAnalyzer);
@@ -74,6 +75,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::protocol_method::ProtocolMethodAnalyzer);
     r.add_decl_check(decl::static_context::StaticContextAnalyzer);
     r.add_decl_check(decl::static_value_type::StaticValueTypeAnalyzer);
+    r.add_decl_check(decl::closure_field::ClosureFieldAnalyzer);
     r.add_decl_check(decl::unsized_param::UnsizedParamAnalyzer);
     r.add_decl_check(decl::existential_box::ExistentialBoxAnalyzer);
     r.add_body_check(decl::existential_box::ExistentialBoxBodyAnalyzer);
@@ -86,6 +88,9 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::field::FieldAnalyzer);
     r.add_decl_check(decl::subscript::SubscriptAnalyzer);
     r.add_decl_check(decl::place_accessor::PlaceAccessorAnalyzer);
+    r.add_decl_check(decl::observer::ObserverAnalyzer);
+    r.add_decl_check(decl::lazy::LazyAnalyzer);
+    r.add_body_check(decl::lazy::LazyBodyAnalyzer);
     r.add_decl_check(decl::ref_return::RefReturnAnalyzer);
     r.add_decl_check(decl::extern_ffi_safe::ExternFfiSafeAnalyzer);
     r.add_decl_check(decl::default_param_ordering::DefaultParamOrderingAnalyzer);
@@ -96,6 +101,8 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::field_method_collision::FieldMethodCollisionAnalyzer);
     r.add_decl_check(decl::extension_conflict::ExtensionConflictAnalyzer);
     r.add_decl_check(decl::extension_validation::ExtensionValidationAnalyzer);
+    r.add_decl_check(decl::conformance_target::ConformanceTargetAnalyzer);
+    r.add_decl_check(decl::import_target::ImportTargetAnalyzer);
     r.add_decl_check(decl::recursive_enum::RecursiveEnumAnalyzer);
     r.add_decl_check(decl::opaque_cycle::OpaqueCycleAnalyzer);
     r.add_decl_check(decl::parent_protocol_conformance::ParentProtocolConformanceAnalyzer);
@@ -110,6 +117,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
 
     // Compilation checks
     r.add_compilation_check(compilation::type_alias_cycles::TypeAliasCycleAnalyzer);
+    r.add_compilation_check(compilation::global_init_cycles::GlobalInitCycleAnalyzer);
     r.add_compilation_check(compilation::struct_cycles::StructCycleAnalyzer);
     r.add_compilation_check(compilation::protocol_cycles::ProtocolCycleAnalyzer);
     r.add_compilation_check(compilation::constraint_cycles::ConstraintCycleAnalyzer);

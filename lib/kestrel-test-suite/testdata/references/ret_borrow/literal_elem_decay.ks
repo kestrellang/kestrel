@@ -74,7 +74,7 @@ func main() -> lang.i64 {
     let viaRef = [h.peek()];
     let after = clones.read();
     if after - mid != (mid - before) + 1 { return 10; }
-    if viaRef(at: 0).payload != "alpha" { return 11; }
-    if plain(at: 0).payload != "beta" { return 12; }
+    if viaRef(0).payload != "alpha" { return 11; }
+    if plain(0).payload != "beta" { return 12; }
     0
 }

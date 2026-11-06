@@ -10,7 +10,7 @@ use kestrel_mir::{ImmediateKind, MonoFuncId};
 use crate::error::CodegenError;
 use crate::func::FuncCompiler;
 use crate::mem;
-use crate::ty::{ScalarTy, TypeRepr, float_bits_to_scalar, int_bits_to_scalar};
+use crate::ty::{ScalarTy, TypeRepr};
 
 pub fn compile_immediate<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
@@ -22,12 +22,12 @@ pub fn compile_immediate<'ctx>(
 
     match kind {
         ImmediateKind::IntLiteral { bits, value } => {
-            let int_ty = int_bits_to_scalar(*bits).llvm(cx).into_int_type();
+            let int_ty = ScalarTy::from_int_bits(*bits).llvm(cx).into_int_type();
             Ok(int_ty.const_int(*value as i64 as u64, false).into())
         },
 
         ImmediateKind::FloatLiteral { bits, value } => {
-            let float_ty = float_bits_to_scalar(*bits).llvm(cx).into_float_type();
+            let float_ty = ScalarTy::from_float_bits(*bits).llvm(cx).into_float_type();
             Ok(float_ty.const_float(*value).into())
         },
 
@@ -45,9 +45,9 @@ pub fn compile_immediate<'ctx>(
         ImmediateKind::MonoFunctionRef(mono_id) => compile_mono_func_ref(fc, builder, *mono_id),
 
         // The address of an existential function table.
-        ImmediateKind::MonoVTable(id) => Ok(fc.ctx.vtable_data[id.index()]
-            .as_pointer_value()
-            .into()),
+        ImmediateKind::MonoVTable(id) => {
+            Ok(fc.ctx.vtable_data[id.index()].as_pointer_value().into())
+        },
 
         ImmediateKind::VTable { .. } => {
             debug_assert!(false, "unresolved VTable in codegen");
@@ -72,12 +72,12 @@ pub fn compile_immediate<'ctx>(
         },
 
         ImmediateKind::FloatInfinity(bits) => {
-            let float_ty = float_bits_to_scalar(*bits).llvm(cx).into_float_type();
+            let float_ty = ScalarTy::from_float_bits(*bits).llvm(cx).into_float_type();
             Ok(float_ty.const_float(f64::INFINITY).into())
         },
 
         ImmediateKind::FloatNan(bits) => {
-            let float_ty = float_bits_to_scalar(*bits).llvm(cx).into_float_type();
+            let float_ty = ScalarTy::from_float_bits(*bits).llvm(cx).into_float_type();
             Ok(float_ty.const_float(f64::NAN).into())
         },
 

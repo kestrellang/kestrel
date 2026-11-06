@@ -46,6 +46,11 @@ pub struct MonoModule {
     pub statics: IndexMap<Entity, crate::item::static_def::StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
+    /// Duplications of a `not Copyable` instantiation found by
+    /// `expand_destroy_copy`; `verify_mono` reports each one as an error.
+    pub instantiation_findings: Vec<crate::mono::expand::InstantiationFinding>,
+    /// Carried over from [`crate::MirModule::observable_drop`].
+    pub observable_drop: indexmap::IndexSet<Entity>,
 }
 
 impl MonoModule {
@@ -58,6 +63,8 @@ impl MonoModule {
             statics: IndexMap::new(),
             ty_arena,
             entity_names: IndexMap::new(),
+            instantiation_findings: Vec::new(),
+            observable_drop: indexmap::IndexSet::new(),
         }
     }
 
@@ -65,6 +72,15 @@ impl MonoModule {
     /// [`crate::ty::is_fat`]; struct tails come from this module's instances.
     pub fn is_fat(&self, ty: crate::TyId) -> bool {
         crate::ty::is_fat(&mut MonoTails(self), ty)
+    }
+
+    /// The element type when `ty`'s unsized tail is a `lang.slice[T]`.
+    pub fn slice_tail_elem(&self, ty: crate::TyId) -> Option<crate::TyId> {
+        let tail = crate::ty::unsized_tail(&mut MonoTails(self), ty)?;
+        match self.ty_arena.get(tail) {
+            crate::ty::MirTy::Slice(elem) => Some(*elem),
+            _ => None,
+        }
     }
 
     pub fn resolve_name(&self, entity: Entity) -> &str {

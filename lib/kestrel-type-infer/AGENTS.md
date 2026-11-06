@@ -44,6 +44,18 @@ It is a **pure function, deliberately not a query**: its input includes the call
 
 (Memberwise struct init — see above — is a *separate* positional zip over fields and does not go through the binder; fields have no skippable defaults.)
 
+## Member lookup goes through the shared queries
+
+Every "which members does this type/protocol have" question is answered by name-res: `TypeMembersByName` (type's own, its extensions', its protocols' extension defaults), `ProtocolMembersByName` (a protocol's requirements, its parents', and their defaults), `VisibleChildrenByName` (one decl's direct children). Inits and subscripts are nameless; they answer to the sentinels `"init"` / `"subscript"` through `kestrel_name_res::helpers::member_lookup_name` — the one name rule, which all three queries use.
+
+**Never hand-roll a lookup with `children_of` + a `NodeKind::Initializer` / `Subscript` filter, or `ExtensionsFor` + a loop.** Each copy drifted: struct construction (`gen_struct_init`) never saw protocol-extension inits, witness lowering never matched a subscript requirement (it compared `Name` against `"subscript"`), and a protocol-side split skipped the visibility check. A `NodeKind` check is fine for *classifying* an entity you already have ("is this an init?"), not for *finding* one.
+
+Protocol-extension members are a fallback layer: they join a candidate set only when nothing of the type's own matches the labels (methods, statics and inits all follow this), so a protocol's convenience init never takes away a struct's memberwise init.
+
+## A call's callee: type or value is syntactic
+
+`T(...)` is an init, `t(...)` with `t: T` is a subscript — and both callees have type `TyKind::Param`. **Never decide init-vs-subscript from the callee's `TyKind`.** The generator records calls whose callee *names* a type (`TypeRef`, or a `Def` of a struct/enum/protocol/type parameter/alias — `Self` lowers to a `Def` of the enclosing type or protocol) in `ctx.type_callee_calls` via `callee_names_type`; `solve_call` dispatches an init only for those.
+
 ## Structural / intrinsic types extend via synthetic `lang` entities
 
 `()`, `!`, and `lang.*` intrinsics are extendable (`extend (): P`,
@@ -119,7 +131,7 @@ the CLI — the build fails with no output and no binary, which reads as
 success to anything grepping stderr. Every emitted constraint that can
 ERROR must carry a real span: for solver-side type formations use the
 formed `HirTy`'s own span (the declared-signature site renders fine even
-when it points into stdlib — `emit_static_wellformedness` in solver.rs
+when it points into stdlib — the `FormationScope::Inferred` call in solver/lower.rs
 is the precedent). When probing compiler behavior from the CLI, verify
 the OUTPUT EXECUTABLE exists; never conclude "compiles" from empty
 stderr.
@@ -194,3 +206,19 @@ Iterable`, and `Hashable` reaches `Equal.Output` and `NotEqual.Output` through
 `Equatable`. G29 (`a87b1f9f`) found this and fixed it in one place:
 `where_clauses.rs::single_assoc` decides every `T.Seg` path in a where clause.
 Reuse it; don't write a second candidate gatherer.
+
+## Static member lookup uses name resolution's precedence
+
+`resolve_static_member` (`src/resolve.rs`) takes its candidates from
+`TypeMembersByName` and applies the same rule as name resolution
+(`resolve_extension_static_method` in kestrel-name-res): direct and
+own-extension members compete equally, and a protocol-extension default joins
+them only when its label signature is still free. Static members named through
+a type reach the solver as `MethodCall` / `Field` / owned `ImplicitMember`
+(see `kestrel-hir-lower/AGENTS.md`), so a looser rule here shows up as E116 or
+an ambiguity that name resolution never reports.
+
+`is_call` separates a read from a call when a type has both a
+`static var zero` and a `static func zero()`. A read has no labels, so it is
+not label-filtered. An unapplied static method (`let f = Box[Int64].make`)
+skips argument binding in `solve_member` and becomes a function value.

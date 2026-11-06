@@ -15,6 +15,7 @@ use crate::ty::resolve_type_annotation;
 pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) {
     let name = ctx.register_name(entity);
     let mut def = StructDef::new(entity, name);
+    ctx.record_observable_drop(entity);
 
     def.type_params = collect_type_params(ctx, entity);
     def.type_info = TypeInfo {
@@ -24,6 +25,17 @@ pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) {
         ..TypeInfo::none()
     };
     def.conditionally_copyable = ctx.query.query(ConditionalCopyableParams {
+        entity,
+        root: ctx.root,
+    });
+    def.staticness = ctx
+        .query
+        .query(kestrel_semantics::NominalStaticness {
+            entity,
+            root: ctx.root,
+        })
+        .staticness;
+    def.sizedness = ctx.query.query(kestrel_semantics::NominalSizedness {
         entity,
         root: ctx.root,
     });

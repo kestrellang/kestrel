@@ -5,16 +5,97 @@
 //! - `Expr` — lower expression for side effects (result unused)
 //! - `Deinit` — explicit deinit: emit DestroyValue for the local's current value
 
-use kestrel_hir::body::{HirStmt, HirStmtId};
+use kestrel_hir::body::{HirExprId, HirStmt, HirStmtId};
+use kestrel_mir::callee::Callee;
+use kestrel_mir::{MirTy, ParamConvention, TyId, ValueId};
 use kestrel_span::Span;
 
 use super::OssaBodyCtx;
 
 impl OssaBodyCtx<'_, '_> {
+    /// Did inference decay this `Optional[&T]` expression's value to
+    /// `Optional[T]` (`let f = b.first`, `xs.first() ?? 0`)?
+    pub(super) fn decays_optional_ref(&self, init: HirExprId) -> bool {
+        self.typed
+            .as_ref()
+            .is_some_and(|t| t.optional_ref_decays.contains(&init))
+    }
+
+    /// Copy an `Optional[&T]` out into an `Optional[T]` (`result_ty`) through
+    /// the `@builtin(.DecayOptionalRef)` function, so the value is owned and
+    /// the place's borrow ends here.
+    pub(super) fn emit_optional_ref_decay(&mut self, value: ValueId, result_ty: TyId) -> ValueId {
+        let decay = self
+            .ctx
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::DecayOptionalRef,
+                root: self.ctx.root,
+            })
+            .expect("ICE: Optional[&T] decay without `@builtin(.DecayOptionalRef)`");
+        self.ctx.register_name(decay);
+        let MirTy::Named { type_args, .. } = self.ctx.module.ty_arena.get(result_ty) else {
+            unreachable!("decayed binding must be Optional[T]");
+        };
+        let payload = type_args[0];
+        // A non-Copyable payload can't be copied out of the place (E503).
+        if self.is_non_copyable(payload) {
+            self.emit_move_out_of_borrow_backstop(payload);
+            return value;
+        }
+        let arg = self.prepare_call_arg(value, ParamConvention::Consuming);
+        let callee = Callee::direct_with_args(decay, vec![payload], None);
+        self.emit_call_returning(callee, vec![arg], result_ty)
+    }
+
+    /// `Optional[&T]` → `Optional[T]` (a type that is already decayed is
+    /// returned as is).
+    pub(super) fn decayed_optional_ty(&mut self, lent: TyId) -> TyId {
+        let arena = &self.ctx.module.ty_arena;
+        let MirTy::Named { entity, type_args } = arena.get(lent) else {
+            return lent;
+        };
+        let [payload] = type_args.as_slice() else {
+            return lent;
+        };
+        let MirTy::Ref { pointee, .. } = arena.get(*payload) else {
+            return lent;
+        };
+        let decayed = MirTy::Named {
+            entity: *entity,
+            type_args: vec![*pointee],
+        };
+        self.ctx.module.ty_arena.intern(decayed)
+    }
+
+    /// Bind `local` to the place `v` (a `@guaranteed` borrow): the binding
+    /// holds the place — `v` is multi-use (`ref_binding_vals`) with the
+    /// local's read budget, and no decay copy is made.
+    fn bind_ref_local(&mut self, v: ValueId, local: kestrel_hir::LocalId, name: String) {
+        self.ref_results.insert(v);
+        self.ref_binding_vals.insert(v, local);
+        let uses = self.local_use_count(local);
+        self.ref_binding_remaining.insert(local, uses);
+        self.body.value_names.insert(v, name);
+        self.local_map.insert(local, super::LocalBinding::Ssa(v));
+    }
+
+    /// Did inference type the binding as a reference (`&T` / `&mutating T`)?
+    /// (MIR represents the borrow itself as a `@guaranteed` pointee value.)
+    pub(crate) fn local_is_ref(&self, local: kestrel_hir::LocalId) -> bool {
+        self.typed.as_ref().is_some_and(|t| {
+            matches!(
+                t.local_types.get(&local),
+                Some(kestrel_type_infer::result::ResolvedTy::Ref { .. })
+            )
+        })
+    }
+
     pub fn lower_stmt(&mut self, stmt_id: HirStmtId) {
         let stmt = self.hir.stmts[stmt_id].clone();
         let span = stmt_span(&self.hir.stmts[stmt_id]);
         let prev_span = self.current_span.replace(span);
+        let mut temporaries: Option<(usize, kestrel_mir::ValueId)> = None;
 
         match &stmt {
             HirStmt::Let { local, value, .. } => {
@@ -30,43 +111,46 @@ impl OssaBodyCtx<'_, '_> {
                 {
                     let (inner, mutating) = (*inner, *mutating);
                     let v = self.lower_borrow_init(inner, mutating);
-                    self.ref_results.insert(v);
-                    self.ref_binding_vals.insert(v, *local);
-                    let uses = self.local_use_count(*local);
-                    self.ref_binding_remaining.insert(*local, uses);
-                    self.body.value_names.insert(v, name);
-                    self.local_map.insert(*local, super::LocalBinding::Ssa(v));
+                    self.bind_ref_local(v, *local, name);
                 } else if let Some(init_expr) = value {
                     let init_val = self.lower_expr(*init_expr);
-                    // Stage-1 binding decay: a ref-typed initializer
-                    // (ret_borrow call result) is COPIED out — the binding
-                    // owns a value, never the place — and the copy is the
-                    // ref's single use, so its borrow ends here. (A read of
-                    // a NAMED binding copies too, but its borrow stays —
-                    // `end_ref_if_single_use`.)
-                    let init_val = if self.ref_results.contains(&init_val) {
-                        let owned = self.emit_copy_value(init_val);
-                        self.end_ref_if_single_use(init_val);
-                        owned
+                    // An unsized place (`let mid = xs(1..<3)`, a `Slice[T]`)
+                    // has no value to copy out: type inference kept the
+                    // binding a reference, so it holds the place like
+                    // `let mid = &xs(1..<3)`.
+                    if self.ref_results.contains(&init_val) && self.local_is_ref(*local) {
+                        self.bind_ref_local(init_val, *local, name);
                     } else {
-                        init_val
-                    };
-                    // Uniform binding lowering (#107): `let` and `var` both
-                    // live at a stack address with init-state + drop-flag
-                    // tracking. An SSA-bound `let` threads through every
-                    // if/match merge, where a conditional move forces an
-                    // eager destroy at the merge instead of lexical scope
-                    // exit; the slot + flag machinery gets that right.
-                    // (Immutability stays a frontend rule — MIR never sees
-                    // an assignment to a `let`.)
-                    let ty = self.resolve_local_type(*local);
-                    let addr = self.emit_uninit(ty);
-                    self.emit_store_init(addr, init_val);
-                    self.body.value_names.insert(addr, name);
-                    self.local_map
-                        .insert(*local, super::LocalBinding::Var(addr));
-                    let flag = self.maybe_alloc_var_flag(ty);
-                    self.track_var(addr, ty, Some(*local), flag);
+                        // Stage-1 binding decay: a ref-typed initializer
+                        // (ret_borrow call result) is COPIED out — the binding
+                        // owns a value, never the place — and the copy is the
+                        // ref's single use, so its borrow ends here. (A read of
+                        // a NAMED binding copies too, but its borrow stays —
+                        // `end_ref_if_single_use`.)
+                        let init_val = if self.ref_results.contains(&init_val) {
+                            let owned = self.emit_copy_value(init_val);
+                            self.end_ref_if_single_use(init_val);
+                            owned
+                        } else {
+                            init_val
+                        };
+                        // Uniform binding lowering (#107): `let` and `var` both
+                        // live at a stack address with init-state + drop-flag
+                        // tracking. An SSA-bound `let` threads through every
+                        // if/match merge, where a conditional move forces an
+                        // eager destroy at the merge instead of lexical scope
+                        // exit; the slot + flag machinery gets that right.
+                        // (Immutability stays a frontend rule — MIR never sees
+                        // an assignment to a `let`.)
+                        let ty = self.resolve_local_type(*local);
+                        let addr = self.emit_uninit(ty);
+                        self.emit_store_init(addr, init_val);
+                        self.body.value_names.insert(addr, name);
+                        self.local_map
+                            .insert(*local, super::LocalBinding::Var(addr));
+                        let flag = self.maybe_alloc_var_flag(ty);
+                        self.track_var(addr, ty, Some(*local), flag);
+                    }
                 } else {
                     // No-initializer declaration (deferred definite-init):
                     // same slot, first assignment StoreInits it.
@@ -80,7 +164,12 @@ impl OssaBodyCtx<'_, '_> {
                 }
             },
             HirStmt::Expr { expr, .. } => {
-                self.lower_expr(*expr);
+                // A discarded owned result and argument temporaries drop at
+                // the end of their statement, not at scope exit
+                // (drop-semantics.md §6) — after the writebacks below.
+                let mark = self.scope_stack.last().map_or(0, |f| f.entries.len());
+                let result = self.lower_expr(*expr);
+                temporaries = Some((mark, result));
             },
             HirStmt::Deinit {
                 local: Some(hir_local),
@@ -89,13 +178,14 @@ impl OssaBodyCtx<'_, '_> {
                 if self.is_var_local(hir_local) {
                     let addr = self.map_local(*hir_local);
                     let ty = self.resolve_local_type(*hir_local);
-                    self.push_inst(kestrel_mir::inst::InstKind::DestroyAddr { address: addr, ty });
+                    self.push_inst(kestrel_mir::inst::InstKind::DestroyAddr {
+                        address: addr,
+                        ty,
+                        user_deinit: true,
+                    });
                     // The slot no longer owns a value: record it (state +
                     // in-memory flag) so scope exit doesn't destroy again.
-                    self.set_var_init(*hir_local, super::VarInit::DefUninit);
-                    if let Some(flag) = self.var_flag(*hir_local) {
-                        self.store_drop_flag(flag, false);
-                    }
+                    self.record_var_whole(*hir_local, super::VarInit::DefUninit);
                 } else {
                     let val = self.map_local(*hir_local);
                     self.emit_destroy_value(val);
@@ -118,6 +208,14 @@ impl OssaBodyCtx<'_, '_> {
             self.drain_writebacks(0);
             self.end_stale_refs_since(0);
         }
+        // Temporaries drop last: a get→set writeback above still reads its
+        // slot (`arr(0).i.x = 10`).
+        if let Some((mark, result)) = temporaries {
+            self.drop_statement_temporaries(mark, result);
+        }
+        // A named reference never mentioned again stops holding its referent.
+        let stmt_end = stmt_span(&self.hir.stmts[stmt_id]);
+        self.end_dead_ref_bindings(&stmt_end);
 
         self.current_span = prev_span;
     }

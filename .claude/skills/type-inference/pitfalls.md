@@ -191,7 +191,7 @@ Wildcard status propagates through unification (see unify.rs changes in
 **Cause**: `apply_literal_defaults` instantiates
 `@builtin(DefaultNullLiteralType) = Optional[T]` with a fresh TyVar for T;
 without downstream constraints, T stays Unresolved. Then
-`default_never_fallback` (solver.rs:117) binds it to `Never`, giving
+`default_never_fallback` (solver/:117) binds it to `Never`, giving
 `Optional[Never]` — which is correct but surprising.
 
 **Rule**: don't report this as a bug. `Optional[Never]` at the end of

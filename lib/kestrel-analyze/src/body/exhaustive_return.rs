@@ -165,11 +165,7 @@ impl ReturnState {
 /// - Everything else (literals, calls, arithmetic, field access, ...) is
 ///   treated as producing the block's value → `Returns` for the purpose
 ///   of exhaustive-return analysis.
-fn block_state(
-    cx: &BodyContext<'_>,
-    stmts: &[HirStmtId],
-    tail: Option<HirExprId>,
-) -> ReturnState {
+fn block_state(cx: &BodyContext<'_>, stmts: &[HirStmtId], tail: Option<HirExprId>) -> ReturnState {
     for &stmt_id in stmts {
         let state = stmt_state(cx, stmt_id);
         if state.definitely_returns() {

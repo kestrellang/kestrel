@@ -20,7 +20,7 @@ import perch.response.(Response)
 ///
 /// ```
 /// // Middleware that requires an Authorization header
-/// func requireAuth[T]() -> (Request, T) -> MiddlewareResult {
+/// func requireAuth[T]() -> escaping (Request, T) -> MiddlewareResult {
 ///     { (request: Request, ctx: T) in
 ///         match request.header("Authorization") {
 ///             .Some(_) => .Continue(request),

@@ -3,9 +3,9 @@
 // include: operator_prelude.ks
 
 module Test
-struct Number: Prelude.ModuloOperatorProtocol {
+struct Number: Prelude.RemainderOperatorProtocol {
     var value: lang.i64
-    func modulo(rhs: Number) -> Number {
+    func remainder(rhs: Number) -> Number {
         Number(value: lang.i64_signed_rem(self.value, rhs.value))
     }
 }

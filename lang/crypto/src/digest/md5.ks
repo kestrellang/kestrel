@@ -9,89 +9,39 @@ module crypto.digest
 /// # Examples
 ///
 /// ```
-/// let digest = MD5.hash(data.asSlice());
+/// let digest = MD5.hash(data.asUnsafeSlice());
 /// let hex = hexString(from: digest);
 /// ```
 public struct MD5: Digest {
-    var state: Array[UInt32];
-    var buffer: Array[UInt8];
-    var totalLen: UInt64;
+    var blocks: BlockBuffer[MD5State];
 
     public static var digestSize: Int64 { 16 }
     public static var blockSize: Int64 { 64 }
 
     public init() {
-        self.state = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476];
-        self.buffer = Array[UInt8]();
-        self.totalLen = 0;
+        let initial: [UInt32] = [
+            0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476
+        ];
+        self.blocks = BlockBuffer(function: MD5State(words: initial), blockLength: 64);
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8] {
-        let sl = bytes.asSlice();
-        self.totalLen = self.totalLen + UInt64(from: sl.count);
-        var offset: Int64 = 0;
-
-        if self.buffer.count > 0 {
-            let needed = 64 - self.buffer.count;
-            if sl.count < needed {
-                self.buffer.append(contentsOf: sl);
-                return;
-            }
-            self.buffer.append(contentsOf: sl.prefix(needed));
-            var block = self.buffer;
-            self.buffer = Array[UInt8]();
-            MD5.compress(block.asSlice(), self.state);
-            offset = needed;
-        }
-
-        while offset + 64 <= sl.count {
-            MD5.compress(sl.drop(first: offset).prefix(64), self.state);
-            offset = offset + 64;
-        }
-
-        if offset < sl.count {
-            self.buffer.append(contentsOf: sl.drop(first: offset));
-        }
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        self.blocks.update(bytes.asUnsafeSlice());
     }
 
     public func finalize() -> DigestOutput {
-        var st = self.state;
-        var buf: [UInt8] = [];
-        buf.append(contentsOf: self.buffer.asSlice());
-
-        buf.append(0x80);
-        while buf.count % 64 != 56 {
-            buf.append(0);
-        }
-
-        // MD5 uses little-endian 64-bit bit count
-        let bitLen = self.totalLen * 8;
-        buf.append(contentsOf: bitLen.toBytesLittleEndian().asSlice());
-
-        var offset: Int64 = 0;
-        while offset < buf.count {
-            MD5.compress(buf.asSlice().drop(first: offset).prefix(64), st);
-            offset = offset + 64;
-        }
-
-        // Output is little-endian
+        let words = self.blocks.finishedWithLengthPadding(.LittleEndian64).words;
         var result: [UInt8] = [];
         for i in 0..<4 {
-            result.append(contentsOf: st(i).toBytesLittleEndian().asSlice());
+            result.append(contentsOf: words(i).toBytesLittleEndian().asUnsafeSlice());
         }
-        return DigestOutput(bytes: result);
-    }
-
-    public static func hash[S](bytes: S) -> DigestOutput where S: Slice[UInt8] {
-        var h = MD5();
-        h.update(bytes);
-        return h.finalize();
+        DigestOutput(bytes: result)
     }
 
     // --- internals ---
 
     /// Loads a little-endian UInt32 from a byte slice at the given offset.
-    static func loadLE(block: ArraySlice[UInt8], at offset: Int64) -> UInt32 {
+    static func loadLE(block: UnsafeSlice[UInt8], at offset: Int64) -> UInt32 {
         let b0 = UInt32(from: block(offset));
         let b1 = UInt32(from: block(offset + 1));
         let b2 = UInt32(from: block(offset + 2));
@@ -99,7 +49,7 @@ public struct MD5: Digest {
         return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
     }
 
-    static func compress(block: ArraySlice[UInt8], mutating state: Array[UInt32]) {
+    static func compress(block: UnsafeSlice[UInt8], mutating state: Array[UInt32]) {
         let t: [UInt32] = [
             0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
             0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
@@ -158,14 +108,27 @@ public struct MD5: Digest {
             let temp = d;
             d = c;
             c = b;
-            let sum = a + f + t(i) + m(g);
-            b = b + sum.rotateLeft(by: shifts(i));
+            let sum = a.addWrapping(f).addWrapping(t(i)).addWrapping(m(g));
+            b = b.addWrapping(sum.rotateLeft(by: shifts(i)));
             a = temp;
         }
 
-        state(0) = state(0) + a;
-        state(1) = state(1) + b;
-        state(2) = state(2) + c;
-        state(3) = state(3) + d;
+        state(0) = state(0).addWrapping(a);
+        state(1) = state(1).addWrapping(b);
+        state(2) = state(2).addWrapping(c);
+        state(3) = state(3).addWrapping(d);
+    }
+}
+
+/// MD5's chaining state, compressed one block at a time by `BlockBuffer`.
+struct MD5State: BlockFunction {
+    var words: Array[UInt32];
+
+    init(words words: Array[UInt32]) {
+        self.words = words;
+    }
+
+    mutating func compress(block: UnsafeSlice[UInt8]) {
+        MD5.compress(block, self.words);
     }
 }

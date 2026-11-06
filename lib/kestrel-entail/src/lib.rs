@@ -41,6 +41,19 @@ pub enum Tri {
     Unknown,
 }
 
+/// Logical negation; Unknown stays Unknown.
+impl std::ops::Not for Tri {
+    type Output = Tri;
+
+    fn not(self) -> Tri {
+        match self {
+            Tri::Holds => Tri::Fails,
+            Tri::Fails => Tri::Holds,
+            Tri::Unknown => Tri::Unknown,
+        }
+    }
+}
+
 impl Tri {
     pub fn from_bool(b: bool) -> Tri {
         if b { Tri::Holds } else { Tri::Fails }
@@ -52,15 +65,6 @@ impl Tri {
 
     pub fn fails(self) -> bool {
         self == Tri::Fails
-    }
-
-    /// Logical negation; Unknown stays Unknown.
-    pub fn not(self) -> Tri {
-        match self {
-            Tri::Holds => Tri::Fails,
-            Tri::Fails => Tri::Holds,
-            Tri::Unknown => Tri::Unknown,
-        }
     }
 
     /// Three-valued AND: Fails dominates, then Unknown.
@@ -306,7 +310,7 @@ fn entails_at<L: EntailLayer + ?Sized>(l: &L, goal: &Goal, depth: u32) -> Tri {
             if ty == ETy::Poison {
                 return Tri::Holds;
             }
-            conforms(l, &ty, *protocol, depth).not()
+            !conforms(l, &ty, *protocol, depth)
         },
         Goal::Equal(a, b) => same(l, &normalize(l, a), &normalize(l, b)),
     }
@@ -390,23 +394,43 @@ fn match_pattern<L: EntailLayer + ?Sized>(
     }
     match (pat, actual) {
         (
-            ETy::Nominal { entity: pe, args: pa },
-            ETy::Nominal { entity: ae, args: aa },
+            ETy::Nominal {
+                entity: pe,
+                args: pa,
+            },
+            ETy::Nominal {
+                entity: ae,
+                args: aa,
+            },
         ) => {
             if pe != ae || pa.len() != aa.len() {
                 return Tri::Fails;
             }
-            Tri::all(pa.iter().zip(aa).map(|(p, a)| match_pattern(l, p, a, binds)))
+            Tri::all(
+                pa.iter()
+                    .zip(aa)
+                    .map(|(p, a)| match_pattern(l, p, a, binds)),
+            )
         },
         (ETy::Tuple(pe), ETy::Tuple(ae)) => {
             if pe.len() != ae.len() {
                 return Tri::Fails;
             }
-            Tri::all(pe.iter().zip(ae).map(|(p, a)| match_pattern(l, p, a, binds)))
+            Tri::all(
+                pe.iter()
+                    .zip(ae)
+                    .map(|(p, a)| match_pattern(l, p, a, binds)),
+            )
         },
         (
-            ETy::Ref { inner: pi, mutating: pm },
-            ETy::Ref { inner: ai, mutating: am },
+            ETy::Ref {
+                inner: pi,
+                mutating: pm,
+            },
+            ETy::Ref {
+                inner: ai,
+                mutating: am,
+            },
         ) => {
             if pm != am {
                 return Tri::Fails;
@@ -428,8 +452,14 @@ fn same<L: EntailLayer + ?Sized>(l: &L, a: &ETy, b: &ETy) -> Tri {
     }
     match (a, b) {
         (
-            ETy::Nominal { entity: ae, args: aa },
-            ETy::Nominal { entity: be, args: ba },
+            ETy::Nominal {
+                entity: ae,
+                args: aa,
+            },
+            ETy::Nominal {
+                entity: be,
+                args: ba,
+            },
         ) => {
             if ae != be || aa.len() != ba.len() {
                 return Tri::Fails;
@@ -443,8 +473,14 @@ fn same<L: EntailLayer + ?Sized>(l: &L, a: &ETy, b: &ETy) -> Tri {
             Tri::all(ae.iter().zip(be).map(|(x, y)| same(l, x, y)))
         },
         (
-            ETy::Ref { inner: ai, mutating: am },
-            ETy::Ref { inner: bi, mutating: bm },
+            ETy::Ref {
+                inner: ai,
+                mutating: am,
+            },
+            ETy::Ref {
+                inner: bi,
+                mutating: bm,
+            },
         ) => {
             if am != bm {
                 return Tri::Fails;
@@ -455,8 +491,14 @@ fn same<L: EntailLayer + ?Sized>(l: &L, a: &ETy, b: &ETy) -> Tri {
         (ETy::Param(x), ETy::Param(y)) if x == y => Tri::Holds,
         (ETy::Abstract(x), ETy::Abstract(y)) if x == y => Tri::Holds,
         (
-            ETy::Proj { base: ab, assoc: aa },
-            ETy::Proj { base: bb, assoc: ba },
+            ETy::Proj {
+                base: ab,
+                assoc: aa,
+            },
+            ETy::Proj {
+                base: bb,
+                assoc: ba,
+            },
         ) if aa == ba && same(l, ab, bb).holds() => Tri::Holds,
         _ if a.is_abstract() || b.is_abstract() => l.equal_abstract(a, b),
         // Two concrete heads of different shapes.
@@ -550,20 +592,40 @@ fn pattern_instance(pattern: &[ETy], actual: &[ETy]) -> bool {
             return true;
         }
         match (p, a) {
-            (ETy::Nominal { entity: pe, args: pa }, ETy::Nominal { entity: ae, args: aa }) => {
+            (
+                ETy::Nominal {
+                    entity: pe,
+                    args: pa,
+                },
+                ETy::Nominal {
+                    entity: ae,
+                    args: aa,
+                },
+            ) => {
                 pe == ae && pa.len() == aa.len() && pa.iter().zip(aa).all(|(x, y)| go(x, y, binds))
             },
             (ETy::Tuple(pe), ETy::Tuple(ae)) => {
                 pe.len() == ae.len() && pe.iter().zip(ae).all(|(x, y)| go(x, y, binds))
             },
-            (ETy::Ref { inner: pi, mutating: pm }, ETy::Ref { inner: ai, mutating: am }) => {
-                pm == am && go(pi, ai, binds)
-            },
+            (
+                ETy::Ref {
+                    inner: pi,
+                    mutating: pm,
+                },
+                ETy::Ref {
+                    inner: ai,
+                    mutating: am,
+                },
+            ) => pm == am && go(pi, ai, binds),
             _ => p == a,
         }
     }
     let mut binds = Vec::new();
-    pattern.len() == actual.len() && pattern.iter().zip(actual).all(|(p, a)| go(p, a, &mut binds))
+    pattern.len() == actual.len()
+        && pattern
+            .iter()
+            .zip(actual)
+            .all(|(p, a)| go(p, a, &mut binds))
 }
 
 #[cfg(test)]

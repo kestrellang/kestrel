@@ -133,7 +133,7 @@ Each step lands independently with tests passing:
 | `body_resolver/paths.rs` (1620 lines) | Simplify — keep variable/import resolution, remove method resolution |
 | `body_resolver/expressions.rs` (3675 lines) | Simplify — emit unresolved exprs instead of resolving |
 | `type_oracle.rs` (4181 lines) | Clean up, becomes the single resolution path |
-| `kestrel-semantic-type-inference/src/solver.rs` | Add handling for `UnresolvedCall`, `UnresolvedMemberAccess` |
+| `kestrel-semantic-type-inference/src/solver/` | Add handling for `UnresolvedCall`, `UnresolvedMemberAccess` |
 | `kestrel-semantic-type-inference/src/constraint.rs` | Add new constraint variants if needed |
 | `kestrel-semantic-type-inference/src/apply.rs` | Update solution application for new expr kinds |
 | `kestrel-semantic-tree/src/expr.rs` | Add `UnresolvedCall`, `UnresolvedMemberAccess` variants |

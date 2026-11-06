@@ -234,7 +234,7 @@ pub fn compile_function(
         let value_id = ValueId::new(i);
         let param_ty = body.values[i].ty;
         let repr = ctx.tc.repr(param_ty, &ctx.module.ty_arena, ctx.module);
-        let pass = abi::param_pass_mode(func.params[i].convention, repr, ptr_ty);
+        let pass = abi::param_pass_mode(func.params[i].convention, repr);
         match pass {
             PassMode::ByVal(_) => {
                 value_map.insert(value_id, block_params_entry[param_idx]);

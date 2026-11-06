@@ -374,8 +374,13 @@ pub enum HirExpr {
         index: u32,
         span: Span,
     },
-    /// `.Case` or `.Case(args)` — resolved by type inference based on expected type
+    /// `.Case` or `.Case(args)` — resolved by type inference based on expected
+    /// type. With an `owner`, the member is named through a type instead —
+    /// `Opt[Int64].Some(1)`, `Opt.Some(x)`, `Self.None` — and `owner` (a
+    /// type-level `Def`/`TypeRef` receiver) is the type it is looked up on,
+    /// so the type's args are the owner's, never mixed into a flat list.
     ImplicitMember {
+        owner: Option<HirExprId>,
         name: HirName,
         args: Option<Vec<HirCallArg>>,
         span: Span,
@@ -597,6 +602,22 @@ pub enum HirPat {
     },
 }
 
+impl HirPat {
+    /// Takes its scrutinee apart (or tests its value) rather than binding
+    /// it whole: such a pattern matches through a ref to the pointee.
+    pub fn destructures(&self) -> bool {
+        matches!(
+            self,
+            HirPat::Tuple { .. }
+                | HirPat::Struct { .. }
+                | HirPat::Variant { .. }
+                | HirPat::ImplicitVariant { .. }
+                | HirPat::Literal { .. }
+                | HirPat::Range { .. }
+        )
+    }
+}
+
 // ===== Supporting types =====
 
 /// Parsed literal value. Unlike `AstLiteral` which stores source text,
@@ -672,6 +693,10 @@ impl std::hash::Hash for HirLiteral {
 pub struct HirCallArg {
     pub label: Option<String>,
     pub value: HirExprId,
+    /// An unlabeled trailing closure (`f(x) { … }`, `f { … }`). It may also
+    /// fill a labeled closure-typed parameter; see
+    /// `kestrel_ast_builder::arg_binding`.
+    pub trailing_closure: bool,
 }
 
 /// A key-value entry in a dictionary literal.
@@ -679,6 +704,77 @@ pub struct HirCallArg {
 pub struct HirDictEntry {
     pub key: HirExprId,
     pub value: HirExprId,
+}
+
+/// A place where a pattern borrows from its scrutinee instead of copying
+/// or moving out of it.
+#[derive(Clone, Copy, Debug)]
+pub struct PatBorrow<'a> {
+    /// `&mutating name`: the borrow needs a mutable scrutinee place.
+    pub mutating: bool,
+    pub span: &'a Span,
+    /// A type test (`c is T`) reads its payload in place; every other
+    /// borrow is a written `&` / `&mutating` binder.
+    pub type_test: bool,
+}
+
+/// Every borrow in `pat`, in source order. The single walk behind "does
+/// this pattern borrow?" questions: place-mode match lowering, E210, E499,
+/// and which accessor a failable scrutinee reads through.
+pub fn pat_borrows(pats: &Arena<HirPat>, pat: HirPatId) -> Vec<PatBorrow<'_>> {
+    let mut out = Vec::new();
+    collect_pat_borrows(pats, pat, &mut out);
+    out
+}
+
+fn collect_pat_borrows<'a>(pats: &'a Arena<HirPat>, pat: HirPatId, out: &mut Vec<PatBorrow<'a>>) {
+    let children: Vec<HirPatId> = match &pats[pat] {
+        HirPat::Binding {
+            by_ref: Some(mutating),
+            span,
+            ..
+        } => {
+            out.push(PatBorrow {
+                mutating: *mutating,
+                span,
+                type_test: false,
+            });
+            Vec::new()
+        },
+        HirPat::At { subpattern, .. } => vec![*subpattern],
+        HirPat::TypeTest { sub, span, .. } => {
+            out.push(PatBorrow {
+                mutating: false,
+                span,
+                type_test: true,
+            });
+            vec![*sub]
+        },
+        HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => {
+            prefix.iter().chain(suffix).copied().collect()
+        },
+        HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
+            args.iter().map(|a| a.pattern).collect()
+        },
+        HirPat::Struct { fields, .. } => fields.iter().filter_map(|f| f.pattern).collect(),
+        HirPat::Or { alternatives, .. } => alternatives.clone(),
+        _ => Vec::new(),
+    };
+    for child in children {
+        collect_pat_borrows(pats, child, out);
+    }
+}
+
+impl HirBody {
+    /// How a match with these arms holds its scrutinee: `None` when no arm
+    /// borrows from it (value mode), `Some(mutating)` when one does (place
+    /// mode), mutable iff any borrow is `&mutating`.
+    pub fn arms_borrow_mode(&self, arms: &[HirMatchArm]) -> Option<bool> {
+        arms.iter()
+            .flat_map(|arm| pat_borrows(&self.pats, arm.pattern))
+            .map(|b| b.mutating)
+            .max()
+    }
 }
 
 /// A single arm in a match expression.
@@ -754,8 +850,8 @@ pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
     ),
     (
         BinaryOp::Rem,
-        Builtin::ModuloOperatorProtocol,
-        "modulo",
+        Builtin::RemainderOperatorProtocol,
+        "remainder",
         None,
     ),
     (
@@ -932,8 +1028,8 @@ pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, Builtin, &str, Option<
     ),
     (
         CompoundAssignOp::RemAssign,
-        Builtin::ModuloAssignProtocol,
-        "modAssign",
+        Builtin::RemainderAssignProtocol,
+        "remainderAssign",
         None,
     ),
     (

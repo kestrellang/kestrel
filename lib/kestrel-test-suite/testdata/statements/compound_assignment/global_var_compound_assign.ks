@@ -14,7 +14,7 @@
 
 module Test
 
-import std.num.Int64
+import std.numeric.Int64
 
 @main
 func main() -> Int64 {

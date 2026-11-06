@@ -6,7 +6,8 @@ import std.ffi.(FFISafe)
 import std.core.(Hashable, Hasher)
 import std.text.(String, StringBuilder, Formatter, FormatOptions, Formattable)
 import std.numeric.(UInt8, Int64)
-import std.memory.(ArraySlice, Pointer)
+import std.memory.(Pointer)
+import std.collections.(Slice)
 
 /// Two-state truth value with `true` and `false` as its only inhabitants.
 ///
@@ -78,9 +79,9 @@ public struct Bool:
     /// stdlib hashes other primitives — equal `Bool`s always hash equal.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         if self.value {
-            hasher.write(ArraySlice(pointer: Pointer(to: 1), count: 1))
+            hasher.write(Slice.lend(start: Pointer(to: 1), count: 1))
         } else {
-            hasher.write(ArraySlice(pointer: Pointer(to: 0), count: 1))
+            hasher.write(Slice.lend(start: Pointer(to: 0), count: 1))
         }
     }
 
@@ -140,7 +141,8 @@ public struct Bool:
             writer.append(value);
             writer.append(char: ')')
         } else {
-            writer.append(value)
+            // Honors width/alignment like every other formattable.
+            _writePadded(into: writer, value, options)
         }
     }
 }

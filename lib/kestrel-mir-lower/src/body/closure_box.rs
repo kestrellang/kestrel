@@ -780,6 +780,7 @@ mod tests {
             pattern: None,
             is_mut: false,
             is_consuming,
+            by_ref: false,
         }
     }
 

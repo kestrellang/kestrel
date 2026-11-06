@@ -29,7 +29,7 @@ pub fn build_struct(
     world.set(entity, FileId(file_entity));
     world.set(entity, Typed);
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
+    world.set(entity, CstNode(SyntaxNodePtr::new(syntax)));
     world.set_parent(entity, parent);
 
     if let Some(name) = node.name_text() {

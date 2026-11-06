@@ -11,10 +11,8 @@
 //
 // Expected semantics follow value semantics (Swift's behavior): the borrowed
 // argument is the array's value at the call, so each round doubles it.
-// EXPECTED TO FAIL until a `mutating` argument may not alias another argument
-// of the same call — either rejected statically, or the overlapping borrow
-// copied before the mutating access begins. If the fix is static rejection,
-// this becomes a diagnostics test.
+// Fixed: the borrowed argument is copied at the call when it overlaps a
+// `mutating` argument (docs/memory-model/access-modes.md).
 
 module Test
 

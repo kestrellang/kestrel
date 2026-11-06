@@ -10,7 +10,7 @@ module Test
 
 import std.numeric.(Int64)
 import std.text.(String)
-import std.io.(println)
+import std.io.stdio.println
 
 indirect enum List {
     case Nil

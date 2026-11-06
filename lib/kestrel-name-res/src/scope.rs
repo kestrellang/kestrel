@@ -215,6 +215,57 @@ fn is_lexical_member(ctx: &QueryContext<'_>, member: Entity) -> bool {
     }
 }
 
+/// What an import path names.
+pub enum ImportTarget {
+    /// A module (`import A.B`).
+    Module(Entity),
+    /// The members named `name` of a module that `context` may see
+    /// (`import A.B.T`).
+    Member {
+        members: Vec<Entity>,
+        name: String,
+    },
+    Unresolved,
+}
+
+/// Resolve an import path: a module, else a visible member of the module
+/// named by all but its last segment. Shared by import processing and the
+/// unresolved-import diagnostic (single source of truth).
+pub fn resolve_import_path(
+    ctx: &QueryContext<'_>,
+    path: &[String],
+    context: Entity,
+    root: Entity,
+) -> ImportTarget {
+    if let Some(module) = ctx.query(ResolveModulePath {
+        path: path.to_vec(),
+        root,
+    }) {
+        return ImportTarget::Module(module);
+    }
+    let Some((name, prefix)) = path.split_last() else {
+        return ImportTarget::Unresolved;
+    };
+    let Some(parent) = ctx.query(ResolveModulePath {
+        path: prefix.to_vec(),
+        root,
+    }) else {
+        return ImportTarget::Unresolved;
+    };
+    let members = ctx.query(VisibleChildrenByName {
+        parent,
+        name: name.clone(),
+        context,
+    });
+    if members.is_empty() {
+        return ImportTarget::Unresolved;
+    }
+    ImportTarget::Member {
+        members,
+        name: name.clone(),
+    }
+}
+
 /// Process a single import entity, adding to selective or wildcard imports.
 fn process_import(
     ctx: &QueryContext<'_>,
@@ -228,13 +279,16 @@ fn process_import(
         return;
     };
 
-    // Resolve the module path to an entity
-    let resolved = ctx.query(ResolveModulePath {
-        path: module_path.0.clone(),
-        root,
-    });
-    let Some(module_entity) = resolved else {
-        return;
+    let module_entity = match resolve_import_path(ctx, &module_path.0, import, root) {
+        ImportTarget::Module(module) => module,
+        // `import A.B.T` names member `T` of module `A.B`: bind it like the
+        // selective `import A.B.(T)`, under its alias if one is given.
+        ImportTarget::Member { members, name } => {
+            let bound = ctx.get::<ImportAlias>(import).map_or(name, |a| a.0.clone());
+            selective.entry(bound).or_default().extend(members);
+            return;
+        },
+        ImportTarget::Unresolved => return,
     };
 
     // Check what kind of import this is

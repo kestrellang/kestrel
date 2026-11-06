@@ -14,8 +14,8 @@ bb1:
     %v7 = literal false  // @owned Bool
     store_assign %v4, %v7
     %v8 = call Test.consume(%v6)  // @owned ()
-    %v9 = literal ()  // @owned ()
     destroy_value %v8
+    %v9 = literal ()  // @owned ()
     destroy_value %v4
     destroy_value %v3
     return %v9
@@ -25,7 +25,7 @@ bb2:
     jump bb3(%v12)
 
 bb3(%v13: @owned ()):
-    %v14 = literal ()  // @owned ()
     destroy_value %v13
+    %v14 = literal ()  // @owned ()
     return %v14
 

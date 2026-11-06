@@ -74,6 +74,7 @@ impl LowerCtx<'_> {
                     method: HirName::name(method),
                     type_args: None,
                     args: vec![HirCallArg {
+                        trailing_closure: false,
                         label: label.map(|l| l.to_string()),
                         value: rhs_closure,
                     }],
@@ -95,6 +96,7 @@ impl LowerCtx<'_> {
                 method: HirName::name(method),
                 type_args: None,
                 args: vec![HirCallArg {
+                    trailing_closure: false,
                     label: label.map(|l| l.to_string()),
                     value: rhs,
                 }],
@@ -265,6 +267,7 @@ impl LowerCtx<'_> {
                 method: HirName::name(method),
                 type_args: None,
                 args: vec![HirCallArg {
+                    trailing_closure: false,
                     label: label.map(|l| l.to_string()),
                     value: lowered_rhs,
                 }],
@@ -526,7 +529,10 @@ impl LowerCtx<'_> {
 
     /// Desugar `for pattern in iterable { body }` to:
     /// ```text
-    /// let $iter = iterable.iter()   // via Iterable protocol
+    /// let $seq = iterable           // only for a temporary (see below)
+    /// let $iter = iterable.iter()   // via Iterable protocol — or the
+    ///                               // iterable itself if it is an Iterator
+    ///                               // (decided by inference)
     /// loop {
     ///     match $iter.next() {       // via Iterator protocol
     ///         .Some(pattern) => { body }
@@ -542,7 +548,7 @@ impl LowerCtx<'_> {
         for_body: &BlockSyntax,
         span: &Span,
     ) -> HirExprId {
-        let lowered_iterable = self.lower_expr_src(iterable);
+        let mut lowered_iterable = self.lower_expr_src(iterable);
 
         // $iter = iterable.iter() via Iterable protocol.
         // If the IterableProtocol builtin isn't available (e.g. tests with
@@ -564,6 +570,27 @@ impl LowerCtx<'_> {
                 span: span.clone(),
             });
         };
+        // `iter()` borrows its receiver and the iterator may point into it, so
+        // a TEMPORARY iterable (`for k in makeDict()`) must outlive the loop:
+        // bind it to a hidden local scoped to the loop block. A place
+        // (local, global, field chain) is borrowed where it lives — binding
+        // it would move or copy the user's value.
+        let mut stmts = Vec::new();
+        // (Syntactic: a computed property reads like a field, so it counts as
+        // a place and is not kept alive — fine unless its value's iterator
+        // points into the temporary.)
+        let is_place = self.is_place_expr(lowered_iterable)
+            || matches!(self.exprs[lowered_iterable], HirExpr::Def(..));
+        if !is_place {
+            let seq_local = self.define_local("$seq", false, span.clone());
+            stmts.push(self.alloc_stmt(HirStmt::Let {
+                local: seq_local,
+                ty: None,
+                value: Some(lowered_iterable),
+                span: span.clone(),
+            }));
+            lowered_iterable = self.alloc_expr(HirExpr::Local(seq_local, span.clone()));
+        }
         let iterate_call = self.alloc_expr(HirExpr::ProtocolCall {
             from_operator: false,
             receiver: lowered_iterable,
@@ -673,10 +700,12 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        // Wrap in a block: { let $iter = iterable.iter(); loop { ... } }
+        // Wrap in a block: { [let $seq = ..;] let $iter = iterable.iter(); loop { ... } }
+        // `$iter` stays the LAST let — `mark_sugar_primary` finds it there.
+        stmts.push(iter_let);
         let block_expr = self.alloc_expr(HirExpr::Block {
             body: HirBlock {
-                stmts: vec![iter_let],
+                stmts,
                 tail_expr: Some(loop_expr),
             },
             span: span.clone(),
@@ -787,8 +816,10 @@ impl LowerCtx<'_> {
 
         // .fromResidual($early) — resolved against the function's return type
         let return_value = self.alloc_expr(HirExpr::ImplicitMember {
+            owner: None,
             name: HirName::name("fromResidual"),
             args: Some(vec![HirCallArg {
+                trailing_closure: false,
                 label: Some("residual".to_string()),
                 value: early_ref,
             }]),
@@ -843,8 +874,10 @@ impl LowerCtx<'_> {
         }
 
         let err_wrap = self.alloc_expr(HirExpr::ImplicitMember {
+            owner: None,
             name: HirName::name("Err"),
             args: Some(vec![HirCallArg {
+                trailing_closure: false,
                 label: None,
                 value: lowered_value,
             }]),
@@ -934,10 +967,12 @@ impl LowerCtx<'_> {
             callee: dsi_type_ref,
             args: vec![
                 HirCallArg {
+                    trailing_closure: false,
                     label: Some("literalCapacity".to_string()),
                     value: lit_cap,
                 },
                 HirCallArg {
+                    trailing_closure: false,
                     label: Some("interpolationCount".to_string()),
                     value: interp_count,
                 },
@@ -971,6 +1006,7 @@ impl LowerCtx<'_> {
                         method: HirName::name("appendLiteral"),
                         type_args: None,
                         args: vec![HirCallArg {
+                            trailing_closure: false,
                             label: None,
                             value: str_lit,
                         }],
@@ -989,6 +1025,7 @@ impl LowerCtx<'_> {
                     let lowered = self.lower_expr_src(expr);
 
                     let mut args = vec![HirCallArg {
+                        trailing_closure: false,
                         label: None,
                         value: lowered,
                     }];
@@ -998,6 +1035,7 @@ impl LowerCtx<'_> {
                         && let Some(opts_expr) = self.build_format_options_from_spec(spec_str, span)
                     {
                         args.push(HirCallArg {
+                            trailing_closure: false,
                             label: None,
                             value: opts_expr,
                         });
@@ -1109,8 +1147,10 @@ impl LowerCtx<'_> {
                 span: span.clone(),
             });
             let some_val = self.alloc_expr(HirExpr::ImplicitMember {
+                owner: None,
                 name: HirName::name("Some"),
                 args: Some(vec![HirCallArg {
+                    trailing_closure: false,
                     label: None,
                     value: int_lit,
                 }]),
@@ -1126,8 +1166,10 @@ impl LowerCtx<'_> {
                 span: span.clone(),
             });
             let some_val = self.alloc_expr(HirExpr::ImplicitMember {
+                owner: None,
                 name: HirName::name("Some"),
                 args: Some(vec![HirCallArg {
+                    trailing_closure: false,
                     label: None,
                     value: int_lit,
                 }]),
@@ -1144,6 +1186,7 @@ impl LowerCtx<'_> {
                 Alignment::Left => unreachable!(),
             };
             let val = self.alloc_expr(HirExpr::ImplicitMember {
+                owner: None,
                 name: HirName::name(variant),
                 args: None,
                 span: span.clone(),
@@ -1197,6 +1240,7 @@ impl LowerCtx<'_> {
                 SignMode::Negative => unreachable!(),
             };
             let val = self.alloc_expr(HirExpr::ImplicitMember {
+                owner: None,
                 name: HirName::name(variant),
                 args: None,
                 span: span.clone(),
@@ -1223,6 +1267,7 @@ impl LowerCtx<'_> {
         };
         if let Some(variant) = float_variant {
             let val = self.alloc_expr(HirExpr::ImplicitMember {
+                owner: None,
                 name: HirName::name(variant),
                 args: None,
                 span: span.clone(),

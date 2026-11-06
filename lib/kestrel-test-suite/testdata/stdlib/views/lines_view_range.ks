@@ -13,7 +13,7 @@ module Test
             var it = sub.iter();
             if it.next().unwrap().isEqual(to: "alpha") == false { return 2 }
             if it.next().unwrap().isEqual(to: "beta") == false { return 3 }
-            if it.next().isSome() { return 4 }
+            if it.next().isSome { return 4 }
             // Underlying byte range includes the terminator after "beta"
             if sub.toString().isEqual(to: "alpha\nbeta\n") == false { return 5 }
 
@@ -55,15 +55,15 @@ module Test
 
             // ---- past-end: checked returns None ----
             let oob = s.lines(checked: std.core.Range[std.numeric.Int64](0, 999));
-            if oob.isSome() { return 17 }
+            if oob.isSome { return 17 }
 
             // ---- past-end: clamped saturates to count ----
-            let clamp = s.lines(clamped: std.core.Range[std.numeric.Int64](-5, 999));
+            let clamp = s.lines(within: std.core.Range[std.numeric.Int64](-5, 999));
             if clamp.toString().isEqual(to: "alpha\nbeta\ngamma") == false { return 18 }
 
             // ---- negative start, checked ----
             let negCheck = s.lines(checked: std.core.Range[std.numeric.Int64](-1, 2));
-            if negCheck.isSome() { return 19 }
+            if negCheck.isSome { return 19 }
 
             // ---- mixed terminators round-trip ----
             let mixed: std.text.String = "a\nb\r\nc\rd";

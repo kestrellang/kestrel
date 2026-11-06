@@ -98,6 +98,30 @@ struct Person: Greetable {
 }
 ```
 
+### Sugar-Only Requirements
+
+A requirement that exists for a piece of syntax can be marked `@sugarOnly`. Conformers still implement it, but outside the protocol's module the only way to reach it is the syntax:
+
+```kestrel
+public protocol ModuloAssign[Other = Self] {
+    @sugarOnly
+    @builtin(.ModuloAssignMethod)
+    mutating func modAssign(other: Other)
+}
+
+var a = 7;
+a %= 3;          // OK: the syntax
+a.modAssign(3);  // error E115: 'modAssign' can only be used through its syntax
+```
+
+The rule covers the requirement itself (`t.modAssign(3)` on `T: ModuloAssign`) and every type's implementation of it (`Int64.modAssign`). Three places may still call it by name:
+
+- code in the protocol's own module;
+- code in the module that wrote the implementation, so your own types keep calling their own methods and inits;
+- the body of another sugar-only implementation, so a type's `init(stringLiteral:length:)` can build its `String` field with `String(stringLiteral:length:)`.
+
+The standard library marks its operator, compound-assignment, comparison, range, `try`, `?.`/`??`/`!`, literal, pattern, interpolation and indexing hooks this way. Hooks that read well as methods stay public: `add`, `subtract`, `multiply`, `divide`, `modulo`, `negate`, `isEqual`, `compare`, `clone`, `next`, `iter`, and `Indirection.value` (the explicit way past auto-deref).
+
 ## Associated Types
 
 Protocols can define associated types that conforming types must specify:
@@ -624,6 +648,23 @@ protocol Factory {
 struct Item: Factory {
     func create() -> Item { }  // Missing 'static'
     // Error: receiver kind mismatch
+}
+```
+
+Instance receivers must match exactly too: a `mutating` requirement needs a
+`mutating` method and a `consuming` requirement a `consuming` one. A plain
+method does not satisfy either, even though it does less — the declaration
+must say what callers get. Parameter conventions follow the same rule
+(E469): each `consuming`, `mutating`, or plain parameter must match the
+requirement's.
+
+```kestrel
+protocol Disposable {
+    consuming func dispose()
+}
+
+struct Handle: Disposable {
+    func dispose() { }  // Error E477: expected a `consuming` method
 }
 ```
 

@@ -1,5 +1,10 @@
-// test: execution
+// test: diagnostics
 // stdlib: true
+// Arrays require Copyable elements (decision for C16): an array literal of a
+// `not Copyable` type is rejected like the annotation `Array[Res]`. It used to
+// be accepted, and reading an element back out trapped at run time.
+//
+// History:
 // A `not Copyable` element MOVES into an array literal: exactly zero
 // deinits may fire during construction, and exactly one when the array
 // (and with it the element) goes out of scope.
@@ -15,7 +20,7 @@ struct Res: not Copyable {
 }
 
 func build(drops: Pointer[Int64]) -> Int64 {
-    var rs = [Res(tag: 1, drops: drops)];
+    var rs = [Res(tag: 1, drops: drops)]; // ERROR: Res !: Copyable
     // construction is a MOVE: no deinit yet
     if drops.read() != 0 { return 1; }
     0

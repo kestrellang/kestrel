@@ -14,8 +14,8 @@ bb1(%v6: @owned Pointer[Test.Handle], %v7: @owned Pointer[Bool]):
     %v11 = struct Test.Handle { .0: %v10 }  // @owned Test.Handle
     store_assign %v6, %v11
     %v12 = literal ()  // @owned ()
-    %v13 = literal ()  // @owned ()
     destroy_value %v12
+    %v13 = literal ()  // @owned ()
     jump bb3(%v13, %v6, %v7)
 
 bb2(%v8: @owned Pointer[Test.Handle], %v9: @owned Pointer[Bool]):
@@ -23,8 +23,8 @@ bb2(%v8: @owned Pointer[Test.Handle], %v9: @owned Pointer[Bool]):
     %v15 = struct Test.Handle { .0: %v14 }  // @owned Test.Handle
     store_assign %v8, %v15
     %v16 = literal ()  // @owned ()
-    %v17 = literal ()  // @owned ()
     destroy_value %v16
+    %v17 = literal ()  // @owned ()
     jump bb3(%v17, %v8, %v9)
 
 bb3(%v18: @owned (), %v19: @owned Pointer[Test.Handle], %v20: @owned Pointer[Bool]):

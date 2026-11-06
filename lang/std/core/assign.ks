@@ -11,6 +11,7 @@ module std.core
 @builtin(.AddAssignProtocol)
 public protocol AddAssign[Other = Self] {
     /// Mutates `self` to `self + other`.
+    @sugarOnly
     @builtin(.AddAssignMethod)
     mutating func addAssign(other: Other)
 }
@@ -19,6 +20,7 @@ public protocol AddAssign[Other = Self] {
 @builtin(.SubtractAssignProtocol)
 public protocol SubtractAssign[Other = Self] {
     /// Mutates `self` to `self - other`.
+    @sugarOnly
     @builtin(.SubtractAssignMethod)
     mutating func subtractAssign(other: Other)
 }
@@ -27,6 +29,7 @@ public protocol SubtractAssign[Other = Self] {
 @builtin(.MultiplyAssignProtocol)
 public protocol MultiplyAssign[Other = Self] {
     /// Mutates `self` to `self * other`.
+    @sugarOnly
     @builtin(.MultiplyAssignMethod)
     mutating func multiplyAssign(other: Other)
 }
@@ -35,22 +38,25 @@ public protocol MultiplyAssign[Other = Self] {
 @builtin(.DivideAssignProtocol)
 public protocol DivideAssign[Other = Self] {
     /// Mutates `self` to `self / other`.
+    @sugarOnly
     @builtin(.DivideAssignMethod)
     mutating func divideAssign(other: Other)
 }
 
 /// Raw protocol backing the `%=` operator.
-@builtin(.ModuloAssignProtocol)
-public protocol ModuloAssign[Other = Self] {
+@builtin(.RemainderAssignProtocol)
+public protocol RemainderAssign[Other = Self] {
     /// Mutates `self` to `self % other`.
-    @builtin(.ModuloAssignMethod)
-    mutating func modAssign(other: Other)
+    @sugarOnly
+    @builtin(.RemainderAssignMethod)
+    mutating func remainderAssign(other: Other)
 }
 
 /// Raw protocol backing the `&=` operator.
 @builtin(.BitwiseAndAssignProtocol)
 public protocol BitwiseAndAssign[Other = Self] {
     /// Mutates `self` to `self & other`.
+    @sugarOnly
     @builtin(.BitwiseAndAssignMethod)
     mutating func bitwiseAndAssign(other: Other)
 }
@@ -59,6 +65,7 @@ public protocol BitwiseAndAssign[Other = Self] {
 @builtin(.BitwiseOrAssignProtocol)
 public protocol BitwiseOrAssign[Other = Self] {
     /// Mutates `self` to `self | other`.
+    @sugarOnly
     @builtin(.BitwiseOrAssignMethod)
     mutating func bitwiseOrAssign(other: Other)
 }
@@ -67,6 +74,7 @@ public protocol BitwiseOrAssign[Other = Self] {
 @builtin(.BitwiseXorAssignProtocol)
 public protocol BitwiseXorAssign[Other = Self] {
     /// Mutates `self` to `self ^ other`.
+    @sugarOnly
     @builtin(.BitwiseXorAssignMethod)
     mutating func bitwiseXorAssign(other: Other)
 }
@@ -75,6 +83,7 @@ public protocol BitwiseXorAssign[Other = Self] {
 @builtin(.ShiftLeftAssignProtocol)
 public protocol LeftShiftAssign[Other] {
     /// Mutates `self` to `self << count`.
+    @sugarOnly
     @builtin(.ShiftLeftAssignMethod)
     mutating func shiftLeftAssign(by count: Other)
 }
@@ -83,6 +92,7 @@ public protocol LeftShiftAssign[Other] {
 @builtin(.ShiftRightAssignProtocol)
 public protocol RightShiftAssign[Other] {
     /// Mutates `self` to `self >> count`.
+    @sugarOnly
     @builtin(.ShiftRightAssignMethod)
     mutating func shiftRightAssign(by count: Other)
 }

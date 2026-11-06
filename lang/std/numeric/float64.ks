@@ -1,5 +1,6 @@
 // Float64 - 64-bit floating point (double precision)
-// Generated from float.ks.template - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/float.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 // ============================================================================
 // FLOAT64
@@ -205,9 +206,9 @@ public struct Float64:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.f64` bit pattern. Internal; used
-    /// by intrinsics.
-    init(raw value: lang.f64) {
+    /// Wraps an existing `lang.f64` value. The FFI counterpart of
+    /// `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.f64) {
         self.raw = value
     }
 
@@ -500,7 +501,9 @@ public struct Float64:
     /// Absolute value — clears the sign bit. NaN stays NaN; `-0.0` becomes
     /// `+0.0`.
     public func abs() -> Float64 {
-        if Bool(boolLiteral: lang.f64_lt(self.raw, 0.0)) { self.negate() } else { self }
+        // `copysign` from +0.0 clears the sign bit: `-0.0` and NaN payloads
+        // keep their magnitude (a `< 0` test misses `-0.0`).
+        Float64(raw: lang.f64_copysign(self.raw, 0.0))
     }
 
     /// Largest integer ≤ `self`. Rounds toward `-infinity`.
@@ -975,8 +978,8 @@ public struct Float64:
         var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
-            mantissa = bnMulSmall(mantissa, UInt32(from: 10));
-            mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+            mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
+            mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
             hasDigits = true;
             index = index + 1;
             if index < len {
@@ -989,8 +992,8 @@ public struct Float64:
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
-                    mantissa = bnMulSmall(mantissa, UInt32(from: 10));
-                    mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+                    mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
+                    mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
                     fracCount = fracCount + 1;
                     hasDigits = true;
                     index = index + 1;
@@ -1069,13 +1072,13 @@ public struct Float64:
         let parts = floatRoundDecimal(mantissa, k, 52, -1074, 971);
         var rawBits = UInt64.zero;
         if parts.overflow {
-            rawBits = UInt64(from: 2047).shiftLeft(by: 52)
+            rawBits = UInt64(truncating: 2047).shiftLeft(by: 52)
         } else if parts.m == UInt64.zero {
             rawBits = UInt64.zero
-        } else if parts.m >= UInt64(from: 4503599627370496) {
+        } else if parts.m >= UInt64(truncating: 4503599627370496) {
             let rawExp = parts.e + 1075;
-            rawBits = UInt64(from: rawExp).shiftLeft(by: 52)
-                .bitwiseOr(parts.m.bitwiseAnd(UInt64(from: 4503599627370495)))
+            rawBits = UInt64(truncating: rawExp).shiftLeft(by: 52)
+                .bitwiseOr(parts.m.bitwiseAnd(UInt64(truncating: 4503599627370495)))
         } else {
             rawBits = parts.m
         }
@@ -1155,19 +1158,22 @@ public struct Float64:
             // Exact IEEE-754 decomposition of the non-negative `value` into
             // m * 2^e (m an integer significand, e a binary exponent).
             let bits = UInt64(raw: lang.f64_to_bits(value.raw));
-            let rawExp = Int64(from: bits.shiftRight(by: 52).bitwiseAnd(UInt64(from: 2047)));
-            let rawMant = bits.bitwiseAnd(UInt64(from: 4503599627370495));
+            let rawExp = Int64(truncating: bits.shiftRight(by: 52).bitwiseAnd(UInt64(truncating: 2047)));
+            let rawMant = bits.bitwiseAnd(UInt64(truncating: 4503599627370495));
             var m = UInt64.zero;
             var e: Int64 = 0;
             if rawExp == 0 {
                 m = rawMant;
                 e = -1074
             } else {
-                m = rawMant.bitwiseOr(UInt64(from: 4503599627370496));
+                m = rawMant.bitwiseOr(UInt64(truncating: 4503599627370496));
                 e = rawExp - 1075
             }
 
-            if precisionProvided == false and suffixPercent == false {
+            if options.radix == 16 {
+                // `:x` / `:X`: exact hexadecimal floating point (C's `%a`).
+                number = floatHexString(rawExp, rawMant, 52, 1023, options.uppercase)
+            } else if precisionProvided == false and suffixPercent == false {
                 // No explicit precision: print the SHORTEST decimal that round-
                 // trips back to this exact value (Dragon4 boundary search). The
                 // lower gap is a half-ulp only at a binade boundary (fraction
@@ -1189,17 +1195,10 @@ public struct Float64:
             } else {
                 // Explicit precision (or percent): exact rounding to that many
                 // fractional / mantissa digits.
-                var decExp: Int64 = 0;
-                if m != UInt64.zero {
-                    decExp = floatSigDigits(m, e, 1).decExp
-                }
-
+                // An explicit precision counts decimal places, so `Auto`
+                // prints fixed notation (`12.34:.1` is "12.3", not "1.2e1").
                 if style == .Auto {
-                    if m == UInt64.zero or (decExp >= -4 and decExp < precision) {
-                        style = .Fixed
-                    } else {
-                        style = .Scientific
-                    }
+                    style = .Fixed
                 }
 
                 if style == .Scientific or style == .ScientificUpper {

@@ -4,7 +4,7 @@
 module Test
 
 enum MaybeAction[T] {
-    case Action(f: (T) -> T)
+    case Action(f: escaping (T) -> T)
     case NoAction
 }
 

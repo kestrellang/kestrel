@@ -171,8 +171,15 @@ impl LowerCtx<'_> {
     /// `.name(arg)` / `.name`.
     fn implicit_member(&mut self, name: &str, arg: Option<HirExprId>, span: &Span) -> HirExprId {
         self.alloc_expr(HirExpr::ImplicitMember {
+            owner: None,
             name: HirName::name(name),
-            args: arg.map(|value| vec![HirCallArg { label: None, value }]),
+            args: arg.map(|value| {
+                vec![HirCallArg {
+                    trailing_closure: false,
+                    label: None,
+                    value,
+                }]
+            }),
             span: span.clone(),
         })
     }

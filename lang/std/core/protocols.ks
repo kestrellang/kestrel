@@ -5,7 +5,8 @@ module std.core
 
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
 import std.text.(String)
-import std.memory.(ArraySlice, Pointer)
+import std.memory.(Pointer)
+import std.collections.(Slice)
 import std.numeric.(UInt64, Int64)
 
 /// Protocol for types whose values can be compared for equality.
@@ -45,6 +46,7 @@ public protocol Equatable {
 @builtin(.Matchable)
 public protocol Matchable {
     /// Returns `true` if `other` matches the receiver.
+    @sugarOnly
     func matches(other: Self) -> Bool
 }
 
@@ -58,14 +60,17 @@ public protocol Matchable {
 @builtin(.RangeMatchable)
 public protocol RangeMatchable[Bound = Self] {
     /// Returns `true` when `self >= bound`. Powers `start..` patterns.
+    @sugarOnly
     @builtin(.RangeMatchableIsAtLeast)
     func isAtLeast(bound: Bound) -> Bool
 
     /// Returns `true` when `self <= bound`. Powers `..=end` patterns.
+    @sugarOnly
     @builtin(.RangeMatchableIsAtMost)
     func isAtMost(bound: Bound) -> Bool
 
     /// Returns `true` when `self < bound`. Powers `..<end` patterns.
+    @sugarOnly
     @builtin(.RangeMatchableIsBelow)
     func isBelow(bound: Bound) -> Bool
 }
@@ -78,25 +83,31 @@ public protocol RangeMatchable[Bound = Self] {
 /// compiler has already verified. A conformer may assume `0 <= index <
 /// matchLength()` and `0 <= from <= to <= matchLength()` and skip its
 /// own bounds checks; the conformance is unsafe to satisfy if those
-/// invariants don't hold. `Array[T]` and `ArraySlice[T]` are the canonical
-/// conformers.
+/// invariants don't hold. `Array[T]`, `Slice[T]` and `UnsafeSlice[T]` are
+/// the canonical conformers.
 @builtin(.ArrayMatchable)
 public protocol ArrayMatchable {
     type Element
+    /// What `..rest` binds: the view `matchSlice` returns (`&Slice[T]` for
+    /// arrays and slices).
+    type Rest
 
     /// Total number of elements available to match.
+    @sugarOnly
     @builtin(.ArrayMatchableMatchLength)
     func matchLength() -> Int64
 
     /// Returns the element at `index`. Caller (the compiler) guarantees
     /// `0 <= index < matchLength()` — implementations may skip bounds checks.
+    @sugarOnly
     @builtin(.ArrayMatchableMatchGet)
     func matchGet(index: Int64) -> Element
 
     /// Returns the slice `[from, to)`. Caller guarantees
     /// `0 <= from <= to <= matchLength()`.
+    @sugarOnly
     @builtin(.ArrayMatchableMatchSlice)
-    func matchSlice(from: Int64, to: Int64) -> ArraySlice[Element]
+    func matchSlice(from: Int64, to: Int64) -> Rest
 }
 
 /// Blanket extension giving every `Equatable` type the `==` and `!=`
@@ -234,7 +245,7 @@ public protocol Hashable: Equatable {
 /// `Dictionary`, and any structure that wants stable hashes.
 public protocol Hasher {
     /// Mixes `bytes` into the running hash state.
-    mutating func write(bytes: ArraySlice[UInt8])
+    mutating func write(bytes: Slice[UInt8])
     /// Returns the finalised hash. After calling `finish` the hasher's
     /// state is unspecified — don't reuse it.
     mutating func finish() -> UInt64

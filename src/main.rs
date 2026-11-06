@@ -9,29 +9,56 @@
 //! (`--list-stages` lists them; `-s all` prints every stage). Default is `verify`.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use kestrel_ast_builder::{Os as AstOs, TargetConfig as AstTargetConfig};
-use kestrel_codegen::TargetConfig as CodegenTargetConfig;
+use kestrel_codegen::TargetConfig;
 use kestrel_codegen_cranelift as cranelift_backend;
 use kestrel_codegen_llvm as llvm_backend;
 use kestrel_compiler::Compiler;
 
-/// Selectable code generation backend.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default)]
+/// Code generation backend, chosen by optimization level (see `Backend::for_opt`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Backend {
-    /// Cranelift backend (default).
-    #[default]
+    /// Cranelift: fast compiles, used for unoptimized builds (`-O0`).
     Cranelift,
-    /// LLVM backend (via inkwell / LLVM 18).
+    /// LLVM 18 (via inkwell): used for optimized builds (`-O1`, `-O2`).
     Llvm,
+}
+
+/// Parses `--overflow-checks on|off`.
+fn parse_on_off(s: &str) -> Result<bool, String> {
+    match s {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        _ => Err(format!("expected `on` or `off`, got `{s}`")),
+    }
+}
+
+impl Backend {
+    /// `-O0` builds with Cranelift (compile speed); `-O1`/`-O2` with LLVM
+    /// (code quality). The single place the backend is decided.
+    fn for_opt(opt_level: u8) -> Backend {
+        if opt_level == 0 {
+            Backend::Cranelift
+        } else {
+            Backend::Llvm
+        }
+    }
 }
 use kestrel_compiler_driver::CompilerDriver;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(code) => code,
+    // Compile on a thread with a large stack: deeply nested input recurses
+    // once per level (see `COMPILER_STACK_SIZE`).
+    let worker = std::thread::Builder::new()
+        .name("kestrel".into())
+        .stack_size(kestrel_compiler::COMPILER_STACK_SIZE)
+        .spawn(run)
+        .expect("failed to spawn the compiler thread");
+    match worker.join() {
+        Ok(Ok(())) => ExitCode::SUCCESS,
+        Ok(Err(code)) => code,
+        Err(panic) => std::panic::resume_unwind(panic),
     }
 }
 
@@ -97,7 +124,8 @@ struct BuildArgs {
     #[arg(short, long)]
     output: Option<String>,
 
-    /// Optimization level: 0 = none, 1 = speed, 2 = speed + size.
+    /// Optimization level: 0 = none (Cranelift backend), 1 = speed,
+    /// 2 = speed + size (both LLVM backend).
     #[arg(
         short = 'O',
         long = "opt-level",
@@ -105,6 +133,11 @@ struct BuildArgs {
         default_value = "0"
     )]
     opt_level: u8,
+
+    /// Trap on integer overflow (`on`) or wrap (`off`). Defaults to on at
+    /// `-O0` and off at `-O1`/`-O2`.
+    #[arg(long = "overflow-checks", value_name = "on|off", value_parser = parse_on_off)]
+    overflow_checks: Option<bool>,
 
     /// Link with a library (repeatable; use `:libname.a` for static).
     #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
@@ -117,10 +150,6 @@ struct BuildArgs {
     /// Link a macOS framework (repeatable).
     #[arg(long = "framework", value_name = "NAME")]
     frameworks: Vec<String>,
-
-    /// Code generation backend.
-    #[arg(long = "backend", value_name = "BACKEND", default_value = "cranelift")]
-    backend: Backend,
 }
 
 #[derive(Args)]
@@ -144,6 +173,10 @@ struct DumpArgs {
     /// List the MIR pipeline stages (for `--stage`) and exit.
     #[arg(long = "list-stages")]
     list_stages: bool,
+
+    /// For `llvm`: optimization level of the printed IR (0-2).
+    #[arg(short = 'O', default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=2))]
+    opt_level: u8,
 }
 
 /// Stage selector for `kestrel dump mir -s <stage>`. Variants map 1:1 onto
@@ -195,6 +228,8 @@ enum DumpKind {
     Mir,
     /// Cranelift IR via the MIR (OSSA) pipeline.
     Cranelift,
+    /// Optimized LLVM IR for the whole module (honours `-O`, default `-O2`).
+    Llvm,
     /// All accumulated diagnostics (lex, parse, infer, analyze).
     Diagnostics,
 }
@@ -214,7 +249,9 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
     // Flush diagnostics before codegen — better to fail fast on type errors
     // than to surface a confusing MIR-lowering cascade downstream.
     // `emit_diagnostics`/`has_errors` cover both diagnostic halves (F17).
-    driver.emit_diagnostics().ok();
+    // Analyzer warnings print here too (E461 unknown attribute, …); without
+    // them a build silently accepted what `kestrel dump diagnostics` flags.
+    driver.emit_diagnostics_with_warnings().ok();
     if driver.has_errors() {
         return Err(ExitCode::FAILURE);
     }
@@ -230,20 +267,13 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
 
     let c_sources = collect_stdlib_c_sources(std_dir.as_deref());
 
-    // `KESTREL_BACKEND` env var overrides `--backend` (lets tools that shell out
-    // to `kestrel build` — e.g. flock — select a backend without the flag).
-    let backend = match std::env::var("KESTREL_BACKEND").as_deref() {
-        Ok("llvm") => Backend::Llvm,
-        Ok("cranelift") => Backend::Cranelift,
-        _ => args.backend,
-    };
-
     // `KESTREL_OPT` overrides `-O` (lets tools that shell out to `kestrel build`
     // — e.g. an older flock without `--release` — pick an optimization level).
     let opt_level = std::env::var("KESTREL_OPT")
         .ok()
         .and_then(|s| s.parse::<u8>().ok())
         .unwrap_or(args.opt_level);
+    let backend = Backend::for_opt(opt_level);
 
     let result = match backend {
         Backend::Cranelift => {
@@ -253,6 +283,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
                 library_paths: args.library_paths,
                 frameworks: args.frameworks,
                 c_sources,
+                overflow_checks_override: args.overflow_checks,
                 ..Default::default()
             };
             compiler
@@ -266,6 +297,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
                 library_paths: args.library_paths,
                 frameworks: args.frameworks,
                 c_sources,
+                overflow_checks_override: args.overflow_checks,
                 ..Default::default()
             };
             compiler
@@ -274,6 +306,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
         },
     };
     driver.emit_diagnostics().ok();
+    emit_mono_warnings(&compiler);
     result.map_err(|e| {
         eprintln!("error: {}", e);
         ExitCode::FAILURE
@@ -328,7 +361,8 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     // spans, codes and notes and throw them away (F18).
     let outcome: Result<(), String> = match args.kind {
         DumpKind::Mir => dump_mir(&compiler, args.stage, args.function_filter.as_deref()),
-        DumpKind::Cranelift => dump_cranelift(globals, &compiler),
+        DumpKind::Cranelift => dump_cranelift(&compiler),
+        DumpKind::Llvm => dump_llvm(&compiler, args.opt_level),
         DumpKind::Diagnostics => {
             // Emitted below; no stdout output for this kind.
             Ok(())
@@ -337,8 +371,13 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     };
 
     // Both halves, always — before the summary line, so the coded diagnostic
-    // is what the user reads and the count is just the epilogue.
-    driver.emit_diagnostics().ok();
+    // is what the user reads and the count is just the epilogue. `dump
+    // diagnostics` promises every diagnostic, so it adds analyzer warnings.
+    if matches!(args.kind, DumpKind::Diagnostics) {
+        driver.emit_diagnostics_with_warnings().ok();
+    } else {
+        driver.emit_diagnostics().ok();
+    }
     if let Err(message) = outcome {
         eprintln!("error: {message}");
         return Err(ExitCode::FAILURE);
@@ -352,20 +391,35 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
 
 /// Print cranelift IR for the whole module. Errors are returned, not printed,
 /// so `dump` can flush accumulated diagnostics first (F18).
-fn dump_cranelift(globals: &Globals, compiler: &Compiler) -> Result<(), String> {
-    let target = globals.codegen_target().map_err(|_| "invalid target".to_string())?;
+fn dump_cranelift(compiler: &Compiler) -> Result<(), String> {
+    let target = compiler.target();
     let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
     let mono = compiler.monomorphize_mir(mir).map_err(|e| e.to_string())?;
     let options = cranelift_backend::CodegenOptions {
         emit_clif: true,
         ..Default::default()
     };
-    let result = cranelift_backend::compile(&mono, &target, &options).map_err(|e| e.to_string())?;
+    let result = cranelift_backend::compile(&mono, target, &options).map_err(|e| e.to_string())?;
     for (name, clif) in &result.clif_text {
         println!("; function: {name}");
         print!("{clif}");
         println!();
     }
+    Ok(())
+}
+
+/// Print the optimized LLVM IR for the whole module at `opt_level`.
+fn dump_llvm(compiler: &Compiler, opt_level: u8) -> Result<(), String> {
+    let target = compiler.target();
+    let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
+    let mono = compiler.monomorphize_mir(mir).map_err(|e| e.to_string())?;
+    let options = llvm_backend::CodegenOptions {
+        opt_level,
+        emit_ir: true,
+        ..Default::default()
+    };
+    let result = llvm_backend::compile(&mono, target, &options).map_err(|e| e.to_string())?;
+    print!("{}", result.module_ir.unwrap_or_default());
     Ok(())
 }
 
@@ -521,7 +575,7 @@ impl Globals {
     /// Build a Compiler, loading stdlib (unless `--no-std`) and every input file.
     /// Returns the compiler and the stdlib directory (if loaded).
     fn load_compiler(&self, files: &[String]) -> Result<(Compiler, Option<PathBuf>), ExitCode> {
-        let mut compiler = Compiler::new().with_target(self.ast_target());
+        let mut compiler = Compiler::new().with_target(self.target()?);
         let mut std_dir_out = None;
 
         if !self.no_std {
@@ -557,31 +611,16 @@ impl Globals {
         Ok((compiler, std_dir_out))
     }
 
-    fn codegen_target(&self) -> Result<CodegenTargetConfig, ExitCode> {
+    /// The compilation target from `--target`, falling back to the host. Every
+    /// stage (`@platform`, MIR layout, codegen) reads this one value.
+    fn target(&self) -> Result<TargetConfig, ExitCode> {
         match self.target.as_deref() {
-            Some(triple) => CodegenTargetConfig::from_triple(triple).map_err(|e| {
+            Some(triple) => TargetConfig::from_triple(triple).map_err(|e| {
                 eprintln!("error: {}", e);
                 ExitCode::FAILURE
             }),
-            None => Ok(CodegenTargetConfig::host()),
+            None => Ok(TargetConfig::host()),
         }
-    }
-
-    /// Derive the ast-builder `TargetConfig` (for `@platform` conditionals) from
-    /// the requested triple, falling back to host.
-    fn ast_target(&self) -> AstTargetConfig {
-        let Some(triple) = &self.target else {
-            return AstTargetConfig::host();
-        };
-        let lower = triple.to_ascii_lowercase();
-        let os = if lower.contains("darwin") || lower.contains("apple") {
-            Some(AstOs::Darwin)
-        } else if lower.contains("linux") {
-            Some(AstOs::Linux)
-        } else {
-            None
-        };
-        AstTargetConfig { os }
     }
 }
 
@@ -604,4 +643,15 @@ fn default_output_path(files: &[String]) -> PathBuf {
     } else {
         PathBuf::from(stem.as_ref())
     }
+}
+/// Emit warnings found after monomorphization (E507) to stderr. They are not
+/// in the query-accumulated stream `emit_diagnostics` prints.
+fn emit_mono_warnings(compiler: &Compiler) {
+    let warnings = compiler.mono_warnings();
+    if warnings.is_empty() {
+        return;
+    }
+    let files =
+        kestrel_compiler::diagnostic::WorldFiles::from_world(compiler.world(), compiler.files());
+    kestrel_reporting::emit_all(&files, &warnings).ok();
 }

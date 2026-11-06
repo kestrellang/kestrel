@@ -97,6 +97,22 @@ pub(crate) fn lex_modal(source: &str) -> Vec<Lexed> {
                     lexer.bump(len);
                 }
             },
+            // `t.1.0` is two tuple indices, not member `1.0`: a float made of
+            // two plain digit runs directly after a `.` splits into
+            // `Integer . Integer`.
+            (Ok(Token::Float), _) if matches!(out.last(), Some((Ok(Token::Dot), d)) if d.end == span.start) =>
+            {
+                let text = &source[span.clone()];
+                match split_tuple_index_pair(text) {
+                    Some(dot) => {
+                        let at = span.start + dot;
+                        out.push((Ok(Token::Integer), span.start..at));
+                        out.push((Ok(Token::Dot), at..at + 1));
+                        out.push((Ok(Token::Integer), at + 1..span.end));
+                    },
+                    None => out.push((token, span)),
+                }
+            },
             _ => out.push((token, span)),
         }
     }
@@ -111,6 +127,15 @@ pub(crate) fn lex_modal(source: &str) -> Vec<Lexed> {
         }
     }
     out
+}
+
+/// The `.` offset in `text` when it is `<digits>.<digits>` with no
+/// underscores or exponent (a nested tuple index like `1.0`).
+fn split_tuple_index_pair(text: &str) -> Option<usize> {
+    let dot = text.find('.')?;
+    let (a, b) = (&text[..dot], &text[dot + 1..]);
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
+    (digits(a) && digits(b)).then_some(dot)
 }
 
 /// Scan one piece of a string body: a fragment, then a hole opener, the

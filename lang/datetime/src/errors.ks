@@ -2,15 +2,15 @@ module datetime
 
 public enum DateTimeError: Formattable {
     case InvalidDate(year: Int64, month: Int64, day: Int64)
-    case InvalidTime(hour: Int64, minute: Int64, second: Int64)
+    case InvalidTime(hour: Int64, minute: Int64, second: Int64, nanosecond: Int64)
 
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         match self {
             .InvalidDate(year: y, month: m, day: d) => {
                 writer.append("invalid date: \(y)-\(m)-\(d)");
             },
-            .InvalidTime(hour: h, minute: m, second: s) => {
-                writer.append("invalid time: \(h):\(m):\(s)");
+            .InvalidTime(hour: h, minute: m, second: s, nanosecond: n) => {
+                writer.append("invalid time: \(h):\(m):\(s) (nanosecond \(n))");
             }
         };
     }

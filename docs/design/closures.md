@@ -369,9 +369,10 @@ Swift-style capture lists are reserved for future use, not shipped.
    multi-call) or `consuming` (unique, one-shot) in the return type.
 5. Captured resources are released: owning environments participate in drop,
    subject to the documented strong-cycle limitation of refcounting.
-6. Structs may hold view-kind closures in fields; the struct becomes
-   frame-bound via the existing provenance carry. `escaping` fields keep the
-   struct storable long-term.
+6. Stored fields and enum payloads hold only owning closures (`escaping` /
+   `consuming`), and view closures are not `Static`
+   ([closure-fields.md](closure-fields.md), superseding the earlier
+   "frame-bound struct" rule).
 7. Copies of an `escaping` closure share state — reference semantics, marked
    by the keyword.
 
@@ -422,9 +423,8 @@ already makes.
   outlive that iteration's lexical scope. An `escaping` or `consuming`
   expected type snapshots each iteration's value when accumulating closures
   for later calls.
-- Capturing closures in aggregate fields preserves their provenance. A
-  frame-view field makes the aggregate frame-bound; an escaping field makes
-  the aggregate Cloneable.
+- Closure fields are owning (E626); an escaping field makes the aggregate
+  Cloneable. Tuples keep the provenance carry for their elements.
 - Reassigning a closure-containing aggregate drops or releases its old closure
   fields using the same memberwise rules as any other aggregate.
 

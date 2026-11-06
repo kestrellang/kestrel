@@ -18,7 +18,7 @@ File paths and commands for common tasks. All paths relative to the repo root.
 | Lower AST body → HIR body | `lib/kestrel-hir-lower/src/` |
 | Lower a type annotation | `lib/kestrel-hir-lower/src/` (`LowerTypeAnnotation`) |
 | Add a type-inference `Constraint` | `lib/kestrel-type-infer/src/constraint.rs` |
-| Add a solver rule for a constraint | `lib/kestrel-type-infer/src/solver.rs` |
+| Add a solver rule for a constraint | `lib/kestrel-type-infer/src/solver/` |
 | Add an `InferError` variant | see `lib/kestrel-type-infer/AGENTS.md` (updates **5** files) |
 | Add a body-level analyzer | `lib/kestrel-analyze/src/body/<name>.rs` |
 | Add a declaration-level analyzer | `lib/kestrel-analyze/src/decl/<name>.rs` |

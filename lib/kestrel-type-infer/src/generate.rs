@@ -4,6 +4,7 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
+use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, bind_arguments};
 use kestrel_ast_builder::{Callable, InitEffect, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
@@ -17,7 +18,7 @@ use kestrel_span::Span;
 use crate::collections::{HashMap, HashSet};
 use crate::constraint::{CallArg, Constraint, Reason, labels_match};
 use crate::ctx::InferCtx;
-use crate::error::InferError;
+use crate::error::{InferError, sugar_only_error};
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify;
 
@@ -135,7 +136,13 @@ fn check_expr(
 
 /// Check a leaf against `expected`: push into a nested introduction form,
 /// or synthesize and coerce (the one place `FromValue` promotion may fire).
-fn check_leaf(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, expected: TyVar, reason: Reason) {
+fn check_leaf(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    id: HirExprId,
+    expected: TyVar,
+    reason: Reason,
+) {
     let (tv, pushed) = check_expr(ctx, hir, id, expected, reason.clone());
     if !pushed {
         mark_synth_pending(ctx, hir, id, tv);
@@ -163,13 +170,24 @@ fn mark_synth_pending(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, tv: 
             | HirExpr::Field { .. }
             | HirExpr::TupleIndex { .. }
     );
-    if computed && matches!(ctx.slot(ctx.resolve(tv)), TySlot::Unresolved { literal: None }) {
+    if computed
+        && matches!(
+            ctx.slot(ctx.resolve(tv)),
+            TySlot::Unresolved { literal: None }
+        )
+    {
         ctx.synth_pending_exprs.insert(id);
     }
 }
 
 /// `check` for a block: its statements, then its tail as a leaf.
-fn check_block(ctx: &mut InferCtx<'_>, hir: &HirBody, block: &HirBlock, expected: TyVar, reason: Reason) {
+fn check_block(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    block: &HirBlock,
+    expected: TyVar,
+    reason: Reason,
+) {
     for &stmt_id in &block.stmts {
         gen_stmt(ctx, hir, stmt_id);
     }
@@ -208,7 +226,10 @@ fn expectation_known(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
 /// A ref expectation (`-> &T`) keeps the synth path: ref decay and the
 /// return-position borrow rules live in `solve_coerce` / `EqualDecayed`.
 fn expected_is_ref(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
-    matches!(ctx.slot(ctx.resolve(tv)), TySlot::Resolved(TyKind::Ref { .. }))
+    matches!(
+        ctx.slot(ctx.resolve(tv)),
+        TySlot::Resolved(TyKind::Ref { .. })
+    )
 }
 
 // ===== Expression generation =====
@@ -378,18 +399,26 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 && ctx.query_ctx.get::<NodeKind>(*entity) == Some(&NodeKind::Function)
                 && let Some(callable) = ctx.query_ctx.get::<Callable>(*entity)
             {
-                let arg_labels: Vec<Option<&str>> =
-                    args.iter().map(|a| a.label.as_deref()).collect();
-                if !labels_match(&callable.params, &arg_labels) {
-                    let name = ctx
-                        .query_ctx
-                        .get::<Name>(*entity)
-                        .map(|n| n.0.clone())
-                        .unwrap_or_else(|| "<fn>".into());
+                let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
+                let params: Vec<BindParam> = callable.params.iter().map(BindParam::of).collect();
+                if let Err(e) = bind_arguments(&params, &arg_labels) {
                     let span = span.clone();
+                    let err = match e {
+                        BindError::AmbiguousTrailingClosure { candidates, .. } => {
+                            InferError::AmbiguousTrailingClosure { candidates, span }
+                        },
+                        _ => InferError::NoMatchingOverload {
+                            name: ctx
+                                .query_ctx
+                                .get::<Name>(*entity)
+                                .map(|n| n.0.clone())
+                                .unwrap_or_else(|| "<fn>".into()),
+                            span,
+                        },
+                    };
                     ctx.type_param_defs.remove(callee);
                     let _ = gen_call_args(ctx, hir, args);
-                    return ctx.report_error(InferError::NoMatchingOverload { name, span });
+                    return ctx.report_error(err);
                 }
             }
 
@@ -398,7 +427,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let callee_tv = gen_expr(ctx, hir, *callee);
             // Consuming a Def(TypeParameter) as a Call callee is valid (T() = init)
             ctx.type_param_defs.remove(callee);
+            if callee_names_type(ctx, hir, *callee) {
+                ctx.type_callee_calls.insert(id);
+            }
             let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
+            bind_skipped_default_type_params(ctx, hir, *callee, &arg_tvs, span);
 
             // If the callee is a known function returning Never (e.g., lang.panic),
             // use Never directly so divergence propagates through control flow.
@@ -418,7 +451,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             };
 
             ctx.call(callee_tv, arg_tvs, result_tv, id, span.clone());
-            resolve_call_now(ctx, callee_tv);
             finish_postponed(ctx, hir, postponed);
             result_tv
         },
@@ -430,6 +462,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             args,
             span,
         } => {
+            ctx.method_receiver_exprs.insert(*receiver);
             let recv_tv = gen_expr(ctx, hir, *receiver);
             let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
             let result_tv = ctx.fresh();
@@ -508,7 +541,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     true,
                     span.clone(),
                 );
-                resolve_member_now(ctx, recv_tv);
             }
             finish_postponed(ctx, hir, postponed);
             result_tv
@@ -527,49 +559,68 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let arg_tvs = gen_call_args(ctx, hir, args);
             let result_tv = ctx.fresh();
 
-            // Receiver must conform to the protocol. When this ProtocolCall
-            // sits inside a Sugar wrapper (the desugaring's primary call),
-            // emit a poisoning Conforms so a non-conforming receiver poisons
-            // recv_tv. The downstream Member constraint then sees an Error
-            // receiver and absorbs without emitting "no member" cascades.
-            if ctx.poison_protocol_call_recv_on_failure.contains(&id) {
-                ctx.conforms_poisoning(recv_tv, *protocol, span.clone());
+            // A `for` loop's `iter()`: whether it is called at all depends on
+            // the iterable's type (an Iterator is used as-is).
+            // (No early `return`: the arm's value must reach the
+            // `expr_types` record at the end of `gen_expr`.)
+            if ctx.for_loop_iter_calls.contains(&id) {
+                ctx.protocol_dispatch_members.insert(id);
+                ctx.for_loop_iterator(recv_tv, result_tv, *protocol, id, span.clone());
+                result_tv
             } else {
-                ctx.conforms(recv_tv, *protocol, span.clone());
+                // Receiver must conform to the protocol. When this ProtocolCall
+                // sits inside a Sugar wrapper (the desugaring's primary call),
+                // emit a poisoning Conforms so a non-conforming receiver poisons
+                // recv_tv. The downstream Member constraint then sees an Error
+                // receiver and absorbs without emitting "no member" cascades.
+                if ctx.poison_protocol_call_recv_on_failure.contains(&id) {
+                    ctx.conforms_poisoning(recv_tv, *protocol, span.clone());
+                } else {
+                    ctx.conforms(recv_tv, *protocol, span.clone());
+                }
+                let Some(method_str) = method.as_str() else {
+                    ctx.poison(result_tv);
+                    return result_tv;
+                };
+                // Operators / for-in / try desugar to ProtocolCall. Their method
+                // lookup must NOT trigger the lazy Indirection peel — a wrapper's
+                // `==` forwards via `extend W: Equatable`, never by peeling the
+                // member to the pointee (which would coerce the argument; R7).
+                ctx.protocol_dispatch_members.insert(id);
+                if *from_operator {
+                    ctx.operator_members.insert(id, *protocol);
+                    ctx.operator_receivers.insert(id, *receiver);
+                    unify_literal_operands(ctx, *protocol, recv_tv, &arg_tvs);
+                    type_literal_operator(
+                        ctx,
+                        *protocol,
+                        method,
+                        recv_tv,
+                        &arg_tvs,
+                        expect.as_ref(),
+                    );
+                }
+                // An operator over a still-open literal gets its result's shape
+                // now (`100..=200` → `ClosedRange[ℓ]`), so a later bound or
+                // annotation on the result can pin the literal (bidi P5: the
+                // walker, not the end of the body).
+                if *from_operator && open_literal(ctx, recv_tv).is_some() {
+                    crate::solver::project_operator_shape(
+                        ctx, recv_tv, result_tv, method_str, &arg_tvs,
+                    );
+                }
+                // Resolve method on the protocol
+                ctx.member(
+                    recv_tv,
+                    method_str,
+                    arg_tvs,
+                    result_tv,
+                    id,
+                    true,
+                    span.clone(),
+                );
+                result_tv
             }
-            let Some(method_str) = method.as_str() else {
-                ctx.poison(result_tv);
-                return result_tv;
-            };
-            // Operators / for-in / try desugar to ProtocolCall. Their method
-            // lookup must NOT trigger the lazy Indirection peel — a wrapper's
-            // `==` forwards via `extend W: Equatable`, never by peeling the
-            // member to the pointee (which would coerce the argument; R7).
-            ctx.protocol_dispatch_members.insert(id);
-            if *from_operator {
-                ctx.operator_members.insert(id, *protocol);
-                unify_literal_operands(ctx, *protocol, recv_tv, &arg_tvs);
-                type_literal_operator(ctx, *protocol, method, recv_tv, &arg_tvs, expect.as_ref());
-            }
-            // An operator over a still-open literal gets its result's shape
-            // now (`100..=200` → `ClosedRange[ℓ]`), so a later bound or
-            // annotation on the result can pin the literal (bidi P5: the
-            // walker, not the end of the body).
-            if *from_operator && open_literal(ctx, recv_tv).is_some() {
-                crate::solver::project_operator_shape(ctx, recv_tv, result_tv, method_str, &arg_tvs);
-            }
-            // Resolve method on the protocol
-            ctx.member(
-                recv_tv,
-                method_str,
-                arg_tvs,
-                result_tv,
-                id,
-                true,
-                span.clone(),
-            );
-            resolve_member_now(ctx, recv_tv);
-            result_tv
         },
 
         // === Member access ===
@@ -608,7 +659,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                         false,
                         span.clone(),
                     );
-                    resolve_member_now(ctx, base_tv);
                 },
                 HirName::Missing => {
                     // Parser already reported "expected identifier after `.`".
@@ -636,7 +686,20 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         },
 
         // === Implicit member (.CaseName) ===
-        HirExpr::ImplicitMember { name, args, span } => {
+        HirExpr::ImplicitMember {
+            owner,
+            name,
+            args,
+            span,
+        } => {
+            // A written owner (`Opt[Int64].Some(1)`, `Opt.None`, `Self.Some`)
+            // is a type-level receiver: typed like any other (bare `Opt` gets
+            // fresh args, `Self` the enclosing instantiation) and consumed here.
+            let owner_tv = owner.map(|o| {
+                let tv = gen_expr(ctx, hir, o);
+                ctx.type_param_defs.remove(&o);
+                tv
+            });
             let arg_tvs = args
                 .as_ref()
                 .map(|a| gen_call_args(ctx, hir, a))
@@ -650,19 +713,19 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Check mode (bidi §2.1): look `.Case` up on the expected type,
             // or on its promotion target (`.Red` against `Color?` is a
             // `Color`, then promoted by the caller's coercion).
-            let home = expect
-                .as_ref()
-                .and_then(|(e, _)| implicit_case_home(ctx, *e, name_str));
+            // With a written owner, that type is the home — the context only
+            // checks the result afterwards.
+            let home = owner_tv.or_else(|| {
+                expect
+                    .as_ref()
+                    .and_then(|(e, _)| implicit_case_home(ctx, *e, name_str))
+            });
             if let Some(home) = home {
                 ctx.equal(result_tv, home, span.clone());
             }
-            // Implicit constraint: resolved against expected type
+            // Implicit constraint: decided here against the home just
+            // equated (or queued while the expected type is still open).
             ctx.implicit(result_tv, name_str, arg_tvs, result_tv, id, span.clone());
-            if home.is_some() {
-                let implicit = ctx.constraints.pop().expect("just pushed");
-                crate::solver::fixpoint(ctx);
-                crate::solver::solve_now(ctx, implicit);
-            }
             result_tv
         },
 
@@ -762,6 +825,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             span,
         } => {
             ctx.scrutinee_exprs.insert(*scrutinee);
+            if hir.arms_borrow_mode(arms) == Some(true) {
+                ctx.mutating_scrutinee_exprs.insert(*scrutinee);
+            }
             let scrut_tv = gen_expr(ctx, hir, *scrutinee);
             // Stage-1 transparent place: a scrutinee is a VALUE context, so a
             // ref-returning call used as a scrutinee must bind its result var
@@ -886,11 +952,20 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Return { value, span } => {
             if let Some(val) = value {
                 // A `return e;` statement is a value position, identical to
-                // the return-tail.
+                // the return-tail. Checked against the return type like the
+                // tail (bidi §2.1), so introduction forms see it — a tuple
+                // literal needs it to keep refs its `(&T, U)` slots pin.
                 mark_return_value(ctx, hir, *val);
-                let val_tv = gen_expr(ctx, hir, *val);
                 let reason = return_reason(ctx);
-                ctx.coerce_because(val_tv, ctx.return_ty, *val, span.clone(), reason);
+                let (val_tv, pushed) = if expectation_known(ctx, ctx.return_ty) {
+                    check_expr(ctx, hir, *val, ctx.return_ty, reason.clone())
+                } else {
+                    (gen_expr(ctx, hir, *val), false)
+                };
+                if !pushed {
+                    mark_synth_pending(ctx, hir, *val, val_tv);
+                    ctx.coerce_because(val_tv, ctx.return_ty, *val, span.clone(), reason);
+                }
             } else {
                 // Bare return — coerce unit against return type so
                 // `return` in a non-void function is a type mismatch
@@ -936,6 +1011,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 HirExpr::Local(..) | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
             );
             if route_via_assign_target {
+                if !matches!(hir.exprs[*target], HirExpr::Local(..)) {
+                    ctx.place_assign_values.insert(*value);
+                }
                 ctx.assign_target(value_tv, target_tv, *value, span.clone());
             } else {
                 let reason = Reason::Assign(expr_span(hir, *target));
@@ -961,6 +1039,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // `MyList` with `type Element = Int64`) the element type flows back
             // to each literal element. Falls back to fresh on the default path.
             let arr_tv = ctx.fresh_literal(LiteralKind::Array);
+            ctx.literal_spans.insert(arr_tv, span.clone());
             let elem_tv = ctx.fresh();
             ctx.associated(arr_tv, "Element", elem_tv, span.clone());
             // Bidirectional hint: if the enclosing `let` annotated this array
@@ -1008,6 +1087,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         HirExpr::Dict { entries, span } => {
             let dict_tv = ctx.fresh_literal(LiteralKind::Dictionary);
+            ctx.literal_spans.insert(dict_tv, span.clone());
             let key_tv = ctx.fresh();
             let val_tv = ctx.fresh();
             ctx.associated(dict_tv, "Key", key_tv, span.clone());
@@ -1062,10 +1142,17 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // FRESH slot var: an annotation pinning the slot to `&T`
             // (stage 2b ref tuples) keeps the ref; unpinned ref elements
             // decay to owned (the stage-1.5 behavior). Non-local elements
-            // keep the eager peel.
+            // keep the eager peel — unless the expected type already pins
+            // that slot to a ref (`-> (&Slice[T], &Slice[T])`): then the
+            // element keeps its ref and the outer Coerce checks it.
+            let ref_slots = expected_tuple_ref_slots(ctx, expect.as_ref(), elements.len());
             let elem_tvs: Vec<TyVar> = elements
                 .iter()
-                .map(|&e| {
+                .zip(ref_slots)
+                .map(|(&e, ref_slot)| {
+                    if ref_slot {
+                        return gen_expr(ctx, hir, e);
+                    }
                     mark_arm_value(ctx, hir, e);
                     let tv = gen_expr(ctx, hir, e);
                     if value_expr_is_local(hir, e) {
@@ -1173,22 +1260,29 @@ fn mark_sugar_primary(
     use kestrel_hir::body::SugarKind;
     match kind {
         SugarKind::ForLoop => {
-            // inner is `Block { stmts: [Let { value: Some(iter_pcall) }], tail_expr: Some(loop) }`.
-            // The iter_pcall is the IterableProtocol "iter" call we want to poison.
+            // inner is `Block { stmts: [.., Let { $iter = iter_pcall }], tail_expr: Some(loop) }`
+            // — the `$iter` let is the LAST statement (a hidden `$seq` let
+            // keeping a temporary iterable alive may precede it). The
+            // iter_pcall is poisoned on failure, and resolved by
+            // `ForLoopIterator` (iterator used directly vs `iter()`).
             let HirExpr::Block { body, .. } = &hir.exprs[inner] else {
                 return;
             };
-            let Some(first_stmt) = body.stmts.first() else {
+            let Some(last_stmt) = body.stmts.last() else {
                 return;
             };
             let HirStmt::Let {
                 value: Some(pcall_id),
                 ..
-            } = &hir.stmts[*first_stmt]
+            } = &hir.stmts[*last_stmt]
             else {
                 return;
             };
+            if !matches!(hir.exprs[*pcall_id], HirExpr::ProtocolCall { .. }) {
+                return;
+            }
             ctx.poison_protocol_call_recv_on_failure.insert(*pcall_id);
+            ctx.for_loop_iter_calls.insert(*pcall_id);
         },
         SugarKind::Try => {
             // inner is `Match { scrutinee: tryExtract_pcall, ..., source: TryOp }`.
@@ -1274,6 +1368,9 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                 // may solve while its initializer is being generated.
                 if !named_ref {
                     ctx.binding_init_exprs.insert(*val);
+                    if ty.is_some() {
+                        ctx.annotated_init_exprs.insert(*val);
+                    }
                 }
                 // An annotated binding is a check: the annotation is pushed
                 // into introduction forms (arms, elements, block tails).
@@ -1302,13 +1399,20 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                     // An unannotated binding is a value context (bidi §9: "an
                     // unannotated `let` decays"): a ref initializer whose type
                     // is already known gives the binding its pointee here,
-                    // instead of the end-of-body ref-decay default.
+                    // instead of the end-of-body ref-decay default. An
+                    // unsized pointee (`let s = xs.asSlice()`, a `Slice[T]`)
+                    // has no value to copy out: the binding keeps the ref.
                     if ty.is_none()
                         && let TySlot::Resolved(TyKind::Ref { pointee, .. }) =
                             ctx.slot(ctx.resolve(val_tv))
                     {
                         let pointee = *pointee;
-                        let _ = unify::unify(ctx, local_tv, pointee);
+                        let target = if crate::solver::pointee_is_unsized(ctx, pointee) {
+                            val_tv
+                        } else {
+                            pointee
+                        };
+                        let _ = unify::unify(ctx, local_tv, target);
                     }
                     // Value flows to the binding (allows promotion)
                     ctx.coerce_because(val_tv, local_tv, *val, span.clone(), reason);
@@ -1341,6 +1445,16 @@ fn gen_pat(
     scrutinee_tv: TyVar,
     source: MatchSource,
 ) {
+    // A destructuring pattern matches THROUGH a ref anywhere, not only at
+    // the top of a `match`: `for (a, b) in pairs.refs()` checks `(a, b)`
+    // against the `&(Int64, Int64)` payload's pointee. Binders inside then
+    // read the pointee in place (MIR's access path peels ref slots); a
+    // binder or wildcard keeps the ref itself.
+    let scrutinee_tv = if hir.pats[pat_id].destructures() {
+        peel_ref_tv(ctx, scrutinee_tv)
+    } else {
+        scrutinee_tv
+    };
     match &hir.pats[pat_id] {
         HirPat::Wildcard { .. } => {
             // No constraint — matches anything
@@ -1524,9 +1638,11 @@ fn gen_pat(
             // → `Int64`, a custom `Trio.Element` → its binding, an abstract
             // `T: ArrayMatchable` → the projection `T.Element`).
             let elem_tv = ctx.fresh();
+            let rest_tv = ctx.fresh();
             if let Some(proto) = ctx.resolver.builtin(kestrel_hir::Builtin::ArrayMatchable) {
                 ctx.conforms(scrutinee_tv, proto, span.clone());
                 ctx.associated(scrutinee_tv, "Element", elem_tv, span.clone());
+                ctx.associated(scrutinee_tv, "Rest", rest_tv, span.clone());
             }
 
             // Equate each prefix/suffix element pattern against elem_tv
@@ -1536,23 +1652,79 @@ fn gen_pat(
                 gen_pat(ctx, hir, elem_pat, pat_tv, source);
             }
 
-            // Named rest binding → `ArraySlice[elem_tv]` local. This is
-            // `matchSlice`'s protocol-fixed return type (the same for every
-            // conformer), not scrutinee special-casing.
+            // Named rest binding → the conformer's `ArrayMatchable.Rest`
+            // (what its `matchSlice` returns: `ArraySlice[T]` for arrays,
+            // whatever view a custom conformer picks).
             if let Some(Some(local)) = rest {
-                if let Some(slice_ent) = ctx.resolver.builtin(kestrel_hir::Builtin::SliceStruct) {
-                    let slice_tv = ctx.named(slice_ent, vec![elem_tv]);
-                    ctx.local_types.insert(*local, slice_tv);
-                } else {
-                    // No SliceStruct builtin available — fall back to a fresh
-                    // TyVar so at least the local is resolvable.
-                    let tv = ctx.fresh();
-                    ctx.local_types.insert(*local, tv);
-                }
+                ctx.local_types.insert(*local, rest_tv);
             }
         },
 
         HirPat::Error { .. } => { /* swallow */ },
+    }
+}
+
+/// A free-function call that omits a defaulted argument whose type is one
+/// of the function's type parameters (`extra: some Slice[UInt8] = …`): pin
+/// that parameter to the default's type, which nothing else would. Method and
+/// overloaded calls do the same in the solver (`skipped_default_types`).
+fn bind_skipped_default_type_params(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    callee: HirExprId,
+    args: &[CallArg],
+    span: &Span,
+) {
+    let HirExpr::Def(entity, _, _) = &hir.exprs[callee] else {
+        return;
+    };
+    let entity = *entity;
+    let qctx = ctx.query_ctx;
+    if qctx.get::<NodeKind>(entity) != Some(&NodeKind::Function) {
+        return;
+    }
+    let (Some(plan), Some(param_tys), Some(type_args)) = (
+        crate::solver::call::binding_plan_for(qctx, entity, args),
+        qctx.query(LowerCallableTypes {
+            entity,
+            root: ctx.root,
+        }),
+        ctx.type_args.get(&callee).cloned(),
+    ) else {
+        return;
+    };
+    let type_params: Vec<Entity> = qctx
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let subs: Vec<(Entity, TyVar)> = type_params.into_iter().zip(type_args).collect();
+    for (param_ty, default_ty) in
+        crate::solver::call::skipped_default_types(ctx, entity, &plan, &param_tys)
+    {
+        let param_tv = lower_hir_ty_with_subs(ctx, &param_ty, &subs);
+        let default_tv = lower_hir_ty_with_subs(ctx, &default_ty, &subs);
+        ctx.equal(param_tv, default_tv, span.clone());
+    }
+}
+
+/// Whether a call's callee NAMES a type (`T(...)`, `Self(...)` — which
+/// lowers to a `Def` of the enclosing type or protocol — or `B.Item(...)`)
+/// instead of producing a value, so the call is an init rather than a
+/// subscript. Syntactic on purpose: the callee's *type* can't answer it.
+fn callee_names_type(ctx: &InferCtx<'_>, hir: &HirBody, callee: HirExprId) -> bool {
+    match &hir.exprs[callee] {
+        HirExpr::TypeRef { .. } => true,
+        HirExpr::Def(entity, _, _) => matches!(
+            ctx.query_ctx.get::<NodeKind>(*entity),
+            Some(
+                NodeKind::Struct
+                    | NodeKind::Enum
+                    | NodeKind::Protocol
+                    | NodeKind::TypeParameter
+                    | NodeKind::TypeAlias
+            )
+        ),
+        _ => false,
     }
 }
 
@@ -1603,7 +1775,13 @@ fn gen_struct_init(
     // the post-mono containment ICE (Inv-3b). De-dup in `solve_conforms`
     // keeps this from double-reporting with the call-site/annotation checks.
     // See BUG-04 (Copyable mono-substitution gap).
-    emit_copyable_wellformedness(ctx, struct_entity, &fresh_args, span);
+    emit_formation_wellformedness(
+        ctx,
+        struct_entity,
+        &fresh_args,
+        span,
+        FormationScope::Written,
+    );
 
     // Substitution map: struct type params → fresh TyVars.
     // Used to instantiate init param/field types with the right type vars.
@@ -1614,27 +1792,43 @@ fn gen_struct_init(
         .collect();
 
     // Collect arg labels for init matching
-    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
 
-    // Find initializer children (direct + from extensions)
-    let children = qctx.children_of(struct_entity).to_vec();
-    let mut inits: Vec<Entity> = children
-        .iter()
-        .filter(|&&c| qctx.get::<NodeKind>(c) == Some(&NodeKind::Initializer))
-        .copied()
-        .collect();
-
-    // Also search extensions for init functions
-    let extensions = qctx.query(kestrel_name_res::ExtensionsFor {
-        target: struct_entity,
+    // Initializers come from the one member query every other lookup uses:
+    // the type's own, its extensions', and its protocols' extension defaults.
+    // Like methods, a protocol-extension init is a fallback that joins only
+    // when no init of the type's own matches the labels — and only if its own
+    // labels match, so a protocol's convenience init never takes away a
+    // struct's memberwise init.
+    let members = qctx.query(kestrel_name_res::TypeMembersByName {
+        type_entity: struct_entity,
+        name: "init".to_string(),
+        context: ctx.owner,
         root,
     });
-    for ext in &extensions {
-        for &child in qctx.children_of(*ext) {
-            if qctx.get::<NodeKind>(child) == Some(&NodeKind::Initializer) {
-                inits.push(child);
-            }
-        }
+    let is_default = |m: &kestrel_name_res::TypeMember| {
+        matches!(
+            m.source,
+            kestrel_name_res::TypeMemberSource::ProtocolExtension { .. }
+        )
+    };
+    let mut inits: Vec<Entity> = members
+        .iter()
+        .filter(|m| !is_default(m))
+        .map(|m| m.entity)
+        .collect();
+    let matches_call = |init: &Entity| {
+        qctx.get::<Callable>(*init)
+            .is_some_and(|c| labels_match(&c.params, &arg_labels))
+    };
+    if !inits.iter().any(matches_call) {
+        inits.extend(
+            members
+                .iter()
+                .filter(|m| is_default(m))
+                .map(|m| m.entity)
+                .filter(matches_call),
+        );
     }
 
     // A derived `Defaultable` adds `init()`, but deriving must not take the
@@ -1672,6 +1866,13 @@ fn gen_struct_init(
         // type-directed disambiguation which happens during solving.
         if let [init] = matched.as_slice() {
             let init = *init;
+            // `@sugarOnly` init requirements (`init(intLiteral:)`) are built by
+            // literal lowering, never by a written call outside their module.
+            if let Some(requirement) =
+                kestrel_name_res::sugar_only_hidden(qctx, init, ctx.owner, root)
+            {
+                ctx.report_error(sugar_only_error(qctx, requirement, "init", result_tv, span));
+            }
             matched_init = Some(init);
             // Record which init was selected so MIR lowering can use the init entity
             ctx.resolutions.insert(expr_id, init);
@@ -1755,16 +1956,22 @@ fn gen_struct_init(
             span: span.clone(),
         });
     } else {
+        // The memberwise init's type args are the struct's own — recorded so
+        // MIR reads the solved args, not the raw `[..]` written (or omitted).
+        if !fresh_args.is_empty() {
+            ctx.record_type_args(expr_id, fresh_args.clone(), span.clone());
+        }
         // Memberwise init: match args against stored field types (in order).
         // This list must be index-aligned with the MIR layout in
         // struct_lower.rs, because struct construction maps argument position
         // straight to FieldIdx. Both sides read `FieldClass` so they cannot
         // drift; do not re-derive the predicate here.
-        let fields: Vec<Entity> = children
+        let fields: Vec<Entity> = qctx
+            .children_of(struct_entity)
             .iter()
             .filter(|&&c| {
                 qctx.get::<kestrel_ast_builder::FieldClass>(c)
-                    .is_some_and(kestrel_ast_builder::FieldClass::is_stored_instance)
+                    .is_some_and(kestrel_ast_builder::FieldClass::is_declared_storage)
             })
             .copied()
             .collect();
@@ -1881,11 +2088,13 @@ fn wrap_init_result(
 fn gen_call_args(ctx: &mut InferCtx<'_>, hir: &HirBody, args: &[HirCallArg]) -> Vec<CallArg> {
     args.iter()
         .map(|arg| {
+            ctx.call_arg_exprs.insert(arg.value);
             let ty = gen_expr(ctx, hir, arg.value);
             CallArg {
                 label: arg.label.clone(),
                 ty,
                 value: arg.value,
+                trailing_closure: arg.trailing_closure,
             }
         })
         .collect()
@@ -2076,6 +2285,11 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     if receiver_open(ctx, recv) && crate::solver::apply_ref_decay_defaults_into(ctx, Some(recv)) {
         settle_left(ctx);
     }
+    // The receiver may be reached THROUGH such a binding (`pair.0` of
+    // `let pair = pairs(i)`): settle every pending decay to the left.
+    if receiver_open(ctx, recv) && crate::solver::apply_ref_decay_defaults_into(ctx, None) {
+        settle_left(ctx);
+    }
     if !receiver_open(ctx, recv) {
         return;
     }
@@ -2085,7 +2299,10 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     if !matches!(ctx.slot(open), TySlot::Unresolved { literal: None }) {
         return;
     }
-    kestrel_debug::ktrace!("e106", "receiver of '{member}' unknown at its use: {open:?}");
+    kestrel_debug::ktrace!(
+        "e106",
+        "receiver of '{member}' unknown at its use: {open:?}"
+    );
     ctx.report_error(InferError::TypeMustBeKnown {
         member: member.to_string(),
         span: span.clone(),
@@ -2106,34 +2323,6 @@ fn settle_scrutinee(ctx: &mut InferCtx<'_>, scrut: TyVar) {
     }
 }
 
-/// Resolve the member constraint just emitted (the last one queued) now,
-/// when its receiver's head is known — the walker looks the member up where
-/// it meets it instead of leaving it to the fixpoint (bidi P3a). A member
-/// whose receiver is still open stays queued.
-fn resolve_member_now(ctx: &mut InferCtx<'_>, recv: TyVar) {
-    if receiver_open(ctx, recv) {
-        return;
-    }
-    if !matches!(ctx.constraints.last(), Some(Constraint::Member { .. })) {
-        return;
-    }
-    let member = ctx.constraints.pop().expect("checked above");
-    crate::solver::solve_now(ctx, member);
-}
-
-/// [`resolve_member_now`] for the `Call` constraint just emitted, when the
-/// callee's head is known.
-fn resolve_call_now(ctx: &mut InferCtx<'_>, callee: TyVar) {
-    if receiver_open(ctx, callee) {
-        return;
-    }
-    if !matches!(ctx.constraints.last(), Some(Constraint::Call { .. })) {
-        return;
-    }
-    let call = ctx.constraints.pop().expect("checked above");
-    crate::solver::solve_now(ctx, call);
-}
-
 /// The P2 operator rule (bidi ruling D2; Rust's built-in binop rule): the
 /// two operands of a homogeneous arithmetic / comparison / bitwise operator
 /// unify while both are still open numeric literals, so `1 + 2.5` is one
@@ -2147,7 +2336,7 @@ fn unify_literal_operands(ctx: &mut InferCtx<'_>, protocol: Entity, recv: TyVar,
         Builtin::SubtractOperatorProtocol,
         Builtin::MultiplyOperatorProtocol,
         Builtin::DivideOperatorProtocol,
-        Builtin::ModuloOperatorProtocol,
+        Builtin::RemainderOperatorProtocol,
         Builtin::EqualsOperatorProtocol,
         Builtin::NotEqualsOperatorProtocol,
         Builtin::LessThanOperatorProtocol,
@@ -2260,12 +2449,11 @@ fn peel_ref_var(ctx: &InferCtx<'_>, tv: TyVar) -> TyVar {
     }
 }
 
-
 /// Default every open literal `recv` is built from, walking back through
 /// the pending constraints that produce it. Returns true on progress.
 fn default_literal_roots(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
     let mut roots = Vec::new();
-    collect_literal_roots(ctx, recv, 4, &mut roots);
+    collect_literal_roots(ctx, recv, &mut Vec::new(), &mut roots);
     let mut progress = false;
     for tv in roots {
         if let Some(lit) = open_literal(ctx, tv) {
@@ -2278,8 +2466,17 @@ fn default_literal_roots(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
 /// The open literal vars `tv` is produced from: itself, or the inputs of
 /// the pending constraint whose result it is (a call's or member's receiver
 /// and arguments, an associated type's container, an interpolation's
-/// accumulator), up to `depth` steps back.
-fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Vec<TyVar>) {
+/// accumulator), however many steps back. The walk is bounded by `seen`
+/// (each var is expanded once), not by a depth: the receiver needs its
+/// type now whatever the chain's length — `let a = xs(0); (a + b + c +
+/// d).f()` reaches the index literal five steps back, and a fixed cap
+/// turned that into a false E106.
+fn collect_literal_roots(
+    ctx: &InferCtx<'_>,
+    tv: TyVar,
+    seen: &mut Vec<TyVar>,
+    out: &mut Vec<TyVar>,
+) {
     let target = peel_ref_var(ctx, tv);
     if open_literal(ctx, target).is_some() {
         if !out.contains(&target) {
@@ -2287,9 +2484,10 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
         }
         return;
     }
-    if depth == 0 || !matches!(ctx.slot(target), TySlot::Unresolved { .. }) {
+    if seen.contains(&target) || !matches!(ctx.slot(target), TySlot::Unresolved { .. }) {
         return;
     }
+    seen.push(target);
     let produced_by = |r: &TyVar| peel_ref_var(ctx, *r) == target;
     let mut inputs: Vec<TyVar> = Vec::new();
     for c in &ctx.constraints {
@@ -2333,13 +2531,18 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
             // A deferred value flow into it (an argument into a protocol
             // argument, a binding's initializer).
             Constraint::Coerce { from, to, .. } if produced_by(to) => inputs.push(*from),
+            // A deferred ref decay (`let got = xs(0)` while the index's
+            // literal still decides the element type).
+            Constraint::EqualDecayed { value, target, .. } if produced_by(target) => {
+                inputs.push(*value)
+            },
             Constraint::Equal { a, b, .. } if produced_by(a) => inputs.push(*b),
             Constraint::Equal { a, b, .. } if produced_by(b) => inputs.push(*a),
             _ => {},
         }
     }
     for input in inputs {
-        collect_literal_roots(ctx, input, depth - 1, out);
+        collect_literal_roots(ctx, input, seen, out);
     }
 }
 
@@ -2468,6 +2671,7 @@ fn gen_call_args_phased(
     let args = args
         .iter()
         .map(|arg| {
+            ctx.call_arg_exprs.insert(arg.value);
             let ty = if is_closure_literal(hir, arg.value) {
                 let placeholder = ctx.fresh();
                 // The call's own coercion treats it as the closure literal it
@@ -2482,6 +2686,7 @@ fn gen_call_args_phased(
                 label: arg.label.clone(),
                 ty,
                 value: arg.value,
+                trailing_closure: arg.trailing_closure,
             }
         })
         .collect();
@@ -2557,27 +2762,7 @@ fn finish_postponed(ctx: &mut InferCtx<'_>, hir: &HirBody, postponed: Vec<(TyVar
 /// so MIR sees `MirTy::SelfType` and monomorphization substitutes the
 /// concrete conforming type at the call site.
 fn is_enclosing_self_protocol(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
-    let qctx = ctx.query_ctx;
-    let mut current = Some(ctx.owner);
-    while let Some(entity) = current {
-        match qctx.get::<NodeKind>(entity) {
-            Some(&NodeKind::Protocol) if entity == protocol => return true,
-            Some(&NodeKind::Extension) => {
-                if qctx.query(kestrel_name_res::ExtensionTargetEntity {
-                    extension: entity,
-                    root: ctx.root,
-                }) == Some(protocol)
-                {
-                    return true;
-                }
-            },
-            // Struct/Enum/Module/etc. — Self refers to those, not the protocol.
-            Some(&NodeKind::Struct | &NodeKind::Enum) => return false,
-            _ => {},
-        }
-        current = qctx.parent_of(entity);
-    }
-    false
+    ctx.owning_self_protocol() == Some(protocol)
 }
 
 fn instantiate_entity_with_args(
@@ -2692,16 +2877,23 @@ fn instantiate_entity_inner(
     // For methods/functions inside extensions, the extension target's type params
     // need fresh TyVars even without explicit type args. Without this, return types
     // like `Box[T]` stay unresolved when calling `Box.wrap(42)` directly.
+    // The same holds for a static member declared in the generic type itself
+    // (`struct Box[T] { static func make(x: T) -> Box[T] }` called as
+    // `Box.make(3)`): its `T` is inferred per use, not left rigid.
     if explicit_type_args.is_empty()
         && type_param_entities.is_empty()
         && let Some(parent) = qctx.parent_of(entity)
-        && qctx.get::<NodeKind>(parent) == Some(&NodeKind::Extension)
     {
-        // Get the extension target's type params (e.g., Box's T)
-        if let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity {
-            extension: parent,
-            root,
-        }) {
+        // The type whose params the member sees (e.g., Box's T).
+        let owner = match qctx.get::<NodeKind>(parent) {
+            Some(NodeKind::Extension) => qctx.query(kestrel_name_res::ExtensionTargetEntity {
+                extension: parent,
+                root,
+            }),
+            Some(NodeKind::Struct | NodeKind::Enum) => Some(parent),
+            _ => None,
+        };
+        if let Some(target) = owner {
             let target_type_params: Vec<Entity> = qctx
                 .get::<TypeParams>(target)
                 .map(|tp| tp.0.clone())
@@ -2713,6 +2905,23 @@ fn instantiate_entity_inner(
                 }
             }
         }
+    }
+
+    // A member an ancestor protocol declares, named from a sub-protocol's
+    // body or extension (`Self.make()` in `extend Q`, `make` being `P`'s):
+    // its signature's `Self` is P's, and here that is Q's `Self`.
+    if let Some(current) = ctx.owning_self_protocol()
+        && let Some(declaring) = ctx.declaring_protocol(entity)
+        && declaring != current
+        && qctx
+            .query(kestrel_name_res::conformances::ConformingProtocols {
+                entity: current,
+                root,
+            })
+            .contains(&declaring)
+    {
+        let self_tv = ctx.self_type_ty(current);
+        subs.push((declaring, self_tv));
     }
 
     emit_where_clause_constraints_with_subs(ctx, entity, &subs, site_span);
@@ -2862,14 +3071,11 @@ fn emit_where_clause_constraints_with_subs(
                 ) {
                     // Call-site where-clause obligation: a TYPE-ARGUMENT
                     // bound (success instantiates witnesses at tv).
-                    ctx.conforms_typearg(tv, protocol, site_span.clone());
                     let arg_tvs: Vec<TyVar> = protocol_type_args
                         .iter()
                         .map(|hir_ty| lower_hir_ty_with_subs(ctx, hir_ty, subs))
                         .collect();
-                    if !arg_tvs.is_empty() {
-                        ctx.record_witness_args(tv, protocol, arg_tvs);
-                    }
+                    ctx.bound_typearg(tv, protocol, arg_tvs, site_span.clone());
                 }
             },
             crate::resolve::WhereClause::Equality { subject, rhs } => {
@@ -2911,28 +3117,47 @@ fn emit_where_clause_constraints_with_subs(
 /// larger change. The helper only pushes `conforms` constraints (it never
 /// re-enters `lower_hir_ty`), so it can't recurse — nested args get their own
 /// well-formedness from the recursive lowering of `arg_tvs` above.
-fn emit_copyable_wellformedness(
+/// Which builtin bounds a type-formation site checks (the single place the
+/// formation rule lives; see `emit_formation_wellformedness`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FormationScope {
+    /// A type the program forms explicitly — an annotation, parameter,
+    /// return, field, literal default or constructor: Copyable, Cloneable
+    /// and Static bounds.
+    Written,
+    /// A type inference forms by instantiating a member's signature
+    /// (`collect() -> Array[Item]`): the Static bound only — the
+    /// ref-containment soundness line. Copyable/Cloneable there would newly
+    /// flag code the move checker already governs.
+    Inferred,
+}
+
+/// Formation well-formedness: when `entity[arg_tvs]` is formed, each arg
+/// must satisfy the (implicit or explicit) builtin bounds `scope` covers on
+/// its type parameter, as a TYPE-ARGUMENT conformance obligation.
+pub(crate) fn emit_formation_wellformedness(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
     arg_tvs: &[TyVar],
     span: &Span,
+    scope: FormationScope,
 ) {
-    let copyable = ctx.query_ctx.query(ResolveBuiltin {
-        builtin: Builtin::Copyable,
-        root: ctx.root,
-    });
-    let cloneable = ctx.query_ctx.query(ResolveBuiltin {
-        builtin: Builtin::Cloneable,
-        root: ctx.root,
-    });
-    // Static rides the same formation-site wellformedness: an annotation
-    // like `-> Wrap[NS]` must check the (implicit or explicit) Static
-    // bounds against the formed args, like the Copyable wf check.
-    let static_proto = ctx.query_ctx.query(ResolveBuiltin {
-        builtin: Builtin::Static,
-        root: ctx.root,
-    });
-    if copyable.is_none() && cloneable.is_none() && static_proto.is_none() {
+    if arg_tvs.is_empty() {
+        return;
+    }
+    let builtin = |b| {
+        ctx.query_ctx.query(ResolveBuiltin {
+            builtin: b,
+            root: ctx.root,
+        })
+    };
+    let mut checked: Vec<Entity> = Vec::new();
+    checked.extend(builtin(Builtin::Static));
+    if scope == FormationScope::Written {
+        checked.extend(builtin(Builtin::Copyable));
+        checked.extend(builtin(Builtin::Cloneable));
+    }
+    if checked.is_empty() {
         return;
     }
     // Positional map from the type's declared params to the formed args.
@@ -2959,17 +3184,13 @@ fn emit_copyable_wellformedness(
         let Some(param) = subject.as_param() else {
             continue;
         };
-        if Some(protocol) != copyable
-            && Some(protocol) != cloneable
-            && Some(protocol) != static_proto
-        {
+        if !checked.contains(&protocol) {
             continue;
         }
         let Some(pos) = params.iter().position(|p| *p == param) else {
             continue;
         };
         if let Some(&tv) = arg_tvs.get(pos) {
-            // Formation wellformedness: a TYPE-ARGUMENT bound.
             ctx.conforms_typearg(tv, protocol, span.clone());
         }
     }
@@ -3086,6 +3307,26 @@ pub(crate) fn lower_subject_with_base(
 /// Used by `HirStmt::Let` to feed the annotation's element type into an
 /// array-literal RHS so element mismatches compare against the target
 /// element type rather than each other.
+/// Per element of a tuple literal of `arity`: is the expected tuple's slot
+/// already a ref (`(&T, U)` from a return type or `let` annotation)? Such an
+/// element is a ref position, not an always-decay aggregate element, so a
+/// ref-returning call there keeps its reference. All `false` when nothing
+/// pins the tuple's shape at generation time (the stage-1.5 decay applies).
+fn expected_tuple_ref_slots(
+    ctx: &InferCtx<'_>,
+    expect: Option<&(TyVar, Reason)>,
+    arity: usize,
+) -> Vec<bool> {
+    let slots = expect.and_then(|(expected, _)| match ctx.slot(ctx.resolve(*expected)) {
+        TySlot::Resolved(TyKind::Tuple(elems)) if elems.len() == arity => Some(elems.clone()),
+        _ => None,
+    });
+    match slots {
+        Some(elems) => elems.iter().map(|&t| expected_is_ref(ctx, t)).collect(),
+        None => vec![false; arity],
+    }
+}
+
 fn extract_array_elem_hint(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
     let resolved = ctx.resolve(tv);
     let TySlot::Resolved(crate::ty::TyKind::Struct { entity, args }) = ctx.slot(resolved) else {
@@ -3288,7 +3529,13 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
             if !is_invalid_existential_box(ctx, *entity, args) {
-                emit_copyable_wellformedness(ctx, *entity, &arg_tvs, span);
+                emit_formation_wellformedness(
+                    ctx,
+                    *entity,
+                    &arg_tvs,
+                    span,
+                    FormationScope::Written,
+                );
             }
             ctx.struct_ty(*entity, arg_tvs)
         },
@@ -3298,7 +3545,13 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
             if !is_invalid_existential_box(ctx, *entity, args) {
-                emit_copyable_wellformedness(ctx, *entity, &arg_tvs, span);
+                emit_formation_wellformedness(
+                    ctx,
+                    *entity,
+                    &arg_tvs,
+                    span,
+                    FormationScope::Written,
+                );
             }
             ctx.enum_ty(*entity, arg_tvs)
         },
@@ -3335,28 +3588,36 @@ pub(crate) fn lower_hir_ty_with_subs(
         // `create_return_type` intercepts. If we get here, fall through to a
         // fresh TyVar (defensive — shouldn't be reached in normal flow).
         HirTy::Opaque { .. } => ctx.fresh(),
-        HirTy::AliasUse { entity, args, .. } => {
-            // Zero-arg alias uses participate in associated-type substitution:
-            // where clauses map specific TypeAlias entities to TyVars.
-            if args.is_empty() {
-                if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
-                    return tv;
-                }
-                // R1 — the one genuinely baseless read: a bare `Item` here has
-                // no receiver in scope, so C3's unambiguity rule applies —
-                // a lone candidate answers, two or more fall through below.
-                if let Some(tv) = ctx.assoc_sub("generate:AliasUse", None, *entity) {
-                    return tv;
-                }
-                if let Some(&tv) = ctx.param_tyvars.get(entity) {
-                    return tv;
-                }
-            }
+        // An alias arrives expanded; a bounded one also checks its bounds.
+        HirTy::Alias {
+            alias,
+            args,
+            expanded,
+            span,
+        } => {
             let arg_tvs: Vec<TyVar> = args
                 .iter()
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
-            ctx.type_alias(*entity, arg_tvs)
+            crate::solver::assoc::emit_alias_bounds(ctx, *alias, &arg_tvs, span);
+            lower_hir_ty_with_subs(ctx, expanded, subs)
+        },
+        // Abstract associated types participate in associated-type
+        // substitution: where clauses map specific TypeAlias entities to TyVars.
+        HirTy::AbstractAssoc { entity, .. } => {
+            if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
+                return tv;
+            }
+            // R1 — the one genuinely baseless read: a bare `Item` here has
+            // no receiver in scope, so C3's unambiguity rule applies —
+            // a lone candidate answers, two or more fall through below.
+            if let Some(tv) = ctx.assoc_sub("generate:AbstractAssoc", None, *entity) {
+                return tv;
+            }
+            if let Some(&tv) = ctx.param_tyvars.get(entity) {
+                return tv;
+            }
+            ctx.type_alias(*entity, Vec::new())
         },
         HirTy::AssocProjection { base, assoc, span } => {
             let base_tv = lower_hir_ty_with_subs(ctx, base, subs);
@@ -3597,7 +3858,8 @@ pub(crate) fn hir_ty_span(ty: &HirTy) -> Span {
         HirTy::Struct { span, .. }
         | HirTy::Enum { span, .. }
         | HirTy::Protocol { span, .. }
-        | HirTy::AliasUse { span, .. }
+        | HirTy::Alias { span, .. }
+        | HirTy::AbstractAssoc { span, .. }
         | HirTy::AssocProjection { span, .. }
         | HirTy::Tuple(_, span)
         | HirTy::Function { span, .. }
@@ -3626,6 +3888,8 @@ fn gen_variant_pat(
 ) {
     let qctx = ctx.query_ctx;
     let root = ctx.root;
+    let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
+    check_variant_pattern_labels(ctx, entity, &labels, span);
 
     // Build substitution map: enum type params → fresh TyVars linked to scrutinee.
     // This ensures payload types like HirTy::Param(T) resolve to the scrutinee's
@@ -3673,6 +3937,33 @@ fn gen_variant_pat(
     }
 }
 
+/// Payload sub-patterns bind by position, like call arguments: a label, when
+/// written, must name the payload at that position. `.A(y: b, x: a)` against
+/// `case A(x:, y:)` is rejected rather than silently binding `b` to `x`.
+pub(crate) fn check_variant_pattern_labels(
+    ctx: &mut InferCtx<'_>,
+    case: Entity,
+    labels: &[Option<String>],
+    span: &Span,
+) {
+    let params = ctx
+        .query_ctx
+        .get::<kestrel_ast_builder::Callable>(case)
+        .map(|c| c.params.clone())
+        .unwrap_or_default();
+    for (i, label) in labels.iter().enumerate() {
+        let Some(got) = label else { continue };
+        let expected = params.get(i).and_then(|p| p.label.clone());
+        if expected.as_deref() != Some(got.as_str()) {
+            ctx.report_error(InferError::LabelMismatch {
+                expected,
+                got: Some(got.clone()),
+                span: span.clone(),
+            });
+        }
+    }
+}
+
 /// Generate constraints for an implicit variant pattern (.CaseName).
 /// Creates fresh TyVars for each sub-pattern binding and emits an
 /// ImplicitPat constraint. The solver defers until the scrutinee type
@@ -3694,6 +3985,7 @@ fn gen_implicit_variant_pat(
         scrutinee: scrutinee_tv,
         name: name.to_string(),
         arg_tys: arg_tys.clone(),
+        labels: args.iter().map(|a| a.label.clone()).collect(),
         span: span.clone(),
     };
     if receiver_open(ctx, scrutinee_tv) {

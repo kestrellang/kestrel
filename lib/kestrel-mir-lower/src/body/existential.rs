@@ -52,11 +52,11 @@ impl OssaBodyCtx<'_, '_> {
         call_args.extend(args.into_iter().skip(1));
         let result = self.emit_call_returning(Callee::Thin(thunk), call_args, result_ty);
         self.emit_destroy_value(thunk);
-        // The receiver view (a `pointeeRef`/`pointeeMutRef` result) was used
+        // The receiver view (a `value` ref accessor result) was used
         // only for its words: end it now, as a direct call ends a borrowed
         // ref argument, so it can't reach a control-flow merge (E497).
-        if self.ref_results.contains(&recv) && !self.ref_binding_vals.contains_key(&recv) {
-            self.emit_end_borrow(recv);
+        if self.ref_results.contains(&recv) {
+            self.end_ref_if_single_use(recv);
         }
         Some(result)
     }
@@ -292,7 +292,7 @@ impl OssaBodyCtx<'_, '_> {
 
 impl OssaBodyCtx<'_, '_> {
     /// The receiver of a `consuming` requirement called on an existential:
-    /// the box is taken by value and viewed through `pointeeRef`; the
+    /// the box is taken by value and viewed through `value`; the
     /// consuming thunk then moves the payload out of the view. Returns the
     /// view argument and `(box, borrow)` for
     /// [`Self::emit_release_consumed_box`]. `None` for any other call.
@@ -415,7 +415,7 @@ impl OssaBodyCtx<'_, '_> {
 // ===== Type tests and downcasts (existentials design §8, §8b) =====
 
 impl OssaBodyCtx<'_, '_> {
-    /// The box's payload as a raw existential view (`Indirection.pointeeRef`),
+    /// The box's payload as a raw existential view (`Indirection.value`),
     /// or `None` when `box_ty` is not a box over a raw existential.
     fn emit_existential_view(&mut self, boxed: ValueId, box_ty: TyId) -> Option<(ValueId, TyId)> {
         let MirTy::Named { type_args, .. } = self.ctx.module.ty_arena.get(box_ty) else {
@@ -428,20 +428,11 @@ impl OssaBodyCtx<'_, '_> {
         ) {
             return None;
         }
-        let protocol = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-            builtin: kestrel_hir::Builtin::Indirection,
-            root: self.ctx.root,
-        })?;
-        let requirement = self.protocol_requirement(protocol, "pointeeRef")?;
-        self.ctx.register_name(protocol);
-        let method = self.ctx.witness_method_key(requirement);
+        let requirement =
+            kestrel_type_infer::indirection_accessor(&self.ctx.query, self.ctx.root, false)?;
+        let callee = self.place_accessor_callee(requirement, box_ty, Vec::new());
         let view = self.emit_call_returning(
-            Callee::Witness {
-                protocol,
-                method,
-                self_type: box_ty,
-                method_type_args: Vec::new(),
-            },
+            callee,
             vec![CallArg {
                 value: boxed,
                 convention: ParamConvention::Borrow,
@@ -454,8 +445,8 @@ impl OssaBodyCtx<'_, '_> {
     /// End a view from [`Self::emit_existential_view`] once only its words
     /// were read.
     fn end_existential_view(&mut self, view: ValueId) {
-        if self.ref_results.contains(&view) && !self.ref_binding_vals.contains_key(&view) {
-            self.emit_end_borrow(view);
+        if self.ref_results.contains(&view) {
+            self.end_ref_if_single_use(view);
         }
     }
 

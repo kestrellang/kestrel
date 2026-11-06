@@ -279,7 +279,7 @@ pub fn set_where_clause(
             ast::WhereConstraint::TypeEquality(e) => Some(WhereConstraint::Equality {
                 lhs: assoc_target_to_ast_type(&e.associated_type_target()?, file_id)?,
                 rhs: lower_opt_type(e.ty(), file_id)?,
-                node: SyntaxNodePtr::new(&e.syntax()),
+                node: SyntaxNodePtr::new(e.syntax()),
             }),
         })
         .collect();
@@ -405,12 +405,12 @@ pub fn spawn_setter(
     file_entity: Entity,
     file_id: usize,
     is_static: bool,
-) {
+) -> Entity {
     let setter = world.spawn();
     world.set(setter, NodeKind::Setter);
     world.set(setter, FileId(file_entity));
     world.set(setter, DeclSpan(get_decl_span(setter_clause, file_id)));
-    world.set(setter, CstNode(SyntaxNodePtr::new(&setter_clause)));
+    world.set(setter, CstNode(SyntaxNodePtr::new(setter_clause)));
     world.set_parent(setter, parent);
     // Setter → Subscript/Field → Container. Record the container so
     // downstream code can skip the intermediate hop without walking.
@@ -423,6 +423,48 @@ pub fn spawn_setter(
         world.set(setter, Static);
     }
     set_documentation(world, setter, setter_clause);
+    setter
+}
+
+/// Mark a failable member (`var first?: T`, `subscript(…)? -> T`): its
+/// annotation becomes `T?`, the type every read provider produces (a `get`
+/// body returns `T?`; ref accessors lend `Optional[&T]`, see
+/// [`spawn_ref_accessor`]). Must run before the accessors are built.
+/// Mark a computed member declared `T throws E` [`Throwing`]. Call after
+/// its `TypeAnnotation` is set and before its accessors are built (their
+/// ref types read the marker).
+pub fn mark_throwing(world: &mut World, entity: Entity) {
+    if matches!(
+        world.get::<TypeAnnotation>(entity),
+        Some(TypeAnnotation(AstType::Result { .. }))
+    ) {
+        world.set(entity, Throwing);
+    }
+}
+
+pub fn mark_failable(world: &mut World, entity: Entity, span: kestrel_span::Span) {
+    world.set(entity, Failable);
+    if let Some(ty) = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone()) {
+        world.set(
+            entity,
+            TypeAnnotation(AstType::Optional(Box::new(ty), span)),
+        );
+    }
+}
+
+/// The accessor clauses an accessor block spells (see [`DeclaredAccessors`]).
+/// The `{ expr }` shorthand counts as `get`.
+pub fn declared_accessors(acc: &kestrel_syntax_tree::ast::PropertyAccessors) -> DeclaredAccessors {
+    DeclaredAccessors {
+        get: acc.declares_get() || acc.code_block().is_some(),
+        modifying_get: acc.modifying_getter().is_some(),
+        set: acc.declares_set(),
+        ref_: acc.ref_clause().is_some(),
+        modifying_ref: acc.modifying_ref_clause().is_some(),
+        mutating_ref: acc.mutating_ref_clause().is_some(),
+        will_set: acc.will_set().is_some(),
+        did_set: acc.did_set().is_some(),
+    }
 }
 
 /// Spawn a `NodeKind::RefAccessor` child entity under a Field or Subscript
@@ -433,12 +475,14 @@ pub fn spawn_setter(
 /// accessor has a RETURN type — the SYNTHESIZED `&T` / `&mutating T`
 /// wrapping the parent's declared type. The user writes `-> T`; a ref type
 /// never appears in source (declared `-> &T` subscripts stay E481). The
-/// `MutatingAccessor` marker distinguishes the two kinds.
+/// `MutatingAccessor` marker distinguishes the two kinds. A bodyless clause
+/// (`clause_body: None`) is a protocol requirement: the child carries the
+/// signature only, and conformers' accessors witness it.
 pub fn spawn_ref_accessor(
     world: &mut World,
     parent: Entity,
     clause: &SyntaxNode,
-    clause_body: &SyntaxNode,
+    clause_body: Option<&SyntaxNode>,
     params: Vec<AstParam>,
     receiver: Option<ReceiverKind>,
     mutating: bool,
@@ -450,28 +494,57 @@ pub fn spawn_ref_accessor(
     world.set(acc, NodeKind::RefAccessor);
     world.set(acc, FileId(file_entity));
     world.set(acc, DeclSpan(get_decl_span(clause, file_id)));
-    world.set(acc, CstNode(SyntaxNodePtr::new(&clause)));
+    world.set(acc, CstNode(SyntaxNodePtr::new(clause)));
     world.set_parent(acc, parent);
     // RefAccessor → Subscript/Field → Container (same hop-skip as Setter).
     if let Some(container) = world.parent_of(parent) {
         world.set(acc, EnclosingContainer(container));
     }
     world.set(acc, Callable { params, receiver });
-    world.set(acc, Valued(SyntaxNodePtr::new(clause_body)));
+    if let Some(body) = clause_body {
+        world.set(acc, Valued(SyntaxNodePtr::new(body)));
+    }
     if mutating {
         world.set(acc, MutatingAccessor);
     }
     // Synthesized ref return around the parent's declared type. Spanned at
     // the clause so any ref-placement diagnostic lands on the accessor.
+    // A failable member (`var first?: T`) is annotated `T?`; its accessors
+    // lend `Optional[&T]` / `Optional[&mutating T]` instead of `&T?`. A
+    // throwing one (`T throws E`) lends `Result[&T, E]` the same way.
     if let Some(parent_ty) = world.get::<TypeAnnotation>(parent).map(|t| t.0.clone()) {
-        world.set(
-            acc,
-            TypeAnnotation(AstType::Ref {
+        let span = get_decl_span(clause, file_id);
+        let ty = match parent_ty {
+            AstType::Optional(inner, opt_span) if world.has::<Failable>(parent) => {
+                AstType::Optional(
+                    Box::new(AstType::Ref {
+                        inner,
+                        mutating,
+                        span,
+                    }),
+                    opt_span,
+                )
+            },
+            AstType::Result {
+                ok,
+                err,
+                span: res_span,
+            } if world.has::<Throwing>(parent) => AstType::Result {
+                ok: Box::new(AstType::Ref {
+                    inner: ok,
+                    mutating,
+                    span,
+                }),
+                err,
+                span: res_span,
+            },
+            parent_ty => AstType::Ref {
                 inner: Box::new(parent_ty),
                 mutating,
-                span: get_decl_span(clause, file_id),
-            }),
-        );
+                span,
+            },
+        };
+        world.set(acc, TypeAnnotation(ty));
     }
     if is_static {
         world.set(acc, Static);

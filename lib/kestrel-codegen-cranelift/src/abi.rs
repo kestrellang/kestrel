@@ -1,44 +1,13 @@
 use cranelift_codegen::ir::{self, AbiParam};
 use cranelift_codegen::isa::CallConv;
+use kestrel_mir::TyArena;
 use kestrel_mir::mono::MonoModule;
-use kestrel_mir::{ParamConvention, TyArena};
 
-use crate::ty::{TypeCache, TypeRepr};
+use crate::ty::{Cranelift, TypeCache, TypeRepr};
 
-#[derive(Debug, Clone, Copy)]
-pub enum PassMode {
-    ByVal(ir::Type),
-    ByRef,
-    Zst,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ReturnMode {
-    Direct(ir::Type),
-    Sret,
-    Void,
-}
-
-pub fn param_pass_mode(convention: ParamConvention, repr: TypeRepr, _ptr_ty: ir::Type) -> PassMode {
-    match convention {
-        ParamConvention::Borrow | ParamConvention::MutBorrow => PassMode::ByRef,
-        ParamConvention::Consuming => match repr {
-            TypeRepr::Scalar(t) => PassMode::ByVal(t),
-            TypeRepr::Aggregate { .. } => PassMode::ByRef,
-            TypeRepr::Zst => PassMode::Zst,
-        },
-    }
-}
-
-pub fn return_mode(repr: TypeRepr) -> ReturnMode {
-    // The `@main` entry point is an ordinary `i64`-returning function (the
-    // MIR-synthesized wrapper), so no entry-point special-casing is needed here.
-    match repr {
-        TypeRepr::Scalar(t) => ReturnMode::Direct(t),
-        TypeRepr::Aggregate { .. } => ReturnMode::Sret,
-        TypeRepr::Zst => ReturnMode::Void,
-    }
-}
+pub type PassMode = kestrel_codegen::PassMode<Cranelift>;
+pub type ReturnMode = kestrel_codegen::ReturnMode<Cranelift>;
+pub use kestrel_codegen::{param_pass_mode, return_mode};
 
 pub fn build_signature(
     func: &kestrel_mir::mono::MonoFunction,
@@ -47,7 +16,7 @@ pub fn build_signature(
     module: &MonoModule,
     call_conv: CallConv,
 ) -> ir::Signature {
-    let ptr_ty = tc.ptr_ty;
+    let ptr_ty = tc.ptr_scalar;
     let mut sig = ir::Signature::new(call_conv);
 
     let ret_repr = tc.repr(func.ret, arena, module);
@@ -59,7 +28,7 @@ pub fn build_signature(
 
     for param in &func.params {
         let repr = tc.repr(param.ty, arena, module);
-        match param_pass_mode(param.convention, repr, ptr_ty) {
+        match param_pass_mode(param.convention, repr) {
             PassMode::ByVal(t) => sig.params.push(AbiParam::new(t)),
             PassMode::ByRef => sig.params.push(AbiParam::new(ptr_ty)),
             PassMode::Zst => {},
@@ -81,7 +50,7 @@ pub fn build_extern_signature(
     module: &MonoModule,
     call_conv: CallConv,
 ) -> ir::Signature {
-    let ptr_ty = tc.ptr_ty;
+    let ptr_ty = tc.ptr_scalar;
     let mut sig = ir::Signature::new(call_conv);
 
     let ret_repr = tc.repr(func.ret, arena, module);

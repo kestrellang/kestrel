@@ -72,8 +72,15 @@ public struct OwnedBox[T]: not Copyable where T: not Copyable, T: not Sized, T: 
     }
 
     /// Pointer to the payload. Valid while the box is alive.
-    public func valuePtr() -> Pointer[T] {
+    internal func valuePtr() -> Pointer[T] {
         self.ptr
+    }
+
+    /// The payload, in place: `&b.value` borrows it, `b.value.x = 1` writes
+    /// it. The box is its only owner, so a write needs a mutable box.
+    public var value: T {
+        ref { self.ptr.value }
+        mutating ref { self.ptr.mutatingValue }
     }
 
     // Frees the block without touching the payload. Measured from the
@@ -96,8 +103,6 @@ public struct OwnedBox[T]: not Copyable where T: not Copyable, T: not Sized, T: 
 
 extend OwnedBox[T]: MutableIndirection {
     type Target = T
-    public func pointeeRef() -> &T { self.ptr.value }
-    public mutating func pointeeMutRef() -> &mutating T { self.ptr.mutatingValue }
 }
 
 // The box owns its payload alone, so it can give it up.

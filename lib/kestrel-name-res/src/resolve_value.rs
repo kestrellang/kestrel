@@ -11,6 +11,7 @@ use kestrel_ast_builder::{
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::helpers::find_in_extensions;
+use crate::protocol_members::ProtocolMembersByName;
 use crate::resolve_name::{NameResolution, ResolveName};
 use crate::resolve_type::{ResolveTypePath, TypeResolution};
 use crate::type_members::{TypeMemberSource, TypeMembersByName};
@@ -342,13 +343,41 @@ fn walk_path_from(
             continue;
         }
 
-        // No direct children — try extension static methods (only for last segment)
-        if is_last
-            && ctx.has::<Typed>(current)
+        // A protocol (`Self.seed()` in `extend Q`, or `Q.seed`) also answers
+        // with its parents' requirements and every extension default along
+        // the way — the protocol-side member query, not just its own children.
+        if ctx.get::<NodeKind>(current) == Some(&NodeKind::Protocol) {
+            let members: Vec<Entity> = ctx
+                .query(ProtocolMembersByName {
+                    protocol: current,
+                    name: segment.clone(),
+                    context,
+                    root,
+                })
+                .into_iter()
+                .map(|m| m.entity)
+                .collect();
+            if is_last && !members.is_empty() {
+                return classify_value_results(ctx, members);
+            }
+        }
+
+        // No direct children — try static members declared in extensions.
+        // A static property mid-path (`Meters.zero.v`) is walked into like a
+        // direct field: the next segment reports it as an intermediate value.
+        if ctx.has::<Typed>(current)
             && let Some(result) =
-                resolve_extension_static_method(ctx, current, segment, context, root)
+                resolve_extension_static_member(ctx, current, segment, context, root)
         {
-            return result;
+            if is_last {
+                return result;
+            }
+            if let ValueResolution::Def(member) = result
+                && ctx.get::<NodeKind>(member) == Some(&NodeKind::Field)
+            {
+                current = member;
+                continue;
+            }
         }
 
         // For associated types (abstract TypeAlias), search protocol bounds
@@ -434,13 +463,19 @@ fn lookup_assoc_type_segment(
     }
 }
 
-/// Is `e` a static callable — explicitly `static`, or a receiver-less function?
-fn is_static_method(ctx: &QueryContext<'_>, e: Entity) -> bool {
-    ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
-        && (ctx.has::<Static>(e) || ctx.get::<Callable>(e).is_some_and(|c| c.receiver.is_none()))
+/// Is `e` a static member — a static property, or a static callable
+/// (explicitly `static`, or a receiver-less function)?
+fn is_static_member(ctx: &QueryContext<'_>, e: Entity) -> bool {
+    match ctx.get::<NodeKind>(e) {
+        Some(NodeKind::Field) => ctx.has::<Static>(e),
+        Some(NodeKind::Function) => {
+            ctx.has::<Static>(e) || ctx.get::<Callable>(e).is_some_and(|c| c.receiver.is_none())
+        },
+        _ => false,
+    }
 }
 
-/// Static methods on `current`, sourced from `TypeMembersByName` — the one
+/// Static members (methods and properties) on `current`, sourced from `TypeMembersByName` — the one
 /// query that answers "what members does this type have?" It already merges
 /// every extension of the type and every extension of every protocol it
 /// transitively conforms to, so `A.staticMethod()` finds a method living in
@@ -461,7 +496,7 @@ fn is_static_method(ctx: &QueryContext<'_>, e: Entity) -> bool {
 /// ambiguous, while a protocol default with different labels stays reachable
 /// as an overload. Dropping it wholesale would repeat F10's mistake in the
 /// other direction — name resolution is the last place the set can be widened.
-fn resolve_extension_static_method(
+fn resolve_extension_static_member(
     ctx: &QueryContext<'_>,
     current: Entity,
     segment: &str,
@@ -477,7 +512,7 @@ fn resolve_extension_static_method(
 
     let (own, via_protocol): (Vec<_>, Vec<_>) = members
         .into_iter()
-        .filter(|m| is_static_method(ctx, m.entity))
+        .filter(|m| is_static_member(ctx, m.entity))
         .partition(|m| !matches!(m.source, TypeMemberSource::ProtocolExtension { .. }));
 
     let mut seen: HashSet<Vec<Option<String>>> =
@@ -773,6 +808,7 @@ mod tests {
                     pattern: None,
                     is_mut: false,
                     is_consuming: false,
+                    by_ref: false,
                 }],
                 receiver: None,
             },

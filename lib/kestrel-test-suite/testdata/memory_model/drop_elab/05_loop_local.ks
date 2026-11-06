@@ -12,7 +12,6 @@
 // it to the loop-body's scope edge.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

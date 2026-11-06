@@ -4,5 +4,5 @@
 module Test
 
 struct Handler[T] {
-    var callback: (T) -> ()
+    var callback: escaping (T) -> ()
 }

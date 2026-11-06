@@ -4,25 +4,31 @@
 //! downstream phases need so analyzers, type inference, move tracking, and MIR
 //! lowering do not each reinterpret raw conformance syntax differently.
 
+pub mod copy_shape;
 pub mod existential;
 pub mod recursive_enum;
+pub mod ref_sources;
 pub mod sizedness;
 pub mod staticness;
 
+pub use copy_shape::{CopyShape, CopyShapeLayer, ty_copy_semantics};
 pub use existential::{
     Dispatch, ExistentialLayout, Layout, RequirementDispatch, SelfConformance, bound_closure,
     is_requirement, reachable_protocols, self_conformance,
 };
 pub use recursive_enum::{IndirectCases, RecursiveCase, RecursiveCases, case_payload_types};
+pub use ref_sources::{HirRefSources, RefShape, RefSourceLayer, may_contain, ref_source_mask};
 pub use sizedness::{
-    NominalSizedness, SizeRequirement, SizedLayer, Sizedness, TypeParamSizeRequirement,
-    assoc_may_be_unsized, hir_type_is_sized, instance_is_sized, last_stored_field,
-    last_stored_field_type, relaxed_param_by_value, BoxDefect, ExistentialBoxDefect,
+    BoxDefect, ExistentialBoxDefect, NominalSizedness, SizeRequirement, SizedLayer, SizedShape,
+    Sizedness, TypeParamSizeRequirement, assoc_may_be_unsized, hir_type_is_sized,
+    instance_is_sized, last_stored_field, last_stored_field_type, relaxed_param_by_value,
+    ty_is_sized,
 };
 
 pub use staticness::{
-    NominalStaticness, StaticLayer, StaticRequirement, Staticness, StaticnessInfo,
+    NominalStaticness, StaticLayer, StaticRequirement, StaticShape, Staticness, StaticnessInfo,
     StaticnessReason, TypeParamStaticRequirement, hir_type_is_static, instance_is_static,
+    ty_is_static,
 };
 
 use std::borrow::Cow;
@@ -34,7 +40,7 @@ use kestrel_ast_builder::{
     ConformanceItem, Conformances, FieldClass, NodeKind, WhereClause as AstWhereClause,
     WhereConstraint,
 };
-use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
+use kestrel_copy_fold::CopyLayer;
 use kestrel_hecs::{CycleMode, Entity, QueryContext, QueryFn};
 use kestrel_hir::builtin::BuiltinKind;
 use kestrel_hir::{Builtin, HirTy};
@@ -223,6 +229,141 @@ impl QueryFn for ProtocolRefines {
     fn describe(&self) -> String {
         format!("ProtocolRefines({:?}, base={:?})", self.protocol, self.base)
     }
+}
+
+/// Copy semantics of an abstract protocol `Self` (the receiver inside
+/// `extend P { ... }` or a protocol requirement). Unlike a generic param,
+/// `Self` is not Copyable by default: move-only types may conform to `P`, so
+/// `Self` is only as copyable as `P`'s refinements guarantee. Single source
+/// of truth for the semantics, solver and type-infer classifiers.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ProtocolSelfCopySemantics {
+    pub protocol: Entity,
+    /// Use site (function / extension); its where clauses may bound `Self`.
+    pub context: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for ProtocolSelfCopySemantics {
+    type Output = CopySemantics;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> CopySemantics {
+        let refines = |builtin| {
+            ctx.query(ResolveBuiltin {
+                builtin,
+                root: self.root,
+            })
+            .is_some_and(|base| {
+                ctx.query(ProtocolRefines {
+                    protocol: self.protocol,
+                    base,
+                    root: self.root,
+                })
+            })
+        };
+        // Cloneable refines Copyable, so test it first.
+        if refines(Builtin::Cloneable) {
+            return CopySemantics::Cloneable;
+        }
+        if refines(Builtin::Copyable) {
+            return CopySemantics::Copyable;
+        }
+        self_where_bound_semantics(ctx, self.context, self.root)
+    }
+
+    fn describe(&self) -> String {
+        format!("ProtocolSelfCopySemantics({:?})", self.protocol)
+    }
+}
+
+/// The strongest copy class a `where Self: P` clause on `context` or any
+/// ancestor grants (`P` refining Cloneable / Copyable); NotCopyable if none.
+fn self_where_bound_semantics(
+    ctx: &QueryContext<'_>,
+    context: Entity,
+    root: Entity,
+) -> CopySemantics {
+    let builtin = |b| ctx.query(ResolveBuiltin { builtin: b, root });
+    let (copyable, cloneable) = (builtin(Builtin::Copyable), builtin(Builtin::Cloneable));
+    let grants = |proto: Entity, base: Option<Entity>| {
+        base.is_some_and(|base| {
+            ctx.query(ProtocolRefines {
+                protocol: proto,
+                base,
+                root,
+            })
+        })
+    };
+    let mut best = CopySemantics::NotCopyable;
+    let mut current = Some(context);
+    while let Some(scope) = current {
+        current = ctx.parent_of(scope);
+        let Some(wc) = ctx.get::<AstWhereClause>(scope) else {
+            continue;
+        };
+        for constraint in &wc.0 {
+            let WhereConstraint::Bound {
+                subject, protocols, ..
+            } = constraint
+            else {
+                continue;
+            };
+            if !is_self_subject(ctx, subject, scope, root) {
+                continue;
+            }
+            for proto in protocols {
+                let Some(proto) = resolve_type_entity(ctx, proto, scope, root) else {
+                    continue;
+                };
+                if grants(proto, cloneable) {
+                    return CopySemantics::Cloneable;
+                }
+                if grants(proto, copyable) {
+                    best = CopySemantics::Copyable;
+                }
+            }
+        }
+    }
+    best
+}
+
+/// Whether a where-clause subject names `Self`.
+fn is_self_subject(
+    ctx: &QueryContext<'_>,
+    ast_ty: &AstType,
+    context: Entity,
+    root: Entity,
+) -> bool {
+    let AstType::Named { segments, .. } = ast_ty else {
+        return false;
+    };
+    matches!(
+        ctx.query(ResolveTypePath {
+            segments: segments.iter().map(|s| s.name.clone()).collect(),
+            context,
+            root,
+        }),
+        TypeResolution::SelfType
+    )
+}
+
+/// Copy semantics of `SelfType(entity)`: a protocol's abstract `Self`
+/// defers to `ProtocolSelfCopySemantics`; a concrete type's `Self` is that
+/// type's nominal semantics.
+pub fn self_type_copy_semantics(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    context: Entity,
+    root: Entity,
+) -> CopySemantics {
+    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Protocol) {
+        return ctx.query(ProtocolSelfCopySemantics {
+            protocol: entity,
+            context,
+            root,
+        });
+    }
+    ctx.query(NominalCopySemantics { entity, root }).semantics
 }
 
 /// Whether `: not P` is permitted on `protocol` — true only for builtin
@@ -650,49 +791,61 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
     }
 
     fn member_semantics(&self, ty: &HirTy) -> CopySemantics {
+        ty_copy_semantics(self, ty)
+    }
+}
+
+impl CopyShapeLayer for HirCopyLayer<'_, '_> {
+    fn query(&self) -> &QueryContext<'_> {
+        self.ctx
+    }
+
+    fn root(&self) -> Entity {
+        self.root
+    }
+
+    // HOOK: the caller-supplied `context` scopes both lookups.
+    fn param_context(&self, _: Entity) -> Entity {
+        self.context
+    }
+
+    fn self_context(&self) -> Entity {
+        self.context
+    }
+
+    fn copy_shape<'t>(&self, ty: &'t HirTy) -> CopyShape<'t, HirTy> {
         match ty {
             HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => {
-                instance_semantics(self, *entity, args)
-            },
-            HirTy::Tuple(elems, _) => fold_members(elems.iter().map(|e| self.member_semantics(e))),
-            // HOOK: caller-supplied `context` scopes the bound lookup.
-            HirTy::Param(entity, _) => self
-                .ctx
-                .query(TypeParamCopyRequirement {
-                    param: *entity,
-                    context: self.context,
-                    root: self.root,
-                })
-                .into(),
-            // No per-instantiation refinement for Self/alias uses (current behavior).
-            HirTy::SelfType(entity, _) => self.base_semantics(*entity),
-            HirTy::AliasUse { entity, .. } => self.base_semantics(*entity),
-            HirTy::Protocol { .. } => CopySemantics::Copyable,
-            HirTy::RawExistential { bounds, .. } => raw_existential_copy_semantics(
-                self.ctx,
-                bounds.iter().filter_map(|b| match b {
-                    HirTy::Protocol { entity, .. } => Some(*entity),
-                    _ => None,
-                }),
-                self.root,
-            ),
-            // `some P and not Copyable` may hide a move-only underlier; the
-            // plain form guarantees a duplicable one (post-solve check).
-            HirTy::Opaque { not_copyable, .. } => {
-                if *not_copyable {
-                    CopySemantics::NotCopyable
-                } else {
-                    CopySemantics::Copyable
+                CopyShape::Nominal {
+                    entity: *entity,
+                    args: Cow::Borrowed(args),
                 }
             },
-            // A closure value's copy class is fixed by its KIND, not by what it
-            // captures (plan D6 / docs/design/closures.md §"Copy and Drop").
-            HirTy::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),
+            HirTy::Tuple(elems, _) => CopyShape::Tuple(Cow::Borrowed(elems)),
+            HirTy::Param(entity, _) => CopyShape::Param(*entity),
+            HirTy::SelfType(entity, _) => CopyShape::SelfType(*entity),
+            HirTy::AbstractAssoc { entity, .. } => CopyShape::BaseOnly(*entity),
+            HirTy::Alias { expanded, .. } => CopyShape::Alias(expanded),
+            HirTy::RawExistential { bounds, .. } => CopyShape::RawExistential(
+                bounds
+                    .iter()
+                    .filter_map(|b| match b {
+                        HirTy::Protocol { entity, .. } => Some(*entity),
+                        _ => None,
+                    })
+                    .collect(),
+            ),
+            HirTy::Opaque { not_copyable, .. } => CopyShape::Opaque {
+                not_copyable: *not_copyable,
+            },
+            HirTy::Function { kind, .. } => CopyShape::Function(*kind),
+            // A protocol existential is Copyable (not known Cloneable).
+            HirTy::Protocol { .. } => CopyShape::Leaf(CopySemantics::Copyable),
             // Ref is rejected (rewritten to Error) at HIR lowering and should
             // never reach here; treat it exactly like Error if it does.
             // Infer/Error are recovery.
             HirTy::Never(_) | HirTy::Infer(_) | HirTy::Error(_) | HirTy::Ref { .. } => {
-                CopySemantics::Copyable
+                CopyShape::Leaf(CopySemantics::Copyable)
             },
             // An associated projection (`I.Item`) is Copyable-by-default, exactly
             // like a type param: the model gives every associated type an implicit
@@ -700,10 +853,10 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
             // Copyable concretes are substituted at mono. Treating it as
             // `NotCopyable` here wrongly poisoned every container of an assoc type
             // (e.g. an iterator's `pendingItem: I.Item?`). MIR `ty_query` already
-            // classifies `AssociatedProjection` as `Bitwise`; the solver agrees via
-            // `type_conforms_copyable`. (A `type Item: not Copyable` associated type
-            // would need per-assoc requirement tracking — not modeled yet.)
-            HirTy::AssocProjection { .. } => CopySemantics::Copyable,
+            // classifies `AssociatedProjection` as `Bitwise`. (A `type Item: not
+            // Copyable` associated type would need per-assoc requirement
+            // tracking — not modeled yet.)
+            HirTy::AssocProjection { .. } => CopyShape::Leaf(CopySemantics::Copyable),
         }
     }
 }
@@ -795,7 +948,11 @@ fn nominal_copy_semantics_impl(
 /// `P` is the lone payload type or the tuple of all of them. `None` when the
 /// stdlib binds no `OwnedBox` (an error reported by the indirect-enum
 /// analyzer). MIR `enum_lower` builds the same shape as a `TyId`.
-pub fn indirect_box_type(ctx: &QueryContext<'_>, payload: Vec<HirTy>, root: Entity) -> Option<HirTy> {
+pub fn indirect_box_type(
+    ctx: &QueryContext<'_>,
+    payload: Vec<HirTy>,
+    root: Entity,
+) -> Option<HirTy> {
     let owned_box = ctx.query(ResolveBuiltin {
         builtin: Builtin::OwnedBox,
         root,
@@ -825,7 +982,7 @@ fn ast_type_last_segment_is(ast_ty: &AstType, name: &str) -> bool {
     segments.last().is_some_and(|s| s.name == name)
 }
 
-fn collect_child_types(
+pub(crate) fn collect_child_types(
     ctx: &QueryContext<'_>,
     entity: Entity,
     root: Entity,
@@ -914,21 +1071,18 @@ pub(crate) fn param_bound_contexts(
     out
 }
 
+/// The entity an annotation names. Deliberately looser than
+/// `kestrel_name_res::annotation_entity`: a resolved non-type (`NotAType`)
+/// still counts, and `Self` stays unresolved (`None`) — the copyability and
+/// conformance-target rules here judge declared parameters and protocols, never
+/// the enclosing type.
 fn resolve_type_entity(
     ctx: &QueryContext<'_>,
     ast_ty: &AstType,
     context: Entity,
     root: Entity,
 ) -> Option<Entity> {
-    let AstType::Named { segments, .. } = ast_ty else {
-        return None;
-    };
-    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-    match ctx.query(ResolveTypePath {
-        segments: seg_names,
-        context,
-        root,
-    }) {
+    match kestrel_name_res::resolve_annotation(ctx, ast_ty, context, root) {
         TypeResolution::Found(entity) | TypeResolution::NotAType(entity) => Some(entity),
         TypeResolution::SelfType | TypeResolution::NotFound(_) => None,
     }

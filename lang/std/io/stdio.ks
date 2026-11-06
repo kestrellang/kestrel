@@ -4,8 +4,8 @@ module std.io.stdio
 
 import std.numeric.(Int64, UInt8)
 import std.result.(Result, Optional)
-import std.memory.(ArraySlice, Pointer)
-import std.collections.(Array)
+import std.memory.(UnsafeSlice, Pointer)
+import std.collections.(Array, Slice)
 import std.text.(String, Formattable)
 import std.core.(Bool)
 import std.io.libc
@@ -33,8 +33,9 @@ public struct Stdin: Readable {
 
     /// Calls `read(2)` on `STDIN_FILENO`. Returns `0` on EOF (e.g. after
     /// the user types Ctrl-D in a terminal).
-    public mutating func read(into buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let n = libc.read(libc.STDIN(), buf.pointer, buf.count);
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        let raw = buf.asUnsafeSlice();
+        let n = libc.read(libc.STDIN(), raw.pointer, raw.count);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -61,7 +62,7 @@ public struct Stdout: Writable {
     public init() {}
 
     /// Calls `write(2)` on `STDOUT_FILENO`.
-    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(libc.STDOUT(), buf.pointer, buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -94,7 +95,7 @@ public struct Stderr: Writable {
     public init() {}
 
     /// Calls `write(2)` on `STDERR_FILENO`.
-    public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.write(libc.STDERR(), buf.pointer, buf.count);
         if n < 0 {
             return .Err(IoError.last())
@@ -190,8 +191,7 @@ public func readLine() -> Result[Optional[String], IoError] {
     loop {
         var buf = Array[UInt8](capacity: 1);
         buf.append(0);
-        let slice = ArraySlice(pointer: buf.asPointer(), count: 1);
-        let n = try input.read(into: slice);
+        let n = try input.read(into: buf.asMutableSlice());
         if n == 0 {
             atEof = true;
             break  // EOF

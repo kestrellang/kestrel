@@ -9,7 +9,6 @@
 // will move the inner drop to the inner-block exit.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

@@ -8,7 +8,7 @@
 module Test
 
 import std.numeric.(Int64)
-import std.core.(String)
+import std.text.(String)
 
 protocol Sized2 {
     func weight() -> Int64

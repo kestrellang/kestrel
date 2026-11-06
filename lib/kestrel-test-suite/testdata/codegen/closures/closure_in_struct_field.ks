@@ -4,7 +4,7 @@
 module Test
 
 struct Handler {
-    let action: (std.numeric.Int64) -> std.numeric.Int64
+    let action: escaping (std.numeric.Int64) -> std.numeric.Int64
 }
 
 @main

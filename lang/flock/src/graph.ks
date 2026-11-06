@@ -209,11 +209,13 @@ func findIndex(nodes nodes: Array[DepNode], name name: String) -> Int64? {
     .None
 }
 
+/// The elements of `arr` from index `start` on.
 func sliceFrom(arr: Array[ResolvedPackage], start: Int64) -> Array[ResolvedPackage] {
     var result = [];
     var i = start;
-    for element in arr {
-        result.append(element);
+    while i < arr.count {
+        result.append(arr(unchecked: i));
+        i = i + 1
     }
     result
 }

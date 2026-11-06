@@ -15,19 +15,19 @@ pub mod compare;
 pub mod conformance;
 pub mod constraint;
 pub mod ctx;
-pub mod entailment;
 mod entail_layer;
-mod solver_entail;
+pub mod entailment;
+pub mod error;
+mod existential;
+pub mod generate;
 pub mod obligations;
 pub mod opaque;
 mod optional_chain;
 mod pipe;
-pub mod error;
-mod existential;
-pub mod generate;
 pub mod resolve;
 pub mod result;
 pub mod solver;
+mod solver_entail;
 pub mod ty;
 pub mod unify;
 pub mod where_clauses;
@@ -107,6 +107,11 @@ impl QueryFn for InferBody {
 
         // Create return type TyVar from TypeAnnotation component
         let return_ty = create_return_type(&mut infer_ctx, query_ctx, self.entity);
+
+        // Settle the assumptions as one batch, then check the body against
+        // them, deciding each constraint where it is emitted (bidi P5).
+        solver::fixpoint(&mut infer_ctx);
+        infer_ctx.eager = true;
 
         // Generate constraints from HIR
         generate::generate(&mut infer_ctx, &hir, &param_types, return_ty);
@@ -454,7 +459,6 @@ fn emit_method_bound_constraint(
     }
     // Find or create a TyVar for this param
     let tv = ctx.param(param);
-    ctx.conforms_typearg(tv, protocol, span.clone());
     // Cache protocol args for solve_associated to use when projecting
     // through `extend ConcreteType: Proto[FreeParams]` bindings.
     let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
@@ -462,9 +466,7 @@ fn emit_method_bound_constraint(
         .iter()
         .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
         .collect();
-    if !arg_tvs.is_empty() {
-        ctx.record_witness_args(tv, protocol, arg_tvs);
-    }
+    ctx.bound_typearg(tv, protocol, arg_tvs, span.clone());
 }
 
 /// Emit a `T.Assoc: Protocol` bound: constrain the PROJECTION
@@ -498,7 +500,6 @@ fn emit_method_projection_bound_constraint(
     ) else {
         return;
     };
-    ctx.conforms_typearg(proj_tv, protocol, span.clone());
     // The body's `T.Assoc` projections reuse this TyVar (preserving the base).
     ctx.push_assoc_sub(base_tv, assoc, proj_tv);
 
@@ -507,9 +508,7 @@ fn emit_method_projection_bound_constraint(
         .iter()
         .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
         .collect();
-    if !arg_tvs.is_empty() {
-        ctx.record_witness_args(proj_tv, protocol, arg_tvs);
-    }
+    ctx.bound_typearg(proj_tv, protocol, arg_tvs, span.clone());
 }
 
 /// Emit a `param.Assoc = RHS` clause: Associated projection constraint plus an
@@ -529,10 +528,12 @@ fn emit_method_type_equality_constraint(
 
     let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
     let rhs_tv = generate::lower_hir_ty_with_subs(ctx, rhs, &subs);
-    ctx.equal(assoc_result, rhs_tv, span.clone());
-
-    // Memo key = the clause's own entity (G29), never a by-name re-lookup.
+    // Register the assumption before anything can consult it: the equality
+    // below is decided on the spot (bidi P5), and the `Associated` lookup
+    // must then find `I.Item = T` in Γ. Memo key = the clause's own entity
+    // (G29), never a by-name re-lookup.
     ctx.push_assoc_sub(Some(subject_tv), assoc, rhs_tv);
+    ctx.equal(assoc_result, rhs_tv, span.clone());
 }
 
 /// Emit a `param = RHS` clause: redirect the param's TyVar slot straight to
@@ -591,10 +592,10 @@ fn contains_hir_opaque(ty: &kestrel_hir::ty::HirTy) -> bool {
     use kestrel_hir::ty::HirTy;
     match ty {
         HirTy::Opaque { .. } => true,
-        HirTy::Struct { args, .. }
-        | HirTy::Enum { args, .. }
-        | HirTy::Protocol { args, .. }
-        | HirTy::AliasUse { args, .. } => args.iter().any(contains_hir_opaque),
+        HirTy::Struct { args, .. } | HirTy::Enum { args, .. } | HirTy::Protocol { args, .. } => {
+            args.iter().any(contains_hir_opaque)
+        },
+        HirTy::Alias { expanded, .. } => contains_hir_opaque(expanded),
         HirTy::Tuple(elems, _) => elems.iter().any(contains_hir_opaque),
         HirTy::Function { params, ret, .. } => {
             params.iter().any(contains_hir_opaque) || contains_hir_opaque(ret)
@@ -794,7 +795,6 @@ fn emit_container_where_clauses(
                     self_tv,
                     query_ctx,
                 );
-                ctx.conforms_typearg(subject_tv, protocol, span.clone());
 
                 // Cache protocol args so solve_associated can substitute
                 // extension free TypeParams when projecting through the witness.
@@ -812,9 +812,7 @@ fn emit_container_where_clauses(
                     .iter()
                     .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
                     .collect();
-                if !arg_tvs.is_empty() {
-                    ctx.record_witness_args(subject_tv, protocol, arg_tvs);
-                }
+                ctx.bound_typearg(subject_tv, protocol, arg_tvs, span.clone());
 
                 // Propagate where clauses from the protocol's associated types.
                 // E.g., `type Iter: Iterator where Iter.Item = Item` on Iterable
@@ -992,7 +990,6 @@ fn emit_protocol_assoc_type_where_clauses(
                     if subject.as_param().is_none() {
                         continue;
                     }
-                    ctx.conforms_typearg(alias_tv, bound_proto, span.clone());
                     let subs: Vec<(Entity, ty::TyVar)> = target_type_params
                         .iter()
                         .zip(fresh_args.iter())
@@ -1002,9 +999,7 @@ fn emit_protocol_assoc_type_where_clauses(
                         .iter()
                         .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
                         .collect();
-                    if !arg_tvs.is_empty() {
-                        ctx.record_witness_args(alias_tv, bound_proto, arg_tvs);
-                    }
+                    ctx.bound_typearg(alias_tv, bound_proto, arg_tvs, span.clone());
                 },
                 // The clause is about this alias (`TargetIterator.Item = …`); the
                 // root is not re-read, as before the fold.
@@ -1169,4 +1164,34 @@ fn is_ptr_ref_intrinsic_call(
         ctx.get::<Name>(e).map(|n| n.0.as_str()),
         Some("ptr_ref" | "ptr_mut_ref")
     )
+}
+
+/// The accessor an `Indirection` peel lends the pointee through: the `ref` of
+/// `Indirection`'s `value` requirement, or (`mutating`) the `mutating ref` of
+/// `MutableIndirection`'s. Calls to it dispatch through the wrapper's witness
+/// table, so any conformer works: a type's own ref accessors or a stored
+/// field.
+pub fn indirection_accessor(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    mutating: bool,
+) -> Option<Entity> {
+    use kestrel_ast_builder::{MutatingAccessor, Name, NodeKind};
+    use kestrel_hir::Builtin;
+    let builtin = if mutating {
+        Builtin::MutableIndirection
+    } else {
+        Builtin::Indirection
+    };
+    let protocol = ctx.query(kestrel_name_res::ResolveBuiltin { builtin, root })?;
+    let place = ctx.children_of(protocol).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::Field)
+            && ctx
+                .get::<Name>(c)
+                .is_some_and(|n| n.0 == kestrel_hir::INDIRECTION_PLACE)
+    })?;
+    ctx.children_of(place).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::RefAccessor)
+            && ctx.has::<MutatingAccessor>(c) == mutating
+    })
 }

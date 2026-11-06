@@ -76,7 +76,7 @@ pub fn resolved_satisfies(
 /// A `ResolvedTy` as a `HirTy` for [`type_satisfies`]. Spans are irrelevant
 /// to the check. `Struct` vs `Enum` doesn't matter: `nominal_satisfies` keys
 /// off the entity's own `NodeKind`.
-fn resolved_ty_to_hir(ty: &crate::result::ResolvedTy) -> HirTy {
+pub(crate) fn resolved_ty_to_hir(ty: &crate::result::ResolvedTy) -> HirTy {
     use crate::result::ResolvedTy;
     let sp = kestrel_span::Span::new(0, 0..0);
     match ty {

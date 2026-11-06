@@ -60,7 +60,7 @@ public struct App[T]: Cloneable, Routes[T] where T: Cloneable {
     // ROUTE REGISTRATION
     // ========================================================================
 
-    public mutating func addRoute(method: HttpMethod, path: String, handler: (Request, T) -> Response) {
+    public mutating func addRoute(method: HttpMethod, path: String, handler: escaping (Request, T) -> Response) {
         self.router.addRoute(method, path, handler)
     }
 

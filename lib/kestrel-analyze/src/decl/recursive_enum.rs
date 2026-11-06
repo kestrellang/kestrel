@@ -23,7 +23,7 @@
 //! **Notes:**
 //! - "add 'indirect' before the enum declaration to allow recursive cases"
 //!
-//! ### E405 -- `indirect_without_recursion` (Warning, Usage)
+//! ### E409 -- `indirect_without_recursion` (Warning, Usage)
 //! **Message:** "`indirect` has no effect: enum '{name}' has no recursive case"
 //!
 //! **Labels:**
@@ -72,7 +72,7 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "E405",
+        id: "E409",
         name: "indirect_without_recursion",
         default_severity: Severity::Warning,
         category: Category::Usage,
@@ -138,7 +138,7 @@ fn check_plain(cx: &DeclContext<'_>, cases: &[RecursiveCase]) -> Vec<AnalyzeDiag
     )]
 }
 
-/// E405–E407 for an `indirect enum`.
+/// E406–E407, E409 for an `indirect enum`.
 fn check_indirect(cx: &DeclContext<'_>, cases: &[RecursiveCase]) -> Vec<AnalyzeDiagnostic> {
     let name = util::entity_name(cx.query, cx.entity);
     let enum_span = util::entity_span(cx.query, cx.entity);

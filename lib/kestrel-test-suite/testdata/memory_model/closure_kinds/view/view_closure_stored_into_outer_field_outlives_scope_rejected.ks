@@ -4,12 +4,9 @@
 // The scope-depth rule (plan D8) through a FIELD target. The sibling
 // view_closure_stored_outlives_captured_scope_rejected.ks pins `g = { r.v }`
 // for a bare outer local; storing the same view-carrying closure into a field
-// of an outer local (`h.f = { r.v }`) is not checked, because the Assign arm in
-// move_tracking.rs only runs `check_outlives` when the target is a bare local
-// (`rhs_local`), although `place_root` already handles field targets. `r` dies
-// at the end of the inner block and `(h.f)()` reads freed storage. Found in the
-// 2026-10 architecture review at 9767d2dc: valgrind invalid read/write.
-// EXPECTED TO FAIL until the outlives check runs on the target's place root.
+// of an outer local (`h.f = { r.v }`) is checked against the target's place
+// root (`h`), so it is E507 too. Since closure fields must be owning, the
+// view-closure field itself is also E626 (docs/design/closure-fields.md).
 module Test
 
 struct Res: not Copyable {
@@ -17,7 +14,7 @@ struct Res: not Copyable {
 }
 
 struct Holder {
-    var f: () -> lang.i64
+    var f: () -> lang.i64 // ERROR(E626)
 }
 
 func test() -> lang.i64 {

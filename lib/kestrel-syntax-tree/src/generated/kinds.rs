@@ -9,6 +9,7 @@ use kestrel_lexer::Token;
 /// The discriminant order is `kinds.txt`'s line order, which is append-only:
 /// rowan stores kinds as raw `u16`s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(clippy::manual_non_exhaustive)] // `__NotAKind` counts the variants
 pub enum SyntaxKind {
     Root,
     SourceFile,
@@ -426,6 +427,18 @@ pub enum SyntaxKind {
     ExprOptionalBind,
     /// the whole postfix chain holding a `?.` (`a?.b.c()`)
     ExprOptionalChain,
+    /// `?` after subscript params / a property name: a failable place
+    FailableMarker,
+    /// contextual `lazy` before let/var
+    LazyModifier,
+    /// modifying get { ... } (mutable receiver, yields a value)
+    ModifyingGetterClause,
+    /// modifying ref { ... } (mutable receiver, yields &T)
+    ModifyingRefClause,
+    /// willSet { ... } property observer
+    WillSetClause,
+    /// didSet { ... } property observer
+    DidSetClause,
     /// Not a syntax kind — the end-of-enum marker. Its discriminant is the
     /// variant count, which lets `syntax_kind_table_round_trips` prove `ALL`
     /// complete. Never construct it.
@@ -713,6 +726,12 @@ impl SyntaxKind {
         SyntaxKind::ExprPlaceholderUse,
         SyntaxKind::ExprOptionalBind,
         SyntaxKind::ExprOptionalChain,
+        SyntaxKind::FailableMarker,
+        SyntaxKind::LazyModifier,
+        SyntaxKind::ModifyingGetterClause,
+        SyntaxKind::ModifyingRefClause,
+        SyntaxKind::WillSetClause,
+        SyntaxKind::DidSetClause,
     ];
 }
 

@@ -124,6 +124,10 @@ pub enum InstKind {
     DestroyAddr {
         address: ValueId,
         ty: TyId,
+        /// A source-level `deinit x;` (vs. compiler cleanup at scope exit).
+        /// Only these are checked against live refs (E498): a scope-exit
+        /// destroy under a live ref is the escape E494 already reports.
+        user_deinit: bool,
     },
 
     // -- Enum discriminant --
@@ -405,7 +409,13 @@ impl InstKind {
                 elements.iter().copied().collect()
             },
             InstKind::Enum { payload, .. } => payload.iter().copied().collect(),
-            InstKind::Call { args, .. } => args.iter().map(|a| a.value).collect(),
+            // The callee is read too when it is a value (`call @thick %f`):
+            // a pass that misses it can delete the closure the call invokes.
+            InstKind::Call { callee, args, .. } => callee
+                .value()
+                .into_iter()
+                .chain(args.iter().map(|a| a.value))
+                .collect(),
             InstKind::ApplyPartial { captures, .. } => captures.iter().copied().collect(),
             InstKind::FieldAddr { base, .. } => SmallVec::from_elem(*base, 1),
             InstKind::Uninit { .. } => SmallVec::new(),

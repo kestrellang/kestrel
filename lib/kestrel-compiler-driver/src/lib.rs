@@ -206,16 +206,22 @@ impl<'a> CompilerDriver<'a> {
         summary
     }
 
-    /// Analyzer diagnostics that belong on stderr: errors only.
-    ///
-    /// Warnings and info are reported through the summary, not printed here.
-    fn emittable_analyze_errors(
+    /// Analyzer diagnostics that belong on stderr: errors, plus warnings when
+    /// `include_warnings` (`kestrel dump diagnostics` promises every
+    /// diagnostic; `build` keeps its output to errors). Info stays in the
+    /// summary.
+    fn emittable_analyze(
         summary: &AnalyzeSummary,
+        include_warnings: bool,
     ) -> Vec<&kestrel_analyze::AnalyzeDiagnostic> {
+        use kestrel_analyze::Severity;
         summary
             .diagnostics
             .iter()
-            .filter(|d| d.severity == kestrel_analyze::Severity::Error)
+            .filter(|d| {
+                d.severity == Severity::Error
+                    || (include_warnings && d.severity == Severity::Warning)
+            })
             .collect()
     }
 
@@ -226,6 +232,15 @@ impl<'a> CompilerDriver<'a> {
     /// Idempotent: only diagnostics not already printed by an earlier call are
     /// emitted, so a caller may flush at several points without duplicating.
     pub fn emit_diagnostics(&self) -> Result<(), codespan_reporting::files::Error> {
+        self.emit(false)
+    }
+
+    /// [`Self::emit_diagnostics`], with analyzer warnings too.
+    pub fn emit_diagnostics_with_warnings(&self) -> Result<(), codespan_reporting::files::Error> {
+        self.emit(true)
+    }
+
+    fn emit(&self, include_warnings: bool) -> Result<(), codespan_reporting::files::Error> {
         let fresh: Vec<_> = {
             let mut emitted = self.emitted_accumulated.borrow_mut();
             self.compiler
@@ -237,7 +252,7 @@ impl<'a> CompilerDriver<'a> {
 
         let analyze = self.analyze.borrow();
         let analyzer_diags = match analyze.as_ref() {
-            Some(s) if !self.emitted_analyze.get() => Self::emittable_analyze_errors(s),
+            Some(s) if !self.emitted_analyze.get() => Self::emittable_analyze(s, include_warnings),
             _ => Vec::new(),
         };
 
@@ -288,8 +303,12 @@ fn analyze_to_codespan(
             label.with_message(&l.message)
         })
         .collect();
-    Diagnostic::error()
-        .with_code(d.descriptor_id)
+    let diag = match d.severity {
+        kestrel_analyze::Severity::Error => Diagnostic::error(),
+        kestrel_analyze::Severity::Warning => Diagnostic::warning(),
+        _ => Diagnostic::note(),
+    };
+    diag.with_code(d.descriptor_id)
         .with_message(&d.message)
         .with_labels(labels)
         .with_notes(d.notes.clone())
@@ -361,6 +380,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::NoMember { .. } => "NoMember",
         InferError::AmbiguousMember { .. } => "AmbiguousMember",
         InferError::MemberNotVisible { .. } => "MemberNotVisible",
+        InferError::SugarOnlyMember { .. } => "SugarOnlyMember",
         InferError::MemberIsStatic { .. } => "MemberIsStatic",
         InferError::NoAssociatedType { .. } => "NoAssociatedType",
         InferError::InfiniteType { .. } => "InfiniteType",
@@ -368,6 +388,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::ImplicitMemberNotFound { .. } => "ImplicitMemberNotFound",
         InferError::ArgCountMismatch { .. } => "ArgCountMismatch",
         InferError::LabelMismatch { .. } => "LabelMismatch",
+        InferError::AmbiguousTrailingClosure { .. } => "AmbiguousTrailingClosure",
         InferError::InstanceMethodAsStatic { .. } => "InstanceMethodAsStatic",
         InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
         InferError::TypeMustBeKnown { .. } => "TypeMustBeKnown",
@@ -394,6 +415,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::KindMismatch { .. } => "KindMismatch",
         InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
         InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
+        InferError::UnsizedAssign { .. } => "UnsizedAssign",
         InferError::OptionalChainNotConforming { .. } => "OptionalChainNotConforming",
         InferError::PipeFixIt { .. } => "PipeFixIt",
     }
@@ -433,6 +455,12 @@ fn format_error(err: &InferError) -> String {
                 name, span.file_id, span.start
             )
         },
+        InferError::SugarOnlyMember { name, .. } => {
+            format!(
+                "SugarOnlyMember '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
         InferError::MemberIsStatic { name, .. } => {
             format!(
                 "MemberIsStatic '{}' at {}:{}",
@@ -469,6 +497,10 @@ fn format_error(err: &InferError) -> String {
                 expected, got, span.file_id, span.start
             )
         },
+        InferError::AmbiguousTrailingClosure { candidates, .. } => format!(
+            "AmbiguousTrailingClosure candidates={:?} at {}:{}",
+            candidates, span.file_id, span.start
+        ),
         InferError::InstanceMethodAsStatic { name, .. } => {
             format!(
                 "InstanceMethodAsStatic '{}' at {}:{}",
@@ -479,7 +511,10 @@ fn format_error(err: &InferError) -> String {
             format!("TypeParamAsValue at {}:{}", span.file_id, span.start)
         },
         InferError::TypeMustBeKnown { member, .. } => {
-            format!("TypeMustBeKnown '{}' at {}:{}", member, span.file_id, span.start)
+            format!(
+                "TypeMustBeKnown '{}' at {}:{}",
+                member, span.file_id, span.start
+            )
         },
         InferError::NotDispatchable { message, .. }
         | InferError::ExistentialAccess { message, .. }
@@ -585,6 +620,9 @@ fn format_error(err: &InferError) -> String {
         },
         InferError::RefInTypeArgument { .. } => {
             format!("RefInTypeArgument at {}:{}", span.file_id, span.start)
+        },
+        InferError::UnsizedAssign { .. } => {
+            format!("UnsizedAssign at {}:{}", span.file_id, span.start)
         },
     }
 }

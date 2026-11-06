@@ -24,7 +24,7 @@ enum HandleResult: Tryable {
     type Output = Handle
     type Residual = Int64
 
-    public func tryExtract() -> ControlFlow[Handle, Int64] {
+    public consuming func tryExtract() -> ControlFlow[Handle, Int64] {
         match self {
             .Ok(handle) => .Continue(handle),
             .Err(code) => .Break(code)

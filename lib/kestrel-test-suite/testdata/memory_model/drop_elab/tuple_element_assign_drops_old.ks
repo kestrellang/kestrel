@@ -13,7 +13,7 @@
 
 module Test
 
-import std.num.Int64
+import std.numeric.Int64
 
 var drops: Int64 = 0;
 

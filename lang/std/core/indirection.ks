@@ -13,30 +13,30 @@ module std.core
 import std.memory.(Pointer)
 
 /// Opt-in transparent member access. `wrapper.foo` resolves through to
-/// `Target.foo` via `pointeeRef()` when the wrapper has no `foo` of its own.
+/// `wrapper.value.foo` when the wrapper has no `foo` of its own.
 @builtin(.Indirection)
 public protocol Indirection {
     /// The pointee type that member access forwards to. May be unsized: an
     /// existential box's `Target` is the raw existential it holds.
     type Target: not Sized
 
-    /// A shared reference to the pointee. Member READS peel through this.
-    func pointeeRef() -> &Target
+    /// The pointee, lent in place. Member READS peel through its `ref`.
+    var value: Target { ref }
 }
 
 /// A smart pointer whose pointee can also be mutated through the peel.
 /// Writes (`wrapper.field = v`), compound assignments (`wrapper.n += 1`), and
-/// `mutating`-method calls route through `pointeeMutRef()`. A read-only
-/// wrapper conforms to `Indirection` only; mutating through it is rejected.
+/// `mutating`-method calls route through `value`'s `mutating ref`. A
+/// read-only wrapper conforms to `Indirection` only; mutating through it is
+/// rejected.
 ///
-/// `pointeeMutRef()` is `mutating` so a copy-on-write wrapper can fork its
-/// storage before handing out the mutable view; wrappers that don't need to
-/// (raw `Pointer`, `RcBox`) still mark it `mutating` — the marker is harmless.
+/// A `mutating ref` takes the wrapper mutably, so a copy-on-write wrapper can
+/// fork its storage before handing out the mutable view.
 @builtin(.MutableIndirection)
 public protocol MutableIndirection: Indirection {
-    /// A mutating reference to the pointee. Member WRITES / RMW / mutating
-    /// methods peel through this.
-    mutating func pointeeMutRef() -> &mutating Target
+    /// The pointee, lent in place. Member WRITES / RMW / mutating methods
+    /// peel through its `mutating ref`.
+    var value: Target { ref mutating ref }
 }
 
 /// A box that can give up its payload: the single owner moves the payload

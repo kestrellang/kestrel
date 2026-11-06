@@ -116,7 +116,8 @@ raw address.
 
 Any code that turns a HIR expression into a place (an address or a
 @guaranteed view) goes through `lower_place` or the addr-only walk
-(`try_field_addr_chain` / `try_var_addr`) in `body/place.rs` — ret_borrow
+(`field_addr_chain`, or `write_place_addr` for a write) in `body/place.rs`
+and `body/mod.rs` — ret_borrow
 returns, borrow lowering, field reads, and both call-arg conventions
 already do. Don't grow a new bespoke route: the pre-unification drift is
 exactly what produced three latent bugs (false E494 on every
@@ -136,7 +137,7 @@ pointer's bits as the value).
 - **`lower_place` is EFFECTFUL for ref-slot fields** — it emits the ref
   extraction (`extract_ref_slot`: instructions, borrow tracking,
   `ref_results` registration). Never call it as a maybe-probe and discard
-  the result. If you only want an address, use `try_field_addr_chain`
+  the result. If you only want an address, use `field_addr_chain`
   (a pure walk; it stops at ref slots — a `&T` field's storage is its
   POINTEE, and a `FieldAddr` there aliases the stored pointer's bits).
   If you call `lower_place`, consume BOTH the `Addr` and `View` arms.

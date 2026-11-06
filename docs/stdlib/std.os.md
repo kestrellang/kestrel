@@ -355,21 +355,7 @@ _Defined in `lang/std/os/fs.ks`._
 public func platform() -> String
 ```
 
-Returns a short identifier for the host operating system.
-
-One of `"darwin"` or `"linux"` — the string is fixed at compile
-time via `@platform` selection of two distinct definitions, so the
-call is effectively a constant. Use this for one-off platform
-branches; for repeated checks consider `@platform` on your own
-functions instead.
-
-### Examples
-
-```
-if platform() == "darwin" {
-    // macOS-specific path
-}
-```
+Linux-specific definition of `platform()`. Selected by `@platform(.Linux)`.
 
 _Defined in `lang/std/os/platform.ks`._
 

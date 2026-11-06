@@ -303,19 +303,19 @@ fn name_of(world: &World, entity: Entity) -> String {
 }
 
 /// Bounds recovered for one synthetic `__opaque_N` type parameter, keyed
-/// by its name: the positive protocol bounds plus an optional negative
-/// (`not Copyable`) bound. Used to render the param back as `some P`.
+/// by its name: the positive protocol bounds plus any negative
+/// (`not Copyable`) bounds. Used to render the param back as `some P`.
 #[derive(Default)]
 struct OpaqueBounds {
     bounds: Vec<AstType>,
-    negative: Option<AstType>,
+    negatives: Vec<AstType>,
 }
 
 type OpaqueMap = HashMap<String, OpaqueBounds>;
 
 /// Invert `desugar_opaque_params`: find synthetic `__opaque_N` type
 /// params and pull their bounds out of the where clause so params can be
-/// rendered as the `some P [and not C]` the user actually wrote.
+/// rendered as the `some P [and not C …]` the user actually wrote.
 fn collect_opaque_resugar(world: &World, entity: Entity) -> OpaqueMap {
     let mut map = OpaqueMap::new();
     let Some(params) = world.get::<TypeParams>(entity) else {
@@ -348,7 +348,7 @@ fn collect_opaque_resugar(world: &World, entity: Entity) -> OpaqueMap {
                     if let Some(n) = single_segment_name(subject)
                         && let Some(info) = map.get_mut(n)
                     {
-                        info.negative = Some(protocol.clone());
+                        info.negatives.push(protocol.clone());
                     }
                 },
                 WhereConstraint::Equality { .. } => {},
@@ -401,7 +401,11 @@ fn param_str(p: &AstParam, hide_bind: bool, opaque: &OpaqueMap) -> String {
     // `is_mut` on AstParam encodes the `mutating` (or `consuming`)
     // access-mode keyword from the source. Render it back as written —
     // `mut` is Rust syntax, not Kestrel.
-    let mods = if p.is_consuming {
+    // A ref-typed param (`x: &T` / `x: &mutating T`) is stored as a borrow
+    // of `T` with `by_ref` set; render the ref it was written with.
+    let mods = if p.by_ref {
+        if p.is_mut { "&mutating " } else { "&" }
+    } else if p.is_consuming {
         "consuming "
     } else if p.is_mut {
         "mutating "
@@ -474,10 +478,12 @@ fn param_ty(t: &AstType, opaque: &OpaqueMap) -> String {
         } else {
             b.join(" and ")
         };
-        return match &info.negative {
-            Some(neg) => format!("some {} and not {}", head, ty(neg)),
-            None => format!("some {}", head),
-        };
+        let negs: String = info
+            .negatives
+            .iter()
+            .map(|n| format!(" and not {}", ty(n)))
+            .collect();
+        return format!("some {head}{negs}");
     }
     ty(t)
 }

@@ -51,7 +51,7 @@ public func handleLogin(req: Request, ctx: AppCtx) -> Response {
         return Response.unauthorized()
     }
 
-    let token = generateToken(passwordRow.id, passwordRow.salt);
+    let token = generateToken();
     let now = currentTimestamp();
 
     guard let .Ok(_) = createToken(db, passwordRow.id, token.clone(), now) else {

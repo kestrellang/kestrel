@@ -13,7 +13,6 @@
 // at the return point the path is still uninit.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

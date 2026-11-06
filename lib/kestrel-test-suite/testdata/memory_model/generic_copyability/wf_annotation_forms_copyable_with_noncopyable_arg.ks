@@ -17,5 +17,5 @@ struct Wrap[T] {
 // Forming `Wrap[Resource]` (Wrap is Copyable-by-default, so T: Copyable) in a
 // type annotation must be rejected at the formation site.
 func mk(r: Resource) -> Wrap[Resource] { // ERROR: !: Copyable
-    return Wrap(inner: r)
+    return Wrap(inner: r) // ERROR: cannot move parameter 'r'
 }

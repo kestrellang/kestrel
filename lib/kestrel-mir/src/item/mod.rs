@@ -121,13 +121,6 @@ pub enum Layout {
     Enum(EnumLayout),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct TargetConfig {
-    pub pointer_width: u64,
-}
-
-impl TargetConfig {
-    pub fn host_64() -> Self {
-        Self { pointer_width: 8 }
-    }
-}
+/// The compilation target, shared with the AST builder and the backends so
+/// MIR layout uses the same pointer width codegen emits.
+pub use kestrel_target::TargetConfig;

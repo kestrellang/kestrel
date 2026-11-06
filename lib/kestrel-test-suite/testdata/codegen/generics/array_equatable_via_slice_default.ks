@@ -4,20 +4,20 @@
 // Regression: `Array == Array` monomorphization.
 //
 // `Array[T]: Equatable` is satisfied by the `isEqual` default on
-// `extend Slice[T] where T: Equatable` — a protocol-extension default reached
+// `extend Sliceable[T] where T: Equatable` — a protocol-extension default reached
 // through a *different* protocol (Equatable) than the one it is defined on
-// (Slice). That default's own type param is the Slice element `T`, which
+// (Sliceable). That default's own type param is the Slice element `T`, which
 // Equatable's method type args never carry, so the monomorphizer used to
 // instantiate `Slice.isEqual` with zero type args and ICE:
 //   "type arg arity mismatch for std.collections.Slice.isEqual: expected 1, got 0"
 //
-// The element type is now recovered from the implementing type's `Slice`
-// conformance (`Array[T]: Slice[T]`), so this compiles and runs. Covers Int,
+// The element type is now recovered from the implementing type's `Sliceable`
+// conformance (`Array[T]: Sliceable[T]`), so this compiles and runs. Covers Int,
 // String (heap element), and nested `Array[Array[T]]` (recursive instantiation).
 
 module Test
 
-import std.core.print
+import std.io.stdio.print
 
 @main
 func main() -> lang.i64 {

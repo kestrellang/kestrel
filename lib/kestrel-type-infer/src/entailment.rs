@@ -6,7 +6,7 @@
 //! conformance site, without spinning up the full inference solver.
 //!
 //! This is the lightweight static-analysis cousin of `solve_conforms` in
-//! `solver.rs`. Both must agree about what conformance means; here we
+//! `solver/`. Both must agree about what conformance means; here we
 //! compose:
 //!
 //! - Direct context match — Γ contains `(p, P_ctx)` with `p == constraint.param`

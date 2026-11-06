@@ -4,7 +4,7 @@
 module Test
 
 struct Transform[T, U] {
-    let transform: (T) -> U
+    let transform: escaping (T) -> U
 }
 
 @main

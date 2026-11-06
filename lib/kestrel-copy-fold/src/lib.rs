@@ -13,7 +13,9 @@
 //!
 //! Those live here and ONLY here. Everything else — type-shape classification,
 //! query plumbing, caches, recursion guards, context choice — stays per layer
-//! behind the `CopyLayer` hook trait. Any intentional per-layer divergence
+//! behind the `CopyLayer` hook trait. (The three FRONT-END layers share one
+//! more piece above this crate: what each kind of type means, in
+//! `kestrel_semantics::copy_shape`.) Any intentional per-layer divergence
 //! must carry a `TODO(copy-drift #n)` comment at its classifier arm and never
 //! be converged silently (#1-#5 were adjudicated and resolved 2026-06-10).
 //!

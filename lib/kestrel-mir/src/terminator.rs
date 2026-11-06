@@ -13,9 +13,14 @@ pub enum SwitchCase {
     /// `..<N` has `start: None`) and must be left UNTESTED — filling an absent
     /// bound with a sentinel (i64::MIN/MAX) truncates under a narrowed switch
     /// discriminant and makes the test always-false (#186).
+    ///
+    /// Bounds are the type's raw bits (a `UInt64` bound above `i64::MAX` is
+    /// stored wrapped); `signed` picks the comparison, so an unsigned value
+    /// with its top bit set is not compared as negative.
     IntRange {
         start: Option<i64>,
         end: Option<i64>,
+        signed: bool,
     },
     CharLiteral(u32),
     CharRange {

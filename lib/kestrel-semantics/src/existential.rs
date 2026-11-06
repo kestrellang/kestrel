@@ -109,8 +109,8 @@ fn mentions_self(ty: &HirTy, assocs: &mut Vec<Entity>) -> bool {
         HirTy::Struct { args, .. }
         | HirTy::Enum { args, .. }
         | HirTy::Protocol { args, .. }
-        | HirTy::AliasUse { args, .. }
         | HirTy::Tuple(args, _) => args.iter().any(|a| mentions_self(a, assocs)),
+        HirTy::Alias { expanded, .. } => mentions_self(expanded, assocs),
         HirTy::Function { params, ret, .. } => {
             params.iter().any(|p| mentions_self(p, assocs)) || mentions_self(ret, assocs)
         },
@@ -122,7 +122,11 @@ fn mentions_self(ty: &HirTy, assocs: &mut Vec<Entity>) -> bool {
                 || bindings.iter().any(|b| mentions_self(&b.ty, assocs))
         },
         HirTy::Opaque { bounds, .. } => bounds.iter().any(|b| mentions_self(b, assocs)),
-        HirTy::Param(..) | HirTy::Never(_) | HirTy::Infer(_) | HirTy::Error(_) => false,
+        HirTy::Param(..)
+        | HirTy::AbstractAssoc { .. }
+        | HirTy::Never(_)
+        | HirTy::Infer(_)
+        | HirTy::Error(_) => false,
     }
 }
 
@@ -259,7 +263,10 @@ pub fn bound_closure(ctx: &QueryContext<'_>, bounds: &[Entity], root: Entity) ->
     let mut out: Vec<Entity> = bounds.to_vec();
     let edges: Vec<(Entity, Entity)> = bounds
         .iter()
-        .flat_map(|&b| ctx.query(ConformingProtocolInstantiations { entity: b, root }).to_vec())
+        .flat_map(|&b| {
+            ctx.query(ConformingProtocolInstantiations { entity: b, root })
+                .to_vec()
+        })
         .filter(|(_, source, _)| ctx.get::<NodeKind>(*source) == Some(&NodeKind::Protocol))
         .map(|(proto, source, _)| (proto, source))
         .collect();

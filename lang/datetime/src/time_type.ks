@@ -3,7 +3,7 @@ module datetime
 // Wall-clock time of day. Nanosecond precision.
 // Range: [00:00:00.000000000, 23:59:59.999999999].
 // Arithmetic wraps at day boundaries.
-// Default Formattable output: ISO 8601 ("15:30:05").
+// Default Formattable output: ISO 8601 ("15:30:05", "15:30:05.25" with a fraction).
 public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
     var nanosSinceMidnight: Int64
 
@@ -20,7 +20,7 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
               minute >= 0 and minute < 60 and
               second >= 0 and second < 60 and
               nanosecond >= 0 and nanosecond < 1_000_000_000 else {
-            throw DateTimeError.InvalidTime(hour: hour, minute: minute, second: second);
+            throw DateTimeError.InvalidTime(hour: hour, minute: minute, second: second, nanosecond: nanosecond);
         }
         self.nanosSinceMidnight = hour * Time.NANOS_PER_HOUR +
                                   minute * Time.NANOS_PER_MINUTE +
@@ -43,6 +43,11 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
         Time.fromNanos(0)
     }
 
+    // The last representable instant of a day: 23:59:59.999999999.
+    static var endOfDay: Time {
+        Time.fromNanos(Time.NANOS_PER_DAY - 1)
+    }
+
     public static var noon: Time {
         Time.fromNanos(12 * 3_600_000_000_000)
     }
@@ -53,6 +58,15 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
     public var minute: Int64 { (self.nanosSinceMidnight / Time.NANOS_PER_MINUTE) % 60 }
     public var second: Int64 { (self.nanosSinceMidnight / Time.NANOS_PER_SECOND) % 60 }
     public var nanosecond: Int64 { self.nanosSinceMidnight % Time.NANOS_PER_SECOND }
+
+    // --- Field replacement ---
+
+    // A copy with the given fields replaced; fails if any is out of range.
+    public func with(hour hour: Int64? = .None, minute minute: Int64? = .None,
+                     second second: Int64? = .None, nanosecond nanosecond: Int64? = .None) -> Time throws DateTimeError {
+        Time(hour: hour.unwrap(or: self.hour), minute: minute.unwrap(or: self.minute),
+             second: second.unwrap(or: self.second), nanosecond: nanosecond.unwrap(or: self.nanosecond))
+    }
 
     // --- Arithmetic ---
 
@@ -92,7 +106,7 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
     // --- Rounding ---
 
     public func rounded(to unit: TimeUnit, mode mode: RoundMode = .HalfExpand) -> Time {
-        let divisor = unit.nanoseconds();
+        let divisor = unit.nanoseconds;
         if divisor <= 1 { return self }
         let rounded = roundValue(self.nanosSinceMidnight, divisor, mode);
         let wrapped = floorMod(rounded, Time.NANOS_PER_DAY);
@@ -108,7 +122,8 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
     // --- Parsing ---
 
     public static func parse(from input: String) -> Time throws ParseError {
-        // Parse ISO 8601: HH:MM:SS or HH:MM:SS.nnnnnnnnn
+        // Parse ISO 8601: HH:MM:SS with an optional fraction of any length
+        // (digits past nanoseconds are truncated). Nothing may follow.
         let bytes: Array[UInt8] = Array(from: input.bytes);
         guard bytes.count >= 8 else { throw ParseError.UnexpectedEnd; }
         let hour = try parseDigits(bytes, 0, 2);
@@ -118,17 +133,20 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
         let second = try parseDigits(bytes, 6, 2);
 
         var nanos: Int64 = 0;
-        if bytes.count > 8 and bytes(8) == 46 {
-            // Parse fractional seconds
-            var i: Int64 = 9;
+        var i: Int64 = 8;
+        if i < bytes.count and bytes(i) == 46 {
+            i = i + 1;
+            let fracStart = i;
             var scale: Int64 = 100_000_000;
-            while i < bytes.count and scale > 0 {
-                let b = Int64(from: bytes(i));
-                if b < 48 or b > 57 { break; }
-                nanos = nanos + (b - 48) * scale;
+            while i < bytes.count and bytes(i) >= 48 and bytes(i) <= 57 {
+                nanos = nanos + Int64(from: bytes(i) - 48) * scale;
                 scale = scale / 10;
                 i = i + 1;
             }
+            guard i > fracStart else { throw ParseError.InvalidFormat("expected digit after '.'"); }
+        }
+        guard i == bytes.count else {
+            throw ParseError.InvalidFormat("unexpected trailing input at position \(i)");
         }
 
         Time(hour: hour, minute: minute, second: second, nanosecond: nanos).mapErr { ParseError.InvalidValue("invalid time") }
@@ -154,6 +172,11 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
         appendPadded(into: writer, self.minute, 2);
         writer.append(":");
         appendPadded(into: writer, self.second, 2);
+        // Fraction only when present, trailing zeros trimmed: "01:02:03.5"
+        if self.nanosecond > 0 {
+            writer.append(".");
+            appendFractional(into: writer, self.nanosecond);
+        }
     }
 
     public func clone() -> Time {

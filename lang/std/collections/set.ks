@@ -242,7 +242,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// let set = Set(from: arr);    // {1, 2, 3}
     /// let r   = Set(from: 1..<4);  // {1, 2, 3}
     /// ```
-    public init[I](from elements: I) where I: Iterable, I.Item = T {
+    public init[I](from elements: I) where I: Iterable, I: not Static, I.Item = T {
         self.dict = Dictionary();
         var iter = elements.iter();
         while let .Some(elem) = iter.next() {
@@ -350,7 +350,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     ///
     /// ```
     /// for item in set.iter() { print(item); }
-    /// let arr = Array(from: set.iter());
+    /// let arr = Array(from: set);
     /// ```
     public func iter() -> SetIterator[T, H] {
         SetIterator(dictIter: self.dict.iter())
@@ -376,7 +376,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// ```
     public mutating func insert(element: T) -> Bool {
         let oldValue = self.dict.insert(element, Unit());
-        oldValue.isNone()
+        oldValue.isNone
     }
 
     // TODO: public mutating func update(element: T) -> Optional[T]
@@ -406,7 +406,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// set.insert(contentsOf: [3, 4, 5]);  // {1, 2, 3, 4, 5}
     /// set.insert(contentsOf: 5..<8);      // {1, 2, 3, 4, 5, 6, 7}
     /// ```
-    public mutating func insert[I](contentsOf elements: I) where I: Iterable, I.Item = T {
+    public mutating func insert[I](contentsOf elements: I) where I: Iterable, I: not Static, I.Item = T {
         var iter = elements.iter();
         while let .Some(elem) = iter.next() {
              self.insert(elem);
@@ -872,7 +872,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         false
     }
 
-    /// Returns *some* element matching `predicate`, or `None`.
+    /// Lends *some* element matching `predicate`, or `None`.
     ///
     /// "First" is determined by iteration order, which is
     /// unspecified — treat the result as arbitrary among matching
@@ -885,11 +885,10 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// set.first { (x) in x > 3 };   // Some(4) or Some(5)
     /// set.first { (x) in x > 99 };  // None
     /// ```
-    public func first(where predicate: (T) -> Bool) -> T? {
-        var iter = self.iter();
-        while let .Some(elem) = iter.next() {
-            if predicate(elem) {
-                return .Some(elem)
+    public func first(where predicate: (T) -> Bool) -> Optional[&T] {
+        for slot in 0..<self.dict.slotCount {
+            if let .Some(elem) = self.dict.keyAt(slot) {
+                if predicate(elem) { return self.dict.keyAt(slot); }
             }
         }
         .None
@@ -1237,8 +1236,8 @@ extend Set[T, H]: Hashable where T: Hashable, H: Hasher, H: Defaultable {
         while let .Some(elem) = elems.next() {
             var elemHasher = H();
             elem.hash(into: elemHasher);
-            // `+` wraps by default, so the sum is a safe commutative combiner.
-            combined = combined + elemHasher.finish();
+            // Wrapping addition is a safe commutative combiner.
+            combined = combined.addWrapping(elemHasher.finish());
         }
         self.count.hash(into: hasher);
         combined.hash(into: hasher);
@@ -1320,7 +1319,7 @@ extend Set[T, H] where T: Hashable, T: Cloneable, H: Hasher, H: Defaultable {
 /// Ordering-aware operations available when `T: Comparable`.
 extend Set[T, H] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable {
 
-    /// Returns the smallest element, or `None` for an empty set.
+    /// Lends the smallest element, or `None` for an empty set.
     ///
     /// Single linear pass; ties go to the first occurrence in
     /// iteration order (which is unspecified, so equally-minimal
@@ -1332,21 +1331,11 @@ extend Set[T, H] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable {
     /// Set([3, 1, 4]).min();  // Some(1)
     /// Set[Int64]().min();    // None
     /// ```
-    public func min() -> T? {
-        var iter = self.iter();
-        if let .Some(first) = iter.next() {
-            var minValue = first;
-            while let .Some(elem) = iter.next() {
-                if elem < minValue {
-                    minValue = elem;
-                }
-            }
-            return .Some(minValue)
-        }
-        .None
+    public func min() -> Optional[&T] {
+        self.dict.keyAt(self.bestSlot({ (a, b) in a < b }))
     }
 
-    /// Returns the largest element, or `None` for an empty set.
+    /// Lends the largest element, or `None` for an empty set.
     ///
     /// Single linear pass. Mirror of `min()`.
     ///
@@ -1356,18 +1345,24 @@ extend Set[T, H] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable {
     /// Set([3, 1, 4]).max();  // Some(4)
     /// Set[Int64]().max();    // None
     /// ```
-    public func max() -> T? {
-        var iter = self.iter();
-        if let .Some(first) = iter.next() {
-            var maxValue = first;
-            while let .Some(elem) = iter.next() {
-                if elem > maxValue {
-                    maxValue = elem;
+    public func max() -> Optional[&T] {
+        self.dict.keyAt(self.bestSlot({ (a, b) in a > b }))
+    }
+
+    /// The slot of the element that `better` prefers over every other
+    /// (first occurrence on ties), or `-1` for an empty set.
+    private func bestSlot(better: (T, T) -> Bool) -> Int64 {
+        var best = -1;
+        for slot in 0..<self.dict.slotCount {
+            if let .Some(elem) = self.dict.keyAt(slot) {
+                if best < 0 {
+                    best = slot;
+                } else if let .Some(current) = self.dict.keyAt(best) {
+                    if better(elem, current) { best = slot; }
                 }
             }
-            return .Some(maxValue)
         }
-        .None
+        best
     }
 
     /// Returns the set's elements as an ascending-sorted `Array[T]`.

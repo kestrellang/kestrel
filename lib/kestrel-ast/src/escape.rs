@@ -400,7 +400,10 @@ mod tests {
     #[test]
     fn unknown_escape_reports_and_does_not_consume_more() {
         let (v, e) = decode_all(r"\qz");
-        assert!(matches!(e.as_slice(), [EscapeErrorKind::InvalidEscape { .. }]));
+        assert!(matches!(
+            e.as_slice(),
+            [EscapeErrorKind::InvalidEscape { .. }]
+        ));
         // `z` is still decoded normally.
         assert_eq!(v, vec![0x7A]);
     }

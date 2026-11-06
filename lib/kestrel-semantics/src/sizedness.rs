@@ -13,6 +13,8 @@
 //! only the tail field can gate: every other stored field must be Sized
 //! (E403 enforces that).
 
+use std::borrow::Cow;
+
 use kestrel_ast_builder::WhereConstraint;
 use kestrel_ast_builder::{
     FieldClass, Intrinsic, NodeKind, TypeParams, WhereClause as AstWhereClause,
@@ -26,17 +28,9 @@ use crate::{ExplicitlyNegatesProtocol, param_bound_contexts, resolve_type_entity
 
 // ===== Vocabulary =====
 
-/// Per-nominal classification. There is no unconditional "unsized"
-/// nominal: a struct is unsized only through its tail type argument.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Sizedness {
-    Sized,
-    /// Sized iff the type args at these positions (indices into the
-    /// nominal's type params, sorted, deduped) are Sized. Non-empty only for
-    /// a struct whose last stored field is (transitively) one of its own
-    /// `not Sized` params.
-    ConditionalOn(Vec<usize>),
-}
+// The shape and rule live in the leaf `kestrel-structural` crate, shared
+// with mono.
+pub use kestrel_structural::{SizedLayer, SizedShape, Sizedness, instance_is_sized, ty_is_sized};
 
 /// Bound state of a type param: every param requires Sized by default;
 /// `where T: not Sized` relaxes it — the param then accepts both sized and
@@ -106,8 +100,9 @@ impl QueryFn for TypeParamSizeRequirement {
                             continue;
                         }
                         let implies_sized = protocols.iter().any(|p| {
-                            resolve_type_entity(ctx, p, context, self.root)
-                                .is_some_and(|p| p == sized || implies_bitwise_copy(ctx, p, self.root))
+                            resolve_type_entity(ctx, p, context, self.root).is_some_and(|p| {
+                                p == sized || implies_bitwise_copy(ctx, p, self.root)
+                            })
                         });
                         if implies_sized {
                             return SizeRequirement::RequiresSized;
@@ -135,13 +130,14 @@ impl QueryFn for TypeParamSizeRequirement {
 /// through its function table (`any[CowBox] P` with `P: Cloneable`).
 fn implies_bitwise_copy(ctx: &QueryContext<'_>, protocol: Entity, root: Entity) -> bool {
     let refines = |builtin| {
-        ctx.query(ResolveBuiltin { builtin, root }).is_some_and(|base| {
-            ctx.query(crate::ProtocolRefines {
-                protocol,
-                base,
-                root,
+        ctx.query(ResolveBuiltin { builtin, root })
+            .is_some_and(|base| {
+                ctx.query(crate::ProtocolRefines {
+                    protocol,
+                    base,
+                    root,
+                })
             })
-        })
     };
     refines(Builtin::Copyable) && !refines(Builtin::Cloneable)
 }
@@ -159,28 +155,6 @@ pub fn assoc_may_be_unsized(ctx: &QueryContext<'_>, assoc: Entity, root: Entity)
             root,
         })
     })
-}
-
-// ===== The shared instance rule =====
-
-/// Layer hooks for `instance_is_sized`: the HIR walker below and the
-/// solver's TyVar layer.
-pub trait SizedLayer {
-    type Ty;
-    fn nominal_sizedness(&self, entity: Entity) -> Sizedness;
-    fn member_is_sized(&self, ty: &Self::Ty) -> bool;
-}
-
-/// THE per-instantiation sizedness rule for every layer: a Sized base wins;
-/// a conditional base ANDs the args at its tail positions. A missing arg at
-/// a gating position is unprovable ⇒ false.
-pub fn instance_is_sized<L: SizedLayer>(layer: &L, entity: Entity, args: &[L::Ty]) -> bool {
-    match layer.nominal_sizedness(entity) {
-        Sizedness::Sized => true,
-        Sizedness::ConditionalOn(positions) => positions
-            .iter()
-            .all(|&i| args.get(i).is_some_and(|arg| layer.member_is_sized(arg))),
-    }
 }
 
 // ===== Nominal classification =====
@@ -218,9 +192,15 @@ fn nominal_sizedness_impl(ctx: &QueryContext<'_>, entity: Entity, root: Entity) 
     if ctx.get::<NodeKind>(entity) != Some(&NodeKind::Struct) {
         return Sizedness::Sized;
     }
+    if is_lang_slice(ctx, entity) {
+        return Sizedness::Unsized;
+    }
     let Some(tail) = last_stored_field_type(ctx, entity, root) else {
         return Sizedness::Sized;
     };
+    if tail_always_unsized(ctx, &tail, root) {
+        return Sizedness::Unsized;
+    }
     let own_params: Vec<Entity> = ctx
         .get::<TypeParams>(entity)
         .map(|tp| tp.0.clone())
@@ -261,6 +241,34 @@ pub fn last_stored_field_type(
     })
 }
 
+/// `lang.slice` — the one intrinsic nominal that is never Sized.
+fn is_lang_slice(ctx: &QueryContext<'_>, entity: Entity) -> bool {
+    ctx.get::<Intrinsic>(entity).is_some()
+        && ctx
+            .get::<kestrel_ast_builder::Name>(entity)
+            .is_some_and(|n| n.0 == "slice")
+}
+
+/// Is a tail type unsized whatever the owner's args are: an always-unsized
+/// nominal, or a conditional one gated on an always-unsized arg
+/// (`Wrapper[lang.slice[T]]`).
+fn tail_always_unsized(ctx: &QueryContext<'_>, tail: &HirTy, root: Entity) -> bool {
+    let HirTy::Struct { entity, args, .. } = tail else {
+        return false;
+    };
+    match ctx.query(NominalSizedness {
+        entity: *entity,
+        root,
+    }) {
+        Sizedness::Sized => false,
+        Sizedness::Unsized => true,
+        Sizedness::ConditionalOn(gating) => gating
+            .iter()
+            .filter_map(|&i| args.get(i))
+            .any(|arg| tail_always_unsized(ctx, arg, root)),
+    }
+}
+
 /// Which of `owner`'s own `not Sized` params a tail type's size depends on.
 fn tail_positions(
     ctx: &QueryContext<'_>,
@@ -285,7 +293,8 @@ fn tail_positions(
             entity: *entity,
             root,
         }) {
-            Sizedness::Sized => Vec::new(),
+            // Always-unsized tails are caught before this walk.
+            Sizedness::Sized | Sizedness::Unsized => Vec::new(),
             Sizedness::ConditionalOn(gating) => gating
                 .iter()
                 .filter_map(|&i| args.get(i))
@@ -307,6 +316,10 @@ struct HirSizedWalk<'a, 'q> {
 impl SizedLayer for HirSizedWalk<'_, '_> {
     type Ty = HirTy;
 
+    fn assoc_is_sized(&self, assoc: Entity) -> bool {
+        !assoc_may_be_unsized(self.ctx, assoc, self.root)
+    }
+
     fn nominal_sizedness(&self, entity: Entity) -> Sizedness {
         self.ctx.query(NominalSizedness {
             entity,
@@ -314,34 +327,36 @@ impl SizedLayer for HirSizedWalk<'_, '_> {
         })
     }
 
-    fn member_is_sized(&self, ty: &HirTy) -> bool {
+    fn shape<'t>(&self, ty: &'t HirTy) -> SizedShape<'t, HirTy> {
         match ty {
-            HirTy::RawExistential { .. } => false,
-            HirTy::Struct { entity, args, .. } => instance_is_sized(self, *entity, args),
-            HirTy::Param(param, _) => {
-                self.ctx.query(TypeParamSizeRequirement {
-                    param: *param,
-                    context: self.context,
-                    root: self.root,
-                }) == SizeRequirement::RequiresSized
+            HirTy::RawExistential { .. } => SizedShape::RawExistential,
+            HirTy::Struct { entity, args, .. } => SizedShape::Struct {
+                entity: *entity,
+                args: Cow::Borrowed(args),
             },
-            HirTy::AssocProjection { assoc, .. } => {
-                !assoc_may_be_unsized(self.ctx, *assoc, self.root)
-            },
-            // Enums, tuples, functions, refs (two words even to an unsized
-            // pointee), protocols, opaques, Self, aliases and recovery leaves.
+            HirTy::Alias { expanded, .. } => SizedShape::Alias(expanded),
+            HirTy::Param(param, _) => SizedShape::Param(*param),
+            HirTy::AssocProjection { assoc, .. } => SizedShape::AssocProjection(*assoc),
             HirTy::Enum { .. }
             | HirTy::Protocol { .. }
             | HirTy::Tuple(..)
             | HirTy::Function { .. }
-            | HirTy::AliasUse { .. }
+            | HirTy::AbstractAssoc { .. }
             | HirTy::SelfType(..)
             | HirTy::Opaque { .. }
             | HirTy::Ref { .. }
             | HirTy::Never(_)
             | HirTy::Infer(_)
-            | HirTy::Error(_) => true,
+            | HirTy::Error(_) => SizedShape::Leaf,
         }
+    }
+
+    fn param_is_sized(&self, param: Entity) -> bool {
+        self.ctx.query(TypeParamSizeRequirement {
+            param,
+            context: self.context,
+            root: self.root,
+        }) == SizeRequirement::RequiresSized
     }
 }
 
@@ -353,7 +368,7 @@ pub fn hir_type_is_sized(
     context: Entity,
     root: Entity,
 ) -> bool {
-    HirSizedWalk { ctx, context, root }.member_is_sized(ty)
+    ty_is_sized(&HirSizedWalk { ctx, context, root }, ty)
 }
 
 // ===== By-value uses of a relaxed param =====
@@ -411,13 +426,13 @@ impl ByValueWalk<'_, '_> {
                 .iter()
                 .chain(std::iter::once(ret.as_ref()))
                 .find_map(|t| self.by_value(t)),
-            HirTy::AliasUse { args, .. } | HirTy::Protocol { args, .. } => {
-                args.iter().find_map(|a| self.by_value(a))
-            },
+            HirTy::Protocol { args, .. } => args.iter().find_map(|a| self.by_value(a)),
+            HirTy::Alias { expanded, .. } => self.by_value(expanded),
             HirTy::RawExistential { bindings, .. } => {
                 bindings.iter().find_map(|b| self.by_value(&b.ty))
             },
             HirTy::AssocProjection { .. }
+            | HirTy::AbstractAssoc { .. }
             | HirTy::SelfType(..)
             | HirTy::Opaque { .. }
             | HirTy::Never(_)

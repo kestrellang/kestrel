@@ -7,7 +7,6 @@
 // drop is unconditional (not flag-guarded) at the function's return.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

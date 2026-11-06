@@ -5,31 +5,31 @@ module Test
 
 // Borrowing should NOT clone — refcount must be unchanged by the call.
 func readRefCount(box: std.memory.RcBox[std.numeric.Int64]) -> std.numeric.Int64 {
-    box.refCount()
+    box.refCount
 }
 
 @main
 func main() -> lang.i64 {
     // --- 1. Assignment copies should clone (bump refcount) ---
     let a = std.memory.RcBox[std.numeric.Int64](42);
-    if a.refCount() != 1 { return 1 }
+    if a.refCount != 1 { return 1 }
 
     let b = a;
-    if a.refCount() != 2 { return 2 }
-    if b.refCount() != 2 { return 3 }
-    if b.getValue() != 42 { return 4 }
+    if a.refCount != 2 { return 2 }
+    if b.refCount != 2 { return 3 }
+    if b.value != 42 { return 4 }
 
     // --- 2. Multiple copies from same source stack refcounts ---
     let c = a;
-    if a.refCount() != 3 { return 5 }
-    if c.getValue() != 42 { return 6 }
+    if a.refCount != 3 { return 5 }
+    if c.value != 42 { return 6 }
 
     // --- 3. Borrowing function call does NOT clone ---
     let d = std.memory.RcBox[std.numeric.Int64](100);
-    if d.refCount() != 1 { return 10 }
+    if d.refCount != 1 { return 10 }
     let rc = readRefCount(d);
     if rc != 1 { return 11 }
-    if d.refCount() != 1 { return 12 }
+    if d.refCount != 1 { return 12 }
 
     // --- 4. VIEW capture does NOT clone ---
     // A normal closure's environment holds an ADDRESS of `e` and owns nothing
@@ -39,21 +39,21 @@ func main() -> lang.i64 {
     // The OWNING tiers are the ones that clone a Cloneable capture at creation
     // (see the design's owning-capture table).
     let e = std.memory.RcBox[std.numeric.Int64](200);
-    if e.refCount() != 1 { return 20 }
-    let getter = { e.getValue() };
-    if e.refCount() != 1 { return 21 }
+    if e.refCount != 1 { return 20 }
+    let getter = { e.value };
+    if e.refCount != 1 { return 21 }
     if getter() != 200 { return 22 }
 
     // --- 5. Multiple views of the same value are still free ---
-    let f = { e.refCount() };
-    if e.refCount() != 1 { return 30 }
+    let f = { e.refCount };
+    if e.refCount != 1 { return 30 }
     // ... and each call reads the CURRENT count through its view.
     if f() != 1 { return 31 }
 
     // --- 6. Copy chain: a -> b -> g ---
     let g = b;
-    if a.refCount() != 4 { return 40 }
-    if g.getValue() != 42 { return 41 }
+    if a.refCount != 4 { return 40 }
+    if g.value != 42 { return 41 }
 
     0
 }

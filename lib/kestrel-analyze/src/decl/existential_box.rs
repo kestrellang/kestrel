@@ -119,10 +119,10 @@ fn check_ty(ctx: &QueryContext<'_>, root: Entity, ty: &HirTy, out: &mut Vec<Anal
 /// The immediate type children of `ty`.
 fn ty_children(ty: &HirTy) -> Vec<&HirTy> {
     match ty {
-        HirTy::Struct { args, .. }
-        | HirTy::Enum { args, .. }
-        | HirTy::Protocol { args, .. }
-        | HirTy::AliasUse { args, .. } => args.iter().collect(),
+        HirTy::Struct { args, .. } | HirTy::Enum { args, .. } | HirTy::Protocol { args, .. } => {
+            args.iter().collect()
+        },
+        HirTy::Alias { expanded, .. } => vec![expanded.as_ref()],
         HirTy::Tuple(elems, _) => elems.iter().collect(),
         HirTy::Function { params, ret, .. } => {
             params.iter().chain(std::iter::once(ret.as_ref())).collect()
@@ -137,6 +137,7 @@ fn ty_children(ty: &HirTy) -> Vec<&HirTy> {
             .collect(),
         HirTy::Opaque { bounds, .. } => bounds.iter().collect(),
         HirTy::Param(..)
+        | HirTy::AbstractAssoc { .. }
         | HirTy::SelfType(..)
         | HirTy::Never(_)
         | HirTy::Infer(_)

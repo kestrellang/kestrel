@@ -15,7 +15,9 @@ mod desugar;
 mod existential;
 mod expr;
 pub mod format_spec;
+mod lazy;
 pub mod literal;
+mod observer;
 mod optional_chain;
 pub(crate) mod pat;
 mod placeholder;
@@ -70,6 +72,51 @@ impl QueryFn for LowerBody {
     }
 }
 
+/// Query: the stored globals a global's initializer reads directly
+/// (`let a = b + 1` depends on `b`), sorted and deduplicated. The single
+/// source for initialization order (MIR's static-init thunks) and for the
+/// initializer-cycle diagnostic. Reads through function calls are not
+/// followed.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct GlobalInitDeps {
+    pub entity: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for GlobalInitDeps {
+    type Output = Vec<Entity>;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Vec<Entity> {
+        let Some(body) = ctx.query(LowerBody {
+            entity: self.entity,
+            root: self.root,
+        }) else {
+            return Vec::new();
+        };
+        let mut deps: Vec<Entity> = body
+            .exprs
+            .iter()
+            .filter_map(|(_, expr)| match expr {
+                kestrel_hir::body::HirExpr::Def(e, _, _) if is_initialized_global(ctx, *e) => {
+                    Some(*e)
+                },
+                _ => None,
+            })
+            .collect();
+        deps.sort_by_key(|e| e.index());
+        deps.dedup();
+        deps
+    }
+}
+
+/// A stored global with an initializer: a module-level or static `let`/`var`
+/// (`Field` without `Callable`) that has a value.
+pub fn is_initialized_global(ctx: &QueryContext<'_>, entity: Entity) -> bool {
+    ctx.get::<kestrel_ast_builder::NodeKind>(entity) == Some(&kestrel_ast_builder::NodeKind::Field)
+        && ctx.get::<kestrel_ast_builder::Callable>(entity).is_none()
+        && ctx.get::<kestrel_ast_builder::Valued>(entity).is_some()
+}
+
 /// A lowered body and its source map. Both are `Send + Sync`: the map holds
 /// syntax *pointers*, resolved against the file's tree on demand.
 #[derive(Clone, Debug, Hash)]
@@ -113,7 +160,20 @@ impl QueryFn for LowerBodyWithSourceMap {
 
         // Lower all top-level statements via lower_block_stmts so that
         // guard-let CPS transformation applies at the function body level.
-        let body_block = lower.lower_block_stmts(&block.stmts, block.tail.as_ref());
+        // Observed and lazy fields' accessors have no written body: they are
+        // built from the declaration (see `observer.rs`, `lazy.rs`).
+        let body_block = if ctx.has::<kestrel_ast_builder::ObserverSetter>(self.entity) {
+            lower.lower_observer_body(&node)
+        } else if ctx.has::<kestrel_ast_builder::LazySetter>(self.entity) {
+            lower.lower_lazy_setter(&node)
+        } else if ctx
+            .get::<kestrel_ast_builder::Lazy>(self.entity)
+            .is_some_and(|l| l.cache.is_some())
+        {
+            lower.lower_lazy_getter(&node)
+        } else {
+            lower.lower_block_stmts(&block.stmts, block.tail.as_ref())
+        };
         let mut statements: Vec<_> = param_desugar_stmts;
         statements.extend(body_block.stmts);
 
@@ -203,7 +263,8 @@ impl LowerCtx<'_> {
         }
 
         let mut named = self.signature_param_names();
-        for param in &callable.params {
+        let pattern_spans = self.signature_param_spans();
+        for (index, param) in callable.params.iter().enumerate() {
             let local = self.define_local(&param.name, param.is_mut, Span::synthetic(0));
             self.params.push(local);
             // Record where a plainly-named parameter is spelled.
@@ -218,7 +279,12 @@ impl LowerCtx<'_> {
 
             // Desugar destructured params: match _param_0 { (a, b) => () }
             if let Some(ref pattern) = param.pattern {
-                let span = Span::synthetic(0);
+                // The pattern's own span, so diagnostics on the desugared
+                // match (E210 on a `&mutating` binder, …) point at it.
+                let span = pattern_spans
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| Span::synthetic(0));
                 let hir_pat = self.lower_param_pattern(pattern, &span, param.is_mut);
                 let param_ref = self.alloc_expr(HirExpr::Local(local, span.clone()));
                 let unit = self.alloc_expr(HirExpr::Tuple {
@@ -271,6 +337,22 @@ impl LowerCtx<'_> {
                     Some(Some((b.syntax().clone(), b.identifier_token()?)))
                 },
                 _ => None,
+            })
+            .collect()
+    }
+
+    /// The span of each written parameter's pattern, in declaration order
+    /// (empty when the owner has no parameter list in source).
+    fn signature_param_spans(&self) -> Vec<Span> {
+        let Some(list) = kestrel_ast_builder::syntax::cst_node(self.ctx, self.owner)
+            .and_then(|decl| decl.children().find_map(ast::ParameterList::cast))
+        else {
+            return Vec::new();
+        };
+        list.parameters()
+            .map(|param| match param.pattern() {
+                Some(pat) => self.span(pat.syntax()),
+                None => self.span(param.syntax()),
             })
             .collect()
     }
@@ -506,7 +588,7 @@ func f() {}",
     fn ordering_ks_bodies_lower() {
         let (world, root, _) = setup(
             include_str!("../../../lang/std/core/ordering.ks"),
-            "reverse",
+            "reversed",
         );
         let ctx = world.query_context();
         let bodies: Vec<_> = world.iter_component::<Valued>().map(|(e, _)| e).collect();

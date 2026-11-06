@@ -44,11 +44,11 @@ use kestrel_ast_builder::{
     Callable, ConformanceItem, Conformances, NodeKind, ReceiverKind, WhereClause as AstWhereClause,
     WhereConstraint,
 };
-use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
+use kestrel_copy_fold::CopyLayer;
 use kestrel_hecs::Entity;
-use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
+use kestrel_hir::{Builtin, HirTy};
 use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_semantics::{
     ConditionalCopyableParams, CopyRequirement, CopySemantics, ExplicitlyNegatesProtocol,
@@ -100,6 +100,30 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    // A reference (`&x`, possibly inside a struct or enum value) stored into a
+    // binding that outlives `x`: the reference analogue of E507's
+    // `Outlives` reason. Returns are checked by the MIR escape check (E494).
+    DiagnosticDescriptor {
+        id: "E509",
+        name: "reference_outlives_referent",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    // One call both borrows and consumes the same non-Copyable value.
+    DiagnosticDescriptor {
+        id: "E510",
+        name: "consumed_while_lent_to_call",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    // A field moved out of a value whose type has a `deinit`: taking the
+    // value apart would skip the deinit.
+    DiagnosticDescriptor {
+        id: "E511",
+        name: "field_move_out_of_deinit_type",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct MoveTrackingAnalyzer;
@@ -115,6 +139,10 @@ impl Describe for MoveTrackingAnalyzer {
 
 impl BodyCheck for MoveTrackingAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
+        // A non-Copyable `lazy` getter is rejected as a whole (E639).
+        if crate::decl::lazy::is_non_copyable_lazy_getter(cx) {
+            return Vec::new();
+        }
         // Copyable is resolved via the builtin registry where possible, with a
         // name-based fallback. Minimal test inputs (`stdlib: false`) sometimes
         // can't resolve the builtin, but still declare `: not Copyable`
@@ -141,13 +169,30 @@ impl BodyCheck for MoveTrackingAnalyzer {
         };
         let mut diags = Vec::new();
         let state = State::empty();
-        let _ = analyze_block(
+        let mut end = analyze_block(
             &mcx,
             &cx.hir.statements,
             cx.hir.tail_expr,
             state,
             &mut diags,
         );
+        // The body's tail is returned by value.
+        if let Some(tail) = cx.hir.tail_expr {
+            check_field_move_out(&mcx, &mut end, &mut diags, tail);
+        }
+        // Falling off the end is an exit too (`return` checks its own).
+        let end_span = cx
+            .hir
+            .tail_expr
+            .map(|t| util::expr_span(cx.hir, t))
+            .or_else(|| {
+                cx.query
+                    .get::<kestrel_ast_builder::DeclSpan>(cx.entity)
+                    .map(|d| d.0.clone())
+            });
+        if let Some(span) = end_span {
+            check_mutating_params_restored(&mcx, &mut end, &mut diags, span);
+        }
         diags
     }
 }
@@ -293,7 +338,12 @@ fn analyze_block(
         if state.diverged {
             break;
         }
+        // A statement is the extent of its temporaries: a freeze it created
+        // that no binding carries (`let n = { r.v }();`) ends here, not at
+        // the end of the block.
+        let stmt_entry_frozen = state.frozen.clone();
         state = analyze_stmt(mcx, stmt_id, state, diags);
+        state.frozen = restore_frozen(stmt_entry_frozen, &state, usize::MAX);
     }
     if !state.diverged
         && let Some(tail) = tail
@@ -352,21 +402,9 @@ fn analyze_stmt(
                     check_outlives(mcx, &mut state, diags, &carried, depth, *val);
                     state.carriers.insert(*local, carried);
                 }
-                // A `let b = x` on a non-Copyable `x` moves `x` into `b`.
-                // Only simple Local-on-RHS triggers a move — field/method/call
-                // RHS is never a partial move (matches lib1).
-                if let Some(src) = rhs_local(mcx.cx.hir, *val)
-                    && local_is_non_copyable(mcx, src)
-                {
-                    record_move(
-                        mcx,
-                        &mut state,
-                        diags,
-                        PlaceKey::whole(src),
-                        *val,
-                        FreezeReason::Move,
-                    );
-                }
+                // `let b = x` / `let b = p.a` moves a non-Copyable place
+                // (the whole local, or just that field — a partial move).
+                record_operand_move(mcx, &mut state, diags, *val, FreezeReason::Move);
                 // Freshly bound local is valid — remove any stale move state
                 // under the same id (shouldn't happen, but defensive).
                 state.moves.retain(|place, _| place.root != *local);
@@ -395,7 +433,13 @@ fn analyze_stmt(
                     span.clone(),
                     FreezeReason::Deinit,
                 );
-                if let Some(existing) = state.moves.get(&place).copied() {
+                let existing = state
+                    .moves
+                    .iter()
+                    .filter(|(m, _)| m.root == *local_id)
+                    .min_by_key(|(m, _)| m.path.len())
+                    .map(|(_, info)| *info);
+                if let Some(existing) = existing {
                     emit_use_after_move(
                         mcx.cx,
                         diags,
@@ -414,13 +458,25 @@ fn analyze_stmt(
                 // Pragmatic approach: use the first HirExprId that contains
                 // this local read. In practice tests only check _that_ the
                 // diagnostic fires, so any valid site works.
-                state.moves.insert(
-                    place,
-                    MoveInfo {
-                        kind: MoveKind::Definite,
-                        site: deinit_site(mcx.cx.hir, *local_id),
-                    },
-                );
+                if is_unowned_param(mcx.cx, *local_id) && state.reported.insert(*local_id) {
+                    diags.push(unowned_param_move(
+                        mcx.cx,
+                        *local_id,
+                        span.clone(),
+                        "destroy",
+                    ));
+                }
+                // A body with no expressions has no later use to anchor a
+                // move site to (and nothing to report one against).
+                if let Some(site) = deinit_site(mcx.cx.hir, *local_id) {
+                    state.moves.insert(
+                        place,
+                        MoveInfo {
+                            kind: MoveKind::Definite,
+                            site,
+                        },
+                    );
+                }
             }
         },
     }
@@ -437,15 +493,8 @@ fn analyze_expr(
     let hir = mcx.cx.hir;
     match &hir.exprs[id] {
         // ===== Read of a local =====
-        HirExpr::Local(local_id, span) => {
-            let place = PlaceKey::whole(*local_id);
-            if !is_assign_target
-                && let Some(info) = state.moves.get(&place).copied()
-                && state.reported.insert(*local_id)
-            {
-                let name = hir.locals[*local_id].name.clone();
-                emit_move_diagnostic(mcx.cx, diags, info, id, span.clone(), &name);
-            }
+        HirExpr::Local(..) => {
+            check_place_use(mcx, &mut state, diags, id, is_assign_target);
         },
 
         // `&inner` borrows the place — not a move, but reading a moved
@@ -476,26 +525,25 @@ fn analyze_expr(
             {
                 let dest_depth = state.local_depth.get(&tid).copied().unwrap_or(0);
                 check_outlives(mcx, &mut state, diags, &carried, dest_depth, *value);
-                state.carriers.entry(tid).or_default().extend(carried);
-            }
-            // If target is a bare Local and value is a Local on a non-Copyable,
-            // the value local is moved.
-            if let Some(src) = rhs_local(hir, *value) {
-                let targeting_self = rhs_local(hir, *target) == Some(src);
-                if !targeting_self && local_is_non_copyable(mcx, src) {
-                    record_move(
-                        mcx,
-                        &mut state,
-                        diags,
-                        PlaceKey::whole(src),
-                        *value,
-                        FreezeReason::Move,
-                    );
+                let set = state.carriers.entry(tid).or_default();
+                for p in carried {
+                    if !set.contains(&p) {
+                        set.push(p);
+                    }
                 }
             }
-            // A Local being written to is refreshed (new value lands there).
-            if let HirExpr::Local(tid, _) = &hir.exprs[*target] {
-                state.moves.retain(|place, _| place.root != *tid);
+            // The value is moved into the target (`x = y`, `x = p.a`), except
+            // a self-assignment `x = x`, which moves nothing.
+            let value_place = place_key_of(mcx.cx.query, mcx.cx.typed, hir, *value);
+            let target_place = place_key_of(mcx.cx.query, mcx.cx.typed, hir, *target);
+            if value_place.is_none() || value_place != target_place {
+                record_operand_move(mcx, &mut state, diags, *value, FreezeReason::Move);
+            }
+            // The written place is refreshed (a new value lands there), and so
+            // is everything under it: `p = …` reinitializes all of `p`,
+            // `p.a = …` reinitializes a moved `p.a`.
+            if let Some(written) = target_place {
+                state.moves.retain(|place, _| !written.is_prefix_of(place));
             }
         },
 
@@ -509,21 +557,24 @@ fn analyze_expr(
             state = analyze_expr(mcx, *condition, state, false, diags);
             let pre = state.clone();
 
-            let then_state = analyze_block(
+            let mut then_state = analyze_block(
                 mcx,
                 &then_body.stmts,
                 then_body.tail_expr,
                 pre.clone(),
                 diags,
             );
+            record_tail_move(mcx, &mut then_state, diags, then_body.tail_expr);
             let else_state = if let Some(else_block) = else_body {
-                analyze_block(
+                let mut s = analyze_block(
                     mcx,
                     &else_block.stmts,
                     else_block.tail_expr,
                     pre.clone(),
                     diags,
-                )
+                );
+                record_tail_move(mcx, &mut s, diags, else_block.tail_expr);
+                s
             } else {
                 pre.clone()
             };
@@ -532,9 +583,22 @@ fn analyze_expr(
 
         // ===== Match =====
         HirExpr::Match {
-            scrutinee, arms, ..
+            scrutinee,
+            arms,
+            source,
+            ..
         } => {
             state = analyze_expr(mcx, *scrutinee, state, false, diags);
+            // A match that only destructures structs/tuples moves just the
+            // bound places (the rule MIR's match lowering shares).
+            let bound_places = kestrel_type_infer::captures::match_bound_places(
+                mcx.cx.query,
+                mcx.cx.typed,
+                hir,
+                *scrutinee,
+                arms,
+                *source,
+            );
             if arms.is_empty() {
                 return state;
             }
@@ -563,7 +627,42 @@ fn analyze_expr(
                 if let Some(guard) = arm.guard {
                     s = analyze_expr(mcx, guard, s, false, diags);
                 }
+                // An arm that binds a non-copyable part by value moves it out
+                // of the scrutinee (MIR consumes the scrutinee to do so), so a
+                // later use of the scrutinee is a use after move.
+                // (A borrowed scrutinee is reported per binding, E503 below.)
+                if let Some(places) = &bound_places
+                    && scrutinee_is_owned(mcx, *scrutinee)
+                {
+                    let mut in_arm = HashSet::new();
+                    collect_pattern_bindings(hir, arm.pattern, &mut in_arm);
+                    for (local, place) in places {
+                        if !in_arm.contains(local) || !local_is_non_copyable(mcx, *local) {
+                            continue;
+                        }
+                        let site = *scrutinee;
+                        if let Some(owner) = deinit_owner_on_path(mcx, place)
+                            && s.reported.insert(place.root)
+                        {
+                            let span = util::expr_span(hir, site);
+                            diags.push(field_move_out_of_deinit_type(mcx, owner, span));
+                        }
+                        record_move(mcx, &mut s, diags, place.clone(), site, FreezeReason::Move);
+                    }
+                } else if pattern_binds_non_copyable_by_value(mcx, arm.pattern)
+                    && scrutinee_is_owned(mcx, *scrutinee)
+                {
+                    record_operand_move_at(
+                        mcx,
+                        &mut s,
+                        diags,
+                        *scrutinee,
+                        FreezeReason::Move,
+                        true,
+                    );
+                }
                 s = analyze_expr(mcx, arm.body, s, false, diags);
+                record_tail_move(mcx, &mut s, diags, Some(arm.body));
                 arm_states.push(s);
             }
             state = merge_match(pre, arm_states);
@@ -688,24 +787,14 @@ fn analyze_expr(
         // ===== Block expression =====
         HirExpr::Block { body, .. } => {
             state = analyze_block(mcx, &body.stmts, body.tail_expr, state, diags);
+            record_tail_move(mcx, &mut state, diags, body.tail_expr);
         },
 
         // ===== Return =====
         HirExpr::Return { value, span: _ } => {
             if let Some(val) = value {
                 state = analyze_expr(mcx, *val, state, false, diags);
-                if let Some(src) = rhs_local(hir, *val)
-                    && local_is_non_copyable(mcx, src)
-                {
-                    record_move(
-                        mcx,
-                        &mut state,
-                        diags,
-                        PlaceKey::whole(src),
-                        *val,
-                        FreezeReason::Move,
-                    );
-                }
+                record_operand_move(mcx, &mut state, diags, *val, FreezeReason::Move);
                 // NOTE: returning a view-carrying value is the OTHER escape
                 // route, and it already has a single source of truth — the MIR
                 // escape check (E494, frame provenance). Adding an E507 here
@@ -713,6 +802,7 @@ fn analyze_expr(
                 // `memory_model/closure_kinds/view/returning_view_closure_*`
                 // shape.
             }
+            check_mutating_params_restored(mcx, &mut state, diags, util::expr_span(hir, id));
         },
 
         // ===== Break / Continue (divergence handled below via Never) =====
@@ -724,12 +814,23 @@ fn analyze_expr(
             // environment. MIR currently realizes a projected move by taking
             // the whole root, while Copyable/Cloneable projections snapshot
             // only themselves. Write captures remain by-reference.
+            // An owning closure moves just the captured field when the root
+            // is only read through projections (the same rule MIR's
+            // `plan_slots` applies); otherwise it takes the whole root.
+            let field_roots =
+                kestrel_type_infer::captures::field_capturable_roots(mcx.captures.get(id));
             let captured_moves: Vec<PlaceKey> = mcx
                 .captures
                 .get(id)
                 .iter()
                 .filter(|cap| cap.kind == CaptureKind::Read && expr_is_non_copyable(mcx, cap.repr))
-                .map(|cap| effective_move_place(cap.key.clone()))
+                .map(|cap| {
+                    if field_roots.contains(&cap.key.root) {
+                        cap.key.clone()
+                    } else {
+                        PlaceKey::whole(cap.key.root)
+                    }
+                })
                 .collect();
             let captured_roots: HashSet<LocalId> =
                 captured_moves.iter().map(|place| place.root).collect();
@@ -812,6 +913,21 @@ fn analyze_expr(
             // other reopens the "consumed more than once" OSSA ICE.
             if !kind.is_view() {
                 for place in captured_moves {
+                    // An owning capture moves the place INTO the closure, so it
+                    // must still be live here (a capture in a loop body sees the
+                    // previous iteration's move through the back-edge state).
+                    let prior = state
+                        .moves
+                        .get(&place)
+                        .or_else(|| state.moves.get(&PlaceKey::whole(place.root)))
+                        .copied();
+                    if let Some(info) = prior
+                        && state.reported.insert(place.root)
+                    {
+                        let name = hir.locals[place.root].name.clone();
+                        let span = util::expr_span(hir, id);
+                        emit_move_diagnostic(mcx.cx, diags, info, id, span, &name);
+                    }
                     record_move(mcx, &mut state, diags, place, id, FreezeReason::Move);
                 }
             }
@@ -827,7 +943,16 @@ fn analyze_expr(
             // "consumed twice" ICE in MIR — the lockstep twin of
             // `lower_indirect_call`'s consuming-callee take.
             if callee_kind_is_consuming(mcx, *callee) {
-                record_operand_move(mcx, &mut state, diags, *callee, FreezeReason::Consume);
+                // MIR consumes the whole holder to call a projected
+                // `consuming` closure (`(h.f)()`), so the move stays rooted.
+                record_operand_move_at(
+                    mcx,
+                    &mut state,
+                    diags,
+                    *callee,
+                    FreezeReason::Consume,
+                    true,
+                );
             }
             for arg in args {
                 state = analyze_expr(mcx, arg.value, state, false, diags);
@@ -878,7 +1003,16 @@ fn analyze_expr(
             // a one-shot closure — it is `not Copyable` and has no `clone()` —
             // so this can only be that path.
             if callee_kind_is_consuming(mcx, *receiver) {
-                record_operand_move(mcx, &mut state, diags, *receiver, FreezeReason::Consume);
+                // MIR consumes the whole holder to call a projected
+                // `consuming` closure (`(h.f)()`), so the move stays rooted.
+                record_operand_move_at(
+                    mcx,
+                    &mut state,
+                    diags,
+                    *receiver,
+                    FreezeReason::Consume,
+                    true,
+                );
             }
             for arg in args {
                 state = analyze_expr(mcx, arg.value, state, false, diags);
@@ -903,22 +1037,34 @@ fn analyze_expr(
             ..
         } => {
             state = analyze_expr(mcx, *receiver, state, false, diags);
-            for arg in args {
-                state = analyze_expr(mcx, arg.value, state, false, diags);
-            }
-            // A `?.` bind's method is the one inference settled on.
-            let method = mcx
-                .cx
-                .typed
-                .protocol_method_name(id, method.as_str_or_empty());
-            if let Some(method_entity) = find_protocol_method(mcx.cx, *protocol, method) {
-                apply_call_moves(mcx, method_entity, args, Some(*receiver), &mut state, diags);
+            // A `for` loop over an Iterator consumes the iterable itself as
+            // its iterator — no `iter()` call (mirrors MIR lowering).
+            if mcx.cx.typed.direct_iterators.contains(&id) {
+                record_operand_move(mcx, &mut state, diags, *receiver, FreezeReason::Move);
+            } else {
+                for arg in args {
+                    state = analyze_expr(mcx, arg.value, state, false, diags);
+                }
+                // A `?.` bind's method is the one inference settled on.
+                let method = mcx
+                    .cx
+                    .typed
+                    .protocol_method_name(id, method.as_str_or_empty());
+                if let Some(method_entity) = find_protocol_method(mcx.cx, *protocol, method) {
+                    apply_call_moves(mcx, method_entity, args, Some(*receiver), &mut state, diags);
+                }
             }
         },
 
         // ===== Pass-throughs =====
+        // A stored-field chain is checked as ONE place (`p.b` is usable
+        // after `p.a` moved); anything else (`f().a`) analyzes its base.
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
-            state = analyze_expr(mcx, *base, state, false, diags);
+            if place_key_of(mcx.cx.query, mcx.cx.typed, hir, id).is_some() {
+                check_place_use(mcx, &mut state, diags, id, is_assign_target);
+            } else {
+                state = analyze_expr(mcx, *base, state, false, diags);
+            }
         },
         // A tuple/array literal stores each element by value — a non-Copyable
         // bare-local element is moved into the aggregate (#162). Record the move
@@ -1016,6 +1162,7 @@ fn apply_call_moves(
         record_operand_move(mcx, state, diags, recv_id, FreezeReason::Consume);
     }
 
+    check_consumed_while_lent(mcx, callable, args, receiver, diags);
     for (i, arg) in args.iter().enumerate() {
         let Some(param) = callable.params.get(i) else {
             continue;
@@ -1024,6 +1171,116 @@ fn apply_call_moves(
             continue;
         }
         record_operand_move(mcx, state, diags, arg.value, FreezeReason::Consume);
+    }
+}
+
+/// The first struct along `place`'s field path that declares a `deinit`.
+/// Moving a field out of such a struct would take the struct apart without
+/// running its `deinit`.
+fn deinit_owner_on_path(mcx: &MoveCtx<'_>, place: &PlaceKey) -> Option<Entity> {
+    place.path.iter().find_map(|elem| {
+        let ProjElem::Field(field) = elem else {
+            return None;
+        };
+        let owner = mcx.cx.query.parent_of(*field)?;
+        // The type's own deinit takes `self` apart; that is its job.
+        let in_own_deinit = mcx.cx.query.get::<NodeKind>(mcx.cx.entity) == Some(&NodeKind::Deinit)
+            && mcx.cx.query.parent_of(mcx.cx.entity) == Some(owner);
+        (!in_own_deinit
+            && !util::children_of_kind(mcx.cx.query, owner, NodeKind::Deinit).is_empty())
+        .then_some(owner)
+    })
+}
+
+/// E511 check for an expression consumed by value (returned, bound,
+/// assigned, or passed `consuming`): a non-Copyable field projection out of
+/// a struct with a `deinit`. Checked on the expression's own place, since
+/// the move itself is recorded on the whole root (`effective_move_place`).
+fn check_field_move_out(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    expr: HirExprId,
+) {
+    let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, expr) else {
+        return;
+    };
+    if place.is_whole() || !expr_is_non_copyable(mcx, expr) {
+        return;
+    }
+    if let Some(owner) = deinit_owner_on_path(mcx, &place)
+        && state.reported.insert(place.root)
+    {
+        let span = util::expr_span(mcx.cx.hir, expr);
+        diags.push(field_move_out_of_deinit_type(mcx, owner, span));
+    }
+}
+
+/// E511: moving a field out of a value whose type has a `deinit`.
+fn field_move_out_of_deinit_type(
+    mcx: &MoveCtx<'_>,
+    owner: Entity,
+    span: kestrel_span::Span,
+) -> AnalyzeDiagnostic {
+    let ty = util::entity_name(mcx.cx.query, owner);
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[7].id,
+        severity: DESCRIPTORS[7].default_severity,
+        message: format!("cannot move a field out of '{ty}', which has a deinit"),
+        labels: vec![DiagLabel {
+            span,
+            message: "field moved out here".into(),
+            is_primary: true,
+        }],
+        notes: vec![format!(
+            "moving a field out would skip '{ty}'s deinit; borrow or copy the field instead"
+        )],
+    }
+}
+
+/// E510: one call both borrows a non-Copyable value (a borrowing or
+/// `mutating` argument, or a non-consuming receiver) and consumes it
+/// (`f(x, x)` with `f(mutating a: R, consuming b: R)`). The borrow is live for
+/// the whole call, so the move would leave it dangling.
+fn check_consumed_while_lent(
+    mcx: &MoveCtx<'_>,
+    callable: &Callable,
+    args: &[HirCallArg],
+    receiver: Option<HirExprId>,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let hir = mcx.cx.hir;
+    let consuming = |i: usize| callable.params.get(i).is_some_and(|p| p.is_consuming);
+    let mut lent: Vec<LocalId> = args
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| !consuming(i))
+        .filter_map(|(_, a)| place_root(hir, a.value))
+        .collect();
+    if !matches!(callable.receiver, Some(ReceiverKind::Consuming)) {
+        lent.extend(receiver.and_then(|r| place_root(hir, r)));
+    }
+    for (i, arg) in args.iter().enumerate() {
+        if !consuming(i) || !expr_is_non_copyable(mcx, arg.value) {
+            continue;
+        }
+        let Some(root) = place_root(hir, arg.value).filter(|r| lent.contains(r)) else {
+            continue;
+        };
+        let name = hir.locals[root].name.clone();
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[6].id,
+            severity: DESCRIPTORS[6].default_severity,
+            message: format!("cannot consume '{name}' while the same call borrows it"),
+            labels: vec![DiagLabel {
+                span: util::expr_span(hir, arg.value),
+                message: "consumed here".into(),
+                is_primary: true,
+            }],
+            notes: vec![format!(
+                "another argument of this call borrows '{name}' for the whole call"
+            )],
+        });
     }
 }
 
@@ -1065,37 +1322,148 @@ fn record_operand_move(
     operand: HirExprId,
     reason: FreezeReason,
 ) {
+    record_operand_move_at(mcx, state, diags, operand, reason, false);
+}
+
+/// An if/match/block result is an owned value: a projection tail (`if c
+/// { p.a } else { … }`) moves out of its root, as MIR lowers it. A bare
+/// local tail keeps its historical treatment (moved by the consumer).
+fn record_tail_move(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    tail: Option<HirExprId>,
+) {
+    let Some(tail) = tail else {
+        return;
+    };
+    if place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, tail).is_some_and(|p| !p.is_whole()) {
+        record_operand_move(mcx, state, diags, tail, FreezeReason::Move);
+    }
+}
+
+/// `record_operand_move`, optionally widening the move to the operand's
+/// whole root. A field move is a partial move (docs/design/partial-moves.md):
+/// MIR takes just that field. `widen_to_root` is for the sites MIR still
+/// realizes by consuming the whole root — a by-value `match` scrutinee and an
+/// owning closure's projected capture — kept in lockstep with MIR.
+fn record_operand_move_at(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    operand: HirExprId,
+    reason: FreezeReason,
+    widen_to_root: bool,
+) {
+    check_field_move_out(mcx, state, diags, operand);
     let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, operand) else {
         return;
     };
     if !expr_is_non_copyable(mcx, operand) {
         return;
     }
-    record_move(
-        mcx,
-        state,
-        diags,
-        effective_move_place(place),
-        operand,
-        reason,
-    );
-}
-
-/// MIR currently moves a non-Copyable projection by taking and destructuring
-/// its whole root. Keep move diagnostics in lockstep until MIR has partial
-/// initialization and drop tracking.
-fn effective_move_place(place: PlaceKey) -> PlaceKey {
-    PlaceKey::whole(place.root)
-}
-
-/// Extract the base local of an expression if it is a bare `HirExpr::Local`.
-/// Returns None for anything else (Field/Tuple/Call/etc.) — matches lib1's
-/// "no partial moves" behavior.
-fn rhs_local(hir: &HirBody, expr: HirExprId) -> Option<LocalId> {
-    if let HirExpr::Local(id, _) = &hir.exprs[expr] {
-        Some(*id)
+    let place = if widen_to_root {
+        PlaceKey::whole(place.root)
     } else {
-        None
+        place
+    };
+    record_move(mcx, state, diags, place, operand, reason);
+}
+
+/// A read (or, with `is_assign_target`, a write) of the place `expr` names,
+/// against every recorded move of the same root:
+/// - a moved place containing it (`p` moved, read `p.a`; or `p.a` itself):
+///   use after move;
+/// - a moved place inside it (`p.a` moved, read `p`): use of a partially
+///   moved value.
+///
+/// Writing a moved place is reinitialization (fine), but writing INTO a moved
+/// place (`p.a.x = …` after moving `p.a`) has no storage to land in.
+fn check_place_use(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    expr: HirExprId,
+    is_assign_target: bool,
+) {
+    let Some(used) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, expr) else {
+        return;
+    };
+    let span = util::expr_span(mcx.cx.hir, expr);
+    // Containing (or equal) moves first: that is the plain use-after-move.
+    let containing = state
+        .moves
+        .iter()
+        .filter(|(m, _)| {
+            m.is_prefix_of(&used) && (!is_assign_target || m.path.len() < used.path.len())
+        })
+        .min_by_key(|(m, _)| m.path.len())
+        .map(|(m, info)| (m.clone(), *info));
+    if let Some((moved, info)) = containing {
+        if state.reported.insert(used.root) {
+            let name = place_display(mcx.cx, &moved);
+            emit_move_diagnostic(mcx.cx, diags, info, expr, span, &name);
+        }
+        return;
+    }
+    if is_assign_target {
+        return;
+    }
+    let inside = state
+        .moves
+        .iter()
+        .filter(|(m, _)| used.is_prefix_of(m) && m.path.len() > used.path.len())
+        .min_by_key(|(m, _)| m.path.len())
+        .map(|(m, info)| (m.clone(), *info));
+    if let Some((moved, info)) = inside
+        && state.reported.insert(used.root)
+    {
+        diags.push(partially_moved_use(mcx.cx, &used, &moved, info, span));
+    }
+}
+
+/// E500/E501 for a use of a place one of whose parts was moved out.
+fn partially_moved_use(
+    cx: &BodyContext<'_>,
+    used: &PlaceKey,
+    moved: &PlaceKey,
+    info: MoveInfo,
+    use_span: kestrel_span::Span,
+) -> AnalyzeDiagnostic {
+    let used_name = place_display(cx, used);
+    let moved_name = place_display(cx, moved);
+    let (d, message, moved_label) = match info.kind {
+        MoveKind::Definite => (
+            &DESCRIPTORS[0],
+            format!("use of partially moved value '{used_name}'"),
+            format!("'{moved_name}' moved here"),
+        ),
+        MoveKind::Maybe => (
+            &DESCRIPTORS[1],
+            format!("value '{used_name}' may have been partially moved"),
+            format!("'{moved_name}' potentially moved here"),
+        ),
+    };
+    AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message,
+        labels: vec![
+            DiagLabel {
+                span: use_span,
+                message: "used here as a whole".into(),
+                is_primary: true,
+            },
+            DiagLabel {
+                span: util::expr_span(cx.hir, info.site),
+                message: moved_label,
+                is_primary: false,
+            },
+        ],
+        notes: vec![format!(
+            "'{moved_name}' was moved out; use the remaining fields individually, or \
+             reassign '{moved_name}' first"
+        )],
     }
 }
 
@@ -1148,70 +1516,16 @@ fn local_is_owned_place(cx: &BodyContext<'_>, local: LocalId) -> bool {
     };
     let name = cx.hir.locals[local].name.as_str();
     if name == "self" {
-        return matches!(callable.receiver, Some(ReceiverKind::Consuming))
-            // A method may witness a `consuming` protocol requirement while
-            // writing its receiver plainly (`func tryExtract()` satisfying
-            // `consuming func tryExtract()`). Callers pass ownership, so `self`
-            // is owned and the body may move payloads out of it; treat it so,
-            // or moving a matched payload into a call/aggregate falsely reads as
-            // a move-out-of-borrow.
-            || self_witnesses_consuming_requirement(cx);
+        // Only a written `consuming` receiver owns `self`. A plain method that
+        // witnesses a `consuming` requirement still BORROWS (a weaker demand):
+        // mono borrows the caller's value for the call and releases it after
+        // (`witness_borrowed_args`), so moving a payload out would alias it.
+        return matches!(callable.receiver, Some(ReceiverKind::Consuming));
     }
     match callable.params.iter().find(|p| p.name == name) {
         Some(p) => p.is_consuming,
         None => true,
     }
-}
-
-/// Whether the body owner is a method satisfying a protocol requirement whose
-/// receiver is `consuming` (so its `self` is effectively owned even if written
-/// plainly). Resolves the method's self-type (its parent, or an extension's
-/// target), then scans every conformed protocol for a same-named requirement
-/// with a consuming receiver.
-fn self_witnesses_consuming_requirement(cx: &BodyContext<'_>) -> bool {
-    use kestrel_ast_builder::Name;
-    use kestrel_name_res::{ConformingProtocols, ExtensionTargetEntity, ProtocolMembersByName};
-
-    let Some(method_name) = cx.query.get::<Name>(cx.entity).map(|n| n.0.clone()) else {
-        return false;
-    };
-    let Some(parent) = cx.query.parent_of(cx.entity) else {
-        return false;
-    };
-    // The self-type the method is attached to: a type body's parent directly,
-    // or the target of an extension.
-    let self_type = match cx.query.get::<NodeKind>(parent) {
-        Some(NodeKind::Extension) => cx.query.query(ExtensionTargetEntity {
-            extension: parent,
-            root: cx.root,
-        }),
-        _ => Some(parent),
-    };
-    let Some(self_type) = self_type else {
-        return false;
-    };
-    let protocols = cx.query.query(ConformingProtocols {
-        entity: self_type,
-        root: cx.root,
-    });
-    protocols.iter().any(|&protocol| {
-        cx.query
-            .query(ProtocolMembersByName {
-                protocol,
-                name: method_name.clone(),
-                context: cx.entity,
-                root: cx.root,
-            })
-            .iter()
-            .any(|m| {
-                matches!(
-                    cx.query
-                        .get::<Callable>(m.entity)
-                        .and_then(|c| c.receiver.as_ref()),
-                    Some(ReceiverKind::Consuming)
-                )
-            })
-    })
 }
 
 /// Collect every local introduced *within* `block` — `let` bindings and pattern
@@ -1335,6 +1649,37 @@ fn collect_expr_bound_locals(hir: &HirBody, id: HirExprId, out: &mut HashSet<Loc
 
 /// Collect every binding local introduced by a pattern (recursing through
 /// tuple/variant/struct/array/or/at sub-patterns) into `out`.
+/// Whether `pat` binds a non-copyable value by value (not `&`), which moves it
+/// out of the matched value.
+fn pattern_binds_non_copyable_by_value(mcx: &MoveCtx<'_>, pat: HirPatId) -> bool {
+    let mut bound = HashSet::new();
+    collect_pattern_bindings(mcx.cx.hir, pat, &mut bound);
+    let by_ref = by_ref_bindings(mcx.cx.hir, pat);
+    bound
+        .into_iter()
+        .any(|local| !by_ref.contains(&local) && local_is_non_copyable(mcx, local))
+}
+
+/// Whether a match scrutinee is a place this body owns (not a borrowed or
+/// `mutating` parameter, whose bindings are borrow-bound instead).
+fn scrutinee_is_owned(mcx: &MoveCtx<'_>, scrutinee: HirExprId) -> bool {
+    place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, scrutinee)
+        .is_some_and(|place| local_is_owned_place(mcx.cx, place.root))
+}
+
+/// The bindings in `pat` written `&name` (borrowing, never moving).
+fn by_ref_bindings(hir: &HirBody, pat: HirPatId) -> HashSet<LocalId> {
+    let mut all = HashSet::new();
+    collect_pattern_bindings(hir, pat, &mut all);
+    all.into_iter()
+        .filter(|&local| {
+            hir.pats.iter().any(|(_, p)| {
+                matches!(p, HirPat::Binding { local: l, by_ref: Some(_), .. } if *l == local)
+            })
+        })
+        .collect()
+}
+
 fn collect_pattern_bindings(hir: &HirBody, pat: HirPatId, out: &mut HashSet<LocalId>) {
     match &hir.pats[pat] {
         HirPat::Binding { local, .. } => {
@@ -1448,6 +1793,17 @@ fn record_move(
                 ],
             });
         }
+    } else if is_unowned_param(mcx.cx, root)
+        && !is_mutating_param(mcx.cx, root)
+        && !is_consuming_closure_local(mcx, root)
+        && state.reported.insert(root)
+    {
+        diags.push(unowned_param_move(
+            mcx.cx,
+            root,
+            util::expr_span(mcx.cx.hir, site),
+            "move",
+        ));
     } else if mcx.borrow_bound.contains(&root) && state.reported.insert(root) {
         let name = mcx.cx.hir.locals[root].name.clone();
         let span = util::expr_span(mcx.cx.hir, site);
@@ -1541,6 +1897,28 @@ fn check_outlives(
     let span = util::expr_span(mcx.cx.hir, site);
     for place in carried {
         let Some(info) = state.frozen.get(place).cloned() else {
+            // Not a view-closure freeze: a reference to `place`. It dangles
+            // once `place`'s binding goes out of scope.
+            let referent_depth = state.local_depth.get(&place.root).copied().unwrap_or(0);
+            if referent_depth > dest_depth && state.freeze_reported.insert(place.root) {
+                let name = mcx.cx.hir.locals[place.root].name.clone();
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[5].id,
+                    severity: DESCRIPTORS[5].default_severity,
+                    message: format!(
+                        "a reference to '{name}' is stored somewhere that outlives '{name}'"
+                    ),
+                    labels: vec![DiagLabel {
+                        span: span.clone(),
+                        message: format!("this value carries a reference to '{name}'"),
+                        is_primary: true,
+                    }],
+                    notes: vec![format!(
+                        "'{name}' goes out of scope before the destination does, so the \
+                         reference would dangle"
+                    )],
+                });
+            }
             continue;
         };
         if info.captured_scope_depth <= dest_depth {
@@ -1599,15 +1977,6 @@ fn check_call_arg_outlives(
             dests.push(arg.value);
         }
     }
-    // The shallowest writable destination bounds them all.
-    let Some(dest_depth) = dests
-        .iter()
-        .filter_map(|&d| place_root(mcx.cx.hir, d))
-        .map(|local| state.local_depth.get(&local).copied().unwrap_or(0))
-        .min()
-    else {
-        return;
-    };
     for (i, arg) in args.iter().enumerate() {
         if callable
             .params
@@ -1620,8 +1989,45 @@ fn check_call_arg_outlives(
         if carried.is_empty() {
             continue;
         }
+        // Only a destination whose type can hold the argument's type is where
+        // it may come to rest (`r.read(into: rest.mutatingSlice(0..))` on a
+        // plain struct `r` stores nothing). The shallowest one bounds them all.
+        let Some(dest_depth) = dests
+            .iter()
+            .filter(|&&d| dest_may_hold(mcx, d, arg.value))
+            .filter_map(|&d| place_root(mcx.cx.hir, d))
+            .map(|local| state.local_depth.get(&local).copied().unwrap_or(0))
+            .min()
+        else {
+            continue;
+        };
         check_outlives(mcx, state, diags, &carried, dest_depth, arg.value);
     }
+}
+
+/// Whether the writable destination `dest` may come to hold `value`, by their
+/// settled types. Unknown types may hold anything. A closure always may: a
+/// function type is `Static` whatever its value captures, so neither
+/// staticness nor the type structure says where a view closure can rest.
+/// Otherwise a `Static` destination holds no reference-carrying value, and
+/// the rest is the shared ref-source rule (`Rep` can't hold a slice).
+fn dest_may_hold(mcx: &MoveCtx<'_>, dest: HirExprId, value: HirExprId) -> bool {
+    let cx = mcx.cx;
+    let types = &cx.typed.expr_types;
+    let (Some(d), Some(v)) = (types.get(&dest), types.get(&value)) else {
+        return true;
+    };
+    if matches!(v, ResolvedTy::Function { .. }) {
+        return true;
+    }
+    if crate::staticness::resolved_ty_is_static(cx.query, d, cx.entity, cx.root) {
+        return false;
+    }
+    let mut layer = kestrel_semantics::HirRefSources {
+        ctx: mcx.cx.query,
+        root: mcx.cx.root,
+    };
+    kestrel_semantics::may_contain(&mut layer, &resolved_to_hir(d), &resolved_to_hir(v))
 }
 
 /// The root local of a place chain (`x`, `x.f`, `x.f.0`), or `None` for
@@ -1720,9 +2126,15 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
                 out.extend(places.iter().cloned());
             }
         },
-        HirExpr::Sugar { inner, .. } | HirExpr::Borrow { inner, .. } => {
+        // `&x` carries the place it refers to (checked against the
+        // destination's lifetime by `check_outlives`).
+        HirExpr::Borrow { inner, .. } => {
+            if let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, hir, *inner) {
+                out.push(place);
+            }
             collect_carried(mcx, state, *inner, out)
         },
+        HirExpr::Sugar { inner, .. } => collect_carried(mcx, state, *inner, out),
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
             collect_carried(mcx, state, *base, out)
         },
@@ -1746,6 +2158,26 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
                 for arg in args {
                     collect_carried(mcx, state, arg.value, out);
                 }
+            } else if result_carries_refs(mcx, expr) {
+                // A function returning a ref-carrying value (`mk(xs, 0, 1)`
+                // -> a slice): it can only have rooted its references at the
+                // arguments that may hold what it points at — the same
+                // sources MIR lowering joins into the result's root.
+                let arg_exprs: Vec<HirExprId> = args.iter().map(|a| a.value).collect();
+                for arg in ref_sources(mcx, expr, &arg_exprs) {
+                    collect_borrowed_arg(mcx, state, arg, out);
+                }
+            }
+        },
+        // A METHOD returning a ref-carrying value views its receiver, plus
+        // any argument that may hold what it points at: `xs.slice(0)` views
+        // `xs` alone.
+        HirExpr::MethodCall { receiver, args, .. } if result_carries_refs(mcx, expr) => {
+            let arg_exprs: Vec<HirExprId> = std::iter::once(*receiver)
+                .chain(args.iter().map(|a| a.value))
+                .collect();
+            for arg in ref_sources(mcx, expr, &arg_exprs) {
+                collect_borrowed_arg(mcx, state, arg, out);
             }
         },
         HirExpr::ImplicitMember {
@@ -1776,6 +2208,77 @@ fn collect_carried(mcx: &MoveCtx<'_>, state: &State, expr: HirExprId, out: &mut 
         },
         _ => {},
     }
+}
+
+/// Does this call's RESULT carry references by value (a non-`Static`
+/// aggregate such as a slice struct holding `&Array[T]`)? A bare `&T` result
+/// is excluded: in every storing position it decays to an owned copy.
+fn result_carries_refs(mcx: &MoveCtx<'_>, call: HirExprId) -> bool {
+    let cx = mcx.cx;
+    match cx.typed.expr_types.get(&call) {
+        None | Some(ResolvedTy::Ref { .. }) => false,
+        Some(ty) => !crate::staticness::resolved_ty_is_static(cx.query, ty, cx.entity, cx.root),
+    }
+}
+
+/// The arguments of `call` its ref-carrying result may borrow from: those
+/// whose type can hold what the result points at
+/// (`kestrel_semantics::ref_source_mask`, the same rule MIR lowering joins
+/// roots by). An argument with no settled type counts as a source.
+fn ref_sources(mcx: &MoveCtx<'_>, call: HirExprId, args: &[HirExprId]) -> Vec<HirExprId> {
+    let types = &mcx.cx.typed.expr_types;
+    let Some(result) = types.get(&call).map(resolved_to_hir) else {
+        return args.to_vec();
+    };
+    let arg_tys: Vec<HirTy> = args
+        .iter()
+        .map(|a| types.get(a).map_or_else(opaque_hir_ty, resolved_to_hir))
+        .collect();
+    let mut layer = kestrel_semantics::HirRefSources {
+        ctx: mcx.cx.query,
+        root: mcx.cx.root,
+    };
+    let mask = kestrel_semantics::ref_source_mask(&mut layer, &result, &arg_tys);
+    args.iter()
+        .zip(mask)
+        .filter_map(|(a, m)| m.then_some(*a))
+        .collect()
+}
+
+/// A settled expression type as a `HirTy`, for the shared ref-source rule.
+/// Only the structure that rule reads is kept; the rest is opaque.
+fn resolved_to_hir(ty: &ResolvedTy) -> HirTy {
+    let sp = kestrel_span::Span::new(0, 0..0);
+    match ty {
+        ResolvedTy::Named { entity, args } => HirTy::Struct {
+            entity: *entity,
+            args: args.iter().map(resolved_to_hir).collect(),
+            span: sp,
+        },
+        ResolvedTy::Param { entity } => HirTy::Param(*entity, sp),
+        ResolvedTy::Tuple(elems) => HirTy::Tuple(elems.iter().map(resolved_to_hir).collect(), sp),
+        ResolvedTy::Ref { pointee, mutating } => HirTy::Ref {
+            inner: Box::new(resolved_to_hir(pointee)),
+            mutating: *mutating,
+            span: sp,
+        },
+        ResolvedTy::Never => HirTy::Never(sp),
+        _ => opaque_hir_ty(),
+    }
+}
+
+fn opaque_hir_ty() -> HirTy {
+    HirTy::Infer(kestrel_span::Span::new(0, 0..0))
+}
+
+/// What a call's result views through one borrowed argument: the argument's
+/// place itself (arguments borrow by signature), plus whatever the argument
+/// already carries (`s.narrow(1)` on a slice `s` views what `s` views).
+fn collect_borrowed_arg(mcx: &MoveCtx<'_>, state: &State, arg: HirExprId, out: &mut Vec<PlaceKey>) {
+    if let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, arg) {
+        out.push(place);
+    }
+    collect_carried(mcx, state, arg, out);
 }
 
 /// Per-instantiation copyability of an EXPRESSION's settled type — the
@@ -1869,55 +2372,53 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
     }
 
     fn member_semantics(&self, ty: &ResolvedTy) -> CopySemantics {
+        kestrel_semantics::ty_copy_semantics(self, ty)
+    }
+}
+
+impl kestrel_semantics::CopyShapeLayer for MoveCopyLayer<'_, '_> {
+    fn query(&self) -> &kestrel_hecs::QueryContext<'_> {
+        self.cx.query
+    }
+
+    fn root(&self) -> Entity {
+        self.cx.root
+    }
+
+    // HOOK: the body owner scopes both lookups.
+    fn param_context(&self, _: Entity) -> Entity {
+        self.cx.entity
+    }
+
+    fn self_context(&self) -> Entity {
+        self.cx.entity
+    }
+
+    fn copy_shape<'t>(&self, ty: &'t ResolvedTy) -> kestrel_semantics::CopyShape<'t, ResolvedTy> {
+        use kestrel_semantics::CopyShape;
         match ty {
-            ResolvedTy::Named { entity, args } => instance_semantics(self, *entity, args),
-            // No per-instantiation refinement for Self (current behavior).
-            ResolvedTy::SelfType { entity } => self.base_semantics(*entity),
-            // HOOK: body-owner context scopes the bound lookup.
-            ResolvedTy::Param { entity } => self
-                .cx
-                .query
-                .query(TypeParamCopyRequirement {
-                    param: *entity,
-                    context: self.cx.entity,
-                    root: self.cx.root,
-                })
-                .into(),
-            ResolvedTy::Tuple(elems) => {
-                fold_members(elems.iter().map(|e| self.member_semantics(e)))
+            ResolvedTy::Named { entity, args } => CopyShape::Nominal {
+                entity: *entity,
+                args: Cow::Borrowed(args),
             },
-            // `some P and not Copyable` hides a possibly move-only underlier —
-            // uses must move. A plain `some P` guarantees a duplicable
-            // underlier (enforced on the defining body post-solve).
-            ResolvedTy::Opaque { not_copyable, .. } => {
-                if *not_copyable {
-                    CopySemantics::NotCopyable
-                } else {
-                    CopySemantics::Copyable
-                }
+            ResolvedTy::SelfType { entity } => CopyShape::SelfType(*entity),
+            ResolvedTy::Param { entity } => CopyShape::Param(*entity),
+            ResolvedTy::Tuple(elems) => CopyShape::Tuple(Cow::Borrowed(elems)),
+            ResolvedTy::Opaque { not_copyable, .. } => CopyShape::Opaque {
+                not_copyable: *not_copyable,
             },
-            // A closure value's copy class is fixed by its KIND (plan D6):
-            // binding a `mutating`/`consuming` closure to a second name is a
-            // MOVE, and an `escaping` one clones (shares) its environment.
-            ResolvedTy::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),
+            ResolvedTy::Function { kind, .. } => CopyShape::Function(*kind),
             ResolvedTy::RawExistential { bounds, .. } => {
-                kestrel_semantics::raw_existential_copy_semantics(
-                    self.cx.query,
-                    bounds.iter().map(|(protocol, _)| *protocol),
-                    self.cx.root,
-                )
+                CopyShape::RawExistential(bounds.iter().map(|(protocol, _)| *protocol).collect())
             },
             // Assoc projections are Copyable-by-default (matches
             // `hir_type_copy_semantics`); never/error are recovery — all
-            // Copyable. Explicit so a future ResolvedTy variant forces a
-            // decision here.
-            // A ref (stage 1) is a borrow: copying it duplicates the pointer,
-            // never the pointee — Copyable, the same answer nightly's old
-            // catch-all gave.
+            // Copyable. A ref (stage 1) is a borrow: copying it duplicates the
+            // pointer, never the pointee.
             ResolvedTy::AssocProjection { .. }
             | ResolvedTy::Never
             | ResolvedTy::Ref { .. }
-            | ResolvedTy::Error => CopySemantics::Copyable,
+            | ResolvedTy::Error => CopyShape::Leaf(CopySemantics::Copyable),
         }
     }
 }
@@ -2047,11 +2548,16 @@ fn join_freeze_state<'a>(out: &mut State, branches: impl Iterator<Item = &'a Sta
     for b in branches {
         out.frozen
             .extend(b.frozen.iter().map(|(k, v)| (k.clone(), v.clone())));
+        // Union, not append: the out state already holds the pre-branch
+        // places, and appending them again doubled each list per branch
+        // (2^k after k `if`s).
         for (local, places) in &b.carriers {
-            out.carriers
-                .entry(*local)
-                .or_default()
-                .extend(places.iter().cloned());
+            let set = out.carriers.entry(*local).or_default();
+            for p in places {
+                if !set.contains(p) {
+                    set.push(p.clone());
+                }
+            }
         }
         out.local_depth.extend(b.local_depth.iter());
         out.freeze_reported
@@ -2285,20 +2791,125 @@ fn emit_use_after_move(
 /// for a `deinit` statement. The HIR arena's deinit-stmt doesn't have its
 /// own expression, so we use the first expression whose span contains the
 /// deinit token. Falls back to the first local-read of this name.
-fn deinit_site(hir: &HirBody, local: LocalId) -> HirExprId {
+fn deinit_site(hir: &HirBody, local: LocalId) -> Option<HirExprId> {
     // Scan for any expression that reads this local — good enough as a span
     // anchor for downstream secondary labels.
     for (id, expr) in hir.exprs.iter() {
         if let HirExpr::Local(l, _) = expr
             && *l == local
         {
-            return id;
+            return Some(id);
         }
     }
-    // Fallback: the first expression in the arena.
-    hir.exprs
+    // Fallback: the first expression in the arena, if the body has any.
+    hir.exprs.iter().next().map(|(id, _)| id)
+}
+
+/// A parameter the body does not own: borrowed (the default) or `mutating`.
+/// Moving or destroying it would release a value the caller still owns.
+fn is_unowned_param(cx: &BodyContext<'_>, local: LocalId) -> bool {
+    cx.hir.params.contains(&local) && !local_is_owned_place(cx, local)
+}
+
+/// A local of `consuming` closure type. Calling it consumes it; a borrowed
+/// parameter of that type is already rejected at the signature (E625), so its
+/// call is not reported again as a move out of a borrow.
+fn is_consuming_closure_local(mcx: &MoveCtx<'_>, local: LocalId) -> bool {
+    matches!(
+        mcx.cx.typed.local_types.get(&local),
+        Some(ResolvedTy::Function {
+            kind: kestrel_ast::FnTypeKind::Consuming,
+            ..
+        })
+    )
+}
+
+/// A `mutating` parameter (or `mutating self`): the body may move its value
+/// out, as long as it puts one back before returning (the caller still owns
+/// the slot). Checked at each exit by `check_mutating_params_restored`.
+fn is_mutating_param(cx: &BodyContext<'_>, local: LocalId) -> bool {
+    if !cx.hir.params.contains(&local) {
+        return false;
+    }
+    let Some(callable) = cx.query.get::<Callable>(cx.entity) else {
+        return false;
+    };
+    let name = cx.hir.locals[local].name.as_str();
+    if name == "self" {
+        return matches!(callable.receiver, Some(ReceiverKind::Mutating));
+    }
+    callable
+        .params
         .iter()
-        .next()
-        .map(|(id, _)| id)
-        .expect("body has at least one expression")
+        .find(|p| p.name == name)
+        .is_some_and(|p| p.is_mut && !p.is_consuming)
+}
+
+/// At a function exit, every `mutating` parameter must hold a value again: a
+/// value moved out and never replaced would leave the caller's slot empty
+/// (and the caller would drop it a second time).
+fn check_mutating_params_restored(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    exit_span: kestrel_span::Span,
+) {
+    let cx = mcx.cx;
+    for &local in &cx.hir.params {
+        if !is_mutating_param(cx, local) {
+            continue;
+        }
+        let Some(info) = state.moves.get(&PlaceKey::whole(local)).copied() else {
+            continue;
+        };
+        if !state.reported.insert(local) {
+            continue;
+        }
+        let name = cx.hir.locals[local].name.clone();
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[2].id,
+            severity: DESCRIPTORS[2].default_severity,
+            message: format!(
+                "mutating parameter '{name}' is moved out and not replaced before returning"
+            ),
+            labels: vec![
+                DiagLabel {
+                    span: exit_span.clone(),
+                    message: format!("returns while '{name}' holds no value"),
+                    is_primary: true,
+                },
+                DiagLabel {
+                    span: util::expr_span(cx.hir, info.site),
+                    message: "moved out here".into(),
+                    is_primary: false,
+                },
+            ],
+            notes: vec![format!(
+                "assign a new value to '{name}' before returning; the caller still owns it"
+            )],
+        });
+    }
+}
+
+/// E503 for moving (`verb` = "move") or destroying a non-owned parameter.
+fn unowned_param_move(
+    cx: &BodyContext<'_>,
+    local: LocalId,
+    span: kestrel_span::Span,
+    verb: &str,
+) -> AnalyzeDiagnostic {
+    let name = cx.hir.locals[local].name.clone();
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[2].id,
+        severity: DESCRIPTORS[2].default_severity,
+        message: format!("cannot {verb} parameter '{name}': it is borrowed, not owned"),
+        labels: vec![DiagLabel {
+            span,
+            message: format!("'{name}' still belongs to the caller"),
+            is_primary: true,
+        }],
+        notes: vec![format!(
+            "mark the parameter `consuming` to take ownership of '{name}'"
+        )],
+    }
 }

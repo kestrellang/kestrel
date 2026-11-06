@@ -8,7 +8,9 @@ module Main
 
 protocol HasCount {
     func count() -> lang.i64
-    func setCount(to value: lang.i64)
+    // `mutating`: a `mutating` impl cannot witness a non-mutating
+    // requirement (it would write through a read-only borrow).
+    mutating func setCount(to value: lang.i64)
 }
 
 extend HasCount {

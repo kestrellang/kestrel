@@ -35,6 +35,11 @@ pub struct TestConfig {
     /// requirement (E618). Execution-mode tests imply this; a diagnostics test
     /// opts in via `// executable: true` to exercise the missing-`@main` check.
     pub executable: bool,
+    /// Execution tests: check post-monomorphization warnings (E508) against
+    /// `// WARN:` annotations both ways even when the file has none
+    /// (`// warnings: checked`), so "no warning" is assertable. A file with
+    /// any `// WARN:` annotation is checked regardless.
+    pub warnings_checked: bool,
     /// Backends this test must run on (`// backends: cranelift,llvm`): one
     /// trial per backend, pinned regardless of `KESTREL_BACKEND`. Empty =
     /// one trial on the env-default backend. ABI-sensitive tests (ret_borrow)
@@ -55,6 +60,7 @@ impl Default for TestConfig {
             mir_snapshot: None,
             mir_filter: None,
             executable: false,
+            warnings_checked: false,
             backends: Vec::new(),
         }
     }
@@ -143,6 +149,9 @@ pub fn parse_test_config(source: &str) -> TestConfig {
             },
             "executable" => {
                 config.executable = value.to_lowercase() == "true";
+            },
+            "warnings" => {
+                config.warnings_checked = value.to_lowercase() == "checked";
             },
             "include" => {
                 config.include.push(value.trim().to_string());

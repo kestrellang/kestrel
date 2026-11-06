@@ -352,6 +352,17 @@ pub static REGISTRY: &[AttrDef] = &[
         doc: "Lets a public enum gain cases without a breaking release: a 'match' on it outside its module must have a catch-all arm.",
     },
     AttrDef {
+        name: "observabledrop",
+        targets: TargetSet::of(&[T::Struct, T::Enum]),
+        params: &[],
+        repeatable: false,
+        phase: AttrPhase::Lowering,
+        conflicts: &[],
+        needs_body: false,
+        repeat_hint: None,
+        doc: "Dropping this type has an observable effect (closing a socket, say), so the copy lifetime passes keep every copy's drop at the end of its scope instead of dropping it early.",
+    },
+    AttrDef {
         name: "platform",
         targets: ANY_DECL,
         // `.darwin`/`.linux` are the pre-0.18 spellings, accepted with a
@@ -372,6 +383,20 @@ pub static REGISTRY: &[AttrDef] = &[
         needs_body: false,
         repeat_hint: Some("list every platform in one '@platform(...)'"),
         doc: "Compiles the declaration only when building for one of the given platforms: '@platform(.Linux, .Darwin)'.",
+    },
+    AttrDef {
+        name: "sugarOnly",
+        // An init requirement classifies as `Initializer`; the rule only
+        // reads the attribute on protocol members (`kestrel-name-res`'s
+        // `SugarOnlyRequirement`).
+        targets: TargetSet::of(&[T::Requirement, T::Initializer]),
+        params: &[],
+        repeatable: false,
+        phase: AttrPhase::NameRes,
+        conflicts: &[],
+        needs_body: false,
+        repeat_hint: None,
+        doc: "Marks a protocol requirement that is reached only through its syntax ('+=', 'try', '?.', literals, patterns). Conformers still implement it, but outside the protocol's module no code may call it, or any type's implementation of it, by name.",
     },
     AttrDef {
         name: "unavailable",

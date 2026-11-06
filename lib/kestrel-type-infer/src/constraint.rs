@@ -4,7 +4,7 @@
 //! during constraint generation and consumed by the fixpoint solver.
 
 use kestrel_ast_builder::AstParam;
-use kestrel_ast_builder::arg_binding::{BindParam, binds};
+use kestrel_ast_builder::arg_binding::{BindArg, BindParam, binds};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::HirExprId;
 use kestrel_hir::ty::HirTy;
@@ -35,10 +35,20 @@ pub enum ConformsOrigin {
 /// `Out` cannot be confused. `Name` is only for producers that genuinely start
 /// from a spelling with no declaration in hand (array/dictionary literals,
 /// `Indirection.Target`, `ArrayMatchable.Element`).
+///
+/// `Conformance` is `Entity` with the protocol's args known: `Self.Output`
+/// lowered from a requirement of `Subtractable[Other]` while `Other` is
+/// bound. A type that conforms to the protocol more than once
+/// (`Subtractable[Meters]` + `Subtractable[Stamp]`) reads the binding from the
+/// conformance those args select, not whichever extension comes first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AssocKey {
     Entity(Entity),
     Name(String),
+    Conformance {
+        assoc: Entity,
+        protocol_args: Vec<TyVar>,
+    },
 }
 
 /// Why a type was expected at a check — shown on a type mismatch as
@@ -152,6 +162,12 @@ pub enum Constraint {
         /// What the conformance judges when `ty` is a ref — see
         /// `ConformsOrigin`.
         origin: ConformsOrigin,
+        /// The protocol's type arguments this obligation requires
+        /// (`Int8: Convertible[?From]` from a call through `init(from:)`).
+        /// Empty = only the protocol entity is checked, with args (if any)
+        /// taken from `witness_protocol_args`. Carried on the constraint so
+        /// two calls on one receiver with different args stay distinct.
+        protocol_args: Vec<TyVar>,
     },
 
     /// `Container.Name → result` — associated type projection.
@@ -227,6 +243,8 @@ pub enum Constraint {
         name: String,
         /// TyVars for each sub-pattern binding (one per payload field).
         arg_tys: Vec<TyVar>,
+        /// Each sub-pattern's label (`.A(x: a)`), checked against the case.
+        labels: Vec<Option<String>>,
         span: Span,
     },
 
@@ -261,6 +279,18 @@ pub enum Constraint {
         tuple: TyVar,
         index: usize,
         result: TyVar,
+        span: Span,
+    },
+
+    /// A `for` loop's iterator source. Deferred until `iterable` resolves:
+    /// an `Iterator` is the loop's iterator itself (`result = iterable`,
+    /// recorded in `direct_iterators`); anything else must be `Iterable` and
+    /// the loop calls its `iter()` (`protocol`, the Iterable builtin).
+    ForLoopIterator {
+        iterable: TyVar,
+        result: TyVar,
+        protocol: Entity,
+        expr: HirExprId,
         span: Span,
     },
 
@@ -308,15 +338,23 @@ pub struct CallArg {
     pub label: Option<String>,
     pub ty: TyVar,
     pub value: HirExprId,
+    /// An unlabeled trailing closure (from `HirCallArg::trailing_closure`).
+    pub trailing_closure: bool,
+}
+
+impl<'a> From<&'a CallArg> for BindArg<'a> {
+    fn from(a: &'a CallArg) -> Self {
+        BindArg {
+            label: a.label.as_deref(),
+            trailing_closure: a.trailing_closure,
+        }
+    }
 }
 
 /// Check if call arg labels can bind to a callable's params. Arguments bind in
 /// declaration order with defaulted params skippable anywhere (not just
 /// trailing). Single source of truth: `kestrel_ast_builder::arg_binding`.
-pub fn labels_match(params: &[AstParam], arg_labels: &[Option<&str>]) -> bool {
-    let bind_params: Vec<BindParam> = params
-        .iter()
-        .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
-        .collect();
+pub fn labels_match(params: &[AstParam], arg_labels: &[BindArg<'_>]) -> bool {
+    let bind_params: Vec<BindParam> = params.iter().map(BindParam::of).collect();
     binds(&bind_params, arg_labels)
 }

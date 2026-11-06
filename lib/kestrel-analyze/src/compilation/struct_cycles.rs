@@ -205,12 +205,30 @@ fn check_type(
                 context,
                 root: cx.root,
             });
-            if let TypeResolution::Found(entity) = result
-                && cx.query.get::<NodeKind>(entity) == Some(&NodeKind::Struct)
-            {
-                return enter_struct(cx, entity, detector, stack, direct, entry);
+            let TypeResolution::Found(entity) = result else {
+                return Ok(());
+            };
+            match cx.query.get::<NodeKind>(entity) {
+                Some(NodeKind::Struct) => enter_struct(cx, entity, detector, stack, direct, entry),
+                // An enum stores its payloads inline (an `indirect` enum is
+                // rejected earlier, E465), so a generic enum's type arguments
+                // (`Optional[S]`) are inline too: not indirection.
+                Some(NodeKind::Enum) => {
+                    for seg in segments {
+                        for arg in &seg.type_args {
+                            check_type(cx, arg, context, detector, stack, None, entry)?;
+                        }
+                    }
+                    Ok(())
+                },
+                _ => Ok(()),
             }
-            Ok(())
+        },
+        // `T?` and `Result[T, E]` sugar are inline enums too.
+        AstType::Optional(inner, _) => check_type(cx, inner, context, detector, stack, None, entry),
+        AstType::Result { ok, err, .. } => {
+            check_type(cx, ok, context, detector, stack, None, entry)?;
+            check_type(cx, err, context, detector, stack, None, entry)
         },
         AstType::Tuple(elements, _) => {
             // Tuple is indirection: struct entries inside aren't direct, but
@@ -221,8 +239,7 @@ fn check_type(
             }
             Ok(())
         },
-        // Array, Optional, Dictionary, Result, Function, Pointer — indirection,
-        // stop here.
+        // Array, Dictionary, Function, Pointer — heap indirection, stop here.
         _ => Ok(()),
     }
 }

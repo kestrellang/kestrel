@@ -9,7 +9,6 @@
 // dataflow proves the path is dead.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

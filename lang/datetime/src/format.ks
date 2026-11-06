@@ -2,6 +2,8 @@ module datetime
 
 // String interpolation-based datetime formatting.
 // All text output is English (no locale support in v1).
+// A component the formatted value doesn't carry (`.Hour` on a Date, `.Offset`
+// on a naive DateTime) produces no output rather than an invented value.
 
 public enum FormatComponent: Equatable, Cloneable {
     // Year
@@ -36,9 +38,9 @@ public enum FormatComponent: Equatable, Cloneable {
     case AmPm               // "PM"
 
     // Zone
-    case TimeZoneName       // "EST" (short timezone name)
-    case FullTimeZoneName   // "Eastern Standard Time"
-    case Offset             // "-04:00"
+    case TimeZoneID         // "America/New_York" (IANA identifier; parses back to the zone)
+    case TimeZoneName       // "EDT" (abbreviation in effect; not parseable back to a zone)
+    case Offset             // "-04:00", or "Z" at UTC
 
     // Literal (populated by appendLiteral)
     case Literal(String)
@@ -66,8 +68,8 @@ public enum FormatComponent: Equatable, Cloneable {
             (.Microsecond, .Microsecond) => true,
             (.Nanosecond, .Nanosecond) => true,
             (.AmPm, .AmPm) => true,
+            (.TimeZoneID, .TimeZoneID) => true,
             (.TimeZoneName, .TimeZoneName) => true,
-            (.FullTimeZoneName, .FullTimeZoneName) => true,
             (.Offset, .Offset) => true,
             (.Literal(a), .Literal(b)) => a == b,
             _ => false
@@ -183,7 +185,7 @@ public struct Format: ExpressibleByStringInterpolation, Cloneable {
             .Year, .Literal("-"), .Month, .Literal("-"), .Day,
             .Literal("T"),
             .Hour, .Literal(":"), .Minute, .Literal(":"), .Second,
-            .Offset, .Literal("["), .TimeZoneName, .Literal("]")
+            .Offset, .Literal("["), .TimeZoneID, .Literal("]")
         ])
     }
 }
@@ -204,57 +206,97 @@ let WEEKDAY_NAMES: Array[String] = ["Monday", "Tuesday", "Wednesday", "Thursday"
 let SHORT_WEEKDAY_NAMES: Array[String] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 let NARROW_WEEKDAY_NAMES: Array[String] = ["M", "T", "W", "T", "F", "S", "S"];
 
-// Format a component using date/time/zone values
-func formatComponent(mutating into writer: some Formatter,
-                     component component: FormatComponent,
-                     year year: Int64, month month: Int64, day day: Int64,
-                     hour hour: Int64, minute minute: Int64, second second: Int64, nanosecond nanosecond: Int64,
-                     weekday weekday: Weekday,
-                     offsetSeconds offsetSeconds: Int64, tzName tzName: String) {
-    match component {
-        .Year => appendPadded(into: writer, year, 4),
-        .ShortYear => appendPadded(into: writer, year % 100, 2),
-        .Month => appendPadded(into: writer, month, 2),
-        .MonthUnpadded => writer.append("\(month)"),
-        .MonthName => writer.append(MONTH_NAMES(month - 1)),
-        .ShortMonthName => writer.append(SHORT_MONTH_NAMES(month - 1)),
-        .NarrowMonthName => writer.append(NARROW_MONTH_NAMES(month - 1)),
-        .Day => appendPadded(into: writer, day, 2),
-        .DayUnpadded => writer.append("\(day)"),
-        .Weekday => writer.append(WEEKDAY_NAMES(weekday.ordinal())),
-        .ShortWeekday => writer.append(SHORT_WEEKDAY_NAMES(weekday.ordinal())),
-        .NarrowWeekday => writer.append(NARROW_WEEKDAY_NAMES(weekday.ordinal())),
-        .Hour => appendPadded(into: writer, hour, 2),
-        .Hour12 => {
-            let h12 = if hour == 0 { 12 } else if hour > 12 { hour - 12 } else { hour };
-            writer.append("\(h12)");
-        },
-        .Hour12Padded => {
-            let h12 = if hour == 0 { 12 } else if hour > 12 { hour - 12 } else { hour };
-            appendPadded(into: writer, h12, 2);
-        },
-        .Minute => appendPadded(into: writer, minute, 2),
-        .Second => appendPadded(into: writer, second, 2),
-        .Millisecond => appendPadded(into: writer, nanosecond / 1_000_000, 3),
-        .Microsecond => appendPadded(into: writer, nanosecond / 1000, 6),
-        .Nanosecond => appendPadded(into: writer, nanosecond, 9),
-        .AmPm => { let ampm = if hour < 12 { "AM" } else { "PM" }; writer.append(ampm); },
-        .TimeZoneName => writer.append(tzName),
-        .FullTimeZoneName => writer.append(tzName),
-        .Offset => {
-            if offsetSeconds == 0 {
-                writer.append("Z");
-            } else {
-                let sign = if offsetSeconds >= 0 { "+" } else { "-" };
-                let absOff = offsetSeconds.abs();
-                writer.append(sign);
-                appendPadded(into: writer, absOff / 3600, 2);
-                writer.append(":");
-                appendPadded(into: writer, (absOff % 3600) / 60, 2);
-            }
-        },
-        .Literal(s) => writer.append(s)
-    };
+// The civil fields a value can supply to a Format. Each `has*` flag gates the
+// components that read the corresponding fields; ungated components emit nothing.
+struct FormatFields {
+    var hasDate: Bool
+    var year: Int64
+    var month: Int64
+    var day: Int64
+    var weekday: Weekday
+    var hasTime: Bool
+    var hour: Int64
+    var minute: Int64
+    var second: Int64
+    var nanosecond: Int64
+    var hasZone: Bool
+    var offsetSeconds: Int64
+    var tzId: String
+    var tzAbbr: String
+
+    init() {
+        self.hasDate = false; self.year = 0; self.month = 1; self.day = 1; self.weekday = .Monday;
+        self.hasTime = false; self.hour = 0; self.minute = 0; self.second = 0; self.nanosecond = 0;
+        self.hasZone = false; self.offsetSeconds = 0; self.tzId = ""; self.tzAbbr = "";
+    }
+
+    mutating func setDate(d: Date) {
+        self.hasDate = true;
+        self.year = d.y; self.month = d.m; self.day = d.d;
+        self.weekday = d.weekday;
+    }
+
+    mutating func setTime(t: Time) {
+        self.hasTime = true;
+        self.hour = t.hour; self.minute = t.minute;
+        self.second = t.second; self.nanosecond = t.nanosecond;
+    }
+
+    // Render `fmt` against these fields.
+    func render(fmt: Format) -> String {
+        var b = StringBuilder();
+        for comp in fmt.components {
+            self.formatComponent(into: b, comp);
+        }
+        b.build()
+    }
+
+    func formatComponent(mutating into writer: some Formatter, component: FormatComponent) {
+        match component {
+            .Literal(s) => writer.append(s),
+            .Year => if self.hasDate { appendPadded(into: writer, self.year, 4); },
+            .ShortYear => if self.hasDate { appendPadded(into: writer, floorMod(self.year, 100), 2); },
+            .Month => if self.hasDate { appendPadded(into: writer, self.month, 2); },
+            .MonthUnpadded => if self.hasDate { writer.append("\(self.month)"); },
+            .MonthName => if self.hasDate { writer.append(MONTH_NAMES(self.month - 1)); },
+            .ShortMonthName => if self.hasDate { writer.append(SHORT_MONTH_NAMES(self.month - 1)); },
+            .NarrowMonthName => if self.hasDate { writer.append(NARROW_MONTH_NAMES(self.month - 1)); },
+            .Day => if self.hasDate { appendPadded(into: writer, self.day, 2); },
+            .DayUnpadded => if self.hasDate { writer.append("\(self.day)"); },
+            .Weekday => if self.hasDate { writer.append(WEEKDAY_NAMES(self.weekday.ordinal())); },
+            .ShortWeekday => if self.hasDate { writer.append(SHORT_WEEKDAY_NAMES(self.weekday.ordinal())); },
+            .NarrowWeekday => if self.hasDate { writer.append(NARROW_WEEKDAY_NAMES(self.weekday.ordinal())); },
+            .Hour => if self.hasTime { appendPadded(into: writer, self.hour, 2); },
+            .Hour12 => if self.hasTime { writer.append("\(hour12(self.hour))"); },
+            .Hour12Padded => if self.hasTime { appendPadded(into: writer, hour12(self.hour), 2); },
+            .Minute => if self.hasTime { appendPadded(into: writer, self.minute, 2); },
+            .Second => if self.hasTime { appendPadded(into: writer, self.second, 2); },
+            .Millisecond => if self.hasTime { appendPadded(into: writer, self.nanosecond / 1_000_000, 3); },
+            .Microsecond => if self.hasTime { appendPadded(into: writer, self.nanosecond / 1000, 6); },
+            .Nanosecond => if self.hasTime { appendPadded(into: writer, self.nanosecond, 9); },
+            .AmPm => if self.hasTime { writer.append(if self.hour < 12 { "AM" } else { "PM" }); },
+            .TimeZoneID => if self.hasZone { writer.append(self.tzId); },
+            .TimeZoneName => if self.hasZone { writer.append(self.tzAbbr); },
+            .Offset => if self.hasZone { appendOffset(into: writer, self.offsetSeconds); }
+        };
+    }
+}
+
+func hour12(hour: Int64) -> Int64 {
+    if hour == 0 { 12 } else if hour > 12 { hour - 12 } else { hour }
+}
+
+// RFC 3339 offset: "Z" at zero, otherwise "+HH:MM" / "-HH:MM".
+func appendOffset(mutating into writer: some Formatter, offsetSeconds: Int64) {
+    if offsetSeconds == 0 {
+        writer.append("Z");
+        return;
+    }
+    let absOff = offsetSeconds.abs();
+    writer.append(if offsetSeconds > 0 { "+" } else { "-" });
+    appendPadded(into: writer, absOff / 3600, 2);
+    writer.append(":");
+    appendPadded(into: writer, (absOff % 3600) / 60, 2);
 }
 
 // ============================================================================
@@ -263,63 +305,40 @@ func formatComponent(mutating into writer: some Formatter,
 
 extend Date {
     public func formatted(as fmt: Format) -> String {
-        var b = StringBuilder();
-        for comp in fmt.components {
-            formatComponent(into: b, component: comp,
-                          year: self.y, month: self.m, day: self.d,
-                          hour: 0, minute: 0, second: 0, nanosecond: 0,
-                          weekday: self.weekday,
-                          offsetSeconds: 0, tzName: "");
-        }
-        b.build()
+        var f = FormatFields();
+        f.setDate(self);
+        f.render(fmt)
     }
 }
 
 extend Time {
     public func formatted(as fmt: Format) -> String {
-        var b = StringBuilder();
-        for comp in fmt.components {
-            formatComponent(into: b, component: comp,
-                          year: 0, month: 0, day: 0,
-                          hour: self.hour, minute: self.minute,
-                          second: self.second, nanosecond: self.nanosecond,
-                          weekday: .Monday,
-                          offsetSeconds: 0, tzName: "");
-        }
-        b.build()
+        var f = FormatFields();
+        f.setTime(self);
+        f.render(fmt)
     }
 }
 
 extend DateTime {
     public func formatted(as fmt: Format) -> String {
-        var b = StringBuilder();
-        for comp in fmt.components {
-            formatComponent(into: b, component: comp,
-                          year: self.year, month: self.month, day: self.day,
-                          hour: self.hour, minute: self.minute,
-                          second: self.second, nanosecond: self.nanosecond,
-                          weekday: self.weekday,
-                          offsetSeconds: 0, tzName: "");
-        }
-        b.build()
+        var f = FormatFields();
+        f.setDate(self.dateVal);
+        f.setTime(self.timeVal);
+        f.render(fmt)
     }
 }
 
 extend ZonedDateTime {
     public func formatted(as fmt: Format) -> String {
         let dt = self.dateTime;
-        let off = self.offsetSeconds;
-        let abbr = self.tz.abbreviationAt(self.inst.secs);
-        var b = StringBuilder();
-        for comp in fmt.components {
-            formatComponent(into: b, component: comp,
-                          year: dt.year, month: dt.month, day: dt.day,
-                          hour: dt.hour, minute: dt.minute,
-                          second: dt.second, nanosecond: dt.nanosecond,
-                          weekday: dt.weekday,
-                          offsetSeconds: off, tzName: abbr);
-        }
-        b.build()
+        var f = FormatFields();
+        f.setDate(dt.dateVal);
+        f.setTime(dt.timeVal);
+        f.hasZone = true;
+        f.offsetSeconds = self.offsetSeconds;
+        f.tzId = self.tz.name;
+        f.tzAbbr = self.tz.abbreviationAt(self.inst.secs);
+        f.render(fmt)
     }
 }
 
@@ -372,7 +391,8 @@ func parseComponent(bytes: Array[UInt8], mutating pos pos: Int64, component comp
         .ShortYear => {
             // `try` hoisted out of operand position (MIR-3 OSSA ICE workaround).
             let yy = try parseDigits(bytes, pos, 2);
-            fields.year = 2000 + yy;
+            // POSIX strptime pivot: 69-99 -> 1969-1999, 00-68 -> 2000-2068.
+            fields.year = if yy >= 69 { 1900 + yy } else { 2000 + yy };
             pos = pos + 2;
         },
         .Month => { fields.month = try parseDigits(bytes, pos, 2); pos = pos + 2; },
@@ -456,45 +476,28 @@ func parseComponent(bytes: Array[UInt8], mutating pos pos: Int64, component comp
             fields.isAmPm = true;
             pos = pos + 2;
         },
-        .TimeZoneName => {
-            // Read until next literal or end
+        .TimeZoneID => {
+            // IANA identifiers ("America/New_York", "+05:30") run to the next ']' or the end.
             var end = pos;
-            while end < bytes.count and bytes(end) != 91 and bytes(end) != 93 {
-                end = end + 1;
-            }
+            while end < bytes.count and bytes(end) != 93 { end = end + 1; }
+            guard end > pos else { throw ParseError.InvalidFormat("expected time zone identifier"); }
             fields.tzName = stringFromBytes(bytes, pos, end - pos);
             fields.hasTz = true;
             pos = end;
         },
-        .FullTimeZoneName => {
-            // Same as TimeZoneName for parsing
+        .TimeZoneName => {
+            // Abbreviations ("EDT") are ambiguous across zones, so they are
+            // consumed but never resolved to a zone.
             var end = pos;
-            while end < bytes.count and bytes(end) != 91 and bytes(end) != 93 {
-                end = end + 1;
-            }
-            fields.tzName = stringFromBytes(bytes, pos, end - pos);
-            fields.hasTz = true;
+            while end < bytes.count and isAsciiLetter(bytes(end)) { end = end + 1; }
+            guard end > pos else { throw ParseError.InvalidFormat("expected time zone abbreviation"); }
             pos = end;
         },
         .Offset => {
-            guard pos < bytes.count else { throw ParseError.UnexpectedEnd; }
-            let c = bytes(pos);
-            if c == 90 or c == 122 {
-                fields.offsetSeconds = 0;
-                fields.hasOffset = true;
-                pos = pos + 1;
-            } else if c == 43 or c == 45 {
-                let h = try parseDigits(bytes, pos + 1, 2);
-                var mPos = pos + 3;
-                if mPos < bytes.count and bytes(mPos) == 58 { mPos = mPos + 1; }
-                let m = try parseDigits(bytes, mPos, 2);
-                fields.offsetSeconds = h * 3600 + m * 60;
-                if c == 45 { fields.offsetSeconds = 0 - fields.offsetSeconds; }
-                fields.hasOffset = true;
-                pos = mPos + 2;
-            } else {
-                throw ParseError.InvalidFormat("expected offset");
-            }
+            let (off, len) = try parseOffset(bytes, pos);
+            fields.offsetSeconds = off;
+            fields.hasOffset = true;
+            pos = pos + len;
         },
         .Literal(expected) => {
             let expBytes: Array[UInt8] = Array(from: expected.bytes);
@@ -560,89 +563,119 @@ func stringFromBytes(bytes: Array[UInt8], start: Int64, length: Int64) -> String
     String(fromUtf8Unchecked: bytes(start..<(start + length)))
 }
 
+func isAsciiLetter(b: UInt8) -> Bool {
+    (b >= 65 and b <= 90) or (b >= 97 and b <= 122)
+}
+
+// Parse an RFC 3339 offset at `pos`: "Z"/"z", "+HH:MM", "-HH:MM" or "+HHMM".
+// Returns (offset seconds east of UTC, bytes consumed).
+func parseOffset(bytes: Array[UInt8], pos: Int64) -> (Int64, Int64) throws ParseError {
+    guard pos < bytes.count else { throw ParseError.UnexpectedEnd; }
+    let c = bytes(pos);
+    if c == 90 or c == 122 { return (0, 1); }
+    guard c == 43 or c == 45 else { throw ParseError.InvalidFormat("expected offset at position \(pos)"); }
+    let h = try parseDigits(bytes, pos + 1, 2);
+    var mPos = pos + 3;
+    if mPos < bytes.count and bytes(mPos) == 58 { mPos = mPos + 1; }
+    let m = try parseDigits(bytes, mPos, 2);
+    guard h < 24 and m < 60 else { throw ParseError.InvalidValue("offset out of range"); }
+    let magnitude = h * 3600 + m * 60;
+    let off = if c == 45 { 0 - magnitude } else { magnitude };
+    (off, mPos + 2 - pos)
+}
+
+// Index of the offset ("Z", "+", "-") that follows an ISO date-time in
+// bytes[0..<end], or `end` if there is none. Scanning starts past the date's
+// own '-' separators (position 19 = after "YYYY-MM-DDTHH:MM:SS").
+func findOffsetStart(bytes: Array[UInt8], end: Int64) -> Int64 {
+    var i: Int64 = 19;
+    while i < end {
+        let c = bytes(i);
+        if c == 90 or c == 122 or c == 43 or c == 45 { return i; }
+        i = i + 1;
+    }
+    end
+}
+
+// Run every component of `fmt` over `input`, rejecting unconsumed trailing
+// input, and fold a 12-hour clock with AM/PM into a 24-hour `hour`.
+func parseFields(input: String, fmt: Format) -> ParsedFields throws ParseError {
+    let bytes: Array[UInt8] = Array(from: input.bytes);
+    var pos: Int64 = 0;
+    var fields = ParsedFields();
+    for comp in fmt.components {
+        try parseComponent(bytes, pos: pos, component: comp, fields: fields);
+    }
+    guard pos == bytes.count else {
+        throw ParseError.InvalidFormat("unexpected trailing input at position \(pos)");
+    }
+    if fields.isAmPm {
+        if fields.isPm and fields.hour < 12 { fields.hour = fields.hour + 12; }
+        if not fields.isPm and fields.hour == 12 { fields.hour = 0; }
+    }
+    fields
+}
+
 // ============================================================================
 // parse(from:, as:) extensions
 // ============================================================================
 
 extend Date {
     public static func parse(from input: String, as fmt: Format) -> Date throws ParseError {
-        let bytes: Array[UInt8] = Array(from: input.bytes);
-        var pos: Int64 = 0;
-        var fields = ParsedFields();
-        for comp in fmt.components {
-            try parseComponent(bytes, pos: pos, component: comp, fields: fields);
-        }
-        guard isValidDate(fields.year, fields.month, fields.day) else {
+        let f = try parseFields(input, fmt);
+        guard isValidDate(f.year, f.month, f.day) else {
             throw ParseError.InvalidValue("invalid date");
         }
-        .Ok(Date.unchecked(year: fields.year, month: fields.month, day: fields.day))
+        .Ok(Date(rawYear: f.year, rawMonth: f.month, rawDay: f.day))
     }
 }
 
 extend Time {
     public static func parse(from input: String, as fmt: Format) -> Time throws ParseError {
-        let bytes: Array[UInt8] = Array(from: input.bytes);
-        var pos: Int64 = 0;
-        var fields = ParsedFields();
-        for comp in fmt.components {
-            try parseComponent(bytes, pos: pos, component: comp, fields: fields);
-        }
-        var hour = fields.hour;
-        if fields.isAmPm {
-            if fields.isPm and hour < 12 { hour = hour + 12; }
-            if not fields.isPm and hour == 12 { hour = 0; }
-        }
-        Time(hour: hour, minute: fields.minute, second: fields.second, nanosecond: fields.nanosecond).mapErr { ParseError.InvalidValue("invalid time") }
+        let f = try parseFields(input, fmt);
+        let t = Time(hour: f.hour, minute: f.minute, second: f.second, nanosecond: f.nanosecond);
+        t.mapErr { ParseError.InvalidValue("invalid time") }
     }
 }
 
 extend DateTime {
     public static func parse(from input: String, as fmt: Format) -> DateTime throws ParseError {
-        let bytes: Array[UInt8] = Array(from: input.bytes);
-        var pos: Int64 = 0;
-        var fields = ParsedFields();
-        for comp in fmt.components {
-            try parseComponent(bytes, pos: pos, component: comp, fields: fields);
-        }
-        var hour = fields.hour;
-        if fields.isAmPm {
-            if fields.isPm and hour < 12 { hour = hour + 12; }
-            if not fields.isPm and hour == 12 { hour = 0; }
-        }
-        DateTime(year: fields.year, month: fields.month, day: fields.day,
-                     hour: hour, minute: fields.minute, second: fields.second,
-                     nanosecond: fields.nanosecond).mapErr { ParseError.InvalidValue("invalid datetime") }
+        let f = try parseFields(input, fmt);
+        DateTime(year: f.year, month: f.month, day: f.day,
+                 hour: f.hour, minute: f.minute, second: f.second,
+                 nanosecond: f.nanosecond).mapErr { ParseError.InvalidValue("invalid datetime") }
     }
 }
 
 extend ZonedDateTime {
+    // Zone resolution: a parsed zone ID wins, using a parsed offset (if any) to
+    // pick the side of a DST fold; an offset alone yields a fixed-offset zone;
+    // neither yields UTC.
     public static func parse(from input: String, as fmt: Format) -> ZonedDateTime throws ParseError {
-        let bytes: Array[UInt8] = Array(from: input.bytes);
-        var pos: Int64 = 0;
-        var fields = ParsedFields();
-        for comp in fmt.components {
-            try parseComponent(bytes, pos: pos, component: comp, fields: fields);
+        let f = try parseFields(input, fmt);
+        let dt = try DateTime(year: f.year, month: f.month, day: f.day,
+                              hour: f.hour, minute: f.minute, second: f.second,
+                              nanosecond: f.nanosecond).mapErr { ParseError.InvalidValue("invalid datetime") };
+        let zoneName: String? = if f.hasTz { .Some(f.tzName.clone()) } else { .None };
+        let offset: Int64? = if f.hasOffset { .Some(f.offsetSeconds) } else { .None };
+        ZonedDateTime.resolveParsed(dt, zoneName: zoneName, offset: offset)
+    }
+}
+
+extend Instant {
+    // Parse with a custom format. Like Instant.parse(from:), the input must
+    // carry an offset or zone ID — without one the text names no instant.
+    public static func parse(from input: String, as fmt: Format) -> Instant throws ParseError {
+        let f = try parseFields(input, fmt);
+        guard f.hasOffset or f.hasTz else {
+            throw ParseError.InvalidFormat("format has no offset or time zone");
         }
-        var hour = fields.hour;
-        if fields.isAmPm {
-            if fields.isPm and hour < 12 { hour = hour + 12; }
-            if not fields.isPm and hour == 12 { hour = 0; }
-        }
-        let dt = try DateTime(year: fields.year, month: fields.month, day: fields.day,
-                              hour: hour, minute: fields.minute, second: fields.second,
-                              nanosecond: fields.nanosecond).mapErr { ParseError.InvalidValue("invalid datetime") };
-        if fields.hasTz {
-            if let .Some(tz) = TimeZone(fields.tzName) {
-                return .Ok(dt.toZoned(in: tz));
-            }
-        }
-        if fields.hasOffset {
-            // Use UTC and adjust by offset
-            let epochDay = daysToCivil(fields.year, fields.month, fields.day);
-            let epochSec = epochDay * 86400 + hour * 3600 + fields.minute * 60 + fields.second - fields.offsetSeconds;
-            let inst = Instant.raw(secs: epochSec, nanos: fields.nanosecond);
-            return .Ok(inst.toZoned(in: TimeZone.utc));
-        }
-        .Ok(dt.toZoned(in: TimeZone.utc))
+        let dt = try DateTime(year: f.year, month: f.month, day: f.day,
+                              hour: f.hour, minute: f.minute, second: f.second,
+                              nanosecond: f.nanosecond).mapErr { ParseError.InvalidValue("invalid datetime") };
+        let zoneName: String? = if f.hasTz { .Some(f.tzName.clone()) } else { .None };
+        let offset: Int64? = if f.hasOffset { .Some(f.offsetSeconds) } else { .None };
+        let z = try ZonedDateTime.resolveParsed(dt, zoneName: zoneName, offset: offset);
+        .Ok(z.instant)
     }
 }

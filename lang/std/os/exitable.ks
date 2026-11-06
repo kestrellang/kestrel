@@ -9,7 +9,7 @@ module std.os
 import std.numeric.(Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64)
 import std.text.(Formattable)
 import std.result.(Result)
-import std.io.(eprintln)
+import std.io.stdio.(eprintln)
 
 /// A process exit code.
 ///
@@ -60,28 +60,28 @@ extend ExitCode: Exitable {
 // ============================================================================
 
 extend Int8: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend Int16: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend Int32: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend Int64: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend UInt8: Exitable {
     consuming func report() -> ExitCode { ExitCode(self) }
 }
 extend UInt16: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend UInt32: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 extend UInt64: Exitable {
-    consuming func report() -> ExitCode { ExitCode(UInt8(from: self)) }
+    consuming func report() -> ExitCode { ExitCode(UInt8(truncating: self)) }
 }
 
 // ============================================================================

@@ -239,32 +239,26 @@ it.next();  // None
 
 ### Representation
 
-A `(ptr, length, index)` triple: a raw pointer to the buffer plus
+A `(source, length, index)` triple: the borrowed `StringSlice` plus
 the cursor and total-length pair the iterator advances through.
 
 ### Memory Model
 
-Value type. The pointer aliases string storage; do not retain the
-iterator across mutations of the source `String`.
+Borrows the source `String` and reads its current buffer on every
+`next()`, so it can't outlive the string and never reads freed memory.
 
 _Defined in `lang/std/text/views.ks`._
 
 ### Members
 
-#### initializer `From Pointer`
+#### initializer `From Slice`
 
 ```kestrel
-public init(ptr: lang.ptr[lang.i8], length: Int64, index: Int64)
+init(source: StringSlice, length: Int64, index: Int64)
 ```
 
-Constructs a bytes iterator from a raw pointer, total byte count, and starting offset.
-
-Prefer `String.bytes.iter()` over calling this directly.
-
-##### Safety
-
-`ptr` must point to at least `length` valid bytes; `index` must
-be in `0..=length`.
+Iterates the first `length` bytes of `source`, from `index`. Use
+`String.bytes.iter()`; `length` must not exceed the slice.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -341,12 +335,12 @@ s.bytes(checked: 5);         // None (out of bounds)
 
 ### Representation
 
-A `(ptr, length)` pair pointing at the source string's UTF-8 buffer.
+A `(slice, length)` pair: the borrowed `StringSlice` and its byte count.
 
 ### Memory Model
 
-Borrows the source string's storage; the view is invalidated by any
-mutation that reallocates that buffer. Copy out to a new `String`
+Borrows the source `String` and reads its current buffer on every
+access, so it can't outlive the string. Copy out to a new `String`
 (e.g. via `substring`) if you need an independent value.
 
 _Defined in `lang/std/text/views.ks`._
@@ -366,12 +360,11 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Clamping`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.BytesClampedYield where I: BytesClampable { get }
+public subscript(clamped: Int64) -> UInt8? { get }
 ```
 
-Reads at `index` with bounds saturated to `[0, count)`. Single-
-byte indexes yield `UInt8?` (`None` on empty view); range indexes
-yield `BytesView` (always valid, possibly empty).
+The byte at `index` saturated into `[0, count)`, or `.None` when
+the view is empty.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -413,6 +406,17 @@ Reads at `index` with no bounds check.
 Caller must guarantee `0 <= index < count`. For ranges, the
 endpoints must be in `0..=count`; otherwise the resulting
 sub-view aliases out-of-bounds memory.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Within`
+
+```kestrel
+public subscript[I](within: I) -> I.BytesClampedYield where I: BytesClampable { get }
+```
+
+The sub-view of `range` clamped into `[0, count)` (always valid,
+possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1323,32 +1327,27 @@ it.next();  // None
 
 ### Representation
 
-A `(ptr, length, byteIndex)` triple. `byteIndex` walks the buffer
+A `(source, length, byteIndex)` triple. `byteIndex` walks the buffer
 in variable-width steps according to the UTF-8 encoding.
 
 ### Memory Model
 
-Value type that aliases the source string's buffer. Do not retain
-across mutations of the source `String`.
+Borrows the source `String` and reads its current buffer on every
+`next()`, so it can't outlive the string and never reads freed memory.
 
 _Defined in `lang/std/text/views.ks`._
 
 ### Members
 
-#### initializer `From Pointer`
+#### initializer `From Slice`
 
 ```kestrel
-public init(ptr: lang.ptr[lang.i8], length: Int64, byteIndex: Int64)
+init(source: StringSlice, length: Int64, byteIndex: Int64)
 ```
 
-Constructs a chars iterator from a raw pointer, byte length, and starting byte offset.
-
-Prefer `String.chars.iter()` over calling this directly.
-
-##### Safety
-
-`ptr` must point to `length` valid UTF-8 bytes; `byteIndex` must
-be `0` or land on a UTF-8 boundary.
+Iterates the first `length` bytes of `source` as code points, from
+`byteIndex` (0 or a UTF-8 boundary). Use `String.chars.iter()`;
+`length` must not exceed the slice.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1449,12 +1448,11 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Clamping`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.CharsClampedYield where I: CharsClampable { get }
+public subscript(clamped: Int64) -> Char? { get }
 ```
 
-Reads at `index` with bounds saturated to `[0, count)`. Single-
-char indexes yield `Char?` (`None` on empty view); range indexes
-yield `CharsView` (always valid, possibly empty).
+The char at `index` saturated into `[0, count)`, or `.None` when
+the view is empty.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1479,6 +1477,17 @@ Reads a single code point (`Char`) for `Int64` indexes, or a
 zero-copy `CharsView` sub-view for `Range[Int64]` /
 `ClosedRange[Int64]`. All access is O(n) because UTF-8 is
 variable-width. Panics on out-of-bounds.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Within`
+
+```kestrel
+public subscript[I](within: I) -> I.CharsClampedYield where I: CharsClampable { get }
+```
+
+The sub-view of `range` clamped into `[0, count)` (always valid,
+possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -2110,7 +2119,7 @@ _Defined in `lang/std/text/format.ks`._
 public var precision: Int64?
 ```
 
-For floats: number of decimal places (or significant digits in `Auto` mode). For strings: maximum character count.
+For floats: number of decimal places (an explicit precision prints `Auto` in fixed notation). For strings: maximum character count.
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -2121,6 +2130,7 @@ public var radix: Int64
 ```
 
 Numeric base for integer formatting: 2 (binary), 8 (octal), 10 (decimal), 16 (hex).
+Floats honor only 16, printing hexadecimal floating point (`0x1.8p+1` for 3.0).
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -2230,8 +2240,9 @@ Protocol for types that can render themselves as a `String` under a `FormatOptio
 Print routines and string interpolation `"\{expr}"` and `"\{expr:spec}"`
 both ultimately bottom out in `format`. Implementors should honour
 every `FormatOptions` field that is meaningful for their domain
-(alignment and width are universal; `radix` only applies to integers,
-`floatStyle` only to floats) and silently ignore fields that aren't.
+(alignment and width are universal; `radix` applies to integers, and to
+floats only as `16`, hexadecimal floating point; `floatStyle` only to
+floats) and silently ignore fields that aren't.
 
 ### Examples
 
@@ -2255,7 +2266,7 @@ _Defined in `lang/std/text/format.ks`._
 #### function `append`
 
 ```kestrel
-mutating func append(some Str)
+mutating func append(some Str and not Static)
 ```
 
 _Defined in `lang/std/text/format.ks`._
@@ -2693,12 +2704,11 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Clamping`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.GraphemesClampedYield where I: GraphemesClampable { get }
+public subscript(clamped: Int64) -> Grapheme? { get }
 ```
 
-Reads at `index` saturated to `[0, count)`. Single-grapheme
-indexes yield `Grapheme?` (`.None` only when the view is empty);
-range indexes yield `GraphemesView` (always valid, possibly empty).
+The grapheme at `index` saturated into `[0, count)`, or `.None` when
+the view is empty.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -2723,6 +2733,17 @@ public subscript[I](I) -> I.GraphemesYield where I: GraphemesIndex { get }
 `ClosedRange[Int64]` yield a zero-copy `GraphemesView` sub-view
 covering those clusters. **O(n)** — walks the segmenter from the
 start. Panics on out-of-bounds.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Within`
+
+```kestrel
+public subscript[I](within: I) -> I.GraphemesClampedYield where I: GraphemesClampable { get }
+```
+
+The sub-view of `range` clamped into `[0, count)` (always valid,
+possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -2929,7 +2950,7 @@ _Defined in `lang/std/text/views.ks`._
 #### initializer `init`
 
 ```kestrel
-public init(ptr: lang.ptr[lang.i8], length: Int64)
+init(source: StringSlice, length: Int64)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3007,7 +3028,7 @@ _Defined in `lang/std/text/views.ks`._
 #### initializer `init`
 
 ```kestrel
-public init(ptr: lang.ptr[lang.i8], length: Int64)
+init(source: StringSlice, length: Int64)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3181,20 +3202,15 @@ _Defined in `lang/std/text/views.ks`._
 
 ### Members
 
-#### initializer `From Pointer`
+#### initializer `From Slice`
 
 ```kestrel
-public init(ptr: lang.ptr[lang.i8], length: Int64, byteIndex: Int64, done: Bool)
+init(source: StringSlice, length: Int64, byteIndex: Int64, done: Bool)
 ```
 
-Constructs a lines iterator from a raw pointer, total byte count, starting byte offset, and `done` flag.
-
-Prefer `someString.lines.iter()` over calling this directly.
-
-##### Safety
-
-`ptr` must point to `length` valid UTF-8 bytes; `byteIndex`
-must be `0` or sit at a UTF-8 boundary.
+Iterates the lines in the first `length` bytes of `source`, from
+`byteIndex` (0 or a UTF-8 boundary). Use `someString.lines.iter()`;
+`length` must not exceed the slice.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3294,12 +3310,11 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Clamping`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.LinesClampedYield where I: LinesClampable { get }
+public subscript(clamped: Int64) -> String? { get }
 ```
 
-Reads at `index` saturated to `[0, count)`. Single-line indexes
-yield `String?` (`.None` only when the view holds no lines);
-range indexes yield `LinesView` (always valid, possibly empty).
+The line at `index` saturated into `[0, count)`, or `.None` when
+the view is empty.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3325,6 +3340,17 @@ public subscript[I](I) -> I.LinesYield where I: LinesIndex { get }
 `LinesView` sub-view covering those lines (terminators preserved
 in the underlying bytes). **O(n)** — walks the buffer from the
 start. Panics on out-of-bounds.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Within`
+
+```kestrel
+public subscript[I](within: I) -> I.LinesClampedYield where I: LinesClampable { get }
+```
+
+The sub-view of `range` clamped into `[0, count)` (always valid,
+possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3511,7 +3537,7 @@ _Defined in `lang/std/text/views.ks`._
 #### initializer `init`
 
 ```kestrel
-public init(ptr: lang.ptr[lang.i8], length: Int64)
+init(source: StringSlice, length: Int64)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3754,10 +3780,11 @@ _Defined in `lang/std/text/views.ks`._
 #### function `collect`
 
 ```kestrel
-public func collect() -> Array[StringSlice]
+public func collect() -> Array[String]
 ```
 
-Collects all segments into an array.
+Collects all segments into an array of owned strings. (A segment
+borrows the source string, so an array of slices can't exist.)
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3919,10 +3946,11 @@ _Defined in `lang/std/text/views.ks`._
 #### function `collect`
 
 ```kestrel
-public func collect() -> Array[StringSlice]
+public func collect() -> Array[String]
 ```
 
-Collects all segments into an array.
+Collects all segments into an array of owned strings. (A segment
+borrows the source string, so an array of slices can't exist.)
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -4079,13 +4107,12 @@ _Defined in `lang/std/text/str.ks`._
 #### function `asByteSlice`
 
 ```kestrel
-public func asByteSlice() -> ArraySlice[UInt8]
+public func asByteSlice() -> &Slice[UInt8]
 ```
 
-Returns a non-owning `ArraySlice[UInt8]` view over this string's
-raw UTF-8 bytes — no copy, no allocation. The slice borrows the
-live string buffer, so it must not outlive the string (or any
-mutation of it). O(1).
+Returns a borrowed `Slice[UInt8]` view over this string's raw
+UTF-8 bytes — no copy, no allocation. The view borrows the live
+string buffer, so it can't outlive the string. O(1).
 
 Use this to hand the bytes to a sink (a socket, a hasher, an
 FFI call) without materializing an `Array[UInt8]` via `toBytes()`.
@@ -4164,7 +4191,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `contains`
 
 ```kestrel
-public func contains(some Str) -> Bool
+public func contains(some Str and not Static) -> Bool
 ```
 
 Returns true if `substring` appears anywhere in this string.
@@ -4197,7 +4224,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `ends`
 
 ```kestrel
-public func ends(with: some Str) -> Bool
+public func ends(with: some Str and not Static) -> Bool
 ```
 
 Returns true if this string ends with `suffix`.
@@ -4216,7 +4243,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `equalsCaseInsensitive`
 
 ```kestrel
-public func equalsCaseInsensitive(some Str) -> Bool
+public func equalsCaseInsensitive(some Str and not Static) -> Bool
 ```
 
 Compares two strings for equality after Unicode case folding.
@@ -4237,7 +4264,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `equalsIgnoreAsciiCase`
 
 ```kestrel
-public func equalsIgnoreAsciiCase(some Str) -> Bool
+public func equalsIgnoreAsciiCase(some Str and not Static) -> Bool
 ```
 
 ASCII case-insensitive equality — folds only `A`–`Z` ↔ `a`–`z`;
@@ -4260,7 +4287,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `firstIndex`
 
 ```kestrel
-public func firstIndex(of: some Str) -> ByteIndex?
+public func firstIndex(of: some Str and not Static) -> ByteIndex?
 ```
 
 Returns the byte index of the first occurrence of `substring`,
@@ -4314,7 +4341,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `lastIndex`
 
 ```kestrel
-public func lastIndex(of: some Str) -> ByteIndex?
+public func lastIndex(of: some Str and not Static) -> ByteIndex?
 ```
 
 Returns the byte index of the last occurrence of `substring`,
@@ -4389,10 +4416,10 @@ Unicode case mapping, use `lowercased()`.
 
 _Defined in `lang/std/text/str.ks`._
 
-#### function `pad`
+#### function `padded`
 
 ```kestrel
-public func pad(leading: Int64, with: Char) -> String
+public func padded(leading: Int64, with: Char) -> String
 ```
 
 Returns the string padded at the start with `char` so the
@@ -4404,15 +4431,15 @@ returns a copy unchanged.
 ##### Examples
 
 ```
-"42".pad(leading: 5, with: '0');  // "00042"
+"42".padded(leading: 5, with: '0');  // "00042"
 ```
 
 _Defined in `lang/std/text/str.ks`._
 
-#### function `pad`
+#### function `padded`
 
 ```kestrel
-public func pad(trailing: Int64, with: Char) -> String
+public func padded(trailing: Int64, with: Char) -> String
 ```
 
 Returns the string padded at the end with `char` so the
@@ -4424,7 +4451,7 @@ returns a copy unchanged.
 ##### Examples
 
 ```
-"42".pad(trailing: 5, with: '.');  // "42..."
+"42".padded(trailing: 5, with: '.');  // "42..."
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4452,7 +4479,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `replaced`
 
 ```kestrel
-public func replaced(some Str, with: some Str) -> String
+public func replaced(some Str and not Static, with: some Str and not Static) -> String
 ```
 
 Returns a copy with every occurrence of `pattern` replaced
@@ -4474,7 +4501,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `split`
 
 ```kestrel
-public func split(some Str) -> SplitView
+public func split(some Str and not Static) -> SplitView
 ```
 
 Returns a lazy view that splits on `separator`, yielding
@@ -4514,7 +4541,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `starts`
 
 ```kestrel
-public func starts(with: some Str) -> Bool
+public func starts(with: some Str and not Static) -> Bool
 ```
 
 Returns true if this string starts with `prefix`.
@@ -4958,7 +4985,7 @@ _Defined in `lang/std/ffi/cstring.ks`._
 #### initializer `From Char Iterable`
 
 ```kestrel
-public init[I](from: I) where I: Iterable, I.Item == Char
+public init[I](from: I) where I: Iterable, I: not Static, I.Item == Char
 ```
 
 Builds a string by encoding each character of `chars` as UTF-8.
@@ -4968,7 +4995,7 @@ Mirrors `Array.init(from:)` and `Set.init(from:)` — accepts any
 result of an iterator chain back into a `String`:
 
 ```
-let upper = String(from: "hello".chars.iter().map { it.toUpper() });
+let upper = String(from: "hello".chars.iter().map { it.toUpper() }.collect());
 // "HELLO"
 ```
 
@@ -4990,7 +5017,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8`
 
 ```kestrel
-public init[S](fromUtf8: S)? where S: Slice[UInt8]
+public init[S](fromUtf8: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Constructs a string from validated UTF-8 bytes, returning `null`
@@ -5007,7 +5034,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8 Lossy`
 
 ```kestrel
-public init[S](fromUtf8Lossy: S) where S: Slice[UInt8]
+public init[S](fromUtf8Lossy: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Constructs a string from bytes, replacing invalid UTF-8 sequences
@@ -5024,7 +5051,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8 Unchecked`
 
 ```kestrel
-public init[S](fromUtf8Unchecked: S) where S: Slice[UInt8]
+public init[S](fromUtf8Unchecked: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Constructs a string by copying bytes without UTF-8 validation.
@@ -5098,10 +5125,30 @@ concatenated to the current buffer, yield valid UTF-8.
 
 _Defined in `lang/std/text/string.ks`._
 
+#### function `_byteCount`
+
+```kestrel
+func _byteCount() -> Int64
+```
+
+The current byte count, for `StringSlice` bounds checks.
+
+_Defined in `lang/std/text/string.ks`._
+
+#### function `_bytePtr`
+
+```kestrel
+func _bytePtr() -> Pointer[UInt8]
+```
+
+The current byte buffer, for `StringSlice` reads.
+
+_Defined in `lang/std/text/string.ks`._
+
 #### function `append`
 
 ```kestrel
-public mutating func append(some Str)
+public mutating func append(some Str and not Static)
 ```
 
 Appends `other`'s bytes to this string. COW.
@@ -5287,7 +5334,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `replace`
 
 ```kestrel
-public mutating func replace(some Str, with: some Str)
+public mutating func replace(some Str and not Static, with: some Str and not Static)
 ```
 
 Replaces every occurrence of `pattern` with `replacement`, in place.
@@ -5450,8 +5497,8 @@ _Defined in `lang/std/text/string.ks`._
 public func asSlice() -> StringSlice
 ```
 
-Returns a `StringSlice` covering this string's entire buffer.
-Shares storage via refcount — zero-copy.
+Returns a `StringSlice` covering the whole string. It borrows the
+string — zero-copy, no refcount.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -5855,7 +5902,7 @@ _Defined in `lang/std/text/builder.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(some Str)
+public mutating func append(some Str and not Static)
 ```
 
 Appends the UTF-8 bytes of `other` to this builder. Accepts any
@@ -5913,12 +5960,16 @@ _Defined in `lang/std/text/slice.ks`._
 public struct StringSlice { /* private fields */ }
 ```
 
-An immutable window into a `String`'s UTF-8 bytes with shared
-ownership. The central read-only abstraction of the text library.
+A read-only window into a `String`'s UTF-8 bytes. It borrows the
+string: a slice can't outlive the string it came from, and it can't
+be stored in a field or an array that would (E494/E509). Use
+`.toOwned()` to keep a piece.
 
-Zero-cost to create from a String (share the RcBox, cover the
-whole range). Zero-cost to narrow (adjust start/end). Keeps the
-source alive as long as the slice exists.
+Making and narrowing a slice is free: no refcount, and the string's
+buffer isn't pinned, so changing the string later doesn't copy it.
+Every read goes through the string's current buffer. If the string
+gets shorter than the slice while the slice is alive, the next read
+panics instead of reading freed memory.
 
 ### Examples
 
@@ -5931,25 +5982,21 @@ slice.toOwned();               // "hello, world"
 
 ### Representation
 
-`(source: RcBox[StringStorage], start: Int64, end: Int64)`.
-
-### Memory Model
-
-Shared ownership via `RcBox`. The source string's buffer stays
-alive as long as any slice references it. Call `.toOwned()` to
-copy just the slice's bytes into an independent `String`.
+`(base: &String, start: Int64, end: Int64)`. `start` and `end` are
+byte offsets into the whole string, not into this slice.
 
 _Defined in `lang/std/text/slice.ks`._
 
 ### Members
 
-#### initializer `From Source`
+#### function `_bytes`
 
 ```kestrel
-public init(source: RcBox[StringStorage], start: Int64, end: Int64)
+func _bytes() -> lang.ptr[lang.i8]
 ```
 
-Creates a slice covering `[start, end)` in the given storage.
+The current address of this slice's first byte, as the raw pointer
+the text views read through. Re-read it on every access.
 
 _Defined in `lang/std/text/slice.ks`._
 
@@ -5959,12 +6006,23 @@ _Defined in `lang/std/text/slice.ks`._
 func _rawPtr() -> Pointer[UInt8]
 ```
 
+The string's current byte buffer. Panics when the string got
+shorter than this slice since it was made.
+
 _Defined in `lang/std/text/slice.ks`._
 
 #### function `_readByte`
 
 ```kestrel
 func _readByte(at: Int64) -> UInt8
+```
+
+_Defined in `lang/std/text/slice.ks`._
+
+#### field `base`
+
+```kestrel
+let base: &String
 ```
 
 _Defined in `lang/std/text/slice.ks`._
@@ -5984,14 +6042,6 @@ public var isEmpty: Bool { get }
 ```
 
 True when the slice covers zero bytes.
-
-_Defined in `lang/std/text/slice.ks`._
-
-#### field `source`
-
-```kestrel
-var source: RcBox[StringStorage]
-```
 
 _Defined in `lang/std/text/slice.ks`._
 

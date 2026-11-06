@@ -35,6 +35,11 @@
 //!
 //! **Notes:** (none)
 //!
+//! ### E628 -- `extension_stored_field` (Error, Correctness)
+//!
+//! An `extend` block cannot add instance storage: the extended type's layout
+//! is fixed by its declaration. Use a computed property, or `static`.
+//!
 //! ### E416 -- `generic_type_static_stored_property` (Error, Correctness)
 //!
 //! **Message:** "static stored properties not supported in generic types"
@@ -44,7 +49,9 @@
 //!   - Span source: `util::entity_span` on the field entity
 //!   - Message: "static stored property in generic type '{type_name}'"
 //!
-//! **Notes:** (none)
+//! **Notes:** Swift's rule, judged on the TYPE: a stored static in any
+//! `extend` of a generic type (even `extend Box[Int64]`) or of a protocol is
+//! rejected too (`generic_owner`).
 //!
 //! ### E466 -- `some_in_field_type` (Error, Correctness)
 //!
@@ -121,6 +128,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E466",
         name: "some_in_field_type",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E628",
+        name: "extension_stored_field",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -232,31 +245,74 @@ impl DeclCheck for FieldAnalyzer {
             return diags;
         }
 
+        // Check: an extension cannot add instance storage to its target.
+        if matches!(parent_kind, Some(NodeKind::Extension)) && !is_static && !is_computed {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[5].id,
+                severity: DESCRIPTORS[5].default_severity,
+                message: "extensions cannot add stored properties".into(),
+                labels: vec![DiagLabel {
+                    span: span.clone(),
+                    message: "stored property declared in an extension".into(),
+                    is_primary: true,
+                }],
+                notes: vec![
+                    "a type's storage is fixed by its declaration; use a computed \
+                     property or a `static` one"
+                        .into(),
+                ],
+            });
+            return diags;
+        }
+
         // Check 3: static stored properties not supported in generic types
-        // Skip protocol fields — they're abstract declarations, not stored properties
-        if is_static && !is_computed && !matches!(parent_kind, Some(NodeKind::Protocol)) {
-            let parent_is_generic = cx
-                .query
-                .get::<TypeParams>(parent)
-                .is_some_and(|tp| !tp.0.is_empty());
+        // (Swift's rule). Skip protocol fields — they're abstract
+        // declarations, not stored properties.
+        if is_static
+            && !is_computed
+            && !matches!(parent_kind, Some(NodeKind::Protocol))
+            && let Some(generic_type) = generic_owner(cx, parent)
+        {
+            let type_name = util::entity_name(cx.query, generic_type);
 
-            if parent_is_generic {
-                let type_name = util::entity_name(cx.query, parent);
-
-                diags.push(AnalyzeDiagnostic {
-                    descriptor_id: DESCRIPTORS[2].id,
-                    severity: DESCRIPTORS[2].default_severity,
-                    message: "static stored properties not supported in generic types".into(),
-                    labels: vec![DiagLabel {
-                        span,
-                        message: format!("static stored property in generic type '{}'", type_name),
-                        is_primary: true,
-                    }],
-                    notes: vec![],
-                });
-            }
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[2].id,
+                severity: DESCRIPTORS[2].default_severity,
+                message: "static stored properties not supported in generic types".into(),
+                labels: vec![DiagLabel {
+                    span,
+                    message: format!("static stored property in generic type '{}'", type_name),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
         }
 
         diags
     }
+}
+
+/// The generic type a stored static declared in `parent` would belong to:
+/// `parent` itself when it has type params, or — for an `extend` block — the
+/// extended type when that type is generic or a protocol (`Self` is generic
+/// over every conformer). The rule is about the TYPE, so `extend Box[Int64]`
+/// counts: `Box` is generic even though this extension names one
+/// instantiation.
+fn generic_owner(
+    cx: &DeclContext<'_>,
+    parent: kestrel_hecs::Entity,
+) -> Option<kestrel_hecs::Entity> {
+    let owner = match cx.query.get::<NodeKind>(parent) {
+        Some(NodeKind::Extension) => cx.query.query(kestrel_name_res::ExtensionTargetEntity {
+            extension: parent,
+            root: cx.root,
+        })?,
+        _ => parent,
+    };
+    let is_generic = matches!(cx.query.get::<NodeKind>(owner), Some(NodeKind::Protocol))
+        || cx
+            .query
+            .get::<TypeParams>(owner)
+            .is_some_and(|tp| !tp.0.is_empty());
+    is_generic.then_some(owner)
 }

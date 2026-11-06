@@ -79,9 +79,14 @@ pub fn is_splittable(ctor: &Constructor) -> bool {
 // ===== Intervals =====
 //
 // Integers and chars are cut the same way, over `i128` so `i64::MAX + 1` and
-// the open ends need no special cases.
+// the open ends need no special cases. An open integer end is unbounded
+// (`OPEN_MIN`/`OPEN_MAX`, beyond every 64-bit value with room for `+ 1`):
+// the type's real domain is applied only where coverage
+// is judged (`usefulness::covers_whole_domain`), so splitting needs no type.
 
 const CHAR_MAX: i128 = char::MAX as i128;
+pub(crate) const OPEN_MIN: i128 = i128::MIN / 2;
+pub(crate) const OPEN_MAX: i128 = i128::MAX / 2;
 const SURROGATE_LO: i128 = 0xD800;
 const SURROGATE_HI: i128 = 0xDFFF;
 
@@ -89,11 +94,10 @@ const SURROGATE_HI: i128 = 0xDFFF;
 /// (`10..=0`), which covers no value — bounds validation reports it.
 pub(crate) fn int_interval(ctor: &Constructor) -> Option<(i128, i128)> {
     let (lo, hi) = match ctor {
-        Constructor::IntLiteral(v) => (*v as i128, *v as i128),
-        Constructor::IntRange { start, end } => (
-            start.map_or(i64::MIN as i128, |s| s as i128),
-            end.map_or(i64::MAX as i128, |e| e as i128),
-        ),
+        Constructor::IntLiteral(v) => (*v, *v),
+        Constructor::IntRange { start, end } => {
+            (start.unwrap_or(OPEN_MIN), end.unwrap_or(OPEN_MAX))
+        },
         _ => return None,
     };
     (lo <= hi).then_some((lo, hi))
@@ -115,7 +119,10 @@ pub(crate) fn char_interval(ctor: &Constructor) -> Option<(i128, i128)> {
 /// Cut `intervals` at every start and every end + 1, keeping the pieces that
 /// some interval covers. Returned sorted and disjoint.
 fn split_intervals(intervals: &[(i128, i128)]) -> Vec<(i128, i128)> {
-    let mut cuts: Vec<i128> = intervals.iter().flat_map(|&(lo, hi)| [lo, hi + 1]).collect();
+    let mut cuts: Vec<i128> = intervals
+        .iter()
+        .flat_map(|&(lo, hi)| [lo, hi + 1])
+        .collect();
     cuts.sort_unstable();
     cuts.dedup();
     cuts.windows(2)
@@ -128,19 +135,27 @@ fn split_intervals(intervals: &[(i128, i128)]) -> Vec<(i128, i128)> {
 /// the literal row it came from; open ends stay `None` (see #186).
 fn int_piece(lo: i128, hi: i128) -> Constructor {
     if lo == hi {
-        return Constructor::IntLiteral(lo as i64);
+        return Constructor::IntLiteral(lo);
     }
     Constructor::IntRange {
-        start: (lo != i64::MIN as i128).then_some(lo as i64),
-        end: (hi != i64::MAX as i128).then_some(hi as i64),
+        start: (lo != OPEN_MIN).then_some(lo),
+        end: (hi != OPEN_MAX).then_some(hi),
     }
 }
 
 /// A char piece. Surrogate codepoints are not chars, so a piece's ends are
 /// pulled out of the surrogate block; a piece inside it holds no char at all.
 fn char_piece(lo: i128, hi: i128) -> Option<Constructor> {
-    let lo = if (SURROGATE_LO..=SURROGATE_HI).contains(&lo) { SURROGATE_HI + 1 } else { lo };
-    let hi = if (SURROGATE_LO..=SURROGATE_HI).contains(&hi) { SURROGATE_LO - 1 } else { hi };
+    let lo = if (SURROGATE_LO..=SURROGATE_HI).contains(&lo) {
+        SURROGATE_HI + 1
+    } else {
+        lo
+    };
+    let hi = if (SURROGATE_LO..=SURROGATE_HI).contains(&hi) {
+        SURROGATE_LO - 1
+    } else {
+        hi
+    };
     if lo > hi {
         return None;
     }
@@ -150,7 +165,11 @@ fn char_piece(lo: i128, hi: i128) -> Option<Constructor> {
     }
     Some(Constructor::CharRange {
         start: if lo == 0 { None } else { Some(as_char(lo)?) },
-        end: if hi == CHAR_MAX { None } else { Some(as_char(hi)?) },
+        end: if hi == CHAR_MAX {
+            None
+        } else {
+            Some(as_char(hi)?)
+        },
     })
 }
 
@@ -175,7 +194,11 @@ fn split_array_lengths(arrays: &[(usize, usize, bool)]) -> Vec<Constructor> {
         .filter(|a| !a.2)
         .map(|&(p, s, _)| p + s)
         .collect();
-    let rests: Vec<(usize, usize)> = arrays.iter().filter(|a| a.2).map(|&(p, s, _)| (p, s)).collect();
+    let rests: Vec<(usize, usize)> = arrays
+        .iter()
+        .filter(|a| a.2)
+        .map(|&(p, s, _)| (p, s))
+        .collect();
 
     if rests.is_empty() {
         fixed.sort_unstable();
@@ -209,7 +232,7 @@ fn split_array_lengths(arrays: &[(usize, usize, bool)]) -> Vec<Constructor> {
 mod tests {
     use super::*;
 
-    fn range(s: Option<i64>, e: Option<i64>) -> Constructor {
+    fn range(s: Option<i128>, e: Option<i128>) -> Constructor {
         Constructor::IntRange { start: s, end: e }
     }
 

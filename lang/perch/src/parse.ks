@@ -40,12 +40,12 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Request throws IoError {
     loop {
         let bytesRead = recv(fileDescriptor, chunk.asPointer(), 4096, 0);
         if bytesRead <= 0 {
-            throw invalidInput()
+            throw IoError.invalidInput()
         }
 
         // Bulk-append exactly the bytes recv produced, in one pass:
         // append(contentsOf:) grows once and copies once → O(n).
-        buffer.append(contentsOf: ArraySlice(pointer: chunk.asPointer(), count: bytesRead));
+        buffer.append(contentsOf: UnsafeSlice(pointer: chunk.asPointer(), count: bytesRead));
 
         headerEnd = findHeaderEnd(buffer);
         if headerEnd >= 0 {
@@ -53,22 +53,22 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Request throws IoError {
         }
 
         if buffer.count > 65536 {
-            throw invalidInput()
+            throw IoError.invalidInput()
         }
     }
 
-    let headerStr = String(fromUtf8: buffer.asSlice()(0..<headerEnd)) ?? String();
+    let headerStr = String(fromUtf8: buffer(0..<headerEnd)) ?? String();
 
     guard let .Some(firstLineEnd) = headerStr.firstIndex(of: "\r\n") else {
-        throw invalidInput();
+        throw IoError.invalidInput();
     }
     let headerSlice = headerStr.asSlice();
     let requestLine = headerSlice.subslice(from: headerSlice.start, to: firstLineEnd.value).toOwned();
 
     var requestLineParts = requestLine.split(" ").iter();
-    guard let .Some(methodSlice) = requestLineParts.next() else { throw invalidInput(); }
-    guard let .Some(rawPathSlice) = requestLineParts.next() else { throw invalidInput(); }
-    guard let .Some(method) = parseMethod(methodSlice.toOwned()) else { throw invalidInput(); }
+    guard let .Some(methodSlice) = requestLineParts.next() else { throw IoError.invalidInput(); }
+    guard let .Some(rawPathSlice) = requestLineParts.next() else { throw IoError.invalidInput(); }
+    guard let .Some(method) = parseMethod(methodSlice.toOwned()) else { throw IoError.invalidInput(); }
 
     let parsed = parseUrl(rawPathSlice.toOwned());
 
@@ -82,7 +82,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Request throws IoError {
             let bodyStart = headerEnd + 4;
             var bodyBytes = [];
 
-            bodyBytes.append(contentsOf: buffer.asSlice()(bodyStart..<buffer.count));
+            bodyBytes.append(contentsOf: buffer(bodyStart..<buffer.count));
 
             while bodyBytes.count < contentLength {
                 let remaining = contentLength - bodyBytes.count;
@@ -95,7 +95,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Request throws IoError {
                 if bytesRead <= 0 {
                     break
                 }
-                bodyBytes.append(contentsOf: ArraySlice(pointer: bodyChunk.asPointer(), count: bytesRead));
+                bodyBytes.append(contentsOf: UnsafeSlice(pointer: bodyChunk.asPointer(), count: bytesRead));
             }
 
             body = String(fromUtf8: bodyBytes.asSlice()) ?? String()

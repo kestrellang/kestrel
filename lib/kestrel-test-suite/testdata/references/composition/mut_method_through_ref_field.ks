@@ -6,7 +6,9 @@
 // pointee, not the slot. The address walk used to project FieldAddr of
 // the slot itself — aliasing the stored pointer's bits as the receiver —
 // and the write was silently lost (printed 5, not 6). The walk now stops
-// at ref slots; the receiver routes through the loaded-ref view.
+// at ref slots; the receiver routes through the loaded-ref view. The
+// holder must be mutable (a `&mutating` field gives no interior
+// mutability), so the second call goes through an owned `consuming` one.
 module Test
 
 struct Counter {
@@ -22,7 +24,7 @@ func pokeMut(mutating h: Holder) {
     h.item.bump();
 }
 
-func pokeShared(h: Holder) {
+func pokeOwned(consuming h: Holder) {
     h.item.bump();
 }
 
@@ -33,7 +35,7 @@ func main() -> lang.i64 {
     var h = Holder(item: r);
     pokeMut(h);
     if c.n != 6 { return 1; }
-    pokeShared(h);
+    pokeOwned(h);
     if c.n != 7 { return 2; }
     0
 }

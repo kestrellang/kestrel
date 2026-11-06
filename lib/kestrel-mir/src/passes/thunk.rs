@@ -687,11 +687,11 @@ mod tests {
             .insts
             .iter()
             .find_map(|i| match &i.kind {
-                InstKind::Call { callee, args, .. }
-                    if matches!(callee, Callee::Direct { func, .. } if *func == target) =>
-                {
-                    Some(args)
-                },
+                InstKind::Call {
+                    callee: Callee::Direct { func, .. },
+                    args,
+                    ..
+                } if *func == target => Some(args),
                 _ => None,
             })
             .expect("thunk should forward a call to the target");

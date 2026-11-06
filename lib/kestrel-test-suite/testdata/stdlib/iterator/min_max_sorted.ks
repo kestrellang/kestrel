@@ -14,12 +14,12 @@ module Test
 
             // Test min
             let minVal = arr.iter().min();
-            if minVal.isNone() { return 1 }
+            if minVal.isNone { return 1 }
             if minVal.unwrap() != 1 { return 2 }
 
             // Test max
             let maxVal = arr.iter().max();
-            if maxVal.isNone() { return 3 }
+            if maxVal.isNone { return 3 }
             if maxVal.unwrap() != 5 { return 4 }
 
             // Test sorted

@@ -41,7 +41,7 @@ module Test
 
             // Test popFirst()
             let first = arr.popFirst();
-            if first.isNone() { return 13 }
+            if first.isNone { return 13 }
             if first.unwrap() != 0 { return 14 }
             if arr.count != 6 { return 15 }
             if arr(unchecked: 0) != 1 { return 16 }
@@ -49,7 +49,7 @@ module Test
             // Test popFirst() on empty
             var emptyArr = std.collections.Array[std.numeric.Int64]();
             let emptyFirst = emptyArr.popFirst();
-            if emptyFirst.isSome() { return 17 }
+            if emptyFirst.isSome { return 17 }
 
             // Test remove(at:)
             // arr is now [1, 2, 99, 3, 4, 100]

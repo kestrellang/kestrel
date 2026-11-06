@@ -105,6 +105,10 @@ pub enum Builtin {
     ExpressibleByBoolLiteral,
     ExpressibleByCharLiteral,
     ExpressibleByNullLiteral,
+    /// Marker on the unsigned integer types (`UInt8`…`UInt64`): their raw
+    /// bits are unsigned, which integer patterns need for range tests and
+    /// exhaustiveness.
+    UnsignedInteger,
     InternalExpressibleByArrayLiteral,
     InternalExpressibleByDictionaryLiteral,
 
@@ -130,8 +134,8 @@ pub enum Builtin {
     MultiplyOperatorMethod,
     DivideOperatorProtocol,
     DivideOperatorMethod,
-    ModuloOperatorProtocol,
-    ModuloOperatorMethod,
+    RemainderOperatorProtocol,
+    RemainderOperatorMethod,
     NegateOperatorProtocol,
     NegateOperatorMethod,
 
@@ -203,8 +207,8 @@ pub enum Builtin {
     MultiplyAssignMethod,
     DivideAssignProtocol,
     DivideAssignMethod,
-    ModuloAssignProtocol,
-    ModuloAssignMethod,
+    RemainderAssignProtocol,
+    RemainderAssignMethod,
     BitwiseAndAssignProtocol,
     BitwiseAndAssignMethod,
     BitwiseOrAssignProtocol,
@@ -262,6 +266,13 @@ pub enum Builtin {
     DefaultStringInterpolationAppendInterpolation,
     DefaultStringInterpolationBuild,
     FormatOptions,
+
+    // ===== References =====
+    /// `@builtin(.DecayOptionalRef) func decayOptionalRef[T](_: Optional[&T])
+    /// -> Optional[T]`: copies the payload out when an `Optional[&T]` is
+    /// bound (`let f = b.first`), so the binding owns a value and stops
+    /// borrowing the place.
+    DecayOptionalRef,
     FormattableProtocol,
     FormattableFormatIntoMethod,
 
@@ -281,7 +292,8 @@ pub enum Builtin {
 
     // ===== Indirection / smart-pointer member peel =====
     /// `Indirection` — opt-in transparent member access: `wrapper.foo` peels
-    /// to `Target.foo` via `pointeeRef()`. Explicit conformance, non-marker.
+    /// to `Target.foo` through the required `value` place
+    /// ([`INDIRECTION_PLACE`]). Explicit conformance, non-marker.
     Indirection,
     /// `MutableIndirection` — the wrapper also hands out `&mutating Target`.
     /// A `mutating` requirement called through `any[B] P` needs it.
@@ -327,6 +339,11 @@ pub enum Builtin {
     OwnedBox,
 }
 
+/// The place `Indirection` requires (`var value: Target { ref }`, refined to
+/// `{ ref mutating ref }` by `MutableIndirection`). The member peel and the
+/// existential box views lend the pointee through its accessors.
+pub const INDIRECTION_PLACE: &str = "value";
+
 impl Builtin {
     /// A display name for the builtin: the type/protocol name as it usually
     /// appears in Kestrel source code, or the `@builtin` attribute name for
@@ -364,6 +381,7 @@ impl Builtin {
             Self::ExpressibleByBoolLiteral => "ExpressibleByBoolLiteral",
             Self::ExpressibleByCharLiteral => "ExpressibleByCharLiteral",
             Self::ExpressibleByNullLiteral => "ExpressibleByNullLiteral",
+            Self::UnsignedInteger => "UnsignedInteger",
             Self::InternalExpressibleByArrayLiteral => "_ExpressibleByArrayLiteral",
             Self::InternalExpressibleByDictionaryLiteral => "_ExpressibleByDictionaryLiteral",
 
@@ -389,8 +407,8 @@ impl Builtin {
             Self::MultiplyOperatorMethod => "MultiplyOperatorMethod",
             Self::DivideOperatorProtocol => "Divisible",
             Self::DivideOperatorMethod => "DivideOperatorMethod",
-            Self::ModuloOperatorProtocol => "Modulo",
-            Self::ModuloOperatorMethod => "ModuloOperatorMethod",
+            Self::RemainderOperatorProtocol => "Remainder",
+            Self::RemainderOperatorMethod => "RemainderOperatorMethod",
             Self::NegateOperatorProtocol => "Negatable",
             Self::NegateOperatorMethod => "NegateOperatorMethod",
 
@@ -462,8 +480,8 @@ impl Builtin {
             Self::MultiplyAssignMethod => "MultiplyAssignMethod",
             Self::DivideAssignProtocol => "DivideAssign",
             Self::DivideAssignMethod => "DivideAssignMethod",
-            Self::ModuloAssignProtocol => "ModuloAssign",
-            Self::ModuloAssignMethod => "ModuloAssignMethod",
+            Self::RemainderAssignProtocol => "RemainderAssign",
+            Self::RemainderAssignMethod => "RemainderAssignMethod",
             Self::BitwiseAndAssignProtocol => "BitwiseAndAssign",
             Self::BitwiseAndAssignMethod => "BitwiseAndAssignMethod",
             Self::BitwiseOrAssignProtocol => "BitwiseOrAssign",
@@ -524,6 +542,7 @@ impl Builtin {
                 "DefaultStringInterpolationAppendInterpolation"
             },
             Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
+            Self::DecayOptionalRef => "DecayOptionalRef",
             Self::FormatOptions => "FormatOptions",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
@@ -601,6 +620,7 @@ impl Builtin {
             "ExpressibleByBoolLiteral" => Some(Self::ExpressibleByBoolLiteral),
             "ExpressibleByCharLiteral" => Some(Self::ExpressibleByCharLiteral),
             "ExpressibleByNullLiteral" => Some(Self::ExpressibleByNullLiteral),
+            "UnsignedInteger" => Some(Self::UnsignedInteger),
             "_ExpressibleByArrayLiteral" => Some(Self::InternalExpressibleByArrayLiteral),
             "_ExpressibleByDictionaryLiteral" => Some(Self::InternalExpressibleByDictionaryLiteral),
 
@@ -626,8 +646,8 @@ impl Builtin {
             "MultiplyOperatorMethod" => Some(Self::MultiplyOperatorMethod),
             "DivideOperatorProtocol" => Some(Self::DivideOperatorProtocol),
             "DivideOperatorMethod" => Some(Self::DivideOperatorMethod),
-            "ModuloOperatorProtocol" => Some(Self::ModuloOperatorProtocol),
-            "ModuloOperatorMethod" => Some(Self::ModuloOperatorMethod),
+            "RemainderOperatorProtocol" => Some(Self::RemainderOperatorProtocol),
+            "RemainderOperatorMethod" => Some(Self::RemainderOperatorMethod),
             "NegateOperatorProtocol" => Some(Self::NegateOperatorProtocol),
             "NegateOperatorMethod" => Some(Self::NegateOperatorMethod),
 
@@ -707,8 +727,8 @@ impl Builtin {
             "MultiplyAssignMethod" => Some(Self::MultiplyAssignMethod),
             "DivideAssignProtocol" => Some(Self::DivideAssignProtocol),
             "DivideAssignMethod" => Some(Self::DivideAssignMethod),
-            "ModuloAssignProtocol" => Some(Self::ModuloAssignProtocol),
-            "ModuloAssignMethod" => Some(Self::ModuloAssignMethod),
+            "RemainderAssignProtocol" => Some(Self::RemainderAssignProtocol),
+            "RemainderAssignMethod" => Some(Self::RemainderAssignMethod),
             "BitwiseAndAssignProtocol" => Some(Self::BitwiseAndAssignProtocol),
             "BitwiseAndAssignMethod" => Some(Self::BitwiseAndAssignMethod),
             "BitwiseOrAssignProtocol" => Some(Self::BitwiseOrAssignProtocol),
@@ -769,6 +789,7 @@ impl Builtin {
                 Some(Self::DefaultStringInterpolationAppendInterpolation)
             },
             "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
+            "DecayOptionalRef" => Some(Self::DecayOptionalRef),
             "FormatOptions" => Some(Self::FormatOptions),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
@@ -868,6 +889,7 @@ impl Builtin {
             | Self::ExpressibleByBoolLiteral
             | Self::ExpressibleByCharLiteral
             | Self::ExpressibleByNullLiteral
+            | Self::UnsignedInteger
             | Self::InternalExpressibleByArrayLiteral
             | Self::InternalExpressibleByDictionaryLiteral => BuiltinKind::protocol(),
 
@@ -896,7 +918,7 @@ impl Builtin {
             | Self::SubtractOperatorProtocol
             | Self::MultiplyOperatorProtocol
             | Self::DivideOperatorProtocol
-            | Self::ModuloOperatorProtocol
+            | Self::RemainderOperatorProtocol
             | Self::NegateOperatorProtocol
             | Self::EqualsOperatorProtocol
             | Self::NotEqualsOperatorProtocol
@@ -924,7 +946,7 @@ impl Builtin {
             | Self::SubtractAssignProtocol
             | Self::MultiplyAssignProtocol
             | Self::DivideAssignProtocol
-            | Self::ModuloAssignProtocol
+            | Self::RemainderAssignProtocol
             | Self::BitwiseAndAssignProtocol
             | Self::BitwiseOrAssignProtocol
             | Self::BitwiseXorAssignProtocol
@@ -936,7 +958,7 @@ impl Builtin {
             | Self::SubtractOperatorMethod
             | Self::MultiplyOperatorMethod
             | Self::DivideOperatorMethod
-            | Self::ModuloOperatorMethod
+            | Self::RemainderOperatorMethod
             | Self::NegateOperatorMethod
             | Self::EqualsOperatorMethod
             | Self::NotEqualsOperatorMethod
@@ -964,7 +986,7 @@ impl Builtin {
             | Self::SubtractAssignMethod
             | Self::MultiplyAssignMethod
             | Self::DivideAssignMethod
-            | Self::ModuloAssignMethod
+            | Self::RemainderAssignMethod
             | Self::BitwiseAndAssignMethod
             | Self::BitwiseOrAssignMethod
             | Self::BitwiseXorAssignMethod
@@ -1011,7 +1033,8 @@ impl Builtin {
             Self::DefaultStringInterpolationInit
             | Self::DefaultStringInterpolationAppendLiteral
             | Self::DefaultStringInterpolationAppendInterpolation
-            | Self::DefaultStringInterpolationBuild => BuiltinKind::Function,
+            | Self::DefaultStringInterpolationBuild
+            | Self::DecayOptionalRef => BuiltinKind::Function,
             Self::FormattableProtocol => BuiltinKind::protocol(),
             Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
             Self::EquatableProtocol
@@ -1024,8 +1047,8 @@ impl Builtin {
             Self::ExitableReport => BuiltinKind::ProtocolMethod,
             Self::ExitCode => BuiltinKind::Struct,
 
-            // Indirection: non-marker protocol with a required `pointeeRef()`
-            // method; explicit conformance (NOT implicit, unlike Copyable).
+            // Indirection: non-marker protocol with a required `value` place;
+            // explicit conformance (NOT implicit, unlike Copyable).
             Self::Indirection | Self::MutableIndirection => BuiltinKind::protocol(),
             // Structural like `Static`: computed, never declared.
             Self::Sized => BuiltinKind::Protocol {

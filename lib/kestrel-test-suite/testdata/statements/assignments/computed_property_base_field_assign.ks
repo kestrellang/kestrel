@@ -13,7 +13,7 @@
 
 module Test
 
-import std.num.Int64
+import std.numeric.Int64
 
 struct Inner {
     var x: Int64;

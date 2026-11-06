@@ -46,7 +46,7 @@ func main() -> lang.i64 {
     var es = std.collections.Array[std.io.error.IoError]();
     es.append(makeError(two));
     es.append(makeError(other));
-    es.append(std.io.error.permissionDenied());
+    es.append(std.io.error.IoError.permissionDenied());
     if es.count != 3 { return 6 }
     if es(0).kind.errno() != two { return 7 }
     if es(1).kind.errno() != other { return 8 }

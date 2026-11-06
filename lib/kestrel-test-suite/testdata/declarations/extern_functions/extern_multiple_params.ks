@@ -2,7 +2,6 @@
 // stdlib: true
 
 module Test
-import Prelude
 
 struct IntA: FFISafe {}
 struct IntB: FFISafe {}

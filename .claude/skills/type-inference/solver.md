@@ -1,7 +1,7 @@
 # Solver architecture (lib `kestrel-type-infer`)
 
 Flat union-find over `TyVar`s with a fixpoint constraint loop. Deliberately
-lean — ~10k lines total across 12 files, most of the bulk in `solver.rs`
+lean — ~10k lines total across 12 files, most of the bulk in `solver/`
 (3.2k), `resolve.rs` (1.9k), `generate.rs` (1.8k).
 
 ## Pipeline position
@@ -23,7 +23,7 @@ returns a `TypedBody`.
 | `constraint.rs` | 169 | `Constraint` enum (12 variants), `CallArg` |
 | `ctx.rs` | 593 | `InferCtx`: types vec, constraint queue, resolutions, promotions, type_args, `where_clause_assoc_subs`, `wildcard_tvars`, `errored_coerce_exprs` |
 | `generate.rs` | 1832 | HIR walk → constraint emission; `gen_expr` / `gen_stmt` / `gen_pat` |
-| `solver.rs` | 3205 | fixpoint loop, `try_solve` dispatch, per-constraint solver fns, literal defaults |
+| `solver/` | 3205 | fixpoint loop, `try_solve` dispatch, per-constraint solver fns, literal defaults |
 | `unify.rs` | 594 | Structural unification, literal guards, occurs check, Error/Never handling |
 | `resolve.rs` | 1949 | `TypeResolver` trait + `WorldResolver` impl; member/associated/conformance resolution |
 | `where_clauses.rs` | 210 | `WhereClausesOf` memoized query |
@@ -35,7 +35,7 @@ returns a `TypedBody`.
 
 Current as of 2026-04-24 — re-grep if the file shifted.
 
-| Fn | solver.rs line | Note |
+| Fn | solver/ line | Note |
 |---|---|---|
 | `solve` (public entry) | 24 | Fixpoint → literal defaults → fixpoint → never fallback → report_unsolved |
 | `fixpoint` | 330 | Loops `solve_round` until no progress |
@@ -106,7 +106,7 @@ zero-or-more constraints, and returns the `TyVar`. Locals go into
 
 After phase-1 fixpoint, any `Unresolved { literal: Some(kind) }` that didn't
 get bound by constraint-driven unification gets its builtin default type via
-`apply_literal_defaults` (solver.rs:2862). Builtins queried:
+`apply_literal_defaults` (solver/:2862). Builtins queried:
 
 - `Integer` → `@builtin(DefaultIntegerLiteralType)` (typically `Int64`)
 - `Float` → `DefaultFloatLiteralType` (typically `Float64`)
@@ -177,7 +177,7 @@ dependent crate rebuild, which is slow to discover.
 1. `constraint.rs` — add variant.
 2. `generate.rs` — emit it from the appropriate `gen_*` branch (or via a
    `ctx.foo(...)` helper method on `InferCtx` — add that in `ctx.rs`).
-3. `solver.rs` — new `solve_foo` fn, arm in `try_solve`.
+3. `solver/` — new `solve_foo` fn, arm in `try_solve`.
 4. Update the constraint table in `SKILL.md`.
 5. Tests: `lib/kestrel-test-suite/testdata/type_infer/…` — add a
    `diagnostics` or `execution` case covering the new constraint behavior.

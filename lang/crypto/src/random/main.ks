@@ -32,6 +32,6 @@ public struct SecureRandom: RandomNumberGenerator {
 /// Fills an array with cryptographically secure random bytes.
 public func randomBytes(count count: Int64) -> Array[UInt8] {
     var buf = Array[UInt8](repeating: 0, count: count);
-    arc4random_buf(buf.asSlice().pointer.asRaw(), count);
+    arc4random_buf(buf.asUnsafeSlice().pointer.asRaw(), count);
     return buf;
 }

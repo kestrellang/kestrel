@@ -23,7 +23,7 @@ module Test
 
             // Test firstIndex
             let pos = arr.iter().firstIndex(where: { (x) in x == 2 });
-            if pos.isNone() { return 6 }
+            if pos.isNone { return 6 }
             if pos.unwrap() != 1 { return 7 }
 
             // Test contains

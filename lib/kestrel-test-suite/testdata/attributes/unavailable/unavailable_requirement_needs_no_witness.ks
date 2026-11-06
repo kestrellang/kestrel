@@ -4,7 +4,6 @@
 // expect-exit: 0
 
 module Test
-import Prelude
 
 protocol Store {
     func fetch() -> Int64

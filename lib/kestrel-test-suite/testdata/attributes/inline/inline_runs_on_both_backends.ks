@@ -4,7 +4,6 @@
 // expect-exit: 0
 
 module Test
-import Prelude
 
 @inline(.Always)
 func double(x: Int64) -> Int64 { x * 2 }

@@ -92,8 +92,8 @@ public protocol Iterator {
 /// `Iterable` is one level above `Iterator`: a collection conforms to
 /// `Iterable` and produces a fresh `Iter` each call to `iter()`, leaving
 /// the source intact. (Compare with `Iterator`, which is consumed in
-/// place.) Every `Iterator` is also `Iterable` via the blanket
-/// conformance below — `iter()` on an iterator returns itself.
+/// place.) An `Iterator` is not itself `Iterable`; a `for` loop over an
+/// iterator uses it directly.
 ///
 /// # Examples
 ///
@@ -113,29 +113,18 @@ public protocol Iterable {
     /// `TargetIterator.Item` matches `Self.Item`.
     type TargetIterator: Iterator where TargetIterator.Item = Item
 
-    /// Builds a fresh iterator over the contents.
+    /// Builds a fresh iterator over the contents. Borrows `self`: the
+    /// collection outlives the iterator it hands out.
     @builtin(.IterableIterMethod)
     func iter() -> TargetIterator
 }
 
-// ============================================================================
-// ITERATOR IS ITERABLE
-// ============================================================================
+// An `Iterator` is NOT `Iterable` (no blanket conformance): `for x in it`
+// consumes an iterator as the loop's iterator directly (the compiler decides
+// per loop — `TypedBody.direct_iterators`), so an adapter chain still drops
+// into a `for` loop without an `iter()` call.
 
-/// Blanket conformance: every `Iterator` is `Iterable` (returning itself).
-/// This is what lets the result of an adapter chain — a `MapIterator`,
-/// `FilterIterator`, etc. — drop into a `for-in` loop without an extra
-/// `iter()` call.
-extend Iterator: Iterable {
-    type Iterable.Item = Self.Item
-    type Iterable.TargetIterator = Self
-
-    /// Returns `self`. The blanket conformance pivot — iterators *are*
-    /// iterables.
-    func iter() -> Self { self }
-}
-
-/// An iterator that can also yield from the back. Powers `rev()` and
+/// An iterator that can also yield from the back. Powers `reversed()` and
 /// efficient "last N elements" patterns without first materialising the
 /// whole sequence.
 ///
@@ -1098,17 +1087,17 @@ extend DoubleEndedIterator {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].iter().rev().collect();                        // [5, 4, 3, 2, 1]
-    /// [1, 2, 3, 4, 5].iter().rev().take(3).collect();         // [5, 4, 3]
-    /// [1, 2, 3, 4, 5].iter().rev().first { it % 2 == 0 };            // Some(4)
+    /// [1, 2, 3, 4, 5].iter().reversed().collect();                        // [5, 4, 3, 2, 1]
+    /// [1, 2, 3, 4, 5].iter().reversed().take(3).collect();         // [5, 4, 3]
+    /// [1, 2, 3, 4, 5].iter().reversed().first { it % 2 == 0 };            // Some(4)
     /// ```
-    public consuming func rev() -> ReversedIterator[Self] {
+    public consuming func reversed() -> ReversedIterator[Self] {
         ReversedIterator(inner: self)
     }
 }
 
 /// `ReversedIterator` is itself double-ended when the wrapped iterator is, so
-/// `rev().rev()` gives back the original direction in `O(1)`.
+/// `reversed().reversed()` gives back the original direction in `O(1)`.
 extend ReversedIterator[I]: DoubleEndedIterator where I: DoubleEndedIterator {
 
     /// Pulls from the back of the inner iterator (which is the front of

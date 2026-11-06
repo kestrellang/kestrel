@@ -17,7 +17,7 @@
 
 module Test
 
-import std.ffi.cstring.(CString)
+import std.ffi.(CString)
 
 @main
 func main() -> lang.i64 {

@@ -9,8 +9,8 @@
 module Test
 
 import std.numeric.(Int64)
-import std.core.(String)
-import std.io.(print)
+import std.text.(String)
+import std.io.stdio.(print)
 
 enum E {
     case A(Int64)

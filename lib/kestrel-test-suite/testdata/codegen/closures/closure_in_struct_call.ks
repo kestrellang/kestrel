@@ -4,7 +4,7 @@
 module Test
 
 struct Calculator {
-    let compute: (std.numeric.Int64, std.numeric.Int64) -> std.numeric.Int64
+    let compute: escaping (std.numeric.Int64, std.numeric.Int64) -> std.numeric.Int64
 }
 
 func run_calc(calc: Calculator, a: std.numeric.Int64, b: std.numeric.Int64) -> std.numeric.Int64 {

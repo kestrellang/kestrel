@@ -55,7 +55,7 @@ func invokeBuild(
     cmd.append(compilerPath());
     cmd.append(" build");
 
-    // `--release` maps to the compiler's `-O 2` (Cranelift speed_and_size).
+    // `--release` maps to the compiler's `-O 2`, an optimized LLVM build.
     // Default (debug) builds omit the flag, leaving the compiler at -O 0.
     if release {
         cmd.append(" -O 2")

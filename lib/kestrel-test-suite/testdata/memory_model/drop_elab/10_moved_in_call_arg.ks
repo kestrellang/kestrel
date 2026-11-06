@@ -7,7 +7,6 @@
 // so the local's path is uninit at the return — no drop emitted.
 
 module Test
-import Prelude
 
 @builtin(.Copyable)
 protocol Copyable {}

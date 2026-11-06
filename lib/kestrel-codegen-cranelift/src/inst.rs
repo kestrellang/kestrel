@@ -3,20 +3,22 @@ use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, AbiParam, InstBuilder, MemFlags, TrapCode, Value};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_hecs::Entity;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::{CallArg, InstKind};
-use kestrel_mir::mono::{MonoEnum, MonoModule, MonoStruct};
 use kestrel_mir::{
     DivGuard, FieldIdx, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy,
-    MonoFuncId, Op, ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
+    MonoFuncId, Op, ParamConvention, Signedness, StructLayout, TyId, ValueId, VariantIdx,
 };
 
 use crate::abi::{self, PassMode, ReturnMode};
 use crate::error::CodegenError;
 use crate::func::FuncCompiler;
-use crate::ty::{TypeCache, TypeRepr, float_bits_to_cl, int_bits_to_cl};
+use crate::ty::{Cranelift, TypeRepr, float_bits_to_cl, int_bits_to_cl};
 use crate::{imm, mem};
+use kestrel_codegen::layout::{
+    discriminant_width, find_mono_enum, ret_ty_is_never, struct_field_offset, struct_field_type,
+    tuple_elem_offset,
+};
 
 /// Returns true if the instruction diverges (call to a !-returning function).
 // Operand contract legend (enforced by verify_value_repr):
@@ -239,11 +241,11 @@ pub fn compile_inst(
                 .repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let is_guaranteed = fc.body.values[operand.index()].ownership
                 == kestrel_mir::value::Ownership::Guaranteed;
-            let disc_width = discriminant_width(
+            let disc_width = discriminant_width::<Cranelift>(
                 operand_ty,
+                fc.body.values[result.index()].ty,
                 &fc.ctx.module.ty_arena,
                 fc.ctx.module,
-                &fc.ctx.tc,
             );
             let val = match repr {
                 // Twin of the LLVM `Discriminant` handling in
@@ -482,13 +484,7 @@ pub fn compile_inst(
                 )
                 .0
             } else {
-                struct_field_offset(
-                    *ty,
-                    *field,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                )
+                struct_field_offset(*ty, *field, &fc.ctx.module.ty_arena, fc.ctx.module)
             };
             let addr = if offset != 0 {
                 builder.ins().iadd_imm(base_val, offset as i64)
@@ -584,8 +580,33 @@ fn compile_op1(
         Op::IntWiden(_, to) => builder.ins().sextend(int_bits_to_cl(to), arg),
         Op::IntUnsignedWiden(_, to) => builder.ins().uextend(int_bits_to_cl(to), arg),
         Op::IntTruncate(_, to) => builder.ins().ireduce(int_bits_to_cl(to), arg),
-        Op::IntToFloat(_, fb) => builder.ins().fcvt_from_sint(float_bits_to_cl(fb), arg),
-        Op::FloatToInt(_, ib) => builder.ins().fcvt_to_sint_sat(int_bits_to_cl(ib), arg),
+        // Cranelift converts only 32/64-bit integers: widen an 8/16-bit
+        // source first (sign-extend; the cast is signed).
+        Op::IntToFloat(ib, fb) => {
+            let arg = match ib {
+                IntBits::I8 | IntBits::I16 => builder.ins().sextend(ir::types::I32, arg),
+                IntBits::I32 | IntBits::I64 => arg,
+            };
+            builder.ins().fcvt_from_sint(float_bits_to_cl(fb), arg)
+        },
+        // Saturating, like LLVM's `llvm.fptosi.sat` at the TARGET width: an
+        // 8/16-bit target converts at 32 bits, clamps to its own range, then
+        // narrows.
+        Op::FloatToInt(_, ib) => match ib {
+            IntBits::I8 | IntBits::I16 => {
+                let (lo, hi) = match ib {
+                    IntBits::I8 => (i8::MIN as i64, i8::MAX as i64),
+                    _ => (i16::MIN as i64, i16::MAX as i64),
+                };
+                let wide = builder.ins().fcvt_to_sint_sat(ir::types::I32, arg);
+                let lo = builder.ins().iconst(ir::types::I32, lo);
+                let hi = builder.ins().iconst(ir::types::I32, hi);
+                let clamped = builder.ins().smax(wide, lo);
+                let clamped = builder.ins().smin(clamped, hi);
+                builder.ins().ireduce(int_bits_to_cl(ib), clamped)
+            },
+            IntBits::I32 | IntBits::I64 => builder.ins().fcvt_to_sint_sat(int_bits_to_cl(ib), arg),
+        },
         // Pure bitcast (no value conversion): float ↔ same-width integer.
         Op::FloatToBits(fb) => {
             let int_ty = match fb {
@@ -604,6 +625,9 @@ fn compile_op1(
         Op::PtrToAddress => arg,
         Op::PtrIsNull => builder.ins().icmp_imm(IntCC::Equal, arg, 0),
         Op::PtrNull(_) => builder.ins().iconst(ptr_ty, 0),
+        Op::OverflowChecks => builder
+            .ins()
+            .iconst(ir::types::I8, i64::from(fc.ctx.options.overflow_checks())),
         Op::PtrTo(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
@@ -678,7 +702,26 @@ fn compile_op1(
         },
         Op::FloatMath(_, FloatMathKind::Floor) => builder.ins().floor(arg),
         Op::FloatMath(_, FloatMathKind::Ceil) => builder.ins().ceil(arg),
-        Op::FloatMath(_, FloatMathKind::Round) => builder.ins().nearest(arg),
+        // Ties away from zero (the documented `round()`; Cranelift's `nearest`
+        // rounds ties to even): truncate, then step one away from zero when
+        // the dropped fraction is at least one half.
+        Op::FloatMath(fb, FloatMathKind::Round) => {
+            let (half, one) = match fb {
+                FloatBits::F16 | FloatBits::F32 => {
+                    (builder.ins().f32const(0.5), builder.ins().f32const(1.0))
+                },
+                FloatBits::F64 => (builder.ins().f64const(0.5), builder.ins().f64const(1.0)),
+            };
+            let truncated = builder.ins().trunc(arg);
+            let fraction = builder.ins().fsub(arg, truncated);
+            let magnitude = builder.ins().fabs(fraction);
+            let step = builder.ins().fcopysign(one, arg);
+            let away = builder.ins().fadd(truncated, step);
+            let round_up = builder
+                .ins()
+                .fcmp(FloatCC::GreaterThanOrEqual, magnitude, half);
+            builder.ins().select(round_up, away, truncated)
+        },
         Op::FloatMath(_, FloatMathKind::Trunc) => builder.ins().trunc(arg),
         Op::FloatMath(_, FloatMathKind::Sqrt) => builder.ins().sqrt(arg),
         _ => {
@@ -979,13 +1022,8 @@ fn compile_struct(
         TypeRepr::Zst => Ok(builder.ins().iconst(ptr_ty, 0)),
         TypeRepr::Scalar(t) => {
             if fields.len() == 1 {
-                let field_ty = struct_field_type(
-                    ty,
-                    fields[0].0,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                );
+                let field_ty =
+                    struct_field_type(ty, fields[0].0, &fc.ctx.module.ty_arena, fc.ctx.module);
                 // This is where F40's wrong value was minted, so this is where the
                 // layout authorities are cross-checked. `resolve_slot_value` on an
                 // AGGREGATE field yields that field's stack-slot ADDRESS — fine as
@@ -1007,20 +1045,10 @@ fn compile_struct(
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
             mem::zero_memory(builder, slot, repr.size());
             for &(field_idx, value_id) in fields {
-                let offset = struct_field_offset(
-                    ty,
-                    field_idx,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                );
-                let field_ty = struct_field_type(
-                    ty,
-                    field_idx,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                );
+                let offset =
+                    struct_field_offset(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
+                let field_ty =
+                    struct_field_type(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
                 let val = resolve_slot_value(fc, builder, field_ty, value_id);
                 let field_repr = fc
                     .ctx
@@ -1037,20 +1065,10 @@ fn compile_struct(
             let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
             mem::zero_memory(builder, slot, size);
             for &(field_idx, value_id) in fields {
-                let offset = struct_field_offset(
-                    ty,
-                    field_idx,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                );
-                let field_ty = struct_field_type(
-                    ty,
-                    field_idx,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                );
+                let offset =
+                    struct_field_offset(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
+                let field_ty =
+                    struct_field_type(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
                 let val = resolve_slot_value(fc, builder, field_ty, value_id);
                 let field_repr = fc
                     .ctx
@@ -1140,7 +1158,7 @@ fn compile_enum(
         if let MirTy::Named { entity, type_args } = arena.get(enum_ty) {
             let entity = *entity;
             let type_args = type_args.clone();
-            if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc) {
+            if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module) {
                 let disc = e.cases[variant.index()].discriminant;
                 (
                     int_bits_to_cl(e.discriminant_width),
@@ -1194,7 +1212,7 @@ fn store_variant_payload(
     if let MirTy::Named { entity, type_args } = arena.get(enum_ty) {
         let entity = *entity;
         let type_args = type_args.clone();
-        if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc)
+        if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module)
             && let Some(Layout::Enum(el)) = &e.type_info.layout
             && let Some(vl) = el.variant_layouts.get(variant.index())
         {
@@ -1382,13 +1400,7 @@ fn compile_struct_extract(
     let is_borrowed =
         fc.body.values[operand.index()].ownership == kestrel_mir::value::Ownership::Guaranteed;
 
-    let field_ty = struct_field_type(
-        operand_ty,
-        field,
-        &fc.ctx.module.ty_arena,
-        fc.ctx.module,
-        &fc.ctx.tc,
-    );
+    let field_ty = struct_field_type(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module);
     let field_repr = fc
         .ctx
         .tc
@@ -1418,13 +1430,7 @@ fn compile_struct_extract(
     // @guaranteed operands are always pointers (Option B invariant).
     // Return the field address — CopyValue handles the load.
     if is_borrowed {
-        let offset = struct_field_offset(
-            operand_ty,
-            field,
-            &fc.ctx.module.ty_arena,
-            fc.ctx.module,
-            &fc.ctx.tc,
-        );
+        let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module);
         let addr = if offset != 0 {
             builder.ins().iadd_imm(base, offset as i64)
         } else {
@@ -1435,15 +1441,11 @@ fn compile_struct_extract(
         // address. A REF-typed result (clone/drop shim projections) keeps
         // the slot's address per the representation contract; loading here
         // would make its consumers deref one level too many.
-        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-            && !matches!(
-                fc.ctx
-                    .module
-                    .ty_arena
-                    .get(fc.body.values[result.index()].ty),
-                MirTy::Ref { .. }
-            )
-        {
+        if kestrel_codegen::ref_slot_loads_pointee(
+            fc.ctx.module,
+            field_ty,
+            fc.body.values[result.index()].ty,
+        ) {
             return Ok(builder
                 .ins()
                 .load(fc.ctx.ptr_ty, MemFlags::new(), addr, Offset32::new(0)));
@@ -1465,13 +1467,7 @@ fn compile_struct_extract(
     }
 
     // @owned aggregate: compute field offset and load.
-    let offset = struct_field_offset(
-        operand_ty,
-        field,
-        &fc.ctx.module.ty_arena,
-        fc.ctx.module,
-        &fc.ctx.tc,
-    );
+    let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module);
     let addr = if offset != 0 {
         builder.ins().iadd_imm(base, offset as i64)
     } else {
@@ -1511,15 +1507,11 @@ fn compile_tuple_extract(
             // Stage 2b ref slot with a POINTEE-typed result: load the
             // stored address (see compile_struct_extract; Ref-typed
             // results keep the slot address).
-            if matches!(arena.get(elem_ty), MirTy::Ref { .. })
-                && !matches!(
-                    fc.ctx
-                        .module
-                        .ty_arena
-                        .get(fc.body.values[result.index()].ty),
-                    MirTy::Ref { .. }
-                )
-            {
+            if kestrel_codegen::ref_slot_loads_pointee(
+                fc.ctx.module,
+                elem_ty,
+                fc.body.values[result.index()].ty,
+            ) {
                 return Ok(builder.ins().load(
                     fc.ctx.ptr_ty,
                     MemFlags::new(),
@@ -1555,7 +1547,7 @@ fn compile_enum_payload(
     if let MirTy::Named { entity, type_args } = arena.get(operand_ty) {
         let entity = *entity;
         let type_args = type_args.clone();
-        if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc) {
+        if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module) {
             let payload_offset = e.payload_offset();
             if let Some(Layout::Enum(el)) = &e.type_info.layout
                 && let Some(vl) = el.variant_layouts.get(variant.index())
@@ -1568,15 +1560,11 @@ fn compile_enum_payload(
                     // Stage 2b ref slot with a POINTEE-typed result: load
                     // the stored address (see compile_struct_extract;
                     // Ref-typed results keep the slot address).
-                    if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-                        && !matches!(
-                            fc.ctx
-                                .module
-                                .ty_arena
-                                .get(fc.body.values[result.index()].ty),
-                            MirTy::Ref { .. }
-                        )
-                    {
+                    if kestrel_codegen::ref_slot_loads_pointee(
+                        fc.ctx.module,
+                        field_ty,
+                        fc.body.values[result.index()].ty,
+                    ) {
                         return Ok(builder.ins().load(
                             fc.ctx.ptr_ty,
                             MemFlags::new(),
@@ -1684,10 +1672,6 @@ fn compile_call(
     }
 }
 
-fn ret_ty_is_never(module: &MonoModule, ret: TyId) -> bool {
-    matches!(module.ty_arena.get(ret), MirTy::Never)
-}
-
 fn compile_resolved_call(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
@@ -1731,7 +1715,7 @@ fn compile_resolved_call(
             .ctx
             .tc
             .repr(param.ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-        let pass = abi::param_pass_mode(param.convention, repr, ptr_ty);
+        let pass = abi::param_pass_mode(param.convention, repr);
         let val = fc.get_value(builder, call_arg.value);
         let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
             == kestrel_mir::value::Ownership::Guaranteed;
@@ -1887,7 +1871,7 @@ fn compile_thin_call(
     }
     for (ty, convention) in &param_tys {
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
-        match abi::param_pass_mode(*convention, repr, ptr_ty) {
+        match abi::param_pass_mode(*convention, repr) {
             PassMode::ByVal(t) => sig.params.push(AbiParam::new(t)),
             PassMode::ByRef => sig.params.push(AbiParam::new(ptr_ty)),
             PassMode::Zst => {},
@@ -1914,7 +1898,7 @@ fn compile_thin_call(
         }
         let (ty, convention) = &param_tys[i];
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
-        let pass = abi::param_pass_mode(*convention, repr, ptr_ty);
+        let pass = abi::param_pass_mode(*convention, repr);
         let val = fc.get_value(builder, call_arg.value);
         let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
             == kestrel_mir::value::Ownership::Guaranteed;
@@ -2016,7 +2000,7 @@ fn compile_thick_call(
     sig.params.push(AbiParam::new(ptr_ty)); // env_ptr
     for (ty, convention) in &param_tys {
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
-        match abi::param_pass_mode(*convention, repr, ptr_ty) {
+        match abi::param_pass_mode(*convention, repr) {
             PassMode::ByVal(t) => sig.params.push(AbiParam::new(t)),
             PassMode::ByRef => sig.params.push(AbiParam::new(ptr_ty)),
             PassMode::Zst => {},
@@ -2044,7 +2028,7 @@ fn compile_thick_call(
         }
         let (ty, convention) = &param_tys[i];
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
-        let pass = abi::param_pass_mode(*convention, repr, ptr_ty);
+        let pass = abi::param_pass_mode(*convention, repr);
         let val = fc.get_value(builder, call_arg.value);
         let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
             == kestrel_mir::value::Ownership::Guaranteed;
@@ -2108,86 +2092,3 @@ fn compile_thick_call(
 // ======================================================================
 // Layout helpers
 // ======================================================================
-
-fn discriminant_width(ty: TyId, arena: &TyArena, module: &MonoModule, tc: &TypeCache) -> ir::Type {
-    if let MirTy::Named { entity, type_args } = arena.get(ty) {
-        let entity = *entity;
-        let type_args = type_args.clone();
-        if let Some(e) = find_mono_enum(&entity, &type_args, module, tc) {
-            return int_bits_to_cl(e.discriminant_width);
-        }
-    }
-    ir::types::I32
-}
-
-fn struct_field_offset(
-    container_ty: TyId,
-    field_idx: FieldIdx,
-    arena: &TyArena,
-    module: &MonoModule,
-    tc: &TypeCache,
-) -> u64 {
-    if let MirTy::Named { entity, type_args } = arena.get(container_ty) {
-        let entity = *entity;
-        let type_args = type_args.clone();
-        if let Some(s) = find_mono_struct(&entity, &type_args, module, tc)
-            && let Some(Layout::Struct(sl)) = &s.type_info.layout
-        {
-            return sl.field_offsets[field_idx.index()];
-        }
-    }
-    0
-}
-
-fn struct_field_type(
-    container_ty: TyId,
-    field_idx: FieldIdx,
-    arena: &TyArena,
-    module: &MonoModule,
-    tc: &TypeCache,
-) -> TyId {
-    if let MirTy::Named { entity, type_args } = arena.get(container_ty) {
-        let entity = *entity;
-        let type_args = type_args.clone();
-        if let Some(s) = find_mono_struct(&entity, &type_args, module, tc) {
-            return s.fields[field_idx.index()].ty;
-        }
-    }
-    container_ty
-}
-
-fn tuple_elem_offset(
-    tc: &mut TypeCache,
-    arena: &TyArena,
-    module: &MonoModule,
-    elems: &[TyId],
-    index: u32,
-) -> (u64, TyId) {
-    let mut layout = StructLayout::new();
-    for (i, &elem) in elems.iter().enumerate() {
-        let repr = tc.repr(elem, arena, module);
-        layout.append_field(StructLayout::scalar(repr.size(), repr.align()));
-        if i == index as usize {
-            return (layout.field_offsets[i], elem);
-        }
-    }
-    (0, elems[index as usize])
-}
-
-pub fn find_mono_struct<'m>(
-    entity: &Entity,
-    type_args: &[TyId],
-    module: &'m MonoModule,
-    _tc: &TypeCache,
-) -> Option<&'m MonoStruct> {
-    module.structs.get(&(*entity, type_args.to_vec()))
-}
-
-pub fn find_mono_enum<'m>(
-    entity: &Entity,
-    type_args: &[TyId],
-    module: &'m MonoModule,
-    _tc: &TypeCache,
-) -> Option<&'m MonoEnum> {
-    module.enums.get(&(*entity, type_args.to_vec()))
-}
