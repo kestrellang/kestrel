@@ -62,6 +62,21 @@ func bucketIsEmpty[K, V](bucket: Bucket[K, V]) -> Bool {
     }
 }
 
+/// The home slot for `hash` in a table of `mask + 1` slots (a power of two).
+fileprivate func slotFor(hash: UInt64, mask: Int64) -> Int64 {
+    Int64(truncating: hash & UInt64(truncating: mask))
+}
+
+/// Writes `entry` into the first `.Empty` slot on `hash`'s probe chain.
+/// Used while rebuilding a table, which has no tombstones and room to spare.
+fileprivate func placeEntry[K, V](buckets: Pointer[Bucket[K, V]], mask: Int64, consuming entry: Bucket[K, V], hash: UInt64) {
+    var slot = slotFor(hash, mask);
+    while not bucketIsEmpty(unsafe buckets.offset(by: slot).value) {
+        slot = (slot + 1) & mask
+    }
+    unsafe buckets.offset(by: slot).write(entry)
+}
+
 /// Returns the smallest power of two `>= n`, clamped up to a minimum of 8.
 ///
 /// Used to pick the next hash-table capacity. A power of two is required
@@ -108,39 +123,36 @@ func nextPowerOfTwo(n: Int64) -> Int64 {
 ///
 /// # Representation
 ///
-/// A `(buckets, capacity, index)` triple — pointer to the bucket array,
-/// total slots, and the current scan position.
+/// A share of the dictionary's storage, plus the bucket pointer, total
+/// slots and current scan position.
 ///
 /// # Memory Model
 ///
-/// Value type. The pointer aliases dictionary storage; do not retain an
-/// iterator across mutations of the source dictionary.
+/// Holds a share of the dictionary's storage, like `ArrayIterator`. The
+/// share keeps the buckets alive and marks them shared, so the iterator
+/// sees the dictionary as it was when `iter()` was called: inserting into
+/// or dropping the dictionary while iterating copies or releases the
+/// dictionary's own table, never the one being read.
 public struct DictionaryIterator[K, V]: Iterator {
     /// Element type yielded by `next()` — a `(key, value)` tuple.
     type Item = (K, V)
 
-    /// Pointer to the source dictionary's bucket array.
+    /// Keeps `buckets` alive for the iterator's lifetime.
+    private var storage: CowBox[DictionaryStorage[K, V]]
+    /// The shared bucket array. Never written while the share is held.
     private var buckets: Pointer[Bucket[K, V]]
     /// Total number of slots in the bucket array.
     private var capacity: Int64
     /// Current scan position; advances every `next()` call.
     private var index: Int64
 
-    /// @name From Buckets
-    /// Constructs an iterator over a raw bucket pointer of the given
-    /// capacity.
-    ///
-    /// Prefer `Dictionary.iter()` over calling this directly. The
-    /// pointer must outlive the iterator.
-    ///
-    /// # Safety
-    ///
-    /// `buckets` must point to at least `capacity` initialized
-    /// `Bucket[K, V]` slots and remain valid for the iterator's
-    /// lifetime.
-    init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64) {
-        self.buckets = buckets;
-        self.capacity = capacity;
+    /// @name From Storage
+    /// Iterates `storage`'s buckets, holding the share until dropped.
+    /// Use `Dictionary.iter()`, `keys` or `values` to get one.
+    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V]]) {
+        self.buckets = storage.value.buckets;
+        self.capacity = storage.value.cap;
+        self.storage = storage;
         self.index = 0;
     }
 
@@ -200,11 +212,14 @@ public struct DictionaryIterator[K, V]: Iterator {
 /// Owns the bucket buffer; `deinit` deallocates it. Used as the value
 /// inside an `RcBox`, providing the refcount that powers COW on the
 /// dictionary level.
-struct DictionaryStorage[K, V, H]: Cloneable where K: Hashable, H: Hasher, H: Defaultable {
+struct DictionaryStorage[K, V]: Cloneable {
     /// Heap pointer to the bucket array; null when `cap == 0`.
     var buckets: Pointer[Bucket[K, V]]
     /// Number of `.Occupied` entries (excludes `.Empty` and `.Deleted`).
     var len: Int64
+    /// Number of `.Deleted` tombstones. `len + deleted` is what fills
+    /// the table, so it's what the load-factor check counts.
+    var deleted: Int64
     /// Total bucket count; always a power of two or zero.
     var cap: Int64
 
@@ -213,9 +228,10 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hashable, H: Hasher, H: De
     ///
     /// Internal — callers must guarantee `cap` is zero or a power of
     /// two and that `buckets` covers `cap` initialized slots.
-    init(buckets buckets: Pointer[Bucket[K, V]], len len: Int64, cap cap: Int64) {
+    init(buckets buckets: Pointer[Bucket[K, V]], len len: Int64, cap cap: Int64, deleted deleted: Int64 = 0) {
         self.buckets = buckets;
         self.len = len;
+        self.deleted = deleted;
         self.cap = cap;
     }
 
@@ -227,7 +243,7 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hashable, H: Hasher, H: De
     /// without allocating. Panics on allocation failure. This is the
     /// slow half of COW, fired by `Dictionary.makeUnique()` when
     /// storage is shared.
-    func clone() -> DictionaryStorage[K, V, H] {
+    func clone() -> DictionaryStorage[K, V] {
         if self.cap == 0 {
             return DictionaryStorage(
                 buckets: Pointer[Bucket[K, V]].nullPointer(),
@@ -247,7 +263,8 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hashable, H: Hasher, H: De
             DictionaryStorage(
                 buckets: newBuckets,
                 len: self.len,
-                cap: self.cap
+                cap: self.cap,
+                deleted: self.deleted
             )
         } else {
             fatalError("DictionaryStorage clone allocation failed")
@@ -329,7 +346,7 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hashable, H: Hasher, H: De
 ///
 /// # Representation
 ///
-/// One field: an `RcBox[DictionaryStorage[K, V, H]]` holding
+/// One field: a `CowBox[DictionaryStorage[K, V]]` holding
 /// `(buckets, len, cap)` over a heap bucket array.
 ///
 /// # Memory Model
@@ -358,7 +375,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// COW storage — `CowBox` handles the reference counting and
     /// clone-on-write barrier.
-    private var storage: CowBox[DictionaryStorage[K, V, H]]
+    private var storage: CowBox[DictionaryStorage[K, V]]
 
     /// Returns the bucket-array pointer from storage. Internal helper.
     private func buckets() -> Pointer[Bucket[K, V]] { self.storage.value.buckets }
@@ -374,7 +391,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// @name From Storage
     /// Wraps an existing storage box in a new `Dictionary`.
-    private init(storage storage: CowBox[DictionaryStorage[K, V, H]]) {
+    private init(storage storage: CowBox[DictionaryStorage[K, V]]) {
         self.storage = storage;
     }
 
@@ -609,10 +626,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Lazy view of the dictionary's keys, iterable in unspecified
     /// order.
     ///
-    /// Constructing the view is O(1) — it shares the bucket pointer
-    /// and skips empty/deleted slots during iteration. The view is
-    /// invalidated by any mutation that may reallocate (insertion past
-    /// the load threshold, `reserveCapacity`, `shrinkToFit`).
+    /// Constructing the view is O(1) — it holds a share of the storage
+    /// and skips empty/deleted slots during iteration. Like `iter()`,
+    /// it sees the keys as they were when the view was made.
     ///
     /// # Examples
     ///
@@ -621,15 +637,15 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// for key in dict.keys { print(key) }
     /// let keyArray = Array(from: dict.keys);
     /// ```
-    public var keys: KeysView[K, V] { get { KeysView(buckets: self.getBuckets(), capacity: self.cap()) } }
+    public var keys: KeysView[K, V] { get { KeysView(storage: self.storage.clone()) } }
 
     /// Lazy view of the dictionary's values, iterable in unspecified
     /// order.
     ///
     /// Same iteration order as `keys` — the two views walk the
     /// buckets in lockstep, so `zip(dict.keys, dict.values)` yields
-    /// pairs equivalent to `dict.iter()`. Invalidated by any
-    /// mutation that may reallocate.
+    /// pairs equivalent to `dict.iter()`. Holds a share of the
+    /// storage, like `keys`.
     ///
     /// # Examples
     ///
@@ -638,7 +654,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// for value in dict.values { print(value) }
     /// let sum = dict.values.iter().sum();  // 6
     /// ```
-    public var values: ValuesView[K, V] { get { ValuesView(buckets: self.getBuckets(), capacity: self.cap()) } }
+    public var values: ValuesView[K, V] { get { ValuesView(storage: self.storage.clone()) } }
 
     // ========================================================================
     // SUBSCRIPTS
@@ -789,25 +805,28 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         }
 
         let hashValue: UInt64 = self.hashKey(key);
-        let capU: UInt64 = UInt64(truncating: myCap);
-        let mod: UInt64 = hashValue.remainder(capU);
-        var index: Int64 = Int64(truncating: mod);
+        // `cap` is a power of two, so `& mask` is the modulo.
+        let mask = myCap - 1;
+        var index = slotFor(hashValue, mask);
         let myBuckets = self.buckets();
         var i: Int64 = 0;
 
         while i < myCap {
-            let bucket = unsafe myBuckets.offset(by: index).read();
+            // Borrow the bucket: a `read()` copy retains and releases the
+            // key and value at every probe step.
+            let bucket = unsafe &myBuckets.offset(by: index).value;
             match bucket {
                 .Empty => return .None,
-                .Occupied(k, _, _) => {
-                    if k.isEqual(to: key) {
+                .Occupied(&k, _, &h) => {
+                    // The cached hash rules out most keys without `isEqual`.
+                    if h == hashValue and k.isEqual(to: key) {
                         return .Some(index)
                     }
                 },
                 .Deleted => {}
             }
             // Linear probing
-            index = (index + 1) % myCap;
+            index = (index + 1) & mask;
             i = i + 1
         }
         .None
@@ -825,20 +844,19 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             return .None
         }
 
-        let capU: UInt64 = UInt64(truncating: myCap);
-        let mod: UInt64 = hashValue.remainder(capU);
-        var index: Int64 = Int64(truncating: mod);
+        let mask = myCap - 1;
+        var index = slotFor(hashValue, mask);
         let myBuckets = self.buckets();
         var i: Int64 = 0;
 
         while i < myCap {
-            let bucket = unsafe myBuckets.offset(by: index).read();
+            let bucket = unsafe &myBuckets.offset(by: index).value;
             match bucket {
                 .Occupied(_, _, _) => {},
                 _ => return .Some(index)
             }
             // Linear probing
-            index = (index + 1) % myCap;
+            index = (index + 1) & mask;
             i = i + 1
         }
         .None
@@ -848,18 +866,32 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     // CAPACITY MANAGEMENT (Internal)
     // ========================================================================
 
-    /// Triggers `resize()` if `count >= 75% * capacity` (or capacity is
-    /// zero).
+    /// Rebuilds the table when live entries plus tombstones reach 75% of
+    /// capacity (or capacity is zero).
     ///
-    /// Called by `insert` before placing a new entry. Resizing
-    /// scattering tombstones is desirable — `resize()` rebuilds the
-    /// table without them.
+    /// Called by `insert` before placing a new entry. Tombstones count
+    /// toward the load: without that, a table under insert/remove churn
+    /// fills with them, runs out of `.Empty` slots, and every miss probes
+    /// the whole table. The rebuild doubles capacity when live entries
+    /// alone fill half the threshold, and otherwise rehashes at the same
+    /// size, which just clears the tombstones. Either way at least
+    /// `cap * 3 / 8` more inserts fit before the next rebuild, so the
+    /// cost stays amortized O(1).
     private mutating func ensureCapacity() {
         let myCap = self.cap();
+        if myCap == 0 {
+            self.resize();
+            return
+        }
         let myLen = self.len();
         let threshold = myCap * 3 / 4;
-        if myLen >= threshold or myCap == 0 {
+        if myLen + self.storage.value.deleted < threshold {
+            return
+        }
+        if myLen * 2 >= threshold {
             self.resize()
+        } else {
+            self.resizeToCapacity(myCap)
         }
     }
 
@@ -881,8 +913,6 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// without exceeding the load factor; this routine itself does
     /// not check. Triggers COW. Panics on allocation failure.
     private mutating func resizeToCapacity(newCap: Int64) {
-        // Writing through `value` forks shared storage first.
-        let s = &mutating self.storage.value;
         let layout = Layout.array[Bucket[K, V]](newCap);
         var allocator = SystemAllocator();
         let result = allocator.allocate(layout);
@@ -895,24 +925,38 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         for i in 0..<newCap {
             unsafe newBuckets.offset(by: i).write(.Empty);
         }
+        let mask = newCap - 1;
 
-        // Move every live entry into the new table (linear probing). The
-        // old buckets are left moved-out, so freeing them drops nothing.
-        let newCapU: UInt64 = UInt64(truncating: newCap);
+        if not self.storage.isUnique {
+            // Shared (another copy or an iterator holds it): copy the live
+            // entries straight into the new table. Writing through
+            // `value` would fork the whole old table first, only to
+            // rebuild it.
+            let old = &self.storage.value;
+            let liveCount = old.len;
+            for i in 0..<old.cap {
+                if let .Occupied(key, value, hashValue) = unsafe old.buckets.offset(by: i).read() {
+                    placeEntry(newBuckets, mask, .Occupied(key, value, hashValue), hashValue)
+                }
+            }
+            self.storage = CowBox(DictionaryStorage(buckets: newBuckets, len: liveCount, cap: newCap));
+            return
+        }
+
+        // Unique: move every live entry into the new table. The old
+        // buckets are left moved-out, so freeing them drops nothing.
+        let s = &mutating self.storage.value;
         for i in 0..<s.cap {
             if let .Occupied(key, value, hashValue) = unsafe s.buckets.offset(by: i).take() {
-                var slotIndex: Int64 = Int64(truncating: hashValue.remainder(newCapU));
-                while not bucketIsEmpty(unsafe newBuckets.offset(by: slotIndex).value) {
-                    slotIndex = (slotIndex + 1) % newCap
-                }
-                unsafe newBuckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue))
+                placeEntry(newBuckets, mask, .Occupied(key, value, hashValue), hashValue)
             }
         }
         if s.cap > 0 {
             unsafe allocator.deallocate(s.buckets.asRaw(), Layout.array[Bucket[K, V]](s.cap))
         }
         s.buckets = newBuckets;
-        s.cap = newCap
+        s.cap = newCap;
+        s.deleted = 0
     }
 
     // ========================================================================
@@ -979,6 +1023,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let maybeSlot = self.findEmptySlot(hashValue);
         if let .Some(slotIndex) = maybeSlot {
             let s = &mutating self.storage.value;
+            // The slot is `.Empty` or a reused `.Deleted` tombstone.
+            if not bucketIsEmpty(unsafe s.buckets.offset(by: slotIndex).value) {
+                s.deleted = s.deleted - 1
+            }
             unsafe s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
             s.len = s.len + 1
         } else {
@@ -1012,6 +1060,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             // Mark as deleted (tombstone)
             unsafe s.buckets.offset(by: index).write(.Deleted);
             s.len = s.len - 1;
+            s.deleted = s.deleted + 1;
             return match bucket {
                 .Occupied(_, v, _) => .Some(v),
                 _ => .None
@@ -1047,6 +1096,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             // Mark as deleted (tombstone)
             unsafe s.buckets.offset(by: index).write(.Deleted);
             s.len = s.len - 1;
+            s.deleted = s.deleted + 1;
             return match bucket {
                 .Occupied(k, v, _) => .Some((k, v)),
                 _ => .None
@@ -1075,7 +1125,8 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         for i in 0..<s.cap {
             unsafe s.buckets.offset(by: i).assign(.Empty);
         }
-        s.len = 0
+        s.len = 0;
+        s.deleted = 0
     }
 
     /// Merges every entry of `other` into `self`, calling `combine`
@@ -1252,9 +1303,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// Returns a `DictionaryIterator[K, V]` over the live entries.
     ///
     /// Order is unspecified and may change between mutations. The
-    /// iterator borrows the bucket array; do not mutate the
-    /// dictionary while iterating. For key- or value-only iteration,
-    /// use `keys.iter()` / `values.iter()`.
+    /// iterator holds a share of the storage, so it sees the entries as
+    /// they were when `iter()` was called; mutating the dictionary while
+    /// iterating copies the table first. For key- or value-only
+    /// iteration, use `keys.iter()` / `values.iter()`.
     ///
     /// # Examples
     ///
@@ -1263,11 +1315,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// let entries = Array(from: dict);
     /// ```
     public func iter() -> DictionaryIterator[K, V] {
-        DictionaryIterator(buckets: self.buckets(), capacity: self.cap())
+        DictionaryIterator(storage: self.storage.clone())
     }
 
-    /// Internal accessor exposing the bucket pointer to `KeysView` /
-    /// `ValuesView` constructors. Not for outside use.
+    /// The bucket pointer, for the extensions below that scan buckets.
     fileprivate func getBuckets() -> Pointer[Bucket[K, V]] { self.buckets() }
 
     // ========================================================================
@@ -1929,29 +1980,26 @@ public struct KeysIterator[K, V]: Iterator where K: Hashable {
 ///
 /// # Representation
 ///
-/// `(buckets, capacity)` — a pointer into the source dictionary's
-/// bucket array plus the total slot count.
+/// A share of the source dictionary's storage.
 ///
 /// # Memory Model
 ///
-/// Value type that borrows the source dictionary's buffer.
+/// Holds a share of the storage (one refcount), so the view stays valid
+/// after the dictionary changes or is dropped, and sees it unchanged.
 public struct KeysView[K, V]: Iterable where K: Hashable {
     /// `Iterable` element type — `K`.
     type Item = K
     /// Concrete iterator type returned by `iter()`.
     type TargetIterator = KeysIterator[K, V]
 
-    /// Pointer into the source dictionary's bucket array.
-    private var buckets: Pointer[Bucket[K, V]]
-    /// Total slots in the bucket array.
-    private var capacity: Int64
+    /// A share of the source dictionary's storage.
+    private var storage: CowBox[DictionaryStorage[K, V]]
 
-    /// @name From Buckets
-    /// Internal — constructs a view from a bucket pointer and capacity.
+    /// @name From Storage
+    /// Internal — constructs a view over a share of `storage`.
     /// Use `Dictionary.keys` to obtain a view.
-    init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64) {
-        self.buckets = buckets;
-        self.capacity = capacity;
+    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V]]) {
+        self.storage = storage;
     }
 
     /// Returns a fresh `KeysIterator[K, V]` over the view.
@@ -1959,7 +2007,7 @@ public struct KeysView[K, V]: Iterable where K: Hashable {
     /// Each call returns a new iterator starting at the beginning of
     /// the bucket array.
     public func iter() -> KeysIterator[K, V] {
-        KeysIterator(dictIter: DictionaryIterator(buckets: self.buckets, capacity: self.capacity))
+        KeysIterator(dictIter: DictionaryIterator(storage: self.storage.clone()))
     }
 }
 
@@ -2041,29 +2089,26 @@ public struct ValuesIterator[K, V]: Iterator where K: Hashable {
 ///
 /// # Representation
 ///
-/// `(buckets, capacity)` — a pointer into the source dictionary's
-/// bucket array plus the total slot count.
+/// A share of the source dictionary's storage.
 ///
 /// # Memory Model
 ///
-/// Value type that borrows the source dictionary's buffer.
+/// Holds a share of the storage (one refcount), so the view stays valid
+/// after the dictionary changes or is dropped, and sees it unchanged.
 public struct ValuesView[K, V]: Iterable where K: Hashable {
     /// `Iterable` element type — `V`.
     type Item = V
     /// Concrete iterator type returned by `iter()`.
     type TargetIterator = ValuesIterator[K, V]
 
-    /// Pointer into the source dictionary's bucket array.
-    private var buckets: Pointer[Bucket[K, V]]
-    /// Total slots in the bucket array.
-    private var capacity: Int64
+    /// A share of the source dictionary's storage.
+    private var storage: CowBox[DictionaryStorage[K, V]]
 
-    /// @name From Buckets
-    /// Internal — constructs a view from a bucket pointer and capacity.
+    /// @name From Storage
+    /// Internal — constructs a view over a share of `storage`.
     /// Use `Dictionary.values` to obtain a view.
-    init(buckets buckets: Pointer[Bucket[K, V]], capacity capacity: Int64) {
-        self.buckets = buckets;
-        self.capacity = capacity;
+    fileprivate init(storage storage: CowBox[DictionaryStorage[K, V]]) {
+        self.storage = storage;
     }
 
     /// Returns a fresh `ValuesIterator[K, V]` over the view.
@@ -2071,7 +2116,7 @@ public struct ValuesView[K, V]: Iterable where K: Hashable {
     /// Each call returns a new iterator starting at the beginning of
     /// the bucket array.
     public func iter() -> ValuesIterator[K, V] {
-        ValuesIterator(dictIter: DictionaryIterator(buckets: self.buckets, capacity: self.capacity))
+        ValuesIterator(dictIter: DictionaryIterator(storage: self.storage.clone()))
     }
 }
 
