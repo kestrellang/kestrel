@@ -117,12 +117,13 @@ public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
     init(arrayLiteral elements: LiteralSlice[Element])
 }
 
-// Bridge: default implementation satisfies _ExpressibleByArrayLiteral
-//extend ExpressibleByArrayLiteral {
-//    public init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64) {
-//        self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
-//    }
-//}
+// Bridge: default implementation satisfies _ExpressibleByArrayLiteral, so a
+// type can adopt ExpressibleByArrayLiteral on its own.
+extend ExpressibleByArrayLiteral {
+    public init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[Element], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64) {
+        self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
+    }
+}
 
 /// Compiler-internal protocol for dictionary-literal lowering.
 ///

@@ -666,9 +666,12 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                     kestrel_debug::ktrace!("entail", "conformance left undecided by an open var");
                     continue;
                 }
-                if poison_ty_on_failure {
-                    ctx.poison(ty);
-                }
+                // The diagnostic names the type as it was, not the poison.
+                let ty = if poison_ty_on_failure {
+                    ctx.poison_keeping_shown(ty)
+                } else {
+                    ty
+                };
                 (
                     InferError::DoesNotConform {
                         ty,
@@ -714,9 +717,12 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 span,
                 is_call,
                 result,
+                expr,
                 ..
             } => {
-                if ctx.is_error(ctx.resolve(receiver)) {
+                // An operator's hidden method: its `Conforms` reports the
+                // failure (see `solve_member`), so don't leak the hook name.
+                if ctx.is_error(ctx.resolve(receiver)) || ctx.operator_members.contains_key(&expr) {
                     ctx.poison(result);
                     continue;
                 }

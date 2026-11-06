@@ -1,7 +1,8 @@
 //! Lowering context — central state during HIR → MIR lowering.
 
 use kestrel_ast_builder::{
-    Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, ReceiverKind, Subscript,
+    Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, ReceiverKind, Settable,
+    Subscript,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
 use kestrel_mir::{
@@ -221,8 +222,14 @@ impl<'w> LowerCtx<'w> {
     /// `"{parent_name}.set"` from the parent Field/Subscript.
     /// Uses the parent's labels (not the setter's own Callable params)
     /// to match the witness table key built by witness_lower.rs.
+    /// A bodyless `{ get set }` protocol requirement has no Setter child and
+    /// stands for its own setter (see `requirement_setter`): its key is
+    /// derived from the requirement itself.
     pub fn witness_setter_key(&self, setter: Entity) -> WitnessMethodKey {
-        let parent = self.world.parent_of(setter);
+        let parent = match self.world.get::<NodeKind>(setter) {
+            Some(NodeKind::Setter) => self.world.parent_of(setter),
+            _ => Some(setter),
+        };
         let parent_key = parent
             .map(|p| self.witness_method_key(p))
             .unwrap_or_else(|| WitnessMethodKey::simple("unknown"));
@@ -243,6 +250,20 @@ impl<'w> LowerCtx<'w> {
             ref_witness_name(&parent_key.name, mutating),
             parent_key.labels,
         )
+    }
+
+    /// A settable protocol property requirement (`var n: Int64 { get set }`)
+    /// with no Setter child: it is its own witness-dispatched setter
+    /// (`"n.set"`). `None` for any other member.
+    pub fn requirement_setter(&self, member: Entity) -> Option<Entity> {
+        if self.world.get::<NodeKind>(member) != Some(&NodeKind::Field)
+            || self.world.get::<Settable>(member).is_none()
+            || self.find_setter_child(member).is_some()
+        {
+            return None;
+        }
+        let parent = self.world.parent_of(member)?;
+        (self.world.get::<NodeKind>(parent) == Some(&NodeKind::Protocol)).then_some(member)
     }
 
     /// Find a `NodeKind::Setter` child of a Field or Subscript entity.

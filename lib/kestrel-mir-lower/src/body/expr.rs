@@ -1820,19 +1820,54 @@ impl OssaBodyCtx<'_, '_> {
                 args.iter().map(|a| self.lower_expr(a.value)).collect();
             let rhs = self.lower_expr(value_id);
             let type_args = self.resolve_type_args(target_id);
-            // A `mutating ref` place property lends through a mutable receiver;
-            // a getter returning `&mutating T` borrows it.
-            let recv_convention = match self.ctx.find_ref_accessor_child(prop, true) {
-                Some(_) => ParamConvention::MutBorrow,
-                None => ParamConvention::Borrow,
+            // A value-returning get/set property is gotten into a writeback
+            // slot (its setter runs at the statement's end). Without it the
+            // store mutated a getter temporary and was lost.
+            let writeback = self.computed_prefix_writeback_receiver(receiver, receiver_ty, prop);
+            let (field_arg, field_ty) = match writeback {
+                Some(found) => found,
+                None => {
+                    // A `mutating ref` place property lends through a mutable
+                    // receiver; a getter returning `&mutating T` borrows it.
+                    let recv_convention = match self.ctx.find_ref_accessor_child(prop, true) {
+                        Some(_) => ParamConvention::MutBorrow,
+                        None => ParamConvention::Borrow,
+                    };
+                    let recv_arg = self.prepare_call_arg_for_expr(receiver, recv_convention);
+                    self.computed_prefix_receiver(
+                        recv_arg,
+                        receiver_ty,
+                        prop,
+                        ParamConvention::MutBorrow,
+                    )
+                },
             };
-            let recv_arg = self.prepare_call_arg_for_expr(receiver, recv_convention);
-            let (field_arg, field_ty) = self.computed_prefix_receiver(
-                recv_arg,
-                receiver_ty,
-                prop,
-                ParamConvention::MutBorrow,
-            );
+            let mut call_args = vec![field_arg];
+            for v in subscript_args {
+                call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+            }
+            return Some(self.emit_subscript_store(
+                target_id,
+                mutating_ref,
+                setter,
+                field_ty,
+                type_args,
+                call_args,
+                rhs,
+            ));
+        }
+
+        // A `{ get set }` protocol requirement on a generic receiver
+        // (`x.items(0) = 9`, `X: HasItems`): no stored field to address, so
+        // get it into a writeback slot whose `"items.set"` witness runs at
+        // the statement's end.
+        if let Some(prop) = self.requirement_subscript_prefix(target_id) {
+            let subscript_args: Vec<ValueId> =
+                args.iter().map(|a| self.lower_expr(a.value)).collect();
+            let rhs = self.lower_expr(value_id);
+            let type_args = self.resolve_type_args(target_id);
+            let (field_arg, field_ty) =
+                self.computed_prefix_writeback_receiver(receiver, receiver_ty, prop)?;
             let mut call_args = vec![field_arg];
             for v in subscript_args {
                 call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
@@ -1930,6 +1965,13 @@ impl OssaBodyCtx<'_, '_> {
 
     /// The computed property a field-subscript place (`p.mutatingValue(i)`)
     /// is applied to, when its prefix is computed rather than stored.
+    /// The settable protocol requirement a dotted subscript place is reached
+    /// through (`x.items` in `x.items(0) = v`), if that is its prefix.
+    fn requirement_subscript_prefix(&self, target_id: HirExprId) -> Option<Entity> {
+        let prop = *self.typed.as_ref()?.field_subscripts.get(&target_id)?;
+        self.ctx.requirement_setter(prop)
+    }
+
     fn computed_subscript_prefix(&self, target_id: HirExprId) -> Option<Entity> {
         let prop = *self.typed.as_ref()?.field_subscripts.get(&target_id)?;
         self.ctx

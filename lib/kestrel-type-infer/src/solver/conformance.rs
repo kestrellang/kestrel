@@ -160,9 +160,11 @@ pub(super) fn solve_conforms(
                 return SolveResult::Solved;
             }
             if is_static_builtin(ctx, protocol) {
-                if poison_ty_on_failure {
-                    ctx.poison(ty);
-                }
+                let ty = if poison_ty_on_failure {
+                    ctx.poison_keeping_shown(ty)
+                } else {
+                    ty
+                };
                 return SolveResult::Error(InferError::DoesNotConform {
                     ty,
                     protocol,
@@ -204,9 +206,11 @@ pub(super) fn solve_conforms(
                 if typearg_failure_is_duplicate(ctx, resolved, protocol, origin) {
                     return SolveResult::Solved;
                 }
-                if poison_ty_on_failure {
-                    ctx.poison(ty);
-                }
+                let ty = if poison_ty_on_failure {
+                    ctx.poison_keeping_shown(ty)
+                } else {
+                    ty
+                };
                 return SolveResult::Error(InferError::DoesNotConform {
                     ty,
                     protocol,
@@ -271,9 +275,11 @@ pub(super) fn solve_conforms(
                             if unify_bound_protocol_args(ctx, resolved, protocol, &protocol_args)
                                 .is_err()
                             {
-                                if poison_ty_on_failure {
-                                    ctx.poison(ty);
-                                }
+                                let ty = if poison_ty_on_failure {
+                                    ctx.poison_keeping_shown(ty)
+                                } else {
+                                    ty
+                                };
                                 return SolveResult::Error(InferError::DoesNotConform {
                                     ty,
                                     protocol,
@@ -313,9 +319,11 @@ pub(super) fn solve_conforms(
                         protocol_args,
                     }),
                     Err(()) => {
-                        if poison_ty_on_failure {
-                            ctx.poison(ty);
-                        }
+                        let ty = if poison_ty_on_failure {
+                            ctx.poison_keeping_shown(ty)
+                        } else {
+                            ty
+                        };
                         SolveResult::Error(InferError::DoesNotConform {
                             ty,
                             protocol,
@@ -330,28 +338,35 @@ pub(super) fn solve_conforms(
                 // E157: `?.` on a type with no payload names that type, so
                 // keep a copy of it before poisoning overwrites the slot.
                 if ctx.resolver.builtin(Builtin::OptionalChainProtocol) == Some(protocol) {
-                    let shown = ctx.fresh();
-                    ctx.types[shown.0 as usize] = ctx.slot(resolved).clone();
-                    if poison_ty_on_failure {
-                        ctx.poison(ty);
-                    }
+                    let shown = if poison_ty_on_failure {
+                        ctx.poison_keeping_shown(ty)
+                    } else {
+                        ty
+                    };
                     return SolveResult::Error(InferError::OptionalChainNotConforming {
                         ty: shown,
                         span,
                     });
                 }
-                if poison_ty_on_failure {
-                    ctx.poison(ty);
-                }
+                let ty = if poison_ty_on_failure {
+                    ctx.poison_keeping_shown(ty)
+                } else {
+                    ty
+                };
                 // E146 names what blocks `any P: P`.
                 SolveResult::Error(
-                    crate::existential::self_conformance_error(ctx, resolved, protocol, &span)
-                        .unwrap_or_else(|| InferError::DoesNotConform {
-                            ty,
-                            protocol,
-                            protocol_args: protocol_args.clone(),
-                            span,
-                        }),
+                    crate::existential::self_conformance_error(
+                        ctx,
+                        ctx.resolve(ty),
+                        protocol,
+                        &span,
+                    )
+                    .unwrap_or_else(|| InferError::DoesNotConform {
+                        ty,
+                        protocol,
+                        protocol_args: protocol_args.clone(),
+                        span,
+                    }),
                 )
             }
         },
