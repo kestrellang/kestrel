@@ -1107,14 +1107,17 @@ impl QueryFn for RetRefPointerDerived {
     type Output = bool;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> bool {
+        // A place (`var value: T { ref { ptr_ref(…) } }`) is a wrapper when
+        // its read accessor is: that body holds the intrinsic call.
+        let entity = place_read_accessor(ctx, self.entity).unwrap_or(self.entity);
         let Some(hir) = ctx.query(LowerBody {
-            entity: self.entity,
+            entity,
             root: self.root,
         }) else {
             return false;
         };
         let Some(typed) = ctx.query(InferBody {
-            entity: self.entity,
+            entity,
             root: self.root,
         }) else {
             return false;
@@ -1134,6 +1137,21 @@ impl QueryFn for RetRefPointerDerived {
                 .iter()
                 .all(|&e| is_ptr_ref_intrinsic_call(ctx, &hir, &typed, e))
     }
+}
+
+/// The non-mutating `ref` accessor of a place member (field or subscript),
+/// or `None` when `member` isn't a place with one.
+fn place_read_accessor(ctx: &QueryContext<'_>, member: Entity) -> Option<Entity> {
+    use kestrel_ast_builder::{MutatingAccessor, NodeKind};
+    if !matches!(
+        ctx.get::<NodeKind>(member),
+        Some(NodeKind::Field | NodeKind::Subscript)
+    ) {
+        return None;
+    }
+    ctx.children_of(member).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::RefAccessor) && !ctx.has::<MutatingAccessor>(c)
+    })
 }
 
 fn is_ptr_ref_intrinsic_call(
