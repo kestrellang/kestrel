@@ -75,12 +75,12 @@ public struct Image[P] where P: Pixel {
     public subscript(x: Int64, y: Int64) -> P {
         get {
             self.checkBounds(x, y);
-            self.bytes.asUnsafeSlice().pointer.cast[P]().offset(by: y * self.stride + x).read()
+            unsafe self.bytes.asUnsafeSlice().pointer.cast[P]().offset(by: y * self.stride + x).read()
         }
         set {
             self.checkBounds(x, y);
             self.bytes.ensureUnique();
-            self.bytes.asUnsafeSlice().pointer.cast[P]().offset(by: y * self.stride + x).write(newValue);
+            unsafe self.bytes.asUnsafeSlice().pointer.cast[P]().offset(by: y * self.stride + x).write(newValue);
         }
     }
 
@@ -96,7 +96,7 @@ public struct Image[P] where P: Pixel {
         let base = self.bytes.asUnsafeSlice().pointer.cast[P]();
         for y in 0..<self.height {
             let row = base.offset(by: y * self.stride);
-            for x in 0..<self.width { row.offset(by: x).write(value); }
+            for x in 0..<self.width { unsafe row.offset(by: x).write(value); }
         }
     }
 

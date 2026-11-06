@@ -48,7 +48,7 @@ extend RawImage {
                 if o == 8 { sx = w - 1 - y; sy = x; }
                 let from = src.offset(by: sy * source.strideBytes + sx * bpp);
                 let to = dst.offset(by: (y * outWidth + x) * bpp);
-                for k in 0..<bpp { to.offset(by: k).write(from.offset(by: k).read()); }
+                for k in 0..<bpp { unsafe to.offset(by: k).write(from.offset(by: k).read()); }
             }
         }
         var out = RawImage(width: outWidth, height: outHeight, planes: [target], color: self.color, alpha: self.alpha);
@@ -163,7 +163,7 @@ extend Image[P] {
         let base = self.bytes.asUnsafeSlice().pointer.cast[P]();
         for y in r.y..<(r.y + r.height) {
             let row = base.offset(by: y * self.stride);
-            for x in r.x..<(r.x + r.width) { row.offset(by: x).write(value); }
+            for x in r.x..<(r.x + r.width) { unsafe row.offset(by: x).write(value); }
         }
     }
 
@@ -235,7 +235,7 @@ extend Image[P] {
                 // Lanczos rings below zero; clamp alpha into range and keep
                 // color within it.
                 a = a.clamp(0.0, 1.0);
-                out.offset(by: y * width + x).write(RgbaF32(r: r.clamp(0.0, a), g: g.clamp(0.0, a), b: b.clamp(0.0, a), a: a));
+                unsafe out.offset(by: y * width + x).write(RgbaF32(r: r.clamp(0.0, a), g: g.clamp(0.0, a), b: b.clamp(0.0, a), a: a));
             }
         }
         result.planes(0) = plane;
@@ -284,7 +284,7 @@ extend Image[P] {
         let src = raw.planes(0).bytes.asUnsafeSlice().pointer.cast[RgbaF32]();
         for y in 0..<raw.height {
             for x in 0..<raw.width {
-                out(x, y) = P.fromRgbaF32(converter.convert(src.offset(by: y * raw.width + x).read()));
+                out(x, y) = unsafe P.fromRgbaF32(converter.convert(src.offset(by: y * raw.width + x).read()));
             }
         }
         out

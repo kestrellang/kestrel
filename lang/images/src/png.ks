@@ -665,29 +665,29 @@ func unfilter(mutating row: Array[UInt8], previous: Array[UInt8], filter: Int64,
     let up = previous.asUnsafeSlice().pointer;
     if filter == 1 {
         for i in stride..<n {
-            p.offset(by: i).write(p.offset(by: i).read() + p.offset(by: i - stride).read());
+            unsafe p.offset(by: i).write(p.offset(by: i).read() + p.offset(by: i - stride).read());
         }
     } else if filter == 2 {
         for i in 0..<n {
-            p.offset(by: i).write(p.offset(by: i).read() + up.offset(by: i).read());
+            unsafe p.offset(by: i).write(p.offset(by: i).read() + up.offset(by: i).read());
         }
     } else if filter == 3 {
         for i in 0..<n {
             var left: Int64 = 0;
-            if i >= stride { left = Int64(from: p.offset(by: i - stride).read()); }
-            let avg = (left + Int64(from: up.offset(by: i).read())) / 2;
-            p.offset(by: i).write(p.offset(by: i).read() + UInt8(truncating: avg));
+            if i >= stride { left = unsafe Int64(from: p.offset(by: i - stride).read()); }
+            let avg = unsafe (left + Int64(from: up.offset(by: i).read())) / 2;
+            unsafe p.offset(by: i).write(p.offset(by: i).read() + UInt8(truncating: avg));
         }
     } else {
         for i in 0..<n {
             var left: Int64 = 0;
             var corner: Int64 = 0;
             if i >= stride {
-                left = Int64(from: p.offset(by: i - stride).read());
-                corner = Int64(from: up.offset(by: i - stride).read());
+                left = unsafe Int64(from: p.offset(by: i - stride).read());
+                corner = unsafe Int64(from: up.offset(by: i - stride).read());
             }
-            let above = Int64(from: up.offset(by: i).read());
-            p.offset(by: i).write(p.offset(by: i).read() + UInt8(truncating: paeth(left, above, corner)));
+            let above = unsafe Int64(from: up.offset(by: i).read());
+            unsafe p.offset(by: i).write(p.offset(by: i).read() + UInt8(truncating: paeth(left, above, corner)));
         }
     }
 }
@@ -902,21 +902,21 @@ func applyFilter(row: Array[UInt8], previous: Array[UInt8], filter: Int64, strid
     let o = out.asUnsafeSlice().pointer;
     var cost: Int64 = 0;
     for i in 0..<n {
-        let x = Int64(from: r.offset(by: i).read());
+        let x = unsafe Int64(from: r.offset(by: i).read());
         var a: Int64 = 0;
         var c: Int64 = 0;
         if i >= stride {
-            a = Int64(from: r.offset(by: i - stride).read());
-            c = Int64(from: up.offset(by: i - stride).read());
+            a = unsafe Int64(from: r.offset(by: i - stride).read());
+            c = unsafe Int64(from: up.offset(by: i - stride).read());
         }
-        let b = Int64(from: up.offset(by: i).read());
+        let b = unsafe Int64(from: up.offset(by: i).read());
         var predicted: Int64 = 0;
         if filter == 1 { predicted = a; }
         if filter == 2 { predicted = b; }
         if filter == 3 { predicted = (a + b) / 2; }
         if filter == 4 { predicted = paeth(a, b, c); }
         let v = (x - predicted) & 0xFF;
-        o.offset(by: i).write(UInt8(truncating: v));
+        unsafe o.offset(by: i).write(UInt8(truncating: v));
         if v < 128 { cost = cost + v; } else { cost = cost + 256 - v; }
     }
     cost
