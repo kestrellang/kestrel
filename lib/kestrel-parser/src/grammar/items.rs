@@ -88,9 +88,29 @@ fn at_item_start(p: &Parser<'_>) -> bool {
         || at_lazy_modifier(p, 0)
 }
 
-/// Contextual `lazy` at token offset `n`, introducing `lazy let|var`.
+/// Contextual `lazy` at token offset `n`, introducing `lazy let|var`. Other
+/// modifiers may sit between it and the keyword (`lazy static var`), so
+/// `lazy` reads as a modifier in either position.
 fn at_lazy_modifier(p: &Parser<'_>, n: usize) -> bool {
-    p.nth_is_contextual(n, "lazy") && (p.nth_at(n + 1, K::Var) || p.nth_at(n + 1, K::Let))
+    if !p.nth_is_contextual(n, "lazy") {
+        return false;
+    }
+    let mut i = n + 1;
+    while p.nth(i).is_some_and(|k| MODIFIERS.contains(&k)) {
+        i += 1;
+    }
+    p.nth_at(i, K::Var) || p.nth_at(i, K::Let)
+}
+
+/// `LazyModifier` node, if a contextual `lazy` modifier is next.
+fn opt_lazy(p: &mut Parser<'_>) -> bool {
+    if !at_lazy_modifier(p, 0) {
+        return false;
+    }
+    let l = p.start();
+    p.bump(K::Identifier);
+    l.complete(p, K::LazyModifier);
+    true
 }
 
 /// The keyword introducing the item at the cursor, looking past
@@ -114,10 +134,14 @@ fn scan_head(p: &Parser<'_>) -> (Option<K>, bool) {
     if p.kind_at(i).is_some_and(|k| VISIBILITY.contains(&k)) {
         i += 1;
     }
+    let lazy_first = at_lazy_modifier(p, i - start);
+    if lazy_first {
+        i += 1;
+    }
     while p.kind_at(i).is_some_and(|k| MODIFIERS.contains(&k)) {
         i += 1;
     }
-    if at_lazy_modifier(p, i - start) {
+    if !lazy_first && at_lazy_modifier(p, i - start) {
         i += 1;
     }
     (p.kind_at(i), i != start)
@@ -536,13 +560,12 @@ fn field_decl(p: &mut Parser<'_>) {
     let m = p.start();
     attribute_list(p);
     visibility(p);
+    let lazy_first = opt_lazy(p);
     opt_static(p);
     opt_unsafe(p);
     stray_modifiers(p);
-    if at_lazy_modifier(p, 0) {
-        let l = p.start();
-        p.bump(K::Identifier);
-        l.complete(p, K::LazyModifier);
+    if !lazy_first {
+        opt_lazy(p);
     }
     p.bump_any(); // let / var
     name(p);
