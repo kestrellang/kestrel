@@ -2191,6 +2191,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .collect()
     }
 
+    /// The single-use expression refs (`ref_results`, not named bindings)
+    /// tracked in scope right now, in creation order.
+    pub(crate) fn tracked_expr_refs(&self) -> Vec<ValueId> {
+        self.scope_stack
+            .iter()
+            .flat_map(|s| s.entries.iter())
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(v)
+                    if self.ref_results.contains(v) && !self.ref_binding_vals.contains_key(v) =>
+                {
+                    Some(*v)
+                },
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn snapshot_scope(&self) -> ScopeSnapshot {
         ScopeSnapshot {
             scopes: self.scope_stack.iter().map(|s| s.entries.clone()).collect(),

@@ -104,6 +104,21 @@ impl OssaBodyCtx<'_, '_> {
         (val, false)
     }
 
+    /// End the single-use refs a decision-tree test loaded since `before`
+    /// (the `&V` inside a lent `Optional[&V]` scrutinee). A test only reads
+    /// through them and the subtrees re-project from the scrutinee, so they
+    /// end before the branch instead of crossing it (E497).
+    fn end_path_refs(&mut self, before: &[ValueId]) {
+        let loaded: Vec<ValueId> = self
+            .tracked_expr_refs()
+            .into_iter()
+            .filter(|v| !before.contains(v))
+            .collect();
+        for r in loaded.into_iter().rev() {
+            self.emit_end_borrow(r);
+        }
+    }
+
     /// The raw address of `view`, rooted where the viewed storage lives;
     /// the view itself ends here unless a named binding owns it.
     fn pin_view_address(&mut self, view: ValueId) -> ValueId {
@@ -511,6 +526,7 @@ impl OssaBodyCtx<'_, '_> {
                     // mode reads through an intra-block view of the pinned
                     // address; the owned copy joins the extra test values
                     // destroyed per successor.
+                    let refs_before = self.tracked_expr_refs();
                     let test_val = if place {
                         let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
                         let (proj, _) = self.apply_access_path(view, scrutinee_ty, path);
@@ -518,8 +534,16 @@ impl OssaBodyCtx<'_, '_> {
                         self.emit_end_borrow(view);
                         owned
                     } else {
-                        self.apply_access_path(scrutinee, scrutinee_ty, path).0
+                        let proj = self.apply_access_path(scrutinee, scrutinee_ty, path).0;
+                        // Read through a lent payload: copy the Bool out
+                        // before its ref ends.
+                        if self.body.value(proj).ownership == Ownership::Guaranteed {
+                            self.emit_copy_value(proj)
+                        } else {
+                            proj
+                        }
                     };
+                    self.end_path_refs(&refs_before);
                     let branch_snapshot = self.snapshot_scope();
                     let current_live: Vec<ValueId> =
                         self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
@@ -662,6 +686,7 @@ impl OssaBodyCtx<'_, '_> {
                 // to be inspected. The borrow is closed right after the read.
                 // Place mode: the read goes through an intra-block view of
                 // the pinned address.
+                let refs_before = self.tracked_expr_refs();
                 let (disc_operand, borrow_to_end) = if place {
                     let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
                     let operand = if path.is_empty() {
@@ -714,6 +739,7 @@ impl OssaBodyCtx<'_, '_> {
                     Some(d) => self.emit_int_discriminant(disc_operand, d.bits),
                     None => self.emit_discriminant(disc_operand),
                 };
+                self.end_path_refs(&refs_before);
                 if let Some(borrow) = borrow_to_end {
                     self.emit_end_borrow(borrow);
                 }
@@ -1743,9 +1769,11 @@ impl OssaBodyCtx<'_, '_> {
                 .iter()
                 .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
                 .collect();
+            let refs_before = self.tracked_expr_refs();
             let Some(cmp) = test(self, ctor, current_scrutinee) else {
                 continue;
             };
+            self.end_path_refs(&refs_before);
             // Use the chain-level live set (not the inflated post-test set)
             // so test intermediates are destroyed in each arm rather than
             // forwarded and accumulated.

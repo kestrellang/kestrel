@@ -29,14 +29,17 @@ public protocol OptionalChain {
     type Wrapped
 
     /// Read-only chains: `a?.count`, `a?.describe()`.
+    @sugarOnly
     @builtin(.OptionalChainBorrowMethod)
     func chainBorrow() -> Optional[&Wrapped]
 
     /// Chains that mutate the payload: `a?.push(x)`, `a?.n = 1`.
+    @sugarOnly
     @builtin(.OptionalChainMutateMethod)
     mutating func chainMutate() -> Optional[&mutating Wrapped]
 
     /// Chains on a temporary: `load()?.consume()`.
+    @sugarOnly
     @builtin(.OptionalChainTakeMethod)
     consuming func chainTake() -> Optional[Wrapped]
 }

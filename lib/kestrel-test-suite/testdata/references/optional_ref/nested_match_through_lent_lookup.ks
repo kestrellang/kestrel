@@ -4,9 +4,8 @@
 
 // Matching a nested pattern straight through a lent `Optional[&V]`
 // (`d(key)` on a dictionary of enums) copies the inner value out, like the
-// flat `.Some(v) => v` case. Known gap: the decision tree holds the lent
-// reference across the arms and reports E497; binding the lookup first
-// (`let e = d(key); match e { … }`) works.
+// flat `.Some(v) => v` case: the decision tree ends the lent `&V` after
+// reading its tag instead of holding it across the arms (was E497).
 module Test
 
 import std.collections.(Array, Dictionary)

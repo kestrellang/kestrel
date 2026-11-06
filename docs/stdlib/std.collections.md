@@ -332,17 +332,6 @@ change elements, never the array's length.
 
 _Defined in `lang/std/collections/array.ks`._
 
-#### function `asSlice`
-
-```kestrel
-public func asSlice() -> &Slice[T]
-```
-
-The elements as a slice, in place. Valid until the array next
-reallocates or is dropped.
-
-_Defined in `lang/std/collections/array.ks`._
-
 #### field `capacity`
 
 ```kestrel
@@ -1325,13 +1314,14 @@ _Defined in `lang/std/collections/views.ks`._
 
 ### Implements `Sliceable`
 
-#### function `asUnsafeSlice`
+#### function `asSlice`
 
 ```kestrel
-public func asUnsafeSlice() -> UnsafeSlice[T]
+public func asSlice() -> &Slice[T]
 ```
 
-Slice protocol kernel — borrows the array's buffer as an UnsafeSlice.
+The elements as a slice, in place. Valid until the array next
+reallocates or is dropped.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -4660,100 +4650,6 @@ public func iter() -> ReversedSliceIterator[T]
 
 _Defined in `lang/std/collections/views.ks`._
 
-## protocol `SeqClampable`
-
-```kestrel
-public protocol SeqClampable[T]
-```
-
-A range that `xs(within: range)` clamps into the sequence.
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Members
-
-#### typealias `SeqClampedOutput`
-
-```kestrel
-type SeqClampedOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqClamped`
-
-```kestrel
-func readSeqClamped(from: UnsafeSlice[T]) -> SeqClampedOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqClamped`
-
-```kestrel
-func writeSeqClamped(to: UnsafeSlice[T], with: SeqClampedOutput)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-## protocol `SeqIndex`
-
-```kestrel
-public protocol SeqIndex[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Members
-
-#### typealias `SeqOutput`
-
-```kestrel
-type SeqOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeq`
-
-```kestrel
-func readSeq(from: UnsafeSlice[T]) -> SeqOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqChecked`
-
-```kestrel
-func readSeqChecked(from: UnsafeSlice[T]) -> SeqOutput?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqUnchecked`
-
-```kestrel
-func readSeqUnchecked(from: UnsafeSlice[T]) -> SeqOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeq`
-
-```kestrel
-func writeSeq(to: UnsafeSlice[T], with: SeqOutput)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqUnchecked`
-
-```kestrel
-func writeSeqUnchecked(to: UnsafeSlice[T], with: SeqOutput)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
 ## protocol `SeqRange`
 
 ```kestrel
@@ -4773,40 +4669,6 @@ _Defined in `lang/std/collections/sliceable.ks`._
 
 ```kestrel
 func resolve(Int64) -> Range[Int64]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-## protocol `SeqWrappable`
-
-```kestrel
-public protocol SeqWrappable[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Members
-
-#### typealias `SeqWrappedOutput`
-
-```kestrel
-type SeqWrappedOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqWrapped`
-
-```kestrel
-func readSeqWrapped(from: UnsafeSlice[T]) -> SeqWrappedOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqWrapped`
-
-```kestrel
-func writeSeqWrapped(to: UnsafeSlice[T], with: SeqWrappedOutput)
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -6172,6 +6034,16 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ### Members
 
+#### function `asUnsafeSlice`
+
+```kestrel
+public func asUnsafeSlice() -> UnsafeSlice[T]
+```
+
+The elements as a raw `(pointer, count)` view.
+
+_Defined in `lang/std/collections/slice.ks`._
+
 #### function `assign`
 
 ```kestrel
@@ -6581,13 +6453,13 @@ _Defined in `lang/std/collections/views.ks`._
 
 ### Implements `Sliceable`
 
-#### function `asUnsafeSlice`
+#### function `asSlice`
 
 ```kestrel
-public func asUnsafeSlice() -> UnsafeSlice[T]
+public func asSlice() -> &Slice[T]
 ```
 
-The elements as a raw `(pointer, count)` view.
+Itself: a slice is already the in-place view.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6777,10 +6649,11 @@ public protocol Sliceable[T]
 Shared read-only protocol for contiguous collections.
 
 `Sliceable[T]` is the contiguous-collection counterpart to `Str` in
-`std.text`: one kernel method (`asSlice`), all read-only logic in a
-protocol extension. Both `Array[T]` and `UnsafeSlice[T]` conform, so
-generic code constrained to `S: Sliceable[T]` accepts either without
-overloading.
+`std.text`: a conformer lends itself as a `Slice` (`asSlice`) and its
+index places; all read-only logic lives in a protocol extension.
+`Array[T]`, `Slice[T]` and `UnsafeSlice[T]` conform, so generic code
+constrained to `S: Sliceable[T]` accepts any of them without
+overloading, and `s(i)` borrows the element rather than copying it.
 
 ### Examples
 
@@ -6791,7 +6664,7 @@ func sum[S](s: &S) -> Int64 where S: Sliceable[Int64], S: not Static, S: not Cop
     total
 }
 sum([1, 2, 3]);              // works with Array
-sum([1, 2, 3].asUnsafeSlice());    // works with UnsafeSlice
+sum([1, 2, 3](1..<3));       // works with Slice
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -6853,15 +6726,26 @@ Reading past `count` is undefined behavior.
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
+#### function `asSlice`
+
+```kestrel
+func asSlice() -> &Slice[T]
+```
+
+The elements as a `Slice`, in place. Every shared algorithm reads
+through it.
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
 #### function `asUnsafeSlice`
 
 ```kestrel
-func asUnsafeSlice() -> UnsafeSlice[T]
+public func asUnsafeSlice() -> UnsafeSlice[T]
 ```
 
-The elements as a raw `(pointer, count)` view. Only valid until the
-collection next changes, so shared algorithms use it within one
-call and never hand it out.
+The elements as a raw `(pointer, count)` view, for algorithms that
+walk the buffer directly. Only valid until the collection next
+changes, so never hand it out.
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
@@ -7468,7 +7352,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](I) -> I.SeqOutput where I: SeqIndex[T] { get }
+subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7476,7 +7360,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](checked: I) -> I.SeqOutput? where I: SeqIndex[T] { get }
+subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7484,7 +7368,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](unchecked: I) -> I.SeqOutput where I: SeqIndex[T] { get }
+subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7492,7 +7376,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript(clamped: Int64) -> T? { get }
+subscript(clamped: Int64) -> T? { ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7500,7 +7384,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](within: I) -> I.SeqClampedOutput where I: SeqClampable[T] { get }
+subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7508,7 +7392,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](wrapped: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] { get }
+subscript(wrapped: Int64) -> T? { ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._

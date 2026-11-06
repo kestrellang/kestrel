@@ -154,6 +154,12 @@ pub struct InferCtx<'a> {
     /// `CallableRefReturn`, not from this expression's recorded type.
     pub(crate) assign_target_exprs: HashSet<HirExprId>,
 
+    /// The VALUE exprs of assignments whose target is a call / member
+    /// access (`d(k) = v`), so `solve_assign_target` can tell a lent
+    /// failable place (never assignable: the analyzer reports E214) from an
+    /// `Optional[&T]` local being rebound.
+    pub(crate) place_assign_values: HashSet<HirExprId>,
+
     /// HirExprIds in ALWAYS-DECAY value positions: `if`/`match` ARM VALUES
     /// (refs cannot cross merges) and array/tuple/dict LITERAL ELEMENTS
     /// (aggregates own their elements). A ref-returning call here binds its
@@ -303,7 +309,6 @@ pub struct InferCtx<'a> {
     pub(crate) return_ty_span: Option<Span>,
 
     /// Entity being inferred (function/init/getter).
-    #[allow(dead_code)]
     pub(crate) owner: Entity,
     pub(crate) root: Entity,
 
@@ -491,6 +496,7 @@ impl<'a> InferCtx<'a> {
             scrutinee_exprs: HashSet::default(),
             mutating_scrutinee_exprs: HashSet::default(),
             assign_target_exprs: HashSet::default(),
+            place_assign_values: HashSet::default(),
             always_decay_exprs: HashSet::default(),
             call_arg_exprs: HashSet::default(),
             direct_callee_exprs: HashSet::default(),
