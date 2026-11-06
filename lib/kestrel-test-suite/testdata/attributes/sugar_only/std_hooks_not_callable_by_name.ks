@@ -8,7 +8,7 @@ func generic[T](a: T, b: T) -> Bool where T: Equatable {
 
 func hooks() {
     var a = 7;
-    a.modAssign(3); // ERROR: 'modAssign' can only be used through its syntax
+    a.remainderAssign(3); // ERROR: 'remainderAssign' can only be used through its syntax
     let _ = a.equal(to: 3); // ERROR: 'equal' can only be used through its syntax
     let _ = a.lessThan(3); // ERROR: 'lessThan' can only be used through its syntax
     let _ = a.exclusiveRange(to: 3); // ERROR: 'exclusiveRange' can only be used through its syntax

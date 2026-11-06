@@ -32,7 +32,7 @@ extend View: Aimed {
 
 extend View: Indirection {
     type Indirection.Target = Account
-    public func pointeeRef() -> &Account { self.inner.pointeeRef() }
+    public var value: Account { ref { self.inner.value } }
 }
 
 @main

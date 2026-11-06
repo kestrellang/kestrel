@@ -26,10 +26,10 @@ func implicitCopies() -> Int64 {
     var a = OwnedBox(5);
     let b = a;
     let c = a;
-    a.pointeeMutRef() = 6;
-    if b.pointeeRef() != 5 { return 1 }
-    if c.pointeeRef() != 5 { return 2 }
-    if a.pointeeRef() != 6 { return 3 }
+    a.value = 6;
+    if b.value != 5 { return 1 }
+    if c.value != 5 { return 2 }
+    if a.value != 6 { return 3 }
     0
 }
 
@@ -37,9 +37,9 @@ func implicitCopies() -> Int64 {
 func explicitClone() -> Int64 {
     let a = OwnedBox(5);
     var b = a.clone();
-    b.pointeeMutRef() = 7;
-    if a.pointeeRef() != 5 { return 1 }
-    if b.pointeeRef() != 7 { return 2 }
+    b.value = 7;
+    if a.value != 5 { return 1 }
+    if b.value != 7 { return 2 }
     0
 }
 
@@ -47,11 +47,11 @@ func explicitClone() -> Int64 {
 func cloneablePayload() -> Int64 {
     let x = OwnedBox(Tracked(n: 1));
     let y = x;
-    if x.pointeeRef().n != 1 { return 1 }
-    if y.pointeeRef().n != 101 { return 2 }
+    if x.value.n != 1 { return 1 }
+    if y.value.n != 101 { return 2 }
     let s = OwnedBox("hello");
     let t = s;
-    if t.pointeeRef() != "hello" { return 3 }
+    if t.value != "hello" { return 3 }
     0
 }
 
