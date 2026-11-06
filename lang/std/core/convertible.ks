@@ -21,3 +21,27 @@ public protocol Convertible[From] {
     /// Creates an instance from `value`.
     init(from value: From)
 }
+
+/// Protocol for the explicit lossy forms of a conversion, for sources
+/// where `init(from:)` would trap because the value may not fit.
+///
+/// Each integer type conforms once per source it can't always hold, so
+/// `Int8(truncating: x)` and `Int8(clamping: x)` work for every wider or
+/// differently-signed `x`.
+///
+/// # Examples
+///
+/// ```
+/// let big: Int64 = 300;
+/// Int8(truncating: big);   // 44  (low 8 bits)
+/// Int8(clamping: big);     // 127
+/// ```
+public protocol LossyConvertible[From] {
+    /// @name Truncating
+    /// Keeps the low bits of `value`, reinterpreted as `Self`. Never traps.
+    init(truncating value: From)
+    /// @name Clamping
+    /// Converts `value`, saturating to `Self`'s minimum or maximum when it
+    /// doesn't fit. Never traps.
+    init(clamping value: From)
+}

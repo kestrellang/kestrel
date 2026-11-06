@@ -226,7 +226,7 @@ _Defined in `lang/std/io/file.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(from: UnsafeSlice[UInt8]) -> Result[Int64, IoError]
+public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Calls `write(2)`. May write fewer bytes than supplied — wrap with

@@ -34,22 +34,22 @@ module Test
 
             // min()
             let minVal = unsorted.min();
-            if minVal.isNone() { return 15 }
+            if minVal.isNone { return 15 }
             if minVal.unwrap() != 1 { return 16 }
 
             // min() on empty
             let empty = std.collections.Array[std.numeric.Int64]();
             let minEmpty = empty.min();
-            if minEmpty.isSome() { return 17 }
+            if minEmpty.isSome { return 17 }
 
             // max()
             let maxVal = unsorted.max();
-            if maxVal.isNone() { return 18 }
+            if maxVal.isNone { return 18 }
             if maxVal.unwrap() != 5 { return 19 }
 
             // max() on empty
             let maxEmpty = empty.max();
-            if maxEmpty.isSome() { return 20 }
+            if maxEmpty.isSome { return 20 }
 
             // isSorted()
             if s.isSorted() == false { return 21 }
@@ -70,21 +70,21 @@ module Test
             sorted.append(1); sorted.append(2); sorted.append(3);
             sorted.append(4); sorted.append(5);
             let bs = sorted.binarySearch(3);
-            if bs.isNone() { return 26 }
+            if bs.isNone { return 26 }
             if bs.unwrap() != 2 { return 27 }
 
             // binarySearch - not found
             let bsNone = sorted.binarySearch(6);
-            if bsNone.isSome() { return 28 }
+            if bsNone.isSome { return 28 }
 
             // binarySearch - first element
             let bsFirst = sorted.binarySearch(1);
-            if bsFirst.isNone() { return 29 }
+            if bsFirst.isNone { return 29 }
             if bsFirst.unwrap() != 0 { return 30 }
 
             // binarySearch - last element
             let bsLast = sorted.binarySearch(5);
-            if bsLast.isNone() { return 31 }
+            if bsLast.isNone { return 31 }
             if bsLast.unwrap() != 4 { return 32 }
 
             0

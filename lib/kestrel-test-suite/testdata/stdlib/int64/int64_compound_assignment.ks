@@ -25,7 +25,7 @@ module Test
             d /= 4;
             if d != 25 { return 4 }
 
-            // modAssign
+            // remainderAssign
             var m: std.numeric.Int64 = 17;
             m %= 5;
             if m != 2 { return 5 }

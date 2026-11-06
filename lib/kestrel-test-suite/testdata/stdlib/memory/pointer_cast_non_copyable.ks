@@ -16,7 +16,7 @@ func main() -> lang.i64 {
     var alloc = std.memory.SystemAllocator();
     let layout = std.memory.Layout(size: 8, alignment: 8);
     let result = alloc.allocate(layout);
-    if result.isNone() { return 1 }
+    if result.isNone { return 1 }
     let raw = result.unwrap();
     let typed: std.memory.Pointer[Res] = raw.cast[Res]();
     if typed.isNull { return 2 }

@@ -16,6 +16,6 @@ struct Token: not Copyable {
 func main() -> lang.i64 {
     var token: Token? = .Some(Token(id: 3));
     if token.take()?.spend() != .Some(3) { return 1 }
-    if token.isSome() { return 2 }
+    if token.isSome { return 2 }
     0
 }

@@ -36,7 +36,7 @@ func main() -> lang.i64 {
         .Some(value) => if value.value != 99 { return 4 },
         .None => return 5
     };
-    if single.next().isSome() { return 6 }
+    if single.next().isSome { return 6 }
 
     0
 }

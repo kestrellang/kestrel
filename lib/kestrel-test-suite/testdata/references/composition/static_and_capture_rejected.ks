@@ -23,5 +23,5 @@ func bad() -> Bool {
     var x = 1;
     let r = &x;
     let o: Optional[&Int64] = .Some(r);
-    consume { o.isSome() }
+    consume { o.isSome }
 }

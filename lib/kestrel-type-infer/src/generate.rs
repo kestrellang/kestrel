@@ -952,11 +952,20 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Return { value, span } => {
             if let Some(val) = value {
                 // A `return e;` statement is a value position, identical to
-                // the return-tail.
+                // the return-tail. Checked against the return type like the
+                // tail (bidi §2.1), so introduction forms see it — a tuple
+                // literal needs it to keep refs its `(&T, U)` slots pin.
                 mark_return_value(ctx, hir, *val);
-                let val_tv = gen_expr(ctx, hir, *val);
                 let reason = return_reason(ctx);
-                ctx.coerce_because(val_tv, ctx.return_ty, *val, span.clone(), reason);
+                let (val_tv, pushed) = if expectation_known(ctx, ctx.return_ty) {
+                    check_expr(ctx, hir, *val, ctx.return_ty, reason.clone())
+                } else {
+                    (gen_expr(ctx, hir, *val), false)
+                };
+                if !pushed {
+                    mark_synth_pending(ctx, hir, *val, val_tv);
+                    ctx.coerce_because(val_tv, ctx.return_ty, *val, span.clone(), reason);
+                }
             } else {
                 // Bare return — coerce unit against return type so
                 // `return` in a non-void function is a type mismatch
@@ -1133,10 +1142,17 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // FRESH slot var: an annotation pinning the slot to `&T`
             // (stage 2b ref tuples) keeps the ref; unpinned ref elements
             // decay to owned (the stage-1.5 behavior). Non-local elements
-            // keep the eager peel.
+            // keep the eager peel — unless the expected type already pins
+            // that slot to a ref (`-> (&Slice[T], &Slice[T])`): then the
+            // element keeps its ref and the outer Coerce checks it.
+            let ref_slots = expected_tuple_ref_slots(ctx, expect.as_ref(), elements.len());
             let elem_tvs: Vec<TyVar> = elements
                 .iter()
-                .map(|&e| {
+                .zip(ref_slots)
+                .map(|(&e, ref_slot)| {
+                    if ref_slot {
+                        return gen_expr(ctx, hir, e);
+                    }
                     mark_arm_value(ctx, hir, e);
                     let tv = gen_expr(ctx, hir, e);
                     if value_expr_is_local(hir, e) {
@@ -2320,7 +2336,7 @@ fn unify_literal_operands(ctx: &mut InferCtx<'_>, protocol: Entity, recv: TyVar,
         Builtin::SubtractOperatorProtocol,
         Builtin::MultiplyOperatorProtocol,
         Builtin::DivideOperatorProtocol,
-        Builtin::ModuloOperatorProtocol,
+        Builtin::RemainderOperatorProtocol,
         Builtin::EqualsOperatorProtocol,
         Builtin::NotEqualsOperatorProtocol,
         Builtin::LessThanOperatorProtocol,
@@ -2437,7 +2453,7 @@ fn peel_ref_var(ctx: &InferCtx<'_>, tv: TyVar) -> TyVar {
 /// the pending constraints that produce it. Returns true on progress.
 fn default_literal_roots(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
     let mut roots = Vec::new();
-    collect_literal_roots(ctx, recv, 4, &mut roots);
+    collect_literal_roots(ctx, recv, &mut Vec::new(), &mut roots);
     let mut progress = false;
     for tv in roots {
         if let Some(lit) = open_literal(ctx, tv) {
@@ -2450,8 +2466,17 @@ fn default_literal_roots(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
 /// The open literal vars `tv` is produced from: itself, or the inputs of
 /// the pending constraint whose result it is (a call's or member's receiver
 /// and arguments, an associated type's container, an interpolation's
-/// accumulator), up to `depth` steps back.
-fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Vec<TyVar>) {
+/// accumulator), however many steps back. The walk is bounded by `seen`
+/// (each var is expanded once), not by a depth: the receiver needs its
+/// type now whatever the chain's length — `let a = xs(0); (a + b + c +
+/// d).f()` reaches the index literal five steps back, and a fixed cap
+/// turned that into a false E106.
+fn collect_literal_roots(
+    ctx: &InferCtx<'_>,
+    tv: TyVar,
+    seen: &mut Vec<TyVar>,
+    out: &mut Vec<TyVar>,
+) {
     let target = peel_ref_var(ctx, tv);
     if open_literal(ctx, target).is_some() {
         if !out.contains(&target) {
@@ -2459,9 +2484,10 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
         }
         return;
     }
-    if depth == 0 || !matches!(ctx.slot(target), TySlot::Unresolved { .. }) {
+    if seen.contains(&target) || !matches!(ctx.slot(target), TySlot::Unresolved { .. }) {
         return;
     }
+    seen.push(target);
     let produced_by = |r: &TyVar| peel_ref_var(ctx, *r) == target;
     let mut inputs: Vec<TyVar> = Vec::new();
     for c in &ctx.constraints {
@@ -2516,7 +2542,7 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
         }
     }
     for input in inputs {
-        collect_literal_roots(ctx, input, depth - 1, out);
+        collect_literal_roots(ctx, input, seen, out);
     }
 }
 
@@ -3281,6 +3307,26 @@ pub(crate) fn lower_subject_with_base(
 /// Used by `HirStmt::Let` to feed the annotation's element type into an
 /// array-literal RHS so element mismatches compare against the target
 /// element type rather than each other.
+/// Per element of a tuple literal of `arity`: is the expected tuple's slot
+/// already a ref (`(&T, U)` from a return type or `let` annotation)? Such an
+/// element is a ref position, not an always-decay aggregate element, so a
+/// ref-returning call there keeps its reference. All `false` when nothing
+/// pins the tuple's shape at generation time (the stage-1.5 decay applies).
+fn expected_tuple_ref_slots(
+    ctx: &InferCtx<'_>,
+    expect: Option<&(TyVar, Reason)>,
+    arity: usize,
+) -> Vec<bool> {
+    let slots = expect.and_then(|(expected, _)| match ctx.slot(ctx.resolve(*expected)) {
+        TySlot::Resolved(TyKind::Tuple(elems)) if elems.len() == arity => Some(elems.clone()),
+        _ => None,
+    });
+    match slots {
+        Some(elems) => elems.iter().map(|&t| expected_is_ref(ctx, t)).collect(),
+        None => vec![false; arity],
+    }
+}
+
 fn extract_array_elem_hint(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
     let resolved = ctx.resolve(tv);
     let TySlot::Resolved(crate::ty::TyKind::Struct { entity, args }) = ctx.slot(resolved) else {

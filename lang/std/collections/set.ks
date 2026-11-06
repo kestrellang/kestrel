@@ -376,7 +376,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// ```
     public mutating func insert(element: T) -> Bool {
         let oldValue = self.dict.insert(element, Unit());
-        oldValue.isNone()
+        oldValue.isNone
     }
 
     // TODO: public mutating func update(element: T) -> Optional[T]
@@ -1236,8 +1236,8 @@ extend Set[T, H]: Hashable where T: Hashable, H: Hasher, H: Defaultable {
         while let .Some(elem) = elems.next() {
             var elemHasher = H();
             elem.hash(into: elemHasher);
-            // `+` wraps by default, so the sum is a safe commutative combiner.
-            combined = combined + elemHasher.finish();
+            // Wrapping addition is a safe commutative combiner.
+            combined = combined.addWrapping(elemHasher.finish());
         }
         self.count.hash(into: hasher);
         combined.hash(into: hasher);

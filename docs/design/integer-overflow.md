@@ -1,6 +1,6 @@
 # Integer overflow — design
 
-**Status:** accepted 2026-10-07, not implemented. Rulings: **O1 (b)** Rust
+**Status:** accepted 2026-10-07, implemented 2026-11-05 (see §5). Rulings: **O1 (b)** Rust
 model — trap when overflow checks are on (default at `-O0`), wrap when off;
 **O2** `*Wrapping` methods (operators deferred); **O3** `MIN / -1` traps when
 checks are on. Rollout per §4: flag default-off, measure, convert, then flip.
@@ -146,3 +146,26 @@ must ask for it:
 2. O2: methods only, or also `&+ &- &*`? Recommended: methods now, operators
    later if wanted.
 3. O3: should `MIN / -1` trap under checks? Recommended: yes.
+
+## 5. As implemented
+
+The checks live in the stdlib, not in new MIR ops:
+
+- `lang.overflow_checks()` is one intrinsic (`Op::OverflowChecks`). Codegen
+  folds it to a constant from `CodegenOptions::overflow_checks()`: on at
+  `-O0`, off at `-O1`/`-O2`, overridden by `--overflow-checks on|off`. MIR
+  and its cache stay the same at every `-O` level, as §4 step 3 wanted.
+- `add`/`subtract`/`multiply` trap when
+  `overflow_checks() and iN_*_overflows(...)`. `negate`, `minValue / -1`
+  and `pow` are gated the same way. With checks off, LLVM folds the guard
+  away and the op is the plain wrapping one.
+- `*Wrapping` and `*Overflowing` join `*Checked`/`*Saturating` for every
+  op. Hashers, the RNG, the int formatters, `crypto` and `uuid` use
+  `*Wrapping`.
+- Shifts are unchanged (masked), per O3.
+- A negated integer literal (`-128`) lowers as a negative literal, not
+  `negate(128)`, so `Int8.minValue` written out doesn't trap.
+- The test harness builds at `-O0`, so tests see checks on. The old
+  wrapping tests (`uintN_overflow_behavior.ks`,
+  `int_div_min_value_wraps.ks`) now trap. They are left as they were,
+  pending a decision.

@@ -46,6 +46,18 @@ pub struct CodegenOptions {
     pub c_sources: Vec<std::path::PathBuf>,
     /// Emit textual LLVM IR (per function) into `CompilationResult::ir_text`.
     pub emit_ir: bool,
+    /// `--overflow-checks on|off`; `None` derives it from `opt_level`.
+    pub overflow_checks_override: Option<bool>,
+}
+
+impl CodegenOptions {
+    /// Whether integer `+ - *` (and `-minValue`, `minValue / -1`, `pow`)
+    /// trap on overflow. On for unoptimized builds, off for optimized ones,
+    /// unless `overflow_checks_override` says otherwise
+    /// (`docs/design/integer-overflow.md`, ruling O1).
+    pub fn overflow_checks(&self) -> bool {
+        self.overflow_checks_override.unwrap_or(self.opt_level == 0)
+    }
 }
 
 pub struct CompilationResult {

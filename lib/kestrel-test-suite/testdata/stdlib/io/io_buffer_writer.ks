@@ -23,8 +23,7 @@ module Test
             data.append(byte108);
             data.append(byte108);
             data.append(byte111);
-            let slice = unsafe std.memory.UnsafeSlice[std.numeric.UInt8](pointer: data.asPointer(), count: 5);
-            let result = buf.write(from: slice);
+            let result = buf.write(from: data(0..<5));
             match result {
                 .Ok(n) => if n != 5 { return 3 },
                 .Err(_) => return 4
@@ -59,8 +58,7 @@ module Test
             let byte33: std.numeric.UInt8 = 33; // '!'
             var data2 = std.collections.Array[std.numeric.UInt8]();
             data2.append(byte33);
-            let slice2 = unsafe std.memory.UnsafeSlice[std.numeric.UInt8](pointer: data2.asPointer(), count: 1);
-            let result2 = buf.write(from: slice2);
+            let result2 = buf.write(from: data2(0..<1));
             match result2 {
                 .Ok(n) => if n != 1 { return 13 },
                 .Err(_) => return 14

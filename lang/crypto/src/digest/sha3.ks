@@ -157,7 +157,7 @@ struct Keccak {
             for i in 0..<rate {
                 if result.count == count { break; }
                 let lane = state.lanes(i / 8);
-                result.append(UInt8(from: (lane >> (8 * (i % 8))) & 0xff));
+                result.append(UInt8(truncating: (lane >> (8 * (i % 8))) & 0xff));
             }
             if result.count == count { break; }
             Keccak.permute(state.lanes);

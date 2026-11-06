@@ -67,8 +67,8 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
     let port64 = Int64(from: port);
     let portHi = port64 / 256;
     let portLo = port64 % 256;
-    addr.append(UInt8(from: portHi));
-    addr.append(UInt8(from: portLo));
+    addr.append(UInt8(truncating: portHi));
+    addr.append(UInt8(truncating: portLo));
     // sin_addr = INADDR_ANY + zero padding (12 bytes)
     var pad: Int64 = 0;
     while pad < 12 {
@@ -171,7 +171,7 @@ public struct TcpStream: Readable, Writable, Cloneable {
     ///
     /// Returns `Err(IoError)` from the captured `errno` if `send`
     /// returns `-1`.
-    public mutating func write(from buf: UnsafeSlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
         let n = libc.send(self.conn.value, buf.pointer, buf.count, 0);
         if n < 0 {
             return .Err(IoError.last())

@@ -266,7 +266,7 @@ extend Sliceable[T] {
         if s.count == 0 {
             return .None
         }
-        let index = Int64(from: rng.nextUInt64(below: UInt64(from: s.count)));
+        let index = Int64(truncating: rng.nextUInt64(below: UInt64(truncating: s.count)));
         .Some(unsafe s.pointer.offset(by: index).read())
     }
 
@@ -314,11 +314,11 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [10, 20, 30].isValidIndex(2);   // true
-    /// [10, 20, 30].isValidIndex(3);   // false
-    /// [10, 20, 30].isValidIndex(-1);  // false
+    /// [10, 20, 30].isValid(index: 2);   // true
+    /// [10, 20, 30].isValid(index: 3);   // false
+    /// [10, 20, 30].isValid(index: -1);  // false
     /// ```
-    public func isValidIndex(index: Int64) -> Bool {
+    public func isValid(index index: Int64) -> Bool {
         index >= 0 and index < self.asUnsafeSlice().count
     }
 
@@ -333,15 +333,15 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].prefix(3);  // UnsafeSlice[1, 2, 3]
+    /// [1, 2, 3, 4, 5].prefix(3);  // [1, 2, 3]
     /// [1, 2].prefix(0);            // empty slice
     /// ```
-    public func prefix(count: Int64) -> UnsafeSlice[T] {
+    public func prefix(count: Int64) -> &Slice[T] {
         let s = self.asUnsafeSlice();
         if count > s.count {
             fatalError("prefix: count exceeds length")
         }
-        unsafe UnsafeSlice(pointer: s.pointer, count: count)
+        Slice.lend(start: s.pointer, count: count)
     }
 
     /// Returns a slice over the last `count` elements. O(1).
@@ -353,14 +353,14 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].suffix(2);  // UnsafeSlice[4, 5]
+    /// [1, 2, 3, 4, 5].suffix(2);  // [4, 5]
     /// ```
-    public func suffix(count: Int64) -> UnsafeSlice[T] {
+    public func suffix(count: Int64) -> &Slice[T] {
         let s = self.asUnsafeSlice();
         if count > s.count {
             fatalError("suffix: count exceeds length")
         }
-        unsafe UnsafeSlice(pointer: s.pointer.offset(by: s.count - count), count: count)
+        Slice.lend(start: s.pointer.offset(by: s.count - count), count: count)
     }
 
     /// Returns a slice with the first `count` elements skipped. O(1).
@@ -374,14 +374,14 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].drop(first: 2);  // UnsafeSlice[3, 4, 5]
+    /// [1, 2, 3, 4, 5].drop(first: 2);  // [3, 4, 5]
     /// ```
-    public func drop(first count: Int64) -> UnsafeSlice[T] {
+    public func drop(first count: Int64) -> &Slice[T] {
         let s = self.asUnsafeSlice();
         if count > s.count {
             fatalError("drop(first:): count exceeds length")
         }
-        unsafe UnsafeSlice(pointer: s.pointer.offset(by: count), count: s.count - count)
+        Slice.lend(start: s.pointer.offset(by: count), count: s.count - count)
     }
 
     /// Returns a slice with the last `count` elements skipped. O(1).
@@ -395,14 +395,14 @@ extend Sliceable[T] {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].drop(last: 2);  // UnsafeSlice[1, 2, 3]
+    /// [1, 2, 3, 4, 5].drop(last: 2);  // [1, 2, 3]
     /// ```
-    public func drop(last count: Int64) -> UnsafeSlice[T] {
+    public func drop(last count: Int64) -> &Slice[T] {
         let s = self.asUnsafeSlice();
         if count > s.count {
             fatalError("drop(last:): count exceeds length")
         }
-        unsafe UnsafeSlice(pointer: s.pointer, count: s.count - count)
+        Slice.lend(start: s.pointer, count: s.count - count)
     }
 
     // -- Searching (predicate) -----------------------------------------------
@@ -665,7 +665,7 @@ extend Sliceable[T] where T: Equatable {
             return false
         }
         for i in 0..<a.count {
-            if unsafe a.pointer.offset(by: i).read().isEqual(to: unsafe b.pointer.offset(by: i).read()) == false {
+            if unsafe a.pointer.offset(by: i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
                 return false
             }
         }
@@ -734,7 +734,7 @@ extend Sliceable[T] where T: Equatable {
             return false
         }
         for i in 0..<b.count {
-            if unsafe a.pointer.offset(by: i).read().isEqual(to: unsafe b.pointer.offset(by: i).read()) == false {
+            if unsafe a.pointer.offset(by: i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
                 return false
             }
         }
@@ -759,7 +759,7 @@ extend Sliceable[T] where T: Equatable {
         }
         let offset = a.count - b.count;
         for i in 0..<b.count {
-            if unsafe a.pointer.offset(by: offset + i).read().isEqual(to: unsafe b.pointer.offset(by: i).read()) == false {
+            if unsafe a.pointer.offset(by: offset + i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
                 return false
             }
         }

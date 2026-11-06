@@ -55,14 +55,14 @@ module Test
 
             // Test first(where:)
             let found = dict.first(where: { (k, v) in v == 20 });
-            if found.isNone() { return 10 }
+            if found.isNone { return 10 }
             let (fk, fv) = found.unwrap();
             if fk != 2 { return 11 }
             if fv != 20 { return 12 }
 
             // Test first(where:) - not found
             let notFound = dict.first(where: { (k, v) in v == 999 });
-            if notFound.isSome() { return 13 }
+            if notFound.isSome { return 13 }
 
             // Test all(where:) on empty dictionary - vacuous truth
             var emptyDict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();

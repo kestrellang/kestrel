@@ -46,7 +46,7 @@ func main() -> lang.i64 {
     // stdlib Optional.take(): returns the payload, leaves .None behind
     var opt: Res? = .Some(Res(id: 7));
     let t = opt.take();
-    if not opt.isNone() { return 5 };
+    if not opt.isNone { return 5 };
     if let .Some(p) = t { if p.id != 7 { return 6 } } else { return 7 };
 
     // stdlib Optional.replace(): returns the OLD value

@@ -124,7 +124,7 @@ public protocol Iterable {
 // per loop — `TypedBody.direct_iterators`), so an adapter chain still drops
 // into a `for` loop without an `iter()` call.
 
-/// An iterator that can also yield from the back. Powers `rev()` and
+/// An iterator that can also yield from the back. Powers `reversed()` and
 /// efficient "last N elements" patterns without first materialising the
 /// whole sequence.
 ///
@@ -1087,17 +1087,17 @@ extend DoubleEndedIterator {
     /// # Examples
     ///
     /// ```
-    /// [1, 2, 3, 4, 5].iter().rev().collect();                        // [5, 4, 3, 2, 1]
-    /// [1, 2, 3, 4, 5].iter().rev().take(3).collect();         // [5, 4, 3]
-    /// [1, 2, 3, 4, 5].iter().rev().first { it % 2 == 0 };            // Some(4)
+    /// [1, 2, 3, 4, 5].iter().reversed().collect();                        // [5, 4, 3, 2, 1]
+    /// [1, 2, 3, 4, 5].iter().reversed().take(3).collect();         // [5, 4, 3]
+    /// [1, 2, 3, 4, 5].iter().reversed().first { it % 2 == 0 };            // Some(4)
     /// ```
-    public consuming func rev() -> ReversedIterator[Self] {
+    public consuming func reversed() -> ReversedIterator[Self] {
         ReversedIterator(inner: self)
     }
 }
 
 /// `ReversedIterator` is itself double-ended when the wrapped iterator is, so
-/// `rev().rev()` gives back the original direction in `O(1)`.
+/// `reversed().reversed()` gives back the original direction in `O(1)`.
 extend ReversedIterator[I]: DoubleEndedIterator where I: DoubleEndedIterator {
 
     /// Pulls from the back of the inner iterator (which is the front of

@@ -36,6 +36,6 @@ func main() -> Int64 {
     let c = &v(1);
     var it = v.iter();
     let n = it.next();
-    print("chunks \(v.count) c \(c.count) \(sum(c)) next \(n.isSome())\n");
+    print("chunks \(v.count) c \(c.count) \(sum(c)) next \(n.isSome)\n");
     0
 }

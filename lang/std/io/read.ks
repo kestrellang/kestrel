@@ -7,7 +7,7 @@ import std.result.(Result, Optional)
 import std.memory.(UnsafeSlice, Pointer)
 import std.collections.(Array, Slice)
 import std.core.(Bool)
-import std.io.error.(IoError, invalidInput)
+import std.io.error.(IoError)
 
 // ============================================================================
 // READ PROTOCOL
@@ -227,7 +227,7 @@ public func readAll[R](mutating reader: R, mutating into buf: Array[UInt8]) -> R
 ///
 /// # Errors
 ///
-/// Returns `.Err(invalidInput())` if EOF is reached before `buf.count`
+/// Returns `.Err(IoError.invalidInput())` if EOF is reached before `buf.count`
 /// bytes have been collected.
 ///
 /// # Examples
@@ -241,7 +241,7 @@ public func readExact[R](mutating reader: R, mutating into buf: Slice[UInt8]) ->
     while filled < buf.count {
         let n = try reader.read(into: buf(filled..));
         if n == 0 {
-            return .Err(invalidInput())
+            return .Err(IoError.invalidInput())
         }
         filled = filled + n
     }

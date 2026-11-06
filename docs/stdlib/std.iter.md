@@ -143,7 +143,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 public protocol DoubleEndedIterator
 ```
 
-An iterator that can also yield from the back. Powers `rev()` and
+An iterator that can also yield from the back. Powers `reversed()` and
 efficient "last N elements" patterns without first materialising the
 whole sequence.
 
@@ -195,10 +195,10 @@ back have met. Can be interleaved freely with `next()`.
 
 _Defined in `lang/std/iter/iterator.ks`._
 
-#### function `rev`
+#### function `reversed`
 
 ```kestrel
-public consuming func rev() -> ReversedIterator[Self]
+public consuming func reversed() -> ReversedIterator[Self]
 ```
 
 Yields elements back-to-front by pulling `nextBack()` instead of
@@ -207,9 +207,9 @@ Yields elements back-to-front by pulling `nextBack()` instead of
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].iter().rev().collect();                        // [5, 4, 3, 2, 1]
-[1, 2, 3, 4, 5].iter().rev().take(3).collect();         // [5, 4, 3]
-[1, 2, 3, 4, 5].iter().rev().first { it % 2 == 0 };            // Some(4)
+[1, 2, 3, 4, 5].iter().reversed().collect();                        // [5, 4, 3, 2, 1]
+[1, 2, 3, 4, 5].iter().reversed().take(3).collect();         // [5, 4, 3]
+[1, 2, 3, 4, 5].iter().reversed().first { it % 2 == 0 };            // Some(4)
 ```
 
 _Defined in `lang/std/iter/iterator.ks`._
@@ -2268,7 +2268,7 @@ public struct ReversedIterator[I] where I: DoubleEndedIterator, I: Iterator, I: 
 Wraps a `DoubleEndedIterator` to walk it back to front. The
 `Iterator` conformance is added by the `extend ReversedIterator[I]:
 DoubleEndedIterator` block in `iterator.ks`. Returned by
-`DoubleEndedIterator.rev()`.
+`DoubleEndedIterator.reversed()`.
 
 ### Representation
 
@@ -2284,7 +2284,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 public init(inner: consuming I)
 ```
 
-Builds a `ReversedIterator`. Prefer `inner.rev()`.
+Builds a `ReversedIterator`. Prefer `inner.reversed()`.
 
 _Defined in `lang/std/iter/adapters.ks`._
 

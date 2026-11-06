@@ -1,32 +1,34 @@
 // UInt16 - 16-bit unsigned integer
-// Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/integer.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 module std.numeric
 
 import std.ffi.(FFISafe)
 import std.core.(
     Equatable, Comparable, Ordering, Bool, Matchable, Hashable, Hasher,
-    Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
+    Addable, Subtractable, Multipliable, Divisible, Remainder, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
-    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible, Defaultable,
+    ExpressibleByIntLiteral, Convertible, LossyConvertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
 import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(UnsafeSlice, Pointer)
-import std.collections.(Sliceable)
+import std.collections.(Sliceable, Slice)
 import std.numeric.(UInt8, Int64, UInt64)
 
 /// A 16-bit unsigned integer.
 ///
 /// UInt16 is the 16-bit member of the integer family. The same surface
 /// area is provided across all widths; switch widths to trade range for memory
-/// or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-/// `*Checked` variants for overflow detection or `*Saturating` to clamp to
-/// `minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+/// or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+/// optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+/// `*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+/// that holds in every build. The type is `FFISafe` and lays out as a single
 /// `lang.i16` so it can cross C boundaries unchanged.
 ///
 /// # Examples
@@ -61,7 +63,7 @@ public struct UInt16:
     Subtractable,
     Multipliable,
     Divisible,
-    Modulo,
+    Remainder,
     
     BitwiseAnd,
     BitwiseOr,
@@ -73,7 +75,7 @@ public struct UInt16:
     SubtractAssign,
     MultiplyAssign,
     DivideAssign,
-    ModuloAssign,
+    RemainderAssign,
     BitwiseAndAssign,
     BitwiseOrAssign,
     BitwiseXorAssign,
@@ -93,7 +95,13 @@ public struct UInt16:
     Convertible[Int64],
     Convertible[UInt8],
     Convertible[UInt32],
-    Convertible[UInt64]
+    Convertible[UInt64],
+    LossyConvertible[Int8],
+    LossyConvertible[Int16],
+    LossyConvertible[Int32],
+    LossyConvertible[Int64],
+    LossyConvertible[UInt32],
+    LossyConvertible[UInt64]
 {
     /// The underlying primitive `lang.i16` value. Exposed for FFI
     /// and intrinsic use; prefer the typed surface for everything else.
@@ -155,40 +163,190 @@ public struct UInt16:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.i16` without conversion. Internal
-    /// constructor used by intrinsics; not part of the public API.
-    init(raw value: lang.i16) {
+    /// Wraps an existing `lang.i16` without conversion. The FFI
+    /// counterpart of `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.i16) {
         self.raw = value
     }
 
     /// @name From Integer
-    /// Converts from `Int8`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int8) { self.raw = lang.cast_i8_i16(other.raw) }
+    /// Converts from `Int8`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: Int8) {
+        if other < 0 {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = lang.cast_i8_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `Int8` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: Int8) { self.raw = lang.cast_i8_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `Int8`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: Int8) {
+        if other < 0 {
+            self.raw = UInt16.minValue.raw
+        } else {
+            self.raw = lang.cast_i8_i16(other.raw)
+        }
+    }
     /// @name From Integer
-    /// Converts from `Int16`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int16) { self.raw = other.raw }
+    /// Converts from `Int16`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: Int16) {
+        if other < 0 {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = other.raw
+    }
+    /// @name Truncating
+    /// Converts from `Int16` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: Int16) { self.raw = other.raw }
+    /// @name Clamping
+    /// Converts from `Int16`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: Int16) {
+        if other < 0 {
+            self.raw = UInt16.minValue.raw
+        } else {
+            self.raw = other.raw
+        }
+    }
+    /// @name Bit Pattern
+    /// Reinterprets the bits of a same-width `Int16` as `UInt16`. Never traps.
+    public init(bitPattern other: Int16) { self.raw = other.raw }
     /// @name From Integer
-    /// Converts from `Int32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int32) { self.raw = lang.cast_i32_i16(other.raw) }
+    /// Converts from `Int32`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: Int32) {
+        if other < 0 or other > Int32(from: UInt16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = lang.cast_i32_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `Int32` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: Int32) { self.raw = lang.cast_i32_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `Int32`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: Int32) {
+        if other < 0 {
+            self.raw = UInt16.minValue.raw
+        } else if other > Int32(from: UInt16.maxValue) {
+            self.raw = UInt16.maxValue.raw
+        } else {
+            self.raw = lang.cast_i32_i16(other.raw)
+        }
+    }
     /// @name From Integer
-    /// Converts from `Int64`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int64) { self.raw = lang.cast_i64_i16(other.raw) }
+    /// Converts from `Int64`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: Int64) {
+        if other < 0 or other > Int64(from: UInt16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = lang.cast_i64_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `Int64` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: Int64) { self.raw = lang.cast_i64_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `Int64`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: Int64) {
+        if other < 0 {
+            self.raw = UInt16.minValue.raw
+        } else if other > Int64(from: UInt16.maxValue) {
+            self.raw = UInt16.maxValue.raw
+        } else {
+            self.raw = lang.cast_i64_i16(other.raw)
+        }
+    }
     /// @name From Integer
-    /// Converts from `UInt8`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `UInt8`. Lossless: every `UInt8` fits in `UInt16`.
     public init(from other: UInt8) { self.raw = lang.cast_u8_i16(other.raw) }
     /// @name From Integer
-    /// Converts from `UInt32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt32) { self.raw = lang.cast_u32_i16(other.raw) }
+    /// Converts from `UInt32`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: UInt32) {
+        if other > UInt32(from: UInt16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = lang.cast_u32_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `UInt32` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: UInt32) { self.raw = lang.cast_u32_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `UInt32`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: UInt32) {
+        if other > UInt32(from: UInt16.maxValue) {
+            self.raw = UInt16.maxValue.raw
+        } else {
+            self.raw = lang.cast_u32_i16(other.raw)
+        }
+    }
     /// @name From Integer
-    /// Converts from `UInt64`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt64) { self.raw = lang.cast_u64_i16(other.raw) }
+    /// Converts from `UInt64`, trapping when the value doesn't fit in
+    /// `UInt16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `UInt16.minValue...UInt16.maxValue`.
+    public init(from other: UInt64) {
+        if other > UInt64(from: UInt16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in UInt16")
+        }
+        self.raw = lang.cast_u64_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `UInt64` keeping only the low bits, reinterpreted as
+    /// `UInt16`. Never traps.
+    public init(truncating other: UInt64) { self.raw = lang.cast_u64_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `UInt64`, saturating to `UInt16.minValue` / `UInt16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: UInt64) {
+        if other > UInt64(from: UInt16.maxValue) {
+            self.raw = UInt16.maxValue.raw
+        } else {
+            self.raw = lang.cast_u64_i16(other.raw)
+        }
+    }
 
     // ========================================================================
     // SIGN INSPECTION (Properties)
@@ -327,11 +485,11 @@ public struct UInt16:
     // STEPPING
     // ========================================================================
 
-    /// Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+    /// Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
     /// integer ranges.
     public func successor() -> UInt16 { self.add(UInt16.one) }
 
-    /// Predecessor — `self - 1`. Wraps at `minValue`.
+    /// Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
     public func predecessor() -> UInt16 { self.subtract(UInt16.one) }
 
     /// Number of `successor()` steps from `self` to `other` — `other - self`
@@ -374,7 +532,7 @@ public struct UInt16:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(unsafe UnsafeSlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[UInt16]().size))
+        hasher.write(Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[UInt16]().size))
     }
 
     // ========================================================================
@@ -385,7 +543,7 @@ public struct UInt16:
     type Subtractable.Output = UInt16
     type Multipliable.Output = UInt16
     type Divisible.Output = UInt16
-    type Modulo.Output = UInt16
+    type Remainder.Output = UInt16
     
     type BitwiseAnd.Output = UInt16
     type BitwiseOr.Output = UInt16
@@ -400,18 +558,80 @@ public struct UInt16:
     type RangeThroughConstructible.Output = RangeThrough[UInt16]
 
     // ========================================================================
-    // ARITHMETIC (Wrapping - Default)
+    // ARITHMETIC (Overflow-checked)
     // ========================================================================
 
-    /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
-    /// `addSaturating` to clamp.
-    public consuming func add(consuming other: UInt16) -> UInt16 { UInt16(raw: lang.i16_add(self.raw, other.raw)) }
+    /// `self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+    /// `addSaturating` or `addOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `UInt16` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func add(consuming other: UInt16) -> UInt16 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i16_unsigned_add_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: UInt16 +")
+        }
+        UInt16(raw: lang.i16_add(self.raw, other.raw))
+    }
 
-    /// `self - other`, wrapping on overflow.
-    public consuming func subtract(consuming other: UInt16) -> UInt16 { UInt16(raw: lang.i16_sub(self.raw, other.raw)) }
+    /// `self + other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func addWrapping(other: UInt16) -> UInt16 { UInt16(raw: lang.i16_add(self.raw, other.raw)) }
 
-    /// `self * other`, wrapping on overflow.
-    public consuming func multiply(consuming other: UInt16) -> UInt16 { UInt16(raw: lang.i16_mul(self.raw, other.raw)) }
+    /// `self + other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `addWrapping`.
+    public func addOverflowing(other: UInt16) -> (UInt16, Bool) {
+        (UInt16(raw: lang.i16_add(self.raw, other.raw)), Bool(boolLiteral: lang.i16_unsigned_add_overflows(self.raw, other.raw)))
+    }
+
+    /// `self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+    /// `subtractSaturating` or `subtractOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `UInt16` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func subtract(consuming other: UInt16) -> UInt16 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i16_unsigned_sub_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: UInt16 -")
+        }
+        UInt16(raw: lang.i16_sub(self.raw, other.raw))
+    }
+
+    /// `self - other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func subtractWrapping(other: UInt16) -> UInt16 { UInt16(raw: lang.i16_sub(self.raw, other.raw)) }
+
+    /// `self - other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `subtractWrapping`.
+    public func subtractOverflowing(other: UInt16) -> (UInt16, Bool) {
+        (UInt16(raw: lang.i16_sub(self.raw, other.raw)), Bool(boolLiteral: lang.i16_unsigned_sub_overflows(self.raw, other.raw)))
+    }
+
+    /// `self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+    /// `multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `UInt16` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func multiply(consuming other: UInt16) -> UInt16 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i16_unsigned_mul_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: UInt16 *")
+        }
+        UInt16(raw: lang.i16_mul(self.raw, other.raw))
+    }
+
+    /// `self * other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func multiplyWrapping(other: UInt16) -> UInt16 { UInt16(raw: lang.i16_mul(self.raw, other.raw)) }
+
+    /// `self * other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `multiplyWrapping`.
+    public func multiplyOverflowing(other: UInt16) -> (UInt16, Bool) {
+        (UInt16(raw: lang.i16_mul(self.raw, other.raw)), Bool(boolLiteral: lang.i16_unsigned_mul_overflows(self.raw, other.raw)))
+    }
 
     /// Truncating integer division (`self / other`). For signed types,
     /// `minValue / -1` wraps; use `divideChecked` to detect.
@@ -428,7 +648,15 @@ public struct UInt16:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public consuming func modulo(consuming other: UInt16) -> UInt16 { UInt16(raw: lang.i16_unsigned_rem(self.raw, other.raw)) }
+    public consuming func remainder(consuming other: UInt16) -> UInt16 { UInt16(raw: lang.i16_unsigned_rem(self.raw, other.raw)) }
+
+    /// Euclidean modulo. For unsigned types this is the same as `%`
+    /// (`remainder`); it exists so generic code can use one name.
+    ///
+    /// # Errors
+    ///
+    /// Traps on division by zero, like `remainder`.
+    public func modulo(by other: UInt16) -> UInt16 { self.remainder(other) }
 
     /// `self / other` without the divide-by-zero and `minValue / -1` guards —
     /// the bare hardware divide. Faster in hot loops, but **undefined
@@ -448,7 +676,7 @@ public struct UInt16:
     /// # Safety
     ///
     /// UB when `other == 0`, or signed `minValue % -1`.
-    public consuming func moduloUnchecked(consuming other: UInt16) -> UInt16 { UInt16(raw: lang.i16_unsigned_rem_unchecked(self.raw, other.raw)) }
+    public consuming func remainderUnchecked(consuming other: UInt16) -> UInt16 { UInt16(raw: lang.i16_unsigned_rem_unchecked(self.raw, other.raw)) }
 
     
     
@@ -460,19 +688,19 @@ public struct UInt16:
     /// Wrapping addition that returns `None` on overflow.
     public func addChecked(other: UInt16) -> UInt16? {
         if Bool(boolLiteral: lang.i16_unsigned_add_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.add(other))
+        .Some(self.addWrapping(other))
     }
 
     /// Subtraction that returns `None` on underflow (`other > self`).
     public func subtractChecked(other: UInt16) -> UInt16? {
         if Bool(boolLiteral: lang.i16_unsigned_sub_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.subtract(other))
+        .Some(self.subtractWrapping(other))
     }
 
     /// Wrapping multiplication that returns `None` on overflow.
     public func multiplyChecked(other: UInt16) -> UInt16? {
         if Bool(boolLiteral: lang.i16_unsigned_mul_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.multiply(other))
+        .Some(self.multiplyWrapping(other))
     }
 
     /// Division that returns `None` for divide-by-zero.
@@ -482,7 +710,6 @@ public struct UInt16:
         };
         .Some(self.divide(other))
     }
-
 
     // ========================================================================
     // ARITHMETIC (Saturating - Clamps to Bounds)
@@ -516,40 +743,90 @@ public struct UInt16:
         }
     }
 
-
     // ========================================================================
     // ARITHMETIC (Extended)
     // ========================================================================
 
-    /// Raises `self` to `exponent` via binary exponentiation. Wraps on
-    /// overflow. Negative exponents return zero (integer truncation of
-    /// the would-be fraction).
+    /// Raises `self` to `exponent` via binary exponentiation.
+    ///
+    /// # Errors
+    ///
+    /// Panics on a negative exponent, and on overflow when overflow checks
+    /// are on (wraps when off); see `powChecked`,
+    /// `powWrapping` and `powSaturating`.
     ///
     /// # Examples
     ///
     /// ```
     /// (2).pow(10);  // 1024
     /// (3).pow(4);   // 81
-    /// (5).pow(-1);  // 0
     /// ```
     public func pow(exponent: Int64) -> UInt16 {
+        if Bool(boolLiteral: lang.i1_not(lang.overflow_checks())) {
+            return self.powWrapping(exponent)
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+            .None => fatalError("arithmetic overflow: UInt16.pow")
+        }
+    }
+
+    /// `self` raised to `exponent`, or `None` on overflow or a negative
+    /// exponent.
+    public func powChecked(exponent: Int64) -> UInt16? {
         if exponent < 0 {
-            return UInt16.zero
-        };
-        if exponent == 0 {
-            return UInt16.one
-        };
-        var result = UInt16.one;
+            return .None
+        }
+        var result: UInt16 = 1;
         var base = self;
         var exp = exponent;
         while exp > 0 {
             if exp % 2 == 1 {
-                result = result.multiply(base)
-            };
-            base = base.multiply(base);
+                let next = result.multiplyChecked(base);
+                if next.isNone { return .None }
+                result = next.unwrap()
+            }
+            exp = exp / 2;
+            // Square only when another bit remains, so the last step can't
+            // overflow a result that fits.
+            if exp > 0 {
+                let squared = base.multiplyChecked(base);
+                if squared.isNone { return .None }
+                base = squared.unwrap()
+            }
+        }
+        .Some(result)
+    }
+
+    /// `self` raised to `exponent`, wrapping on overflow. A negative
+    /// exponent traps.
+    public func powWrapping(exponent: Int64) -> UInt16 {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        var result: UInt16 = 1;
+        var base = self;
+        var exp = exponent;
+        while exp > 0 {
+            if exp % 2 == 1 {
+                result = result.multiplyWrapping(base)
+            }
+            base = base.multiplyWrapping(base);
             exp = exp / 2
-        };
+        }
         result
+    }
+
+    /// `self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+    /// overflow. A negative exponent traps.
+    public func powSaturating(exponent: Int64) -> UInt16 {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+            .None => UInt16.maxValue
+        }
     }
 
     /// Greatest common divisor via Euclidean algorithm. For signed types
@@ -567,7 +844,7 @@ public struct UInt16:
         var b = other;
         while b != UInt16.zero {
             let t = b;
-            b = a.modulo(b);
+            b = a.remainder(b);
             a = t
         };
         a
@@ -648,7 +925,7 @@ public struct UInt16:
     /// MSB re-enter at the LSB.
     public func rotateLeft(by count: Int64) -> UInt16 {
         let bits: Int64 = 16;
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftLeft(by: c).bitwiseOr(self.shiftRight(by: bits - c)) }
     }
@@ -657,7 +934,7 @@ public struct UInt16:
     /// `rotateLeft`.
     public func rotateRight(by count: Int64) -> UInt16 {
         let bits: Int64 = 16;
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftRight(by: c).bitwiseOr(self.shiftLeft(by: bits - c)) }
     }
@@ -675,7 +952,7 @@ public struct UInt16:
     /// `self /= other`
     public mutating func divideAssign(other: UInt16) { self = self.divide(other) }
     /// `self %= other`
-    public mutating func modAssign(other: UInt16) { self = self.modulo(other) }
+    public mutating func remainderAssign(other: UInt16) { self = self.remainder(other) }
     /// `self &= other`
     public mutating func bitwiseAndAssign(other: UInt16) { self = self.bitwiseAnd(other) }
     /// `self |= other`
@@ -722,7 +999,7 @@ public struct UInt16:
         while i < 2 {
             let shift = (2 - 1 - i) * 8;
             let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
-            result.append(UInt8(from: byteVal));
+            result.append(UInt8(truncating: byteVal));
             i = i + 1
         }
         result
@@ -738,7 +1015,7 @@ public struct UInt16:
         while i < 2 {
             let shift = i * 8;
             let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
-            result.append(UInt8(from: byteVal));
+            result.append(UInt8(truncating: byteVal));
             i = i + 1
         }
         result
@@ -777,7 +1054,7 @@ public struct UInt16:
             result = (result << 8) | byteVal;
             i = i + 1
         }
-        self.raw = UInt16(from: result).raw;
+        self.raw = UInt16(truncating: result).raw;
     }
 
     /// @name From Bytes Little Endian
@@ -796,7 +1073,7 @@ public struct UInt16:
             result = result | (byteVal << shift);
             i = i + 1
         }
-        self.raw = UInt16(from: result).raw;
+        self.raw = UInt16(truncating: result).raw;
     }
 
     // ========================================================================
@@ -866,7 +1143,7 @@ public struct UInt16:
             return null
         }
 
-        self.raw = UInt16(from: result).raw;
+        self.raw = UInt16(truncating: result).raw;
     }
     /// @name Parse Radix
     /// Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
@@ -905,7 +1182,7 @@ public struct UInt16:
             return null
         }
 
-        let radixU: UInt64 = UInt64(from: radix);
+        let radixU: UInt64 = UInt64(truncating: radix);
         let maxVal: UInt64 = UInt64(from: UInt16.maxValue);
 
         var result: UInt64 = 0;
@@ -928,7 +1205,7 @@ public struct UInt16:
                 return null
             }
 
-            let digitU: UInt64 = UInt64(from: digit);
+            let digitU: UInt64 = UInt64(truncating: digit);
             if result > (maxVal - digitU) / radixU {
                 return null
             }
@@ -936,7 +1213,7 @@ public struct UInt16:
             index = index + 1
         }
 
-        self.raw = UInt16(from: result).raw;
+        self.raw = UInt16(truncating: result).raw;
     }
 
     // ========================================================================
@@ -972,7 +1249,7 @@ public struct UInt16:
         if n == UInt16.zero {
             digits.appendByte(48)
         } else {
-        let radixVal: UInt16 = UInt16(from: radix);
+        let radixVal: UInt16 = UInt16(truncating: radix);
         var m = n;
         while m != UInt16.zero {
             let digit: UInt16 = m % radixVal;
@@ -984,7 +1261,7 @@ public struct UInt16:
             } else {
                 digitVal - 10 + 97
             };
-            digits.appendByte(UInt8(from: charCode));
+            digits.appendByte(UInt8(truncating: charCode));
             m = m / radixVal
         }
         }

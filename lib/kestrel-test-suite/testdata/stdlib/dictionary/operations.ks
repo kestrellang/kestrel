@@ -21,12 +21,12 @@ module Test
 
             // Test subscript access
             let val = dict(2);
-            if val.isNone() { return 5 }
+            if val.isNone { return 5 }
             if val.unwrap() != 200 { return 6 }
 
             // Test remove
             let removed = dict.remove(1);
-            if removed.isNone() { return 7 }
+            if removed.isNone { return 7 }
             if removed.unwrap() != 100 { return 8 }
             if dict.count != 1 { return 9 }
 
