@@ -39,6 +39,14 @@ pub struct CodegenCtx<'ctx> {
     pub machine: TargetMachine,
     pub tc: TypeCache,
     pub ptr_size: u64,
+    /// Emit the entry point as a C `int main(int, char**)` wrapper around the
+    /// Kestrel `main`. WebAssembly checks call signatures, so Emscripten's
+    /// `main(argc, argv)` call traps on the argument-less Kestrel entry.
+    pub c_main_wrapper: bool,
+    /// Emit LLVM bitcode instead of an object. Emscripten's own (newer) LLVM
+    /// then generates the wasm, so the object conventions (e.g. wasm64
+    /// table indices) match its libraries rather than this compiler's LLVM.
+    pub emit_bitcode: bool,
 
     pub func_ids: Vec<Option<FunctionValue<'ctx>>>,
     /// The target's C struct-passing rules (`kestrel_codegen::c_abi`).
@@ -63,17 +71,34 @@ impl<'ctx> CodegenCtx<'ctx> {
         target: &TargetConfig,
         options: &'ctx CodegenOptions,
     ) -> Result<Self, CodegenError> {
-        Target::initialize_native(&InitializationConfig::default())
-            .map_err(|e| CodegenError::ModuleCreation(format!("native target init: {e}")))?;
+        if target.is_wasm() {
+            Target::initialize_webassembly(&InitializationConfig::default());
+        } else {
+            Target::initialize_native(&InitializationConfig::default())
+                .map_err(|e| CodegenError::ModuleCreation(format!("native target init: {e}")))?;
+        }
 
         let triple = TargetTriple::create(&target.triple.to_string());
         let target_obj = Target::from_triple(&triple)
             .map_err(|e| CodegenError::ModuleCreation(format!("target from triple: {e}")))?;
 
-        // Host CPU/features matches the Cranelift backend's native ISA. (Kestrel
-        // codegen is host-targeted; cross-compiling would want generic here.)
-        let cpu = TargetMachine::get_host_cpu_name().to_string();
-        let features = TargetMachine::get_host_cpu_features().to_string();
+        // Host CPU/features matches the Cranelift backend's native ISA; a
+        // cross target (e.g. WebAssembly) gets the generic CPU.
+        let (cpu, features) = if target.is_host() {
+            (
+                TargetMachine::get_host_cpu_name().to_string(),
+                TargetMachine::get_host_cpu_features().to_string(),
+            )
+        } else {
+            ("generic".to_string(), String::new())
+        };
+        // WebAssembly has no position-independent code outside dynamic
+        // linking; Emscripten links static objects.
+        let reloc = if target.is_wasm() {
+            RelocMode::Static
+        } else {
+            RelocMode::PIC
+        };
 
         let opt = match options.opt_level {
             0 => OptimizationLevel::None,
@@ -82,14 +107,7 @@ impl<'ctx> CodegenCtx<'ctx> {
         };
 
         let machine = target_obj
-            .create_target_machine(
-                &triple,
-                &cpu,
-                &features,
-                opt,
-                RelocMode::PIC,
-                CodeModel::Default,
-            )
+            .create_target_machine(&triple, &cpu, &features, opt, reloc, CodeModel::Default)
             .ok_or_else(|| CodegenError::ModuleCreation("create_target_machine failed".into()))?;
 
         let llmod = cx.create_module("kestrel_module");
@@ -113,6 +131,8 @@ impl<'ctx> CodegenCtx<'ctx> {
             machine,
             tc,
             ptr_size,
+            c_main_wrapper: target.is_wasm(),
+            emit_bitcode: target.is_wasm(),
             func_ids: vec![None; module.functions.len()],
             c_abi: target.c_abi(),
             c_symbols: HashMap::new(),
@@ -129,6 +149,50 @@ impl<'ctx> CodegenCtx<'ctx> {
         self.declare_all_functions()?;
         self.define_all_vtables();
         self.define_all_functions()?;
+        if self.c_main_wrapper {
+            self.define_c_main()?;
+        }
+        Ok(())
+    }
+
+    /// `int main(int argc, char **argv)` calling the Kestrel entry point and
+    /// truncating its `Int64` exit code (see `c_main_wrapper`).
+    fn define_c_main(&mut self) -> Result<(), CodegenError> {
+        let Some(entry) = self
+            .module
+            .functions
+            .iter()
+            .position(|f| self.is_main_function(f))
+            .and_then(|i| self.func_ids[i])
+        else {
+            return Ok(()); // a library build has no entry point
+        };
+        if entry.count_params() != 0 {
+            return Err(CodegenError::ModuleCreation(
+                "C main wrapper: the entry point takes parameters".into(),
+            ));
+        }
+        let i32t = self.cx.i32_type();
+        let ptr = self.cx.ptr_type(inkwell::AddressSpace::default());
+        let main = self.llmod.add_function(
+            "main",
+            i32t.fn_type(&[i32t.into(), ptr.into()], false),
+            Some(Linkage::External),
+        );
+        let builder = self.cx.create_builder();
+        builder.position_at_end(self.cx.append_basic_block(main, "entry"));
+        let call = builder
+            .build_call(entry, &[], "code")
+            .map_err(|e| CodegenError::ModuleCreation(e.to_string()))?;
+        let code = match call.try_as_basic_value().basic() {
+            Some(v) if v.is_int_value() => builder
+                .build_int_truncate_or_bit_cast(v.into_int_value(), i32t, "exit")
+                .map_err(|e| CodegenError::ModuleCreation(e.to_string()))?,
+            _ => i32t.const_zero(),
+        };
+        builder
+            .build_return(Some(&code))
+            .map_err(|e| CodegenError::ModuleCreation(e.to_string()))?;
         Ok(())
     }
 
@@ -175,13 +239,21 @@ impl<'ctx> CodegenCtx<'ctx> {
             .emit_ir
             .then(|| self.llmod.print_to_string().to_string());
 
-        let buffer = self
-            .machine
-            .write_to_memory_buffer(&self.llmod, FileType::Object)
-            .map_err(|e| CodegenError::ModuleFinish(e.to_string()))?;
+        let buffer = if self.emit_bitcode {
+            self.llmod.write_bitcode_to_memory()
+        } else {
+            self.machine
+                .write_to_memory_buffer(&self.llmod, FileType::Object)
+                .map_err(|e| CodegenError::ModuleFinish(e.to_string()))?
+        };
+
+        // inkwell's `as_slice` includes LLVM's trailing NUL terminator. ELF and
+        // Mach-O readers ignore the extra byte; the wasm reader rejects it.
+        let bytes = buffer.as_slice();
+        let object = bytes.strip_suffix(&[0]).unwrap_or(bytes);
 
         Ok(crate::CompilationResult {
-            object_bytes: buffer.as_slice().to_vec(),
+            object_bytes: object.to_vec(),
             ir_text: self.ir_outputs,
             module_ir,
         })
@@ -374,7 +446,9 @@ impl<'ctx> CodegenCtx<'ctx> {
 
         // Every function, an `@extern` thunk included, has the Kestrel ABI.
         let sig = abi::build_signature(func, &mut self.tc, &module.ty_arena, module, cx);
-        let (linkage, name) = if is_main {
+        let (linkage, name) = if is_main && self.c_main_wrapper {
+            (Linkage::Internal, "kestrel.main".to_string())
+        } else if is_main {
             (Linkage::External, "main".to_string())
         } else {
             // Mono suffix guarantees a unique LLVM symbol within the module.

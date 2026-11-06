@@ -222,6 +222,7 @@ impl<M: ScalarModel> Classifier<'_, M> {
                 let pieces = match self.abi {
                     CAbi::SysV64 => self.sysv_pieces(ty, size),
                     CAbi::Aapcs64 => self.aapcs_pieces(ty, size),
+                    CAbi::Wasm => self.wasm_pieces(ty, size),
                     CAbi::Other => None,
                 };
                 pieces.map_or(CRet::Sret, |pieces| CRet::Split { pieces })
@@ -251,6 +252,13 @@ impl<M: ScalarModel> Classifier<'_, M> {
                     Some(pieces) => CArg::Split {
                         pieces,
                         array: true,
+                    },
+                    None => CArg::Indirect,
+                },
+                CAbi::Wasm => match self.wasm_pieces(ty, size) {
+                    Some(pieces) => CArg::Split {
+                        pieces,
+                        array: false,
                     },
                     None => CArg::Indirect,
                 },
@@ -315,6 +323,25 @@ impl<M: ScalarModel> Classifier<'_, M> {
             })
             .collect();
         Some(pieces)
+    }
+
+    /// WebAssembly: a struct whose only content is one scalar (at any
+    /// nesting) is that scalar; anything else goes through memory.
+    fn wasm_pieces(&mut self, ty: TyId, size: u64) -> Option<Vec<Piece>> {
+        let leaves = self.leaves(ty);
+        let [leaf] = leaves[..] else {
+            return None;
+        };
+        if leaf.offset != 0 || leaf.size != size {
+            return None;
+        }
+        let prim = match (leaf.float, leaf.size) {
+            (true, 4) => CPrim::F32,
+            (true, 8) => CPrim::F64,
+            (false, n) => CPrim::int_for(n),
+            _ => return None,
+        };
+        Some(vec![Piece { offset: 0, prim }])
     }
 
     /// AArch64: a homogeneous float aggregate (1-4 equal floats) goes in float

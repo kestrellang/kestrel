@@ -64,7 +64,7 @@ func libc_getcwd(buf: RawPointer, size: Int64) -> RawPointer
 @extern(.C, mangleName: "__error")
 func __errno_ptr() -> Pointer[Int32]
 
-@platform(.Linux)
+@platform(.Linux, .Emscripten)
 @extern(.C, mangleName: "__errno_location")
 func __errno_ptr() -> Pointer[Int32]
 
@@ -86,6 +86,10 @@ func ST_MODE_OFFSET() -> Int64 { 4 }
 @platform(.Linux)
 func ST_MODE_OFFSET() -> Int64 { 24 }
 
+/// Byte offset of `st_mode` within `struct stat` on Emscripten (after a 4-byte `st_dev`).
+@platform(.Emscripten)
+func ST_MODE_OFFSET() -> Int64 { 4 }
+
 /// `S_IFMT` — bitmask isolating the file-type bits of `st_mode`.
 func S_IFMT() -> Int32 { 61440 }
 
@@ -100,7 +104,7 @@ func S_IFREG() -> Int32 { 32768 }
 func DIRENT_NAME_OFFSET() -> Int64 { 21 }
 
 /// Byte offset of `d_name` within `struct dirent` on linux.
-@platform(.Linux)
+@platform(.Linux, .Emscripten)
 func DIRENT_NAME_OFFSET() -> Int64 { 19 }
 
 /// Default mode for new directories — `0o755` (`rwxr-xr-x`).

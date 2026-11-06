@@ -36,7 +36,8 @@ Available on every subcommand:
 
 | Flag | Meaning |
 |---|---|
-| `--target <TRIPLE>` | Target triple for cross-compilation (e.g. `x86_64-unknown-linux-gnu`). Also selects `@platform` conditionals (darwin/linux). |
+| `--target <TRIPLE>` | Target triple for cross-compilation (e.g. `x86_64-unknown-linux-gnu`). Also selects `@platform` conditionals (darwin/linux/emscripten). `wasm64-unknown-emscripten` builds for the browser with the LLVM backend: the compiler emits LLVM bitcode and links with `emcc` (Memory64), and the output is named for what `emcc` should produce, e.g. `-o index.html`. |
+| `--link-arg <ARG>` | Pass one argument verbatim to the linker driver (repeatable), e.g. `--link-arg=-sUSE_SDL=2`. |
 | `-v`, `--verbose` | Verbose output (stdlib path, files read, output path). |
 | `--std <PATH>` | Path to the standard library (overrides the default lookup below). |
 | `--no-std` | Compile without the standard library. |

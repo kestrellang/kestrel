@@ -53,7 +53,7 @@ func gameLoop[A](mutating app: A, config cfg: Config) where A: InputManager, A: 
                 .KeyDown(.Digit4) => { state.selectedPattern = .Pulsar },
                 .KeyDown(.Digit5) => { state.selectedPattern = .GosperGun },
                 .KeyDown(.Escape) => { state.running = false },
-                .MouseDown(px, py) => { state.stamp(px, py, cfg.cellSize) },
+                .MouseDown(_, px, py) => { state.stamp(px, py, cfg.cellSize) },
                 _ => {}
             }
         }

@@ -44,6 +44,8 @@ pub struct CodegenOptions {
     pub libraries: Vec<String>,
     pub library_paths: Vec<String>,
     pub frameworks: Vec<String>,
+    /// Extra arguments passed verbatim to the linker driver.
+    pub link_args: Vec<String>,
     pub c_sources: Vec<std::path::PathBuf>,
     /// Emit textual LLVM IR (per function) into `CompilationResult::ir_text`.
     pub emit_ir: bool,
@@ -95,7 +97,9 @@ pub fn compile_and_link(
 
     let tmp_dir = std::env::temp_dir();
     let id = LINK_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let obj_name = format!("kestrel_llvm_{}_{}.o", std::process::id(), id);
+    // WebAssembly hands the linker bitcode (see `CodegenCtx::finish`).
+    let ext = if target.is_wasm() { "bc" } else { "o" };
+    let obj_name = format!("kestrel_llvm_{}_{}.{ext}", std::process::id(), id);
     let obj_path = tmp_dir.join(obj_name);
     std::fs::write(&obj_path, &result.object_bytes)?;
 
