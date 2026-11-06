@@ -86,7 +86,7 @@ public enum IoErrorKind: Equatable, Formattable {
 
     /// The kind for a system error code.
     public static func of(errno code: Int32) -> IoErrorKind {
-        match Int64(from: native_errno_kind(code)) {
+        match Int64(from: unsafe native_errno_kind(code)) {
             1 => .NotFound, 2 => .PermissionDenied, 3 => .AlreadyExists,
             4 => .InvalidInput, 5 => .InvalidData, 6 => .UnexpectedEnd,
             7 => .TimedOut, 8 => .WouldBlock, 9 => .Interrupted,
@@ -185,7 +185,7 @@ public struct IoError: Equatable, Formattable {
     /// The error for the calling thread's current `errno`. Call it right
     /// after the failing system call, before anything else can change it.
     public static func last() -> IoError {
-        IoError(errno: native_errno())
+        IoError(errno: unsafe native_errno())
     }
 
     /// The system error code, if the system reported this error.
@@ -197,7 +197,7 @@ public struct IoError: Equatable, Formattable {
     /// for an error of kind `.Other`.
     public func description() -> String {
         if self.code >= 0 and self.kind == .Other {
-            let text = String(from: CString(raw: native_strerror(self.code).cast[UInt8]()));
+            let text = String(from: CString(raw: unsafe native_strerror(self.code).cast[UInt8]()));
             return "\(text) (errno \(self.code))"
         }
         self.kind.description()

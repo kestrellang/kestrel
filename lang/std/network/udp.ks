@@ -36,22 +36,22 @@ public struct UdpSocket: not Copyable {
 
     /// Sends one datagram of `buf` to `address`; returns the bytes sent.
     public mutating func send(buf: Slice[UInt8], to address: SocketAddress) -> Result[Int64, IoError] {
-        let cells = malloc(nativeAddressSize());
+        let cells = unsafe malloc(nativeAddressSize());
         address.writeNative(into: cells);
-        let n = native_send_to(self.fd, buf.pointer.asRaw(), buf.count, cells);
+        let n = unsafe native_send_to(self.fd, buf.pointer.asRaw(), buf.count, cells);
         let error = IoError.last();
-        free(cells);
+        unsafe free(cells);
         if n < 0 { .Err(error) } else { .Ok(n) }
     }
 
     /// Waits for one datagram; returns its size and sender. A datagram
     /// longer than `buf` is cut short.
     public mutating func receiveFrom(mutating into buf: Slice[UInt8]) -> Result[(Int64, SocketAddress), IoError] {
-        let cells = malloc(nativeAddressSize());
-        let n = native_receive_from(self.fd, buf.pointer.asRaw(), buf.count, cells);
+        let cells = unsafe malloc(nativeAddressSize());
+        let n = unsafe native_receive_from(self.fd, buf.pointer.asRaw(), buf.count, cells);
         let error = IoError.last();
         let result = if n < 0 { .Err(error) } else { .Ok((n, SocketAddress.readNative(from: cells))) };
-        free(cells);
+        unsafe free(cells);
         result
     }
 
@@ -59,7 +59,7 @@ public struct UdpSocket: not Copyable {
     /// datagrams are received.
     public mutating func connect(to address: SocketAddress) -> Result[(), IoError] {
         let fd = self.fd;
-        withNativeAddress(address, { (cells) in native_connect(fd, cells, -1) })
+        withNativeAddress(address, { (cells) in unsafe native_connect(fd, cells, -1) })
     }
 
     /// Sends one datagram to the connected peer.
@@ -107,7 +107,7 @@ public struct UdpSocket: not Copyable {
     public consuming func close() -> Result[(), IoError] {
         let fd = self.fd;
         self.fd = -1;
-        check(native_close(fd))
+        check(unsafe native_close(fd))
     }
 
     /// Gives up ownership: the descriptor stays open and the caller closes
@@ -120,7 +120,7 @@ public struct UdpSocket: not Copyable {
 
     deinit {
         if self.fd >= 0 {
-            native_close(self.fd);
+            unsafe native_close(self.fd);
         }
     }
 }

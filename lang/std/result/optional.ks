@@ -555,7 +555,7 @@ extend Optional[T]: Equatable where T: Equatable {
                 .Some(b) => a == b,
                 .None => false
             },
-            .None => other.isNone()
+            .None => other.isNone
         }
     }
 
@@ -600,7 +600,7 @@ extend Optional[T]: Comparable where T: Comparable {
     public func compare(other: Optional[T]) -> Ordering {
         // Nested: a `(self, other)` tuple would move both borrowed operands.
         match self {
-            .None => if other.isNone() { .Equal } else { .Less },
+            .None => if other.isNone { .Equal } else { .Less },
             .Some(a) => match other {
                 .None => .Greater,
                 .Some(b) => a.compare(b)

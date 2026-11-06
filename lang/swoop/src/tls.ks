@@ -189,7 +189,7 @@ extend TlsStream {
         let ctx = unsafe libc_SSL_CTX_new(method);
         if lang.ptr_is_null(ctx) {
              unsafe posix_close(fd.raw);
-            throw IoError(code: 1)
+            throw IoError(kind: .OutOfMemory)
         }
 
         // Load system CA certificates and enable peer verification
@@ -202,7 +202,7 @@ extend TlsStream {
         if lang.ptr_is_null(ssl) {
             unsafe libc_SSL_CTX_free(ctx);
              unsafe posix_close(fd.raw);
-            throw IoError(code: 2)
+            throw IoError(kind: .OutOfMemory)
         }
 
         // Attach socket fd
@@ -224,7 +224,8 @@ extend TlsStream {
             unsafe libc_SSL_free(ssl);
             unsafe libc_SSL_CTX_free(ctx);
              unsafe posix_close(fd.raw);
-            throw IoError(code: connectResult)
+            // Handshake or certificate verification failed.
+            throw IoError.invalidData
         }
 
         .Ok(TlsStream(ssl, ctx, fd))

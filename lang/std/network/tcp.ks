@@ -130,7 +130,7 @@ public struct TcpStream: Readable, Writable, not Copyable {
     public consuming func close() -> Result[(), IoError] {
         let fd = self.fd;
         self.fd = -1;
-        check(native_close(fd))
+        check(unsafe native_close(fd))
     }
 
     /// Gives up ownership: the descriptor stays open and the caller closes
@@ -143,7 +143,7 @@ public struct TcpStream: Readable, Writable, not Copyable {
 
     deinit {
         if self.fd >= 0 {
-            native_close(self.fd);
+            unsafe native_close(self.fd);
         }
     }
 }
@@ -151,12 +151,12 @@ public struct TcpStream: Readable, Writable, not Copyable {
 /// Tries each address of `host` in order. A negative timeout waits
 /// forever; otherwise it bounds the whole attempt.
 func connectToAny(host: String, port: UInt16, timeoutMilliseconds: Int64) -> Result[TcpStream, IoError] {
-    let deadline = native_monotonic_ms() + timeoutMilliseconds;
+    let deadline = unsafe native_monotonic_ms() + timeoutMilliseconds;
     var last = IoError.unexpectedEnd;
     for address in try lookup(host, port) {
         var remaining: Int64 = -1;
         if timeoutMilliseconds >= 0 {
-            remaining = deadline - native_monotonic_ms();
+            remaining = deadline - unsafe native_monotonic_ms();
             if remaining <= 0 {
                 return .Err(IoError.timedOut)
             }
@@ -231,7 +231,7 @@ public struct TcpListener: not Copyable {
 
     deinit {
         if self.fd >= 0 {
-            native_close(self.fd);
+            unsafe native_close(self.fd);
         }
     }
 }

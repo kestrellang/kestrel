@@ -32,8 +32,8 @@ func main() -> lang.i64 {
         .Some(a) => if a.ip != IpAddress.V4(Ipv4Address(10, 0, 0, 1)) { return 14 },
         .None => return 15
     }
-    if SocketAddress.parse("10.0.0.1:65536").isSome() { return 16 }
-    if SocketAddress.parse("10.0.0.1").isSome() { return 17 }
+    if SocketAddress.parse("10.0.0.1:65536").isSome { return 16 }
+    if SocketAddress.parse("10.0.0.1").isSome { return 17 }
 
     if not IpAddress.parse("127.5.0.1").unwrap().isLoopback { return 18 }
     if not IpAddress.V6(Ipv6Address.any).isUnspecified { return 19 }

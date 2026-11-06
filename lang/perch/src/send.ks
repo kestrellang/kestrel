@@ -2,7 +2,7 @@
 
 module perch
 
-import std.io.error.(IoError)
+import std.streams.(IoError, Writable)
 
 /// Serializes and sends an HTTP response over a connection.
 ///
@@ -21,7 +21,7 @@ import std.io.error.(IoError)
 /// let response = Response.ok(Text("hello"));
 ///  sendResponse(response, to: stream);
 /// ```
-func sendResponse(response: Response, to fileDescriptor: Int32) -> () throws IoError {
+func sendResponse[S](response: Response, mutating to stream: S) -> () throws IoError where S: Writable, S: not Copyable, S: not Static {
     var resp = String(capacity: 256 + response.bodyContent.bytes.count);
 
     resp.append("HTTP/1.1 \(response.status.code) \(response.status.text())\r\n");

@@ -37,7 +37,7 @@ public enum Environment {
     /// The raw bytes of variable `name`, or `None` if it is unset.
     public static func variableBytes(name: String) -> Optional[Array[UInt8]] {
         let cname = name.toCString();
-        let raw = native_getenv(cname.raw.asRaw());
+        let raw = unsafe native_getenv(cname.raw.asRaw());
         cname.free();
         if raw.isNull {
             return .None
@@ -48,7 +48,7 @@ public enum Environment {
     /// True if variable `name` is set, even to the empty string.
     public static func hasVariable(name: String) -> Bool {
         let cname = name.toCString();
-        let raw = native_getenv(cname.raw.asRaw());
+        let raw = unsafe native_getenv(cname.raw.asRaw());
         cname.free();
         not raw.isNull
     }
@@ -58,7 +58,7 @@ public enum Environment {
     /// skipped.
     public static func variables() -> Array[(String, String)] {
         var result = Array[(String, String)]();
-        let environ = native_environ();
+        let environ = unsafe native_environ();
         if environ.isNull {
             return result
         }
@@ -92,7 +92,7 @@ public enum Environment {
     public static func setVariable(name: String, to value: String) -> Result[(), IoError] {
         let cname = name.toCString();
         let cvalue = value.toCString();
-        let status = native_setenv(cname.raw.asRaw(), cvalue.raw.asRaw(), 1);
+        let status = unsafe native_setenv(cname.raw.asRaw(), cvalue.raw.asRaw(), 1);
         cname.free();
         cvalue.free();
         if status != 0 {
@@ -108,7 +108,7 @@ public enum Environment {
     /// Not thread-safe, for the same reason as `setVariable`.
     public static func removeVariable(name: String) -> Result[(), IoError] {
         let cname = name.toCString();
-        let status = native_unsetenv(cname.raw.asRaw());
+        let status = unsafe native_unsetenv(cname.raw.asRaw());
         cname.free();
         if status != 0 {
             return .Err(IoError.last())
@@ -125,15 +125,15 @@ public enum Environment {
     public static func currentDirectory() -> Result[String, IoError] {
         var size: Int64 = 512;
         while true {
-            let buf = malloc(size);
-            let result = native_getcwd(buf, size);
+            let buf = unsafe malloc(size);
+            let result = unsafe native_getcwd(buf, size);
             if not result.isNull {
                 let path = stringFromNative(buf) ?? String();
-                free(buf);
+                unsafe free(buf);
                 return .Ok(path)
             }
             let error = IoError.last();
-            free(buf);
+            unsafe free(buf);
             // ERANGE: the buffer was too small, so grow it and retry.
             if (error.errno ?? 0) != rangeErrorCode() or size >= 1048576 {
                 return .Err(error)
@@ -146,7 +146,7 @@ public enum Environment {
     /// Changes the process's working directory. Affects every thread.
     public static func setCurrentDirectory(to path: String) -> Result[(), IoError] {
         let cpath = path.toCString();
-        let status = native_chdir(cpath.raw.asRaw());
+        let status = unsafe native_chdir(cpath.raw.asRaw());
         cpath.free();
         if status != 0 {
             return .Err(IoError.last())
@@ -162,7 +162,7 @@ public enum Environment {
                 return .Some(home)
             }
         }
-        stringFromNative(native_passwd_home())
+        stringFromNative(unsafe native_passwd_home())
     }
 
     /// The directory for temporary files: `$TMPDIR` if set and non-empty,

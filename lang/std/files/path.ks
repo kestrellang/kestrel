@@ -210,7 +210,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
 
     /// `true` if something exists at this path (following symbolic links).
     public func exists() -> Bool {
-        metadata(self).isOk()
+        metadata(self).isOk
     }
 
     /// `true` if this path is a regular file (following symbolic links).
@@ -238,14 +238,14 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// (`realpath(3)`). The path must exist.
     public func canonical() -> Result[Path, IoError] {
         let cpath = self.text.toCString();
-        let resolved = native_canonical(cpath.raw.asRaw());
+        let resolved = unsafe native_canonical(cpath.raw.asRaw());
         let error = IoError.last();
         cpath.free();
         if resolved.isNull {
             return .Err(error)
         }
         let text = textFromNative(resolved);
-        free(resolved);
+        unsafe free(resolved);
         .Ok(Path(text))
     }
 

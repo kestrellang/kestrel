@@ -19,7 +19,7 @@ func main() -> lang.i64 {
 
     // Static constructors carry no errno.
     if IoError.notFound.kind != IoErrorKind.NotFound { return 4 }
-    if IoError.notFound.errno.isSome() { return 5 }
+    if IoError.notFound.errno.isSome { return 5 }
     if IoError.permissionDenied.description() != "permission denied" { return 6 }
     if IoError.alreadyExists.description() != "already exists" { return 7 }
     if IoError.invalidInput.description() != "invalid input" { return 8 }

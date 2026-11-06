@@ -26,7 +26,7 @@ import std.ffi.(malloc, free)
 public enum Directory {
     /// Creates the directory `path`. Its parent must exist.
     public static func create(path: Path) -> Result[(), IoError] {
-        withNativePath(path, { (p) in native_mkdir(p, 493) })
+        withNativePath(path, { (p) in unsafe native_mkdir(p, 493) })
     }
 
     /// Creates `path` and any missing parents (`mkdir -p`). Succeeds if the
@@ -52,7 +52,7 @@ public enum Directory {
 
     /// Removes the directory `path`, which must be empty.
     public static func remove(path: Path) -> Result[(), IoError] {
-        withNativePath(path, { (p) in native_rmdir(p) })
+        withNativePath(path, { (p) in unsafe native_rmdir(p) })
     }
 
     /// Removes `path` and everything in it (`rm -r`). Symbolic links are
@@ -65,7 +65,7 @@ public enum Directory {
             } else {
                 // A bare `remove` here would name `Directory.remove`, so
                 // unlink directly.
-                try withNativePath(entry.path, { (p) in native_unlink(p) })
+                try withNativePath(entry.path, { (p) in unsafe native_unlink(p) })
             }
         }
         Directory.remove(path)
@@ -75,7 +75,7 @@ public enum Directory {
     /// order the file system returns them.
     public static func entries(path: Path) -> Result[DirectoryEntries, IoError] {
         let cpath = path.text.toCString();
-        let dir = native_directory_open(cpath.raw.asRaw());
+        let dir = unsafe native_directory_open(cpath.raw.asRaw());
         let error = IoError.last();
         cpath.free();
         if dir.isNull {
@@ -95,7 +95,7 @@ public enum Directory {
         template.append(prefix);
         template.append("XXXXXX");
         let ctemplate = template.toCString();
-        let r = native_make_temporary_directory(ctemplate.raw.asRaw());
+        let r = unsafe native_make_temporary_directory(ctemplate.raw.asRaw());
         let error = IoError.last();
         let made = textFromNative(ctemplate.raw.asRaw());
         ctemplate.free();
@@ -109,7 +109,7 @@ public enum Directory {
 /// `$TMPDIR`, or `/tmp`.
 internal func temporaryRoot() -> String {
     let name = "TMPDIR".toCString();
-    let raw = native_getenv(name.raw.asRaw());
+    let raw = unsafe native_getenv(name.raw.asRaw());
     name.free();
     if raw.isNull { return "/tmp" }
     textFromNative(raw)
@@ -142,18 +142,18 @@ public struct DirectoryEntries: Iterator, not Copyable {
         if self.dir.isNull {
             return .None
         }
-        let cells = malloc(16);
-        let r = native_directory_next(self.dir, cells, cells.cast[UInt8]().offset(by: 8).asRaw());
+        let cells = unsafe malloc(16);
+        let r = unsafe native_directory_next(self.dir, cells, cells.cast[UInt8]().offset(by: 8).asRaw());
         let error = IoError.last();
         if r <= 0 {
-            free(cells);
-            native_directory_close(self.dir);
+            unsafe free(cells);
+            unsafe native_directory_close(self.dir);
             self.dir = RawPointer.nullPointer();
             return if r == 0 { .None } else { .Some(.Err(error)) }
         }
-        let name = textFromNative(cells.cast[RawPointer]().read());
-        let code = Int64(from: cells.cast[UInt8]().offset(by: 8).cast[Int32]().read());
-        free(cells);
+        let name = textFromNative(unsafe cells.cast[RawPointer]().read());
+        let code = Int64(from: unsafe cells.cast[UInt8]().offset(by: 8).cast[Int32]().read());
+        unsafe free(cells);
         let path = self.base.joined(with: Path(name.clone()));
         // d_type is unknown on some file systems: ask lstat.
         let kind = if code == 4 {
@@ -169,7 +169,7 @@ public struct DirectoryEntries: Iterator, not Copyable {
 
     deinit {
         if not self.dir.isNull {
-            native_directory_close(self.dir);
+            unsafe native_directory_close(self.dir);
         }
     }
 }

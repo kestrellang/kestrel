@@ -9,7 +9,7 @@ module Test
 @main
 func main() -> lang.i64 {
     if Environment.hasVariable("KESTREL_SYSTEM_TEST") { return 1 }
-    if Environment.variable("KESTREL_SYSTEM_TEST").isSome() { return 2 }
+    if Environment.variable("KESTREL_SYSTEM_TEST").isSome { return 2 }
 
     match Environment.setVariable("KESTREL_SYSTEM_TEST", to: "a=b c") {
         .Ok(_) => {},

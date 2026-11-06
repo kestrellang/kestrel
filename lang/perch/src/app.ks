@@ -5,6 +5,7 @@ module perch
 import http.method.(HttpMethod)
 import http.content.(Text)
 import http.status.(StatusCode)
+import std.network.(TcpListener)
 
 // ============================================================================
 // ENDPOINTS
@@ -249,14 +250,14 @@ public struct App[Ctx]: Cloneable {
             // $try_value's deinit past the next accept() and closed the
             // new connection's fd (see perch 0.3).
             match listener.accept() {
-                .Ok(stream) => {
-                    let fd = stream.rawFd();
-                    let response = match parseHttpRequest(fd) {
+                .Ok((stream, _)) => {
+                    var stream = stream;
+                    let response = match parseHttpRequest(stream) {
                         .Ok(request) => self.respond(to: request),
                         .Err(_) => Response(StatusCode.badRequest(), Text("Bad Request"))
                     };
                     // A client that hung up mid-response is its problem, not the server's.
-                    let _sent = sendResponse(response, to: fd);
+                    let _sent = sendResponse(response, to: stream);
                 },
                 .Err(e) => throw ServerError(e.description())
             }
@@ -267,7 +268,7 @@ public struct App[Ctx]: Cloneable {
     /// 404 when no route matches.
     public func respond(to request: Request) -> Response {
         guard let .Some((route, values, named)) =
-            self.root.table.pointeeRef().find(request.method, request.segments) else {
+            self.root.table.value.find(request.method, request.segments) else {
             return Response.notFound()
         }
         var matched = request;

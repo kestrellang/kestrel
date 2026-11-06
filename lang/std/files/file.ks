@@ -46,7 +46,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
     /// `AlreadyExists` if `createNew` is set and it does.
     public static func open(path: Path, options: OpenOptions) -> Result[File, IoError] {
         let cpath = path.text.toCString();
-        let fd = native_open(cpath.raw.asRaw(), options.nativeFlags(), Int32(from: options.permissions.mode));
+        let fd = unsafe native_open(cpath.raw.asRaw(), options.nativeFlags(), Int32(from: options.permissions.mode));
         let error = IoError.last();
         cpath.free();
         if fd < 0 {
@@ -66,7 +66,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
 
     /// Reads up to `buf.count` bytes from the current position.
     public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
-        let n = native_read(self.fd, buf.pointer.asRaw(), buf.count);
+        let n = unsafe native_read(self.fd, buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -76,7 +76,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
     /// Writes up to `buf.count` bytes at the current position (or the end,
     /// when opened to append).
     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
-        let n = native_write(self.fd, buf.pointer.asRaw(), buf.count);
+        let n = unsafe native_write(self.fd, buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -89,7 +89,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
 
     /// Waits until the contents reach the storage device (`fsync`).
     public mutating func sync() -> Result[(), IoError] {
-        if native_sync(self.fd) < 0 {
+        if unsafe native_sync(self.fd) < 0 {
             return .Err(IoError.last())
         }
         .Ok(())
@@ -103,7 +103,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
             .Current(n) => (n, 1),
             .End(n) => (n, 2)
         };
-        let at = native_seek(self.fd, offset, whence);
+        let at = unsafe native_seek(self.fd, offset, whence);
         if at < 0 {
             return .Err(IoError.last())
         }
@@ -112,7 +112,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
 
     /// Cuts the file to `length` bytes, or extends it with zeros.
     public mutating func setLength(length: Int64) -> Result[(), IoError] {
-        if native_set_length(self.fd, length) < 0 {
+        if unsafe native_set_length(self.fd, length) < 0 {
             return .Err(IoError.last())
         }
         .Ok(())
@@ -120,11 +120,11 @@ public struct File: Readable, Writable, Seekable, not Copyable {
 
     /// The open file's metadata (`fstat`).
     public func metadata() -> Result[Metadata, IoError] {
-        let out = malloc(40);
-        let r = native_file_metadata(self.fd, out);
+        let out = unsafe malloc(40);
+        let r = unsafe native_file_metadata(self.fd, out);
         let error = IoError.last();
         let result = if r < 0 { .Err(error) } else { .Ok(metadataFrom(out)) };
-        free(out);
+        unsafe free(out);
         result
     }
 
@@ -133,7 +133,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
     public consuming func close() -> Result[(), IoError] {
         let fd = self.fd;
         self.fd = -1;
-        if native_close(fd) < 0 {
+        if unsafe native_close(fd) < 0 {
             return .Err(IoError.last())
         }
         .Ok(())
@@ -149,7 +149,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
 
     deinit {
         if self.fd >= 0 {
-            native_close(self.fd);
+            unsafe native_close(self.fd);
         }
     }
 }

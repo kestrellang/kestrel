@@ -27,7 +27,7 @@ func main() -> lang.i64 {
     match child.wait() {
         .Ok(status) => {
             if not status.isEqual(to: .Terminated) { return 6 }
-            if status.code.isSome() { return 7 }
+            if status.code.isSome { return 7 }
         },
         .Err(_) => { return 8 }
     }

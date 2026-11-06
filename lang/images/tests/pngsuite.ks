@@ -4,7 +4,7 @@
 
 module images_tests
 
-import std.io.file.(readFileBytes)
+import std.files.(Path, readBytes)
 import images.(RawImage, PngFormat, ImageFormat, DecodeOptions, CollectingSink, ImageSink, ImageDecoder)
 
 /// Decodes `data` fed in `chunkSize`-byte pieces.
@@ -37,7 +37,7 @@ func main() {
     let dir = directory("PNGSUITE");
     for expected in pngSuite() {
         let name = expected.name;
-        guard let .Ok(data) = readFileBytes(dir + name) else {
+        guard let .Ok(data) = readBytes(Path(dir + name)) else {
             check("\(name) readable", false);
             continue;
         }

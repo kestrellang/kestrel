@@ -19,7 +19,7 @@ public struct StandardInput: Readable {
 
     /// Reads from the shared buffer, refilling it from fd 0.
     public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
-        let n = native_stdin_read(buf.pointer.asRaw(), buf.count);
+        let n = unsafe native_stdin_read(buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -61,7 +61,7 @@ public struct StandardOutput: Writable {
 
     /// Adds `buf` to the shared buffer.
     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
-        let n = native_stdout_write(buf.pointer.asRaw(), buf.count);
+        let n = unsafe native_stdout_write(buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -81,7 +81,7 @@ public struct StandardError: Writable {
 
     /// Writes `buf` to fd 2.
     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
-        let n = native_stream_write(2, buf.pointer.asRaw(), buf.count);
+        let n = unsafe native_stream_write(2, buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -95,7 +95,7 @@ public struct StandardError: Writable {
 /// Writes standard output's shared buffer to fd 1. Other std modules call
 /// it before anything else writes to fd 1, such as a child process.
 internal func flushStandardOutput() -> Result[(), IoError] {
-    if native_stdout_flush() < 0 {
+    if unsafe native_stdout_flush() < 0 {
         return .Err(IoError.last())
     }
     .Ok(())

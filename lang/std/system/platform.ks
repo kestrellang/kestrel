@@ -13,20 +13,24 @@ public enum OperatingSystem: Equatable, Formattable {
     case Darwin
     /// Linux, with any C library.
     case Linux
+    /// WebAssembly in a browser, via Emscripten.
+    case Emscripten
 
     public func isEqual(to other: OperatingSystem) -> Bool {
         match (self, other) {
             (.Darwin, .Darwin) => true,
             (.Linux, .Linux) => true,
+            (.Emscripten, .Emscripten) => true,
             _ => false
         }
     }
 
-    /// The lowercase name used in target triples: `darwin`, `linux`.
+    /// The lowercase name used in target triples: `darwin`, `linux`, `emscripten`.
     public var name: String {
         match self {
             .Darwin => "darwin",
-            .Linux => "linux"
+            .Linux => "linux",
+            .Emscripten => "emscripten"
         }
     }
 
@@ -110,8 +114,8 @@ public struct Platform: Equatable, Formattable {
         Platform(
             operatingSystem: currentOperatingSystem(),
             architecture: currentArchitecture(),
-            pointerWidth: Int64(from: native_pointer_width()),
-            endianness: if native_is_little_endian() != 0 { .Little } else { .Big }
+            pointerWidth: Int64(from: unsafe native_pointer_width()),
+            endianness: if unsafe native_is_little_endian() != 0 { .Little } else { .Big }
         )
     }
 
@@ -134,11 +138,14 @@ internal func currentOperatingSystem() -> OperatingSystem { .Darwin }
 @platform(.Linux)
 internal func currentOperatingSystem() -> OperatingSystem { .Linux }
 
+@platform(.Emscripten)
+internal func currentOperatingSystem() -> OperatingSystem { .Emscripten }
+
 /// The shim's answer comes from the C compiler's target macros, so it is
 /// right for cross-compiled builds too. `@platform` can't select on
 /// architecture yet; when it can, this becomes a compile-time constant.
 internal func currentArchitecture() -> Architecture {
-    match native_architecture() {
+    match unsafe native_architecture() {
         0 => .X86_64,
         1 => .Arm64,
         2 => .X86,

@@ -111,7 +111,7 @@ func run() -> () throws WgpuError {
     );
     let bindGroup = device.createBindGroup(layout: pipeline.bindGroupLayout(0), entries: [uniformBuffer.binding(0)]);
 
-    let maxFrames = match getenv("CUBE_FRAMES") {
+    let maxFrames = match Environment.variable("CUBE_FRAMES") {
         .Some(s) => Int64(parsing: s) ?? 0,
         .None => 0
     };

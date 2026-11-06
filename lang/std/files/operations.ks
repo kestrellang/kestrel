@@ -13,7 +13,7 @@ import std.ffi.(malloc, free)
 /// Removes the file or symbolic link `path`. Use `Directory.remove` for a
 /// directory.
 public func remove(path: Path) -> Result[(), IoError] {
-    withNativePath(path, { (p) in native_unlink(p) })
+    withNativePath(path, { (p) in unsafe native_unlink(p) })
 }
 
 /// Renames `source` to `destination`, replacing a file already there.
@@ -21,7 +21,7 @@ public func remove(path: Path) -> Result[(), IoError] {
 public func rename(source: Path, to destination: Path) -> Result[(), IoError] {
     let from = source.text.toCString();
     let to = destination.text.toCString();
-    let r = native_rename(from.raw.asRaw(), to.raw.asRaw());
+    let r = unsafe native_rename(from.raw.asRaw(), to.raw.asRaw());
     let error = IoError.last();
     from.free();
     to.free();
@@ -46,7 +46,7 @@ public func copy(source: Path, to destination: Path) -> Result[Int64, IoError] {
 public func createSymbolicLink(at link: Path, to target: Path) -> Result[(), IoError] {
     let t = target.text.toCString();
     let l = link.text.toCString();
-    let r = native_symlink(t.raw.asRaw(), l.raw.asRaw());
+    let r = unsafe native_symlink(t.raw.asRaw(), l.raw.asRaw());
     let error = IoError.last();
     t.free();
     l.free();
@@ -58,27 +58,27 @@ public func readSymbolicLink(path: Path) -> Result[Path, IoError] {
     var capacity: Int64 = 256;
     let cpath = path.text.toCString();
     loop {
-        let buffer = malloc(capacity);
-        let n = native_read_link(cpath.raw.asRaw(), buffer, capacity);
+        let buffer = unsafe malloc(capacity);
+        let n = unsafe native_read_link(cpath.raw.asRaw(), buffer, capacity);
         let error = IoError.last();
         if n < 0 {
-            free(buffer);
+            unsafe free(buffer);
             cpath.free();
             return .Err(error)
         }
         if n < capacity {
-            buffer.cast[UInt8]().offset(by: n).write(0);
+            unsafe buffer.cast[UInt8]().offset(by: n).write(0);
             let text = textFromNative(buffer);
-            free(buffer);
+            unsafe free(buffer);
             cpath.free();
             return .Ok(Path(text))
         }
-        free(buffer);
+        unsafe free(buffer);
         capacity = capacity * 2
     }
 }
 
 /// Sets the permission bits of `path` (`chmod`).
 public func setPermissions(path: Path, permissions: Permissions) -> Result[(), IoError] {
-    withNativePath(path, { (p) in native_chmod(p, Int32(from: permissions.mode)) })
+    withNativePath(path, { (p) in unsafe native_chmod(p, Int32(from: permissions.mode)) })
 }

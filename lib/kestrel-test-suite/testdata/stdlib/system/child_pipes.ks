@@ -26,7 +26,7 @@ func main() -> lang.i64 {
         },
         .None => { return 3 }
     }
-    if child.takeStandardInput().isSome() { return 4 }
+    if child.takeStandardInput().isSome { return 4 }
     match child.waitForOutput() {
         .Ok(o) => {
             if not o.status.isSuccess { return 5 }

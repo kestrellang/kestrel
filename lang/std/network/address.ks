@@ -416,25 +416,25 @@ public struct SocketAddress: Equatable, Hashable, Formattable {
     func writeNative(into cells: RawPointer) {
         let words = cells.cast[Int64]();
         let bytes = cells.cast[UInt8]().offset(by: 24);
-        words.offset(by: 1).write(Int64(from: self.port));
+        unsafe words.offset(by: 1).write(Int64(from: self.port));
         match self.ip {
             .V4(a) => {
-                words.write(4);
-                words.offset(by: 2).write(0);
+                unsafe words.write(4);
+                unsafe words.offset(by: 2).write(0);
                 var i = 0;
                 while i < 4 {
-                    bytes.offset(by: i).write(a.octet(i));
+                    unsafe bytes.offset(by: i).write(a.octet(i));
                     i = i + 1
                 }
             },
             .V6(a) => {
-                words.write(6);
-                words.offset(by: 2).write(Int64(from: a.scopeId));
+                unsafe words.write(6);
+                unsafe words.offset(by: 2).write(Int64(from: a.scopeId));
                 var i = 0;
                 while i < 8 {
                     let s = a.segment(i);
-                    bytes.offset(by: i * 2).write(UInt8(from: s >> 8));
-                    bytes.offset(by: i * 2 + 1).write(UInt8(from: s & 255));
+                    unsafe bytes.offset(by: i * 2).write(UInt8(from: s >> 8));
+                    unsafe bytes.offset(by: i * 2 + 1).write(UInt8(from: s & 255));
                     i = i + 1
                 }
             }
@@ -445,20 +445,20 @@ public struct SocketAddress: Equatable, Hashable, Formattable {
     static func readNative(from cells: RawPointer) -> SocketAddress {
         let words = cells.cast[Int64]();
         let bytes = cells.cast[UInt8]().offset(by: 24);
-        let port = UInt16(from: words.offset(by: 1).read());
-        if words.read() == 4 {
-            let ip = Ipv4Address(bytes.read(), bytes.offset(by: 1).read(), bytes.offset(by: 2).read(), bytes.offset(by: 3).read());
+        let port = UInt16(from: unsafe words.offset(by: 1).read());
+        if unsafe words.read() == 4 {
+            let ip = Ipv4Address(unsafe bytes.read(), unsafe bytes.offset(by: 1).read(), unsafe bytes.offset(by: 2).read(), unsafe bytes.offset(by: 3).read());
             return SocketAddress(IpAddress.V4(ip), port: port)
         }
         var high: UInt64 = 0;
         var low: UInt64 = 0;
         var i = 0;
         while i < 16 {
-            let byte = UInt64(from: bytes.offset(by: i).read());
+            let byte = UInt64(from: unsafe bytes.offset(by: i).read());
             if i < 8 { high = (high << 8) | byte } else { low = (low << 8) | byte }
             i = i + 1
         }
-        let scope = UInt32(from: words.offset(by: 2).read());
+        let scope = UInt32(from: unsafe words.offset(by: 2).read());
         SocketAddress(IpAddress.V6(Ipv6Address(high: high, low: low, scopeId: scope)), port: port)
     }
 }
@@ -476,7 +476,7 @@ func join(a: UInt16, b: UInt16, c: UInt16, d: UInt16) -> UInt64 {
 
 /// A decimal number at `start` with no leading zero and at most `max`, and
 /// the index after it.
-func decimal(b: UnsafeSlice[UInt8], start: Int64, max: Int64) -> Optional[(Int64, Int64)] {
+func decimal(b: Slice[UInt8], start: Int64, max: Int64) -> Optional[(Int64, Int64)] {
     var i = start;
     var value = 0;
     while i < b.count and b(i) >= 48 and b(i) <= 57 {
@@ -493,7 +493,7 @@ func decimal(b: UnsafeSlice[UInt8], start: Int64, max: Int64) -> Optional[(Int64
 }
 
 /// One to four hex digits at `start`, before `end`, and the index after.
-func hex(b: UnsafeSlice[UInt8], start: Int64, end: Int64) -> Optional[(UInt16, Int64)] {
+func hex(b: Slice[UInt8], start: Int64, end: Int64) -> Optional[(UInt16, Int64)] {
     var i = start;
     var value: UInt16 = 0;
     while i < end and i - start < 4 {
@@ -509,7 +509,7 @@ func hex(b: UnsafeSlice[UInt8], start: Int64, end: Int64) -> Optional[(UInt16, I
 }
 
 /// Whether a `.` comes before the next `:` in `b(start..<end)`.
-func containsDot(b: UnsafeSlice[UInt8], start: Int64, end: Int64) -> Bool {
+func containsDot(b: Slice[UInt8], start: Int64, end: Int64) -> Bool {
     var i = start;
     while i < end and b(i) != colon() {
         if b(i) == dot() {

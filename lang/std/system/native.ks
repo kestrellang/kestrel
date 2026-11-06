@@ -129,8 +129,8 @@ internal func bytesFromNative(raw: RawPointer) -> Array[UInt8] {
     let ptr = raw.cast[UInt8]();
     var bytes = Array[UInt8]();
     var i: Int64 = 0;
-    while ptr.offset(by: i).read() != 0 {
-        bytes.append(ptr.offset(by: i).read());
+    while unsafe ptr.offset(by: i).read() != 0 {
+        bytes.append(unsafe ptr.offset(by: i).read());
         i = i + 1
     }
     bytes
@@ -138,7 +138,7 @@ internal func bytesFromNative(raw: RawPointer) -> Array[UInt8] {
 
 /// Reads the `index`th pointer of a C `char **` array.
 internal func nativePointerAt(array: RawPointer, index: Int64) -> RawPointer {
-    array.cast[RawPointer]().offset(by: index).read()
+    unsafe array.cast[RawPointer]().offset(by: index).read()
 }
 
 /// A small block of C `int32_t` cells for out-parameters. Freed on drop.
@@ -146,19 +146,19 @@ internal struct NativeInt32Cells: not Copyable {
     var pointer: Pointer[Int32]
 
     init(count: Int64) {
-        let raw = std.ffi.malloc(count * 4);
-        std.ffi.memset(raw, 0, count * 4);
+        let raw = unsafe std.ffi.malloc(count * 4);
+        unsafe std.ffi.memset(raw, 0, count * 4);
         self.pointer = raw.cast[Int32]()
     }
 
     func asNative() -> RawPointer { self.pointer.asRaw() }
 
-    func read(at index: Int64) -> Int32 { self.pointer.offset(by: index).read() }
+    func read(at index: Int64) -> Int32 { unsafe self.pointer.offset(by: index).read() }
 
-    func write(value: Int32, at index: Int64) { self.pointer.offset(by: index).write(value) }
+    func write(value: Int32, at index: Int64) { unsafe self.pointer.offset(by: index).write(value) }
 
     deinit {
-        std.ffi.free(self.pointer.asRaw());
+        unsafe std.ffi.free(self.pointer.asRaw());
     }
 }
 
@@ -183,7 +183,7 @@ internal struct NativeStringArray: not Copyable {
     deinit {
         for p in self.pointers {
             if not p.isNull {
-                std.ffi.free(p);
+                unsafe std.ffi.free(p);
             }
         }
     }

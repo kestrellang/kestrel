@@ -29,29 +29,29 @@ public struct ProcessId: Equatable, Formattable {
 /// The running process.
 public enum Process {
     /// This process's ID.
-    public static var id: ProcessId { ProcessId(value: Int64(from: native_getpid())) }
+    public static var id: ProcessId { ProcessId(value: Int64(from: unsafe native_getpid())) }
 
     /// The parent process's ID.
-    public static var parentId: ProcessId { ProcessId(value: Int64(from: native_getppid())) }
+    public static var parentId: ProcessId { ProcessId(value: Int64(from: unsafe native_getppid())) }
 
     /// The absolute path of the running executable, with symbolic links
     /// resolved on Linux.
     public static func executablePath() -> Result[String, IoError] {
         let size: Int64 = 4096;
-        let buf = malloc(size + 1);
-        let length = native_executable_path(buf, size);
+        let buf = unsafe malloc(size + 1);
+        let length = unsafe native_executable_path(buf, size);
         if length < 0 {
-            free(buf);
+            unsafe free(buf);
             return .Err(IoError.last())
         }
         let bytes = buf.cast[UInt8]();
         var path = String();
         var i: Int64 = 0;
         while i < length {
-            path.appendByte(bytes.offset(by: i).read());
+            path.appendByte(unsafe bytes.offset(by: i).read());
             i = i + 1
         }
-        free(buf);
+        unsafe free(buf);
         .Ok(path)
     }
 
@@ -62,11 +62,11 @@ public enum Process {
     /// on it.
     public static func arguments() -> Array[String] {
         var result = Array[String]();
-        let argv = native_argv();
+        let argv = unsafe native_argv();
         if argv.isNull {
             return result
         }
-        let count = Int64(from: native_argc());
+        let count = Int64(from: unsafe native_argc());
         for i in 0..<count {
             let bytes = bytesFromNative(nativePointerAt(argv, i));
             result.append(String(fromUtf8Lossy: bytes.asSlice()))
@@ -112,7 +112,7 @@ public enum ExitStatus: Equatable, Formattable {
 
     /// Prints `exit code 3` or `terminated`.
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        let text = match self {
+        let text: String = match self {
             .Exited(code) => "exit code \(code.value)",
             .Terminated => "terminated"
         };
@@ -148,7 +148,7 @@ public struct PipeReader: Readable, not Copyable {
 
     /// Reads what the child has written so far; `0` once it closes its end.
     public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
-        let n = native_read(self.fd, buf.pointer.asRaw(), buf.count);
+        let n = unsafe native_read(self.fd, buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -157,7 +157,7 @@ public struct PipeReader: Readable, not Copyable {
 
     deinit {
         if self.fd >= 0 {
-            native_close(self.fd);
+            unsafe native_close(self.fd);
         }
     }
 }
@@ -169,7 +169,7 @@ public struct PipeWriter: Writable, not Copyable {
 
     /// Writes to the child's standard input.
     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
-        let n = native_write(self.fd, buf.pointer.asRaw(), buf.count);
+        let n = unsafe native_write(self.fd, buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -181,7 +181,7 @@ public struct PipeWriter: Writable, not Copyable {
 
     deinit {
         if self.fd >= 0 {
-            native_close(self.fd);
+            unsafe native_close(self.fd);
         }
     }
 }
@@ -404,11 +404,11 @@ public struct Command: not Copyable {
             .Some(env) => env.asNative(),
             .None => RawPointer.nullPointer()
         };
-        let status = native_spawn(program.raw.asRaw(), nativeArgv.asNative(), envp, cwd,
+        let status = unsafe native_spawn(program.raw.asRaw(), nativeArgv.asNative(), envp, cwd,
                                   modes.asNative(), pidCell.asNative(), fds.asNative());
         program.free();
         if not cwd.isNull {
-            free(cwd);
+            unsafe free(cwd);
         }
         if status != 0 {
             return .Err(IoError(errno: status))
@@ -472,7 +472,7 @@ internal func native_access(path: RawPointer, mode: Int32) -> Int32
 /// True if `path` names a file this process may execute (`X_OK` is 1).
 internal func isExecutable(path: String) -> Bool {
     let cpath = path.toCString();
-    let result = native_access(cpath.raw.asRaw(), 1);
+    let result = unsafe native_access(cpath.raw.asRaw(), 1);
     cpath.free();
     result == 0
 }
@@ -526,16 +526,16 @@ public struct Child: not Copyable {
     /// still running when the time is up; the child is left running.
     public mutating func wait(milliseconds milliseconds: Int64) -> Result[Optional[ExitStatus], IoError] {
         self.input = .None;
-        let deadline = native_monotonic_ms() + milliseconds;
+        let deadline = unsafe native_monotonic_ms() + milliseconds;
         var pause: Int32 = 1;
         while true {
             if let .Some(status) = try self.reap(blocking: false) {
                 return .Ok(.Some(status))
             }
-            if native_monotonic_ms() >= deadline {
+            if unsafe native_monotonic_ms() >= deadline {
                 return .Ok(.None)
             }
-            native_sleep_ms(pause);
+            unsafe native_sleep_ms(pause);
             if pause < 20 {
                 pause = pause * 2
             }
@@ -556,10 +556,10 @@ public struct Child: not Copyable {
     public mutating func kill() -> Result[(), IoError] { self.signal(9) }
 
     mutating func signal(number: Int32) -> Result[(), IoError] {
-        if self.status.isSome() {
+        if self.status.isSome {
             return .Ok(())
         }
-        if native_kill(self.pid, number) != 0 {
+        if unsafe native_kill(self.pid, number) != 0 {
             return .Err(IoError.last())
         }
         .Ok(())
@@ -571,7 +571,7 @@ public struct Child: not Copyable {
             return .Ok(.Some(status))
         }
         let cells = NativeInt32Cells(2);
-        let r = native_wait(self.pid, if blocking { 0 } else { 1 }, cells.asNative(),
+        let r = unsafe native_wait(self.pid, if blocking { 0 } else { 1 }, cells.asNative(),
                             cells.pointer.offset(by: 1).asRaw());
         if r < 0 {
             return .Err(IoError.last())
@@ -623,14 +623,14 @@ public struct Child: not Copyable {
         var scratch = Array[UInt8](repeating: 0, count: 65536);
         let ready = NativeInt32Cells(2);
         let deadline = match timeoutMilliseconds {
-            .Some(ms) => native_monotonic_ms() + ms,
+            .Some(ms) => unsafe native_monotonic_ms() + ms,
             .None => -1
         };
 
         while outFd >= 0 or errFd >= 0 {
             var wait: Int32 = -1;
             if deadline >= 0 {
-                let left = deadline - native_monotonic_ms();
+                let left = deadline - unsafe native_monotonic_ms();
                 if left <= 0 {
                     let _ = self.kill();
                     let _ = self.wait();
@@ -638,7 +638,7 @@ public struct Child: not Copyable {
                 }
                 wait = Int32(from: left)
             }
-            if native_poll_two(outFd, errFd, wait, ready.asNative()) < 0 {
+            if unsafe native_poll_two(outFd, errFd, wait, ready.asNative()) < 0 {
                 return .Err(IoError.last())
             }
             if ready.read(at: 0) != 0 {
@@ -657,7 +657,7 @@ public struct Child: not Copyable {
 
         let status = match deadline {
             -1 => try self.wait(),
-            _ => try self.finish(.Some(deadline - native_monotonic_ms()))
+            _ => try self.finish(.Some(deadline - unsafe native_monotonic_ms()))
         };
         .Ok(Output(status: status, standardOutput: outBytes, standardError: errBytes))
     }
@@ -666,7 +666,7 @@ public struct Child: not Copyable {
         self.input = .None;
         self.output = .None;
         self.error = .None;
-        if self.status.isNone() {
+        if self.status.isNone {
             let _ = self.reap(blocking: true);
         }
     }

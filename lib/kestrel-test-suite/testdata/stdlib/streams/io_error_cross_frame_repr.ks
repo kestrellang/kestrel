@@ -43,7 +43,7 @@ func main() -> lang.i64 {
     if es.count != 3 { return 6 }
     if code(es(0)) != two { return 7 }
     if code(es(1)) != other { return 8 }
-    if es(2).kind != IoErrorKind.PermissionDenied or es(2).errno.isSome() { return 9 }
+    if es(2).kind != IoErrorKind.PermissionDenied or es(2).errno.isSome { return 9 }
 
     let r: Result[Int64, IoError] = .Err(makeError(other));
     match r {

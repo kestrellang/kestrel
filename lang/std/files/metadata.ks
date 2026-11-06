@@ -104,13 +104,13 @@ public func symbolicLinkMetadata(path: Path) -> Result[Metadata, IoError] {
 }
 
 internal func readMetadata(path: Path, follow: Bool) -> Result[Metadata, IoError] {
-    let out = malloc(40);
+    let out = unsafe malloc(40);
     let cpath = path.text.toCString();
-    let r = native_path_metadata(cpath.raw.asRaw(), if follow { 1 } else { 0 }, out);
+    let r = unsafe native_path_metadata(cpath.raw.asRaw(), if follow { 1 } else { 0 }, out);
     let error = IoError.last();
     cpath.free();
     let result = if r < 0 { .Err(error) } else { .Ok(metadataFrom(out)) };
-    free(out);
+    unsafe free(out);
     result
 }
 
@@ -118,10 +118,10 @@ internal func readMetadata(path: Path, follow: Bool) -> Result[Metadata, IoError
 internal func metadataFrom(out: RawPointer) -> Metadata {
     let cells = out.cast[Int64]();
     Metadata(
-        kind: FileKind.of(cells.offset(by: 0).read()),
-        size: cells.offset(by: 1).read(),
-        permissions: Permissions(UInt32(from: cells.offset(by: 2).read())),
-        modified: cells.offset(by: 3).read(),
-        accessed: cells.offset(by: 4).read()
+        kind: FileKind.of(unsafe cells.offset(by: 0).read()),
+        size: unsafe cells.offset(by: 1).read(),
+        permissions: Permissions(UInt32(from: unsafe cells.offset(by: 2).read())),
+        modified: unsafe cells.offset(by: 3).read(),
+        accessed: unsafe cells.offset(by: 4).read()
     )
 }

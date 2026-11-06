@@ -27,16 +27,16 @@ import std.ffi.(malloc, free)
 /// ```
 public func lookup(host: String, port: UInt16) -> Result[Array[SocketAddress], IoError] {
     let capacity: Int64 = 64;
-    let cells = malloc(capacity * nativeAddressSize());
-    let kindCell = malloc(4);
+    let cells = unsafe malloc(capacity * nativeAddressSize());
+    let kindCell = unsafe malloc(4);
     let name = host.toCString();
-    let n = native_lookup(name.raw.asRaw(), Int64(from: port), cells, capacity, kindCell);
+    let n = unsafe native_lookup(name.raw.asRaw(), Int64(from: port), cells, capacity, kindCell);
     let error = IoError.last();
-    let kind = kindCell.cast[Int32]().read();
+    let kind = unsafe kindCell.cast[Int32]().read();
     name.free();
-    free(kindCell);
+    unsafe free(kindCell);
     if n < 0 {
-        free(cells);
+        unsafe free(cells);
         // -1: the resolver reported a system error, held in errno.
         return .Err(if kind < 0 { error } else { IoError(kind: lookupErrorKind(kind)) })
     }
@@ -46,7 +46,7 @@ public func lookup(host: String, port: UInt16) -> Result[Array[SocketAddress], I
         addresses.append(SocketAddress.readNative(from: cells.cast[UInt8]().offset(by: i * nativeAddressSize()).asRaw()));
         i = i + 1
     }
-    free(cells);
+    unsafe free(cells);
     .Ok(addresses)
 }
 

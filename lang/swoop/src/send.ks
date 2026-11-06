@@ -234,15 +234,6 @@ func sendAllString[S](mutating stream: S, s: String) -> () throws IoError where 
 }
 
 /// Sends all bytes of a buffer over a stream.
-func sendAllBytes[S](mutating stream: S, buf: [UInt8]) -> () throws IoError where S: Writable {
-    let len = buf.count;
-    var sent: Int64 = 0;
-    while sent < len {
-        let n = try stream.write(from: buf(sent..));
-        if n == 0 {
-            throw IoError(code: 32)
-        }
-        sent = sent + n
-    }
-    .Ok(())
+func sendAllBytes[S](mutating stream: S, buf: [UInt8]) -> () throws IoError where S: Writable, S: not Copyable, S: not Static {
+    stream.writeAll(from: buf.asSlice())
 }

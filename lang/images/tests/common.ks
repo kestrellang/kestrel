@@ -2,7 +2,7 @@
 
 module images_tests
 
-import std.os.(getenv)
+import std.system.(Environment)
 import deflate.(Crc32)
 import images.(RawImage, Rgba16, ConversionOptions, Image)
 
@@ -12,7 +12,7 @@ func check(name: String, ok: Bool) {
 
 /// The directory named by an environment variable, with a trailing slash.
 func directory(variable: String) -> String {
-    match getenv(variable) {
+    match Environment.variable(variable) {
         .Some(dir) => "\(dir)/",
         .None => "./"
     }

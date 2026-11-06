@@ -6,7 +6,7 @@ module perch
 import http.method.(HttpMethod, parseMethod)
 import http.headers.(Headers)
 import http.wire.(findHeaderEnd, parseDecimal)
-import std.io.error.(IoError)
+import std.streams.(IoError, Readable)
 
 /// Reads and parses an HTTP request from a connection.
 ///
@@ -35,12 +35,12 @@ public func parseHttpRequest[S](mutating stream: S) -> Request throws IoError wh
     loop {
         let bytesRead = try stream.read(into: chunk.asMutableSlice());
         if bytesRead <= 0 {
-            throw IoError.invalidInput()
+            throw IoError.invalidInput
         }
 
         // Bulk-append exactly the bytes read, in one pass:
         // append(contentsOf:) grows once and copies once → O(n).
-        buffer.append(contentsOf: unsafe UnsafeSlice(pointer: chunk.asPointer(), count: bytesRead));
+        buffer.append(contentsOf: chunk(0..<bytesRead));
 
         headerEnd = findHeaderEnd(buffer);
         if headerEnd >= 0 {
@@ -48,22 +48,22 @@ public func parseHttpRequest[S](mutating stream: S) -> Request throws IoError wh
         }
 
         if buffer.count > 65536 {
-            throw IoError.invalidInput()
+            throw IoError.invalidInput
         }
     }
 
     let headerStr = String(fromUtf8: buffer(0..<headerEnd)) ?? String();
 
     guard let .Some(firstLineEnd) = headerStr.firstIndex(of: "\r\n") else {
-        throw IoError.invalidInput();
+        throw IoError.invalidInput;
     }
     let headerSlice = headerStr.asSlice();
     let requestLine = headerSlice.subslice(from: headerSlice.start, to: firstLineEnd.value).toOwned();
 
     var requestLineParts = requestLine.split(" ").iter();
-    guard let .Some(methodSlice) = requestLineParts.next() else { throw IoError.invalidInput(); }
-    guard let .Some(rawPathSlice) = requestLineParts.next() else { throw IoError.invalidInput(); }
-    guard let .Some(method) = parseMethod(methodSlice.toOwned()) else { throw IoError.invalidInput(); }
+    guard let .Some(methodSlice) = requestLineParts.next() else { throw IoError.invalidInput; }
+    guard let .Some(rawPathSlice) = requestLineParts.next() else { throw IoError.invalidInput; }
+    guard let .Some(method) = parseMethod(methodSlice.toOwned()) else { throw IoError.invalidInput; }
 
     let headerLines = headerSlice.subslice(from: firstLineEnd.value + 2, to: headerSlice.end).toOwned();
     let headers = Headers.parse(from: headerLines);
@@ -91,7 +91,7 @@ public func parseHttpRequest[S](mutating stream: S) -> Request throws IoError wh
                 if bytesRead <= 0 {
                     break
                 }
-                bodyBytes.append(contentsOf: unsafe UnsafeSlice(pointer: bodyChunk.asPointer(), count: bytesRead));
+                bodyBytes.append(contentsOf: bodyChunk(0..<bytesRead));
             }
 
             body = String(fromUtf8: bodyBytes.asSlice()) ?? String()

@@ -27,7 +27,7 @@ public struct UnixStream: Readable, Writable, not Copyable {
     public static func connect(path: Path) -> Result[UnixStream, IoError] {
         let fd = try openSocket(unixFamily(), streamKind());
         let name = path.string.toCString();
-        let r = native_unix_connect(fd, name.raw.asRaw());
+        let r = unsafe native_unix_connect(fd, name.raw.asRaw());
         let error = IoError.last();
         name.free();
         if r < 0 {
@@ -38,12 +38,12 @@ public struct UnixStream: Readable, Writable, not Copyable {
 
     /// Two streams connected to each other (`socketpair`).
     public static func pair() -> Result[(UnixStream, UnixStream), IoError] {
-        let cells = malloc(8);
-        let r = native_socket_pair(cells);
+        let cells = unsafe malloc(8);
+        let r = unsafe native_socket_pair(cells);
         let error = IoError.last();
         let fds = cells.cast[Int32]();
-        let (a, b) = (fds.read(), fds.offset(by: 1).read());
-        free(cells);
+        let (a, b) = (unsafe fds.read(), unsafe fds.offset(by: 1).read());
+        unsafe free(cells);
         if r < 0 {
             return .Err(error)
         }
@@ -101,7 +101,7 @@ public struct UnixStream: Readable, Writable, not Copyable {
     public consuming func close() -> Result[(), IoError] {
         let fd = self.fd;
         self.fd = -1;
-        check(native_close(fd))
+        check(unsafe native_close(fd))
     }
 
     /// Gives up ownership: the descriptor stays open and the caller closes
@@ -114,7 +114,7 @@ public struct UnixStream: Readable, Writable, not Copyable {
 
     deinit {
         if self.fd >= 0 {
-            native_close(self.fd);
+            unsafe native_close(self.fd);
         }
     }
 }
@@ -128,7 +128,7 @@ public struct UnixListener: not Copyable {
     public static func bind(path: Path) -> Result[UnixListener, IoError] {
         let fd = try openSocket(unixFamily(), streamKind());
         let name = path.string.toCString();
-        let r = native_unix_bind(fd, name.raw.asRaw());
+        let r = unsafe native_unix_bind(fd, name.raw.asRaw());
         let error = IoError.last();
         name.free();
         if r < 0 {
@@ -154,7 +154,7 @@ public struct UnixListener: not Copyable {
 
     deinit {
         if self.fd >= 0 {
-            native_close(self.fd);
+            unsafe native_close(self.fd);
         }
     }
 }

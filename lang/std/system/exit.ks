@@ -20,7 +20,7 @@ import std.numeric.(Int32)
 /// }
 /// ```
 public func exit(code: ExitCode) -> ! {
-    native_exit(Int32(from: code.value));
+    unsafe native_exit(Int32(from: code.value));
     loop {}
 }
 
@@ -28,6 +28,6 @@ public func exit(code: ExitCode) -> ! {
 /// handlers or flushing anything. For states where continuing, or even
 /// cleaning up, could do harm. Use `exit` for ordinary failures.
 public func abort() -> ! {
-    native_abort();
+    unsafe native_abort();
     loop {}
 }
