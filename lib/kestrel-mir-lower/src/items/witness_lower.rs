@@ -369,26 +369,42 @@ fn bind_witness_methods(
                 })
                 .map(|tm| (tm.entity, tm.source.clone()))
                 .collect();
-            let entities: Vec<Entity> = type_side.iter().map(|(e, _)| *e).collect();
-
-            impl_func = if let Some(slot) = slot {
-                find_accessor_among(
-                    ctx,
-                    &entities,
-                    slot,
-                    lookup_name,
-                    &method_key.labels,
-                    &expected,
-                )
-            } else {
-                find_impl_among(
-                    ctx,
-                    &entities,
-                    method_name,
-                    Some(&method_key.labels),
-                    &expected,
+            // The type's own members (body + its extensions) are more
+            // specific than a protocol-extension default with the same
+            // signature, so they are searched first; the defaults only fill
+            // a requirement the type doesn't implement itself.
+            let (own, defaults): (Vec<Entity>, Vec<Entity>) = {
+                let (own, defaults): (Vec<_>, Vec<_>) = type_side.iter().partition(|(_, src)| {
+                    !matches!(src, TypeMemberSource::ProtocolExtension { .. })
+                });
+                (
+                    own.into_iter().map(|(e, _)| *e).collect(),
+                    defaults.into_iter().map(|(e, _)| *e).collect(),
                 )
             };
+            for entities in [own, defaults] {
+                impl_func = if let Some(slot) = slot {
+                    find_accessor_among(
+                        ctx,
+                        &entities,
+                        slot,
+                        lookup_name,
+                        &method_key.labels,
+                        &expected,
+                    )
+                } else {
+                    find_impl_among(
+                        ctx,
+                        &entities,
+                        method_name,
+                        Some(&method_key.labels),
+                        &expected,
+                    )
+                };
+                if impl_func.is_some() {
+                    break;
+                }
+            }
 
             let chosen_src = impl_func.and_then(|chosen| {
                 type_side
@@ -815,7 +831,9 @@ fn requirement_subst(
     impl_ty: TyId,
 ) -> SubstMap {
     let mut subst = SubstMap::new();
-    subst.type_params.extend(proto_subst.iter().map(|(e, t)| (*e, *t)));
+    subst
+        .type_params
+        .extend(proto_subst.iter().map(|(e, t)| (*e, *t)));
     subst.type_params.insert(protocol, impl_ty);
     for &declaring in declaring_protocols {
         subst.type_params.insert(declaring, impl_ty);
@@ -1124,9 +1142,39 @@ fn candidate_param_types_match(ctx: &mut LowerCtx, candidate: Entity, expected: 
         return false;
     }
     tys.iter().zip(expected).all(|(got, want)| match got {
-        Some(g) => *g == *want,
+        Some(g) => *g == *want || same_method_type_param(ctx, candidate, *g, *want),
         None => true,
     })
+}
+
+/// `got` is `candidate`'s own method-level type param and `want` the
+/// requirement's at the same position (`subscript[I](checked index: I)` on
+/// both sides): different entities, the same signature slot.
+fn same_method_type_param(ctx: &LowerCtx, candidate: Entity, got: TyId, want: TyId) -> bool {
+    let (MirTy::TypeParam(g), MirTy::TypeParam(w)) = (
+        ctx.module.ty_arena.get(got).clone(),
+        ctx.module.ty_arena.get(want).clone(),
+    ) else {
+        return false;
+    };
+    let position = |owner: Entity, param: Entity| {
+        ctx.world
+            .get::<TypeParams>(owner)
+            .and_then(|tp| tp.0.iter().position(|&p| p == param))
+    };
+    let Some(requirement) = ctx.world.parent_of(w) else {
+        return false;
+    };
+    let is_member = |e: Entity| {
+        matches!(
+            ctx.world.get::<NodeKind>(e),
+            Some(NodeKind::Function | NodeKind::Subscript)
+        )
+    };
+    is_member(requirement)
+        && ctx.world.parent_of(g) == Some(candidate)
+        && position(candidate, g).is_some()
+        && position(candidate, g) == position(requirement, w)
 }
 
 fn get_param_labels(ctx: &LowerCtx, method_entity: Entity) -> Option<Vec<Option<String>>> {
