@@ -6,5 +6,5 @@ import Test.(Bag)
 import std.text.(String)
 
 public func firstItem(b: Bag) -> String {
-    b.items(unchecked: 0)
+    unsafe b.items(unchecked: 0)
 }
