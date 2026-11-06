@@ -4253,6 +4253,33 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
     }
 
+    /// End a single-use ref and the borrows it was lent from. A ref result
+    /// keeps its source borrow (an existential box's `value` place
+    /// receiver, say) open until scope exit, so a later read of the same
+    /// place in the same block (`a and box.method()` capturing `box`) would
+    /// hit an active borrow. Stops at a named ref binding, which outlives
+    /// any one use, and at anything not an open scope borrow.
+    pub fn end_ref_and_sources(&mut self, v: ValueId) {
+        let mut current = Some(v);
+        while let Some(value) = current {
+            if self.ref_binding_vals.contains_key(&value) || !self.is_open_scope_borrow(value) {
+                return;
+            }
+            current = self.body.value(value).borrow_source;
+            self.emit_end_borrow(value);
+        }
+    }
+
+    /// True if `value` is a borrow the scope machinery still has to end.
+    fn is_open_scope_borrow(&self, value: ValueId) -> bool {
+        self.scope_stack.iter().any(|scope| {
+            scope
+                .entries
+                .iter()
+                .any(|e| matches!(e, ScopeEntry::Borrow(v) if *v == value))
+        })
+    }
+
     /// End every named ref binding declared in the current block whose last
     /// mention in the source is behind us (`stmt_end` is the end of the
     /// statement just lowered): a reference that is never used again no
