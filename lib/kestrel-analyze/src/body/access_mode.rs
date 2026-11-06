@@ -353,6 +353,11 @@ fn arg_is_closure_value(cx: &BodyContext<'_>, arg_id: HirExprId) -> bool {
     )
 }
 
+/// Is `expr` a direct reference to one of the function's own parameters?
+fn is_function_param(cx: &BodyContext<'_>, expr: HirExprId) -> bool {
+    matches!(&cx.hir.exprs[expr], HirExpr::Local(local, _) if cx.hir.params.contains(local))
+}
+
 /// Calling a `mutating`-KIND closure is an EXCLUSIVE use of whatever holds it.
 ///
 /// docs/design/closures.md, "`mutating`: write-back": "Calling one is an
@@ -394,6 +399,10 @@ fn check_mutating_kind_call(
                 "cannot call a `mutating` closure through a shared reference",
             ));
         },
+        // A plain (borrowing) parameter of `mutating` closure type already
+        // gets E625 at the signature, which names the fix; an E203 per call
+        // would repeat it and wrongly say the closure is bound with `let`.
+        MutClass::ImmutableLocal(_) if is_function_param(cx, callee) => {},
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: descriptor("E203").id,
