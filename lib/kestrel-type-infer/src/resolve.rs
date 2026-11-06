@@ -952,6 +952,17 @@ impl TypeResolver for WorldResolver<'_> {
             },
             1 => matches[0],
             _ => {
+                // Same-label overloads that all witness one requirement of a
+                // parameterized protocol (`static func exactly(_: Int64)` +
+                // `exactly(_: Bool)` via `Exactly[Int64]` + `Exactly[Bool]`)
+                // collapse to that requirement, exactly as instance members
+                // and inits do in `resolve_member_nominal`; the solver then
+                // infers the protocol args from the call's arguments.
+                if let Some(proto_res) =
+                    self.try_resolve_through_protocol(entity, name, args, &matches)
+                {
+                    return Ok(proto_res);
+                }
                 return Err(MemberError::Ambiguous(
                     matches.into_iter().map(|e| (e, None, 0)).collect(),
                 ));
