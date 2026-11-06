@@ -654,8 +654,8 @@ public struct Deque[T]: Iterable, Cloneable {
         let myLen = self.len();
         if myLen == 0 {
             return (
-                Slice.lend(start: Pointer[T].nullPointer(), count: 0),
-                Slice.lend(start: Pointer[T].nullPointer(), count: 0)
+                unsafe Slice.lend(start: Pointer[T].nullPointer(), count: 0),
+                unsafe Slice.lend(start: Pointer[T].nullPointer(), count: 0)
             )
         }
         let myHead = self.head();
@@ -664,14 +664,14 @@ public struct Deque[T]: Iterable, Cloneable {
         let tailEnd = myHead + myLen;
         if tailEnd <= myCap {
             return (
-                Slice.lend(start: myPtr.offset(by: myHead), count: myLen),
-                Slice.lend(start: myPtr, count: 0)
+                unsafe Slice.lend(start: myPtr.offset(by: myHead), count: myLen),
+                unsafe Slice.lend(start: myPtr, count: 0)
             )
         }
         let firstLen = myCap - myHead;
         return (
-            Slice.lend(start: myPtr.offset(by: myHead), count: firstLen),
-            Slice.lend(start: myPtr, count: myLen - firstLen)
+            unsafe Slice.lend(start: myPtr.offset(by: myHead), count: firstLen),
+            unsafe Slice.lend(start: myPtr, count: myLen - firstLen)
         )
     }
 

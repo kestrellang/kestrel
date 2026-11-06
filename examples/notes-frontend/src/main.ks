@@ -324,7 +324,7 @@ func filterByFolder(notes: Array[Value], folderId: Int64) -> Array[Value] {
     var result = Array[Value]();
     var i: Int64 = 0;
     while i < notes.count {
-        let note = notes(unchecked: i);
+        let note = unsafe notes(unchecked: i);
         if noteFolder(note) == folderId {
             result.append(note)
         };

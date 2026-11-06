@@ -190,7 +190,7 @@ struct BrickGrid : Cloneable {
         if row < 0 or row >= Config.brickRows or col < 0 or col >= Config.brickCols {
             return false
         }
-        self.bricks(unchecked: row * Config.brickCols + col)
+        unsafe self.bricks(unchecked: row * Config.brickCols + col)
     }
 
     // Remove brick and return points earned
@@ -200,8 +200,8 @@ struct BrickGrid : Cloneable {
         }
 
         let idx = row * Config.brickCols + col;
-        if self.bricks(unchecked: idx) {
-            self.bricks(unchecked: idx) = false;
+        if unsafe self.bricks(unchecked: idx) {
+            unsafe self.bricks(unchecked: idx) = false;
             self.remaining = self.remaining - 1;
             return Config.brickPoints(row: row)
         }
@@ -219,7 +219,7 @@ struct BrickGrid : Cloneable {
 
     mutating func reset() {
         for i in Range[Int64](0, Config.brickRows * Config.brickCols) {
-            self.bricks(unchecked: i) = true;
+            unsafe self.bricks(unchecked: i) = true;
         }
         self.remaining = Config.brickRows * Config.brickCols;
     }

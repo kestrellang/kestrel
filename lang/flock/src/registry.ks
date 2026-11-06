@@ -79,7 +79,7 @@ public func resolveRegistryUrl(projectUrl projectUrl: String?) -> String {
 public func splitPackageName(name name: String) -> (String, String)? {
     var i: Int64 = 0;
     while i < name.bytes.count {
-        if name.bytes(unchecked: i) == 47 {
+        if unsafe name.bytes(unchecked: i) == 47 {
             let org = name.asSlice().subslice(from: 0, to: i).toOwned();
             let pkg = name.asSlice().subslice(from: i + 1, to: name.bytes.count).toOwned();
             return .Some((org, pkg))

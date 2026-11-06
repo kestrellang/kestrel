@@ -18,21 +18,21 @@ module Test
             // Test zip
             let zipped = arr1.iter().zip(arr2.iter()).collect();
             if zipped.count != 3 { return 1 }
-            let (a, b) = zipped(unchecked: 0);
+            let (a, b) = unsafe zipped(unchecked: 0);
             if a != 1 { return 2 }
             if b != 10 { return 3 }
 
             // Test enumerate
             let enumerated = arr1.iter().enumerate().collect();
             if enumerated.count != 3 { return 4 }
-            let (idx, val) = enumerated(unchecked: 1);
+            let (idx, val) = unsafe enumerated(unchecked: 1);
             if idx != 1 { return 5 }
             if val != 2 { return 6 }
 
             // Test chain
             let chained = arr1.iter().chain(arr2.iter()).collect();
             if chained.count != 6 { return 7 }
-            if chained(unchecked: 3) != 10 { return 8 }
+            if unsafe chained(unchecked: 3) != 10 { return 8 }
 
             0
         }

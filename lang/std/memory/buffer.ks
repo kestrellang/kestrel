@@ -108,9 +108,13 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
     }
 
     /// @name Checked Index
-    /// Reads slot `index`, returning `.None` when out of range. As with
-    /// the unchecked form, the slot must already hold an initialised `T`.
-    public func read(at index: Int64) -> T? where T: Copyable {
+    /// Reads slot `index`, returning `.None` when out of range.
+    ///
+    /// # Safety
+    ///
+    /// The slot must already hold an initialised `T`. The bounds check
+    /// can't tell an initialised slot from a fresh one.
+    public unsafe func read(at index: Int64) -> T? where T: Copyable {
         if index >= 0 and index < self.cap {
             .Some(unsafe self.ptr.offset(by: index).read())
         } else {
@@ -120,7 +124,12 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
 
     /// Writes `value` to slot `index`. Returns `false` (and does
     /// nothing) when out of range.
-    public func write(at index: Int64, consuming value: T) -> Bool {
+    ///
+    /// # Safety
+    ///
+    /// The old contents of the slot are overwritten, not dropped, so the
+    /// slot must be uninitialised or hold a value that needs no drop.
+    public unsafe func write(at index: Int64, consuming value: T) -> Bool {
         if index >= 0 and index < self.cap {
             unsafe self.ptr.offset(by: index).write(value);
             true

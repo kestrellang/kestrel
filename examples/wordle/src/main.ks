@@ -23,7 +23,7 @@ struct Ctx: Cloneable {
         var copy = Array[String]();
         var i: Int64 = 0;
         while i < self.words.count {
-            copy.append(self.words(unchecked: i).clone());
+            copy.append(unsafe self.words(unchecked: i).clone());
             i = i + 1
         };
         Ctx(words: copy)
@@ -94,7 +94,7 @@ func validateAndAppend(raw: String, guesses: Array[String], answer: String, word
     var newList = Array[String]();
     var i: Int64 = 0;
     while i < guesses.count {
-        newList.append(guesses(unchecked: i).clone());
+        newList.append(unsafe guesses(unchecked: i).clone());
         i = i + 1
     };
     newList.append(normalized);

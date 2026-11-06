@@ -53,7 +53,7 @@ public func typeFilterRowHtml() -> String {
     let types = allTypes();
     var i: Int64 = 0;
     while i < types.count {
-        let typeName = types(unchecked: i);
+        let typeName = unsafe types(unchecked: i);
         t.setRaw("color", typeColor(typeName));
         t.setRaw("colorDark", typeColorDark(typeName));
         t.put("typeName", capitalize(typeName));
@@ -121,7 +121,7 @@ public func gridItemsHtml(entries: Array[PokemonEntry]) -> String {
     var t = Template();
     var i: Int64 = 0;
     while i < entries.count {
-        let e = entries(unchecked: i);
+        let e = unsafe entries(unchecked: i);
         t.setInt("id", e.id);
         t.setRaw("idPad", padId(e.id));
         t.put("name", e.displayName);
@@ -144,7 +144,7 @@ public func filterKanto(query: String, typeFilter: String) -> Array[PokemonEntry
     let all = kantoPokedex();
     var i: Int64 = 0;
     while i < all.count {
-        let e = all(unchecked: i);
+        let e = unsafe all(unchecked: i);
         let nameMatch = q.bytes.count == 0 or containsLower(e.apiName, q) or containsLower(e.displayName, q);
         let typeMatch = typeFilter.bytes.count == 0 or e.primaryType == typeFilter;
         if nameMatch and typeMatch {
@@ -219,7 +219,7 @@ public func statsRadarSvg(statsArr: Array[Value]) -> String {
     var pi: Int64 = 0;
     while pi < 6 {
         let statIdx = angleToStatIdx(pi);
-        let stat = statsArr(unchecked: statIdx);
+        let stat = unsafe statsArr(unchecked: statIdx);
         let value = getInt(getField(stat, "base_stat"));
         let cap = if value > 200 { 200 } else { value };
         let normalized = (Float64(from: cap) / 200.0) * r;
@@ -236,7 +236,7 @@ public func statsRadarSvg(statsArr: Array[Value]) -> String {
     // Dots + labels + values
     var di: Int64 = 0;
     while di < 6 {
-        let stat = statsArr(unchecked: di);
+        let stat = unsafe statsArr(unchecked: di);
         let value = getInt(getField(stat, "base_stat"));
         let cap = if value > 200 { 200 } else { value };
         let normalized = (Float64(from: cap) / 200.0) * r;
@@ -344,22 +344,22 @@ public func detailPageHtml(json: Value, id: Int64) -> String {
 
     // Primary + secondary type (or duplicate primary if mono-type)
     let primaryType = if typesArr.count > 0 {
-        getString(getField(getField(typesArr(unchecked: 0), "type"), "name"))
+        getString(getField(getField(unsafe typesArr(unchecked: 0), "type"), "name"))
     } else { "normal" };
     let secondaryType = if typesArr.count > 1 {
-        getString(getField(getField(typesArr(unchecked: 1), "type"), "name"))
+        getString(getField(getField(unsafe typesArr(unchecked: 1), "type"), "name"))
     } else { primaryType };
 
     // HP is stat index 0 by PokeAPI convention.
     let hpValue = if statsArr.count > 0 {
-        getInt(getField(statsArr(unchecked: 0), "base_stat"))
+        getInt(getField(unsafe statsArr(unchecked: 0), "base_stat"))
     } else { 0 };
 
     // BST = sum of all 6 base stats
     var bst: Int64 = 0;
     var bi: Int64 = 0;
     while bi < statsArr.count {
-        bst = bst + getInt(getField(statsArr(unchecked: bi), "base_stat"));
+        bst = bst + getInt(getField(unsafe statsArr(unchecked: bi), "base_stat"));
         bi = bi + 1
     }
 
@@ -404,7 +404,7 @@ public func detailPageHtml(json: Value, id: Int64) -> String {
     h.append(##"<div class="tcg-info"><div class="tcg-types">"##);
     var ti: Int64 = 0;
     while ti < typesArr.count {
-        let typeName = getString(getField(getField(typesArr(unchecked: ti), "type"), "name"));
+        let typeName = getString(getField(getField(unsafe typesArr(unchecked: ti), "type"), "name"));
         t.put("typeName", capitalize(typeName));
         t.setRaw("typeC", typeColor(typeName));
         t.setRaw("typeCD", typeColorDark(typeName));
@@ -426,7 +426,7 @@ public func detailPageHtml(json: Value, id: Int64) -> String {
     h.append(##"<div class="tcg-section"><div class="tcg-section-title">Abilities</div><div class="tcg-abilities">"##);
     var aIdx: Int64 = 0;
     while aIdx < abilitiesArr.count {
-        let a = abilitiesArr(unchecked: aIdx);
+        let a = unsafe abilitiesArr(unchecked: aIdx);
         let abName = getString(getField(getField(a, "ability"), "name"));
         let isHidden = match getField(a, "is_hidden").asBool() {
             .Some(b) => b,
@@ -460,7 +460,7 @@ public func detailPageHtml(json: Value, id: Int64) -> String {
     h.append(##"<div class="tcg-side-types">"##);
     var tii: Int64 = 0;
     while tii < typesArr.count {
-        let typeName = getString(getField(getField(typesArr(unchecked: tii), "type"), "name"));
+        let typeName = getString(getField(getField(unsafe typesArr(unchecked: tii), "type"), "name"));
         t.put("typeName", capitalize(typeName));
         t.setRaw("typeC", typeColor(typeName));
         t.setRaw("typeCD", typeColorDark(typeName));
@@ -472,7 +472,7 @@ public func detailPageHtml(json: Value, id: Int64) -> String {
 
     // Side stat tiles: BST, HP, Speed
     let speedValue = if statsArr.count > 5 {
-        getInt(getField(statsArr(unchecked: 5), "base_stat"))
+        getInt(getField(unsafe statsArr(unchecked: 5), "base_stat"))
     } else { 0 };
     t.setInt("bst", bst);
     t.setInt("hp2", hpValue);

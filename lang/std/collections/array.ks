@@ -212,7 +212,7 @@ struct ArrayStorage[T]: Cloneable {
 ///
 /// The default subscript `arr(i)` panics on out-of-bounds. Variants exist
 /// for every common policy, each an in-place place: `arr(checked: i)` is
-/// `.None` when out of range, `arr(unchecked: i)` skips the bounds check
+/// `.None` when out of range, `unsafe arr(unchecked: i)` skips the bounds check
 /// (UB on OOB), `arr(wrapped: i)` wraps with modulo (negative indices count
 /// from the end), and `arr(clamped: i)` saturates into `[0, count-1]`.
 /// Ranges take `arr(0..<3)`, `arr(checked: r)` and `arr(unchecked: r)`,
@@ -556,7 +556,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// The elements as a slice, in place. Valid until the array next
     /// reallocates or is dropped.
     public func asSlice() -> &Slice[T] {
-        Slice.lend(start: self.ptr(), count: self.len())
+        unsafe Slice.lend(start: self.ptr(), count: self.len())
     }
 
     /// The elements as a writable slice, in place. Runs the copy-on-write
@@ -564,7 +564,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// change elements, never the array's length.
     public mutating func asMutableSlice() -> &mutating Slice[T] {
         self.makeUnique();
-        Slice.lendMutating(start: self.ptr(), count: self.len())
+        unsafe Slice.lendMutating(start: self.ptr(), count: self.len())
     }
 
     /// Element access and sub-slicing, in place: `xs(2)` is a reference to
@@ -582,11 +582,14 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
         mutating ref { I.lendMutating(index, self.asMutableSlice()) }
     }
 
-    /// Like `xs(index)`, without the bounds check (undefined behavior when
-    /// out of range).
-    public subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
-        ref { I.lendUnchecked(index, self.asSlice()) }
-        mutating ref { I.lendMutatingUnchecked(index, self.asMutableSlice()) }
+    /// Like `xs(index)`, without the bounds check.
+    ///
+    /// # Safety
+    ///
+    /// `index` must be in range. Out of range is undefined behavior.
+    public unsafe subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { unsafe I.lendUnchecked(index, self.asSlice()) }
+        mutating ref { unsafe I.lendMutatingUnchecked(index, self.asMutableSlice()) }
     }
 
     /// Like `xs(index)`, but the place may not exist: `.None` instead of a
@@ -1543,7 +1546,7 @@ extend Array[T]: unsafe ArrayMatchable {
     /// against `matchLength()`, so the unchecked read is safe in that
     /// context.
     public func matchGet(index: Int64) -> T {
-        self(unchecked: index)
+        unsafe self(unchecked: index)
     }
 
     /// Pattern-matcher hook returning the half-open `[from, to)` slice.
@@ -1604,7 +1607,7 @@ extend Array[T]: Hashable where T: Hashable {
     public func hash[H](mutating into hasher: H) where H: Hasher {
         self.count.hash(into: hasher);
         for i in 0..<self.count {
-            self(unchecked: i).hash(into: hasher);
+            unsafe self(unchecked: i).hash(into: hasher);
         }
     }
 }
@@ -1718,7 +1721,7 @@ extend Array[T] where T: Iterable {
     public func flatten() -> Array[T.Item] {
         var result = Array[T.Item]();
         for i in 0..<self.count {
-            var iter = self(unchecked: i).iter();
+            var iter = unsafe self(unchecked: i).iter();
             while let .Some(item) = iter.next() {
                 result.append( item)
             }
@@ -1750,10 +1753,10 @@ extend Array[T] where T: Formattable {
             return ""
         }
         var b = StringBuilder();
-        self(unchecked: 0).format(into: b);
+        unsafe self(unchecked: 0).format(into: b);
         for i in 1..<self.count {
             b.append(separator);
-            self(unchecked: i).format(into: b)
+            unsafe self(unchecked: i).format(into: b)
         }
         b.build()
     }

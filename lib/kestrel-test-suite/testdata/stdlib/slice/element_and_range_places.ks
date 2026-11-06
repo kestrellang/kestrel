@@ -27,14 +27,14 @@ func show(xs: Array[Int64]) -> String {
 func main() -> Int64 {
     var xs: Array[Int64] = [1, 2, 3, 4, 5];
     let p = xs.asUnsafeSlice().pointer;
-    let s = &Slice.lend(start: p, count: 5);
+    let s = &unsafe Slice.lend(start: p, count: 5);
     print("count \(s.count) first \(s(0)) sum \(sum(s)) max \(s.max())\n");
     let t = &s(1..<4);
     print("sub \(t.count) \(t(0)) \(sum(t)) \(sum(t(1..))) \(sum(s(..=1)))\n");
     let c = &s(within: 3..<99);
     let e = &s(0..<0);
     print("checked \(s(checked: 9)) \(s(checked: 1)) clamped \(sum(c)) \(s(clamped: 99)) \(e(clamped: 0)) wrapped \(s(wrapped: -1))\n");
-    let m = &mutating Slice.lendMutating(start: p, count: 5);
+    let m = &mutating unsafe Slice.lendMutating(start: p, count: 5);
     m(4) = 50;
     bump(m(2..<5));
     m(0..<2).assign(from: [7, 8]);

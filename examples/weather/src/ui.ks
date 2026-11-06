@@ -80,7 +80,7 @@ public func searchResultsHtml(json: Value) -> String {
                     var t = Template();
                     var i: Int64 = 0;
                     while i < results.count {
-                        let city = results(unchecked: i);
+                        let city = unsafe results(unchecked: i);
                         let name = getString(getField(city, "name"));
                         let country = getString(getField(city, "country"));
                         let admin1 = getString(getField(city, "admin1"));
@@ -241,7 +241,7 @@ public func weatherPageHtml(json: Value, cityName: String) -> String {
 
                     var i: Int64 = 0;
                     while i < times.count {
-                        let dateStr = getString(times(unchecked: i));
+                        let dateStr = getString(unsafe times(unchecked: i));
                         let dayCode = getIntFromArray(codes, i);
                         let high = getFloatFromArray(dailyHighs, i);
                         let low = getFloatFromArray(dailyLows, i);

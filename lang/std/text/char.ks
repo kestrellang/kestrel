@@ -459,7 +459,7 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
     /// use the result for content-addressed storage.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self._value;
-        hasher.write(Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
+        hasher.write(unsafe Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
     }
 
     /// Returns true if `self >= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.
@@ -570,14 +570,14 @@ public struct Grapheme: Equatable, Cloneable {
             self._first = Char(unchecked: 0);
             self._rest = .None
         } else if n == 1 {
-            self._first = chars(unchecked: 0);
+            self._first = unsafe chars(unchecked: 0);
             self._rest = .None
         } else {
-            self._first = chars(unchecked: 0);
+            self._first = unsafe chars(unchecked: 0);
             var rest = Array[Char]();
             var i: Int64 = 1;
             while i < n {
-                rest.append(chars(unchecked: i));
+                rest.append(unsafe chars(unchecked: i));
                 i = i + 1
             }
             self._rest = .Some(rest)
@@ -650,7 +650,7 @@ public struct Grapheme: Equatable, Cloneable {
             let n = r.count;
             var i: Int64 = 0;
             while i < n {
-                len = len + r(unchecked: i).utf8Length();
+                len = len + unsafe r(unchecked: i).utf8Length();
                 i = i + 1
             }
         }
@@ -688,7 +688,7 @@ public struct Grapheme: Equatable, Cloneable {
                 }
                 var i: Int64 = 0;
                 while i < an {
-                    if a(unchecked: i).isEqual(to: b(unchecked: i)) == false {
+                    if unsafe a(unchecked: i).isEqual(to: b(unchecked: i)) == false {
                         return false
                     }
                     i = i + 1
@@ -709,7 +709,7 @@ extend Grapheme: Comparable {
         let minLen = if myChars.count < otherChars.count { myChars.count } else { otherChars.count };
         for (i, c) in myChars.iter().enumerate() {
             if i >= minLen { break }
-            let cmp = c.compare(otherChars(unchecked: i));
+            let cmp = c.compare(unsafe otherChars(unchecked: i));
             if cmp != .Equal { return cmp }
         }
         myChars.count.compare(otherChars.count)

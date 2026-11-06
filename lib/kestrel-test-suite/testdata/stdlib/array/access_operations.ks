@@ -20,8 +20,8 @@ module Test
             if oob.isSome { return 3 }
 
             // Test getUnchecked
-            if arr(unchecked: 0) != 10 { return 4 }
-            if arr(unchecked: 2) != 30 { return 5 }
+            if unsafe arr(unchecked: 0) != 10 { return 4 }
+            if unsafe arr(unchecked: 2) != 30 { return 5 }
 
             0
         }

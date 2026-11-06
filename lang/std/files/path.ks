@@ -58,14 +58,14 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     public var parent: Optional[Path] {
         let b = self.trimmed();
         var i = b.count - 1;
-        while i >= 0 and b(unchecked: i) != slash() {
+        while i >= 0 and unsafe b(unchecked: i) != slash() {
             i = i - 1
         }
         if i < 0 or b.count == 1 {
             return .None
         }
         var end = i;
-        while end > 0 and b(unchecked: end - 1) == slash() {
+        while end > 0 and unsafe b(unchecked: end - 1) == slash() {
             end = end - 1
         }
         if end == 0 {
@@ -79,7 +79,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     public var name: Optional[String] {
         let b = self.trimmed();
         var i = b.count;
-        while i > 0 and b(unchecked: i - 1) != slash() {
+        while i > 0 and unsafe b(unchecked: i - 1) != slash() {
             i = i - 1
         }
         if i == b.count {
@@ -118,7 +118,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
         var start: Int64 = 0;
         var i: Int64 = 0;
         while i <= b.count {
-            if i == b.count or b(unchecked: i) == slash() {
+            if i == b.count or unsafe b(unchecked: i) == slash() {
                 if i > start {
                     let part = textOf(b(start..<i));
                     if part != "." {
@@ -179,7 +179,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
                 continue
             }
             if part == ".." {
-                if kept.count > 0 and kept(unchecked: kept.count - 1) != ".." {
+                if kept.count > 0 and unsafe kept(unchecked: kept.count - 1) != ".." {
                     kept.pop();
                     continue
                 }
@@ -273,7 +273,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// The bytes without trailing slashes, except a lone `/`.
     func trimmed() -> Array[UInt8] {
         var b = textBytes(self.text);
-        while b.count > 1 and b(unchecked: b.count - 1) == slash() {
+        while b.count > 1 and unsafe b(unchecked: b.count - 1) == slash() {
             b.pop();
         }
         b
@@ -286,7 +286,7 @@ internal func slash() -> UInt8 { 47 }
 /// The bytes of `text`.
 internal func textBytes(text: String) -> Array[UInt8] {
     let raw = text.asByteSlice();
-    Slice.lend(start: raw.pointer, count: raw.count).toArray()
+    unsafe Slice.lend(start: raw.pointer, count: raw.count).toArray()
 }
 
 /// `bytes` as a `String`, kept as is even when not UTF-8.
@@ -305,7 +305,7 @@ internal func extensionDot(name: String) -> Optional[Int64] {
     let b = textBytes(name);
     var i = b.count - 1;
     while i > 0 {
-        if b(unchecked: i) == 46 {
+        if unsafe b(unchecked: i) == 46 {
             return .Some(i)
         }
         i = i - 1

@@ -63,7 +63,9 @@ In the standard library:
 
 - `Pointer` access: `read`, `take`, `write`, `assign`, `dropInPlace`, `value` and `mutatingValue`.
 - `UnsafeSlice.init(pointer:count:)`.
-- `Buffer.read(unchecked:)` and `Buffer.write(unchecked:)`.
+- `Buffer.read(unchecked:)`, `Buffer.write(unchecked:)`, `Buffer.read(at:)` and `Buffer.write(at:)` (the checked pair still can't tell an initialised slot from a fresh one).
+- `Slice.lend(start:count:)` and `Slice.lendMutating(start:count:)`.
+- The `(unchecked:)` subscripts on `Array`, `Slice`, `UnsafeSlice`, `Sliceable`, `BytesView` and `LiteralSlice`, and the `SliceIndex` hooks behind them (`lendUnchecked`, `lendMutatingUnchecked`).
 - `Allocator.deallocate` and `Allocator.reallocate`.
 - `Layout.ofValue`.
 

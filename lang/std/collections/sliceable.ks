@@ -44,7 +44,8 @@ public protocol Sliceable[T]: Iterable {
     // gives defaults that forward to `asSlice()`.
     subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
     subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] { ref }
-    subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
+    // Unsafe: `index` must be in range.
+    unsafe subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
     subscript(clamped index: Int64)? -> T { ref }
     subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] { ref }
     subscript(wrapped index: Int64)? -> T { ref }
@@ -106,8 +107,8 @@ extend Sliceable[T] {
         ref { I.lendChecked(index, self.asSlice()) }
     }
 
-    public subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
-        ref { I.lendUnchecked(index, self.asSlice()) }
+    public unsafe subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { unsafe I.lendUnchecked(index, self.asSlice()) }
     }
 
     public subscript(clamped index: Int64)? -> T {
@@ -134,12 +135,12 @@ extend Sliceable[T] {
 extend UnsafeSlice[T] {
     /// The elements as a `Slice`, in place.
     public func asSlice() -> &Slice[T] {
-        Slice.lend(start: self.pointer, count: self.count)
+        unsafe Slice.lend(start: self.pointer, count: self.count)
     }
 
     /// Like `asSlice()`, for writing through.
     public mutating func asMutableSlice() -> &mutating Slice[T] {
-        Slice.lendMutating(start: self.pointer, count: self.count)
+        unsafe Slice.lendMutating(start: self.pointer, count: self.count)
     }
 
     public subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] {
@@ -152,9 +153,9 @@ extend UnsafeSlice[T] {
         mutating ref { I.lendMutatingChecked(index, self.asMutableSlice()) }
     }
 
-    public subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
-        ref { I.lendUnchecked(index, self.asSlice()) }
-        mutating ref { I.lendMutatingUnchecked(index, self.asMutableSlice()) }
+    public unsafe subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { unsafe I.lendUnchecked(index, self.asSlice()) }
+        mutating ref { unsafe I.lendMutatingUnchecked(index, self.asMutableSlice()) }
     }
 
     public subscript(clamped index: Int64)? -> T {
@@ -341,7 +342,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("prefix: count exceeds length")
         }
-        Slice.lend(start: s.pointer, count: count)
+        unsafe Slice.lend(start: s.pointer, count: count)
     }
 
     /// Returns a slice over the last `count` elements. O(1).
@@ -360,7 +361,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("suffix: count exceeds length")
         }
-        Slice.lend(start: s.pointer.offset(by: s.count - count), count: count)
+        unsafe Slice.lend(start: s.pointer.offset(by: s.count - count), count: count)
     }
 
     /// Returns a slice with the first `count` elements skipped. O(1).
@@ -381,7 +382,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("drop(first:): count exceeds length")
         }
-        Slice.lend(start: s.pointer.offset(by: count), count: s.count - count)
+        unsafe Slice.lend(start: s.pointer.offset(by: count), count: s.count - count)
     }
 
     /// Returns a slice with the last `count` elements skipped. O(1).
@@ -402,7 +403,7 @@ extend Sliceable[T] {
         if count > s.count {
             fatalError("drop(last:): count exceeds length")
         }
-        Slice.lend(start: s.pointer, count: s.count - count)
+        unsafe Slice.lend(start: s.pointer, count: s.count - count)
     }
 
     // -- Searching (predicate) -----------------------------------------------
@@ -636,7 +637,7 @@ extend Sliceable[T] {
         for i in 0..<s.count {
             let inner = transform(unsafe p.offset(by: i).read());
             for j in 0..<inner.count {
-                b.append(inner(unchecked: j))
+                b.append(unsafe inner(unchecked: j))
             }
         }
         b.build()

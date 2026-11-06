@@ -37,7 +37,7 @@ public func findHeaderEnd(buf: Array[UInt8]) -> Int64 {
     var i: Int64 = 0;
     let limit = bufLen - 3;
     while i < limit {
-        if buf(unchecked: i) == 13 and buf(unchecked: i + 1) == 10 and buf(unchecked: i + 2) == 13 and buf(unchecked: i + 3) == 10 {
+        if unsafe buf(unchecked: i) == 13 and unsafe buf(unchecked: i + 1) == 10 and unsafe buf(unchecked: i + 2) == 13 and unsafe buf(unchecked: i + 3) == 10 {
             return i
         }
         i = i + 1
@@ -62,7 +62,7 @@ public func findHeaderEnd(buf: Array[UInt8]) -> Int64 {
 public func parseDecimal(s: String) -> Int64 {
     var result: Int64 = 0;
     for i in 0..<s.bytes.count {
-        let digit = Int64(from: s.bytes(unchecked: i)) - 48;
+        let digit = Int64(from: unsafe s.bytes(unchecked: i)) - 48;
         if digit >= 0 and digit <= 9 {
             result = result * 10 + digit
         }
@@ -150,7 +150,7 @@ public func dechunk(raw: Array[UInt8]) -> Array[UInt8] {
 
         var chunkSize: Int64 = 0;
         while pos < length {
-            let b = raw(unchecked: pos);
+            let b = unsafe raw(unchecked: pos);
             if b == 13 {
                 pos = pos + 2;
                 break
@@ -167,7 +167,7 @@ public func dechunk(raw: Array[UInt8]) -> Array[UInt8] {
 
         var copied: Int64 = 0;
         while copied < chunkSize and pos < length {
-            result.append(raw(unchecked: pos));
+            result.append(unsafe raw(unchecked: pos));
             pos = pos + 1;
             copied = copied + 1
         }

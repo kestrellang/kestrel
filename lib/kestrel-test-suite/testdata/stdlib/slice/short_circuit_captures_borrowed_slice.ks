@@ -17,7 +17,7 @@ func outside(i: Int64, s: Slice[Int64]) -> Bool {
 @main
 func main() -> Int64 {
     var xs: Array[Int64] = [1, 2, 3, 4, 5];
-    let s = &Slice.lend(start: xs.asUnsafeSlice().pointer, count: 5);
+    let s = &unsafe Slice.lend(start: xs.asUnsafeSlice().pointer, count: 5);
     print("\(outside(9, s)) \(outside(2, s)) \(outside(5, s))\n");
     0
 }

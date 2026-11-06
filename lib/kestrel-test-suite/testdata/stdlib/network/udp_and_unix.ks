@@ -13,7 +13,7 @@ func main() -> lang.i64 {
     var b = match UdpSocket.bind(to: any) { .Ok(s) => s, .Err(_) => return 2 };
     let bAddress = b.localAddress().unwrap();
     let ping = "ping".asByteSlice();
-    match a.send(Slice.lend(start: ping.pointer, count: ping.count), to: bAddress) {
+    match a.send(unsafe Slice.lend(start: ping.pointer, count: ping.count), to: bAddress) {
         .Ok(n) => if n != 4 { return 3 },
         .Err(_) => return 4
     }
@@ -25,7 +25,7 @@ func main() -> lang.i64 {
 
     // Connected: `send(buf)` goes to the fixed peer.
     if a.connect(to: bAddress).isErr { return 7 }
-    if a.send(Slice.lend(start: ping.pointer, count: 2)).isErr { return 8 }
+    if a.send(unsafe Slice.lend(start: ping.pointer, count: 2)).isErr { return 8 }
     if b.setReadTimeout(milliseconds: .Some(2000)).isErr { return 9 }
     match b.receive(into: buf.asMutableSlice()) {
         .Ok(n) => if n != 2 { return 10 },

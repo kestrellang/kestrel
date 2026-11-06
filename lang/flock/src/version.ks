@@ -112,9 +112,9 @@ public func parseVersion(s s: String) -> Version throws FlockError {
         throw FlockError.InvalidVersion(s)
     }
 
-    let majorStr = parts(unchecked: 0);
-    let minorStr = parts(unchecked: 1);
-    let patchStr = parts(unchecked: 2);
+    let majorStr = unsafe parts(unchecked: 0);
+    let minorStr = unsafe parts(unchecked: 1);
+    let patchStr = unsafe parts(unchecked: 2);
 
     match parseInt(majorStr) {
         .Some(major) => {
@@ -175,7 +175,7 @@ func splitOnDot(s: String) -> Array[String] {
     let len = s.bytes.count;
 
     while i < len {
-        let byte = s.bytes(unchecked: i);
+        let byte = unsafe s.bytes(unchecked: i);
         if byte == 46 { // '.'
             result.append(s.asSlice().subslice(from: start, to: i).toOwned());
             start = i + 1

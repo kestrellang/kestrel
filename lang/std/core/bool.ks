@@ -79,9 +79,9 @@ public struct Bool:
     /// stdlib hashes other primitives — equal `Bool`s always hash equal.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         if self.value {
-            hasher.write(Slice.lend(start: Pointer(to: 1), count: 1))
+            hasher.write(unsafe Slice.lend(start: Pointer(to: 1), count: 1))
         } else {
-            hasher.write(Slice.lend(start: Pointer(to: 0), count: 1))
+            hasher.write(unsafe Slice.lend(start: Pointer(to: 0), count: 1))
         }
     }
 

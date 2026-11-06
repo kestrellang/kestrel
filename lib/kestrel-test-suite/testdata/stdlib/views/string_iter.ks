@@ -10,13 +10,13 @@ module Test
             // ---- iter() on String ----
             let chars = s.iter().collect();
             if chars.count != 5 { return 1 }
-            if chars(unchecked: 0).isEqual(to: 'h') == false { return 2 }
-            if chars(unchecked: 4).isEqual(to: 'o') == false { return 3 }
+            if unsafe chars(unchecked: 0).isEqual(to: 'h') == false { return 2 }
+            if unsafe chars(unchecked: 4).isEqual(to: 'o') == false { return 3 }
 
             // iter() with map
             let upper = s.iter().map(as: { (c) in c.uppercased() }).collect();
             if upper.count != 5 { return 4 }
-            if upper(unchecked: 0).isEqual(to: 'H') == false { return 5 }
+            if unsafe upper(unchecked: 0).isEqual(to: 'H') == false { return 5 }
 
             // iter() with filter
             let vowels = s.iter().filter(where: { (c) in

@@ -60,7 +60,7 @@ public func buildGraph(
     visited.append(root.name);
 
     while queue.count > 0 {
-        let current = queue(unchecked: 0);
+        let current = unsafe queue(unchecked: 0);
         queue = sliceFrom(queue, 1);
 
         // Collect dependency names for this node
@@ -133,8 +133,8 @@ public func topologicalSort(nodes nodes: Array[DepNode]) -> Array[DepNode] throw
         // Find a node with in-degree 0 that hasn't been emitted yet
         var found: Int64 = -1;
         for index in 0..<count {
-            if inDegrees(unchecked: index) != 0 { continue }
-            if containsNode(nodes: result, name: nodes(unchecked: index).name) { continue }
+            if unsafe inDegrees(unchecked: index) != 0 { continue }
+            if containsNode(nodes: result, name: unsafe nodes(unchecked: index).name) { continue }
             found = index;
             break
         }
@@ -150,7 +150,7 @@ public func topologicalSort(nodes nodes: Array[DepNode]) -> Array[DepNode] throw
             throw FlockError.DependencyCycle(cycleNames)
         }
 
-        let node = nodes(unchecked: found);
+        let node = unsafe nodes(unchecked: found);
         result.append(node);
         // Mark as done by setting in-degree to -1
         inDegrees = setAt(arr: inDegrees, index: found, value: -1);
@@ -158,9 +158,9 @@ public func topologicalSort(nodes nodes: Array[DepNode]) -> Array[DepNode] throw
         // Decrease in-degree for nodes that depend on this one. Indexed rather
         // than iterated because `setAt` rebuilds `inDegrees` each time.
         for index in 0..<count {
-            let degree = inDegrees(unchecked: index);
+            let degree = unsafe inDegrees(unchecked: index);
             if degree <= 0 { continue }
-            let otherNode = nodes(unchecked: index);
+            let otherNode = unsafe nodes(unchecked: index);
             if containsInDeps(depNames: otherNode.depNames, name: node.name) {
                 inDegrees = setAt(arr: inDegrees, index: index, value: degree - 1)
             }
@@ -201,7 +201,7 @@ func containsInDeps(depNames depNames: Array[String], name name: String) -> Bool
 func findIndex(nodes nodes: Array[DepNode], name name: String) -> Int64? {
     var i: Int64 = 0;
     while i < nodes.count {
-        if nodes(unchecked: i).name == name {
+        if unsafe nodes(unchecked: i).name == name {
             return .Some(i)
         }
         i = i + 1
@@ -214,7 +214,7 @@ func sliceFrom(arr: Array[ResolvedPackage], start: Int64) -> Array[ResolvedPacka
     var result = [];
     var i = start;
     while i < arr.count {
-        result.append(arr(unchecked: i));
+        result.append(unsafe arr(unchecked: i));
         i = i + 1
     }
     result
@@ -227,7 +227,7 @@ func setAt(arr arr: Array[Int64], index index: Int64, value value: Int64) -> Arr
         if i == index {
             result.append(value)
         } else {
-            result.append(arr(unchecked: i))
+            result.append(unsafe arr(unchecked: i))
         }
         i = i + 1
     }

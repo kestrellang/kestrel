@@ -14,12 +14,12 @@ module Test
             let (left, right) = pairs.iter().unzip();
             if left.count != 3 { return 1 }
             if right.count != 3 { return 2 }
-            if left(unchecked: 0) != 1 { return 3 }
-            if left(unchecked: 1) != 2 { return 4 }
-            if left(unchecked: 2) != 3 { return 5 }
-            if right(unchecked: 0) != 10 { return 6 }
-            if right(unchecked: 1) != 20 { return 7 }
-            if right(unchecked: 2) != 30 { return 8 }
+            if unsafe left(unchecked: 0) != 1 { return 3 }
+            if unsafe left(unchecked: 1) != 2 { return 4 }
+            if unsafe left(unchecked: 2) != 3 { return 5 }
+            if unsafe right(unchecked: 0) != 10 { return 6 }
+            if unsafe right(unchecked: 1) != 20 { return 7 }
+            if unsafe right(unchecked: 2) != 30 { return 8 }
 
             // Unzip empty
             let emptyPairs = std.collections.Array[(std.numeric.Int64, std.numeric.Int64)]();

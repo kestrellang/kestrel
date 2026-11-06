@@ -850,7 +850,7 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Sends the whole buffer in a single `write` so the hasher gets
     /// to choose how to consume it.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(Slice.lend(start: self.ptr(), count: self.len()))
+        hasher.write(unsafe Slice.lend(start: self.ptr(), count: self.len()))
     }
 
     /// Returns a shallow clone — storage is shared until either side mutates.

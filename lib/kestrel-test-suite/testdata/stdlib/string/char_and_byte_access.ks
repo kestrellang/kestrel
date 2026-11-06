@@ -48,7 +48,7 @@ module Test
             if bOob.isSome { return 14 }
 
             // Test bytes()(unchecked: i)
-            let bu = s.bytes(unchecked: 1);
+            let bu = unsafe s.bytes(unchecked: 1);
             // 'e' is ASCII 101
             if bu != 101 { return 15 }
 

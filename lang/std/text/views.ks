@@ -163,7 +163,7 @@ public struct BytesView: Iterable, Cloneable {
     /// Caller must guarantee `0 <= index < count`. For ranges, the
     /// endpoints must be in `0..=count`; otherwise the resulting
     /// sub-view aliases out-of-bounds memory.
-    public subscript[I](unchecked index: I) -> I.BytesYield where I: BytesIndex {
+    public unsafe subscript[I](unchecked index: I) -> I.BytesYield where I: BytesIndex {
         get { index.readBytesUnchecked(from: self) }
     }
 
@@ -585,7 +585,7 @@ public struct GraphemesIterator: Iterator {
 
         // Return the grapheme
         if chars.count == 1 {
-            .Some(Grapheme(char: chars(unchecked: 0)))
+            .Some(Grapheme(char: unsafe chars(unchecked: 0)))
         } else {
             .Some(Grapheme(chars: chars))
         }

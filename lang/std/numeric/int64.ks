@@ -397,7 +397,7 @@ public struct Int64:
     /// only within a single process — do not persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
         let val = self;
-        hasher.write(Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[Int64]().size))
+        hasher.write(unsafe Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[Int64]().size))
     }
 
     // ========================================================================
@@ -1004,7 +1004,7 @@ public struct Int64:
         var result: UInt64 = 0;
         var i: Int64 = 0;
         while i < 8 {
-            let byteVal = UInt64(from: bytes(unchecked: i));
+            let byteVal = UInt64(from: unsafe bytes(unchecked: i));
             result = (result << 8) | byteVal;
             i = i + 1
         }
@@ -1023,7 +1023,7 @@ public struct Int64:
         var i: Int64 = 0;
         while i < 8 {
             let shift = i * 8;
-            let byteVal = UInt64(from: bytes(unchecked: i));
+            let byteVal = UInt64(from: unsafe bytes(unchecked: i));
             result = result | (byteVal << shift);
             i = i + 1
         }
@@ -1055,7 +1055,7 @@ public struct Int64:
         var index: Int64 = 0;
         var isNegative = false;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {
             isNegative = true;
@@ -1079,7 +1079,7 @@ public struct Int64:
         var result: UInt64 = 0;
 
         while index < len {
-            let byte: UInt8 = string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe string.bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             if byteVal < 48 or byteVal > 57 {
@@ -1128,7 +1128,7 @@ public struct Int64:
         var index: Int64 = 0;
         var isNegative = false;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {
             isNegative = true;
@@ -1151,7 +1151,7 @@ public struct Int64:
         var result: UInt64 = 0;
 
         while index < len {
-            let byte: UInt8 = string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe string.bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {
@@ -1264,7 +1264,7 @@ public struct Int64:
 
         var i = digits.bytes.count - 1;
         while i >= 0 {
-            result.appendByte(digits.bytes(unchecked: i));
+            result.appendByte(unsafe digits.bytes(unchecked: i));
             i = i - 1
         }
 

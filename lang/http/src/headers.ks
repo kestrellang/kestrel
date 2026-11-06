@@ -145,7 +145,7 @@ public struct Headers: Cloneable {
     public mutating func remove(name: String) {
         var i: Int64 = 0;
         while i < self.entries.count {
-            let pair = self.entries(unchecked: i);
+            let pair = unsafe self.entries(unchecked: i);
             if pair.0.equalsIgnoreAsciiCase(name) {
                  self.entries.remove(at: i);
             } else {

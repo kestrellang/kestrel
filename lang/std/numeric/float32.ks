@@ -882,9 +882,9 @@ public struct Float32:
         }
 
         if len == 3 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
+            let b0: UInt8 = unsafe string.bytes(unchecked: 0);
+            let b1: UInt8 = unsafe string.bytes(unchecked: 1);
+            let b2: UInt8 = unsafe string.bytes(unchecked: 2);
             let isN0 = Int64(from: b0) == 110 or Int64(from: b0) == 78;
             let isA1 = Int64(from: b1) == 97 or Int64(from: b1) == 65;
             let isN2 = Int64(from: b2) == 110 or Int64(from: b2) == 78;
@@ -895,9 +895,9 @@ public struct Float32:
         }
 
         if len == 3 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
+            let b0: UInt8 = unsafe string.bytes(unchecked: 0);
+            let b1: UInt8 = unsafe string.bytes(unchecked: 1);
+            let b2: UInt8 = unsafe string.bytes(unchecked: 2);
             let isI = Int64(from: b0) == 105 or Int64(from: b0) == 73;
             let isN = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF = Int64(from: b2) == 102 or Int64(from: b2) == 70;
@@ -908,10 +908,10 @@ public struct Float32:
         }
 
         if len == 4 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
-            let b3: UInt8 = string.bytes(unchecked: 3);
+            let b0: UInt8 = unsafe string.bytes(unchecked: 0);
+            let b1: UInt8 = unsafe string.bytes(unchecked: 1);
+            let b2: UInt8 = unsafe string.bytes(unchecked: 2);
+            let b3: UInt8 = unsafe string.bytes(unchecked: 3);
             let isMinus = Int64(from: b0) == 45;
             let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
@@ -923,10 +923,10 @@ public struct Float32:
         }
 
         if len == 4 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
-            let b3: UInt8 = string.bytes(unchecked: 3);
+            let b0: UInt8 = unsafe string.bytes(unchecked: 0);
+            let b1: UInt8 = unsafe string.bytes(unchecked: 1);
+            let b2: UInt8 = unsafe string.bytes(unchecked: 2);
+            let b3: UInt8 = unsafe string.bytes(unchecked: 3);
             let isPlus = Int64(from: b0) == 43;
             let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
@@ -938,14 +938,14 @@ public struct Float32:
         }
 
         if len == 8 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
-            let b3: UInt8 = string.bytes(unchecked: 3);
-            let b4: UInt8 = string.bytes(unchecked: 4);
-            let b5: UInt8 = string.bytes(unchecked: 5);
-            let b6: UInt8 = string.bytes(unchecked: 6);
-            let b7: UInt8 = string.bytes(unchecked: 7);
+            let b0: UInt8 = unsafe string.bytes(unchecked: 0);
+            let b1: UInt8 = unsafe string.bytes(unchecked: 1);
+            let b2: UInt8 = unsafe string.bytes(unchecked: 2);
+            let b3: UInt8 = unsafe string.bytes(unchecked: 3);
+            let b4: UInt8 = unsafe string.bytes(unchecked: 4);
+            let b5: UInt8 = unsafe string.bytes(unchecked: 5);
+            let b6: UInt8 = unsafe string.bytes(unchecked: 6);
+            let b7: UInt8 = unsafe string.bytes(unchecked: 7);
             let isI0 = Int64(from: b0) == 105 or Int64(from: b0) == 73;
             let isN1 = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF2 = Int64(from: b2) == 102 or Int64(from: b2) == 70;
@@ -963,7 +963,7 @@ public struct Float32:
         var index: Int64 = 0;
         var isNegative = false;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {
             isNegative = true;
@@ -981,7 +981,7 @@ public struct Float32:
         var mantissa = Array[UInt32]();
         var hasDigits = false;
         var fracCount: Int64 = 0;
-        var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
+        var currentByte: Int64 = Int64(from: unsafe string.bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
             mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
@@ -989,14 +989,14 @@ public struct Float32:
             hasDigits = true;
             index = index + 1;
             if index < len {
-                currentByte = Int64(from: string.bytes(unchecked: index))
+                currentByte = Int64(from: unsafe string.bytes(unchecked: index))
             }
         }
 
         if index < len and currentByte == 46 {
             index = index + 1;
             if index < len {
-                currentByte = Int64(from: string.bytes(unchecked: index));
+                currentByte = Int64(from: unsafe string.bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
                     mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
                     mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
@@ -1004,7 +1004,7 @@ public struct Float32:
                     hasDigits = true;
                     index = index + 1;
                     if index < len {
-                        currentByte = Int64(from: string.bytes(unchecked: index))
+                        currentByte = Int64(from: unsafe string.bytes(unchecked: index))
                     }
                 }
             }
@@ -1024,18 +1024,18 @@ public struct Float32:
             }
 
             var expNegative = false;
-            currentByte = Int64(from: string.bytes(unchecked: index));
+            currentByte = Int64(from: unsafe string.bytes(unchecked: index));
 
             if currentByte == 45 {
                 expNegative = true;
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.bytes(unchecked: index))
+                    currentByte = Int64(from: unsafe string.bytes(unchecked: index))
                 }
             } else if currentByte == 43 {
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.bytes(unchecked: index))
+                    currentByte = Int64(from: unsafe string.bytes(unchecked: index))
                 }
             }
 
@@ -1056,7 +1056,7 @@ public struct Float32:
                 hasExpDigit = true;
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.bytes(unchecked: index))
+                    currentByte = Int64(from: unsafe string.bytes(unchecked: index))
                 }
             }
 
@@ -1235,7 +1235,7 @@ public struct Float32:
             var expIndex: Int64 = -1;
             var i: Int64 = 0;
             while i < len {
-                let b = number.bytes(unchecked: i);
+                let b = unsafe number.bytes(unchecked: i);
                 let v = Int64(from: b);
                 if v == 46 {  // '.'
                     dotIndex = i
@@ -1250,7 +1250,7 @@ public struct Float32:
                 let endIndex: Int64 = if expIndex >= 0 { expIndex } else { len };
                 var trimEnd = endIndex;
                 while trimEnd > dotIndex + 1 {
-                    let b = number.bytes(unchecked: trimEnd - 1);
+                    let b = unsafe number.bytes(unchecked: trimEnd - 1);
                     if Int64(from: b) == 48 {
                         trimEnd = trimEnd - 1
                     } else {
