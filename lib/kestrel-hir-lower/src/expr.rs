@@ -241,7 +241,14 @@ impl LowerCtx<'_> {
                 if op == kestrel_ast::BinaryOp::Pipe {
                     return self.lower_pipe(node, &span);
                 }
-                let (lhs, rhs) = self.operands(node, &span);
+                let (lhs, mut rhs) = self.operands(node, &span);
+                // A rejected right side lowers as recovery poison, so the
+                // misplaced `try` reports once and nothing cascades from it.
+                if matches!(op, kestrel_ast::BinaryOp::And | kestrel_ast::BinaryOp::Or)
+                    && self.reject_try_in_short_circuit_rhs(&rhs, &op)
+                {
+                    rhs = ExprSrc::Error(rhs.node().map_or(span.clone(), |n| self.span(n)));
+                }
                 let lhs = self.lower_expr_src(&lhs);
                 let rhs = self.lower_expr_src(&rhs);
                 self.desugar_binary_hir(op, lhs, rhs, &span)
@@ -393,6 +400,48 @@ impl LowerCtx<'_> {
 
     /// The two operands of a binary-shaped node, each an error at `span`
     /// when absent.
+    /// E012: `try` in the right operand of `and` / `or`. That operand runs
+    /// inside the short-circuit closure, so its early return would leave the
+    /// closure, not the function. A closure written inside the operand is
+    /// its own scope and may use `try` freely. True when it reported.
+    fn reject_try_in_short_circuit_rhs(
+        &mut self,
+        rhs: &ExprSrc,
+        op: &kestrel_ast::BinaryOp,
+    ) -> bool {
+        let Some(rhs) = rhs.node() else {
+            return false;
+        };
+        let mut rejected = false;
+        let mut stack = vec![rhs.clone()];
+        while let Some(node) = stack.pop() {
+            match node.kind() {
+                SyntaxKind::ExprClosure => continue,
+                SyntaxKind::ExprTry => {
+                    rejected = true;
+                    let span = self.span(&node);
+                    self.ctx.accumulate(
+                        Diagnostic::error()
+                            .with_code("E012")
+                            .with_message(format!(
+                                "`try` can't appear on the right side of `{}`",
+                                op.symbol()
+                            ))
+                            .with_labels(vec![Label::primary(span.file_id, span.range())
+                                .with_message("this runs only if the left side doesn't decide the result")])
+                            .with_notes(vec![
+                                "bind the value first (`let x = try f();`) or move the `try` to the left side"
+                                    .to_string(),
+                            ]),
+                    );
+                },
+                _ => {},
+            }
+            stack.extend(node.children());
+        }
+        rejected
+    }
+
     pub(crate) fn operands(&self, node: &SyntaxNode, span: &Span) -> (ExprSrc, ExprSrc) {
         let mut exprs = expr_children(node);
         let lhs = ExprSrc::or_error(exprs.next(), span);

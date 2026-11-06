@@ -14,7 +14,7 @@ the type checker, and the code is assigned in one place,
 
 ## Contents
 
-- [E001–E011 — Control flow & definite initialization](#e001e011--control-flow--definite-initialization)
+- [E001–E012 — Control flow & definite initialization](#e001e012--control-flow--definite-initialization)
 - [E100–E141 — Type checking, names, parameters & literals](#e100e141--type-checking-names-parameters--literals)
 - [E200–E213 — Mutability, access modes & assignment](#e200e213--mutability-access-modes--assignment)
 - [E300–E321 — Patterns & exhaustiveness](#e300e321--patterns--exhaustiveness)
@@ -33,7 +33,7 @@ the type checker, and the code is assigned in one place,
 
 ---
 
-## E001–E011 — Control flow & definite initialization
+## E001–E012 — Control flow & definite initialization
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -48,6 +48,7 @@ the type checker, and the code is assigned in one place,
 | E009 | cannot return before all fields are initialized | An `init` has an early `return` while some fields are still unassigned. |
 | E010 | '{keyword}' outside of loop | `break`/`continue` used where no loop encloses it. |
 | E011 | undeclared label '{label}' | `break`/`continue` names a loop label that no enclosing loop declares. |
+| E012 | `try` can't appear on the right side of `{op}` | The right side of `and`/`or` runs only when the left side doesn't decide the result, so an early return from `try` there is rejected. Bind the value first or move the `try` to the left side. |
 
 ## E100–E141 — Type checking, names, parameters & literals
 
