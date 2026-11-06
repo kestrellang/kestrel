@@ -55,7 +55,10 @@ impl TargetConfig {
     /// Whether this targets WebAssembly, which needs its own LLVM target,
     /// static relocation, and a generic CPU.
     pub fn is_wasm(&self) -> bool {
-        matches!(self.triple.architecture, Architecture::Wasm32 | Architecture::Wasm64)
+        matches!(
+            self.triple.architecture,
+            Architecture::Wasm32 | Architecture::Wasm64
+        )
     }
 
     /// Whether this is the machine the compiler runs on, so code can be

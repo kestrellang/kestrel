@@ -94,7 +94,11 @@ impl<'ctx> CodegenCtx<'ctx> {
         };
         // WebAssembly has no position-independent code outside dynamic
         // linking; Emscripten links static objects.
-        let reloc = if target.is_wasm() { RelocMode::Static } else { RelocMode::PIC };
+        let reloc = if target.is_wasm() {
+            RelocMode::Static
+        } else {
+            RelocMode::PIC
+        };
 
         let opt = match options.opt_level {
             0 => OptimizationLevel::None,
@@ -103,14 +107,7 @@ impl<'ctx> CodegenCtx<'ctx> {
         };
 
         let machine = target_obj
-            .create_target_machine(
-                &triple,
-                &cpu,
-                &features,
-                opt,
-                reloc,
-                CodeModel::Default,
-            )
+            .create_target_machine(&triple, &cpu, &features, opt, reloc, CodeModel::Default)
             .ok_or_else(|| CodegenError::ModuleCreation("create_target_machine failed".into()))?;
 
         let llmod = cx.create_module("kestrel_module");
