@@ -186,11 +186,11 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
         if n == 1 {
             return self.data.pop()
         }
-        let min = self.data(0);
+        // Swap the minimum to the end and pop it: a move, not a copy.
         self.data.swap(at: 0, with: n - 1);
-         self.data.pop();
+        let min = self.data.pop();
         self.siftDown(0);
-        .Some(min)
+        min
     }
 
     /// Returns the minimum element without removing it. O(1).

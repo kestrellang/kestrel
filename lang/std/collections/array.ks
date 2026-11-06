@@ -11,7 +11,7 @@ import std.numeric.(Int64)
 import std.numeric.(RandomNumberGenerator, Lcg64, SystemRandom)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
-import std.ffi.(memcpy)
+import std.ffi.(memcpy, memmove)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
 import std.collections.(Sliceable, Slice, SliceIndex, SliceClampable)
@@ -642,8 +642,9 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     // and frees the old one. The storage must be unique.
     private mutating func moveStorage(to newPtr: Pointer[T], cap cap: Int64) {
         let s = &mutating self.storage.value;
-        for i in 0..<s.len {
-            unsafe newPtr.offset(by: i).write(s.ptr.offset(by: i).take())
+        // A move is a bit copy, so one memcpy moves every element.
+        if s.len > 0 {
+            let _ = unsafe memcpy(newPtr.asRaw(), s.ptr.asRaw(), s.len * Int64(intLiteral: lang.sizeof[T]()));
         }
         if s.cap > 0 {
             var allocator = SystemAllocator();
@@ -653,13 +654,22 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
         s.cap = cap
     }
 
+    // Bit-moves `n` elements from slot `src` to slot `dst`; the ranges may
+    // overlap. Valid for any `T` (a move is a bit copy). The vacated slots
+    // are left logically uninitialized, and the storage must be unique.
+    private mutating func shiftElements(from src: Int64, to dst: Int64, count n: Int64) {
+        if n <= 0 or src == dst {
+            return
+        }
+        let p = self.ptr();
+        let _ = unsafe memmove(p.offset(by: dst).asRaw(), p.offset(by: src).asRaw(), n * Int64(intLiteral: lang.sizeof[T]()));
+    }
+
     private mutating func grow(minCapacity: Int64) {
         let myCap = self.cap();
         if myCap >= minCapacity {
             return
         }
-
-        self.makeUnique();
 
         // Calculate new capacity
         var newCap: Int64 = myCap;
@@ -674,11 +684,23 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
         let newLayout = Layout.array[T](newCap);
         var allocator = SystemAllocator();
         let result = allocator.allocate(newLayout);
-        if let .Some(rawPtr) = result {
-            self.moveStorage(to: rawPtr.cast[T](), cap: newCap)
+        let newPtr = if let .Some(rawPtr) = result {
+            rawPtr.cast[T]()
         } else {
             fatalError("Array grow failed")
+        };
+        if self.storage.isUnique {
+            self.moveStorage(to: newPtr, cap: newCap);
+            return
         }
+        // Shared: copy straight into the bigger buffer rather than forking
+        // an exact-size copy first and then moving it again.
+        let src = self.ptr();
+        let n = self.len();
+        for i in 0..<n {
+            unsafe newPtr.offset(by: i).write(src.offset(by: i).read())
+        }
+        self.storage = CowBox(ArrayStorage(ptr: newPtr, len: n, cap: newCap))
     }
 
     // ========================================================================
@@ -705,7 +727,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// ```
     public mutating func append(consuming element: T) {
         let myLen = self.len();
-        self.makeUnique();
+        // No separate `makeUnique`: `grow` and the `value` write below fork.
         self.grow(myLen + 1);
         // Reserve the slot and bump `len` in place (O(1) amortized), then
         // move the element in.
@@ -738,7 +760,6 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
             return
         }
         let myLen = self.len();
-        self.makeUnique();
         self.grow(myLen + otherLen);
         let otherPtr = sl.asPointer();
         let s = &mutating self.storage.value;
@@ -793,15 +814,10 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
         if index < 0 or index > myLen {
             fatalError("Array.insert: index out of bounds")
         }
-        self.makeUnique();
         self.grow(myLen + 1);
+        self.makeUnique();
+        self.shiftElements(from: index, to: index + 1, count: myLen - index);
         let s = &mutating self.storage.value;
-        // Shift elements right
-        var i: Int64 = s.len;
-        while i > index {
-            unsafe s.ptr.offset(by: i).write(s.ptr.offset(by: i - 1).take());
-            i = i - 1
-        }
         unsafe s.ptr.offset(by: index).write(element);
         s.len = s.len + 1
     }
@@ -887,17 +903,11 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
             fatalError("Array.remove: index out of bounds")
         }
         self.makeUnique();
-        let s = &mutating self.storage.value;
-        // Move (`take`), not `read()`: each slot is overwritten by
-        // `write`, which drops nothing, so a copy here leaked.
-        let removed = unsafe s.ptr.offset(by: index).take();
-        // Shift elements left
-        var i: Int64 = index;
-        while i < s.len - 1 {
-            unsafe s.ptr.offset(by: i).write(s.ptr.offset(by: i + 1).take());
-            i = i + 1
-        }
-        s.len = s.len - 1;
+        // Move (`take`), not `read()`: the slot is overwritten by the
+        // shift, which drops nothing, so a copy here leaked.
+        let removed = unsafe self.ptr().offset(by: index).take();
+        self.shiftElements(from: index + 1, to: index, count: myLen - index - 1);
+        self.storage.value.len = myLen - 1;
         removed
     }
 
@@ -933,17 +943,13 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
             return
         }
         self.makeUnique();
-        let s = &mutating self.storage.value;
         // Drop the removed elements, then move the tail left.
+        let p = self.ptr();
         for k in start..<end {
-            unsafe s.ptr.offset(by: k).dropInPlace()
+            unsafe p.offset(by: k).dropInPlace()
         }
-        var i = start;
-        while i < myLen - removeCount {
-            unsafe s.ptr.offset(by: i).write(s.ptr.offset(by: i + removeCount).take());
-            i = i + 1
-        }
-        s.len = s.len - removeCount
+        self.shiftElements(from: end, to: start, count: myLen - end);
+        self.storage.value.len = myLen - removeCount
     }
 
 
@@ -1134,26 +1140,13 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
 
         self.grow(newLen);
         self.makeUnique();
-        let s = &mutating self.storage.value;
-        // Drop the replaced elements; every shift below is a move.
+        // Drop the replaced elements, then move the tail into place.
+        let p = self.ptr();
         for k in start..<end {
-            unsafe s.ptr.offset(by: k).dropInPlace()
+            unsafe p.offset(by: k).dropInPlace()
         }
-        if insertCount > removeCount {
-            // Shift elements right
-            var i = myLen - 1;
-            while i >= end {
-                unsafe s.ptr.offset(by: i + insertCount - removeCount).write(s.ptr.offset(by: i).take());
-                i = i - 1
-            }
-        } else if insertCount < removeCount {
-            // Shift elements left
-            var i = end;
-            while i < myLen {
-                unsafe s.ptr.offset(by: start + insertCount + (i - end)).write(s.ptr.offset(by: i).take());
-                i = i + 1
-            }
-        }
+        self.shiftElements(from: end, to: start + insertCount, count: myLen - end);
+        let s = &mutating self.storage.value;
 
         // Copy replacement
         for i in 0..<insertCount {
@@ -1679,7 +1672,36 @@ extend Array[T] {
     /// people.sort(byKey: { (p) in p.age });
     /// ```
     public mutating func sort[K](consuming byKey key: (T) -> K) where K: Comparable {
-        self.sort(by: { (a, b) in key(a).compare(key(b)) == Ordering.Less })
+        let n = self.count;
+        if n < 2 {
+            return
+        }
+        // Key each element once (n calls, not two per comparison), sort the
+        // (key, index) pairs, then apply that permutation with swaps. Ties
+        // keep their original order.
+        var order = Array[(K, Int64)](capacity: n);
+        for i in 0..<n {
+            order.append((key(self(i)), i))
+        }
+        order.sort(by: { (a, b) in
+            let c = a.0.compare(b.0);
+            c == Ordering.Less or (c == Ordering.Equal and a.1 < b.1)
+        });
+        // perm(j) is the old index of the element that belongs at j.
+        var perm = Array[Int64](capacity: n);
+        for j in 0..<n {
+            perm.append(order(j).1)
+        }
+        for i in 0..<n {
+            var cur = i;
+            while perm(cur) != i {
+                let next = perm(cur);
+                self.swap(at: cur, with: next);
+                perm(cur) = cur;
+                cur = next
+            }
+            perm(cur) = cur
+        }
     }
 
     /// Returns a new array sorted by an extracted `Comparable` key;
@@ -1692,7 +1714,9 @@ extend Array[T] {
     /// let byLen = words.sorted(byKey: { (w) in w.count });
     /// ```
     public func sorted[K](consuming byKey key: (T) -> K) -> Array[T] where K: Comparable {
-        self.sorted(by: { (a, b) in key(a).compare(key(b)) == Ordering.Less })
+        var copy = self.clone();
+        copy.sort(byKey: key);
+        copy
     }
 }
 

@@ -16,7 +16,7 @@ import std.core.(
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
-import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(UnsafeSlice, Pointer)
 import std.collections.(Sliceable, Slice)
 import std.numeric.(UInt8, Int64, UInt64)
@@ -501,11 +501,11 @@ public struct Int16:
     // HASHING
     // ========================================================================
 
-    /// Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-    /// only within a single process — do not persist hashes across builds.
+    /// Feeds this value into `hasher` as one 64-bit word
+    /// (`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+    /// Don't persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let val = self;
-        hasher.write(unsafe Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[Int16]().size))
+        hasher.write(uint64: UInt64(truncating: self))
     }
 
     // ========================================================================
@@ -1154,8 +1154,10 @@ public struct Int16:
     /// Int16(parsing: "-7");    // Some(-7)
     /// Int16(parsing: "abc");   // None
     /// ```
-    public init(parsing string: String)? {
-        let len = string.bytes.count;
+    public init[S](parsing text: S)? where S: Str, S: not Static {
+        // One view for the whole parse; works on String and StringSlice alike.
+        let bytes = text.bytes;
+        let len = bytes.count;
         if len == 0 {
             return null
         }
@@ -1163,7 +1165,7 @@ public struct Int16:
         var index: Int64 = 0;
         var isNegative = false;
 
-        let firstByte: UInt8 = unsafe string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {
             isNegative = true;
@@ -1187,7 +1189,7 @@ public struct Int16:
         var result: UInt64 = 0;
 
         while index < len {
-            let byte: UInt8 = unsafe string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             if byteVal < 48 or byteVal > 57 {
@@ -1223,12 +1225,14 @@ public struct Int16:
     /// Int16(parsing: "101010", radix: 2);  // Some(42)
     /// Int16(parsing: "z", radix: 36);      // Some(35)
     /// ```
-    public init(parsing string: String, radix radix: Int64)? {
+    public init[S](parsing text: S, radix radix: Int64)? where S: Str, S: not Static {
+        // One view for the whole parse; works on String and StringSlice alike.
+        let bytes = text.bytes;
         if radix < 2 or radix > 36 {
             return null
         }
 
-        let len = string.bytes.count;
+        let len = bytes.count;
         if len == 0 {
             return null
         }
@@ -1236,7 +1240,7 @@ public struct Int16:
         var index: Int64 = 0;
         var isNegative = false;
 
-        let firstByte: UInt8 = unsafe string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {
             isNegative = true;
@@ -1259,7 +1263,7 @@ public struct Int16:
         var result: UInt64 = 0;
 
         while index < len {
-            let byte: UInt8 = unsafe string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {

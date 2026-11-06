@@ -188,20 +188,18 @@ public struct Deflater: Compressor {
 
     // Bits for the block's symbols and extra bits under the given code.
     func payloadBits(literalFrequencies: Array[Int64], distanceFrequencies: Array[Int64], literalLengths: Array[Int64], distanceLengths: Array[Int64]) -> Int64 {
-        let lengthExtra = lengthExtraBits();
-        let distanceExtra = distanceExtraBits();
         var bits: Int64 = 0;
         for symbol in 0..<286 {
             let frequency = literalFrequencies(symbol);
             if frequency == 0 { continue; }
             var extra: Int64 = 0;
-            if symbol > 256 { extra = lengthExtra(symbol - 257); }
+            if symbol > 256 { extra = LENGTH_EXTRA_BITS(symbol - 257); }
             bits = bits + frequency * (literalLengths(symbol) + extra);
         }
         for symbol in 0..<30 {
             let frequency = distanceFrequencies(symbol);
             if frequency == 0 { continue; }
-            bits = bits + frequency * (distanceLengths(symbol) + distanceExtra(symbol));
+            bits = bits + frequency * (distanceLengths(symbol) + DISTANCE_EXTRA_BITS(symbol));
         }
         bits
     }
@@ -209,10 +207,6 @@ public struct Deflater: Compressor {
     mutating func writeTokens(tokens: Tokens, first: Int64, last: Int64, literalLengths: Array[Int64], distanceLengths: Array[Int64]) {
         let literalCodes = canonicalCodes(literalLengths);
         let distanceCodes = canonicalCodes(distanceLengths);
-        let lengthBase = lengthBases();
-        let lengthExtra = lengthExtraBits();
-        let distanceBase = distanceBases();
-        let distanceExtra = distanceExtraBits();
 
         for i in first..<last {
             let length = tokens.lengths(i);
@@ -224,12 +218,12 @@ public struct Deflater: Compressor {
             let lengthIndex = self.lengthSymbols(length);
             let symbol = 257 + lengthIndex;
             self.writer.writeCode(literalCodes(symbol), literalLengths(symbol));
-            self.writer.write(UInt64(from: length - lengthBase(lengthIndex)), lengthExtra(lengthIndex));
+            self.writer.write(UInt64(from: length - LENGTH_BASES(lengthIndex)), LENGTH_EXTRA_BITS(lengthIndex));
 
             let distance = tokens.values(i);
             let distanceSymbol = self.distanceSymbols(distance);
             self.writer.writeCode(distanceCodes(distanceSymbol), distanceLengths(distanceSymbol));
-            self.writer.write(UInt64(from: distance - distanceBase(distanceSymbol)), distanceExtra(distanceSymbol));
+            self.writer.write(UInt64(from: distance - DISTANCE_BASES(distanceSymbol)), DISTANCE_EXTRA_BITS(distanceSymbol));
         }
         self.writer.writeCode(literalCodes(256), literalLengths(256));
     }
@@ -238,11 +232,10 @@ public struct Deflater: Compressor {
 /// Index into the length tables for each match length 0...258 (entries
 /// below 3 are unused).
 func makeLengthSymbolTable() -> Array[Int64] {
-    let bases = lengthBases();
     var table = Array[Int64](repeating: 0, count: maxMatch + 1);
     var symbol: Int64 = 0;
     for length in minMatch..<(maxMatch + 1) {
-        while symbol + 1 < bases.count and bases(symbol + 1) <= length { symbol = symbol + 1; }
+        while symbol + 1 < LENGTH_BASES.count and LENGTH_BASES(symbol + 1) <= length { symbol = symbol + 1; }
         table(length) = symbol;
     }
     // 258 has its own code, not the top of 227's range.
@@ -255,11 +248,10 @@ func makeLengthSymbolTable() -> Array[Int64] {
 
 /// Distance symbol for each distance 0...32768 (entry 0 is unused).
 func makeDistanceSymbolTable() -> Array[Int64] {
-    let bases = distanceBases();
     var table = Array[Int64](repeating: 0, count: windowSize + 1);
     var symbol: Int64 = 0;
     for distance in 1..<(windowSize + 1) {
-        while symbol + 1 < bases.count and bases(symbol + 1) <= distance { symbol = symbol + 1; }
+        while symbol + 1 < DISTANCE_BASES.count and DISTANCE_BASES(symbol + 1) <= distance { symbol = symbol + 1; }
         table(distance) = symbol;
     }
     table
@@ -437,9 +429,8 @@ struct DynamicHeader {
         var codeLengthFrequencies = Array[Int64](repeating: 0, count: 19);
         for symbol in runSymbols { codeLengthFrequencies(symbol) = codeLengthFrequencies(symbol) + 1; }
         let codeLengthLengths = buildCodeLengths(codeLengthFrequencies, 7);
-        let order = codeLengthOrder();
         var codeLengthCount: Int64 = 19;
-        while codeLengthCount > 4 and codeLengthLengths(order(codeLengthCount - 1)) == 0 { codeLengthCount = codeLengthCount - 1; }
+        while codeLengthCount > 4 and codeLengthLengths(CODE_LENGTH_ORDER(codeLengthCount - 1)) == 0 { codeLengthCount = codeLengthCount - 1; }
 
         var bits: Int64 = 5 + 5 + 4 + 3 * codeLengthCount;
         for k in 0..<runSymbols.count {
@@ -461,9 +452,8 @@ struct DynamicHeader {
         writer.write(UInt64(from: self.literalCount - 257), 5);
         writer.write(UInt64(from: self.distanceCount - 1), 5);
         writer.write(UInt64(from: self.codeLengthCount - 4), 4);
-        let order = codeLengthOrder();
         for i in 0..<self.codeLengthCount {
-            writer.write(UInt64(from: self.codeLengthLengths(order(i))), 3);
+            writer.write(UInt64(from: self.codeLengthLengths(CODE_LENGTH_ORDER(i))), 3);
         }
         let codes = canonicalCodes(self.codeLengthLengths);
         for k in 0..<self.runSymbols.count {

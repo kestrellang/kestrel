@@ -469,7 +469,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
 
         var i = digits.bytes.count - 1;
         while i >= 0 {{
-            result.appendByte(digits.bytes(unchecked: i));
+            result.appendByte(unsafe digits.bytes(unchecked: i));
             i = i - 1
         }}
 
@@ -527,8 +527,10 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// {type_name}(parsing: "-7");    // Some(-7)
     /// {type_name}(parsing: "abc");   // None
     /// ```
-    public init(parsing string: String)? {{
-        let len = string.bytes.count;
+    public init[S](parsing text: S)? where S: Str, S: not Static {{
+        // One view for the whole parse; works on String and StringSlice alike.
+        let bytes = text.bytes;
+        let len = bytes.count;
         if len == 0 {{
             return null
         }}
@@ -536,7 +538,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         var index: Int64 = 0;
         var isNegative = false;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {{
             isNegative = true;
@@ -560,7 +562,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         var result: UInt64 = 0;
 
         while index < len {{
-            let byte: UInt8 = string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             if byteVal < 48 or byteVal > 57 {{
@@ -597,12 +599,14 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// {type_name}(parsing: "101010", radix: 2);  // Some(42)
     /// {type_name}(parsing: "z", radix: 36);      // Some(35)
     /// ```
-    public init(parsing string: String, radix radix: Int64)? {{
+    public init[S](parsing text: S, radix radix: Int64)? where S: Str, S: not Static {{
+        // One view for the whole parse; works on String and StringSlice alike.
+        let bytes = text.bytes;
         if radix < 2 or radix > 36 {{
             return null
         }}
 
-        let len = string.bytes.count;
+        let len = bytes.count;
         if len == 0 {{
             return null
         }}
@@ -610,7 +614,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         var index: Int64 = 0;
         var isNegative = false;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {{
             isNegative = true;
@@ -633,7 +637,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         var result: UInt64 = 0;
 
         while index < len {{
-            let byte: UInt8 = string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {{
@@ -682,15 +686,17 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// let n = {type_name}(parsing: "42");   // Some(42)
     /// let bad = {type_name}(parsing: "-1"); // null (no sign for unsigned)
     /// ```
-    public init(parsing string: String)? {{
-        let len = string.bytes.count;
+    public init[S](parsing text: S)? where S: Str, S: not Static {{
+        // One view for the whole parse; works on String and StringSlice alike.
+        let bytes = text.bytes;
+        let len = bytes.count;
         if len == 0 {{
             return null
         }}
 
         var index: Int64 = 0;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 43 {{
             index = 1
@@ -707,7 +713,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         let maxVal: UInt64 = {max_val_expr};
 
         while index < len {{
-            let byte: UInt8 = string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe bytes(unchecked: index);
             let byteVal = UInt64(from: byte);
 
             if byteVal < 48 or byteVal > 57 {{
@@ -754,19 +760,21 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// let n = {type_name}(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
     /// let m = {type_name}(parsing: "101010", radix: 2);   // Some(42)
     /// ```
-    public init(parsing string: String, radix radix: Int64)? {{
+    public init[S](parsing text: S, radix radix: Int64)? where S: Str, S: not Static {{
+        // One view for the whole parse; works on String and StringSlice alike.
+        let bytes = text.bytes;
         if radix < 2 or radix > 36 {{
             return null
         }}
 
-        let len = string.bytes.count;
+        let len = bytes.count;
         if len == 0 {{
             return null
         }}
 
         var index: Int64 = 0;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 43 {{
             index = 1
@@ -784,7 +792,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         var result: UInt64 = 0;
 
         while index < len {{
-            let byte: UInt8 = string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {{
@@ -852,7 +860,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
         while i < {bc} {{
-            result.append(ptr.offset(by: i).read());
+            result.append(unsafe ptr.offset(by: i).read());
             i = i + 1
         }}
         result
@@ -902,7 +910,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
         while i < {bc} {{
-            ptr.offset(by: i).write(bytes(unchecked: i));
+            unsafe ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }}
         self.raw = value.raw;
@@ -919,7 +927,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         var result: UInt64 = 0;
         var i: Int64 = 0;
         while i < {bc} {{
-            let byteVal = UInt64(from: bytes(unchecked: i));
+            let byteVal = UInt64(from: unsafe bytes(unchecked: i));
             result = (result << 8) | byteVal;
             i = i + 1
         }}
@@ -938,7 +946,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         var i: Int64 = 0;
         while i < {bc} {{
             let shift = i * 8;
-            let byteVal = UInt64(from: bytes(unchecked: i));
+            let byteVal = UInt64(from: unsafe bytes(unchecked: i));
             result = result | (byteVal << shift);
             i = i + 1
         }}
@@ -1046,6 +1054,15 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     parse_method = generate_integer_parse_method(type_name, bits, signed)
 
     result = apply_signed_blocks(template, signed)
+    # The hash word: the value's bits as a UInt64. Unsigned types widen
+    # losslessly (from:); signed types reinterpret (truncating:).
+    if type_name == "UInt64":
+        hash_word = "self"
+    elif signed:
+        hash_word = "UInt64(truncating: self)"
+    else:
+        hash_word = "UInt64(from: self)"
+    result = result.replace("{{HASH_WORD}}", hash_word)
     result = result.replace("{{TYPE_NAME}}", type_name)
     result = result.replace("{{BITS}}", str(bits))
     result = result.replace("{{SIGNEDNESS}}", signedness)
@@ -1133,16 +1150,18 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
     /// __TYPE_NAME__(parsing: "abc");       // None
     /// __TYPE_NAME__(parsing: "");          // None
     /// ```
-    public init(parsing string: String)? {
-        let len = string.bytes.count;
+    public init[S](parsing text: S)? where S: Str, S: not Static {
+        // One view for the whole parse; works on String and StringSlice alike.
+        let bytes = text.bytes;
+        let len = bytes.count;
         if len == 0 {
             return null
         }
 
         if len == 3 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
+            let b0: UInt8 = unsafe bytes(unchecked: 0);
+            let b1: UInt8 = unsafe bytes(unchecked: 1);
+            let b2: UInt8 = unsafe bytes(unchecked: 2);
             let isN0 = Int64(from: b0) == 110 or Int64(from: b0) == 78;
             let isA1 = Int64(from: b1) == 97 or Int64(from: b1) == 65;
             let isN2 = Int64(from: b2) == 110 or Int64(from: b2) == 78;
@@ -1153,9 +1172,9 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         }
 
         if len == 3 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
+            let b0: UInt8 = unsafe bytes(unchecked: 0);
+            let b1: UInt8 = unsafe bytes(unchecked: 1);
+            let b2: UInt8 = unsafe bytes(unchecked: 2);
             let isI = Int64(from: b0) == 105 or Int64(from: b0) == 73;
             let isN = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF = Int64(from: b2) == 102 or Int64(from: b2) == 70;
@@ -1166,10 +1185,10 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         }
 
         if len == 4 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
-            let b3: UInt8 = string.bytes(unchecked: 3);
+            let b0: UInt8 = unsafe bytes(unchecked: 0);
+            let b1: UInt8 = unsafe bytes(unchecked: 1);
+            let b2: UInt8 = unsafe bytes(unchecked: 2);
+            let b3: UInt8 = unsafe bytes(unchecked: 3);
             let isMinus = Int64(from: b0) == 45;
             let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
@@ -1181,10 +1200,10 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         }
 
         if len == 4 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
-            let b3: UInt8 = string.bytes(unchecked: 3);
+            let b0: UInt8 = unsafe bytes(unchecked: 0);
+            let b1: UInt8 = unsafe bytes(unchecked: 1);
+            let b2: UInt8 = unsafe bytes(unchecked: 2);
+            let b3: UInt8 = unsafe bytes(unchecked: 3);
             let isPlus = Int64(from: b0) == 43;
             let isI = Int64(from: b1) == 105 or Int64(from: b1) == 73;
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
@@ -1196,14 +1215,14 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         }
 
         if len == 8 {
-            let b0: UInt8 = string.bytes(unchecked: 0);
-            let b1: UInt8 = string.bytes(unchecked: 1);
-            let b2: UInt8 = string.bytes(unchecked: 2);
-            let b3: UInt8 = string.bytes(unchecked: 3);
-            let b4: UInt8 = string.bytes(unchecked: 4);
-            let b5: UInt8 = string.bytes(unchecked: 5);
-            let b6: UInt8 = string.bytes(unchecked: 6);
-            let b7: UInt8 = string.bytes(unchecked: 7);
+            let b0: UInt8 = unsafe bytes(unchecked: 0);
+            let b1: UInt8 = unsafe bytes(unchecked: 1);
+            let b2: UInt8 = unsafe bytes(unchecked: 2);
+            let b3: UInt8 = unsafe bytes(unchecked: 3);
+            let b4: UInt8 = unsafe bytes(unchecked: 4);
+            let b5: UInt8 = unsafe bytes(unchecked: 5);
+            let b6: UInt8 = unsafe bytes(unchecked: 6);
+            let b7: UInt8 = unsafe bytes(unchecked: 7);
             let isI0 = Int64(from: b0) == 105 or Int64(from: b0) == 73;
             let isN1 = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF2 = Int64(from: b2) == 102 or Int64(from: b2) == 70;
@@ -1221,7 +1240,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         var index: Int64 = 0;
         var isNegative = false;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {
             isNegative = true;
@@ -1239,7 +1258,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
         var mantissa = Array[UInt32]();
         var hasDigits = false;
         var fracCount: Int64 = 0;
-        var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
+        var currentByte: Int64 = Int64(from: unsafe bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
             mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
@@ -1247,14 +1266,14 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             hasDigits = true;
             index = index + 1;
             if index < len {
-                currentByte = Int64(from: string.bytes(unchecked: index))
+                currentByte = Int64(from: unsafe bytes(unchecked: index))
             }
         }
 
         if index < len and currentByte == 46 {
             index = index + 1;
             if index < len {
-                currentByte = Int64(from: string.bytes(unchecked: index));
+                currentByte = Int64(from: unsafe bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
                     mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
                     mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
@@ -1262,7 +1281,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
                     hasDigits = true;
                     index = index + 1;
                     if index < len {
-                        currentByte = Int64(from: string.bytes(unchecked: index))
+                        currentByte = Int64(from: unsafe bytes(unchecked: index))
                     }
                 }
             }
@@ -1282,18 +1301,18 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             }
 
             var expNegative = false;
-            currentByte = Int64(from: string.bytes(unchecked: index));
+            currentByte = Int64(from: unsafe bytes(unchecked: index));
 
             if currentByte == 45 {
                 expNegative = true;
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.bytes(unchecked: index))
+                    currentByte = Int64(from: unsafe bytes(unchecked: index))
                 }
             } else if currentByte == 43 {
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.bytes(unchecked: index))
+                    currentByte = Int64(from: unsafe bytes(unchecked: index))
                 }
             }
 
@@ -1314,7 +1333,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
                 hasExpDigit = true;
                 index = index + 1;
                 if index < len {
-                    currentByte = Int64(from: string.bytes(unchecked: index))
+                    currentByte = Int64(from: unsafe bytes(unchecked: index))
                 }
             }
 
@@ -1531,7 +1550,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
             var expIndex: Int64 = -1;
             var i: Int64 = 0;
             while i < len {
-                let b = number.bytes(unchecked: i);
+                let b = unsafe number.bytes(unchecked: i);
                 let v = Int64(from: b);
                 if v == 46 {  // '.'
                     dotIndex = i
@@ -1546,7 +1565,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
                 let endIndex: Int64 = if expIndex >= 0 { expIndex } else { len };
                 var trimEnd = endIndex;
                 while trimEnd > dotIndex + 1 {
-                    let b = number.bytes(unchecked: trimEnd - 1);
+                    let b = unsafe number.bytes(unchecked: trimEnd - 1);
                     if Int64(from: b) == 48 {
                         trimEnd = trimEnd - 1
                     } else {

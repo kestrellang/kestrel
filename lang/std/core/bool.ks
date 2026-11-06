@@ -5,7 +5,7 @@ module std.core
 import std.ffi.(FFISafe)
 import std.core.(Hashable, Hasher)
 import std.text.(String, StringBuilder, Formatter, FormatOptions, Formattable)
-import std.numeric.(UInt8, Int64)
+import std.numeric.(UInt8, Int64, UInt64)
 import std.memory.(Pointer)
 import std.collections.(Slice)
 
@@ -75,14 +75,9 @@ public struct Bool:
     // HASHING
     // ========================================================================
 
-    /// Feeds a single `0` or `1` byte into `hasher`. Compatible with how the
-    /// stdlib hashes other primitives — equal `Bool`s always hash equal.
+    /// Feeds `1` or `0` into `hasher` as one word (`write(uint64:)`).
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        if self.value {
-            hasher.write(unsafe Slice.lend(start: Pointer(to: 1), count: 1))
-        } else {
-            hasher.write(unsafe Slice.lend(start: Pointer(to: 0), count: 1))
-        }
+        hasher.write(uint64: if self.value { 1 } else { 0 })
     }
 
     // ========================================================================

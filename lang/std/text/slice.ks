@@ -244,7 +244,10 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
     }
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(unsafe Slice.lend(start: self._rawPtr().offset(by: self.start), count: (self.end - self.start)))
+        let count = self.end - self.start;
+        hasher.write(unsafe Slice.lend(start: self._rawPtr().offset(by: self.start), count: count));
+        // Length terminator, as in `String.hash`.
+        hasher.write(uint64: UInt64(truncating: count))
     }
 
     public func clone() -> StringSlice {

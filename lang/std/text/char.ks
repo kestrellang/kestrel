@@ -3,7 +3,7 @@
 module std.text
 
 import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral, Hashable, Hasher, RangeMatchable)
-import std.numeric.(Int64, UInt8, UInt32)
+import std.numeric.(Int64, UInt8, UInt32, UInt64)
 import std.result.(Optional)
 import std.collections.(Array, Slice)
 import std.memory.(Pointer)
@@ -453,13 +453,9 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
         self._value.compare(other._value)
     }
 
-    /// Hashes this character by writing its 4-byte scalar value to the hasher.
-    ///
-    /// Uses native byte order — fine for in-process hash maps; do not
-    /// use the result for content-addressed storage.
+    /// Hashes this character by writing its scalar value as one word.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let val = self._value;
-        hasher.write(unsafe Slice.lend(start: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
+        hasher.write(uint64: UInt64(from: self._value))
     }
 
     /// Returns true if `self >= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.

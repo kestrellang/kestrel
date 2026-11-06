@@ -30,9 +30,13 @@ public struct StandardInput: Readable {
     /// input. Invalid UTF-8 becomes U+FFFD.
     public mutating func readLine() -> Result[Optional[String], IoError] {
         var bytes = Array[UInt8]();
+        // One scratch byte for the whole line: `readByte` would allocate
+        // per byte. The C side buffers fd 0, so each read is a memcpy.
+        var one = Array[UInt8](repeating: 0, count: 1);
         var sawAny = false;
-        while let .Some(b) = try self.readByte() {
+        while try self.read(into: one.asMutableSlice()) > 0 {
             sawAny = true;
+            let b = unsafe one(unchecked: 0);
             if b == 10 {
                 break
             }

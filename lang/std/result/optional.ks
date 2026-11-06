@@ -623,14 +623,12 @@ extend Optional[T]: Hashable where T: Hashable {
         match self {
             .Some(value) => {
                 // Write 1 to indicate Some
-                let marker: Int64 = 1;
-                hasher.write(unsafe Slice.lend(start: Pointer(to: marker).asRaw().cast[UInt8](), count: 8));
+                hasher.write(uint64: 1);
                 value.hash(into: hasher)
             },
             .None => {
                 // Write 0 to indicate None
-                let marker: Int64 = 0;
-                hasher.write(unsafe Slice.lend(start: Pointer(to: marker).asRaw().cast[UInt8](), count: 8))
+                hasher.write(uint64: 0)
             }
         }
     }

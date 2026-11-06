@@ -56,12 +56,13 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// The path without its last component: `/a/b` → `/a`, `/a` → `/`.
     /// `None` for `/`, the empty path, or a single relative component.
     public var parent: Optional[Path] {
-        let b = self.trimmed();
-        var i = b.count - 1;
+        let b = self.text.asByteSlice();
+        let count = self.trimmedCount();
+        var i = count - 1;
         while i >= 0 and unsafe b(unchecked: i) != slash() {
             i = i - 1
         }
-        if i < 0 or b.count == 1 {
+        if i < 0 or count == 1 {
             return .None
         }
         var end = i;
@@ -77,15 +78,16 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// The last component: `b.tar.gz` for `/a/b.tar.gz`. `None` for `/`,
     /// the empty path, or a path ending in `..`.
     public var name: Optional[String] {
-        let b = self.trimmed();
-        var i = b.count;
+        let b = self.text.asByteSlice();
+        let count = self.trimmedCount();
+        var i = count;
         while i > 0 and unsafe b(unchecked: i - 1) != slash() {
             i = i - 1
         }
-        if i == b.count {
+        if i == count {
             return .None
         }
-        let last = textOf(b(i..<b.count));
+        let last = textOf(b(i..<count));
         if last == "." or last == ".." { .None } else { .Some(last) }
     }
 
@@ -93,7 +95,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     public var stem: Optional[String] {
         let name = match self.name { .Some(n) => n, .None => return .None };
         match extensionDot(name) {
-            .Some(dot) => .Some(textOf(textBytes(name)(0..<dot))),
+            .Some(dot) => .Some(textOf(name.asByteSlice()(0..<dot))),
             .None => .Some(name)
         }
     }
@@ -103,7 +105,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     public var extension: Optional[String] {
         let name = match self.name { .Some(n) => n, .None => return .None };
         let dot = match extensionDot(name) { .Some(d) => d, .None => return .None };
-        let b = textBytes(name);
+        let b = name.asByteSlice();
         .Some(textOf(b((dot + 1)..<b.count)))
     }
 
@@ -114,7 +116,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
         if self.isAbsolute {
             parts.append("/")
         }
-        let b = textBytes(self.text);
+        let b = self.text.asByteSlice();
         var start: Int64 = 0;
         var i: Int64 = 0;
         while i <= b.count {
@@ -270,24 +272,20 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
         _writePadded(into: writer, self.text.clone(), options)
     }
 
-    /// The bytes without trailing slashes, except a lone `/`.
-    func trimmed() -> Array[UInt8] {
-        var b = textBytes(self.text);
-        while b.count > 1 and unsafe b(unchecked: b.count - 1) == slash() {
-            b.pop();
+    /// The byte count without trailing slashes, except a lone `/`.
+    /// Callers index `self.text.asByteSlice()` up to it, so no copy is made.
+    func trimmedCount() -> Int64 {
+        let b = self.text.asByteSlice();
+        var n = b.count;
+        while n > 1 and unsafe b(unchecked: n - 1) == slash() {
+            n = n - 1
         }
-        b
+        n
     }
 }
 
 /// `/`.
 internal func slash() -> UInt8 { 47 }
-
-/// The bytes of `text`.
-internal func textBytes(text: String) -> Array[UInt8] {
-    let raw = text.asByteSlice();
-    unsafe Slice.lend(start: raw.pointer, count: raw.count).toArray()
-}
 
 /// `bytes` as a `String`, kept as is even when not UTF-8.
 internal func textOf(bytes: Slice[UInt8]) -> String {
@@ -303,7 +301,7 @@ internal func textFromNative(raw: RawPointer) -> String {
 /// The index of the dot that starts `name`'s extension, if any. A dot at
 /// index 0 (`.profile`) doesn't count.
 internal func extensionDot(name: String) -> Optional[Int64] {
-    let b = textBytes(name);
+    let b = name.asByteSlice();
     var i = b.count - 1;
     while i > 0 {
         if unsafe b(unchecked: i) == 46 {
