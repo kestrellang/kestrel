@@ -119,9 +119,11 @@ pub struct InferCtx<'a> {
     /// never see a ref. Patterns stay wired directly to the scrutinee var.
     pub(crate) scrutinee_exprs: HashSet<HirExprId>,
 
-    /// The scrutinees whose arms write through a `&mutating` binder: a
-    /// failable member read there goes through its `mutating ref`.
-    pub(crate) mutating_scrutinee_exprs: HashSet<HirExprId>,
+    /// Reads in a context that needs a mutable place: a scrutinee whose arms
+    /// write through a `&mutating` binder, or a value returned as
+    /// `&mutating T`. A place member read there goes through its `mutating
+    /// ref` and is typed `&mutating T` (`Optional[&mutating T]` failable).
+    pub(crate) mutating_place_reads: HashSet<HirExprId>,
 
     /// HirExprIds that are a `Call`'s direct callee. A direct callee Def
     /// legitimately carries `TyKind::Function { ret: Ref }` — exempted from
@@ -235,6 +237,10 @@ pub struct InferCtx<'a> {
     /// The `for_loop_iter_calls` whose iterable is itself an `Iterator`.
     /// Surfaced on `TypedBody.direct_iterators`.
     pub(crate) direct_iterators: HashSet<HirExprId>,
+
+    /// Place reads typed `&mutating T` (see `mutating_place_reads`).
+    /// Surfaced on `TypedBody.mutating_lends`.
+    pub(crate) mutating_lends: HashSet<HirExprId>,
 
     /// Expressions whose `Optional[&T]` value decays to `Optional[T]`: bound
     /// initializers and operator receivers. Surfaced on `TypedBody.optional_ref_decays`.
@@ -509,7 +515,7 @@ impl<'a> InferCtx<'a> {
             error_is_cascade: Vec::new(),
             errored_coerce_exprs: HashSet::default(),
             scrutinee_exprs: HashSet::default(),
-            mutating_scrutinee_exprs: HashSet::default(),
+            mutating_place_reads: HashSet::default(),
             assign_target_exprs: HashSet::default(),
             place_assign_values: HashSet::default(),
             always_decay_exprs: HashSet::default(),
@@ -529,6 +535,7 @@ impl<'a> InferCtx<'a> {
             poison_protocol_call_recv_on_failure: HashSet::default(),
             for_loop_iter_calls: HashSet::default(),
             direct_iterators: HashSet::default(),
+            mutating_lends: HashSet::default(),
             optional_ref_decays: HashSet::default(),
             call_return_tvs: HashMap::default(),
             protocol_dispatch_members: HashSet::default(),
