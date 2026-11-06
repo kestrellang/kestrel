@@ -581,6 +581,47 @@ impl OssaBodyCtx<'_, '_> {
         None
     }
 
+    /// The member of a protocol EXTENSION that `method` names — an
+    /// extension-only place or method, which a witness table also carries
+    /// but [`Self::find_protocol_method_entity`] (requirements only) can't
+    /// see. A ref slot (`alias.ref`) answers with its RefAccessor child.
+    pub(crate) fn find_protocol_extension_member(
+        &self,
+        protocol: Entity,
+        method: &WitnessMethodKey,
+    ) -> Option<Entity> {
+        if let Some((member, mutating)) = crate::context::parse_ref_witness_name(&method.name) {
+            let key = WitnessMethodKey::new(member.to_string(), method.labels.clone());
+            let parent = self.find_protocol_extension_member(protocol, &key)?;
+            return self.ctx.find_ref_accessor_child(parent, mutating);
+        }
+        let extensions = self
+            .ctx
+            .query
+            .query(kestrel_name_res::extensions::ExtensionsFor {
+                target: protocol,
+                root: self.ctx.root,
+            });
+        extensions.iter().find_map(|&ext| {
+            self.ctx
+                .world
+                .children_of(ext)
+                .iter()
+                .copied()
+                .find(|&child| {
+                    kestrel_name_res::helpers::member_lookup_name(&self.ctx.query, child)
+                        == Some(method.name.as_str())
+                        && self
+                            .ctx
+                            .world
+                            .get::<Callable>(child)
+                            .map_or(method.labels.is_empty(), |c| {
+                                c.params.iter().map(|p| &p.label).eq(method.labels.iter())
+                            })
+                })
+        })
+    }
+
     /// Unified type-arg resolution for calls.
     pub(crate) fn resolve_call_type_args(
         &mut self,

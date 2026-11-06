@@ -3647,6 +3647,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 protocol, method, ..
             } => self
                 .find_protocol_method_entity(*protocol, method)
+                .or_else(|| self.find_protocol_extension_member(*protocol, method))
                 .and_then(|entity| {
                     self.ctx.query.query(kestrel_hir_lower::CallableRefReturn {
                         entity,
