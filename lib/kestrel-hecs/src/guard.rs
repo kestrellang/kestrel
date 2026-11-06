@@ -4,10 +4,10 @@
 //! # Why this exists
 //!
 //! Several places in the compiler bracket a piece of work between a "push"
-//! and a "pop" of some side state: the query framework's active-query stack
-//! (cycle detection), `OPAQUE_RESOLVE_STACK` in `kestrel-mir-lower`,
-//! `COMPUTING_COPY_SEMANTICS` / `COMPUTING_STATICNESS` in
-//! `kestrel-semantics`. A hand-written pop after the work is skipped when
+//! and a "pop" of some side state, chiefly the query framework's
+//! active-query stack (cycle detection). Recursive types once kept their own
+//! thread-local stacks too; those now use query cycle recovery
+//! (`CycleMode`) instead. A hand-written pop after the work is skipped when
 //! the work panics — and the compiler has **five hosts that catch panics
 //! and keep going** (`CompilerDriver::infer_all`, the LSP compiler worker,
 //! the test-suite harness, and the two codegen backends' per-function

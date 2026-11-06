@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use kestrel_copy_fold::{CopyLayer, CopySem, CopySemantics, instance_semantics};
+use kestrel_copy_fold::{ConditionalCopy, CopyLayer, CopySem, CopySemantics, instance_semantics};
 use kestrel_hecs::Entity;
 
 use crate::item::function::{WhereClause, WhereConstraint};
@@ -70,7 +70,7 @@ impl<'a> TypeEnv<'a> {
     /// A nominal's generic copy behavior and conditional-Copyable gating
     /// positions, from whichever of the struct / enum maps holds it.
     /// Unknown entity -> Bitwise with no gating (the `Named` fallback).
-    pub fn nominal_copy(&self, entity: Entity) -> (CopyBehavior, &'a [usize]) {
+    pub fn nominal_copy(&self, entity: Entity) -> (CopyBehavior, &'a ConditionalCopy) {
         nominal_copy_in(self.structs, self.enums, entity)
     }
 }
@@ -81,14 +81,18 @@ pub(crate) fn nominal_copy_in<'a>(
     structs: &'a IndexMap<Entity, StructDef>,
     enums: &'a IndexMap<Entity, EnumDef>,
     entity: Entity,
-) -> (CopyBehavior, &'a [usize]) {
+) -> (CopyBehavior, &'a ConditionalCopy) {
+    static UNGATED: ConditionalCopy = ConditionalCopy {
+        positions: Vec::new(),
+        clone_only: false,
+    };
     if let Some(s) = structs.get(&entity) {
         return (s.type_info.copy.clone(), &s.conditionally_copyable);
     }
     if let Some(e) = enums.get(&entity) {
         return (e.type_info.copy.clone(), &e.conditionally_copyable);
     }
-    (CopyBehavior::Bitwise, &[])
+    (CopyBehavior::Bitwise, &UNGATED)
 }
 
 impl CopyLayer for MirCopyLayer<'_> {
@@ -99,7 +103,7 @@ impl CopyLayer for MirCopyLayer<'_> {
         self.env.nominal_copy(entity).0
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, ConditionalCopy> {
         Cow::Borrowed(self.env.nominal_copy(entity).1)
     }
 
@@ -363,7 +367,7 @@ pub fn copy_is_mono_dependent_by(
     module: &MirModule,
     ty: TyId,
     where_clause: Option<&WhereClause>,
-    gating_of: &dyn Fn(Entity) -> Option<Vec<usize>>,
+    gating_of: &dyn Fn(Entity) -> Option<ConditionalCopy>,
 ) -> bool {
     match arena.get(ty) {
         MirTy::TypeParam(entity) => {
@@ -399,7 +403,7 @@ pub fn copy_is_mono_dependent_by(
                 return false;
             };
             // Only gating positions affect the container's copyability.
-            gating.iter().any(|&pos| {
+            gating.positions.iter().any(|&pos| {
                 type_args.get(pos).is_some_and(|&arg| {
                     copy_is_mono_dependent_by(arena, module, arg, where_clause, gating_of)
                 })

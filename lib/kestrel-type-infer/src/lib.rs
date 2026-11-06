@@ -21,6 +21,7 @@ pub mod error;
 mod existential;
 pub mod generate;
 pub mod obligations;
+pub mod opaque;
 mod optional_chain;
 mod pipe;
 pub mod resolve;
@@ -50,6 +51,7 @@ pub use conformance::{
     extension_bounds_hold, resolved_satisfies, type_satisfies, type_test_blocker,
 };
 pub use error::describe_fn_kind;
+pub use opaque::{OpaqueConcrete, OpaqueConcreteTy, origin_type_params, substitute_resolved_ty};
 
 /// Resolve the logical enclosing container for a function-like entity.
 /// Setters have an `EnclosingContainer` component set at build time;
