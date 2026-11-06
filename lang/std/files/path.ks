@@ -237,7 +237,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// The absolute path with every symbolic link, `.` and `..` resolved
     /// (`realpath(3)`). The path must exist.
     public func canonical() -> Result[Path, IoError] {
-        let cpath = self.text.toCString();
+        let cpath = try self.text.toNativeString();
         let resolved = unsafe native_canonical(cpath.raw.asRaw());
         let error = IoError.last();
         cpath.free();
@@ -294,7 +294,8 @@ internal func textOf(bytes: Slice[UInt8]) -> String {
     String(fromUtf8Unchecked: bytes)
 }
 
-/// The text of a NUL-terminated C string.
+/// The text of a NUL-terminated C string, with invalid UTF-8 replaced by
+/// U+FFFD.
 internal func textFromNative(raw: RawPointer) -> String {
     String(from: CString(raw: raw.cast[UInt8]()))
 }

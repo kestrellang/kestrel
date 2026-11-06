@@ -56,12 +56,24 @@ public enum Directory {
     }
 
     /// Removes `path` and everything in it (`rm -r`). Symbolic links are
-    /// removed, never followed.
+    /// removed, never followed, and that includes `path` itself: if it's a
+    /// link to a directory, the link goes and the directory stays.
     public static func removeAll(path: Path) -> Result[(), IoError] {
+        // `entries` opens `path` with `opendir`, which follows a link, so
+        // check the argument with `lstat` first.
+        if (try symbolicLinkMetadata(path)).isSymbolicLink {
+            return withNativePath(path, { (p) in unsafe native_unlink(p) })
+        }
+        Directory.removeTree(path)
+    }
+
+    /// `removeAll` below the top level. Entry kinds come from the
+    /// directory listing, which doesn't follow links.
+    fileprivate static func removeTree(path: Path) -> Result[(), IoError] {
         for entry in try Directory.entries(path) {
             let entry = try entry;
             if entry.kind == .Directory {
-                try Directory.removeAll(entry.path)
+                try Directory.removeTree(entry.path)
             } else {
                 // A bare `remove` here would name `Directory.remove`, so
                 // unlink directly.
@@ -74,7 +86,7 @@ public enum Directory {
     /// The entries of `path`, read lazily, without `.` and `..`, in the
     /// order the file system returns them.
     public static func entries(path: Path) -> Result[DirectoryEntries, IoError] {
-        let cpath = path.text.toCString();
+        let cpath = try path.text.toNativeString();
         let dir = unsafe native_directory_open(cpath.raw.asRaw());
         let error = IoError.last();
         cpath.free();
@@ -94,7 +106,7 @@ public enum Directory {
         }
         template.append(prefix);
         template.append("XXXXXX");
-        let ctemplate = template.toCString();
+        let ctemplate = try template.toNativeString();
         let r = unsafe native_make_temporary_directory(ctemplate.raw.asRaw());
         let error = IoError.last();
         let made = textFromNative(ctemplate.raw.asRaw());

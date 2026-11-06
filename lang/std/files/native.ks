@@ -78,7 +78,7 @@ internal func native_chmod(path: RawPointer, mode: Int32) -> Int32
 /// Runs `body` with `path` as a NUL-terminated C string, freed afterwards.
 /// `body` returns a C result: negative means failure, read from errno.
 internal func withNativePath(path: Path, body: (RawPointer) -> Int32) -> Result[(), IoError] {
-    let cpath = path.text.toCString();
+    let cpath = try path.text.toNativeString();
     let r = body(cpath.raw.asRaw());
     let error = IoError.last();
     cpath.free();

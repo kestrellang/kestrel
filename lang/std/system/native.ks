@@ -116,7 +116,7 @@ internal func native_is_little_endian() -> Int32
 // ============================================================================
 
 /// Copies a NUL-terminated C string into a `String`. `None` for a null
-/// pointer. Bytes are copied as-is; no UTF-8 check.
+/// pointer. Invalid UTF-8 becomes U+FFFD.
 internal func stringFromNative(raw: RawPointer) -> Optional[String] {
     if raw.isNull {
         return .None

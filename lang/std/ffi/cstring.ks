@@ -27,6 +27,7 @@ import std.ffi.(FFISafe, malloc, free, memcpy)
 import std.numeric.(Int64, UInt8)
 import std.memory.(Pointer, RawPointer)
 import std.core.(Convertible, Bool)
+import std.collections.(Slice)
 import std.text.(String)
 
 /// A null-terminated, non-owning byte pointer suitable for `@extern(.C)` boundaries.
@@ -187,6 +188,11 @@ extend String: Convertible[CString] {
     /// @name From CString
     /// Builds a `String` by copying the bytes out of `cstring`, excluding the null terminator.
     ///
+    /// Bytes that aren't valid UTF-8 become U+FFFD, as with
+    /// `String(fromUtf8Lossy:)`, so the result is always a valid
+    /// `String`: C strings such as file names and environment values are
+    /// often not UTF-8.
+    ///
     /// O(n) — `cstring.length` walks to the terminator and the byte
     /// copy is linear. Empty `CString`s (length zero) yield the
     /// default empty `String` without touching the pointer.
@@ -207,8 +213,11 @@ extend String: Convertible[CString] {
         if cstring.length == 0 {
             self.init();
         } else {
-            // Copy bytes from CString (excluding null terminator)
-            self = String.fromBytesUnchecked(cstring.raw, cstring.length);
+            // Copy bytes from CString (excluding null terminator). The
+            // checked copy is the fast path; only invalid input pays for
+            // the lossy decode.
+            let bytes = unsafe Slice.lend(start: cstring.raw, count: cstring.length);
+            self = String(fromUtf8: bytes) ?? String(fromUtf8Lossy: bytes);
         }
     }
 }

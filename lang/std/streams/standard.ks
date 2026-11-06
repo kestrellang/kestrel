@@ -75,12 +75,19 @@ public struct StandardOutput: Writable {
 }
 
 /// The process's standard error. Unbuffered, so diagnostics appear at once.
+///
+/// Each write flushes standard output's buffer first. That keeps the two
+/// streams in order when they share a pipe or file, and it means the
+/// output a program printed before a `fatalError` (which writes here and
+/// then traps, skipping `atexit`) isn't lost.
 public struct StandardError: Writable {
     /// @name Default
     public init() {}
 
-    /// Writes `buf` to fd 2.
+    /// Flushes standard output, then writes `buf` to fd 2.
     public mutating func write(from buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        // Best effort: a failed stdout flush mustn't hide the diagnostic.
+        let _ = flushStandardOutput();
         let n = unsafe native_stream_write(2, buf.pointer.asRaw(), buf.count);
         if n < 0 {
             return .Err(IoError.last())

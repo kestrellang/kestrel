@@ -376,6 +376,10 @@ public struct Command: not Copyable {
 
     /// Spawns with each stream's explicit setting, or the given default.
     func spawn(defaultInput: Stdio, defaultOutput: Stdio, defaultError: Stdio) -> Result[Child, IoError] {
+        // C would cut each of these at a NUL byte and run something else.
+        if self.hasNulByte() {
+            return .Err(IoError(kind: .InvalidInput))
+        }
         var argv = Array[String](capacity: self.argumentList.count + 1);
         argv.append(self.program.clone());
         for arg in self.argumentList {
@@ -423,6 +427,25 @@ public struct Command: not Copyable {
     }
 
     /// The child's `envp`, or `None` to inherit this process's unchanged.
+    /// `true` when the program, an argument, the working directory or an
+    /// environment change holds a NUL byte.
+    func hasNulByte() -> Bool {
+        if self.program.containsNulByte { return true }
+        for arg in self.argumentList {
+            if arg.containsNulByte { return true }
+        }
+        if let .Some(dir) = self.workingDirectory {
+            if dir.containsNulByte { return true }
+        }
+        for change in self.environmentChanges {
+            if change.0.containsNulByte { return true }
+            if let .Some(value) = change.1 {
+                if value.containsNulByte { return true }
+            }
+        }
+        false
+    }
+
     func childEnvironment() -> Optional[NativeStringArray] {
         if not self.clearsEnvironment and self.environmentChanges.isEmpty {
             return .None
@@ -471,6 +494,7 @@ internal func native_access(path: RawPointer, mode: Int32) -> Int32
 
 /// True if `path` names a file this process may execute (`X_OK` is 1).
 internal func isExecutable(path: String) -> Bool {
+    if path.containsNulByte { return false }
     let cpath = path.toCString();
     let result = unsafe native_access(cpath.raw.asRaw(), 1);
     cpath.free();
