@@ -353,13 +353,15 @@ extend Str {
     /// zero-copy `StringSlice` segments.
     ///
     /// The empty separator is special-cased to split per code
-    /// point. Adjacent separators produce empty segments.
+    /// point. Adjacent separators produce empty segments, as does a
+    /// separator at either end. An empty string has no segments.
     ///
     /// # Examples
     ///
     /// ```
     /// "a,b,c".split(",").collect();   // ["a", "b", "c"]
     /// "a,,b".split(",").count;        // 3 (empty segment preserved)
+    /// "a,".split(",").count;          // 2 (["a", ""])
     /// ```
     public func split(separator: some Str and not Static) -> SplitView {
         SplitView(slice: self.asSlice(), separator: separator.asSlice())

@@ -1760,7 +1760,10 @@ extend Array[T] where T: Formattable {
     }
 }
 
-// Formattable: provided by extend Sliceable[T] where T: Formattable
+/// Renders as `"[e1, e2, ...]"`, so arrays work in string interpolation and
+/// `print`. The `format` witness comes from `extend Sliceable[T] where
+/// T: Formattable`.
+extend Array[T]: Formattable where T: Formattable {}
 
 // ============================================================================
 // DIRECT ITERABLE CONFORMANCE
