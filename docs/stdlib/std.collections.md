@@ -2334,16 +2334,16 @@ _Defined in `lang/std/collections/deque.ks`._
 #### function `asSlices`
 
 ```kestrel
-public func asSlices() -> (UnsafeSlice[T], UnsafeSlice[T])
+public func asSlices() -> (&Slice[T], &Slice[T])
 ```
 
 Returns the two contiguous slices that make up the ring buffer.
 
 If the buffer doesn't wrap, the first slice contains all elements
 and the second is empty. If it wraps, the first slice covers
-head-to-end and the second covers start-to-tail. Useful for
-bulk operations that need pointer-contiguous access without
-copying.
+head-to-end and the second covers start-to-tail. Both lend the
+deque's storage in place: nothing is copied, and they are only
+valid until the deque next changes.
 
 ##### Examples
 
