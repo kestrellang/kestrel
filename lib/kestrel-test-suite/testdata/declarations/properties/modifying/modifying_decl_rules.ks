@@ -39,7 +39,7 @@ protocol Named {
 }
 
 extend Named {
-    var cached: Int64 { // ERROR(E621): `ref` and `modifying` accessors are not allowed in protocols
+    var cached: Int64 { // ERROR(E621): a protocol requires `ref` / `mutating ref` with bodyless clauses
         modifying get { 1 }
     }
 }

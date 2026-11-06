@@ -198,7 +198,7 @@ _Defined in `lang/std/io/file.ks`._
 #### function `read`
 
 ```kestrel
-public mutating func read(into: ArraySlice[UInt8]) -> Result[Int64, IoError]
+public mutating func read(into: mutating Slice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Calls `read(2)`. Advances the file position by the byte count
@@ -226,7 +226,7 @@ _Defined in `lang/std/io/file.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(from: ArraySlice[UInt8]) -> Result[Int64, IoError]
+public mutating func write(from: UnsafeSlice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Calls `write(2)`. May write fewer bytes than supplied — wrap with

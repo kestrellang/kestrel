@@ -5,7 +5,7 @@ module std.io.write
 import std.numeric.(Int64, UInt8)
 import std.result.(Result)
 import std.memory.(UnsafeSlice, Pointer)
-import std.collections.(Array, ArraySlice)
+import std.collections.(Array, Slice)
 import std.text.(String)
 import std.core.(Bool)
 import std.io.error.(IoError, brokenPipe)
@@ -155,7 +155,7 @@ public struct Buffer: Writable, Cloneable {
     /// A read-only slice of the buffered bytes. It borrows the buffer, so
     /// the compiler keeps it from outliving it; copy via `toArray` to keep
     /// the bytes.
-    public func asSlice() -> ArraySlice[UInt8] {
+    public func asSlice() -> &Slice[UInt8] {
         self.data.asSlice()
     }
 

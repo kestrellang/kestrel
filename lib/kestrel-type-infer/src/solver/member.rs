@@ -330,9 +330,9 @@ pub(super) fn member_not_found_error(
 /// Lazy `Indirection` member peel. When member `name` was not found on the
 /// concrete nominal `recv_kind`, but its entity conforms to the `Indirection`
 /// protocol, this:
-///   1. resolves the concrete `pointeeRef`/`pointeeMutRef` accessors on the
-///      wrapper and records an `IndirectionPeel` for MIR (appending → the
-///      outer→inner chain for nested wrappers), and
+///   1. records an `IndirectionPeel` for MIR with the `value` requirement's
+///      `ref` / `mutating ref` accessors (appending → the outer→inner chain
+///      for nested wrappers), and
 ///   2. emits an `Associated` constraint binding a fresh TyVar to the
 ///      wrapper's `Indirection.Target` (reusing `solve_associated`),
 ///
@@ -366,19 +366,40 @@ pub(crate) fn try_indirection_peel(
         return None;
     }
 
-    // Resolve the concrete pointee accessors on the wrapper (for MIR replay).
-    // `pointeeRef` is required by `Indirection`; `pointeeMutRef` only exists on
-    // `MutableIndirection` conformers (None ⇒ read-only ⇒ writes are D2).
-    let read_method = ctx
+    // The pointee accessors MIR replays: the wrapper's own `value` accessors
+    // when it declares them (a direct call), else the protocol requirements'
+    // (witness dispatch: a stored `value`). The write accessor exists only
+    // for a `MutableIndirection` conformer (None ⇒ read-only ⇒ writes are D2).
+    let place = ctx
         .resolver
-        .resolve_member(recv_kind, "pointeeRef", &[])
-        .ok()?
-        .entity;
-    let mut_method = ctx
-        .resolver
-        .resolve_member(recv_kind, "pointeeMutRef", &[])
+        .resolve_member(recv_kind, kestrel_hir::INDIRECTION_PLACE, &[])
         .ok()
         .map(|r| r.entity);
+    let accessor = |mutating: bool| {
+        place
+            .and_then(|p| {
+                ctx.query_ctx.children_of(p).iter().copied().find(|&c| {
+                    ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(c)
+                        == Some(&kestrel_ast_builder::NodeKind::RefAccessor)
+                        && ctx
+                            .query_ctx
+                            .has::<kestrel_ast_builder::MutatingAccessor>(c)
+                            == mutating
+                })
+            })
+            .or_else(|| crate::indirection_accessor(ctx.query_ctx, ctx.root, mutating))
+    };
+    let mutable = ctx
+        .query_ctx
+        .query(ResolveBuiltin {
+            builtin: Builtin::MutableIndirection,
+            root: ctx.root,
+        })
+        .is_some_and(|mutable| {
+            crate::conformance::type_satisfies(ctx.query_ctx, &w_hir, mutable, ctx.root)
+        });
+    let read_method = accessor(false)?;
+    let mut_method = if mutable { accessor(true) } else { None };
 
     // Pointee type = wrapper's `Indirection.Target`. Reuse the assoc-type
     // machinery via an `Associated` constraint on a fresh TyVar.
@@ -466,6 +487,46 @@ pub(super) fn solve_member(
             explicit_type_args,
             span,
         );
+    }
+
+    // An operator on a lent `Optional[&T]` (`xs.first() ?? 0`,
+    // `b(checked: 1) == .Some(5)`) works on the copied-out `Optional[T]`, as
+    // a binding would: the receiver expression decays (`optional_ref_decays`).
+    if let Some(&recv_expr) = ctx.operator_receivers.get(&expr)
+        && let Some((optional, pointee)) = super::equality::optional_ref_pointee(ctx, resolved)
+    {
+        match super::pointee_sizedness(ctx, pointee) {
+            Some(true) => {
+                ctx.optional_ref_decays.insert(recv_expr);
+                let decayed = ctx.named(optional, vec![pointee]);
+                return solve_member(
+                    ctx,
+                    decayed,
+                    name,
+                    args,
+                    result,
+                    expr,
+                    is_call,
+                    is_static_context,
+                    explicit_type_args,
+                    span,
+                );
+            },
+            None => {
+                return SolveResult::Deferred(Constraint::Member {
+                    receiver,
+                    name: name.to_string(),
+                    args,
+                    result,
+                    expr,
+                    is_call,
+                    is_static_context,
+                    explicit_type_args: explicit_type_args.to_vec(),
+                    span,
+                });
+            },
+            Some(false) => {},
+        }
     }
 
     // Existential receiver (`B[rawany P]`): protocol members first, then
@@ -784,6 +845,27 @@ pub(super) fn solve_member(
             name: name.to_string(),
             span,
         });
+    }
+
+    // `@sugarOnly`: outside its protocol's module the requirement (and every
+    // witness of it) is reached only through its syntax, which marks its
+    // lookups as protocol dispatch.
+    if !ctx.protocol_dispatch_members.contains(&expr)
+        && let Some(requirement) = kestrel_name_res::sugar_only_hidden(
+            ctx.query_ctx,
+            resolution.entity,
+            ctx.owner,
+            ctx.root,
+        )
+    {
+        ctx.poison(result);
+        return SolveResult::Error(crate::error::sugar_only_error(
+            ctx.query_ctx,
+            requirement,
+            name,
+            receiver,
+            &span,
+        ));
     }
 
     // Applicability (bidi §5.1 steps 4 and 6): the declaring extension's
@@ -1388,7 +1470,8 @@ pub(super) fn solve_member(
         Some(_) if wraps_ref => ctx.ref_ty(ret_tv, false),
         _ => ret_tv,
     };
-    bind_call_result(ctx, result, ret_tv, expr, span.clone());
+    let args_decay = !matches!(resolution.kind, crate::resolve::MemberKind::Field { .. });
+    bind_call_result(ctx, result, ret_tv, expr, span.clone(), args_decay);
 
     SolveResult::Solved
 }

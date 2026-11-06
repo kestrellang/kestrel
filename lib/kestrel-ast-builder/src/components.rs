@@ -196,6 +196,10 @@ pub struct AstParam {
     pub is_mut: bool,
     /// Whether this parameter specifically has consuming access mode.
     pub is_consuming: bool,
+    /// Spelled with a reference type (`x: &T`, `x: &mutating T`): `ty` is
+    /// the pointee and the ref kind set the access mode, so it passes like
+    /// `x: T` / `mutating x: T`. Only such a param may take an unsized `T`.
+    pub by_ref: bool,
 }
 
 impl AstParam {
@@ -263,6 +267,7 @@ impl AstParam {
             pattern: None,
             is_mut: is_consuming || SETTER_NEW_VALUE_MODE == ReceiverKind::Mutating,
             is_consuming,
+            by_ref: false,
         }
     }
 }

@@ -67,7 +67,7 @@ module Test
             if subRev.isSome() { return 17 }
 
             // clamped range
-            let subClamp = s.graphemes(clamped: std.core.Range[std.numeric.Int64](-5, 100));
+            let subClamp = s.graphemes(within: std.core.Range[std.numeric.Int64](-5, 100));
             if subClamp.toString().isEqual(to: "abcde") == false { return 18 }
 
             // ClosedRange[Int64]

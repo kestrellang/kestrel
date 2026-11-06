@@ -1438,15 +1438,11 @@ fn compile_struct_extract(
         // address. A REF-typed result (clone/drop shim projections) keeps
         // the slot's address per the representation contract; loading here
         // would make its consumers deref one level too many.
-        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-            && !matches!(
-                fc.ctx
-                    .module
-                    .ty_arena
-                    .get(fc.body.values[result.index()].ty),
-                MirTy::Ref { .. }
-            )
-        {
+        if kestrel_codegen::ref_slot_loads_pointee(
+            fc.ctx.module,
+            field_ty,
+            fc.body.values[result.index()].ty,
+        ) {
             return Ok(builder
                 .ins()
                 .load(fc.ctx.ptr_ty, MemFlags::new(), addr, Offset32::new(0)));
@@ -1508,15 +1504,11 @@ fn compile_tuple_extract(
             // Stage 2b ref slot with a POINTEE-typed result: load the
             // stored address (see compile_struct_extract; Ref-typed
             // results keep the slot address).
-            if matches!(arena.get(elem_ty), MirTy::Ref { .. })
-                && !matches!(
-                    fc.ctx
-                        .module
-                        .ty_arena
-                        .get(fc.body.values[result.index()].ty),
-                    MirTy::Ref { .. }
-                )
-            {
+            if kestrel_codegen::ref_slot_loads_pointee(
+                fc.ctx.module,
+                elem_ty,
+                fc.body.values[result.index()].ty,
+            ) {
                 return Ok(builder.ins().load(
                     fc.ctx.ptr_ty,
                     MemFlags::new(),
@@ -1565,15 +1557,11 @@ fn compile_enum_payload(
                     // Stage 2b ref slot with a POINTEE-typed result: load
                     // the stored address (see compile_struct_extract;
                     // Ref-typed results keep the slot address).
-                    if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-                        && !matches!(
-                            fc.ctx
-                                .module
-                                .ty_arena
-                                .get(fc.body.values[result.index()].ty),
-                            MirTy::Ref { .. }
-                        )
-                    {
+                    if kestrel_codegen::ref_slot_loads_pointee(
+                        fc.ctx.module,
+                        field_ty,
+                        fc.body.values[result.index()].ty,
+                    ) {
                         return Ok(builder.ins().load(
                             fc.ctx.ptr_ty,
                             MemFlags::new(),

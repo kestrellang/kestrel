@@ -24,6 +24,11 @@
 //! ### E460 -- `missing_property_setter` (Error, Correctness)
 //! **Message:** "property '{name}' requires a setter to satisfy protocol '{proto}'"
 //!
+//! ### E405 -- `missing_property_ref_accessor` (Error, Correctness)
+//! **Message:** "property '{name}' must lend a reference (`ref`) to satisfy protocol '{proto}'"
+//! A `{ ref }` / `{ mutating ref }` requirement met by a computed property
+//! without the matching ref accessor (a `get` returns a copy, not the place).
+//!
 //! ### E462 -- `conflicting_associated_type` (Error, Correctness)
 //! **Message:** "conflicting associated type '{name}' inherited by protocol '{proto}'"
 //!
@@ -41,9 +46,9 @@ use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, ExtensionTarget, InitEffect, MutatingRead, NodeKind,
-    QualifiedTarget, ReceiverKind, Settable, TypeAnnotation, TypeParams, WhereClause,
-    WhereConstraint,
+    Callable, Computed, ConformanceItem, Conformances, ExtensionTarget, InitEffect,
+    MutatingAccessor, MutatingRead, NodeKind, QualifiedTarget, ReceiverKind, Settable,
+    TypeAnnotation, TypeParams, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
@@ -131,6 +136,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E469",
         name: "wrong_parameter_convention",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E405",
+        name: "missing_property_ref_accessor",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -540,9 +551,21 @@ fn check_protocol_requirements(
                     if cx.query.has::<MutatingRead>(field_entity) {
                         diags.push(modifying_witness_diag(&name, &proto_name, &decl_span));
                     }
+                    // A missing `mutating ref` is the precise report; E460's
+                    // "needs a setter" would point at the wrong fix.
+                    let ref_diag = missing_ref_accessor_diag(
+                        cx,
+                        child,
+                        field_entity,
+                        &name,
+                        &proto_name,
+                        &decl_span,
+                    );
+                    let missing_ref = ref_diag.is_some();
+                    diags.extend(ref_diag);
                     let proto_needs_set = cx.query.get::<Settable>(child).is_some();
                     let impl_has_set = cx.query.get::<Settable>(field_entity).is_some();
-                    if proto_needs_set && !impl_has_set {
+                    if proto_needs_set && !impl_has_set && !missing_ref {
                         diags.push(AnalyzeDiagnostic {
                             descriptor_id: DESCRIPTORS[6].id,
                             severity: DESCRIPTORS[6].default_severity,
@@ -1810,6 +1833,54 @@ fn resolve_type_entity(
 /// Types are checked separately by `check_method_return_type`; param types
 /// aren't compared here because type-param / Self substitution isn't modeled
 /// by entity equality.
+/// E405 when the protocol property `requirement` requires `ref` / `mutating
+/// ref` and the computed `witness` lacks the matching accessor. A stored
+/// field lends itself in place (witness_lower synthesizes the accessor);
+/// a stored `let` missing `mutating ref` is already E460 (no setter).
+fn missing_ref_accessor_diag(
+    cx: &CompilationContext<'_>,
+    requirement: Entity,
+    witness: Entity,
+    name: &str,
+    proto_name: &str,
+    decl_span: &kestrel_span::Span,
+) -> Option<AnalyzeDiagnostic> {
+    if !cx.query.has::<Computed>(witness) {
+        return None;
+    }
+    let ref_kinds = |e: Entity| -> Vec<bool> {
+        cx.query
+            .children_of(e)
+            .iter()
+            .filter(|&&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::RefAccessor))
+            .map(|&c| cx.query.has::<MutatingAccessor>(c))
+            .collect()
+    };
+    let provided = ref_kinds(witness);
+    let missing = ref_kinds(requirement)
+        .into_iter()
+        .find(|m| !provided.contains(m))?;
+    let accessor = if missing { "mutating ref" } else { "ref" };
+    let descriptor = DESCRIPTORS.iter().find(|d| d.id == "E405")?;
+    Some(AnalyzeDiagnostic {
+        descriptor_id: descriptor.id,
+        severity: descriptor.default_severity,
+        message: format!(
+            "property '{name}' must lend a reference (`{accessor}`) to satisfy protocol \
+             '{proto_name}'"
+        ),
+        labels: vec![DiagLabel {
+            span: decl_span.clone(),
+            message: format!("'{name}' has no `{accessor}` accessor"),
+            is_primary: true,
+        }],
+        notes: vec![format!(
+            "the requirement lends the place itself; declare `{accessor} {{ … }}` or make \
+             '{name}' a stored property"
+        )],
+    })
+}
+
 /// E477 for a property/subscript witness whose read provider is `modifying`.
 fn modifying_witness_diag(
     name: &str,

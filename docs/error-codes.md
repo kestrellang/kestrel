@@ -63,7 +63,7 @@ the type checker, and the code is assigned in one place,
 | E109 | type mismatch | The value's type is not the one the context requires (also: a mutating closure where a non-mutating one is expected). |
 | E113 | wrong number of arguments / wrong label / no matching overload / ambiguous trailing closure | The call's shape (arity, argument labels, type-argument count) fits no declaration, or a trailing closure could fill more than one closure-typed parameter. |
 | E114 | literal not accepted | The literal's kind cannot be written as the expected type. |
-| E115 | member '{name}' is not accessible | Visibility forbids the access from this scope. |
+| E115 | member '{name}' is not accessible / '{name}' can only be used through its syntax | Visibility forbids the access from this scope, or the member is (or implements) a `@sugarOnly` requirement named outside its protocol's module. |
 | E116 | wrong kind of member use | A static member used on an instance, an instance method on a type, a type parameter as a value, or a method not called. |
 | E117 | infinite type | Unification would build a recursive type. |
 | E118 | opaque return type error | A circular `some P` return, or a `some P` that hides a non-`Copyable` type. |
@@ -103,6 +103,7 @@ the type checker, and the code is assigned in one place,
 | E152 | 'is' needs an existential on the left: '{T}' {is known at compile time / is a generic parameter} | `x is T` (and `as?`, `is` patterns) only test an existential's payload. A concrete type's answer is static; a generic parameter is rejected for now. |
 | E153 | an 'is' pattern binds a borrow of the payload, so it cannot be 'var' | `var c is Circle`: the binding refers to the payload in place. |
 | E154 | '{type}' in an 'any' bound is not a protocol | Every bound of `any` must be a protocol. |
+| E156 | a slice cannot be assigned as a whole | The target of an assignment is unsized (`xs(1..<3) = ys`, a `Slice[T]` place), as in Rust. Copy into it with `xs(1..<3).assign(from: ys)` (lengths must match) or resize with `replaceSubrange`. |
 | E157 | \`?.\` requires a type that conforms to \`OptionalChain\`, found '{T}' | `a?.b` on a value with no payload to chain on (not an `Optional`, a `Result`, or another `OptionalChain` type). Use `.` for a non-optional value. Emitted by type inference. |
 | E158 | can't consume through \`?.\` on a place | A chain on a variable or field lends its payload by reference, so a `consuming` method or argument can't take it. Move the value out first: `a.take()?.…`. Emitted by the `optional_chain` analyzer. |
 
@@ -187,6 +188,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E402 | '{B}' cannot box an existential: {reason} | `any[B] P` names a box that cannot hold a raw existential. `B` needs exactly one type parameter declared `not Sized`, a conformance to `ExistentialBox`, and no stored field holding `T` by value. Reasons: `it must have exactly one type parameter`, `its type parameter is not declared 'not Sized'`, `it does not conform to 'ExistentialBox'`, `field '{f}' stores '{T}' by value`. |
 | E403 | '{T}' may be unsized here ('where {T}: not Sized'), so it can only be used behind a pointer or as the last stored field | A `not Sized` type parameter used by value in a signature or a non-tail field. Move by-value members into an extension `where T: Sized`. |
 | E404 | the box in 'any[...]' is written without type arguments: '{suggestion}' / must name a box type | `any[B] P` takes the box unapplied (`any[RcBox] P`, not `any[RcBox[T]] P`), and it must be a type name. Emitted by HIR lowering. |
+| E405 | property '{name}' must lend a reference (\`ref\` / \`mutating ref\`) to satisfy protocol '{proto}' | The protocol requires `{ ref }` or `{ ref mutating ref }`, and the witness is a computed property without that accessor (a `get` returns a copy, not the place). Declare the ref accessor, or make the property stored. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |
@@ -299,7 +301,7 @@ protocol/extension-target arguments, where-clause types).
 
 | Code | Message | Explanation |
 |---|---|---|
-| E480 | parameters are not reference-typed; spell the convention instead | **Permanent.** `x: T` borrows and `mutating x: T` mutably borrows — conventions are the only spelling. Covers function-type and closure parameters too. |
+| E480 | a reference-typed parameter must be written `x: &T` or `x: &mutating T` | `x: &T` borrows like `x: T`, `x: &mutating T` mutably borrows like `mutating x: T` (also in function types and closure params). Rejected when combined with a `mutating`/`consuming` keyword or written through a type alias. |
 | E481 | reference return types are not supported yet | Legal since stage 1; the code is retained for the positions still rejected. |
 | E482 | references cannot be stored in bindings | A `var`/`let` annotation may not be `&T`. An aggregate that *wraps* a reference is legal. |
 | E483 | references cannot be stored in fields | Struct/enum fields, including enum case payloads (payloads classify as Field, not Param). Legal since 2b except from STRICT entries. |
@@ -508,12 +510,13 @@ members and `lazy` properties.
 |---|---|---|
 | E619 | duplicate read provider: this member declares more than one of \`get\`, \`modifying get\`, \`ref\` and \`modifying ref\` | Reads need exactly one provider. |
 | E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. |
-| E621 | \`ref\` and \`modifying\` accessors are not allowed in protocols or protocol extensions | Declare them on concrete types only. |
+| E621 | a protocol requires \`ref\` / \`mutating ref\` with bodyless clauses, and only a protocol extension gives their bodies; \`modifying\` accessors are not allowed in either | A protocol requires a place with bodyless clauses (`var value: T { ref mutating ref }`), and a protocol extension may give default bodies (`extend P { var value: T { ref { … } } }`). A body in the protocol itself, a bodyless clause in an extension, and `modifying` accessors are rejected. |
 | E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a read provider; add one. |
 | E636 | \`modifying\` accessors need an instance receiver | A static member or global has no `self` to modify; use a plain `get` / `ref`. |
 | E637 | a failable/throwing member needs a read accessor · a failable/throwing place cannot have a \`set\` accessor | A failable member (`var x?: T`, `subscript(...)? -> T`) reads as `Optional`, a throwing one (`-> T throws E` with accessors) as `Result`; neither can be assigned. Write through it with a `mutating ref` (`Optional[&mutating T]` / `Result[&mutating T, E]`) and a `&mutating` payload binder. |
 | E638 | (varies) | `willSet` / `didSet` on anything but an instance stored `var` of a struct or enum: a `let`, static or global property, a subscript, a failable member, a protocol member, or mixed with `get`/`set`/`ref`. Also `return` in an observer body, which would skip the store. |
 | E639 | (varies) | `lazy` on anything but an instance `var` of a struct or enum with a type annotation and an `= expr` initializer and no accessors; also a `lazy` property whose type isn't Copyable. |
+| E640 | a \`ref\` accessor needs a body outside a protocol | A bodyless `ref` / `mutating ref` only declares a protocol requirement. Write `ref { … }`, or drop the accessor block for a stored property. |
 
 ## E624–E626 — Closure kinds
 

@@ -6,7 +6,7 @@
 module swoop.tls
 
 import std.io.error.(IoError)
-import std.collections.(MutableArraySlice)
+import std.collections.(Slice)
 import std.memory.(RcBox)
 import http.wire.(stringToBytes)
 
@@ -100,7 +100,7 @@ public struct TlsStream: Readable, Writable, Cloneable {
     // Shared, reference-counted handle to the live connection. Cloning a
     // `TlsStream` (e.g. passing it by value through the request pipeline)
     // bumps the refcount rather than bit-copying; the connection is torn
-    // down exactly once, by whichever handle drops last (`isUnique()`).
+    // down exactly once, by whichever handle drops last (`isUnique`).
     private var conn: RcBox[SslHandles]
 
     init(ssl: lang.ptr[lang.i8], ctx: lang.ptr[lang.i8], fd: Int32) {
@@ -120,9 +120,9 @@ public struct TlsStream: Readable, Writable, Cloneable {
         TlsStream(conn: self.conn.clone())
     }
 
-    public mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Int64 throws IoError {
-        let raw = buf.asUnsafeMutableSlice();
-        let ssl = self.conn.valuePtr().with { (c) in c.ssl };
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Int64 throws IoError {
+        let raw = buf.asUnsafeSlice();
+        let ssl = self.conn.value.ssl;
         let count32 = if raw.count > 2147483647 { 2147483647 } else { Int32(from: raw.count) };
         let n = Int32(raw: libc_SSL_read(
             ssl,
@@ -136,7 +136,7 @@ public struct TlsStream: Readable, Writable, Cloneable {
     }
 
     public mutating func write(from buf: UnsafeSlice[UInt8]) -> Int64 throws IoError {
-        let ssl = self.conn.valuePtr().with { (c) in c.ssl };
+        let ssl = self.conn.value.ssl;
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
         let n = Int32(raw: libc_SSL_write(
             ssl,
@@ -152,11 +152,11 @@ public struct TlsStream: Readable, Writable, Cloneable {
     public mutating func flush() -> () throws IoError = .Ok(())
 
     // Tear the connection down once, when the last shared handle drops.
-    // Non-final handles see `isUnique() == false` and skip teardown; the
+    // Non-final handles see `isUnique == false` and skip teardown; the
     // RcBox refcount falls to zero on this same drop, freeing the storage.
     deinit {
-        if self.conn.isUnique() {
-            let h = self.conn.getValue();
+        if self.conn.isUnique {
+            let h = &self.conn.value;
             // SSL_free and SSL_CTX_free are no-ops on null in LibreSSL
              libc_SSL_shutdown(h.ssl);
             libc_SSL_free(h.ssl);

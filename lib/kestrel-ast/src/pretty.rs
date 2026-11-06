@@ -53,11 +53,9 @@ pub fn format_type(ty: &AstType) -> String {
         AstType::Some {
             bounds, negative, ..
         } => {
-            let b: Vec<_> = bounds.iter().map(format_type).collect();
-            match negative {
-                Some(neg) => format!("some {} and not {}", b.join(" and "), format_type(neg)),
-                None => format!("some {}", b.join(" and ")),
-            }
+            let mut b: Vec<_> = bounds.iter().map(format_type).collect();
+            b.extend(negative.iter().map(|n| format!("not {}", format_type(n))));
+            format!("some {}", b.join(" and "))
         },
         AstType::Any { box_ty, bounds, .. } => {
             let b: Vec<_> = bounds.iter().map(format_any_bound).collect();

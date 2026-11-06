@@ -173,7 +173,9 @@ impl BodyCheck for AssignmentAnalyzer {
             // Stage 1.5: a member with a `mutating ref` accessor is a
             // writable place projection — base mutability is enforced by
             // the access-mode analyzer's mutating-receiver check.
-            if util::accessor_place_mut_base(cx, *receiver).is_some() {
+            if util::accessor_place_mut_base(cx, *receiver).is_some()
+                || util::member_has_mutating_ref(cx, *receiver)
+            {
                 continue;
             }
             match util::ref_place(cx, *receiver)
@@ -289,8 +291,8 @@ fn check_target(
         // In an initializer, self.field assignments are always allowed.
         HirExpr::Field { base, name, .. } => {
             // Indirection write peel through a READ-ONLY wrapper: the field is
-            // reached via `pointeeRef()` (a `&T` place) because the wrapper is
-            // `Indirection` but not `MutableIndirection` — no `pointeeMutRef()`.
+            // reached via `value`'s `ref` (a `&T` place) because the wrapper is
+            // `Indirection` but not `MutableIndirection` — no `mutating ref`.
             // Same class as E208: a `&T` place can't be written. (D2)
             if cx
                 .typed

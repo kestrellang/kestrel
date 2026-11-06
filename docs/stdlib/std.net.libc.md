@@ -73,6 +73,8 @@ _Defined in `lang/std/net/libc.ks`._
 public func SOL_SOCKET() -> Int32
 ```
 
+Linux-specific definition of `SOL_SOCKET` (`1`).
+
 _Defined in `lang/std/net/libc.ks`._
 
 ## function `SO_REUSEADDR`
@@ -81,12 +83,7 @@ _Defined in `lang/std/net/libc.ks`._
 public func SO_REUSEADDR() -> Int32
 ```
 
-`SO_REUSEADDR` — allow rebinding to an address still in `TIME_WAIT`.
-
-Pass as the `optname` argument of `setsockopt()` with `SOL_SOCKET`
-to let a server bind to a recently-used port without waiting for
-the kernel's grace period. Numeric value differs across
-platforms.
+Linux-specific definition of `SO_REUSEADDR` (`2`).
 
 _Defined in `lang/std/net/libc.ks`._
 

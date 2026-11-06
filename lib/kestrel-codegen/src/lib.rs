@@ -13,4 +13,4 @@ pub mod repr;
 
 pub use abi::{PassMode, ReturnMode, param_pass_mode, return_mode};
 pub use kestrel_target::TargetConfig;
-pub use repr::{ScalarModel, TypeCache, TypeRepr};
+pub use repr::{ScalarModel, TypeCache, TypeRepr, ref_slot_loads_pointee};

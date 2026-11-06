@@ -26,7 +26,7 @@ public struct ArraySlice[T] {
     public subscript(index: Int64) -> T {
         ref {
             checkIndex(index, self.count);
-            self.base(at: self.start + index)
+            self.base(self.start + index)
         }
     }
 
@@ -54,14 +54,14 @@ public struct MutableArraySlice[T] {
     public subscript(index: Int64) -> T {
         ref {
             checkIndex(index, self.count);
-            self.base(at: self.start + index)
+            self.base(self.start + index)
         }
     }
 
     /// Overwrites element `index` with `value`.
     public func update(at index: Int64, to value: T) where T: Copyable {
         checkIndex(index, self.count);
-        self.base(at: self.start + index) = value;
+        self.base(self.start + index) = value;
     }
 
     /// Swaps elements `i` and `j` of the slice.
@@ -74,7 +74,7 @@ public struct MutableArraySlice[T] {
     /// Sets every element of the slice to `value`.
     public func fill(with value: T) where T: Copyable {
         for i in 0..<self.count {
-            self.base(at: self.start + i) = value;
+            self.base(self.start + i) = value;
         }
     }
 

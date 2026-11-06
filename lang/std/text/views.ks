@@ -168,11 +168,17 @@ public struct BytesView: Iterable, Cloneable {
     }
 
     /// @name Clamping
-    /// Reads at `index` with bounds saturated to `[0, count)`. Single-
-    /// byte indexes yield `UInt8?` (`None` on empty view); range indexes
-    /// yield `BytesView` (always valid, possibly empty).
-    public subscript[I](clamped index: I) -> I.BytesClampedYield where I: BytesClampable {
-        get { index.readBytesClamped(from: self) }
+    /// The byte at `index` saturated into `[0, count)`, or `.None` when
+    /// the view is empty.
+    public subscript(clamped index: Int64) -> UInt8? {
+        get { readBytesClampedAt(self, index) }
+    }
+
+    /// @name Within
+    /// The sub-view of `range` clamped into `[0, count)` (always valid,
+    /// possibly empty).
+    public subscript[I](within range: I) -> I.BytesClampedYield where I: BytesClampable {
+        get { range.readBytesClamped(from: self) }
     }
 
     /// @name Wrapping
@@ -396,11 +402,17 @@ public struct CharsView: Iterable, Cloneable {
     }
 
     /// @name Clamping
-    /// Reads at `index` with bounds saturated to `[0, count)`. Single-
-    /// char indexes yield `Char?` (`None` on empty view); range indexes
-    /// yield `CharsView` (always valid, possibly empty).
-    public subscript[I](clamped index: I) -> I.CharsClampedYield where I: CharsClampable {
-        get { index.readCharsClamped(from: self) }
+    /// The char at `index` saturated into `[0, count)`, or `.None` when
+    /// the view is empty.
+    public subscript(clamped index: Int64) -> Char? {
+        get { readCharsClampedAt(self, index) }
+    }
+
+    /// @name Within
+    /// The sub-view of `range` clamped into `[0, count)` (always valid,
+    /// possibly empty).
+    public subscript[I](within range: I) -> I.CharsClampedYield where I: CharsClampable {
+        get { range.readCharsClamped(from: self) }
     }
 
     /// @name Wrapping
@@ -658,11 +670,17 @@ public struct GraphemesView: Iterable, Cloneable {
     }
 
     /// @name Clamping
-    /// Reads at `index` saturated to `[0, count)`. Single-grapheme
-    /// indexes yield `Grapheme?` (`.None` only when the view is empty);
-    /// range indexes yield `GraphemesView` (always valid, possibly empty).
-    public subscript[I](clamped index: I) -> I.GraphemesClampedYield where I: GraphemesClampable {
-        get { index.readGraphemesClamped(from: self) }
+    /// The grapheme at `index` saturated into `[0, count)`, or `.None` when
+    /// the view is empty.
+    public subscript(clamped index: Int64) -> Grapheme? {
+        get { readGraphemesClampedAt(self, index) }
+    }
+
+    /// @name Within
+    /// The sub-view of `range` clamped into `[0, count)` (always valid,
+    /// possibly empty).
+    public subscript[I](within range: I) -> I.GraphemesClampedYield where I: GraphemesClampable {
+        get { range.readGraphemesClamped(from: self) }
     }
 
     /// @name Wrapping
@@ -934,11 +952,17 @@ public struct LinesView: Iterable, Cloneable {
     }
 
     /// @name Clamping
-    /// Reads at `index` saturated to `[0, count)`. Single-line indexes
-    /// yield `String?` (`.None` only when the view holds no lines);
-    /// range indexes yield `LinesView` (always valid, possibly empty).
-    public subscript[I](clamped index: I) -> I.LinesClampedYield where I: LinesClampable {
-        get { index.readLinesClamped(from: self) }
+    /// The line at `index` saturated into `[0, count)`, or `.None` when
+    /// the view is empty.
+    public subscript(clamped index: Int64) -> String? {
+        get { readLinesClampedAt(self, index) }
+    }
+
+    /// @name Within
+    /// The sub-view of `range` clamped into `[0, count)` (always valid,
+    /// possibly empty).
+    public subscript[I](within range: I) -> I.LinesClampedYield where I: LinesClampable {
+        get { range.readLinesClamped(from: self) }
     }
 
     /// @name Wrapping
@@ -1135,18 +1159,23 @@ public struct GraphemeIndex: Equatable {
 /// `BytesView` sub-view. All access is O(1) — no buffer copy on slice.
 internal protocol BytesIndex {
     type BytesYield
+    @sugarOnly
     func readBytes(from view: BytesView) -> BytesYield
+    @sugarOnly
     func readBytesChecked(from view: BytesView) -> BytesYield?
+    @sugarOnly
     func readBytesUnchecked(from view: BytesView) -> BytesYield
 }
 
 internal protocol BytesClampable {
     type BytesClampedYield
+    @sugarOnly
     func readBytesClamped(from view: BytesView) -> BytesClampedYield
 }
 
 internal protocol BytesWrappable {
     type BytesWrappedYield
+    @sugarOnly
     func readBytesWrapped(from view: BytesView) -> BytesWrappedYield
 }
 
@@ -1173,19 +1202,17 @@ extend Int64: BytesIndex {
     }
 }
 
-extend Int64: BytesClampable {
-    type BytesClampedYield = UInt8?
-
-    public func readBytesClamped(from view: BytesView) -> UInt8? {
-        let len = view.count;
-        if len == 0 {
-            return .None
-        }
-        var idx = self;
-        if idx < 0 { idx = 0 }
-        if idx >= len { idx = len - 1 }
-        .Some(view._readByteRaw(index: idx))
+/// `view(clamped: index)`: the byte at `index` saturated into
+/// `[0, count)`, or `.None` when the view is empty.
+fileprivate func readBytesClampedAt(view: BytesView, index: Int64) -> UInt8? {
+    let len = view.count;
+    if len == 0 {
+        return .None
     }
+    var idx = index;
+    if idx < 0 { idx = 0 }
+    if idx >= len { idx = len - 1 }
+    .Some(view._readByteRaw(index: idx))
 }
 
 extend Int64: BytesWrappable {
@@ -1331,6 +1358,7 @@ extend ClosedRange[Int64]: BytesWrappable {
 /// them. Single-element indexes (`Int64`) deliberately don't conform —
 /// `substring` is range-flavored only.
 public protocol BytesSubstringIndex {
+    @sugarOnly
     func readBytesSubstring(from view: BytesView) -> String
 }
 
@@ -1530,17 +1558,21 @@ extend RangeThrough[Int64]: BytesSubstringIndex {
 /// linear.
 internal protocol CharsIndex {
     type CharsYield
+    @sugarOnly
     func readChars(from view: CharsView) -> CharsYield
+    @sugarOnly
     func readCharsChecked(from view: CharsView) -> CharsYield?
 }
 
 internal protocol CharsClampable {
     type CharsClampedYield
+    @sugarOnly
     func readCharsClamped(from view: CharsView) -> CharsClampedYield
 }
 
 internal protocol CharsWrappable {
     type CharsWrappedYield
+    @sugarOnly
     func readCharsWrapped(from view: CharsView) -> CharsWrappedYield
 }
 
@@ -1581,19 +1613,17 @@ extend Int64: CharsIndex {
     }
 }
 
-extend Int64: CharsClampable {
-    type CharsClampedYield = Char?
-
-    public func readCharsClamped(from view: CharsView) -> Char? {
-        let n = view.count;
-        if n == 0 {
-            return .None
-        }
-        var idx = self;
-        if idx < 0 { idx = 0 }
-        if idx >= n { idx = n - 1 }
-        _charsViewCharAt(view: view, charIndex: idx)
+/// `view(clamped: index)`: the char at `index` saturated into
+/// `[0, count)`, or `.None` when the view is empty.
+fileprivate func readCharsClampedAt(view: CharsView, index: Int64) -> Char? {
+    let n = view.count;
+    if n == 0 {
+        return .None
     }
+    var idx = index;
+    if idx < 0 { idx = 0 }
+    if idx >= n { idx = n - 1 }
+    _charsViewCharAt(view: view, charIndex: idx)
 }
 
 extend Int64: CharsWrappable {
@@ -1749,6 +1779,7 @@ extend ClosedRange[Int64]: CharsWrappable {
 
 /// Range-only index for `CharsView.substring`. See `BytesSubstringIndex`.
 public protocol CharsSubstringIndex {
+    @sugarOnly
     func readCharsSubstring(from view: CharsView) -> String
 }
 
@@ -1969,17 +2000,21 @@ extend RangeThrough[Int64]: CharsSubstringIndex {
 /// start; the slice itself is free.
 internal protocol GraphemesIndex {
     type GraphemesYield
+    @sugarOnly
     func readGraphemes(from view: GraphemesView) -> GraphemesYield
+    @sugarOnly
     func readGraphemesChecked(from view: GraphemesView) -> GraphemesYield?
 }
 
 internal protocol GraphemesClampable {
     type GraphemesClampedYield
+    @sugarOnly
     func readGraphemesClamped(from view: GraphemesView) -> GraphemesClampedYield
 }
 
 internal protocol GraphemesWrappable {
     type GraphemesWrappedYield
+    @sugarOnly
     func readGraphemesWrapped(from view: GraphemesView) -> GraphemesWrappedYield
 }
 
@@ -2020,19 +2055,17 @@ extend Int64: GraphemesIndex {
     }
 }
 
-extend Int64: GraphemesClampable {
-    type GraphemesClampedYield = Grapheme?
-
-    public func readGraphemesClamped(from view: GraphemesView) -> Grapheme? {
-        let n = view.count;
-        if n == 0 {
-            return .None
-        }
-        var idx = self;
-        if idx < 0 { idx = 0 }
-        if idx >= n { idx = n - 1 }
-        _graphemesViewAt(view: view, graphemeIndex: idx)
+/// `view(clamped: index)`: the grapheme at `index` saturated into
+/// `[0, count)`, or `.None` when the view is empty.
+fileprivate func readGraphemesClampedAt(view: GraphemesView, index: Int64) -> Grapheme? {
+    let n = view.count;
+    if n == 0 {
+        return .None
     }
+    var idx = index;
+    if idx < 0 { idx = 0 }
+    if idx >= n { idx = n - 1 }
+    _graphemesViewAt(view: view, graphemeIndex: idx)
 }
 
 extend Int64: GraphemesWrappable {
@@ -2187,6 +2220,7 @@ extend ClosedRange[Int64]: GraphemesWrappable {
 
 /// Range-only index for `GraphemesView.substring`. See `BytesSubstringIndex`.
 public protocol GraphemesSubstringIndex {
+    @sugarOnly
     func readGraphemesSubstring(from view: GraphemesView) -> String
 }
 
@@ -2408,17 +2442,21 @@ extend RangeThrough[Int64]: GraphemesSubstringIndex {
 /// same line strings.
 internal protocol LinesIndex {
     type LinesYield
+    @sugarOnly
     func readLines(from view: LinesView) -> LinesYield
+    @sugarOnly
     func readLinesChecked(from view: LinesView) -> LinesYield?
 }
 
 internal protocol LinesClampable {
     type LinesClampedYield
+    @sugarOnly
     func readLinesClamped(from view: LinesView) -> LinesClampedYield
 }
 
 internal protocol LinesWrappable {
     type LinesWrappedYield
+    @sugarOnly
     func readLinesWrapped(from view: LinesView) -> LinesWrappedYield
 }
 
@@ -2459,19 +2497,17 @@ extend Int64: LinesIndex {
     }
 }
 
-extend Int64: LinesClampable {
-    type LinesClampedYield = String?
-
-    public func readLinesClamped(from view: LinesView) -> String? {
-        let n = view.count;
-        if n == 0 {
-            return .None
-        }
-        var idx = self;
-        if idx < 0 { idx = 0 }
-        if idx >= n { idx = n - 1 }
-        _linesViewAt(view: view, lineIndex: idx)
+/// `view(clamped: index)`: the line at `index` saturated into
+/// `[0, count)`, or `.None` when the view is empty.
+fileprivate func readLinesClampedAt(view: LinesView, index: Int64) -> String? {
+    let n = view.count;
+    if n == 0 {
+        return .None
     }
+    var idx = index;
+    if idx < 0 { idx = 0 }
+    if idx >= n { idx = n - 1 }
+    _linesViewAt(view: view, lineIndex: idx)
 }
 
 extend Int64: LinesWrappable {
@@ -2626,6 +2662,7 @@ extend ClosedRange[Int64]: LinesWrappable {
 
 /// Range-only index for `LinesView.substring`. See `BytesSubstringIndex`.
 public protocol LinesSubstringIndex {
+    @sugarOnly
     func readLinesSubstring(from view: LinesView) -> String
 }
 

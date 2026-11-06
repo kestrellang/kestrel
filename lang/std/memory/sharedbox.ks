@@ -37,7 +37,7 @@ public protocol ExistentialBox: Indirection {
 /// storage; dropping the last handle destroys the payload exactly once.
 /// Most of the contract is inherited rather than invented — sharing is
 /// `Cloneable.clone()`, releasing is the conformer's own `deinit`, and reading
-/// the payload is `MutableIndirection.pointeeRef()` (which also supplies
+/// the payload is `MutableIndirection.value` (which also supplies
 /// transparent member access, so `box.field` reaches the payload's field).
 /// Only creation, shared mutation, identity and uniqueness are new.
 ///
@@ -56,7 +56,7 @@ public protocol ExistentialBox: Indirection {
 ///     let box: B = B(value);          // init(consuming value: Target)
 ///     let alias = box.clone();        // shares the managed storage
 ///     box.isIdentical(to: alias);     // true — one storage, two handles
-///     alias.pointeeRef()              // read the payload through the peel
+///     alias.value                     // read the payload in place
 /// }
 /// ```
 ///
@@ -87,7 +87,7 @@ public protocol SharedBox: ExistentialBox, Cloneable, MutableIndirection {
     /// This is the marked exception to value semantics, and the operation
     /// escaping closures and (later) classes are built on. Value-semantic
     /// clients — `any` payloads, `indirect enum`s — must not use it; they
-    /// check `isUnique()` and fork instead.
+    /// check `isUnique` and fork instead.
     ///
     /// # Safety
     ///
@@ -114,5 +114,5 @@ public protocol SharedBox: ExistentialBox, Cloneable, MutableIndirection {
     /// treat `false` as "fork before mutating" rather than as proof of
     /// sharing. A box that always answers `false` degrades to fork-always —
     /// slower, still correct.
-    func isUnique() -> Bool
+    var isUnique: Bool { get }
 }

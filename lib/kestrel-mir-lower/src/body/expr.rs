@@ -13,6 +13,7 @@
 //! - `closure` — closure capture and thunk generation
 
 use kestrel_ast_builder::{Callable, NodeKind, Settable};
+use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_mir::TyId;
 use kestrel_mir::callee::Callee;
@@ -31,6 +32,7 @@ impl OssaBodyCtx<'_, '_> {
     /// Lower an HIR expression to a ValueId, applying promotion if needed.
     pub fn lower_expr(&mut self, expr_id: HirExprId) -> ValueId {
         let value = self.lower_expr_no_promote(expr_id);
+        let value = self.apply_optional_ref_decay(expr_id, value);
         let value = self.apply_kind_coercion(expr_id, value);
         self.apply_promotion(expr_id, value)
     }
@@ -118,8 +120,19 @@ impl OssaBodyCtx<'_, '_> {
     /// cross-kind closure coercion, or an existential conversion)? Such an
     /// expression must go through `lower_expr`: the place-oriented fast paths
     /// would hand back the unconverted source.
+    /// Copy a decaying `Optional[&T]` value out (`optional_ref_decays`).
+    fn apply_optional_ref_decay(&mut self, expr_id: HirExprId, value: ValueId) -> ValueId {
+        if !self.decays_optional_ref(expr_id) {
+            return value;
+        }
+        let lent = self.resolve_expr_type(expr_id);
+        let decayed = self.decayed_optional_ty(lent);
+        self.emit_optional_ref_decay(value, decayed)
+    }
+
     pub(crate) fn has_value_conversion(&self, expr_id: HirExprId) -> bool {
-        self.has_kind_coercion(expr_id)
+        self.decays_optional_ref(expr_id)
+            || self.has_kind_coercion(expr_id)
             || self
                 .typed
                 .as_ref()
@@ -542,9 +555,9 @@ impl OssaBodyCtx<'_, '_> {
             .cloned()
     }
 
-    /// Replay an `Indirection` peel: emit the `pointeeRef()` / `pointeeMutRef()`
-    /// accessor call(s) on member-access base `base`, returning the final
-    /// `&Target` / `&mutating Target` pointee view. `mutating` selects the
+    /// Replay an `Indirection` peel: emit the `value` place's `ref` /
+    /// `mutating ref` witness call(s) on member-access base `base`, returning
+    /// the final `&Target` / `&mutating Target` pointee view. `mutating` selects the
     /// write accessor; each level's result is the next level's receiver
     /// (nested `RcBox[Pointer[T]]`). The returned view is then projected
     /// (field) or passed as a receiver (method) by the caller.
@@ -574,14 +587,13 @@ impl OssaBodyCtx<'_, '_> {
             };
             self.ctx.register_name(method);
             // Pass the POINTEE type as the result type, NOT `&Target`: the
-            // callee's `CallableRefReturn` (`pointeeRef -> &Target`) drives
+            // callee's `CallableRefReturn` (`value.ref -> &Target`) drives
             // `emit_call_inner` to register the result @guaranteed as the
             // pointee VIEW (holding the address) — exactly like `arr.at(i)`.
             // Passing `&Target` would register an @owned pointer whose
             // StructExtract reads the pointer's bytes as the pointee (segfault).
             let target_ty = lower_resolved_ty(self.ctx, &peel.target);
-            let type_args = self.prepend_receiver_type_args(recv_ty, vec![]);
-            let callee = Callee::direct_with_args(method, type_args, None);
+            let callee = self.place_accessor_callee(method, recv_ty, vec![]);
             let ref_val = self.emit_call_returning(callee, vec![recv_arg], target_ty);
             recv_ty = target_ty;
             recv_arg = CallArg {
@@ -594,8 +606,9 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// Store `value` into `field_name` of an `Indirection` pointee reached by a
-    /// write peel: get the `&mutating Target` view via `pointeeMutRef()`, take
-    /// the field's address through it, and `StoreAssign` (drops the old value).
+    /// write peel: get the `&mutating Target` view via `value`'s `mutating
+    /// ref`, take the field's address through it, and `StoreAssign` (drops
+    /// the old value).
     /// `rhs` is lowered first (pinned evaluation order).
     fn lower_indirection_field_store(
         &mut self,
@@ -652,7 +665,7 @@ impl OssaBodyCtx<'_, '_> {
         field_name: &str,
     ) -> ValueId {
         // Indirection read peel: `wrapper.field` where the wrapper has no
-        // `field` → resolve it on the pointee, reached via `pointeeRef()`.
+        // `field` → resolve it on the pointee, reached via `value`'s `ref`.
         if let Some(peels) = self.indirection_peels_of(expr_id) {
             let view = self.lower_indirection_chain(base, &peels, false);
             let result_ty = self.resolve_expr_type(expr_id);
@@ -790,8 +803,7 @@ impl OssaBodyCtx<'_, '_> {
 
             if is_static {
                 let self_type = self.type_from_type_ref(base);
-                let type_args = self.prepend_receiver_type_args(self_type, vec![]);
-                let callee = Callee::direct_with_args(getter_entity, type_args, None);
+                let callee = self.place_accessor_callee(getter_entity, self_type, vec![]);
                 return self.emit_call_returning(callee, vec![], result_ty);
             }
 
@@ -802,21 +814,7 @@ impl OssaBodyCtx<'_, '_> {
             // `modifying` read provider takes the receiver mutably.
             let convention = self.ctx.read_receiver_convention(getter_entity);
             let arg = self.prepare_call_arg_for_expr(base, convention);
-
-            if let Some(protocol) = self.ctx.is_protocol_method(getter_entity) {
-                self.ctx.register_name(protocol);
-                let key = self.ctx.witness_method_key(getter_entity);
-                let callee = Callee::Witness {
-                    protocol,
-                    method: key,
-                    self_type: receiver_ty,
-                    method_type_args,
-                };
-                return self.emit_call_returning(callee, vec![arg], result_ty);
-            }
-
-            let type_args = self.prepend_receiver_type_args(receiver_ty, method_type_args);
-            let callee = Callee::direct_with_args(getter_entity, type_args, None);
+            let callee = self.place_accessor_callee(getter_entity, receiver_ty, method_type_args);
             return self.emit_call_returning(callee, vec![arg], result_ty);
         }
 
@@ -1090,7 +1088,8 @@ impl OssaBodyCtx<'_, '_> {
         value: HirExprId,
     ) -> ValueId {
         // Indirection write peel: `wrapper.field = v` where the wrapper has no
-        // `field` → store through the pointee, reached via `pointeeMutRef()`.
+        // `field` → store through the pointee, reached via `value`'s
+        // `mutating ref`.
         if let HirExpr::Field { base, name, .. } = &self.hir.exprs[target]
             && let Some(peels) = self.indirection_peels_of(target)
         {
@@ -1354,6 +1353,29 @@ impl OssaBodyCtx<'_, '_> {
     // Setter dispatch
     // ----------------------------------------------------------------
 
+    /// The callee of a call to a place accessor (a getter, or a `ref` /
+    /// `mutating ref` child): witness dispatch when it is a protocol
+    /// requirement's (`T: P` reading `x.value`), else a direct call with
+    /// `self_ty`'s type args prepended.
+    pub(crate) fn place_accessor_callee(
+        &mut self,
+        accessor: kestrel_hecs::Entity,
+        self_ty: TyId,
+        method_type_args: Vec<TyId>,
+    ) -> Callee {
+        if let Some(protocol) = self.ctx.is_protocol_method(accessor) {
+            self.ctx.register_name(protocol);
+            return Callee::Witness {
+                protocol,
+                method: self.ctx.witness_method_key(accessor),
+                self_type: self_ty,
+                method_type_args,
+            };
+        }
+        let type_args = self.prepend_receiver_type_args(self_ty, method_type_args);
+        Callee::direct_with_args(accessor, type_args, None)
+    }
+
     /// Call a `mutating ref` accessor and store `rhs` through the returned
     /// place — PtrTo + StoreAssign + EndBorrow, the shipped `&mutating`-call
     /// assign shape (`lower_assign`). `call_args` = receiver + index args,
@@ -1363,13 +1385,11 @@ impl OssaBodyCtx<'_, '_> {
     /// ref's single use, so its borrow ends here.
     fn emit_ref_accessor_store(
         &mut self,
-        accessor: kestrel_hecs::Entity,
-        type_args: Vec<TyId>,
+        callee: Callee,
         call_args: Vec<CallArg>,
         pointee_ty: TyId,
         rhs: ValueId,
     ) -> ValueId {
-        let callee = Callee::direct_with_args(accessor, type_args, None);
         let ref_val = self.emit_call_returning(callee, call_args, pointee_ty);
         let ptr_ty = self.ctx.module.ty_arena.pointer(pointee_ty);
         let addr = self.emit_op1(Op::PtrTo(pointee_ty), ref_val, ptr_ty);
@@ -1485,18 +1505,16 @@ impl OssaBodyCtx<'_, '_> {
             let rhs = self.lower_expr(value_id);
             let pointee_ty = self.resolve_expr_type(target_id);
             let mut call_args: Vec<CallArg> = Vec::new();
-            let type_args = if is_static {
+            let callee = if is_static {
                 let self_type = self.type_from_type_ref(base);
-                self.prepend_receiver_type_args(self_type, vec![])
+                self.place_accessor_callee(accessor, self_type, vec![])
             } else {
                 let receiver_ty = self.resolve_expr_type(base);
                 let ta = self.resolve_type_args(target_id);
                 call_args.push(self.prepare_call_arg_for_expr(base, ParamConvention::MutBorrow));
-                self.prepend_receiver_type_args(receiver_ty, ta)
+                self.place_accessor_callee(accessor, receiver_ty, ta)
             };
-            return Some(
-                self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs),
-            );
+            return Some(self.emit_ref_accessor_store(callee, call_args, pointee_ty, rhs));
         }
 
         // Concrete computed property setter
@@ -1588,7 +1606,8 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.register_name(accessor);
             let rhs = self.lower_expr(value_id);
             let pointee_ty = self.resolve_expr_type(target_id);
-            return Some(self.emit_ref_accessor_store(accessor, vec![], vec![], pointee_ty, rhs));
+            let callee = Callee::direct_with_args(accessor, vec![], None);
+            return Some(self.emit_ref_accessor_store(callee, vec![], pointee_ty, rhs));
         }
         let setter = self.write_setter(entity, None)?;
         self.ctx.register_name(setter);
@@ -1630,15 +1649,15 @@ impl OssaBodyCtx<'_, '_> {
             let rhs = self.lower_expr(value_id);
             let pointee_ty = self.resolve_expr_type(target_id);
             let mut call_args: Vec<CallArg> = Vec::new();
-            let type_args = if is_static {
+            let callee = if is_static {
                 let self_type = self.type_from_type_ref(callee_expr);
-                self.prepend_receiver_type_args(self_type, vec![])
+                self.place_accessor_callee(accessor, self_type, vec![])
             } else {
                 let receiver_ty = self.resolve_expr_type(callee_expr);
                 let ta = self.resolve_type_args(target_id);
                 call_args
                     .push(self.prepare_call_arg_for_expr(callee_expr, ParamConvention::MutBorrow));
-                self.prepend_receiver_type_args(receiver_ty, ta)
+                self.place_accessor_callee(accessor, receiver_ty, ta)
             };
             for a in args {
                 let v = self.lower_expr(a.value);
@@ -1651,9 +1670,7 @@ impl OssaBodyCtx<'_, '_> {
             // with defaults yet; add the equivalent `expand_default_args` here when
             // one surfaces (the ref accessor's params are the index params only — no
             // trailing `newValue` — so it'd expand against the full param list).
-            return Some(
-                self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs),
-            );
+            return Some(self.emit_ref_accessor_store(callee, call_args, pointee_ty, rhs));
         }
 
         let setter = self.write_setter(resolved, Some(callee_expr))?;
@@ -1749,21 +1766,47 @@ impl OssaBodyCtx<'_, '_> {
             return None;
         }
 
-        // Skip computed-property subscript-set (stored fields only)
-        let prefix_entity =
-            receiver_entity.and_then(|recv| self.ctx.field_named(recv, method_name));
-        let is_computed_property =
-            prefix_entity.is_some_and(|e| self.ctx.world.get::<Callable>(e).is_some());
-        if is_computed_property {
-            return None;
-        }
-
         let mutating_ref = self.ctx.find_ref_accessor_child(resolved, true);
         let setter = if mutating_ref.is_none() {
             Some(self.write_setter(resolved, Some(receiver))?)
         } else {
             None
         };
+
+        // A reference-typed computed prefix (`p.mutatingValue(i) = v`): the
+        // getter lends the referent, which is the subscript's receiver.
+        if let Some(prop) = self.computed_subscript_prefix(target_id) {
+            let subscript_args: Vec<ValueId> =
+                args.iter().map(|a| self.lower_expr(a.value)).collect();
+            let rhs = self.lower_expr(value_id);
+            let type_args = self.resolve_type_args(target_id);
+            // A `mutating ref` place property lends through a mutable receiver;
+            // a getter returning `&mutating T` borrows it.
+            let recv_convention = match self.ctx.find_ref_accessor_child(prop, true) {
+                Some(_) => ParamConvention::MutBorrow,
+                None => ParamConvention::Borrow,
+            };
+            let recv_arg = self.prepare_call_arg_for_expr(receiver, recv_convention);
+            let (field_arg, field_ty) = self.computed_prefix_receiver(
+                recv_arg,
+                receiver_ty,
+                prop,
+                ParamConvention::MutBorrow,
+            );
+            let mut call_args = vec![field_arg];
+            for v in subscript_args {
+                call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+            }
+            return Some(self.emit_subscript_store(
+                target_id,
+                mutating_ref,
+                setter,
+                field_ty,
+                type_args,
+                call_args,
+                rhs,
+            ));
+        }
 
         // Resolve field type and extract through it
         let recv_entity = receiver_entity?;
@@ -1834,16 +1877,51 @@ impl OssaBodyCtx<'_, '_> {
             call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
         }
 
+        Some(self.emit_subscript_store(
+            target_id,
+            mutating_ref,
+            setter,
+            field_ty,
+            type_args,
+            call_args,
+            rhs,
+        ))
+    }
+
+    /// The computed property a field-subscript place (`p.mutatingValue(i)`)
+    /// is applied to, when its prefix is computed rather than stored.
+    fn computed_subscript_prefix(&self, target_id: HirExprId) -> Option<Entity> {
+        let prop = *self.typed.as_ref()?.field_subscripts.get(&target_id)?;
+        self.ctx
+            .world
+            .get::<Callable>(prop)
+            .is_some()
+            .then_some(prop)
+    }
+
+    /// Store `rhs` into subscript place `target_id` whose receiver arg (and
+    /// index args) are already in `call_args`: through the `mutating ref`
+    /// accessor when declared, else the setter. `field_ty` is the receiver's
+    /// type (the field or computed-ref pointee the subscript belongs to).
+    #[allow(clippy::too_many_arguments)]
+    fn emit_subscript_store(
+        &mut self,
+        target_id: HirExprId,
+        mutating_ref: Option<Entity>,
+        setter: Option<Entity>,
+        field_ty: TyId,
+        type_args: Vec<TyId>,
+        mut call_args: Vec<CallArg>,
+        rhs: ValueId,
+    ) -> ValueId {
         // Stage 1.5: `mutating ref` write provider — fabricate the element
         // place through the accessor (receiver = the field place) and store
         // through it. RHS was lowered before the place fabrication above.
         if let Some(accessor) = mutating_ref {
             self.ctx.register_name(accessor);
             let pointee_ty = self.resolve_expr_type(target_id);
-            let type_args = self.prepend_receiver_type_args(field_ty, type_args);
-            return Some(
-                self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs),
-            );
+            let callee = self.place_accessor_callee(accessor, field_ty, type_args);
+            return self.emit_ref_accessor_store(callee, call_args, pointee_ty, rhs);
         }
 
         let setter = setter.expect("setter present when no mutating ref accessor");
@@ -1865,6 +1943,6 @@ impl OssaBodyCtx<'_, '_> {
             let callee = Callee::direct_with_args(setter, type_args, None);
             self.emit_call_void(callee, call_args);
         }
-        Some(self.emit_literal(Immediate::unit()))
+        self.emit_literal(Immediate::unit())
     }
 }

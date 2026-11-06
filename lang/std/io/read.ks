@@ -5,7 +5,7 @@ module std.io.read
 import std.numeric.(Int64, UInt8)
 import std.result.(Result, Optional)
 import std.memory.(UnsafeSlice, Pointer)
-import std.collections.(Array, MutableArraySlice)
+import std.collections.(Array, Slice)
 import std.core.(Bool)
 import std.io.error.(IoError, invalidInput)
 
@@ -26,7 +26,7 @@ import std.io.error.(IoError, invalidInput)
 /// ```
 /// public struct DigitsReader: Readable {
 ///     var next: UInt8
-///     public mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Result[Int64, IoError] {
+///     public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
 ///         if buf.count == 0 { return .Ok(0) }
 ///         buf.fill(with: self.next);
 ///         self.next = self.next + 1;
@@ -37,7 +37,7 @@ import std.io.error.(IoError, invalidInput)
 public protocol Readable {
     /// Reads up to `buf.count` bytes; returns the number of bytes
     /// actually written, with `0` signalling EOF.
-    mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Result[Int64, IoError]
+    mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError]
 }
 
 // ============================================================================
@@ -56,7 +56,7 @@ public struct Empty: Readable {
     public init() {}
 
     /// Always returns `.Ok(0)`.
-    public mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         .Ok(0)
     }
 }
@@ -81,7 +81,7 @@ public struct Repeat: Readable {
     }
 
     /// Fills `buf` with the repeated byte; returns `.Ok(buf.count)`.
-    public mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Result[Int64, IoError] {
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
         buf.fill(with: self.byte);
         .Ok(buf.count)
     }
@@ -126,8 +126,8 @@ public struct Cursor: Readable, Cloneable {
 
     /// Reads from the current position; returns `.Ok(0)` at EOF and
     /// advances the position by the byte count returned.
-    public mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let raw = buf.asUnsafeMutableSlice();
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        let raw = buf.asUnsafeSlice();
         let available = self.data.count - self.position;
         if available == 0 {
             return .Ok(0)
@@ -236,11 +236,10 @@ public func readAll[R](mutating reader: R, mutating into buf: Array[UInt8]) -> R
 /// var header = Array[UInt8](repeating: 0, count: 16);
 /// try readExact(file, into: header.asMutableSlice());   // must read 16 bytes
 /// ```
-public func readExact[R](mutating reader: R, consuming into buf: MutableArraySlice[UInt8]) -> Result[(), IoError] where R: Readable, R: not Copyable {
-    var rest = buf;
+public func readExact[R](mutating reader: R, mutating into buf: Slice[UInt8]) -> Result[(), IoError] where R: Readable, R: not Copyable {
     var filled: Int64 = 0;
-    while filled < rest.count {
-        let n = try reader.read(into: rest.mutatingSlice(filled..));
+    while filled < buf.count {
+        let n = try reader.read(into: buf(filled..));
         if n == 0 {
             return .Err(invalidInput())
         }

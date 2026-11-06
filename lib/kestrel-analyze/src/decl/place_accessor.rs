@@ -3,9 +3,9 @@
 //! Validates `ref { … }` / `mutating ref { … }` accessor blocks on
 //! subscripts and computed properties: a member has at most ONE read
 //! provider (`get` XOR `ref`) and ONE write provider (`set` XOR
-//! `mutating ref`), must have a read provider, and ref accessors are
-//! rejected in protocols and protocol extensions (witness ref-returns are
-//! out of scope; the stage-1.5 restriction is concrete inherent decls).
+//! `mutating ref`), and must have a read provider. A protocol may require
+//! `ref` / `mutating ref` with bodyless clauses; ref accessor bodies and
+//! `modifying` accessors stay out of protocols and protocol extensions.
 //!
 //! ## Diagnostics
 //!
@@ -16,7 +16,13 @@
 //! `set { }` and `mutating ref { }` on one member.
 //!
 //! ### E621 -- `ref_accessor_in_protocol` (Error, Correctness)
-//! A ref accessor on a protocol member or a protocol-extension member.
+//! A `modifying` accessor on a protocol or protocol-extension member, a
+//! ref accessor body in a protocol (defaults go in a protocol extension),
+//! or a bodyless ref clause in a protocol extension (only a protocol can
+//! require one).
+//!
+//! ### E640 -- `bodyless_ref_accessor` (Error, Correctness)
+//! A bodyless `ref` / `mutating ref` outside a protocol.
 //!
 //! ### E622 -- `accessor_missing_read_provider` (Error, Correctness)
 //! An accessor block with a write provider but no `get`/`ref` (set-only
@@ -59,6 +65,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E621",
         name: "ref_accessor_in_protocol",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E640",
+        name: "bodyless_ref_accessor",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -136,28 +148,76 @@ impl DeclCheck for PlaceAccessorAnalyzer {
         let has_getter = cx.query.get::<Valued>(cx.entity).is_some();
         let span = util::entity_span(cx.query, cx.entity);
 
-        // E621: ref accessors are rejected in protocols and protocol
-        // extensions (the stage-1.5 scope restriction: concrete inherent
-        // declarations only).
-        if (has_ref || has_mutating_ref || declared.any_modifying()) && in_protocol_scope(cx) {
+        // Ref accessors with and without bodies: a bodyless clause is a
+        // protocol requirement (`var value: T { ref mutating ref }`).
+        let ref_children = [
+            accessors.and_then(|a| a.ref_accessor),
+            accessors.and_then(|a| a.mutating_ref_accessor),
+        ];
+        let bodied_ref = ref_children
+            .iter()
+            .flatten()
+            .any(|&c| cx.query.get::<Valued>(c).is_some());
+        let bodyless_ref = ref_children
+            .iter()
+            .flatten()
+            .any(|&c| cx.query.get::<Valued>(c).is_none());
+        let in_protocol = cx
+            .query
+            .parent_of(cx.entity)
+            .is_some_and(|p| cx.query.get::<NodeKind>(p) == Some(&NodeKind::Protocol));
+
+        // E621: a protocol REQUIRES `ref` / `mutating ref` with bodyless
+        // clauses (witnessed by a conformer's accessors or a stored field),
+        // and a protocol extension supplies their default bodies, like a
+        // default method. A body in the protocol itself, a bodyless clause in
+        // an extension, and `modifying` accessors stay rejected.
+        let protocol_scope = in_protocol_scope(cx);
+        if protocol_scope
+            && (declared.any_modifying()
+                || (in_protocol && bodied_ref)
+                || (!in_protocol && bodyless_ref))
+        {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: descriptor("E621").id,
                 severity: descriptor("E621").default_severity,
-                message: "`ref` and `modifying` accessors are not allowed in protocols or \
-                          protocol extensions"
+                message: "a protocol requires `ref` / `mutating ref` with bodyless clauses, \
+                          and only a protocol extension gives their bodies; `modifying` \
+                          accessors are not allowed in either"
                     .into(),
                 labels: vec![DiagLabel {
                     span: span.clone(),
-                    message: "declare the accessor on a concrete type".into(),
+                    message: "not allowed here".into(),
                     is_primary: true,
                 }],
                 notes: vec![
-                    "witness-dispatched reference returns are outside the stage-1.5 reference \
-                     rules; protocol members use `get`/`set`"
+                    "require the place in the protocol (`var value: T { ref mutating ref }`) \
+                     and give a default in `extend P { var value: T { ref { … } } }`"
                         .into(),
                 ],
             });
             // The provider checks below would only cascade.
+            return diags;
+        }
+
+        // E640: a bodyless `ref` / `mutating ref` outside a protocol has
+        // nothing to lend.
+        if bodyless_ref && !protocol_scope {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: descriptor("E640").id,
+                severity: descriptor("E640").default_severity,
+                message: "a `ref` accessor needs a body outside a protocol".into(),
+                labels: vec![DiagLabel {
+                    span: span.clone(),
+                    message: "this accessor has no body".into(),
+                    is_primary: true,
+                }],
+                notes: vec![
+                    "a bodyless `ref` / `mutating ref` only declares a protocol requirement; \
+                     write `ref { … }`, or drop the accessor block for a stored property"
+                        .into(),
+                ],
+            });
             return diags;
         }
 

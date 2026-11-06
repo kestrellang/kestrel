@@ -9,21 +9,20 @@
 
 module Test
 
-import std.collections.(Array, MutableArraySlice)
+import std.collections.(Array, Slice)
 
 struct Filler { var byte: Int64 }
 
 extend Filler {
-    mutating func fill(consuming into buf: MutableArraySlice[Int64]) -> Int64 {
+    mutating func fill(mutating into buf: Slice[Int64]) -> Int64 {
         buf.fill(with: self.byte);
         self.byte += 1;
         buf.count
     }
 }
 
-func fillTail(mutating f: Filler, consuming into buf: MutableArraySlice[Int64]) -> Int64 {
-    var rest = buf;
-    f.fill(into: rest.mutatingSlice(1..))
+func fillTail(mutating f: Filler, mutating into buf: Slice[Int64]) -> Int64 {
+    f.fill(into: buf(1..))
 }
 
 @main

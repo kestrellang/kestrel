@@ -28,7 +28,7 @@ func main() -> lang.i64 {
     if h1.box.isIdentical(to: other.box) { return 2; }
 
     h2.box.sharedMutRef() = 99;                           // mutate through the copy
-    if h1.box.getValue() != 99 { return 3; }              // one storage behind two holders
-    if other.box.getValue() != 1 { return 4; }            // the independent box is untouched
+    if h1.box.value != 99 { return 3; }              // one storage behind two holders
+    if other.box.value != 1 { return 4; }            // the independent box is untouched
     0
 }

@@ -23,7 +23,7 @@ public struct BLAKE3: Digest {
         self.stack = Array[Array[UInt32]]();
     }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static {
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         let input = bytes.asUnsafeSlice();
         var offset: Int64 = 0;
         while offset < input.count {

@@ -252,10 +252,10 @@ fn desugar_opaque_params(
 
             // `some P and not Copyable` in param position desugars to the
             // existing `where __opaque_N: not Copyable` machinery.
-            if let Some(negative) = negative {
+            for negative in negative {
                 new_where_constraints.push(WhereConstraint::NegativeBound {
                     subject: tp_ast.clone(),
-                    protocol: (**negative).clone(),
+                    protocol: negative.clone(),
                     node: SyntaxNodePtr::new(cst_node),
                 });
             }

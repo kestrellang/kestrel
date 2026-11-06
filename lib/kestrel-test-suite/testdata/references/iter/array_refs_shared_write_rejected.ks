@@ -2,7 +2,7 @@
 // stdlib: true
 
 // Stage 2d stdlib surface: `refs()` Items are SHARED — writes through
-// the loop variable reject (E208), use `mutableRefs()` instead.
+// the loop variable reject (E208), use `mutatingRefs()` instead.
 module Test
 
 @main

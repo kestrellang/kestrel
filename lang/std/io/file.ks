@@ -5,7 +5,7 @@ module std.io.file
 import std.numeric.(Int64, Int32, UInt8)
 import std.result.(Result, Optional)
 import std.memory.(UnsafeSlice, Pointer)
-import std.collections.(Array, MutableArraySlice)
+import std.collections.(Array, Slice)
 import std.text.(String)
 import std.core.(Bool, Copyable)
 import std.io.libc
@@ -222,8 +222,8 @@ public struct File: Readable, Writable, not Copyable {
     /// returned. Short reads (`n < buf.count`) are normal — keep calling
     /// until `0` is returned (EOF) or an error fires. Use `readAll`/
     /// `readExact` from `std.io.read` when looping by hand isn't wanted.
-    public mutating func read(consuming into buf: MutableArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let raw = buf.asUnsafeMutableSlice();
+    public mutating func read(mutating into buf: Slice[UInt8]) -> Result[Int64, IoError] {
+        let raw = buf.asUnsafeSlice();
         let n = libc.read(self.fd, raw.pointer, raw.count);
         if n < 0 {
             return .Err(IoError.last())

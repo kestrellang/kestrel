@@ -74,6 +74,15 @@ impl MonoModule {
         crate::ty::is_fat(&mut MonoTails(self), ty)
     }
 
+    /// The element type when `ty`'s unsized tail is a `lang.slice[T]`.
+    pub fn slice_tail_elem(&self, ty: crate::TyId) -> Option<crate::TyId> {
+        let tail = crate::ty::unsized_tail(&mut MonoTails(self), ty)?;
+        match self.ty_arena.get(tail) {
+            crate::ty::MirTy::Slice(elem) => Some(*elem),
+            _ => None,
+        }
+    }
+
     pub fn resolve_name(&self, entity: Entity) -> &str {
         self.entity_names
             .get(&entity)

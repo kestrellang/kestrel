@@ -1406,10 +1406,10 @@ fn mono_size_and_align(
 
 /// [`crate::ty::TailLookup`] over the generic struct defs, substituting
 /// (and interning) the last field at the asked instance.
-struct GenericTails<'a> {
-    arena: &'a mut TyArena,
-    structs: &'a IndexMap<Entity, StructDef>,
-    witnesses: &'a [WitnessDef],
+pub(crate) struct GenericTails<'a> {
+    pub(crate) arena: &'a mut TyArena,
+    pub(crate) structs: &'a IndexMap<Entity, StructDef>,
+    pub(crate) witnesses: &'a [WitnessDef],
 }
 
 impl crate::ty::TailLookup for GenericTails<'_> {

@@ -22,19 +22,19 @@ struct Bag {
     var top: Int64 throws BadIndex {
         get {
             if self.items.count == 0 { throw BadIndex.Empty; }
-            .Ok(self.items(at: self.items.count - 1))
+            .Ok(self.items(self.items.count - 1))
         }
     }
 
     var first: Int64 throws BadIndex {
         ref {
             if self.items.count == 0 { throw BadIndex.Empty; }
-            let r = &self.items(at: 0);
+            let r = &self.items(0);
             .Ok(r)
         }
         mutating ref {
             if self.items.count == 0 { throw BadIndex.Empty; }
-            let r = &mutating self.items(at: 0);
+            let r = &mutating self.items(0);
             .Ok(r)
         }
     }
@@ -42,12 +42,12 @@ struct Bag {
     subscript(checked i: Int64) -> Int64 throws BadIndex {
         ref {
             if i < 0 or i >= self.items.count { throw BadIndex.OutOfRange; }
-            let r = &self.items(at: i);
+            let r = &self.items(i);
             .Ok(r)
         }
         mutating ref {
             if i < 0 or i >= self.items.count { throw BadIndex.OutOfRange; }
-            let r = &mutating self.items(at: i);
+            let r = &mutating self.items(i);
             .Ok(r)
         }
     }
@@ -71,9 +71,9 @@ func main() -> lang.i64 {
         .Err(_) => { return 4; },
     }
     if let .Ok(&mutating v) = b.first { v += 10; }
-    if b.items(at: 0) != 14 { return 5; }
+    if b.items(0) != 14 { return 5; }
     if let .Ok(&mutating v) = b(checked: 1) { v = 50; }
-    if b.items(at: 1) != 50 { return 6; }
+    if b.items(1) != 50 { return 6; }
     if let .Ok(&mutating v) = b(checked: 7) { v = 0; return 7; }
 
     let empty = Bag(items: []);

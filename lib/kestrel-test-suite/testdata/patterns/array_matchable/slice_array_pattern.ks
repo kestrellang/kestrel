@@ -3,9 +3,9 @@
 
 module Test
 
-import std.collections.ArraySlice
+import std.collections.Slice
 
-func sliceFirst(s: ArraySlice[lang.i64]) -> lang.i64 {
+func sliceFirst(s: Slice[lang.i64]) -> lang.i64 {
     match s {
         [first, ..] => first,
         _ => 0

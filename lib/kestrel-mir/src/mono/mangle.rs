@@ -191,6 +191,12 @@ fn mangle_type(
             mangle_type(arena, entity_names, inner, out);
         },
 
+        MirTy::Slice(elem) => {
+            let elem = *elem;
+            out.push('Q');
+            mangle_type(arena, entity_names, elem, out);
+        },
+
         // `Z` + each bound (path + args) + `B` + each pinned associated
         // type (path + type) + `E`.
         MirTy::RawExistential { bounds, bindings } => {

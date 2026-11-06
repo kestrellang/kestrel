@@ -19,10 +19,10 @@ func main() -> lang.i64 {
 
     box.sharedMutRef() = 42;              // write through the &mutating projection
 
-    if box.getValue() != 42 { return 1; }
-    if alias.getValue() != 42 { return 2; }   // the alias sees it — shared, not forked
+    if box.value != 42 { return 1; }
+    if alias.value != 42 { return 2; }   // the alias sees it — shared, not forked
 
-    if box.isUnique() { return 3; }       // sharedMutRef must not split storage
+    if box.isUnique { return 3; }       // sharedMutRef must not split storage
     if box.isIdentical(to: alias) == false { return 4; }
     0
 }

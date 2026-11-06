@@ -18,6 +18,7 @@ import std.text.(Formattable, Formatter, FormatOptions, Char, Grapheme, decodeUt
 /// and what the subscript returns.
 public protocol StringIndex: Equatable, Comparable {
     type Yield
+    @sugarOnly
     func read(from slice: StringSlice) -> Yield
 }
 

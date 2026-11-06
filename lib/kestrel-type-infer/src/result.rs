@@ -52,10 +52,10 @@ pub struct TypedBody {
     pub opaque_concrete_type: Option<ResolvedTy>,
 
     /// `Indirection`-peel plan for member-access exprs that resolved through a
-    /// smart-pointer's pointee (`wrapper.m` → `wrapper.pointeeRef().m`). The
+    /// smart-pointer's pointee (`wrapper.m` → `wrapper.value.m`). The
     /// `Vec` is the peel CHAIN, outer→inner, for nested wrappers
     /// (`RcBox[Pointer[T]]`). MIR lowering replays it: project the receiver
-    /// through each `pointeeRef()`/`pointeeMutRef()` before the member access.
+    /// through each level's `value` accessor before the member access.
     /// Single source of truth — MIR never re-derives the peel (mirrors
     /// `resolutions` / `ClosureCaptures`).
     pub indirection_peels: HashMap<HirExprId, Vec<IndirectionPeel>>,
@@ -75,6 +75,17 @@ pub struct TypedBody {
     /// the iterable itself is CONSUMED as the loop's iterator. Decided once
     /// by inference; the move checker and MIR lowering both read it.
     pub direct_iterators: HashSet<HirExprId>,
+    /// Expressions of type `Optional[&T]` whose value decays to `Optional[T]`:
+    /// bound initializers (`let f = b.first`) and operator receivers
+    /// (`xs.first() ?? 0`). MIR copies the payload out wherever the
+    /// expression is lowered, through `@builtin(.DecayOptionalRef)`.
+    pub optional_ref_decays: HashSet<HirExprId>,
+    /// Calls whose callee returns a ref ONCE INSTANTIATED (value: mutating),
+    /// including generic returns that only become refs through their type
+    /// arguments (`-> I.Ref` at `I.Ref = &T`, `-> T` at `T = &U`). A
+    /// declared `-> &T` is covered too. MIR lowering reads this as the
+    /// call's return convention; the declared signature alone can't say.
+    pub ref_return_calls: HashMap<HirExprId, bool>,
     /// Existential conversions at check leaves: `expr` (of type `from`)
     /// becomes the existential `to` by the recorded rule. MIR lowering emits
     /// them from here and never re-derives one (existentials design §4).
@@ -146,16 +157,18 @@ pub struct ExistentialConversion {
     pub to: ResolvedTy,
 }
 
-/// One level of an `Indirection` member peel: the concrete pointee accessors
-/// on the wrapper type at this level. `mut_method` is `None` when the wrapper
+/// One level of an `Indirection` member peel: the pointee accessors the
+/// wrapper at this level lends through. `mut_method` is `None` when the wrapper
 /// is `Indirection` but not `MutableIndirection` (read-only) — a write through
 /// it is the `indirection_no_mutating_accessor` error.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IndirectionPeel {
-    /// `pointeeRef()` on the wrapper — yields `&Target` for reads.
+    /// `Indirection.value`'s `ref` requirement — yields `&Target` for reads,
+    /// dispatched through the wrapper's witness.
     pub read_method: Entity,
-    /// `pointeeMutRef()` on the wrapper — yields `&mutating Target` for
-    /// writes / RMW / mutating-method receivers; `None` if read-only.
+    /// `MutableIndirection.value`'s `mutating ref` — yields `&mutating
+    /// Target` for writes / RMW / mutating-method receivers; `None` if the
+    /// wrapper is read-only.
     pub mut_method: Option<Entity>,
     /// The concrete pointee type (`Indirection.Target`) at this level. MIR
     /// builds the `&Target` / `&mutating Target` result type of the accessor
@@ -185,6 +198,8 @@ impl Hash for TypedBody {
             indirection_peels,
             kind_coercions,
             direct_iterators,
+            optional_ref_decays,
+            ref_return_calls,
             existential_conversions,
             type_tests,
             chain_modes,
@@ -203,6 +218,10 @@ impl Hash for TypedBody {
         let mut direct: Vec<_> = direct_iterators.iter().map(|e| e.raw()).collect();
         direct.sort_unstable();
         direct.hash(state);
+        let mut decays: Vec<_> = optional_ref_decays.iter().map(|e| e.raw()).collect();
+        decays.sort_unstable();
+        decays.hash(state);
+        hash_sorted(ref_return_calls, state);
         hash_sorted(existential_conversions, state);
         hash_sorted(type_tests, state);
         hash_sorted(chain_modes, state);
@@ -481,6 +500,15 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
             .collect(),
         kind_coercions: ctx.kind_coercions.clone(),
         direct_iterators: ctx.direct_iterators.clone(),
+        optional_ref_decays: ctx.optional_ref_decays.clone(),
+        ref_return_calls: ctx
+            .call_return_tvs
+            .iter()
+            .filter_map(|(&expr, &tv)| match resolve_to_concrete(ctx, tv) {
+                ResolvedTy::Ref { mutating, .. } => Some((expr, mutating)),
+                _ => None,
+            })
+            .collect(),
         existential_conversions: ctx
             .existential_conversions
             .iter()
@@ -796,6 +824,9 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::MemberNotVisible { receiver, name, .. } => {
             format!("{}.{} not visible", describe_tyvar(ctx, *receiver), name)
         },
+        InferError::SugarOnlyMember { receiver, name, .. } => {
+            format!("{}.{} is sugar-only", describe_tyvar(ctx, *receiver), name)
+        },
         InferError::MemberIsStatic { receiver, name, .. } => {
             format!(
                 "'{}' is a static member of '{}' and cannot be used on an instance",
@@ -937,6 +968,7 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::RefInTypeArgument { .. } => {
             "a reference cannot be a generic type argument".into()
         },
+        InferError::UnsizedAssign { .. } => "a slice cannot be assigned as a whole".into(),
         InferError::ConventionMismatch { .. } => {
             "cannot pass a mutating closure where a non-mutating parameter is expected".into()
         },
@@ -1064,6 +1096,8 @@ mod tests {
             indirection_peels: HashMap::default(),
             kind_coercions: HashMap::default(),
             direct_iterators: HashSet::default(),
+            optional_ref_decays: HashSet::default(),
+            ref_return_calls: HashMap::default(),
             existential_conversions: HashMap::default(),
             type_tests: HashMap::default(),
             chain_modes: HashMap::default(),
@@ -1150,6 +1184,13 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    ..base.clone()
+                },
+            ),
+            (
+                "ref_return_calls",
+                TypedBody {
+                    ref_return_calls: [(e, false)].into_iter().collect(),
                     ..base.clone()
                 },
             ),

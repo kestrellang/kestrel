@@ -9,7 +9,7 @@ public struct SHA3_224: Digest {
 
     public init() { self.core = Keccak(rate: 144, domain: Keccak.sha3Domain); }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static { self.core.update(bytes.asUnsafeSlice()); }
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized { self.core.update(bytes.asUnsafeSlice()); }
 
     public func finalize() -> DigestOutput { DigestOutput(bytes: self.core.squeeze(SHA3_224.digestSize)) }
 }
@@ -23,7 +23,7 @@ public struct SHA3_256: Digest {
 
     public init() { self.core = Keccak(rate: 136, domain: Keccak.sha3Domain); }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static { self.core.update(bytes.asUnsafeSlice()); }
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized { self.core.update(bytes.asUnsafeSlice()); }
 
     public func finalize() -> DigestOutput { DigestOutput(bytes: self.core.squeeze(SHA3_256.digestSize)) }
 }
@@ -37,7 +37,7 @@ public struct SHA3_384: Digest {
 
     public init() { self.core = Keccak(rate: 104, domain: Keccak.sha3Domain); }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static { self.core.update(bytes.asUnsafeSlice()); }
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized { self.core.update(bytes.asUnsafeSlice()); }
 
     public func finalize() -> DigestOutput { DigestOutput(bytes: self.core.squeeze(SHA3_384.digestSize)) }
 }
@@ -51,7 +51,7 @@ public struct SHA3_512: Digest {
 
     public init() { self.core = Keccak(rate: 72, domain: Keccak.sha3Domain); }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static { self.core.update(bytes.asUnsafeSlice()); }
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized { self.core.update(bytes.asUnsafeSlice()); }
 
     public func finalize() -> DigestOutput { DigestOutput(bytes: self.core.squeeze(SHA3_512.digestSize)) }
 }
@@ -72,7 +72,7 @@ public struct SHAKE128 {
 
     public init() { self.core = Keccak(rate: 168, domain: Keccak.shakeDomain); }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static { self.core.update(bytes.asUnsafeSlice()); }
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized { self.core.update(bytes.asUnsafeSlice()); }
 
     /// The first `outputLength` bytes of output, or null if it's below 1.
     /// Non-mutating: absorbing more and finalizing again is fine.
@@ -82,7 +82,7 @@ public struct SHAKE128 {
     }
 
     /// One-shot SHAKE128, or null if `outputLength` is below 1.
-    public static func hash(bytes: some Slice[UInt8] and not Static, outputLength outputLength: Int64) -> DigestOutput? {
+    public static func hash(bytes: &some Sliceable[UInt8] and not Static and not Copyable and not Sized, outputLength outputLength: Int64) -> DigestOutput? {
         var shake = SHAKE128();
         shake.update(bytes);
         shake.finalize(outputLength: outputLength)
@@ -96,7 +96,7 @@ public struct SHAKE256 {
 
     public init() { self.core = Keccak(rate: 136, domain: Keccak.shakeDomain); }
 
-    public mutating func update[S](bytes: S) where S: Slice[UInt8], S: not Static { self.core.update(bytes.asUnsafeSlice()); }
+    public mutating func update[S](bytes: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized { self.core.update(bytes.asUnsafeSlice()); }
 
     /// The first `outputLength` bytes of output, or null if it's below 1.
     public func finalize(outputLength outputLength: Int64) -> DigestOutput? {
@@ -105,7 +105,7 @@ public struct SHAKE256 {
     }
 
     /// One-shot SHAKE256, or null if `outputLength` is below 1.
-    public static func hash(bytes: some Slice[UInt8] and not Static, outputLength outputLength: Int64) -> DigestOutput? {
+    public static func hash(bytes: &some Sliceable[UInt8] and not Static and not Copyable and not Sized, outputLength outputLength: Int64) -> DigestOutput? {
         var shake = SHAKE256();
         shake.update(bytes);
         shake.finalize(outputLength: outputLength)

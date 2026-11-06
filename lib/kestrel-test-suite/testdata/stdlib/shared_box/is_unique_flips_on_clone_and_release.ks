@@ -16,16 +16,16 @@ import std.core.(Bool)
 // `inner` is a second handle scoped to this call; it is released on return.
 func cloneAndReportShared(box: RcBox[Int64]) -> Bool {
     let inner = box.clone();
-    box.isUnique()              // false while `inner` is alive
+    box.isUnique              // false while `inner` is alive
 }
 
 @main
 func main() -> lang.i64 {
     let a = RcBox[Int64](5);
-    if a.isUnique() == false { return 1; }        // fresh box: sole owner
+    if a.isUnique == false { return 1; }        // fresh box: sole owner
 
     if cloneAndReportShared(a) { return 2; }      // shared while the clone lives
 
-    if a.isUnique() == false { return 3; }        // the clone's release restored uniqueness
+    if a.isUnique == false { return 3; }        // the clone's release restored uniqueness
     0
 }

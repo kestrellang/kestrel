@@ -23,7 +23,7 @@ struct Payload: not Copyable {
 func shareThenRelease() -> Int64 {
     let box = RcBox(Payload(id: 7));
     let alias = box.clone();
-    let id: Int64 = alias.pointeeRef().id;
+    let id: Int64 = alias.value.id;
     if deinit_count != 0 { return -1; }   // nothing destroyed while handles are live
     id
 }

@@ -801,11 +801,27 @@ impl OssaBodyCtx<'_, '_> {
         self.anchor_value_in_slot(v, cap_ty)
     }
 
+    /// The capture of a borrowed UNSIZED value (`s: Slice[T]`): it has no
+    /// by-value bits to store in a sized slot — its representation is its
+    /// (fat) address — so the capture is that address. `None` otherwise.
+    fn unsized_borrow_addr(&mut self, v: ValueId, cap_ty: TyId) -> Option<ValueId> {
+        if self.body.value(v).ownership != Ownership::Guaranteed
+            || !self.ctx.module.is_unsized(cap_ty)
+        {
+            return None;
+        }
+        let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
+        Some(self.emit_op1(Op::PtrTo(cap_ty), v, ptr_ty))
+    }
+
     /// Materialize `v`'s bits into a fresh frame slot and return the slot
     /// address. Never consumes, copies (clones) or moves `v`: an @owned value
     /// is borrowed for the store, a @guaranteed one is stored directly
     /// (`emit_store_init_borrowed` is the no-CopyValue store).
     fn anchor_value_in_slot(&mut self, v: ValueId, cap_ty: TyId) -> ValueId {
+        if let Some(addr) = self.unsized_borrow_addr(v, cap_ty) {
+            return addr;
+        }
         let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
         let one = self.emit_literal(Immediate::i64(1));
         let addr = self.emit_op1(Op::StackAlloc(cap_ty), one, ptr_ty);
@@ -947,6 +963,11 @@ impl OssaBodyCtx<'_, '_> {
             //                   convention guarantees an escaping closure's
             //                   captures are @owned and take the move branch.
             let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
+            if !self.is_var_local(&root)
+                && let Some(addr) = self.unsized_borrow_addr(mir_val, cap_ty)
+            {
+                return addr;
+            }
             let one = self.emit_literal(Immediate::i64(1));
             let addr = self.emit_op1(Op::StackAlloc(cap_ty), one, ptr_ty);
             if self.is_var_local(&root) {

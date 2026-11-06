@@ -4,7 +4,8 @@
 // Stage 2d anti-smuggling: a ref-valued member alias is POSITION-
 // TRANSPARENT. Trivial aliases are eagerly expanded at every named use,
 // so an illegal position rejects exactly as if `&T` were written there
-// (E480 param / E482 binding). The diagnostic anchors at the alias RHS —
+// (E482 binding). A ref-typed param must be written `x: &T` itself, not
+// through an alias (E480). The diagnostic anchors at the alias RHS —
 // one illegal use per alias below so each line carries one error.
 module Test
 

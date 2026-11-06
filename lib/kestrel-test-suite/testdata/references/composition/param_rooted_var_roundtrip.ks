@@ -16,7 +16,7 @@ func wrapThroughVar(a: Int64) -> Optional[&Int64] {
 @main
 func main() {
     var x = 5;
-    let o = wrapThroughVar(x);
+    let o: Optional[&Int64] = wrapThroughVar(x); // annotated: an unannotated binding copies out
     x = 8;
     if let .Some(v) = o {
         if v != 8 {

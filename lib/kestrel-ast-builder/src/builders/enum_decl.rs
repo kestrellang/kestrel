@@ -94,6 +94,7 @@ pub fn build_enum_case(
                 pattern: None,
                 is_mut: false,
                 is_consuming: false,
+                by_ref: false,
             }
         })
         .collect();
