@@ -177,6 +177,22 @@ pub enum InferError {
         span: Span,
     },
 
+    /// Memberwise init call leaves out a field that has no default.
+    /// Emitted for `S(a: 1)` when `S` has fields `a`, `c` and `c` has none.
+    MemberwiseInitMissing {
+        struct_name: String,
+        field: String,
+        span: Span,
+    },
+
+    /// Memberwise init argument that no remaining field takes: an unknown
+    /// label, or one out of declaration order (`S(a: 1, c: 2, b: 3)`).
+    MemberwiseInitUnexpected {
+        struct_name: String,
+        label: Option<String>,
+        span: Span,
+    },
+
     /// Implicit `it` parameter used in a context expecting != 1 parameter.
     ItWrongArity { expected: usize, span: Span },
 
@@ -579,6 +595,28 @@ impl InferError {
                 )
             },
 
+            Self::MemberwiseInitMissing {
+                struct_name, field, ..
+            } => labeled(
+                format!("missing argument for field '{field}' of struct '{struct_name}'"),
+                format!("'{field}' has no default"),
+            ),
+
+            Self::MemberwiseInitUnexpected {
+                struct_name, label, ..
+            } => {
+                let desc = label
+                    .as_deref()
+                    .map(|s| format!("'{s}'"))
+                    .unwrap_or_else(|| "unlabeled".into());
+                labeled(
+                    format!(
+                        "no remaining field of struct '{struct_name}' takes the {desc} argument"
+                    ),
+                    "arguments must name fields, in declaration order".to_string(),
+                )
+            },
+
             Self::ExistentialBoxMismatch { from, to, .. } => labeled(
                 format!(
                     "cannot convert '{from}' to '{to}': existentials in different boxes are \
@@ -805,6 +843,8 @@ impl InferError {
             | Self::AmbiguousTrailingClosure { .. }
             | Self::MemberwiseInitArity { .. }
             | Self::MemberwiseInitLabel { .. }
+            | Self::MemberwiseInitMissing { .. }
+            | Self::MemberwiseInitUnexpected { .. }
             | Self::NoMatchingOverload { .. }
             | Self::TypeArgCountMismatch { .. } => "E113",
             Self::LiteralNotAccepted { .. } => "E114",
@@ -867,6 +907,8 @@ impl InferError {
             | Self::NoMatchingOverload { span, .. }
             | Self::MemberwiseInitArity { span, .. }
             | Self::MemberwiseInitLabel { span, .. }
+            | Self::MemberwiseInitMissing { span, .. }
+            | Self::MemberwiseInitUnexpected { span, .. }
             | Self::ItWrongArity { span, .. }
             | Self::ExistentialBoxMismatch { span, .. }
             | Self::NotDispatchable { span, .. }

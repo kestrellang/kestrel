@@ -401,6 +401,8 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
         InferError::MemberwiseInitArity { .. } => "MemberwiseInitArity",
         InferError::MemberwiseInitLabel { .. } => "MemberwiseInitLabel",
+        InferError::MemberwiseInitMissing { .. } => "MemberwiseInitMissing",
+        InferError::MemberwiseInitUnexpected { .. } => "MemberwiseInitUnexpected",
         InferError::ItWrongArity { .. } => "ItWrongArity",
         InferError::LiteralNotAccepted { .. } => "LiteralNotAccepted",
         InferError::UnresolvedTypeParam { .. } => "UnresolvedTypeParam",
@@ -560,6 +562,18 @@ fn format_error(err: &InferError) -> String {
         } => format!(
             "MemberwiseInitLabel '{}' expected={} got={:?} at {}:{}",
             struct_name, expected, got, span.file_id, span.start
+        ),
+        InferError::MemberwiseInitMissing {
+            struct_name, field, ..
+        } => format!(
+            "MemberwiseInitMissing '{}' field={} at {}:{}",
+            struct_name, field, span.file_id, span.start
+        ),
+        InferError::MemberwiseInitUnexpected {
+            struct_name, label, ..
+        } => format!(
+            "MemberwiseInitUnexpected '{}' label={:?} at {}:{}",
+            struct_name, label, span.file_id, span.start
         ),
         InferError::ItWrongArity { expected, .. } => {
             format!(

@@ -628,6 +628,7 @@ impl OssaBodyCtx<'_, '_> {
     /// `rhs` is lowered first (pinned evaluation order).
     fn lower_indirection_field_store(
         &mut self,
+        target: HirExprId,
         base: HirExprId,
         peels: &[IndirectionPeel],
         field_name: &str,
@@ -636,6 +637,19 @@ impl OssaBodyCtx<'_, '_> {
         let rhs = self.lower_expr(value);
         let view = self.lower_indirection_chain(base, peels, true);
         let pointee_ty = self.body.value(view).ty;
+        // A property requirement written through an existential has no field
+        // to store into: call the payload's setter through the table.
+        if let Some(property) = self.protocol_property_requirement(target)
+            && matches!(
+                self.ctx.module.ty_arena.get(pointee_ty),
+                MirTy::RawExistential { .. }
+            )
+            && self
+                .emit_dynamic_setter_call(property, pointee_ty, view, rhs)
+                .is_some()
+        {
+            return self.emit_literal(Immediate::unit());
+        }
         let field_idx = match self.ctx.module.ty_arena.get(pointee_ty) {
             MirTy::Named { entity, .. } => self.ctx.resolve_field_idx(*entity, field_name),
             _ => None,
@@ -811,8 +825,7 @@ impl OssaBodyCtx<'_, '_> {
             // registers @guaranteed + ref_results via the child's
             // CallableRefReturn — nothing else changes.
             let getter_entity = self
-                .ctx
-                .find_ref_accessor_child(resolved.unwrap(), false)
+                .read_place_provider(resolved.unwrap(), expr_id)
                 .unwrap_or_else(|| resolved.unwrap());
             self.ctx.register_name(getter_entity);
             let result_ty = self.resolve_expr_type(expr_id);
@@ -1135,7 +1148,7 @@ impl OssaBodyCtx<'_, '_> {
         {
             let base = *base;
             let field_name = name.as_str_or_empty().to_string();
-            return self.lower_indirection_field_store(base, &peels, &field_name, value);
+            return self.lower_indirection_field_store(target, base, &peels, &field_name, value);
         }
 
         // Setter dispatch: computed properties, subscripts, field-subscripts

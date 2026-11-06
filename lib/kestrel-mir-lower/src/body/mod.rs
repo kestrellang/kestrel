@@ -1563,6 +1563,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// `struct_ty` that has one, lowered inline (the same lowering a
     /// memberwise init's omitted argument gets), with its `FieldIdx`.
     fn field_default_values(&mut self, struct_ty: TyId) -> Vec<(FieldIdx, ValueId)> {
+        self.field_default_values_except(struct_ty, &[])
+    }
+
+    /// [`Self::field_default_values`] for the defaulted fields not already in
+    /// `given` (a memberwise construction's explicit arguments): a given
+    /// field's default is never evaluated.
+    pub(crate) fn field_default_values_except(
+        &mut self,
+        struct_ty: TyId,
+        given: &[(FieldIdx, ValueId)],
+    ) -> Vec<(FieldIdx, ValueId)> {
         let MirTy::Named {
             entity, type_args, ..
         } = self.ctx.module.ty_arena.get(struct_ty).clone()
@@ -1580,6 +1591,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         .is_some_and(|fc| fc.is_declared_storage())
             })
             .filter_map(|&c| Some((c, self.ctx.field_idx_of(c)?)))
+            .filter(|(_, idx)| !given.iter().any(|(g, _)| g == idx))
             .collect();
         let field_tys = self.struct_field_tys(struct_ty);
         defaulted
@@ -4894,7 +4906,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             _ if is_static => return None,
             _ => {
                 let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(receiver)?;
-                (Some(recv_arg.value), receiver_ty)
+                // A requirement on an existential is reached on the payload,
+                // through the table (the box has no witness of its own).
+                let peeled = self.peel_existential_receiver(recv_arg.value, receiver_ty, member);
+                let (place, receiver_ty) = peeled.unwrap_or((recv_arg.value, receiver_ty));
+                (Some(place), receiver_ty)
             },
         };
         let index_vals: Vec<ValueId> = index_args
@@ -4957,6 +4973,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
         for &v in index_vals {
             args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+        }
+        if self.is_raw_existential(receiver_ty)
+            && let Some(got) = self.emit_dynamic_call(member, receiver_ty, args.clone(), result_ty)
+        {
+            return got;
         }
         let read_callee = self
             .ctx
@@ -5194,6 +5215,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         (self.prepare_call_arg(result, convention), prop_ty)
     }
 
+    /// The accessor child a READ of place member `member` at `expr_id` calls:
+    /// the `mutating ref` when type inference typed the read `&mutating T`
+    /// (`TypedBody::mutating_lends`), else the `ref`. `None` when the member has neither. Without the mutating case
+    /// `func f(mutating xs: [T]) -> &mutating T { xs(0) }` lent the shared
+    /// `ref` and wrote through it, skipping Array's copy-on-write.
+    pub(crate) fn read_place_provider(&self, member: Entity, expr_id: HirExprId) -> Option<Entity> {
+        let mutating = self
+            .typed
+            .as_ref()
+            .is_some_and(|t| t.mutating_lends.contains(&expr_id));
+        mutating
+            .then(|| self.ctx.find_ref_accessor_child(member, true))
+            .flatten()
+            .or_else(|| self.ctx.find_ref_accessor_child(member, false))
+    }
+
     /// Computed property `prop`'s type at a receiver of type `receiver_ty`:
     /// its declared type with the receiver's type args (and a protocol
     /// requirement's `Self`) substituted.
@@ -5391,6 +5428,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 self.end_lent_slot_borrow(lent, &wb.lent_refs);
             }
             let new_val = self.emit_take(wb.slot_addr, wb.elem_ty);
+            // A payload view (see `peel_existential_receiver`): set through
+            // the table.
+            if let Some(view) = wb.recv_place
+                && self.is_raw_existential(wb.receiver_ty)
+                && self
+                    .emit_dynamic_setter_call(wb.setter, wb.receiver_ty, view, new_val)
+                    .is_some()
+            {
+                continue;
+            }
             let mut args: Vec<CallArg> = wb
                 .recv_place
                 .map(|value| CallArg {
