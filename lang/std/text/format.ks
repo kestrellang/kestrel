@@ -498,6 +498,7 @@ public protocol Interpolatable {
     /// `literalCapacity` is the total byte count of the static segments;
     /// `interpolationCount` is the number of `\{...}` holes. Implementors
     /// can use these to preallocate.
+    @sugarOnly
     init(literalCapacity literalCapacity: Int64, interpolationCount interpolationCount: Int64)
 
     /// Appends a static literal segment.
@@ -521,6 +522,7 @@ public protocol ExpressibleByStringInterpolation: ExpressibleByStringLiteral {
 
     /// @name From Interpolation
     /// Constructs `Self` from a fully built interpolation accumulator.
+    @sugarOnly
     init(interpolation: Interpolation)
 }
 

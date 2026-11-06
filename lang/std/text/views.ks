@@ -1159,18 +1159,23 @@ public struct GraphemeIndex: Equatable {
 /// `BytesView` sub-view. All access is O(1) — no buffer copy on slice.
 internal protocol BytesIndex {
     type BytesYield
+    @sugarOnly
     func readBytes(from view: BytesView) -> BytesYield
+    @sugarOnly
     func readBytesChecked(from view: BytesView) -> BytesYield?
+    @sugarOnly
     func readBytesUnchecked(from view: BytesView) -> BytesYield
 }
 
 internal protocol BytesClampable {
     type BytesClampedYield
+    @sugarOnly
     func readBytesClamped(from view: BytesView) -> BytesClampedYield
 }
 
 internal protocol BytesWrappable {
     type BytesWrappedYield
+    @sugarOnly
     func readBytesWrapped(from view: BytesView) -> BytesWrappedYield
 }
 
@@ -1353,6 +1358,7 @@ extend ClosedRange[Int64]: BytesWrappable {
 /// them. Single-element indexes (`Int64`) deliberately don't conform —
 /// `substring` is range-flavored only.
 public protocol BytesSubstringIndex {
+    @sugarOnly
     func readBytesSubstring(from view: BytesView) -> String
 }
 
@@ -1552,17 +1558,21 @@ extend RangeThrough[Int64]: BytesSubstringIndex {
 /// linear.
 internal protocol CharsIndex {
     type CharsYield
+    @sugarOnly
     func readChars(from view: CharsView) -> CharsYield
+    @sugarOnly
     func readCharsChecked(from view: CharsView) -> CharsYield?
 }
 
 internal protocol CharsClampable {
     type CharsClampedYield
+    @sugarOnly
     func readCharsClamped(from view: CharsView) -> CharsClampedYield
 }
 
 internal protocol CharsWrappable {
     type CharsWrappedYield
+    @sugarOnly
     func readCharsWrapped(from view: CharsView) -> CharsWrappedYield
 }
 
@@ -1769,6 +1779,7 @@ extend ClosedRange[Int64]: CharsWrappable {
 
 /// Range-only index for `CharsView.substring`. See `BytesSubstringIndex`.
 public protocol CharsSubstringIndex {
+    @sugarOnly
     func readCharsSubstring(from view: CharsView) -> String
 }
 
@@ -1989,17 +2000,21 @@ extend RangeThrough[Int64]: CharsSubstringIndex {
 /// start; the slice itself is free.
 internal protocol GraphemesIndex {
     type GraphemesYield
+    @sugarOnly
     func readGraphemes(from view: GraphemesView) -> GraphemesYield
+    @sugarOnly
     func readGraphemesChecked(from view: GraphemesView) -> GraphemesYield?
 }
 
 internal protocol GraphemesClampable {
     type GraphemesClampedYield
+    @sugarOnly
     func readGraphemesClamped(from view: GraphemesView) -> GraphemesClampedYield
 }
 
 internal protocol GraphemesWrappable {
     type GraphemesWrappedYield
+    @sugarOnly
     func readGraphemesWrapped(from view: GraphemesView) -> GraphemesWrappedYield
 }
 
@@ -2205,6 +2220,7 @@ extend ClosedRange[Int64]: GraphemesWrappable {
 
 /// Range-only index for `GraphemesView.substring`. See `BytesSubstringIndex`.
 public protocol GraphemesSubstringIndex {
+    @sugarOnly
     func readGraphemesSubstring(from view: GraphemesView) -> String
 }
 
@@ -2426,17 +2442,21 @@ extend RangeThrough[Int64]: GraphemesSubstringIndex {
 /// same line strings.
 internal protocol LinesIndex {
     type LinesYield
+    @sugarOnly
     func readLines(from view: LinesView) -> LinesYield
+    @sugarOnly
     func readLinesChecked(from view: LinesView) -> LinesYield?
 }
 
 internal protocol LinesClampable {
     type LinesClampedYield
+    @sugarOnly
     func readLinesClamped(from view: LinesView) -> LinesClampedYield
 }
 
 internal protocol LinesWrappable {
     type LinesWrappedYield
+    @sugarOnly
     func readLinesWrapped(from view: LinesView) -> LinesWrappedYield
 }
 
@@ -2642,6 +2662,7 @@ extend ClosedRange[Int64]: LinesWrappable {
 
 /// Range-only index for `LinesView.substring`. See `BytesSubstringIndex`.
 public protocol LinesSubstringIndex {
+    @sugarOnly
     func readLinesSubstring(from view: LinesView) -> String
 }
 

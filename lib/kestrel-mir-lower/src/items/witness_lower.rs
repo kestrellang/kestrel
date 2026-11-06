@@ -297,7 +297,14 @@ fn bind_witness_methods(
         if prefer_source && !extension_only {
             let source_children: Vec<Entity> = ctx.world.children_of(source).to_vec();
             impl_func = if let Some(slot) = slot {
-                find_accessor_among(ctx, &source_children, slot)
+                find_accessor_among(
+                    ctx,
+                    &source_children,
+                    slot,
+                    lookup_name,
+                    &method_key.labels,
+                    &expected,
+                )
             } else {
                 find_impl_among(
                     ctx,
@@ -340,7 +347,14 @@ fn bind_witness_methods(
             let entities: Vec<Entity> = type_side.iter().map(|(e, _)| *e).collect();
 
             impl_func = if let Some(slot) = slot {
-                find_accessor_among(ctx, &entities, slot)
+                find_accessor_among(
+                    ctx,
+                    &entities,
+                    slot,
+                    lookup_name,
+                    &method_key.labels,
+                    &expected,
+                )
             } else {
                 find_impl_among(
                     ctx,
@@ -532,7 +546,17 @@ fn bind_witness_methods(
         if source_is_protocol_ext {
             let ext_children: Vec<Entity> = ctx.world.children_of(source).to_vec();
             let ext_impl = if let Some(slot) = slot {
-                find_accessor_among(ctx, &ext_children, slot)
+                find_accessor_among(
+                    ctx,
+                    &ext_children,
+                    slot,
+                    lookup_name,
+                    &method_key.labels,
+                    &ExpectedSignature {
+                        params: None,
+                        ret: None,
+                    },
+                )
             } else {
                 find_impl_among(
                     ctx,
@@ -559,7 +583,15 @@ fn bind_witness_methods(
         // Protocol extension default
         if member.extension.is_some() {
             let bind_entity = if let Some(slot) = slot {
-                find_accessor_among(ctx, &[member.entity], slot).unwrap_or(member.entity)
+                find_accessor_among(
+                    ctx,
+                    &[member.entity],
+                    slot,
+                    lookup_name,
+                    &method_key.labels,
+                    &expected,
+                )
+                .unwrap_or(member.entity)
             } else {
                 member.entity
             };
@@ -887,33 +919,49 @@ fn accessor_slot(method_name: &str) -> Option<(&str, AccessorSlot)> {
 
 /// The accessor child (`set`, `ref` or `mutating ref`) that `slot` names,
 /// on the first Field/Subscript among `candidates` that declares one.
+/// The `slot` accessor (`set` / `ref` / `mutating ref`) of the candidate
+/// member that matches the requirement by name, labels and signature, as
+/// `find_impl_among` picks a method: a type can declare several subscripts
+/// with places (`xs(i)`, `xs(checked: i)`, …), one per label set.
 fn find_accessor_among(
-    ctx: &LowerCtx,
+    ctx: &mut LowerCtx,
     candidates: &[Entity],
     slot: AccessorSlot,
+    member_name: &str,
+    labels: &[Option<String>],
+    expected: &ExpectedSignature,
 ) -> Option<Entity> {
-    let is_slot = |e: Entity| match (ctx.world.get::<NodeKind>(e), slot) {
-        (Some(NodeKind::Setter), AccessorSlot::Set) => true,
-        (Some(NodeKind::RefAccessor), AccessorSlot::Ref | AccessorSlot::MutRef) => {
-            ctx.world.get::<MutatingAccessor>(e).is_some() == (slot == AccessorSlot::MutRef)
-        },
-        _ => false,
-    };
-    candidates
+    let owners: Vec<Entity> = candidates
         .iter()
-        .filter(|&&c| {
+        .copied()
+        .filter(|&c| {
             matches!(
                 ctx.world.get::<NodeKind>(c),
                 Some(NodeKind::Field | NodeKind::Subscript)
-            )
+            ) && accessor_child(ctx, c, slot).is_some()
         })
-        .find_map(|&c| {
-            ctx.world
-                .children_of(c)
-                .iter()
-                .copied()
-                .find(|&gc| is_slot(gc))
-        })
+        .collect();
+    // A field place has no labels or `Callable`: its name alone decides.
+    let owner = match find_impl_among(ctx, &owners, member_name, Some(labels), expected) {
+        Some(owner) => owner,
+        None => *owners
+            .iter()
+            .find(|&&c| member_lookup_name(&ctx.query, c) == Some(member_name))?,
+    };
+    accessor_child(ctx, owner, slot)
+}
+
+/// `member`'s accessor child filling `slot`.
+fn accessor_child(ctx: &LowerCtx, member: Entity, slot: AccessorSlot) -> Option<Entity> {
+    ctx.world.children_of(member).iter().copied().find(|&gc| {
+        match (ctx.world.get::<NodeKind>(gc), slot) {
+            (Some(NodeKind::Setter), AccessorSlot::Set) => true,
+            (Some(NodeKind::RefAccessor), AccessorSlot::Ref | AccessorSlot::MutRef) => {
+                ctx.world.get::<MutatingAccessor>(gc).is_some() == (slot == AccessorSlot::MutRef)
+            },
+            _ => false,
+        }
+    })
 }
 
 fn matches_candidate(

@@ -316,7 +316,7 @@ fn push_members_for_type(
             world.get::<NodeKind>(child),
             Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol)
         ) {
-            push_member_if_visible(ctx, world, child, context, prefix, out, seen);
+            push_member_if_visible(ctx, world, root, child, context, prefix, out, seen);
         }
     }
 
@@ -332,7 +332,7 @@ fn push_members_for_type(
             root,
         });
         for member in members.iter() {
-            push_member_if_visible(ctx, world, member.entity, context, prefix, out, seen);
+            push_member_if_visible(ctx, world, root, member.entity, context, prefix, out, seen);
         }
         return;
     }
@@ -345,7 +345,7 @@ fn push_members_for_type(
         root,
     });
     for member in members.iter() {
-        push_member_if_visible(ctx, world, member.entity, context, prefix, out, seen);
+        push_member_if_visible(ctx, world, root, member.entity, context, prefix, out, seen);
     }
 }
 
@@ -356,10 +356,13 @@ fn push_members_for_type(
 /// `*MembersByName` wrappers via `filter_members_by_name`. Since we consume
 /// the unfiltered maps directly, the `IsVisibleFrom` check has to be
 /// re-applied here — otherwise `private` / `fileprivate` members leak into
-/// cross-module completion.
+/// cross-module completion. `@sugarOnly` members are left out the same way
+/// inference rejects them.
+#[allow(clippy::too_many_arguments)]
 fn push_member_if_visible(
     ctx: &QueryContext<'_>,
     world: &World,
+    root: Entity,
     entity: Entity,
     context: Entity,
     prefix: &str,
@@ -369,7 +372,8 @@ fn push_member_if_visible(
     if !ctx.query(kestrel_name_res::IsVisibleFrom {
         target: entity,
         context,
-    }) {
+    }) || kestrel_name_res::sugar_only_hidden(ctx, entity, context, root).is_some()
+    {
         return;
     }
     push_member_entity(ctx, world, entity, prefix, out, seen);

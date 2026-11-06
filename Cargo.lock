@@ -922,6 +922,7 @@ dependencies = [
  "kestrel-ast-builder",
  "kestrel-compiler",
  "kestrel-hecs",
+ "kestrel-name-res",
  "kestrel-syntax-tree",
  "serde",
  "serde_json",

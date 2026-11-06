@@ -553,11 +553,6 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// The number of elements the buffer can hold without reallocating.
     public var capacity: Int64 { self.cap() }
 
-    /// Slice protocol kernel — borrows the array's buffer as an UnsafeSlice.
-    public func asUnsafeSlice() -> UnsafeSlice[T] {
-        UnsafeSlice(pointer: self.ptr(), count: self.len())
-    }
-
     /// The elements as a slice, in place. Valid until the array next
     /// reallocates or is dropped.
     public func asSlice() -> &Slice[T] {

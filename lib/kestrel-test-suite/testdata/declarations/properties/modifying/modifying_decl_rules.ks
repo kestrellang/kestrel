@@ -39,7 +39,7 @@ protocol Named {
 }
 
 extend Named {
-    var cached: Int64 { // ERROR(E621): a protocol can only require `ref` / `mutating ref`
+    var cached: Int64 { // ERROR(E621): a protocol requires `ref` / `mutating ref` with bodyless clauses
         modifying get { 1 }
     }
 }
