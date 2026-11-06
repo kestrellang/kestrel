@@ -511,7 +511,7 @@ let value = try someOperation() ?? defaultValue;
 module MyApp.Utils
 
 import std.collections.Array
-import std.io as IO
+import std.files as Files
 import Library.(Item1, Item2)
 import ModuleA.(Widget as WidgetA)
 public import internal.types.Core   // re-export

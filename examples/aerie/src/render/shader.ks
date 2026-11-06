@@ -1,6 +1,6 @@
 module Aerie
 
-import std.io.file.(readFileString)
+import std.files.(Path, readText)
 
 // The shaders live in assets/shaders/*.wgsl. Each is loaded after a small
 // header of constants the game decides (so they have one source of truth,
@@ -31,7 +31,7 @@ func loadShader(name: String, header header: String) -> String {
 
 func readShader(name: String) -> String {
     let path = "assets/shaders/\(name).wgsl";
-    match readFileString(path) {
+    match readText(Path(path)) {
         .Ok(text) => text,
         .Err(_) => { fatalError("can't read \(path); run from the game's folder") }
     }

@@ -3,7 +3,7 @@
 // skip: blocked on type alias normalization
 
 module Test
-import std.io.stdio.println
+import std.streams.println
 
 struct MyError {}
 

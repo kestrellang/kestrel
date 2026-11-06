@@ -16,7 +16,7 @@ import std.collections.(Array, Slice)
 // through `asMutableSlice()`, which runs the copy-on-write check first, so
 // `xs(1..<4).sort()` and `xs.sort()` share one implementation.
 
-extend Slice[T] {
+extend Slice[T] where T: Copyable {
     /// Swaps elements `i` and `j` of the slice. Panics if either is out of
     /// range.
     public mutating func swap(at i: Int64, with j: Int64) {

@@ -2,7 +2,7 @@
 // expect-stdout: 0\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 struct Counter {
     var count: std.numeric.Int64

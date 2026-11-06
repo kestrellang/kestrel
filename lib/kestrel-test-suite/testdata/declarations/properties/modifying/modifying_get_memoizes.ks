@@ -8,7 +8,7 @@
 module Test
 
 import std.numeric.(Int64)
-import std.io.stdio.(println)
+import std.streams.(println)
 
 struct Cache {
     var cached: Int64?

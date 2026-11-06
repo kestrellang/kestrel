@@ -7,7 +7,7 @@
 // admits statics, and reported a spurious E449.
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 struct S {
     static var shared: S = S(a: 1);

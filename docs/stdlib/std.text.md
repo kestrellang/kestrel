@@ -5017,7 +5017,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8`
 
 ```kestrel
-public init[S](fromUtf8: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromUtf8: S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Constructs a string from validated UTF-8 bytes, returning `null`
@@ -5034,7 +5034,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8 Lossy`
 
 ```kestrel
-public init[S](fromUtf8Lossy: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromUtf8Lossy: S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Constructs a string from bytes, replacing invalid UTF-8 sequences
@@ -5051,7 +5051,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `From UTF-8 Unchecked`
 
 ```kestrel
-public init[S](fromUtf8Unchecked: &S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
+public init[S](fromUtf8Unchecked: S) where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized
 ```
 
 Constructs a string by copying bytes without UTF-8 validation.

@@ -3,7 +3,7 @@
 // expect-stdout: 5\n7\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 public struct Foo {
     private static var _s: std.numeric.Int64 = 5;

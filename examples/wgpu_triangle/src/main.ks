@@ -4,6 +4,7 @@
 
 module Main
 
+import std.files.(Path, writeBytes)
 import wgpu.(Instance, WgpuError, TextureFormat, TextureUsage, ColorTarget, VertexBufferLayout, VertexFormat, BufferUsage, Color)
 
 let shader: String = "
@@ -96,7 +97,7 @@ func writePPM(pixels: [UInt8], path: String) {
         bytes.append(pixels(i + 2));
         i = i + 4;
     }
-    match writeFileBytes(path, bytes) {
+    match writeBytes(Path(path), bytes.asSlice()) {
         .Ok(_) => {},
         .Err(_) => { println("could not write \(path)"); }
     }

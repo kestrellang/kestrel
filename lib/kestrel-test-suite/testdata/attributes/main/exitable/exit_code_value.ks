@@ -5,7 +5,7 @@
 // `@main` returning an `ExitCode` exits with that code.
 
 module Main
-import std.os.ExitCode
+import std.system.ExitCode
 
 @main
 func main() -> ExitCode { ExitCode(2) }

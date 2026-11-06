@@ -484,7 +484,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// var opt2 = Some(42);
     /// opt2.take(where: { it < 0 });   // None;     opt2 is still Some(42)
     /// ```
-    public mutating func take(where predicate: (T) -> Bool) -> Optional[T] {
+    public mutating func take(where predicate: (T) -> Bool) -> Optional[T] where T: Copyable {
         match self {
             .Some(value) => {
                 if predicate(value) {
@@ -517,7 +517,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     ///     print(value)   // never executes
     /// };
     /// ```
-    public consuming func iter() -> OptionalIterator[T] {
+    public consuming func iter() -> OptionalIterator[T] where T: Copyable {
         OptionalIterator(self)
     }
 }
@@ -548,10 +548,14 @@ extend Optional[T]: Equatable where T: Equatable {
     /// None == None;         // true
     /// ```
     public func isEqual(to other: Optional[T]) -> Bool {
-        match (self, other) {
-            (.Some(a), .Some(b)) => a == b,
-            (.None, .None) => true,
-            _ => false
+        // Nested rather than `match (self, other)`: a tuple would move
+        // both borrowed operands (T may be non-Copyable).
+        match self {
+            .Some(a) => match other {
+                .Some(b) => a == b,
+                .None => false
+            },
+            .None => other.isNone
         }
     }
 
@@ -594,11 +598,13 @@ extend Optional[T]: Comparable where T: Comparable {
     /// Some(2) < Some(1);  // false
     /// ```
     public func compare(other: Optional[T]) -> Ordering {
-        match (self, other) {
-            (.None, .None) => .Equal,
-            (.None, .Some(_)) => .Less,
-            (.Some(_), .None) => .Greater,
-            (.Some(a), .Some(b)) => a.compare(b)
+        // Nested: a `(self, other)` tuple would move both borrowed operands.
+        match self {
+            .None => if other.isNone { .Equal } else { .Less },
+            .Some(a) => match other {
+                .None => .Greater,
+                .Some(b) => a.compare(b)
+            }
         }
     }
 }

@@ -455,7 +455,7 @@ module DataProcessor
 import std.collections.(Array)
 import std.text.(String)
 import std.result.(Result, Optional)
-import std.io.(File, ReadError, WriteError)
+import std.files.(File, ReadError, WriteError)
 
 func processFile(path: String) -> Result[Array[String], ReadError] {
     // Implementation uses only imported types

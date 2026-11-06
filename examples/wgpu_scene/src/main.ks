@@ -462,7 +462,7 @@ func run() -> () throws WgpuError {
 
     var camera = Camera(position: Vec3(x: 0.0, y: 5.0, z: 17.0), yaw: 0.0, pitch: -0.28);
     var controls = Controls();
-    let maxFrames = match getenv("SCENE_FRAMES") {
+    let maxFrames = match Environment.variable("SCENE_FRAMES") {
         .Some(s) => Int64(parsing: s) ?? 0,
         .None => 0
     };

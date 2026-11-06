@@ -5,7 +5,7 @@
 
 module swoop.tls
 
-import std.io.error.(IoError)
+import std.streams.(IoError, Readable, Writable)
 import std.collections.(Slice)
 import std.memory.(RcBox)
 import http.wire.(stringToBytes)
@@ -181,15 +181,15 @@ extend TlsStream {
          unsafe libc_OPENSSL_init_ssl(initOpts.raw, lang.ptr_null[lang.i8]());
 
         // TCP connect, then take ownership of the fd
-        var tcpStream = try TcpStream.connect(host, port);
-        let fd = tcpStream.detachFd();
+        let tcpStream = try TcpStream.connect(host, port);
+        let fd = tcpStream.intoRawDescriptor().value;
 
         // Create SSL_CTX
         let method = unsafe libc_TLS_client_method();
         let ctx = unsafe libc_SSL_CTX_new(method);
         if lang.ptr_is_null(ctx) {
              unsafe posix_close(fd.raw);
-            throw IoError(code: 1)
+            throw IoError(kind: .OutOfMemory)
         }
 
         // Load system CA certificates and enable peer verification
@@ -202,7 +202,7 @@ extend TlsStream {
         if lang.ptr_is_null(ssl) {
             unsafe libc_SSL_CTX_free(ctx);
              unsafe posix_close(fd.raw);
-            throw IoError(code: 2)
+            throw IoError(kind: .OutOfMemory)
         }
 
         // Attach socket fd
@@ -224,7 +224,8 @@ extend TlsStream {
             unsafe libc_SSL_free(ssl);
             unsafe libc_SSL_CTX_free(ctx);
              unsafe posix_close(fd.raw);
-            throw IoError(code: connectResult)
+            // Handshake or certificate verification failed.
+            throw IoError.invalidData
         }
 
         .Ok(TlsStream(ssl, ctx, fd))

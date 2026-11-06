@@ -3,7 +3,7 @@
 module std.core
 
 import std.text.(String)
-import std.io.stdio.(eprintln)
+import std.streams.(eprintln)
 
 /// Aborts the process with `message`.
 ///

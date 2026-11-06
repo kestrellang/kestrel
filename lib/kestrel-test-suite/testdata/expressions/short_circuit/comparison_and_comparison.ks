@@ -1,7 +1,7 @@
 // test: diagnostics
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 func main() -> lang.i64 {
      println(1 < 2 and 3 > 2);

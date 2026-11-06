@@ -9,7 +9,7 @@
 module Test
 import std.numeric.(Int64)
 import std.text.(String)
-import std.io.stdio.(print)
+import std.streams.(print)
 struct Res: not Copyable {
     var id: Int64
     deinit { print("drop res \(self.id)") }

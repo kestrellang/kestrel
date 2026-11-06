@@ -4,7 +4,7 @@
 // expect-stdout: drop 1\n
 
 // Printing reaches `write` only through generic and protocol calls
-// (println -> writeLine[W] -> W.write with W = Stdout). The post-mono walk sees
+// (println -> write(formatted:) on Self = StandardOutput -> write). The post-mono walk sees
 // the resolved calls, so a deinit that only prints is caught too.
 module Test
 

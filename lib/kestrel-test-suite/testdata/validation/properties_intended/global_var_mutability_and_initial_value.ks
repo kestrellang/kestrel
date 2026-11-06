@@ -3,7 +3,7 @@
 // expect-stdout: 0\n5\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 public var globalVar: std.numeric.Int64 = 0;
 

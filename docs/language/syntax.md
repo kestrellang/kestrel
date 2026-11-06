@@ -258,7 +258,7 @@ module my_app.utils;
 
 // Imports
 import std.collections.Map;
-import std.io as IO; // Renaming
+import std.files as Files; // Renaming
 ```
 
 ## Access Control
@@ -353,7 +353,7 @@ Semicolons are **required** after:
 - Expression statements: `doSomething();`
 - Assignment statements: `count = count + 1;`
 - Module declarations: `module my_app.utils;`
-- Import statements: `import std.io;`
+- Import statements: `import std.files;`
 
 ### Optional/Omitted Semicolons
 

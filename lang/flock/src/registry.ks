@@ -40,8 +40,8 @@ public func resolveRegistryUrl(projectUrl projectUrl: String?) -> String {
 
     // 2. Global config (~/.flock/config.toml)
     let configPath = joinPath(base: flockHome(), rel: "config.toml");
-    if fileExists(configPath) {
-        match readFileString(configPath) {
+    if Path(configPath).exists() {
+        match readText(Path(configPath)) {
             .Ok(source) => {
                 match parseToml(source) {
                     .Ok(root) => {

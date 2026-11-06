@@ -277,7 +277,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(contentsOf: &some Sliceable[T] and not Static and not Copyable and not Sized)
+public mutating func append(contentsOf: some Sliceable[T] and not Sized)
 ```
 
 Appends every element of `other` to the end of this array.
@@ -6048,7 +6048,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `assign`
 
 ```kestrel
-public mutating func assign(from: &some Sliceable[T] and not Static and not Copyable and not Sized) where T: Copyable
+public mutating func assign(from: some Sliceable[T] and not Sized) where T: Copyable
 ```
 
 Overwrites every element with the matching element of `other`.
@@ -6890,7 +6890,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `ends`
 
 ```kestrel
-public func ends(with: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool where T: Equatable
+public func ends(with: some Sliceable[T] and not Sized) -> Bool where T: Equatable
 ```
 
 `true` if the trailing elements match `suffix`. O(k) where k is
@@ -7334,7 +7334,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `starts`
 
 ```kestrel
-public func starts(with: &some Sliceable[T] and not Static and not Copyable and not Sized) -> Bool where T: Equatable
+public func starts(with: some Sliceable[T] and not Sized) -> Bool where T: Equatable
 ```
 
 `true` if the leading elements match `prefix`. O(k) where k is

@@ -33,7 +33,7 @@ func main() -> () throws ServerError {
     folderRoutes.on(Delete("/:id"), Folders.delete);
 
     // PORT overrides the default 8080.
-    let port: UInt16 = match getenv("PORT") {
+    let port: UInt16 = match Environment.variable("PORT") {
         .Some(raw) => UInt16(parsing: raw) ?? 8080,
         .None => 8080
     };

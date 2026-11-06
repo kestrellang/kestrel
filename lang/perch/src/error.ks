@@ -6,7 +6,7 @@ module perch
 import http.status.(StatusCode)
 import quill.value.(Value)
 import quill.json.emitter.(emitJson)
-import std.io.error.(IoError)
+import std.streams.(IoError)
 
 /// A handler failure that becomes the HTTP response.
 ///

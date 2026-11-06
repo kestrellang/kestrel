@@ -11,7 +11,7 @@ module Main
 import std.text.(Formattable, Formatter)
 import std.text.StringBuilder
 import std.text.FormatOptions
-import std.io.stdio.println
+import std.streams.println
 
 struct MyErr: Formattable {
     func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {

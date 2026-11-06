@@ -4,7 +4,7 @@ module datetime_regressions
 // with `lang/datetime/tests/run.sh`; exits non-zero if any check fails.
 
 import datetime.(Date, Time, DateTime, ZonedDateTime, Instant, Duration, Period, TimeZone, Format, FakeClock, Weekday, TimeUnit)
-import std.os.(exit)
+import std.system.(exit)
 
 struct Checker {
     var failures: Int64

@@ -177,7 +177,7 @@ extend Slice[T] where T: Copyable {
 
 /// `Sliceable[T]` conformance: every read-only algorithm on `Sliceable`
 /// works on a slice too.
-extend Slice[T]: Sliceable[T], Iterable {
+extend Slice[T]: Sliceable[T], Iterable where T: Copyable {
     type Item = T
     type TargetIterator = UnsafeSliceIterator[T]
 
@@ -229,7 +229,7 @@ extend Slice[T]: Equatable where T: Equatable { }
 
 /// `ArrayMatchable` conformance so a slice can appear in array patterns.
 /// `..rest` binds a narrower slice of the same elements.
-extend Slice[T]: unsafe ArrayMatchable {
+extend Slice[T]: unsafe ArrayMatchable where T: Copyable {
     type Element = T
     type Rest = &Slice[T]
 

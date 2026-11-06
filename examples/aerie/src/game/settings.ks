@@ -26,18 +26,18 @@ struct Settings {
     var benchRuns: Int64?
 
     static func fromEnvironment() -> Settings {
-        let view = Int64(parsing: getenv("AERIE_VIEW") ?? "") ?? defaultViewRadius;
-        let save = getenv("AERIE_SAVE") ?? defaultSavePath();
+        let view = Int64(parsing: Environment.variable("AERIE_VIEW") ?? "") ?? defaultViewRadius;
+        let save = Environment.variable("AERIE_SAVE") ?? defaultSavePath();
         Settings(
             viewRadius: view.clamp(minViewRadius, maxViewRadius),
-            startTime: Float32(parsing: getenv("AERIE_TIME") ?? ""),
-            skipTitle: getenv("AERIE_PLAY").isSome,
+            startTime: Float32(parsing: Environment.variable("AERIE_TIME") ?? ""),
+            skipTitle: Environment.variable("AERIE_PLAY").isSome,
             savePath: if save == "none" { .None } else { .Some(save) },
-            maxFrames: Int64(parsing: getenv("AERIE_FRAMES") ?? "") ?? 0,
-            vsync: (getenv("AERIE_VSYNC") ?? "1") != "0",
-            quality: Quality.named(getenv("AERIE_QUALITY") ?? "") ?? .High,
-            tourSpeed: Float32(parsing: getenv("AERIE_TOUR") ?? "") ?? 0.0,
-            benchRuns: match getenv("AERIE_BENCH") {
+            maxFrames: Int64(parsing: Environment.variable("AERIE_FRAMES") ?? "") ?? 0,
+            vsync: (Environment.variable("AERIE_VSYNC") ?? "1") != "0",
+            quality: Quality.named(Environment.variable("AERIE_QUALITY") ?? "") ?? .High,
+            tourSpeed: Float32(parsing: Environment.variable("AERIE_TOUR") ?? "") ?? 0.0,
+            benchRuns: match Environment.variable("AERIE_BENCH") {
                 .Some(runs) => .Some(Int64(parsing: runs) ?? 10),
                 .None => .None
             }

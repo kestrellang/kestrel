@@ -494,7 +494,15 @@ impl QueryFn for TypeParamCopyRequirement {
             root: self.root,
         });
 
+        // Every bound in scope is read before deciding: a positive `Copyable`
+        // (or refining) bound WINS over a `not Copyable` relaxation — the
+        // struct's `where T: not Copyable` says T need not be Copyable, a
+        // method's or extension's `where T: Copyable` narrows that back
+        // (`Pointer.read() -> T where T: Copyable`). Mirrors the MIR scan in
+        // `kestrel_mir::ty_query::copy_behavior`.
+        let mut requires_copyable = false;
         let mut requires_cloneable = false;
+        let mut negated = false;
         for context in param_bound_contexts(ctx, self.param, self.context) {
             let Some(wc) = ctx.get::<AstWhereClause>(context) else {
                 continue;
@@ -508,11 +516,10 @@ impl QueryFn for TypeParamCopyRequirement {
                         {
                             continue;
                         }
-                        if let Some(copyable) = copyable
-                            && resolve_type_entity(ctx, protocol, context, self.root)
-                                == Some(copyable)
+                        if copyable.is_some()
+                            && resolve_type_entity(ctx, protocol, context, self.root) == copyable
                         {
-                            return CopyRequirement::MayBeNonCopyable;
+                            negated = true;
                         }
                     },
                     WhereConstraint::Bound {
@@ -522,21 +529,23 @@ impl QueryFn for TypeParamCopyRequirement {
                         {
                             continue;
                         }
-                        if let Some(cloneable) = cloneable {
-                            for protocol_ty in protocols {
-                                let Some(protocol) =
-                                    resolve_type_entity(ctx, protocol_ty, context, self.root)
-                                else {
-                                    continue;
-                                };
-                                if ctx.query(ProtocolRefines {
-                                    protocol,
-                                    base: cloneable,
-                                    root: self.root,
-                                }) {
-                                    requires_cloneable = true;
-                                }
-                            }
+                        for protocol_ty in protocols {
+                            let Some(protocol) =
+                                resolve_type_entity(ctx, protocol_ty, context, self.root)
+                            else {
+                                continue;
+                            };
+                            let refines = |base: Option<Entity>| {
+                                base.is_some_and(|base| {
+                                    ctx.query(ProtocolRefines {
+                                        protocol,
+                                        base,
+                                        root: self.root,
+                                    })
+                                })
+                            };
+                            requires_cloneable |= refines(cloneable);
+                            requires_copyable |= refines(copyable);
                         }
                     },
                     WhereConstraint::Equality { .. } => {},
@@ -545,10 +554,30 @@ impl QueryFn for TypeParamCopyRequirement {
         }
 
         if requires_cloneable {
-            CopyRequirement::RequiresCloneable
-        } else {
-            CopyRequirement::RequiresCopyable
+            return CopyRequirement::RequiresCloneable;
         }
+        if requires_copyable {
+            return CopyRequirement::RequiresCopyable;
+        }
+        if negated {
+            return CopyRequirement::MayBeNonCopyable;
+        }
+        // A type that opts out of Copyable (`enum Optional[T]: not Copyable`)
+        // accepts any argument for its params, so its params may be
+        // non-Copyable in every body that sees them — its own methods and its
+        // extensions' (whose params are the target's). Without this, formation
+        // accepts `Optional[Handle]` while the bodies bit-copy T.
+        if let Some(copyable) = copyable
+            && let Some(owner) = ctx.parent_of(self.param)
+            && ctx.query(ExplicitlyNegatesProtocol {
+                entity: owner,
+                protocol: copyable,
+                root: self.root,
+            })
+        {
+            return CopyRequirement::MayBeNonCopyable;
+        }
+        CopyRequirement::RequiresCopyable
     }
 
     fn describe(&self) -> String {

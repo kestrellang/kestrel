@@ -6,7 +6,7 @@
 // calls its `report()` witness.
 
 module Main
-import std.os.(Exitable, ExitCode)
+import std.system.(Exitable, ExitCode)
 import std.numeric.UInt8
 
 struct Status: Exitable {

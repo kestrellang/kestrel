@@ -51,7 +51,7 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
     ///
     /// Panics with `"Buffer allocation failed"` if `allocator.allocate`
     /// returns `.None`.
-    public init(capacity: Int64, allocator: A) {
+    public init(capacity: Int64, consuming allocator: A) {
         self.allocator = allocator;
         self.cap = capacity;
         let layout = Layout.array[T](capacity);
@@ -66,7 +66,7 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
     // Internal init that adopts an existing allocation. Used by
     // higher-level collections that already hold the storage and want
     // to wrap it as a Buffer (e.g. when reconstructing from raw fields).
-    private init(pointer: Pointer[T], capacity: Int64, allocator: A) {
+    private init(pointer: Pointer[T], capacity: Int64, consuming allocator: A) {
         self.ptr = pointer;
         self.cap = capacity;
         self.allocator = allocator;
@@ -93,7 +93,7 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
     /// `index` must satisfy `0 <= index < capacity`, and the slot must
     /// already hold an initialised `T`. Out-of-range or uninitialised
     /// reads are undefined behavior.
-    public unsafe func read(unchecked index: Int64) -> T {
+    public unsafe func read(unchecked index: Int64) -> T where T: Copyable {
         unsafe self.ptr.offset(by: index).read()
     }
 
@@ -103,14 +103,14 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
     /// # Safety
     ///
     /// Same precondition as `read(unchecked:)` — `0 <= index < capacity`.
-    public unsafe func write(unchecked index: Int64, value: T) {
+    public unsafe func write(unchecked index: Int64, consuming value: T) {
         unsafe self.ptr.offset(by: index).write(value)
     }
 
     /// @name Checked Index
     /// Reads slot `index`, returning `.None` when out of range. As with
     /// the unchecked form, the slot must already hold an initialised `T`.
-    public func read(at index: Int64) -> T? {
+    public func read(at index: Int64) -> T? where T: Copyable {
         if index >= 0 and index < self.cap {
             .Some(unsafe self.ptr.offset(by: index).read())
         } else {
@@ -120,7 +120,7 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
 
     /// Writes `value` to slot `index`. Returns `false` (and does
     /// nothing) when out of range.
-    public func write(at index: Int64, value: T) -> Bool {
+    public func write(at index: Int64, consuming value: T) -> Bool {
         if index >= 0 and index < self.cap {
             unsafe self.ptr.offset(by: index).write(value);
             true
@@ -177,14 +177,14 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
     /// Returns a `UnsafeSlice[T]` over the entire buffer. The slice does not
     /// extend the buffer's lifetime; callers must keep the buffer alive
     /// for as long as they use the slice.
-    public func asUnsafeSlice() -> UnsafeSlice[T] {
+    public func asUnsafeSlice() -> UnsafeSlice[T] where T: Copyable {
         unsafe UnsafeSlice(pointer: self.ptr, count: self.cap)
     }
 
     /// Returns a slice over `[start, end)`, or `.None` when the range
     /// falls outside `[0, capacity]`. As with `asSlice`, the slice
     /// borrows from the buffer.
-    public func slice(from start: Int64, to end: Int64) -> UnsafeSlice[T]? {
+    public func slice(from start: Int64, to end: Int64) -> UnsafeSlice[T]? where T: Copyable {
         if start >= 0 and end <= self.cap and start <= end {
             .Some(unsafe UnsafeSlice(pointer: self.ptr.offset(by: start), count: end - start))
         } else {

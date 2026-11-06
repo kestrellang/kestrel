@@ -191,7 +191,7 @@ fn main_return_type_ok(cx: &CompilationContext<'_>, entity: Entity) -> bool {
 /// (`kestrel-mir-lower::synthesize_main_wrapper`): `()` (`Tuple([])` → exit 0),
 /// `!` (`Never` → unreachable), and raw `lang.iN` (sign-extend; #109 back-compat)
 /// are handled STRUCTURALLY — no `Exitable` conformance — so they're valid even
-/// with no stdlib (the `Exitable` protocol lives in `std.os`). Everything else
+/// with no stdlib (the `Exitable` protocol lives in `std.system`). Everything else
 /// must conform to `Exitable`.
 ///
 /// `main() -> T throws E` is `Result[T, E]`, which conforms via its generic

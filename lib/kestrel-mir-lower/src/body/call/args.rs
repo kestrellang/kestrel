@@ -556,16 +556,15 @@ impl OssaBodyCtx<'_, '_> {
             let parent = self.find_protocol_method_entity(protocol, &key)?;
             return self.ctx.find_ref_accessor_child(parent, mutating);
         }
-        let members = self
-            .ctx
-            .query
-            .query(kestrel_name_res::ProtocolMembersByName {
-                protocol,
-                name: method.name.clone(),
-                context: self.ctx.root,
-                root: self.ctx.root,
-            });
-        for member in &members {
+        // Unfiltered: type inference already checked visibility, and a
+        // root-context filter hides `internal`/`fileprivate` extension
+        // methods, losing their conventions (a `mutating` receiver lowered
+        // as a borrow).
+        let map = self.ctx.query.query(kestrel_name_res::ProtocolMembers {
+            protocol,
+            root: self.ctx.root,
+        });
+        for member in map.named(&method.name) {
             if let Some(callable) = self.ctx.world.get::<Callable>(member.entity) {
                 let member_labels: Vec<Option<&str>> =
                     callable.params.iter().map(|p| p.label.as_deref()).collect();
