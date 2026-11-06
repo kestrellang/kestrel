@@ -4169,7 +4169,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     /// End a single-use ref and the borrows it was lent from. A ref result
-    /// keeps its source borrow (an existential box's `pointeeMutRef`
+    /// keeps its source borrow (an existential box's `value` place
     /// receiver, say) open until scope exit, so a later read of the same
     /// place in the same block (`a and box.method()` capturing `box`) would
     /// hit an active borrow. Stops at a named ref binding, which outlives

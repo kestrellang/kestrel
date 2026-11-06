@@ -116,7 +116,9 @@ func buildCodeLengths(frequencies: Array[Int64], maxLength: Int64) -> Array[Int6
     if used.count == 0 { return lengths; }
     if used.count == 1 {
         lengths(used(0).1) = 1;
-        return lengths;
+        // Through a binding: see `subscript_assign_then_return_array`.
+        let out = lengths;
+        return out;
     }
     used.sort(by: { (a: (Int64, Int64), b: (Int64, Int64)) in a.0 < b.0 or (a.0 == b.0 and a.1 < b.1) });
 

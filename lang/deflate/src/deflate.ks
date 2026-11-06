@@ -66,7 +66,7 @@ public struct Deflater: Compressor {
         self.distanceSymbols = makeDistanceSymbolTable();
     }
 
-    public mutating func write[S](input: S) -> Array[UInt8] where S: Slice[UInt8], S: not Static {
+    public mutating func write[S](input: &S) -> Array[UInt8] where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
         if self.isFinished { return []; }
         self.buffer.append(contentsOf: input.asUnsafeSlice());
         if self.buffer.count - self.historyLength >= compressChunkSize {
@@ -247,7 +247,10 @@ func makeLengthSymbolTable() -> Array[Int64] {
     }
     // 258 has its own code, not the top of 227's range.
     table(maxMatch) = 28;
-    table
+    // Returning through a binding works around the OSSA crash documented
+    // by `subscript_assign_then_return_array`.
+    let out = table;
+    out
 }
 
 /// Distance symbol for each distance 0...32768 (entry 0 is unused).

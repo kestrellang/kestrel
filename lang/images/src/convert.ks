@@ -404,11 +404,11 @@ struct PixelCodec {
         let at = p.offset(by: channel * self.sampleBytes);
         if self.sampleBytes == 1 { return unitFrom8(at.read()); }
         if self.sampleBytes == 2 {
-            let bits = UInt16(from: at.read()) | (UInt16(from: at.offset(by: 1).read()) << 8);
+            let bits = (UInt16(from: at.read()) | (UInt16(from: at.offset(by: 1).read()) << 8));
             if self.isFloat { return halfToFloat(bits); }
             return unitFrom16(bits);
         }
-        let bits = UInt32(from: at.read()) | (UInt32(from: at.offset(by: 1).read()) << 8) | (UInt32(from: at.offset(by: 2).read()) << 16) | (UInt32(from: at.offset(by: 3).read()) << 24);
+        let bits = (UInt32(from: at.read()) | (UInt32(from: at.offset(by: 1).read()) << 8) | (UInt32(from: at.offset(by: 2).read()) << 16) | (UInt32(from: at.offset(by: 3).read()) << 24));
         Float32(bitPattern: bits)
     }
 
