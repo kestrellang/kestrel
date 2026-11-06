@@ -415,6 +415,20 @@ pub static REGISTRY: &[AttrDef] = &[
         doc: "Compiles the declaration only when building for one of the given platforms: '@platform(.Linux, .Darwin)'.",
     },
     AttrDef {
+        name: "sugarOnly",
+        // An init requirement classifies as `Initializer`; the rule only
+        // reads the attribute on protocol members (`kestrel-name-res`'s
+        // `SugarOnlyRequirement`).
+        targets: TargetSet::of(&[T::Requirement, T::Initializer]),
+        params: &[],
+        repeatable: false,
+        phase: AttrPhase::NameRes,
+        conflicts: &[],
+        needs_body: false,
+        repeat_hint: None,
+        doc: "Marks a protocol requirement that is reached only through its syntax ('+=', 'try', '?.', literals, patterns). Conformers still implement it, but outside the protocol's module no code may call it, or any type's implementation of it, by name.",
+    },
+    AttrDef {
         name: "unavailable",
         targets: USABLE,
         params: &[

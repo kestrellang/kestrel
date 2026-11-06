@@ -124,6 +124,8 @@ pub enum ParsedAttr {
     NonExhaustive,
     /// `@observabledrop` on a struct or enum.
     ObservableDrop,
+    /// `@sugarOnly` on a protocol requirement.
+    SugarOnly,
     /// `@derive(P, Q)`: the protocol paths as written.
     Derive(Vec<Vec<String>>),
     /// `@default` on an enum case.

@@ -147,12 +147,13 @@ GetterClause =
 SetterClause =
   'set' CodeBlock
 
-// `ref` is a contextual keyword: an identifier token.
+// `ref` is a contextual keyword: an identifier token. A bodyless clause
+// is a protocol requirement (`var value: T { ref mutating ref }`).
 RefClause =
-  'ident' CodeBlock
+  'ident' CodeBlock?
 
 MutatingRefClause =
-  'mutating' 'ident' CodeBlock
+  'mutating' 'ident' CodeBlock?
 
 // `modifying` (contextual) marks an accessor whose receiver is mutable:
 // `modifying get` yields a value, `modifying ref` a shared `&T`.

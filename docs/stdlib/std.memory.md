@@ -281,8 +281,7 @@ COW barrier — makes the storage uniquely owned, cloning it if shared.
 
 The fork clones the heap value in place (`RcBox.fork`), so a
 shared box is deep-copied exactly once and an unsized payload works.
-Every write (`value`'s `mutating ref`, `pointeeMutRef`) goes through
-here.
+Every write (`value`'s `mutating ref`) goes through here.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
@@ -293,18 +292,6 @@ public var isUnique: Bool { get }
 ```
 
 `true` when no other copy shares this storage.
-
-_Defined in `lang/std/memory/cowbox.ks`._
-
-#### field `value`
-
-```kestrel
-public var value: T { ref mutating ref }
-```
-
-The payload, in place. Reading borrows the shared storage; writing
-(`c.value.len = 0`, a `mutating` argument, a mutating method) forks a
-shared box first, so other copies never see the change.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
@@ -341,11 +328,15 @@ type Target = T
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
-#### function `pointeeRef`
+#### field `value`
 
 ```kestrel
-public func pointeeRef() -> &T
+public var value: T { ref mutating ref }
 ```
+
+The payload, in place. Reading borrows the shared storage; writing
+(`c.value.len = 0`, a `mutating` argument, a mutating method) forks a
+shared box first, so other copies never see the change.
 
 _Defined in `lang/std/memory/cowbox.ks`._
 
@@ -354,14 +345,6 @@ _Defined in `lang/std/memory/cowbox.ks`._
 ### Implements `MutableIndirection`
 
 _Conditional: `where T: Cloneable`._
-
-#### function `pointeeMutRef`
-
-```kestrel
-public mutating func pointeeMutRef() -> &mutating T where T: Cloneable
-```
-
-_Defined in `lang/std/memory/cowbox.ks`._
 
 ## typealias `DefaultBox`
 
@@ -899,30 +882,11 @@ type Target = T
 
 _Defined in `lang/std/memory/ownedbox.ks`._
 
-#### function `pointeeRef`
-
-```kestrel
-public func pointeeRef() -> &T
-```
-
-_Defined in `lang/std/memory/ownedbox.ks`._
-
 #### function `takeValue`
 
 ```kestrel
 public consuming func takeValue() -> T where T: Sized
 ```
-
-_Defined in `lang/std/memory/ownedbox.ks`._
-
-#### field `value`
-
-```kestrel
-public var value: T { ref mutating ref }
-```
-
-The payload, in place: `&b.value` borrows it, `b.value.x = 1` writes
-it. The box is its only owner, so a write needs a mutable box.
 
 _Defined in `lang/std/memory/ownedbox.ks`._
 
@@ -938,11 +902,14 @@ _Defined in `lang/std/memory/ownedbox.ks`._
 
 ### Implements `MutableIndirection`
 
-#### function `pointeeMutRef`
+#### field `value`
 
 ```kestrel
-public mutating func pointeeMutRef() -> &mutating T
+public var value: T { ref mutating ref }
 ```
+
+The payload, in place: `&b.value` borrows it, `b.value.x = 1` writes
+it. The box is its only owner, so a write needs a mutable box.
 
 _Defined in `lang/std/memory/ownedbox.ks`._
 
@@ -1143,14 +1110,6 @@ Compare with `RawPointer.offset`, which strides by raw bytes.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
-#### function `pointeeRef`
-
-```kestrel
-public func pointeeRef() -> &T
-```
-
-_Defined in `lang/std/memory/pointer.ks`._
-
 #### field `raw`
 
 ```kestrel
@@ -1193,28 +1152,6 @@ Same validity preconditions as `read()`, and additionally: after the
 take the pointee must not be read or dropped until the slot is
 re-initialised (e.g. via `write`). Taking the same slot twice without
 an intervening write double-owns the value and will double-free.
-
-_Defined in `lang/std/memory/pointer.ks`._
-
-#### field `value`
-
-```kestrel
-public var value: &T { get }
-```
-
-Borrowed view of the pointee — no copy, no clone, no `T: Copyable`
-requirement. Member access, operators, and borrow-convention calls
-go through it in place; binding it (`let x = p.value;`) stores an
-owned copy instead (binding decay).
-
-##### Safety
-
-- The pointer must be non-null and the storage must hold a valid,
-  initialized `T` for as long as the reference is used.
-- The reference inherits this pointer's contract: the compiler does
-  not verify the pointee's lifetime. Using it after the storage is
-  freed is undefined behavior — the same trust point as `read()`,
-  returning a view instead of a copy.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
@@ -1288,11 +1225,27 @@ _Conditional: `where T: FFISafe`._
 
 ### Implements `MutableIndirection`
 
-#### function `pointeeMutRef`
+#### field `value`
 
 ```kestrel
-public mutating func pointeeMutRef() -> &mutating T
+public var value: T { ref mutating ref }
 ```
+
+The pointee, in place — no copy, no clone, no `T: Copyable`
+requirement. Member access, operators, and borrow-convention calls
+go through it in place; binding it (`let x = p.value;`) stores an
+owned copy instead (binding decay). Writing through it (`p.value = x`,
+a mutating method) needs a `var` pointer; `mutatingValue` writes
+through any pointer.
+
+##### Safety
+
+- The pointer must be non-null and the storage must hold a valid,
+  initialized `T` for as long as the reference is used.
+- The reference inherits this pointer's contract: the compiler does
+  not verify the pointee's lifetime. Using it after the storage is
+  freed is undefined behavior — the same trust point as `read()`,
+  returning a view instead of a copy.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
@@ -1563,14 +1516,6 @@ public var mutatingValue: &mutating T { get }
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
-#### function `pointeeRef`
-
-```kestrel
-public func pointeeRef() -> &T
-```
-
-_Defined in `lang/std/memory/rcbox.ks`._
-
 #### field `refCount`
 
 ```kestrel
@@ -1579,17 +1524,6 @@ public var refCount: Int64 { get }
 
 Current strong reference count. Mostly useful for tests and
 diagnostics; production COW logic should branch on `isUnique`.
-
-_Defined in `lang/std/memory/rcbox.ks`._
-
-#### field `value`
-
-```kestrel
-public var value: &T { get }
-```
-
-The payload, read-only. Writes go through `mutatingValue`, because
-every handle onto this storage sees them.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
@@ -1622,11 +1556,16 @@ _Defined in `lang/std/memory/rcbox.ks`._
 
 ### Implements `MutableIndirection`
 
-#### function `pointeeMutRef`
+#### field `value`
 
 ```kestrel
-public mutating func pointeeMutRef() -> &mutating T
+public var value: T { ref mutating ref }
 ```
+
+The payload, in place. A write through it (`rc.value.x = 1`, or a
+member write through the peel) needs a `var` handle, and every handle
+onto this storage sees it; `mutatingValue` writes through a `let`
+handle.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
@@ -1735,7 +1674,7 @@ storage that owns one `Target`. Duplicating a handle (`clone()`) shares the
 storage; dropping the last handle destroys the payload exactly once.
 Most of the contract is inherited rather than invented — sharing is
 `Cloneable.clone()`, releasing is the conformer's own `deinit`, and reading
-the payload is `MutableIndirection.pointeeRef()` (which also supplies
+the payload is `MutableIndirection.value` (which also supplies
 transparent member access, so `box.field` reaches the payload's field).
 Only creation, shared mutation, identity and uniqueness are new.
 
@@ -1754,7 +1693,7 @@ func roundTrip[B](value: Int64) -> Int64 where B: SharedBox, B.Target = Int64 {
     let box: B = B(value);          // init(consuming value: Target)
     let alias = box.clone();        // shares the managed storage
     box.isIdentical(to: alias);     // true — one storage, two handles
-    alias.pointeeRef()              // read the payload through the peel
+    alias.value                     // read the payload in place
 }
 ```
 
@@ -2057,6 +1996,26 @@ caller is responsible for ensuring `count` elements live at `pointer`.
 
 _Defined in `lang/std/memory/pointer.ks`._
 
+#### function `asMutableSlice`
+
+```kestrel
+public mutating func asMutableSlice() -> &mutating Slice[T]
+```
+
+Like `asSlice()`, for writing through.
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### function `asUnsafeSlice`
+
+```kestrel
+public func asUnsafeSlice() -> UnsafeSlice[T]
+```
+
+Returns `self` — `UnsafeSlice` is already the borrowed view.
+
+_Defined in `lang/std/memory/pointer.ks`._
+
 #### field `count`
 
 ```kestrel
@@ -2111,7 +2070,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](I) -> I.SeqOutput where I: SeqIndex[T] { get set }
+public subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -2119,7 +2078,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](unchecked: I) -> I.SeqOutput where I: SeqIndex[T] { get set }
+public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref mutating ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -2127,7 +2086,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.SeqClampedOutput where I: SeqClampable[T] { get set }
+public subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref mutating ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -2135,22 +2094,38 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](wrapped: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] { get set }
+public subscript(clamped: Int64) -> T? { ref mutating ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(wrapped: Int64) -> T? { ref mutating ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `Sliceable`
 
-#### function `asUnsafeSlice`
+#### function `asSlice`
 
 ```kestrel
-public func asUnsafeSlice() -> UnsafeSlice[T]
+public func asSlice() -> &Slice[T]
 ```
 
-Returns `self` — `UnsafeSlice` is already the borrowed view.
+The elements as a `Slice`, in place.
 
-_Defined in `lang/std/memory/pointer.ks`._
+_Defined in `lang/std/collections/sliceable.ks`._
 
 ### Implements `Iterable`
 

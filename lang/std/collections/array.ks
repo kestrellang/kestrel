@@ -211,15 +211,12 @@ struct ArrayStorage[T]: Cloneable {
 /// # Indexing
 ///
 /// The default subscript `arr(i)` panics on out-of-bounds. Variants exist
-/// for every common policy: `arr(checked: i)` returns `T?`,
-/// `arr(unchecked: i)` skips the bounds check (UB on OOB),
-/// `arr(wrapped: i)` wraps with modulo (and supports negative indices),
-/// and `arr(clamped: i)` clamps to `[0, count-1]`. Range arguments use the
-/// same labels — `arr(0..<3)`, `arr(checked: r)`, `arr(unchecked: r)`,
-/// `arr(clamped: r)` — dispatched through the unified `SeqIndex[T]`,
-/// `SeqClampable[T]`, and `SeqWrappable[T]` protocols. `Int64` and range
-/// types share each label; the result type varies (`T?` vs `UnsafeSlice[T]`
-/// for `clamped:`).
+/// for every common policy, each an in-place place: `arr(checked: i)` is
+/// `.None` when out of range, `arr(unchecked: i)` skips the bounds check
+/// (UB on OOB), `arr(wrapped: i)` wraps with modulo (negative indices count
+/// from the end), and `arr(clamped: i)` saturates into `[0, count-1]`.
+/// Ranges take `arr(0..<3)`, `arr(checked: r)` and `arr(unchecked: r)`,
+/// and `arr(within: r)` lends the part of `r` inside the array.
 ///
 /// # Capacity & Reallocation
 ///
@@ -556,11 +553,6 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// The number of elements the buffer can hold without reallocating.
     public var capacity: Int64 { self.cap() }
 
-    /// Slice protocol kernel — borrows the array's buffer as an UnsafeSlice.
-    public func asUnsafeSlice() -> UnsafeSlice[T] {
-        unsafe UnsafeSlice(pointer: self.ptr(), count: self.len())
-    }
-
     /// The elements as a slice, in place. Valid until the array next
     /// reallocates or is dropped.
     public func asSlice() -> &Slice[T] {
@@ -597,22 +589,34 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
         mutating ref { I.lendMutatingUnchecked(index, self.asMutableSlice()) }
     }
 
-    /// Like `xs(index)`, but `.None` instead of a panic when out of range.
-    /// An element comes back as a copy; a range as a lent slice.
-    public subscript[I](checked index: I) -> I.SliceCheckedOutput where I: SliceIndex[T] {
-        get { I.lendChecked(index, self.asSlice()) }
+    /// Like `xs(index)`, but the place may not exist: `.None` instead of a
+    /// panic when out of range. Reading copies the element out (`T?`) or
+    /// lends the slice; `if let .Some(&mutating v) = xs(checked: i)` writes
+    /// in place.
+    public subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendChecked(index, self.asSlice()) }
+        mutating ref { I.lendMutatingChecked(index, self.asMutableSlice()) }
     }
 
-    /// Like `xs(index)`, with the index or range clamped into the array. A
-    /// clamped element of an empty array is `.None`.
-    public subscript[I](clamped index: I) -> I.SliceClampedOutput where I: SliceClampable[T] {
-        get { I.lendClamped(index, self.asSlice()) }
+    /// The element at `index` saturated into `0..<count`, in place, or
+    /// `.None` for an empty array.
+    public subscript(clamped index: Int64)? -> T {
+        ref { self.asSlice().lendClamped(index) }
+        mutating ref { self.asMutableSlice().lendMutatingClamped(index) }
     }
 
-    /// A copy of the element at `index` modulo `count` (negative indices
-    /// count from the end), or `.None` for an empty array.
-    public subscript(wrapped index: Int64) -> T? {
-        get { self.asSlice()(wrapped: index) }
+    /// The part of `range` that lies within the array, in place (always
+    /// valid, possibly empty).
+    public subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] {
+        ref { R.lendWithin(range, self.asSlice()) }
+        mutating ref { R.lendMutatingWithin(range, self.asMutableSlice()) }
+    }
+
+    /// The element at `index` modulo `count` (negative indices count from
+    /// the end), in place, or `.None` for an empty array.
+    public subscript(wrapped index: Int64)? -> T {
+        ref { self.asSlice().lendWrapped(index) }
+        mutating ref { self.asMutableSlice().lendMutatingWrapped(index) }
     }
 
     /// COW write barrier — deep-copies storage if shared.

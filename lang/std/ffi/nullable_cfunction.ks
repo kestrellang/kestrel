@@ -26,7 +26,7 @@ import std.result.(Optional)
 /// }
 /// ```
 ///
-/// `F` must be a C function type (E646).
+/// `F` must be a C function type (E647).
 @builtin(.NullableCFunctionStruct)
 public struct NullableCFunction[F]: FFISafe, ExpressibleByNullLiteral where F: not Static {
     fileprivate var _raw: RawPointer

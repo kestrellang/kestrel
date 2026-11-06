@@ -116,11 +116,11 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
         w
     });
     let mut decays: Vec<(TyVar, TyVar)> = Vec::new();
-    // Bound `Optional[&T]` initializers: (target, Optional entity, T, expr).
+    // Bound / passed `Optional[&T]` values: (target, Optional entity, T, expr).
     let mut optional_decays = Vec::new();
     for c in &ctx.constraints {
         if let Constraint::Coerce { from, to, expr, .. } = c
-            && ctx.binding_init_exprs.contains(expr)
+            && equality::optional_ref_decay_site(ctx, *expr)
             && let Some((optional, pointee)) = equality::optional_ref_pointee(ctx, *from)
             // Not filtered by `only`: the stalled receiver is often the
             // payload (`o?.x`, `.Some(r) => r.x`), not the binding. Every
@@ -131,8 +131,11 @@ pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option
         {
             // An unsized payload (`Optional[&Slice[T]]`) has no value to copy
             // out, so the binding keeps the reference.
+            // A stalled receiver (`only`) needs the type now: a pointee still
+            // unresolved there is a literal's, which is sized.
             match pointee_sizedness(ctx, pointee) {
                 Some(true) => optional_decays.push((*to, optional, pointee, *expr)),
+                None if only.is_some() => optional_decays.push((*to, optional, pointee, *expr)),
                 Some(false) => decays.push((*to, ctx.resolve(*from))),
                 None => {},
             }

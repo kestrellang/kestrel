@@ -7035,14 +7035,6 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `SliceIndex`
 
-#### typealias `SliceCheckedOutput`
-
-```kestrel
-type SliceCheckedOutput = T?
-```
-
-_Defined in `lang/std/collections/slice.ks`._
-
 #### typealias `SliceOutput`
 
 ```kestrel
@@ -7062,7 +7054,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `lendChecked`
 
 ```kestrel
-public static func lendChecked(consuming Int64, Slice[T]) -> T?
+public static func lendChecked(consuming Int64, Slice[T]) -> Optional[&T]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -7071,6 +7063,14 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ```kestrel
 public static func lendMutating(consuming Int64, mutating Slice[T]) -> &mutating T
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+public static func lendMutatingChecked(consuming Int64, mutating Slice[T]) -> Optional[&mutating T]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._

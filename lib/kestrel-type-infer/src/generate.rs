@@ -18,7 +18,7 @@ use kestrel_span::Span;
 use crate::collections::{HashMap, HashSet};
 use crate::constraint::{CallArg, Constraint, Reason, labels_match};
 use crate::ctx::InferCtx;
-use crate::error::InferError;
+use crate::error::{InferError, sugar_only_error};
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify;
 
@@ -463,6 +463,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             args,
             span,
         } => {
+            ctx.method_receiver_exprs.insert(*receiver);
             let recv_tv = gen_expr(ctx, hir, *receiver);
             let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
             let result_tv = ctx.fresh();
@@ -589,6 +590,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.protocol_dispatch_members.insert(id);
                 if *from_operator {
                     ctx.operator_members.insert(id, *protocol);
+                    ctx.operator_receivers.insert(id, *receiver);
                     unify_literal_operands(ctx, *protocol, recv_tv, &arg_tvs);
                     type_literal_operator(
                         ctx,
@@ -1001,6 +1003,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 HirExpr::Local(..) | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
             );
             if route_via_assign_target {
+                if !matches!(hir.exprs[*target], HirExpr::Local(..)) {
+                    ctx.place_assign_values.insert(*value);
+                }
                 ctx.assign_target(value_tv, target_tv, *value, span.clone());
             } else {
                 let reason = Reason::Assign(expr_span(hir, *target));
@@ -1878,6 +1883,13 @@ fn gen_struct_init(
         // type-directed disambiguation which happens during solving.
         if let [init] = matched.as_slice() {
             let init = *init;
+            // `@sugarOnly` init requirements (`init(intLiteral:)`) are built by
+            // literal lowering, never by a written call outside their module.
+            if let Some(requirement) =
+                kestrel_name_res::sugar_only_hidden(qctx, init, ctx.owner, root)
+            {
+                ctx.report_error(sugar_only_error(qctx, requirement, "init", result_tv, span));
+            }
             matched_init = Some(init);
             // Record which init was selected so MIR lowering can use the init entity
             ctx.resolutions.insert(expr_id, init);

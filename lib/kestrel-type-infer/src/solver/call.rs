@@ -438,6 +438,16 @@ pub(super) fn bind_call_result(
             return;
         }
     }
+    // A bound or passed `Optional[&T]` (a failable read whose receiver
+    // resolved after the binding's own Coerce already merged its var with
+    // `result`): route through Coerce so it still decays to `Optional[T]`
+    // (arm 1b).
+    if super::equality::optional_ref_decay_site(ctx, expr)
+        && super::equality::optional_ref_pointee(ctx, rr).is_some()
+    {
+        ctx.coerce(ret_tv, result, expr, span);
+        return;
+    }
     ctx.equal(result, ret_tv, span);
 }
 

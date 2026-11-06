@@ -222,10 +222,12 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
         unsafe lang.ptr_take(self._raw)
     }
 
-    /// Borrowed view of the pointee — no copy, no clone, no `T: Copyable`
+    /// The pointee, in place — no copy, no clone, no `T: Copyable`
     /// requirement. Member access, operators, and borrow-convention calls
     /// go through it in place; binding it (`let x = p.value;`) stores an
-    /// owned copy instead (binding decay).
+    /// owned copy instead (binding decay). Writing through it (`p.value = x`,
+    /// a mutating method) needs a `var` pointer; `mutatingValue` writes
+    /// through any pointer.
     ///
     /// # Safety
     ///
@@ -235,8 +237,9 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     ///   not verify the pointee's lifetime. Using it after the storage is
     ///   freed is undefined behavior — the same trust point as `read()`,
     ///   returning a view instead of a copy.
-    public unsafe var value: &T {
-        unsafe lang.ptr_ref(self._raw)
+    public unsafe var value: T {
+        ref { unsafe lang.ptr_ref(self._raw) }
+        mutating ref { unsafe self.mutatingValue }
     }
 
     /// Mutable borrowed view of the pointee. Mutating methods and
@@ -390,7 +393,7 @@ public struct UnsafeSlice[T] {
     public var pointer: Pointer[T] { self.ptr }
 
     // subscript(index:), subscript(checked:), subscript(unchecked:),
-    // subscript(clamped:), subscript(wrapped:): provided by extend Sliceable[T]
+    // subscript(clamped:), subscript(within:), subscript(wrapped:): provided by extend Sliceable[T]
 
     /// Forward iterator over the elements.
     public func iter() -> UnsafeSliceIterator[T] {
@@ -579,14 +582,9 @@ public struct MutRefSliceIterator[T]: Iterator {
     }
 }
 
-// A raw `Pointer[T]` is a smart pointer: `ptr.field` reaches the pointee.
-// `pointeeRef`/`pointeeMutRef` are the existing `value`/`mutatingValue` views
-// under the protocol's names. Works for any `T` (Copyable or not).
-extend Pointer[T]: MutableIndirection {
-    type Target = T
-    public func pointeeRef() -> &T { unsafe self.value }
-    public mutating func pointeeMutRef() -> &mutating T { unsafe self.mutatingValue }
-}
+// A raw `Pointer[T]` is not an `Indirection`: reaching the pointee reads
+// memory the compiler can't vouch for, so it is spelled
+// `unsafe ptr.value.field`, never a silent `ptr.field` peel.
 
 
 

@@ -160,6 +160,12 @@ pub struct InferCtx<'a> {
     /// `CallableRefReturn`, not from this expression's recorded type.
     pub(crate) assign_target_exprs: HashSet<HirExprId>,
 
+    /// The VALUE exprs of assignments whose target is a call / member
+    /// access (`d(k) = v`), so `solve_assign_target` can tell a lent
+    /// failable place (never assignable: the analyzer reports E214) from an
+    /// `Optional[&T]` local being rebound.
+    pub(crate) place_assign_values: HashSet<HirExprId>,
+
     /// HirExprIds in ALWAYS-DECAY value positions: `if`/`match` ARM VALUES
     /// (refs cannot cross merges) and array/tuple/dict LITERAL ELEMENTS
     /// (aggregates own their elements). A ref-returning call here binds its
@@ -230,8 +236,8 @@ pub struct InferCtx<'a> {
     /// Surfaced on `TypedBody.direct_iterators`.
     pub(crate) direct_iterators: HashSet<HirExprId>,
 
-    /// Bound initializers whose `Optional[&T]` decayed to `Optional[T]`.
-    /// Surfaced on `TypedBody.optional_ref_decays`.
+    /// Expressions whose `Optional[&T]` value decays to `Optional[T]`: bound
+    /// initializers and operator receivers. Surfaced on `TypedBody.optional_ref_decays`.
     pub(crate) optional_ref_decays: HashSet<HirExprId>,
 
     /// Every resolved call's instantiated return var (`bind_call_result`).
@@ -253,6 +259,11 @@ pub struct InferCtx<'a> {
     /// Maps the expr to its operator protocol (`Addable`, `Equal`, …), which
     /// Rule L checks the right operand against.
     pub(crate) operator_members: HashMap<HirExprId, Entity>,
+    /// Operator call → its receiver (left operand) expression.
+    pub(crate) operator_receivers: HashMap<HirExprId, HirExprId>,
+    /// Receivers of instance method calls (`xs.first().map(f)`): a lent
+    /// `Optional[&T]` there decays to `Optional[T]` (`optional_ref_decay_site`).
+    pub(crate) method_receiver_exprs: HashSet<HirExprId>,
 
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
@@ -304,7 +315,6 @@ pub struct InferCtx<'a> {
     pub(crate) return_ty_span: Option<Span>,
 
     /// Entity being inferred (function/init/getter).
-    #[allow(dead_code)]
     pub(crate) owner: Entity,
     pub(crate) root: Entity,
 
@@ -496,6 +506,7 @@ impl<'a> InferCtx<'a> {
             scrutinee_exprs: HashSet::default(),
             mutating_scrutinee_exprs: HashSet::default(),
             assign_target_exprs: HashSet::default(),
+            place_assign_values: HashSet::default(),
             always_decay_exprs: HashSet::default(),
             call_arg_exprs: HashSet::default(),
             direct_callee_exprs: HashSet::default(),
@@ -517,6 +528,8 @@ impl<'a> InferCtx<'a> {
             call_return_tvs: HashMap::default(),
             protocol_dispatch_members: HashSet::default(),
             operator_members: HashMap::default(),
+            operator_receivers: HashMap::default(),
+            method_receiver_exprs: HashSet::default(),
             resolutions: HashMap::default(),
             indirection_peels: HashMap::default(),
             field_subscripts: HashMap::default(),

@@ -1,7 +1,7 @@
 // test: diagnostics
 // stdlib: false
 //
-// E642: generic code calls a protocol requirement without `unsafe`, so a
+// E643: generic code calls a protocol requirement without `unsafe`, so a
 // witness may only be unsafe when its requirement is.
 
 module Test

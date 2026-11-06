@@ -34,15 +34,12 @@ let pivot = names.partition(by: { (n) in n.count > 3 });
 ### Indexing
 
 The default subscript `arr(i)` panics on out-of-bounds. Variants exist
-for every common policy: `arr(checked: i)` returns `T?`,
-`arr(unchecked: i)` skips the bounds check (UB on OOB),
-`arr(wrapped: i)` wraps with modulo (and supports negative indices),
-and `arr(clamped: i)` clamps to `[0, count-1]`. Range arguments use the
-same labels — `arr(0..<3)`, `arr(checked: r)`, `arr(unchecked: r)`,
-`arr(clamped: r)` — dispatched through the unified `SeqIndex[T]`,
-`SeqClampable[T]`, and `SeqWrappable[T]` protocols. `Int64` and range
-types share each label; the result type varies (`T?` vs `UnsafeSlice[T]`
-for `clamped:`).
+for every common policy, each an in-place place: `arr(checked: i)` is
+`.None` when out of range, `arr(unchecked: i)` skips the bounds check
+(UB on OOB), `arr(wrapped: i)` wraps with modulo (negative indices count
+from the end), and `arr(clamped: i)` saturates into `[0, count-1]`.
+Ranges take `arr(0..<3)`, `arr(checked: r)` and `arr(unchecked: r)`,
+and `arr(within: r)` lends the part of `r` inside the array.
 
 ### Capacity & Reallocation
 
@@ -332,17 +329,6 @@ public mutating func asMutableSlice() -> &mutating Slice[T]
 The elements as a writable slice, in place. Runs the copy-on-write
 check first, so writes never reach a copy's buffer. The slice can
 change elements, never the array's length.
-
-_Defined in `lang/std/collections/array.ks`._
-
-#### function `asSlice`
-
-```kestrel
-public func asSlice() -> &Slice[T]
-```
-
-The elements as a slice, in place. Valid until the array next
-reallocates or is dropped.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -1237,33 +1223,46 @@ _Defined in `lang/std/collections/array.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](checked: I) -> I.SliceCheckedOutput where I: SliceIndex[T] { get }
+public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref mutating ref }
 ```
 
-Like `xs(index)`, but `.None` instead of a panic when out of range.
-An element comes back as a copy; a range as a lent slice.
+Like `xs(index)`, but the place may not exist: `.None` instead of a
+panic when out of range. Reading copies the element out (`T?`) or
+lends the slice; `if let .Some(&mutating v) = xs(checked: i)` writes
+in place.
 
 _Defined in `lang/std/collections/array.ks`._
 
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.SliceClampedOutput where I: SliceClampable[T] { get }
+public subscript(clamped: Int64) -> T? { ref mutating ref }
 ```
 
-Like `xs(index)`, with the index or range clamped into the array. A
-clamped element of an empty array is `.None`.
+The element at `index` saturated into `0..<count`, in place, or
+`.None` for an empty array.
 
 _Defined in `lang/std/collections/array.ks`._
 
 #### subscript `subscript`
 
 ```kestrel
-public subscript(wrapped: Int64) -> T? { get }
+public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
 ```
 
-A copy of the element at `index` modulo `count` (negative indices
-count from the end), or `.None` for an empty array.
+The part of `range` that lies within the array, in place (always
+valid, possibly empty).
+
+_Defined in `lang/std/collections/array.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(wrapped: Int64) -> T? { ref mutating ref }
+```
+
+The element at `index` modulo `count` (negative indices count from
+the end), in place, or `.None` for an empty array.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -1315,13 +1314,14 @@ _Defined in `lang/std/collections/views.ks`._
 
 ### Implements `Sliceable`
 
-#### function `asUnsafeSlice`
+#### function `asSlice`
 
 ```kestrel
-public func asUnsafeSlice() -> UnsafeSlice[T]
+public func asSlice() -> &Slice[T]
 ```
 
-Slice protocol kernel — borrows the array's buffer as an UnsafeSlice.
+The elements as a slice, in place. Valid until the array next
+reallocates or is dropped.
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -2284,7 +2284,7 @@ _Defined in `lang/std/collections/deque.ks`._
 #### subscript `Indexed`
 
 ```kestrel
-subscript(Int64) -> T { get set }
+subscript(Int64) -> T { ref mutating ref }
 ```
 
 O(1) random access by logical index.
@@ -2416,10 +2416,10 @@ _Defined in `lang/std/collections/deque.ks`._
 #### function `first`
 
 ```kestrel
-public func first() -> T?
+public func first() -> Optional[&T]
 ```
 
-Returns the front element without removing it, or `.None` if empty.
+Lends the front element without removing it, or `.None` if empty.
 
 O(1). The removing counterpart is `popFront()`.
 
@@ -2453,10 +2453,10 @@ _Defined in `lang/std/collections/deque.ks`._
 #### function `last`
 
 ```kestrel
-public func last() -> T?
+public func last() -> Optional[&T]
 ```
 
-Returns the back element without removing it, or `.None` if empty.
+Lends the back element without removing it, or `.None` if empty.
 
 O(1). The removing counterpart is `popBack()`.
 
@@ -2579,6 +2579,26 @@ when the final size is known in advance.
 ```
 var d = Deque[Int64]();
 d.reserveCapacity(minimumCapacity: 100);
+```
+
+_Defined in `lang/std/collections/deque.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+subscript(checked: Int64) -> T? { ref mutating ref }
+```
+
+Like `d(index)`, but the place may not exist: `.None` instead of a
+panic when out of range. `if let .Some(&mutating v) = d(checked: i)`
+writes in place.
+
+##### Examples
+
+```
+var d = Deque[Int64](from: [10, 20]);
+d(checked: 1);  // .Some(20)
+d(checked: 5);  // .None
 ```
 
 _Defined in `lang/std/collections/deque.ks`._
@@ -2915,16 +2935,15 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### subscript `Lookup`
 
 ```kestrel
-public subscript(K) -> V? { get set }
+public subscript(K) -> V? { ref mutating ref }
 ```
 
-Reads the value for `key` (or `None` if absent), or assigns
-to insert/remove the entry.
+The value stored for `key`, in place, or `.None` when absent.
 
-The assignment form treats `Some(v)` as insert/update and
-`None` as delete — so `dict(k) = None` is the inline form of
-`dict.remove(k)`. For a non-`Optional` getter use
-`dict(key, default: ...)` or `dict(unwrap: key)`.
+Reads lend `Optional[&V]` (a binding copies it out); a `&mutating`
+payload binder updates the stored value in place with one lookup.
+The place never inserts or removes: use `insert(key, value)`,
+`remove(key)`, or `dict(key, default: v)` to insert when missing.
 
 ##### Examples
 
@@ -2932,8 +2951,7 @@ The assignment form treats `Some(v)` as insert/update and
 var dict = ["a": 1, "b": 2];
 dict("a");           // Some(1)
 dict("z");           // None
-dict("c") = 3;       // inserts "c": 3
-dict("a") = None;    // removes "a"
+if let .Some(&mutating v) = dict("a") { v += 10; }  // "a": 11
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -2970,29 +2988,27 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### subscript `Unwrap`
 
 ```kestrel
-public subscript(unwrap: K) -> V { get set }
+public subscript(unwrap: K) -> V { ref mutating ref }
 ```
 
-Reads or writes the value for `key`, panicking on the read
-when the key is absent.
+The value for `key`, in place, panicking when the key is absent.
 
-Use when you've already verified the key exists (or when its
-absence indicates a bug). The setter is equivalent to
-`insert(key, newValue)` and never panics. For a non-panicking
-read use `dict(key)` or `dict(key, default: ...)`.
+Use when absence is a bug. Reads lend `&V` and writes update the
+stored value in place; assigning to a missing key panics too, so
+insert with `insert(key, value)` or `dict(key, default: v)`.
 
 ##### Errors
 
-Read panics with
-`"Dictionary subscript(unwrap:): key not found"` when the key
-is absent.
+Panics with `"Dictionary subscript(unwrap:): key not found"` when
+the key is absent.
 
 ##### Examples
 
 ```
-let dict = ["a": 1, "b": 2];
-dict(unwrap: "a");  // 1
-dict(unwrap: "z");  // PANIC: key not found
+var dict = ["a": 1, "b": 2];
+dict(unwrap: "a");       // 1
+dict(unwrap: "a") += 1;  // "a": 2
+dict(unwrap: "z");       // PANIC: key not found
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3023,23 +3039,21 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### subscript `With Default`
 
 ```kestrel
-public subscript(K, default: V) -> V { get }
+public subscript(K, default: V) -> V { get mutating ref }
 ```
 
-Reads the value for `key`, falling back to `defaultValue` when
-the key is absent.
+The value for `key`, or `defaultValue` when absent.
 
-Read-only and *non-inserting* — the default value is returned
-but never stored. To upsert with a default, use `upsert(...)`
-or `update(...)`.
+Reading never stores the default. Writing inserts `defaultValue`
+first when the key is missing, then updates the stored value in
+place, so `counts(word, default: 0) += 1` is one lookup.
 
 ##### Examples
 
 ```
-let dict = ["a": 1, "b": 2];
-dict("a", default: 0);  // 1
-dict("z", default: 0);  // 0
-dict("z");              // still None — default wasn't stored
+var dict = ["a": 1];
+dict("z", default: 0);       // 0, nothing stored
+dict("z", default: 0) += 5;  // inserts "z": 5
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3328,11 +3342,10 @@ _Defined in `lang/std/collections/dictionary.ks`._
 #### function `first`
 
 ```kestrel
-public func first(where: (K, V) -> Bool) -> (K, V)?
+public func first(where: (K, V) -> Bool) -> Optional[(&K, &V)]
 ```
 
-Returns *some* entry matching `predicate(key, value)`, or
-`None`.
+Lends *some* entry matching `predicate(key, value)`, or `None`.
 
 "First" is determined by bucket order, which is hash-dependent
 and unspecified — treat the result as arbitrary among matching
@@ -3379,8 +3392,9 @@ Inserts `(key, value)`, replacing any existing entry for `key`,
 and returns the old value (or `None`) on update.
 
 Triggers `ensureCapacity()` and may resize before the insert
-lands. The cached hash is computed once here. For
-transform-based updates see `update(...)` and `upsert(...)`.
+lands. The cached hash is computed once here. To update a value in
+place use `if let .Some(&mutating v) = dict(key)` or
+`dict(key, default: v) += …`.
 
 ##### Examples
 
@@ -3409,6 +3423,17 @@ Reads more naturally than the comparison.
 [:].isEmpty;           // true
 ["a": 1].isEmpty;      // false
 ```
+
+_Defined in `lang/std/collections/dictionary.ks`._
+
+#### function `keyAt`
+
+```kestrel
+internal func keyAt(consuming Int64) -> Optional[&K]
+```
+
+Lends the key in bucket `slot`, or `.None` for an empty or deleted
+slot, or one out of range.
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
@@ -3527,33 +3552,6 @@ let b = ["y": 20, "z": 30];
 let merged = a.merging(b) { (_, new) in new };
 // merged == ["x": 1, "y": 20, "z": 30]
 // a is unchanged
-```
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-#### function `modify`
-
-```kestrel
-public mutating func modify[R](K, (V) -> R) -> R?
-```
-
-Mutates the value for `key` in place and returns the closure's
-result, or `None` (without invoking `body`) if the key is absent.
-
-The interim form of in-place value access — the conditional
-ref-returning lookup (`find(key:) -> Optional[&V]`) waits for
-`Optional[&T]`. Today this is a bucket read → mutate → write-back
-under the hood; it can upgrade to true in-place mutation later with
-no API change. One probe (no re-hash on write-back, unlike
-`update(...)`); triggers COW only when the key is present.
-
-##### Examples
-
-```
-var dict = ["a": 1];
-dict.modify("a") { (mutating v) in v = v + 1 };  // .Some(())
-dict.modify("z") { (mutating v) in v = v + 1 };  // .None; body not invoked
-dict("a");  // Some(2)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -3695,6 +3693,16 @@ dict.shrinkToFit();  // capacity drops from 1024 to 8
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
+#### field `slotCount`
+
+```kestrel
+internal var slotCount: Int64 { get }
+```
+
+Number of bucket slots, for slot-wise key scans (`Set`).
+
+_Defined in `lang/std/collections/dictionary.ks`._
+
 #### function `sumValues`
 
 ```kestrel
@@ -3712,58 +3720,6 @@ Empty dictionaries return `V()` — for `Int64` that's `0`, for
 ```
 ["a": 1, "b": 2, "c": 3].sumValues();  // 6
 [:].sumValues();                        // 0 — V's default
-```
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-#### function `update`
-
-```kestrel
-public mutating func update(K, with: (V) -> V) -> Bool
-```
-
-Applies `transform` to the existing value for `key` and writes
-the result back; returns whether the key was found.
-
-**Deprecated:** prefer `modify(...)`, which mutates in place with
-a single probe (no re-hash on write-back) and returns the
-closure's result. `update` will be removed in a future release.
-
-No-op when the key is absent — for "update or insert" semantics
-use `upsert(...)`. Internally re-uses `insert(...)`, so the
-hash is recomputed.
-
-##### Examples
-
-```
-var dict = ["a": 1, "b": 2];
-dict.update("a") { (v) in v * 10 };  // true;  dict("a") == Some(10)
-dict.update("z") { (v) in v * 10 };  // false; dict unchanged
-```
-
-_Defined in `lang/std/collections/dictionary.ks`._
-
-#### function `upsert`
-
-```kestrel
-public mutating func upsert(K, default: V, with: (V) -> V)
-```
-
-Inserts `transform(defaultValue)` for a new key, or
-`transform(existing)` for an existing one.
-
-The classic "increment-or-set-to-1" pattern. `defaultValue` is
-passed through `transform` even on the insert path, so the same
-closure handles both branches uniformly. For the no-insert
-variant see `update(...)`.
-
-##### Examples
-
-```
-var counts: [String: Int64] = [:];
-counts.upsert("apple", default: 0) { (n) in n + 1 };
-counts.upsert("apple", default: 0) { (n) in n + 1 };
-counts("apple");  // Some(2)
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -4694,98 +4650,6 @@ public func iter() -> ReversedSliceIterator[T]
 
 _Defined in `lang/std/collections/views.ks`._
 
-## protocol `SeqClampable`
-
-```kestrel
-public protocol SeqClampable[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Members
-
-#### typealias `SeqClampedOutput`
-
-```kestrel
-type SeqClampedOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqClamped`
-
-```kestrel
-func readSeqClamped(from: UnsafeSlice[T]) -> SeqClampedOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqClamped`
-
-```kestrel
-func writeSeqClamped(to: UnsafeSlice[T], with: SeqClampedOutput)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-## protocol `SeqIndex`
-
-```kestrel
-public protocol SeqIndex[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Members
-
-#### typealias `SeqOutput`
-
-```kestrel
-type SeqOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeq`
-
-```kestrel
-func readSeq(from: UnsafeSlice[T]) -> SeqOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqChecked`
-
-```kestrel
-func readSeqChecked(from: UnsafeSlice[T]) -> SeqOutput?
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqUnchecked`
-
-```kestrel
-func readSeqUnchecked(from: UnsafeSlice[T]) -> SeqOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeq`
-
-```kestrel
-func writeSeq(to: UnsafeSlice[T], with: SeqOutput)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqUnchecked`
-
-```kestrel
-func writeSeqUnchecked(to: UnsafeSlice[T], with: SeqOutput)
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
 ## protocol `SeqRange`
 
 ```kestrel
@@ -4805,40 +4669,6 @@ _Defined in `lang/std/collections/sliceable.ks`._
 
 ```kestrel
 func resolve(Int64) -> Range[Int64]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-## protocol `SeqWrappable`
-
-```kestrel
-public protocol SeqWrappable[T]
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-### Members
-
-#### typealias `SeqWrappedOutput`
-
-```kestrel
-type SeqWrappedOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `readSeqWrapped`
-
-```kestrel
-func readSeqWrapped(from: UnsafeSlice[T]) -> SeqWrappedOutput
-```
-
-_Defined in `lang/std/collections/sliceable.ks`._
-
-#### function `writeSeqWrapped`
-
-```kestrel
-func writeSeqWrapped(to: UnsafeSlice[T], with: SeqWrappedOutput)
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -5311,10 +5141,10 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `first`
 
 ```kestrel
-public func first(where: (T) -> Bool) -> T?
+public func first(where: (T) -> Bool) -> Optional[&T]
 ```
 
-Returns *some* element matching `predicate`, or `None`.
+Lends *some* element matching `predicate`, or `None`.
 
 "First" is determined by iteration order, which is
 unspecified — treat the result as arbitrary among matching
@@ -5686,10 +5516,10 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `max`
 
 ```kestrel
-public func max() -> T? where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
+public func max() -> Optional[&T] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
 ```
 
-Returns the largest element, or `None` for an empty set.
+Lends the largest element, or `None` for an empty set.
 
 Single linear pass. Mirror of `min()`.
 
@@ -5705,10 +5535,10 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `min`
 
 ```kestrel
-public func min() -> T? where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
+public func min() -> Optional[&T] where T: Hashable, T: Comparable, H: Hasher, H: Defaultable
 ```
 
-Returns the smallest element, or `None` for an empty set.
+Lends the smallest element, or `None` for an empty set.
 
 Single linear pass; ties go to the first occurrence in
 iteration order (which is unspecified, so equally-minimal
@@ -6204,6 +6034,16 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ### Members
 
+#### function `asUnsafeSlice`
+
+```kestrel
+public func asUnsafeSlice() -> UnsafeSlice[T]
+```
+
+The elements as a raw `(pointer, count)` view.
+
+_Defined in `lang/std/collections/slice.ks`._
+
 #### function `assign`
 
 ```kestrel
@@ -6295,6 +6135,16 @@ long as the slice is used.
 
 _Defined in `lang/std/collections/slice.ks`._
 
+#### function `lendClamped`
+
+```kestrel
+internal func lendClamped(consuming Int64) -> Optional[&T]
+```
+
+Lends the element `xs(clamped: index)` names.
+
+_Defined in `lang/std/collections/slice.ks`._
+
 #### function `lendMutating`
 
 ```kestrel
@@ -6302,6 +6152,36 @@ public static func lendMutating(start: consuming Pointer[T], count: consuming In
 ```
 
 Like `lend(start:count:)`, for writing through.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingClamped`
+
+```kestrel
+internal mutating func lendMutatingClamped(consuming Int64) -> Optional[&mutating T]
+```
+
+Like `lendClamped`, lent mutably.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingWrapped`
+
+```kestrel
+internal mutating func lendMutatingWrapped(consuming Int64) -> Optional[&mutating T]
+```
+
+Like `lendWrapped`, lent mutably.
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendWrapped`
+
+```kestrel
+internal func lendWrapped(consuming Int64) -> Optional[&T]
+```
+
+Lends the element `xs(wrapped: index)` names.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6481,33 +6361,46 @@ _Defined in `lang/std/collections/slice.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](checked: I) -> I.SliceCheckedOutput where I: SliceIndex[T] { get }
+public subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref mutating ref }
 ```
 
-Like `self(index)`, but `.None` instead of a panic when out of range.
-An element comes back as a copy; a range as a lent slice.
+Like `self(index)`, but the place may not exist: `.None` instead of
+a panic when out of range. Reading copies the element out (`T?`) or
+lends the slice; `if let .Some(&mutating v) = s(checked: i)` writes
+in place.
 
 _Defined in `lang/std/collections/slice.ks`._
 
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.SliceClampedOutput where I: SliceClampable[T] { get }
+public subscript(clamped: Int64) -> T? { ref mutating ref }
 ```
 
-Like `self(index)`, with the index or range clamped into the slice.
-A clamped element of an empty slice is `.None`.
+The element at `index` saturated into `0..<count`, in place, or
+`.None` for an empty slice.
 
 _Defined in `lang/std/collections/slice.ks`._
 
 #### subscript `subscript`
 
 ```kestrel
-public subscript(wrapped: Int64) -> T? { get }
+public subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref mutating ref }
 ```
 
-A copy of the element at `index` modulo `count` (negative indices
-count from the end), or `.None` for an empty slice.
+The part of `range` that lies within the slice, in place (always
+valid, possibly empty).
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+public subscript(wrapped: Int64) -> T? { ref mutating ref }
+```
+
+The element at `index` modulo `count` (negative indices count from
+the end), in place, or `.None` for an empty slice.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6560,13 +6453,13 @@ _Defined in `lang/std/collections/views.ks`._
 
 ### Implements `Sliceable`
 
-#### function `asUnsafeSlice`
+#### function `asSlice`
 
 ```kestrel
-public func asUnsafeSlice() -> UnsafeSlice[T]
+public func asSlice() -> &Slice[T]
 ```
 
-The elements as a raw `(pointer, count)` view.
+Itself: a slice is already the in-place view.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6650,26 +6543,24 @@ _Defined in `lang/std/collections/slice.ks`._
 public protocol SliceClampable[T]
 ```
 
-The clamped form of `SliceIndex`: a range is clamped into the slice and
-lent; an element index is clamped into `0..<count` and copied out, or
-`.None` for an empty slice.
+A range that `xs(within: range)` clamps into the slice and lends.
 
 _Defined in `lang/std/collections/slice.ks`._
 
 ### Members
 
-#### typealias `SliceClampedOutput`
+#### function `lendMutatingWithin`
 
 ```kestrel
-type SliceClampedOutput
+static func lendMutatingWithin(consuming Self, mutating Slice[T]) -> &mutating Slice[T]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
 
-#### function `lendClamped`
+#### function `lendWithin`
 
 ```kestrel
-static func lendClamped(consuming Self, Slice[T]) -> SliceClampedOutput
+static func lendWithin(consuming Self, Slice[T]) -> &Slice[T]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -6691,17 +6582,6 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ### Members
 
-#### typealias `SliceCheckedOutput`
-
-```kestrel
-type SliceCheckedOutput
-```
-
-What `checked:` gives: a copy of the element (`T?`), or a lent
-slice (`Optional[&Slice[T]]`).
-
-_Defined in `lang/std/collections/slice.ks`._
-
 #### typealias `SliceOutput`
 
 ```kestrel
@@ -6721,8 +6601,10 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `lendChecked`
 
 ```kestrel
-static func lendChecked(consuming Self, Slice[T]) -> SliceCheckedOutput
+static func lendChecked(consuming Self, Slice[T]) -> Optional[&SliceOutput]
 ```
+
+`.None` when the index or range doesn't fit.
 
 _Defined in `lang/std/collections/slice.ks`._
 
@@ -6730,6 +6612,14 @@ _Defined in `lang/std/collections/slice.ks`._
 
 ```kestrel
 static func lendMutating(consuming Self, mutating Slice[T]) -> &mutating SliceOutput
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `lendMutatingChecked`
+
+```kestrel
+static func lendMutatingChecked(consuming Self, mutating Slice[T]) -> Optional[&mutating SliceOutput]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
@@ -6759,10 +6649,11 @@ public protocol Sliceable[T]
 Shared read-only protocol for contiguous collections.
 
 `Sliceable[T]` is the contiguous-collection counterpart to `Str` in
-`std.text`: one kernel method (`asSlice`), all read-only logic in a
-protocol extension. Both `Array[T]` and `UnsafeSlice[T]` conform, so
-generic code constrained to `S: Sliceable[T]` accepts either without
-overloading.
+`std.text`: a conformer lends itself as a `Slice` (`asSlice`) and its
+index places; all read-only logic lives in a protocol extension.
+`Array[T]`, `Slice[T]` and `UnsafeSlice[T]` conform, so generic code
+constrained to `S: Sliceable[T]` accepts any of them without
+overloading, and `s(i)` borrows the element rather than copying it.
 
 ### Examples
 
@@ -6773,7 +6664,7 @@ func sum[S](s: &S) -> Int64 where S: Sliceable[Int64], S: not Static, S: not Cop
     total
 }
 sum([1, 2, 3]);              // works with Array
-sum([1, 2, 3].asUnsafeSlice());    // works with UnsafeSlice
+sum([1, 2, 3](1..<3));       // works with Slice
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -6835,15 +6726,26 @@ Reading past `count` is undefined behavior.
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
+#### function `asSlice`
+
+```kestrel
+func asSlice() -> &Slice[T]
+```
+
+The elements as a `Slice`, in place. Every shared algorithm reads
+through it.
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
 #### function `asUnsafeSlice`
 
 ```kestrel
-func asUnsafeSlice() -> UnsafeSlice[T]
+public func asUnsafeSlice() -> UnsafeSlice[T]
 ```
 
-The elements as a raw `(pointer, count)` view. Only valid until the
-collection next changes, so shared algorithms use it within one
-call and never hand it out.
+The elements as a raw `(pointer, count)` view, for algorithms that
+walk the buffer directly. Only valid until the collection next
+changes, so never hand it out.
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
@@ -7023,10 +6925,11 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `first`
 
 ```kestrel
-public func first() -> T?
+public func first() -> Optional[&T]
 ```
 
-First element, or `.None` for an empty collection. O(1).
+Lends the first element in place, or `.None` for an empty collection.
+O(1). A binding (`let f = xs.first()`) copies it out.
 
 Read-only — to remove the first element from an `Array`, use
 `popFirst()`.
@@ -7043,10 +6946,10 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `first`
 
 ```kestrel
-public func first(where: (T) -> Bool) -> T?
+public func first(where: (T) -> Bool) -> Optional[&T]
 ```
 
-First element matching `predicate`, or `None`. O(n).
+Lends the first element matching `predicate`, or `None`. O(n).
 
 ##### Examples
 
@@ -7222,10 +7125,11 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `last`
 
 ```kestrel
-public func last() -> T?
+public func last() -> Optional[&T]
 ```
 
-Last element, or `.None` for an empty collection. O(1).
+Lends the last element in place, or `.None` for an empty collection.
+O(1).
 
 Read-only — to remove the last element from an `Array`, use
 `pop()`.
@@ -7242,10 +7146,10 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `last`
 
 ```kestrel
-public func last(where: (T) -> Bool) -> T?
+public func last(where: (T) -> Bool) -> Optional[&T]
 ```
 
-Last element matching `predicate`, or `None`. O(n).
+Lends the last element matching `predicate`, or `None`. O(n).
 
 ##### Examples
 
@@ -7313,10 +7217,10 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `max`
 
 ```kestrel
-public func max() -> T? where T: Comparable
+public func max() -> Optional[&T] where T: Comparable
 ```
 
-Largest element, or `None` if empty. O(n).
+Lends the largest element, or `None` if empty. O(n).
 
 Ties go to the first occurrence.
 
@@ -7332,10 +7236,10 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `min`
 
 ```kestrel
-public func min() -> T? where T: Comparable
+public func min() -> Optional[&T] where T: Comparable
 ```
 
-Smallest element, or `None` if empty. O(n).
+Lends the smallest element, or `None` if empty. O(n).
 
 Ties go to the first occurrence.
 
@@ -7448,7 +7352,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](I) -> I.SeqOutput where I: SeqIndex[T] { get }
+subscript[I](I) -> I.SliceOutput where I: SliceIndex[T] { ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7456,7 +7360,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](checked: I) -> I.SeqOutput? where I: SeqIndex[T] { get }
+subscript[I](checked: I) -> I.SliceOutput? where I: SliceIndex[T] { ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7464,7 +7368,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](unchecked: I) -> I.SeqOutput where I: SeqIndex[T] { get }
+subscript[I](unchecked: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7472,7 +7376,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.SeqClampedOutput where I: SeqClampable[T] { get }
+subscript(clamped: Int64) -> T? { ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7480,7 +7384,15 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### subscript `subscript`
 
 ```kestrel
-public subscript[I](wrapped: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] { get }
+subscript[R](within: R) -> Slice[T] where R: SliceClampable[T] { ref }
+```
+
+_Defined in `lang/std/collections/sliceable.ks`._
+
+#### subscript `subscript`
+
+```kestrel
+subscript(wrapped: Int64) -> T? { ref }
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._

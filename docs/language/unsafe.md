@@ -27,11 +27,11 @@ struct RawBuffer {
 
 Document the safety contract on every unsafe declaration: what the caller must guarantee.
 
-A stored field can't be `unsafe` (E645). Keep the field private and expose an `unsafe` computed property instead.
+A stored field can't be `unsafe` (E646). Keep the field private and expose an `unsafe` computed property instead.
 
 ## Using Something Unsafe
 
-A use is a call, a property read, an initializer, a subscript, or naming the declaration as a value. Every use must be inside an *unsafe context*, or it is an error (E640). There are two forms.
+A use is a call, a property read, an initializer, a subscript, or naming the declaration as a value. Every use must be inside an *unsafe context*, or it is an error (E641). There are two forms.
 
 The **`unsafe` expression** covers one expression. It binds like `try`, so it covers the whole postfix chain after it:
 
@@ -55,7 +55,7 @@ Rules:
 
 - The body of an `unsafe func` is **not** an unsafe context. Each unsafe operation inside it still needs its own `unsafe`, so the operations that need checking stay visible.
 - The rule is lexical. A closure written inside an `unsafe` region is covered by it.
-- An `unsafe` that covers no unsafe use is a warning (E641). A use marks only the innermost `unsafe` around it, so an `unsafe` that only wraps another `unsafe` is reported as well.
+- An `unsafe` that covers no unsafe use is a warning (E642). A use marks only the innermost `unsafe` around it, so an `unsafe` that only wraps another `unsafe` is reported as well.
 
 ## What Is Unsafe
 
@@ -92,28 +92,28 @@ A protocol is `unsafe` when the compiler relies on its conformers to keep a prom
 public unsafe protocol ArrayMatchable { … }
 ```
 
-A conformance to an unsafe protocol must be written `unsafe P` (E643). That marks the place where the author vouches for the contract:
+A conformance to an unsafe protocol must be written `unsafe P` (E644). That marks the place where the author vouches for the contract:
 
 ```kestrel
 struct Ring[T]: unsafe ArrayMatchable { … }
 extend MyBuffer: unsafe ArrayMatchable { … }
 ```
 
-Writing `unsafe P` for a protocol that isn't unsafe is a warning (E644). Using an unsafe protocol, as a bound or an existential, needs no `unsafe`.
+Writing `unsafe P` for a protocol that isn't unsafe is a warning (E645). Using an unsafe protocol, as a bound or an existential, needs no `unsafe`.
 
 ### Unsafe requirements and witnesses
 
-A protocol requirement can be `unsafe`; then callers must use `unsafe` whenever they call it, including through generic code. A requirement that is safe can't be satisfied by an `unsafe` witness (E642), because generic code would call it without `unsafe`. Either mark the requirement `unsafe` or make the witness safe.
+A protocol requirement can be `unsafe`; then callers must use `unsafe` whenever they call it, including through generic code. A requirement that is safe can't be satisfied by an `unsafe` witness (E643), because generic code would call it without `unsafe`. Either mark the requirement `unsafe` or make the witness safe.
 
 ## Diagnostics
 
 | Code | Severity | Meaning |
 |------|----------|---------|
-| E640 | Error | An unsafe declaration is used outside an `unsafe` expression or block. |
-| E641 | Warning | An `unsafe` covers no unsafe operation. |
-| E642 | Error | An `unsafe` witness satisfies a safe requirement. |
-| E643 | Error | A conformance to an unsafe protocol is missing `unsafe`. |
-| E644 | Warning | `unsafe P` on a protocol that isn't unsafe. |
-| E645 | Error | `unsafe` on a stored field. |
+| E641 | Error | An unsafe declaration is used outside an `unsafe` expression or block. |
+| E642 | Warning | An `unsafe` covers no unsafe operation. |
+| E643 | Error | An `unsafe` witness satisfies a safe requirement. |
+| E644 | Error | A conformance to an unsafe protocol is missing `unsafe`. |
+| E645 | Warning | `unsafe P` on a protocol that isn't unsafe. |
+| E646 | Error | `unsafe` on a stored field. |
 
-See [Error codes](../error-codes.md#e640e645--unsafe) for the messages.
+See [Error codes](../error-codes.md#e641e646--unsafe) for the messages.

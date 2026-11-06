@@ -3,8 +3,8 @@
 
 // A C function type `@extern(.C) (…) -> …` holds a C address, so only a
 // function with a C entry point (`@export(.C)` or `@extern(.C)`) can be named
-// as one; an ordinary function can't (E646) and a closure has no address at
-// all (E624). `NullableCFunction[F]` needs a C function type `F` (E646).
+// as one; an ordinary function can't (E647) and a closure has no address at
+// all (E624). `NullableCFunction[F]` needs a C function type `F` (E647).
 
 module Test
 

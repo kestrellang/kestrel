@@ -531,7 +531,7 @@ A C function type, `@extern(.C) (A) -> R`, is the address of a function C
 can call: exactly a C function pointer, so it can be an `@extern` argument
 or result, or a field of an `FFISafe` struct. Naming an `@export(.C)` or
 `@extern(.C)` function where one is expected gives its C entry point. An
-ordinary function has none (E646) and a closure has no address at all
+ordinary function has none (E647) and a closure has no address at all
 (E624); pass closure state through the API's `void* userdata`. A `&T`
 param is a C pointer, as in an `@extern` declaration.
 
@@ -545,7 +545,7 @@ func qsort(base: RawPointer, count: UInt64, size: UInt64, compare: @extern(.C) (
 unsafe qsort(numbers.asPointer().asRaw(), count, 4, compareInts);
 ```
 
-Kestrel calls a C function value with the C ABI, in `unsafe` (E640),
+Kestrel calls a C function value with the C ABI, in `unsafe` (E641),
 since nothing checks that the address is a live function of that type:
 
 ```kestrel

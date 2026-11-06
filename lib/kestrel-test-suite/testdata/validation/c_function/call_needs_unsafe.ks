@@ -1,7 +1,7 @@
 // test: diagnostics
 // stdlib: true
 
-// Calling a C function value is unsafe (E640): nothing checks that its
+// Calling a C function value is unsafe (E641): nothing checks that its
 // address is a live C function of that type. Calling an `@export(.C)`
 // function by name is an ordinary call.
 

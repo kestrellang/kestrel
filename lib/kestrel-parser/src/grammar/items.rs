@@ -584,17 +584,19 @@ fn opt_failable_marker(p: &mut Parser<'_>) {
 
 /// The accessor clause keyword(s) at token offset `n`, if a clause starts
 /// there: `get {`, `set {`, `ref {`, `mutating ref {`, `modifying get {`,
-/// `modifying ref {`, `willSet {`, `didSet {`.
+/// `modifying ref {`, `willSet {`, `didSet {`, or a bodyless `ref` /
+/// `mutating ref` requirement.
 fn at_accessor_clause(p: &Parser<'_>, n: usize) -> bool {
     match p.nth(n) {
         Some(K::Get | K::Set) => p.nth_at(n + 1, K::LBrace),
-        Some(K::Mutating) => p.nth_is_contextual(n + 1, "ref") && p.nth_at(n + 2, K::LBrace),
+        Some(K::Mutating) => p.nth_is_contextual(n + 1, "ref") && at_ref_clause_end(p, n + 2),
+        Some(K::Identifier) if p.nth_is_contextual(n, "ref") => at_ref_clause_end(p, n + 1),
         Some(K::Identifier) if p.nth_is_contextual(n, "modifying") => {
             (p.nth_at(n + 1, K::Get) || p.nth_is_contextual(n + 1, "ref"))
                 && p.nth_at(n + 2, K::LBrace)
         },
         Some(K::Identifier) => {
-            ["ref", "willSet", "didSet"]
+            ["willSet", "didSet"]
                 .iter()
                 .any(|kw| p.nth_is_contextual(n, kw))
                 && p.nth_at(n + 1, K::LBrace)
@@ -642,6 +644,13 @@ fn accessor_body(p: &mut Parser<'_>, field: bool) {
     }
 }
 
+/// What may follow a `ref` / `mutating ref` keyword: its body, or — for a
+/// bodyless protocol requirement (`{ ref mutating ref }`) — the next
+/// requirement clause or the block's closing brace.
+fn at_ref_clause_end(p: &Parser<'_>, n: usize) -> bool {
+    p.nth_at(n, K::LBrace) || p.nth_at(n, K::RBrace) || p.nth_at(n, K::Mutating)
+}
+
 fn accessor_clause(p: &mut Parser<'_>) {
     let m = p.start();
     let kind = match p.current() {
@@ -680,7 +689,11 @@ fn accessor_clause(p: &mut Parser<'_>) {
             kind
         },
     };
-    top_block(p);
+    // Only a ref clause may be bodyless (`at_accessor_clause` admits no
+    // other clause without a `{`).
+    if p.at(K::LBrace) {
+        top_block(p);
+    }
     m.complete(p, kind);
 }
 

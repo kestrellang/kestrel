@@ -51,8 +51,7 @@ public struct CowBox[T]: Cloneable where T: Cloneable, T: not Sized, T: not Stat
     ///
     /// The fork clones the heap value in place (`RcBox.fork`), so a
     /// shared box is deep-copied exactly once and an unsized payload works.
-    /// Every write (`value`'s `mutating ref`, `pointeeMutRef`) goes through
-    /// here.
+    /// Every write (`value`'s `mutating ref`) goes through here.
     public mutating func ensureUnique() {
         if not self.inner.isUnique {
             self.inner = self.inner.fork()
@@ -86,8 +85,8 @@ public struct CowBox[T]: Cloneable where T: Cloneable, T: not Sized, T: not Stat
 }
 
 // Transparent member access with copy-on-write: a READ peels through
-// `pointeeRef()` (no fork), while any WRITE / mutating-method peels through
-// `pointeeMutRef()`, which runs the COW barrier first — so `cow.field = v`
+// `value`'s `ref` (no fork), while any WRITE / mutating-method peels through
+// its `mutating ref`, which runs the COW barrier first — so `cow.field = v`
 // forks a shared box exactly like `cow.value.field = v` does.
 //
 // The write barrier forks by cloning the payload into fresh storage
@@ -95,15 +94,9 @@ public struct CowBox[T]: Cloneable where T: Cloneable, T: not Sized, T: not Stat
 // existential's table carries its size and clone.
 extend CowBox[T]: Indirection {
     type Target = T
-    public func pointeeRef() -> &T { unsafe self.valuePtr().value }
 }
 
 // `any[CowBox] P`: the struct's `init(consuming:)` is the witness.
 extend CowBox[T]: ExistentialBox {}
 
-extend CowBox[T]: MutableIndirection where T: Cloneable {
-    public mutating func pointeeMutRef() -> &mutating T {
-        self.ensureUnique();
-        unsafe self.valuePtr().mutatingValue
-    }
-}
+extend CowBox[T]: MutableIndirection where T: Cloneable {}

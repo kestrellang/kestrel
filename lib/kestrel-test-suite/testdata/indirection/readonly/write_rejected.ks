@@ -3,7 +3,7 @@
 
 // Read-only smart pointer (R4 / D2): a wrapper conforming to `Indirection`
 // but NOT `MutableIndirection` reads through fine, but a write is rejected
-// (`indirection_no_mutating_accessor`) — there is no `pointeeMutRef()`.
+// (`indirection_no_mutating_accessor`) — its `value` has no `mutating ref`.
 module Test
 
 import std.memory.(RcBox)
@@ -20,7 +20,7 @@ struct ReadView {
 
 extend ReadView: Indirection {
     type Target = Account
-    public func pointeeRef() -> &Account { self.inner.pointeeRef() }
+    public var value: Account { ref { self.inner.value } }
 }
 
 @main

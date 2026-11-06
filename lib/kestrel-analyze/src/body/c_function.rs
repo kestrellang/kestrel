@@ -11,7 +11,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### E646 — `c_function_needs_c_entry` (Error, Correctness)
+//! ### E647 — `c_function_needs_c_entry` (Error, Correctness)
 //!
 //! **Message:** "'{name}' has no C entry point; a C function type needs a
 //! function declared '@export(.C)' or '@extern(.C)'", or for
@@ -39,7 +39,7 @@ use kestrel_name_res::EntityBuiltin;
 use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "E646",
+    id: "E647",
     name: "c_function_needs_c_entry",
     default_severity: Severity::Error,
     category: Category::Correctness,
@@ -74,7 +74,7 @@ fn e646(
     note: Option<&str>,
 ) -> AnalyzeDiagnostic {
     AnalyzeDiagnostic {
-        descriptor_id: "E646",
+        descriptor_id: "E647",
         severity: Severity::Error,
         message,
         labels: vec![DiagLabel {

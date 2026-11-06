@@ -1,7 +1,7 @@
 // test: diagnostics
 // stdlib: false
 //
-// E641: an `unsafe` that covers no unsafe use is reported. A use marks only
+// E642: an `unsafe` that covers no unsafe use is reported. A use marks only
 // the innermost `unsafe` around it, so an outer one wrapping an inner one is
 // unnecessary too.
 

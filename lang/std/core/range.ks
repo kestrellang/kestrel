@@ -19,6 +19,7 @@ public protocol RangeConstructible[Other = Self] {
     type Output
 
     /// Builds the half-open range `[self, end)`.
+    @sugarOnly
     @builtin(.ExclusiveRangeOperatorMethod)
     func exclusiveRange(to end: Other) -> Output
 }
@@ -29,6 +30,7 @@ public protocol ClosedRangeConstructible[Other = Self] {
     type Output
 
     /// Builds the closed range `[self, end]`.
+    @sugarOnly
     @builtin(.InclusiveRangeOperatorMethod)
     func inclusiveRange(to end: Other) -> Output
 }
@@ -229,6 +231,7 @@ public protocol RangeFromConstructible {
     type Output
 
     /// Builds the partial range `[self, +∞)`.
+    @sugarOnly
     @builtin(.RangeFromOperatorMethod)
     func rangeFrom() -> Output
 }
@@ -241,6 +244,7 @@ public protocol RangeUpToConstructible {
     type Output
 
     /// Builds the partial range `(-∞, self)`.
+    @sugarOnly
     @builtin(.RangeUpToOperatorMethod)
     func rangeUpTo() -> Output
 }
@@ -253,6 +257,7 @@ public protocol RangeThroughConstructible {
     type Output
 
     /// Builds the partial range `(-∞, self]`.
+    @sugarOnly
     @builtin(.RangeThroughOperatorMethod)
     func rangeThrough() -> Output
 }

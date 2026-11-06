@@ -180,6 +180,12 @@ impl ParsedAttrs {
             .any(|e| matches!(e.attr, ParsedAttr::NonExhaustive))
     }
 
+    pub fn is_sugar_only(&self) -> bool {
+        self.attrs
+            .iter()
+            .any(|e| matches!(e.attr, ParsedAttr::SugarOnly))
+    }
+
     pub fn is_observable_drop(&self) -> bool {
         self.attrs
             .iter()

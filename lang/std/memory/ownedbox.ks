@@ -102,8 +102,6 @@ public struct OwnedBox[T]: not Copyable where T: not Copyable, T: not Sized, T: 
 
 extend OwnedBox[T]: MutableIndirection {
     type Target = T
-    public func pointeeRef() -> &T { unsafe self.ptr.value }
-    public mutating func pointeeMutRef() -> &mutating T { unsafe self.ptr.mutatingValue }
 }
 
 // The box owns its payload alone, so it can give it up.

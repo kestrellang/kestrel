@@ -16,7 +16,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### E640 — `unsafe_use` (Error, Correctness)
+//! ### E641 — `unsafe_use` (Error, Correctness)
 //!
 //! **Message:** "{what} '{name}' is unsafe and requires an `unsafe` expression or block",
 //! or for a call through a C function value: "calling a C function value is
@@ -33,7 +33,7 @@
 //! **Notes:**
 //! - "wrap the use in `unsafe` once you have checked its safety contract"
 //!
-//! ### E641 — `unused_unsafe` (Warning, Usage)
+//! ### E642 — `unused_unsafe` (Warning, Usage)
 //!
 //! **Message:** "unnecessary `unsafe`: it covers no unsafe operation"
 //!
@@ -61,13 +61,13 @@ use crate::util;
 
 pub(crate) static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
-        id: "E640",
+        id: "E641",
         name: "unsafe_use",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "E641",
+        id: "E642",
         name: "unused_unsafe",
         default_severity: Severity::Warning,
         category: Category::Usage,
@@ -206,7 +206,7 @@ fn unsafe_use(
         });
     }
     AnalyzeDiagnostic {
-        descriptor_id: "E640",
+        descriptor_id: "E641",
         severity: Severity::Error,
         message: format!(
             "{what}'{}' is unsafe and requires an `unsafe` expression or block",
@@ -219,7 +219,7 @@ fn unsafe_use(
 
 fn c_value_call(span: Span) -> AnalyzeDiagnostic {
     AnalyzeDiagnostic {
-        descriptor_id: "E640",
+        descriptor_id: "E641",
         severity: Severity::Error,
         message:
             "calling a C function value is unsafe and requires an `unsafe` expression or block"
@@ -239,7 +239,7 @@ fn c_value_call(span: Span) -> AnalyzeDiagnostic {
 
 fn unused_unsafe(span: &Span) -> AnalyzeDiagnostic {
     AnalyzeDiagnostic {
-        descriptor_id: "E641",
+        descriptor_id: "E642",
         severity: Severity::Warning,
         message: "unnecessary `unsafe`: it covers no unsafe operation".into(),
         labels: vec![DiagLabel {
