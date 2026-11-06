@@ -5136,6 +5136,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     ) -> (CallArg, TyId) {
         let declared = crate::ty::resolve_type_annotation(self.ctx, prop);
         let prop_ty = self.subst_receiver_args(receiver_ty, declared);
+        let prop_ty = self.requirement_ty_at(prop, receiver_ty, prop_ty);
         // A place property (`var item: T { ref … mutating ref … }`) lends
         // through its accessor child: the `mutating ref` for a mutable use,
         // else the `ref`. The caller prepares `receiver` with that
@@ -5159,6 +5160,50 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return (arg, pointee);
         }
         (self.prepare_call_arg(result, convention), prop_ty)
+    }
+
+    /// A protocol requirement's declared type (`var item: Item`, read as
+    /// `Self.Item`) at a generic receiver `H`: `Self` → `H`, then the
+    /// function's where-clause equalities (`H.Item = Array[Int64]`) pin it.
+    /// Other members' types pass through unchanged.
+    fn requirement_ty_at(&mut self, member: Entity, receiver_ty: TyId, ty: TyId) -> TyId {
+        let Some(protocol) = self.ctx.world.parent_of(member) else {
+            return ty;
+        };
+        use kestrel_ast_builder::NodeKind;
+        if self.ctx.world.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
+            return ty;
+        }
+        let mut subst = kestrel_mir::SubstMap::new();
+        subst.type_params.insert(protocol, receiver_ty);
+        let ty = kestrel_mir::substitute(&mut self.ctx.module.ty_arena, ty, &subst);
+        self.normalize_where_equal(ty)
+    }
+
+    /// `ty` rewritten through the current function's where-clause equalities
+    /// (`where H.Item = Array[Int64]`): the pinned type when `ty` is one's
+    /// subject, else `ty` unchanged.
+    pub(crate) fn normalize_where_equal(&self, ty: TyId) -> TyId {
+        let Some(wc) = self
+            .ctx
+            .module
+            .functions
+            .get(&self.func_entity)
+            .and_then(|f| f.where_clause.as_ref())
+        else {
+            return ty;
+        };
+        wc.constraints
+            .iter()
+            .find_map(|c| match c {
+                kestrel_mir::item::function::WhereConstraint::Equal { subject, rhs }
+                    if *subject == ty =>
+                {
+                    Some(*rhs)
+                },
+                _ => None,
+            })
+            .unwrap_or(ty)
     }
 
     /// Substitute a member's declared type (written against its owner's type

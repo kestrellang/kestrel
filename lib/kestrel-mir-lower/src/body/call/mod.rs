@@ -426,6 +426,26 @@ impl OssaBodyCtx<'_, '_> {
     ) -> (TyId, Vec<CallArg>) {
         let recv_entity = match self.ctx.module.ty_arena.get(receiver_ty) {
             MirTy::Named { entity, .. } => *entity,
+            // A generic receiver (`h.item(1)`, `H: Holder`) has no stored
+            // fields: a place requirement lends through its accessor, and a
+            // where-clause equality (`H.Item = Array[Int64]`) names the
+            // concrete type the subscript dispatches on.
+            _ if !call_args.is_empty()
+                && self
+                    .ctx
+                    .find_ref_accessor_child(field_entity, false)
+                    .is_some() =>
+            {
+                let old_receiver = call_args.remove(0);
+                let (field_arg, field_ty) = self.computed_prefix_receiver(
+                    old_receiver,
+                    receiver_ty,
+                    field_entity,
+                    receiver_convention,
+                );
+                call_args.insert(0, field_arg);
+                return (field_ty, call_args);
+            },
             _ => return (receiver_ty, call_args),
         };
 
