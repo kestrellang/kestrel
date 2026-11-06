@@ -72,11 +72,11 @@ module Test
             let parts = splitArr.split(0).toArray();
             if parts.count != 3 { return 22 }
             if parts(0).count != 1 { return 23 }
-            if parts(0)(unchecked: 0) != 1 { return 24 }
+            if unsafe parts(0)(unchecked: 0) != 1 { return 24 }
             if parts(1).count != 1 { return 25 }
-            if parts(1)(unchecked: 0) != 2 { return 26 }
+            if unsafe parts(1)(unchecked: 0) != 2 { return 26 }
             if parts(2).count != 1 { return 27 }
-            if parts(2)(unchecked: 0) != 3 { return 28 }
+            if unsafe parts(2)(unchecked: 0) != 3 { return 28 }
 
             // split with no separator found
             let noSepParts = a.split(0).toArray();

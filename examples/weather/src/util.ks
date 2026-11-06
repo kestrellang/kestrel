@@ -20,17 +20,17 @@ public func parseFormValue(body: String, key: String) -> String {
         var matched = true;
         var ki: Int64 = 0;
         while ki < keyLen {
-            if body.bytes(unchecked: pos + ki) != keyEq.bytes(unchecked: ki) {
+            if unsafe body.bytes(unchecked: pos + ki) != unsafe keyEq.bytes(unchecked: ki) {
                 matched = false;
                 break
             };
             ki = ki + 1
         }
-        if matched and (pos == 0 or body.bytes(unchecked: pos - 1) == 38) {
+        if matched and (pos == 0 or unsafe body.bytes(unchecked: pos - 1) == 38) {
             // Found it — extract value until & or end
             let valStart = pos + keyLen;
             var valEnd = valStart;
-            while valEnd < bodyLen and body.bytes(unchecked: valEnd) != 38 {
+            while valEnd < bodyLen and unsafe body.bytes(unchecked: valEnd) != 38 {
                 valEnd = valEnd + 1
             }
             return percentDecode(body.asSlice().subslice(from: valStart, to: valEnd).toOwned())

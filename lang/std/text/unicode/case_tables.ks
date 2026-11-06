@@ -241,9 +241,9 @@ public func toUppercase(c: Char) -> Char {
         return Char(unchecked: cp - 32)
     }
     if cp > 0x10FFFF { return c }
-    let blockIdx = UPPER_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
+    let blockIdx = unsafe UPPER_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
     let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
-    let delta = UPPER_STAGE2(unchecked: stage2_idx);
+    let delta = unsafe UPPER_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
     Char(unchecked: UInt32(truncating: Int64(from: cp).add(Int64(from: delta))))
 }
@@ -258,9 +258,9 @@ public func toLowercase(c: Char) -> Char {
         return Char(unchecked: cp + 32)
     }
     if cp > 0x10FFFF { return c }
-    let blockIdx = LOWER_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
+    let blockIdx = unsafe LOWER_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
     let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
-    let delta = LOWER_STAGE2(unchecked: stage2_idx);
+    let delta = unsafe LOWER_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
     Char(unchecked: UInt32(truncating: Int64(from: cp).add(Int64(from: delta))))
 }
@@ -276,9 +276,9 @@ public func toTitlecase(c: Char) -> Char {
         return Char(unchecked: cp - 32)
     }
     if cp > 0x10FFFF { return c }
-    let blockIdx = TITLE_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
+    let blockIdx = unsafe TITLE_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
     let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
-    let delta = TITLE_STAGE2(unchecked: stage2_idx);
+    let delta = unsafe TITLE_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
     Char(unchecked: UInt32(truncating: Int64(from: cp).add(Int64(from: delta))))
 }
@@ -291,7 +291,7 @@ public func hasUppercaseExpansion(c: Char) -> Bool {
     let cp = c.value();
     var i: Int64 = 0;
     while i < UPPER_EXPANSIONS_COUNT {
-        let entry = UPPER_EXPANSIONS(unchecked: i);
+        let entry = unsafe UPPER_EXPANSIONS(unchecked: i);
         if UInt32(truncating: entry.0) == cp { return true }
         i = i + 1
     }
@@ -314,7 +314,7 @@ public func uppercaseExpansion(c: Char) -> String {
     let cp = c.value();
     var i: Int64 = 0;
     while i < UPPER_EXPANSIONS_COUNT {
-        let entry = UPPER_EXPANSIONS(unchecked: i);
+        let entry = unsafe UPPER_EXPANSIONS(unchecked: i);
         if UInt32(truncating: entry.0) == cp {
             var result = String();
             result.append(char: Char(unchecked: UInt32(truncating: entry.2)));
@@ -333,7 +333,7 @@ public func hasLowercaseExpansion(c: Char) -> Bool {
     let cp = c.value();
     var i: Int64 = 0;
     while i < LOWER_EXPANSIONS_COUNT {
-        let entry = LOWER_EXPANSIONS(unchecked: i);
+        let entry = unsafe LOWER_EXPANSIONS(unchecked: i);
         if UInt32(truncating: entry.0) == cp { return true }
         i = i + 1
     }
@@ -347,7 +347,7 @@ public func lowercaseExpansion(c: Char) -> String {
     let cp = c.value();
     var i: Int64 = 0;
     while i < LOWER_EXPANSIONS_COUNT {
-        let entry = LOWER_EXPANSIONS(unchecked: i);
+        let entry = unsafe LOWER_EXPANSIONS(unchecked: i);
         if UInt32(truncating: entry.0) == cp {
             var result = String();
             result.append(char: Char(unchecked: UInt32(truncating: entry.2)));
@@ -365,7 +365,7 @@ public func hasTitlecaseExpansion(c: Char) -> Bool {
     let cp = c.value();
     var i: Int64 = 0;
     while i < TITLE_EXPANSIONS_COUNT {
-        let entry = TITLE_EXPANSIONS(unchecked: i);
+        let entry = unsafe TITLE_EXPANSIONS(unchecked: i);
         if UInt32(truncating: entry.0) == cp { return true }
         i = i + 1
     }
@@ -378,7 +378,7 @@ public func titlecaseExpansion(c: Char) -> String {
     let cp = c.value();
     var i: Int64 = 0;
     while i < TITLE_EXPANSIONS_COUNT {
-        let entry = TITLE_EXPANSIONS(unchecked: i);
+        let entry = unsafe TITLE_EXPANSIONS(unchecked: i);
         if UInt32(truncating: entry.0) == cp {
             var result = String();
             result.append(char: Char(unchecked: UInt32(truncating: entry.2)));

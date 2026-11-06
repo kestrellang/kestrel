@@ -100,7 +100,7 @@ public func parseClientUrl(raw: String) -> ClientUrl throws SwoopError {
     var pathStart = len;
     var si = afterScheme;
     while si < len {
-        if raw.bytes(unchecked: si) == 47 { // '/'
+        if unsafe raw.bytes(unchecked: si) == 47 { // '/'
             pathStart = si;
             break
         }

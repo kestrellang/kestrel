@@ -26,7 +26,7 @@ func noteList(notes: Array[Value]) -> Document {
     var cards = Document();
     var i: Int64 = 0;
     while i < notes.count {
-        cards.append(noteCard(notes(unchecked: i)));
+        cards.append(noteCard(unsafe notes(unchecked: i)));
         i = i + 1
     };
     div([cls("note-list")]) { cards }
@@ -100,7 +100,7 @@ func folderPicker(nid: Int64, currentFolderId: Int64, folders: Array[Value]) -> 
 
     var i: Int64 = 0;
     while i < folders.count {
-        let folder = folders(unchecked: i);
+        let folder = unsafe folders(unchecked: i);
         let fid = getInt(folder, "id");
         let name = getStr(folder, "name");
         let optAttrs = if fid == currentFolderId {

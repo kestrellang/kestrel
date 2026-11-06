@@ -19,9 +19,9 @@ func main() -> lang.i64 {
     if words.count != 3 { return 1 }
     let wordParts = words.collect();
     if wordParts.count != 3 { return 2 }
-    if wordParts(unchecked: 0).toOwned().isEqual(to: "one") == false { return 3 }
-    if wordParts(unchecked: 1).toOwned().isEqual(to: "two") == false { return 4 }
-    if wordParts(unchecked: 2).toOwned().isEqual(to: "three") == false { return 5 }
+    if unsafe wordParts(unchecked: 0).toOwned().isEqual(to: "one") == false { return 3 }
+    if unsafe wordParts(unchecked: 1).toOwned().isEqual(to: "two") == false { return 4 }
+    if unsafe wordParts(unchecked: 2).toOwned().isEqual(to: "three") == false { return 5 }
 
     // Slice.split(where:) — snapshot of `marker`
     var marker: Int64 = -1;
@@ -31,9 +31,9 @@ func main() -> lang.i64 {
     if segments.count != 3 { return 6 }
     let segs = segments.toArray();
     if segs.count != 3 { return 7 }
-    if segs(unchecked: 0).count != 1 { return 8 }
-    if segs(unchecked: 1).count != 2 { return 9 }
-    if segs(unchecked: 2).count != 1 { return 10 }
+    if unsafe segs(unchecked: 0).count != 1 { return 8 }
+    if unsafe segs(unchecked: 1).count != 2 { return 9 }
+    if unsafe segs(unchecked: 2).count != 1 { return 10 }
 
     0
 }

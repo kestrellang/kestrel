@@ -11,7 +11,7 @@ public func containsLower(haystack: String, needleLower: String) -> Bool {
 public func capitalize(s: String) -> String {
     let len = s.bytes.count;
     if len == 0 { return s.clone() };
-    let first = s.bytes(unchecked: 0);
+    let first = unsafe s.bytes(unchecked: 0);
     // If first byte is lowercase ASCII a-z, uppercase it
     if first >= 97 and first <= 122 {
         var out = String();

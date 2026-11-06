@@ -138,7 +138,7 @@ public struct LiteralSlice[T]: Iterable {
     /// emitted init paths that use this guarantee the index is in range;
     /// do not expose this subscript to user input without checking
     /// `count` first.
-    public subscript(unchecked index: Int64) -> T {
+    public unsafe subscript(unchecked index: Int64) -> T {
         get {
             unsafe self.ptr.offset(by: index).read()
         }

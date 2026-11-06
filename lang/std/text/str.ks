@@ -140,7 +140,7 @@ extend Str {
     /// ```
     public func asByteSlice() -> &Slice[UInt8] {
         let slice = self.asSlice();
-        Slice.lend(start: slice._rawPtr().offset(by: slice.start), count: slice.end - slice.start)
+        unsafe Slice.lend(start: slice._rawPtr().offset(by: slice.start), count: slice.end - slice.start)
     }
 
     // -- Iteration -----------------------------------------------------------

@@ -11,9 +11,9 @@ module Test
             // asSlice() returns a Slice view of the entire array
             let slice = arr.asSlice();
             if slice.count != 3 { return 1 }
-            if slice(unchecked: 0) != 10 { return 2 }
-            if slice(unchecked: 1) != 20 { return 3 }
-            if slice(unchecked: 2) != 30 { return 4 }
+            if unsafe slice(unchecked: 0) != 10 { return 2 }
+            if unsafe slice(unchecked: 1) != 20 { return 3 }
+            if unsafe slice(unchecked: 2) != 30 { return 4 }
 
             // asSlice on empty array
             let empty = std.collections.Array[std.numeric.Int64]();

@@ -25,10 +25,10 @@ func main() -> lang.i64 {
     if cOut.isSome { return 6 }
 
     // -- Unchecked subscript read/write --
-    if arr(unchecked: 0) != 10 { return 7 }
-    arr(unchecked: 1) = 99;
+    if unsafe arr(unchecked: 0) != 10 { return 7 }
+    unsafe arr(unchecked: 1) = 99;
     if arr(1) != 99 { return 8 }
-    arr(unchecked: 1) = 20;
+    unsafe arr(unchecked: 1) = 20;
 
     // -- Clamped subscript read --
     let cl = arr(clamped: -5);
@@ -73,7 +73,7 @@ func main() -> lang.i64 {
     let sc = s(checked: 99);
     if sc.isSome { return 25 }
 
-    let su = s(unchecked: 1);
+    let su = unsafe s(unchecked: 1);
     if su != 20 { return 26 }
 
     let scl = s(clamped: -5);

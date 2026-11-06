@@ -28,11 +28,11 @@ module Test
             if emptySlice.count != 0 { return 4 }
 
             // Test subscript(unchecked:) get
-            if slice(unchecked: 0) != 10 { return 5 }
-            if slice(unchecked: 1) != 20 { return 6 }
-            if slice(unchecked: 2) != 30 { return 7 }
-            if slice(unchecked: 3) != 40 { return 8 }
-            if slice(unchecked: 4) != 50 { return 9 }
+            if unsafe slice(unchecked: 0) != 10 { return 5 }
+            if unsafe slice(unchecked: 1) != 20 { return 6 }
+            if unsafe slice(unchecked: 2) != 30 { return 7 }
+            if unsafe slice(unchecked: 3) != 40 { return 8 }
+            if unsafe slice(unchecked: 4) != 50 { return 9 }
 
             // Test subscript(checked:) - valid index
             let safe1 = slice(checked: 2);
@@ -66,9 +66,9 @@ module Test
             if sub.isNone { return 20 }
             let subSlice = sub.unwrap();
             if subSlice.count != 3 { return 21 }
-            if subSlice(unchecked: 0) != 20 { return 22 }
-            if subSlice(unchecked: 1) != 30 { return 23 }
-            if subSlice(unchecked: 2) != 40 { return 24 }
+            if unsafe subSlice(unchecked: 0) != 20 { return 22 }
+            if unsafe subSlice(unchecked: 1) != 30 { return 23 }
+            if unsafe subSlice(unchecked: 2) != 40 { return 24 }
 
             // Test subscript(checked: Range) - empty sub-slice
             let emptySub = slice(checked: std.core.Range[std.numeric.Int64](2, 2));

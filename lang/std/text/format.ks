@@ -433,15 +433,15 @@ public func _writePadded(mutating into writer: some Formatter, content: String, 
             let contentLen = content.bytes.count;
             if padLeft > 0 and options.fill == '0' and contentLen > 0 {
                 // Detect sign character: '-' (45), '+' (43), ' ' (32)
-                let firstByte = Int64(from: content.bytes(unchecked: 0));
+                let firstByte = Int64(from: unsafe content.bytes(unchecked: 0));
                 var prefixLen: Int64 = 0;
                 if firstByte == 45 or firstByte == 43 or firstByte == 32 {
                     prefixLen = 1
                 }
                 // Detect radix prefix: "0b", "0o", "0x", "0X" after optional sign
                 if contentLen > prefixLen + 1 {
-                    let p0 = Int64(from: content.bytes(unchecked: prefixLen));
-                    let p1 = Int64(from: content.bytes(unchecked: prefixLen + 1));
+                    let p0 = Int64(from: unsafe content.bytes(unchecked: prefixLen));
+                    let p1 = Int64(from: unsafe content.bytes(unchecked: prefixLen + 1));
                     // p0 == '0' (48), p1 == 'b'(98)/'o'(111)/'x'(120)/'X'(88)
                     if p0 == 48 and (p1 == 98 or p1 == 111 or p1 == 120 or p1 == 88) {
                         prefixLen = prefixLen + 2

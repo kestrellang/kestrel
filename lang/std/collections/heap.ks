@@ -2,7 +2,7 @@
 
 module std.collections
 
-import std.core.(Bool, Cloneable, Comparable, fatalError)
+import std.core.(Bool, Cloneable, Comparable, Ordering, fatalError)
 import std.numeric.(Int64)
 import std.result.(Optional)
 
@@ -186,11 +186,11 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
         if n == 1 {
             return self.data.pop()
         }
-        let min = self.data(0);
+        // Swap the minimum to the end and pop it: a move, not a copy.
         self.data.swap(at: 0, with: n - 1);
-         self.data.pop();
+        let min = self.data.pop();
         self.siftDown(0);
-        .Some(min)
+        min
     }
 
     /// Returns the minimum element without removing it. O(1).
@@ -296,7 +296,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
         var i = index;
         while i > 0 {
             let parent = (i - 1) / 2;
-            if self.data(i) < self.data(parent) {
+            if self.data(i).compare(self.data(parent)) == Ordering.Less {
                 self.data.swap(at: i, with: parent);
                 i = parent
             } else {
@@ -313,10 +313,10 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
             let left = 2 * i + 1;
             let right = 2 * i + 2;
             var smallest = i;
-            if left < n and self.data(left) < self.data(smallest) {
+            if left < n and self.data(left).compare(self.data(smallest)) == Ordering.Less {
                 smallest = left
             }
-            if right < n and self.data(right) < self.data(smallest) {
+            if right < n and self.data(right).compare(self.data(smallest)) == Ordering.Less {
                 smallest = right
             }
             if smallest == i { break; }

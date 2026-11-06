@@ -8,7 +8,7 @@ import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
 import std.core.(Bool, Equatable, Hashable, Hasher, Cloneable, ExpressibleByStringLiteral, Divisible)
 import std.result.(Optional, Result)
 import std.streams.(IoError)
-import std.ffi.(CString, free)
+import std.ffi.(CString, free, malloc, memcpy)
 import std.memory.(RawPointer)
 
 /// A file system path.
@@ -30,81 +30,85 @@ import std.memory.(RawPointer)
 public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleByStringLiteral, Divisible[Path] {
     type Output = Path
 
-    var text: String
+    // The bytes as written: usually UTF-8, but not necessarily, so a
+    // non-UTF-8 name read from the system opens again unchanged.
+    var data: Array[UInt8]
 
     /// @name From Text
     /// The path `text`, as written.
     public init(text: String) {
-        self.text = text
+        self.data = text.asByteSlice().toArray()
+    }
+
+    /// @name From Bytes
+    /// The path made of exactly these bytes, which needn't be UTF-8.
+    public init(bytes bytes: Array[UInt8]) {
+        self.data = bytes
     }
 
     /// @name String Literal
     /// A path literal, as in `File.open("data.txt")`.
     public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
-        self.text = String(stringLiteral: ptr, length)
+        self.data = String(stringLiteral: ptr, length).asByteSlice().toArray()
     }
 
-    /// The path as text.
-    public var string: String { self.text.clone() }
+    /// The path as text. Bytes that aren't UTF-8 become U+FFFD, so use
+    /// `bytes` when the exact name matters.
+    public var string: String { textOf(self.data.asSlice()) }
+
+    /// The path's bytes, exactly.
+    public var bytes: Array[UInt8] { self.data.clone() }
 
     /// `true` for the empty path.
-    public var isEmpty: Bool { self.text.isEmpty }
+    public var isEmpty: Bool { self.data.isEmpty }
 
     /// `true` if the path starts at the root (`/`).
-    public var isAbsolute: Bool { self.text.starts(with: "/") }
+    public var isAbsolute: Bool {
+        self.data.count > 0 and unsafe self.data(unchecked: 0) == slash()
+    }
 
     /// The path without its last component: `/a/b` → `/a`, `/a` → `/`.
     /// `None` for `/`, the empty path, or a single relative component.
     public var parent: Optional[Path] {
-        let b = self.trimmed();
-        var i = b.count - 1;
-        while i >= 0 and b(unchecked: i) != slash() {
+        let b = self.data.asSlice();
+        let count = self.trimmedCount();
+        var i = count - 1;
+        while i >= 0 and unsafe b(unchecked: i) != slash() {
             i = i - 1
         }
-        if i < 0 or b.count == 1 {
+        if i < 0 or count == 1 {
             return .None
         }
         var end = i;
-        while end > 0 and b(unchecked: end - 1) == slash() {
+        while end > 0 and unsafe b(unchecked: end - 1) == slash() {
             end = end - 1
         }
         if end == 0 {
             return .Some(Path("/"))
         }
-        .Some(Path(textOf(b(0..<end))))
+        .Some(Path(bytes: b(0..<end).toArray()))
     }
 
     /// The last component: `b.tar.gz` for `/a/b.tar.gz`. `None` for `/`,
-    /// the empty path, or a path ending in `..`.
+    /// the empty path, or a path ending in `.` or `..`.
     public var name: Optional[String] {
-        let b = self.trimmed();
-        var i = b.count;
-        while i > 0 and b(unchecked: i - 1) != slash() {
-            i = i - 1
-        }
-        if i == b.count {
-            return .None
-        }
-        let last = textOf(b(i..<b.count));
-        if last == "." or last == ".." { .None } else { .Some(last) }
+        let (start, end) = match self.nameRange() { .Some(r) => r, .None => return .None };
+        .Some(textOf(self.data(start..<end)))
     }
 
     /// The name without its extension: `b.tar` for `b.tar.gz`.
     public var stem: Optional[String] {
-        let name = match self.name { .Some(n) => n, .None => return .None };
-        match extensionDot(name) {
-            .Some(dot) => .Some(textOf(textBytes(name)(0..<dot))),
-            .None => .Some(name)
-        }
+        let (start, end) = match self.nameRange() { .Some(r) => r, .None => return .None };
+        let stop = match self.extensionDot(start, end) { .Some(dot) => dot, .None => end };
+        .Some(textOf(self.data(start..<stop)))
     }
 
     /// What follows the name's last dot: `gz` for `b.tar.gz`. A leading dot
     /// (`.profile`) doesn't start an extension.
     public var extension: Optional[String] {
-        let name = match self.name { .Some(n) => n, .None => return .None };
-        let dot = match extensionDot(name) { .Some(d) => d, .None => return .None };
-        let b = textBytes(name);
-        .Some(textOf(b((dot + 1)..<b.count)))
+        let (start, end) = match self.nameRange() { .Some(r) => r, .None => return .None };
+        let dot = match self.extensionDot(start, end) { .Some(d) => d, .None => return .None };
+        .Some(textOf(self.data((dot + 1)..<end)))
     }
 
     /// The components in order. An absolute path starts with `/`; empty
@@ -114,20 +118,8 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
         if self.isAbsolute {
             parts.append("/")
         }
-        let b = textBytes(self.text);
-        var start: Int64 = 0;
-        var i: Int64 = 0;
-        while i <= b.count {
-            if i == b.count or b(unchecked: i) == slash() {
-                if i > start {
-                    let part = textOf(b(start..<i));
-                    if part != "." {
-                        parts.append(part)
-                    }
-                }
-                start = i + 1
-            }
-            i = i + 1
+        for (start, end) in self.componentRanges() {
+            parts.append(textOf(self.data(start..<end)))
         }
         parts
     }
@@ -135,15 +127,16 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// `other` appended as a further component. An absolute `other`
     /// replaces this path, as in Rust and Python.
     public func joined(with other: Path) -> Path {
-        if other.isAbsolute or self.text.isEmpty {
+        if other.isAbsolute or self.data.isEmpty {
             return other.clone()
         }
-        var text = self.text.clone();
-        if not text.ends(with: "/") {
-            text.append("/")
+        var joined = Array[UInt8](capacity: self.data.count + 1 + other.data.count);
+        joined.append(contentsOf: self.data);
+        if unsafe self.data(unchecked: self.data.count - 1) != slash() {
+            joined.append(slash())
         }
-        text.append(other.text);
-        Path(text)
+        joined.append(contentsOf: other.data);
+        Path(bytes: joined)
     }
 
     /// `self / other` is `self.joined(with: other)`.
@@ -154,54 +147,54 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// The path with its extension replaced by `ext`, or added if it has
     /// none. An empty `ext` removes the extension.
     public func replacingExtension(with ext: String) -> Path {
-        let stem = match self.stem {
-            .Some(s) => s,
-            .None => return self.clone()
-        };
-        var name = stem;
+        let (start, end) = match self.nameRange() { .Some(r) => r, .None => return self.clone() };
+        let stop = match self.extensionDot(start, end) { .Some(dot) => dot, .None => end };
+        // Everything up to the stem stays byte for byte; trailing slashes go.
+        var result = Array[UInt8]();
+        result.append(contentsOf: self.data(0..<stop));
         if not ext.isEmpty {
-            name.append(".");
-            name.append(ext)
+            result.append(46);
+            result.append(contentsOf: ext.asByteSlice())
         }
-        match self.parent {
-            .Some(parent) => parent.joined(with: Path(name)),
-            .None => if self.isAbsolute { Path("/" + name) } else { Path(name) }
-        }
+        Path(bytes: result)
     }
 
     /// The path with `.` dropped and `..` folded into the component before
     /// it, without touching the file system. A symbolic link can make this
     /// differ from `canonical()`.
     public func normalized() -> Path {
-        var kept = Array[String]();
-        for part in self.components() {
-            if part == "/" {
-                continue
-            }
-            if part == ".." {
-                if kept.count > 0 and kept(unchecked: kept.count - 1) != ".." {
-                    kept.pop();
-                    continue
+        var kept = Array[(Int64, Int64)]();
+        for (start, end) in self.componentRanges() {
+            if self.isDotDot(start, end) {
+                if kept.count > 0 {
+                    let (ls, le) = unsafe kept(unchecked: kept.count - 1);
+                    if not self.isDotDot(ls, le) {
+                        kept.pop();
+                        continue
+                    }
                 }
                 if self.isAbsolute {
                     continue
                 }
             }
-            kept.append(part)
+            kept.append((start, end))
         }
-        var text: String = if self.isAbsolute { "/" } else { "" };
+        var result = Array[UInt8]();
+        if self.isAbsolute {
+            result.append(slash())
+        }
         var first = true;
-        for part in kept {
+        for (start, end) in kept {
             if not first {
-                text.append("/")
+                result.append(slash())
             }
-            text.append(part);
+            result.append(contentsOf: self.data(start..<end));
             first = false
         }
-        if text.isEmpty and not self.isAbsolute {
-            text.append(".")
+        if result.isEmpty {
+            result.append(46)
         }
-        Path(text)
+        Path(bytes: result)
     }
 
     // ========================================================================
@@ -237,16 +230,16 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
     /// The absolute path with every symbolic link, `.` and `..` resolved
     /// (`realpath(3)`). The path must exist.
     public func canonical() -> Result[Path, IoError] {
-        let cpath = self.text.toCString();
+        let cpath = try self.toNativePath();
         let resolved = unsafe native_canonical(cpath.raw.asRaw());
         let error = IoError.last();
         cpath.free();
         if resolved.isNull {
             return .Err(error)
         }
-        let text = textFromNative(resolved);
+        let result = pathFromNative(resolved);
         unsafe free(resolved);
-        .Ok(Path(text))
+        .Ok(result)
     }
 
     // ========================================================================
@@ -255,60 +248,124 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
 
     /// Same bytes. `a/b` and `a//b` are different paths; compare
     /// `normalized()` paths to ignore that.
-    public func isEqual(to other: Path) -> Bool { self.text == other.text }
+    public func isEqual(to other: Path) -> Bool { self.data == other.data }
 
     /// Hashes the bytes.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        self.text.hash(into: hasher)
+        self.data.hash(into: hasher)
     }
 
     /// Copies the path.
-    public func clone() -> Path { Path(self.text.clone()) }
+    public func clone() -> Path { Path(bytes: self.data.clone()) }
 
-    /// Writes the path as text.
+    /// Writes the path as text (non-UTF-8 bytes as U+FFFD).
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        _writePadded(into: writer, self.text.clone(), options)
+        _writePadded(into: writer, self.string, options)
     }
 
-    /// The bytes without trailing slashes, except a lone `/`.
-    func trimmed() -> Array[UInt8] {
-        var b = textBytes(self.text);
-        while b.count > 1 and b(unchecked: b.count - 1) == slash() {
-            b.pop();
+    // ========================================================================
+    // INTERNALS
+    // ========================================================================
+
+    /// The path as a NUL-terminated C string for a system call;
+    /// `InvalidInput` if it holds a NUL byte. The caller frees it.
+    internal func toNativePath() -> Result[CString, IoError] {
+        let count = self.data.count;
+        for i in 0..<count {
+            if unsafe self.data(unchecked: i) == 0 {
+                return .Err(IoError(kind: .InvalidInput))
+            }
         }
-        b
+        let raw = unsafe malloc(count + 1);
+        if raw.isNull {
+            return .Err(IoError(kind: .OutOfMemory))
+        }
+        if count > 0 {
+            let _ = unsafe memcpy(raw, self.data.asSlice().pointer.asRaw(), count);
+        }
+        unsafe raw.cast[UInt8]().offset(by: count).write(0);
+        .Ok(CString(raw: raw.cast[UInt8]()))
+    }
+
+    /// The byte count without trailing slashes, except a lone `/`.
+    func trimmedCount() -> Int64 {
+        var n = self.data.count;
+        while n > 1 and unsafe self.data(unchecked: n - 1) == slash() {
+            n = n - 1
+        }
+        n
+    }
+
+    /// The byte range of the last component, unless it's `.` or `..`.
+    func nameRange() -> Optional[(Int64, Int64)] {
+        let count = self.trimmedCount();
+        var i = count;
+        while i > 0 and unsafe self.data(unchecked: i - 1) != slash() {
+            i = i - 1
+        }
+        if i == count or self.isDot(i, count) or self.isDotDot(i, count) {
+            return .None
+        }
+        .Some((i, count))
+    }
+
+    /// The index of the dot that starts the extension of the name in
+    /// `[start, end)`. A dot at the name's first byte (`.profile`) doesn't count.
+    func extensionDot(start: Int64, end: Int64) -> Optional[Int64] {
+        var i = end - 1;
+        while i > start {
+            if unsafe self.data(unchecked: i) == 46 {
+                return .Some(i)
+            }
+            i = i - 1
+        }
+        .None
+    }
+
+    /// Byte ranges of the components, skipping empty ones and `.`.
+    func componentRanges() -> Array[(Int64, Int64)] {
+        var ranges = Array[(Int64, Int64)]();
+        let count = self.data.count;
+        var start: Int64 = 0;
+        var i: Int64 = 0;
+        while i <= count {
+            if i == count or unsafe self.data(unchecked: i) == slash() {
+                if i > start and not self.isDot(start, i) {
+                    ranges.append((start, i))
+                }
+                start = i + 1
+            }
+            i = i + 1
+        }
+        ranges
+    }
+
+    func isDot(start: Int64, end: Int64) -> Bool {
+        end - start == 1 and unsafe self.data(unchecked: start) == 46
+    }
+
+    func isDotDot(start: Int64, end: Int64) -> Bool {
+        end - start == 2 and unsafe self.data(unchecked: start) == 46 and unsafe self.data(unchecked: start + 1) == 46
     }
 }
 
 /// `/`.
 internal func slash() -> UInt8 { 47 }
 
-/// The bytes of `text`.
-internal func textBytes(text: String) -> Array[UInt8] {
-    let raw = text.asByteSlice();
-    Slice.lend(start: raw.pointer, count: raw.count).toArray()
-}
-
-/// `bytes` as a `String`, kept as is even when not UTF-8.
+/// `bytes` as a `String`, with bytes that aren't UTF-8 as U+FFFD.
 internal func textOf(bytes: Slice[UInt8]) -> String {
-    String(fromUtf8Unchecked: bytes)
+    String(fromUtf8Lossy: bytes)
 }
 
-/// The text of a NUL-terminated C string.
+/// The text of a NUL-terminated C string, with invalid UTF-8 replaced by
+/// U+FFFD.
 internal func textFromNative(raw: RawPointer) -> String {
     String(from: CString(raw: raw.cast[UInt8]()))
 }
 
-/// The index of the dot that starts `name`'s extension, if any. A dot at
-/// index 0 (`.profile`) doesn't count.
-internal func extensionDot(name: String) -> Optional[Int64] {
-    let b = textBytes(name);
-    var i = b.count - 1;
-    while i > 0 {
-        if b(unchecked: i) == 46 {
-            return .Some(i)
-        }
-        i = i - 1
-    }
-    .None
+/// The path spelled by a NUL-terminated C string, byte for byte.
+internal func pathFromNative(raw: RawPointer) -> Path {
+    let ptr = raw.cast[UInt8]();
+    let count = CString(raw: ptr).length;
+    Path(bytes: unsafe Slice.lend(start: ptr, count: count).toArray())
 }

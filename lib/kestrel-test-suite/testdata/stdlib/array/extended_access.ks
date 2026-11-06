@@ -19,7 +19,7 @@ module Test
             arr(1) = 25;
             if arr(1) != 25 { return 4 }
             // Also exercise unchecked subscript for equivalence
-            arr(unchecked: 1) = 25;
+            unsafe arr(unchecked: 1) = 25;
 
             // Test subscript(wrapped:) with negative index
             let wrapLast = arr(wrapped: -1);
@@ -67,7 +67,7 @@ module Test
             if arr.isValid(index: -1) { return 22 }
 
             // Test unchecked subscript setter
-            arr(unchecked: 0) = 99;
+            unsafe arr(unchecked: 0) = 99;
             if arr(0) != 99 { return 23 }
 
             0

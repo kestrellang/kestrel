@@ -21,7 +21,7 @@ func main() -> lang.i64 {
     let n: Int64 = 42;
     let s = "\(n)";
     var i: Int64 = 0;
-    let b = s.bytes(unchecked: i);
+    let b = unsafe s.bytes(unchecked: i);
     if b == 52 {   // '4' = 0x34 = 52
         return 0
     }

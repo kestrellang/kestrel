@@ -149,19 +149,32 @@ public struct TcpStream: Readable, Writable, not Copyable {
 }
 
 /// Tries each address of `host` in order. A negative timeout waits
-/// forever; otherwise it bounds the whole attempt.
+/// forever; otherwise it bounds the whole attempt, lookup included, and
+/// each address gets an equal share of what's left, so one dead route
+/// (say, IPv6 with no connectivity) can't use up the deadline before a
+/// working one is tried.
 func connectToAny(host: String, port: UInt16, timeoutMilliseconds: Int64) -> Result[TcpStream, IoError] {
     let deadline = unsafe native_monotonic_ms() + timeoutMilliseconds;
-    var last = IoError.unexpectedEnd;
-    for address in try lookup(host, port) {
-        var remaining: Int64 = -1;
+    let addresses = try lookup(host, port);
+    if addresses.isEmpty {
+        return .Err(IoError(kind: .HostNotFound))
+    }
+    var last = IoError(kind: .HostNotFound);
+    let n = addresses.count;
+    for i in 0..<n {
+        var budget: Int64 = -1;
         if timeoutMilliseconds >= 0 {
-            remaining = deadline - unsafe native_monotonic_ms();
+            let remaining = deadline - unsafe native_monotonic_ms();
             if remaining <= 0 {
                 return .Err(IoError.timedOut)
             }
+            // The last address gets everything left over.
+            budget = remaining / (n - i);
+            if budget < 1 {
+                budget = 1
+            }
         }
-        match connectSocket(address, streamKind(), remaining) {
+        match connectSocket(addresses(i), streamKind(), budget) {
             .Ok(fd) => return .Ok(TcpStream(unsafeDescriptor: FileDescriptor(fd))),
             .Err(e) => last = e
         }
@@ -193,17 +206,29 @@ public struct TcpListener: not Copyable {
         }
     }
 
-    /// Listens on `port` on every local address, IPv6 and IPv4 (`[::]`,
-    /// or `0.0.0.0` where IPv6 is unavailable).
+    /// Listens on `port` on this machine only (`[::1]`, or `127.0.0.1`
+    /// where IPv6 is unavailable), so a dev server isn't reachable from the
+    /// network by accident. Use `bind(anyInterface:)` to accept outside
+    /// connections.
     public static func bind(port: UInt16) -> Result[TcpListener, IoError] {
-        match TcpListener.bind(to: SocketAddress(IpAddress.V6(Ipv6Address.any), port: port)) {
+        bindDualStack(IpAddress.V6(Ipv6Address.localhost), IpAddress.V4(Ipv4Address.localhost), port)
+    }
+
+    /// Listens on `port` on every local address, IPv6 and IPv4 (`[::]`,
+    /// or `0.0.0.0` where IPv6 is unavailable). Reachable from the network.
+    public static func bind(anyInterface port: UInt16) -> Result[TcpListener, IoError] {
+        bindDualStack(IpAddress.V6(Ipv6Address.any), IpAddress.V4(Ipv4Address.any), port)
+    }
+
+    /// Binds `v6`, falling back to `v4` only when IPv6 itself is missing.
+    static func bindDualStack(v6: IpAddress, v4: IpAddress, port: UInt16) -> Result[TcpListener, IoError] {
+        match TcpListener.bind(to: SocketAddress(v6, port: port)) {
             .Ok(listener) => .Ok(listener),
             .Err(e) => {
-                // Only a missing IPv6 stack falls back to IPv4.
                 if e.kind == IoErrorKind.AddressInUse or e.kind == IoErrorKind.PermissionDenied {
                     return .Err(e)
                 }
-                TcpListener.bind(to: SocketAddress(IpAddress.V4(Ipv4Address.any), port: port))
+                TcpListener.bind(to: SocketAddress(v4, port: port))
             }
         }
     }

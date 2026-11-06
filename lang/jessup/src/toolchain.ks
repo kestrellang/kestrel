@@ -334,7 +334,7 @@ public func listToolchains() -> () throws JessupError {
 
     for name in entries {
         // Skip hidden files
-        if name.bytes.count > 0 and name.bytes(unchecked: 0) != 46 {
+        if name.bytes.count > 0 and unsafe name.bytes(unchecked: 0) != 46 {
             if name == activeChannel {
                 var activeMsg = String();
                 activeMsg.append("  ");
@@ -700,7 +700,7 @@ func toolchainDirName(channel channel: String, tag tag: String) -> String {
 
 /// Strips a single leading 'v' (byte 118) from a tag, if present.
 func stripLeadingV(tag tag: String) -> String {
-    if tag.bytes.count > 0 and tag.bytes(unchecked: 0) == 118 {
+    if tag.bytes.count > 0 and unsafe tag.bytes(unchecked: 0) == 118 {
         tag.asSlice().subslice(from: 1, to: tag.bytes.count).toOwned()
     } else {
         tag
@@ -711,7 +711,7 @@ func trimTrailingNewline(s: String) -> String {
     let len = s.bytes.count;
     var end = len;
     while end > 0 {
-        let b = s.bytes(unchecked: end - 1);
+        let b = unsafe s.bytes(unchecked: end - 1);
         if b == 10 or b == 13 {
             end = end - 1
         } else {

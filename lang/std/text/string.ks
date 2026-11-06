@@ -12,7 +12,7 @@ import std.collections.(Sliceable, Slice)
 import std.numeric.(UInt32)
 import std.text.(Char, decodeUtf8, encodeUtf8, BytesView, CharsView, CharsIterator, GraphemesView, LinesView, CharsSubstringIndex, StringSlice, Str, SplitView, SplitWhereView)
 import std.text.unicode as unicode
-import std.ffi.(memcpy, memcmp, memmem)
+import std.ffi.(memcpy, memmove, memcmp, memmem)
 
 // ============================================================================
 // INTERNAL HELPERS
@@ -76,9 +76,11 @@ func _bytesCompare(a a: Pointer[UInt8], b b: Pointer[UInt8], n n: Int64) -> Orde
 /// Internal heap buffer for `String` — the value sitting inside the `RcBox`.
 ///
 /// Owns a `Pointer[UInt8]` plus its `len` and `cap`. Cloning allocates
-/// a fresh exact-fit buffer (used by COW); the deinit deallocates if
-/// `cap > 0`. Empty strings carry a null pointer with `len == cap == 0`
-/// so the deinit is a no-op.
+/// a fresh buffer (used by COW); the deinit deallocates if `cap > 0`.
+/// `cap == 0` means the storage owns no buffer: the empty string (null
+/// pointer, `len == 0`) or a string literal borrowing its static bytes
+/// (`len > 0`). Such bytes are read-only; every write path goes through
+/// `String.grow`, which copies them into an owned buffer first.
 ///
 /// # Representation
 ///
@@ -92,8 +94,8 @@ struct StringStorage: Cloneable {
     /// Constructs a storage record from a pointer, length, and capacity.
     ///
     /// Internal: callers must ensure `ptr` is either a fresh allocation
-    /// of `cap` bytes (with `len <= cap`) or a null pointer with both
-    /// counts zero.
+    /// of `cap` bytes (with `len <= cap`), static bytes with `cap == 0`,
+    /// or a null pointer with both counts zero.
     init(ptr ptr: Pointer[UInt8], len len: Int64, cap cap: Int64) {
         self.ptr = ptr;
         self.len = len;
@@ -107,12 +109,10 @@ struct StringStorage: Cloneable {
     /// that a grow → write sequence doesn't lose the buffer through a
     /// clone chain (CopyValue on Named types expands to clone calls).
     func clone() -> StringStorage {
+        // `cap == 0` owns nothing: either the empty string or a literal's
+        // static bytes. Both are shared as-is.
         if self.cap == 0 {
-            return StringStorage(
-                ptr: Pointer[UInt8].nullPointer(),
-                len: 0,
-                cap: 0
-            )
+            return StringStorage(ptr: self.ptr, len: self.len, cap: 0)
         }
         let layout = Layout.array[UInt8](self.cap);
         let newPtr = _textAlloc(layout);
@@ -269,31 +269,21 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// @name String Literal
     /// Compiler-emitted constructor for string literals.
     ///
-    /// Receives a static byte pointer and length, then memcpys into a
-    /// fresh heap allocation so the resulting `String` owns its bytes
-    /// (and can be mutated independently of the literal pool).
+    /// Receives a pointer into the literal pool and a length, and borrows
+    /// those bytes without copying them: the storage records `cap == 0`
+    /// ("owns nothing"). The first write copies the bytes into a heap
+    /// buffer (`grow`), so the literal pool is never written or freed.
     ///
-    /// # Errors
-    ///
-    /// Panics with `"String allocation failed"` if the system
-    /// allocator returns null.
+    /// `ptr` must stay valid for the whole program, as literal-pool
+    /// bytes do.
     public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
         let byteLen = Int64(intLiteral: length);
-        if byteLen > 0 {
-            let newPtr = _textAlloc(Layout.array[UInt8](byteLen));
-             unsafe memcpy(newPtr.asRaw(), RawPointer(raw: ptr), byteLen);
-            self.storage = CowBox(StringStorage(
-                ptr: newPtr,
-                len: byteLen,
-                cap: byteLen
-            ))
+        let bytes = if byteLen > 0 {
+            RawPointer(raw: ptr).cast[UInt8]()
         } else {
-            self.storage = CowBox(StringStorage(
-                ptr: Pointer[UInt8].nullPointer(),
-                len: 0,
-                cap: 0
-            ))
-        }
+            Pointer[UInt8].nullPointer()
+        };
+        self.storage = CowBox(StringStorage(ptr: bytes, len: byteLen, cap: 0));
     }
 
     /// @name From Storage
@@ -492,7 +482,14 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
 
         let newLayout = Layout.array[UInt8](newCap);
         let newPtr = _textAlloc(newLayout);
-        // Writing through `value` forks shared storage first.
+        if not self.storage.isUnique {
+            // Shared: copy straight into the bigger buffer. Writing through
+            // `value` would fork an exact-size copy first, then copy again.
+            let myLen = self.len();
+            _memcpyBytes(dst: newPtr, src: self.ptr(), n: myLen);
+            self.storage = CowBox(StringStorage(ptr: newPtr, len: myLen, cap: newCap));
+            return
+        }
         let s = &mutating self.storage.value;
         _memcpyBytes(dst: newPtr, src: s.ptr, n: s.len);
         if s.cap > 0 {
@@ -603,6 +600,11 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Capacity is unchanged, so this is the right primitive for
     /// reusing a buffer in a hot loop.
     public mutating func clear() {
+        // Shared storage: start fresh instead of forking a copy to discard.
+        if not self.storage.isUnique {
+            self = String();
+            return
+        }
         self.storage.value.len = 0
     }
 
@@ -625,18 +627,49 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// s;  // "hi"
     /// ```
     public mutating func trim() {
-        self.trimStart();
-        self.trimEnd()
+        // End first, so the start trim moves fewer bytes.
+        self.trimEnd();
+        self.trimStart()
     }
 
     /// Removes leading ASCII whitespace in place.
     public mutating func trimStart() {
-        self = self.trimmedStart().toOwned()
+        let start = self.trimmedStart().start;
+        self.dropLeadingBytes(start)
     }
 
     /// Removes trailing ASCII whitespace in place.
     public mutating func trimEnd() {
-        self = self.trimmedEnd().toOwned()
+        let end = self.trimmedEnd().end;
+        self.truncateBytes(end)
+    }
+
+    // Keeps the first `n` bytes (a char boundary). Shortening never needs
+    // a new buffer, so this only forks when the storage is shared.
+    private mutating func truncateBytes(n: Int64) {
+        if n < self.len() {
+            self.storage.value.len = n
+        }
+    }
+
+    // Drops the first `n` bytes (a char boundary). An owned, unique buffer
+    // slides its tail down in place; otherwise the tail is copied out.
+    private mutating func dropLeadingBytes(n: Int64) {
+        if n <= 0 {
+            return
+        }
+        let myLen = self.len();
+        if n >= myLen {
+            self.clear();
+            return
+        }
+        if self.cap() == 0 or not self.storage.isUnique {
+            self = self.substringBytes(from: n, to: myLen);
+            return
+        }
+        let s = &mutating self.storage.value;
+        let _ = unsafe memmove(s.ptr.asRaw(), s.ptr.offset(by: n).asRaw(), myLen - n);
+        s.len = myLen - n
     }
 
     /// Removes leading and trailing code points matching `predicate`, in place.
@@ -649,17 +682,22 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// s;  // "hi"
     /// ```
     public mutating func trim(where predicate: (Char) -> Bool) {
-        self = self.trimmed(where: predicate).toOwned()
+        let end = self.trimmedEnd(where: predicate).end;
+        self.truncateBytes(end);
+        let start = self.trimmedStart(where: predicate).start;
+        self.dropLeadingBytes(start)
     }
 
     /// Removes leading code points matching `predicate`, in place.
     public mutating func trimStart(where predicate: (Char) -> Bool) {
-        self = self.trimmedStart(where: predicate).toOwned()
+        let start = self.trimmedStart(where: predicate).start;
+        self.dropLeadingBytes(start)
     }
 
     /// Removes trailing code points matching `predicate`, in place.
     public mutating func trimEnd(where predicate: (Char) -> Bool) {
-        self = self.trimmedEnd(where: predicate).toOwned()
+        let end = self.trimmedEnd(where: predicate).end;
+        self.truncateBytes(end)
     }
 
     // ========================================================================
@@ -680,6 +718,8 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// ```
     public mutating func lowercaseAscii() {
         let myLen = self.len();
+        // A literal borrows read-only bytes; take a writable copy first.
+        self.grow(myLen);
         let s = &mutating self.storage.value;
         for i in 0..<myLen {
             let byte = unsafe s.ptr.offset(by: i).read();
@@ -695,6 +735,8 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Uppercases ASCII letters in place; non-ASCII bytes are left untouched.
     public mutating func uppercaseAscii() {
         let myLen = self.len();
+        // A literal borrows read-only bytes; take a writable copy first.
+        self.grow(myLen);
         let s = &mutating self.storage.value;
         for i in 0..<myLen {
             let byte = unsafe s.ptr.offset(by: i).read();
@@ -713,6 +755,11 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
 
     /// Replaces this string with its lowercase form using full Unicode case mapping.
     public mutating func lowercase() {
+        // ASCII-only text maps byte for byte: convert in place.
+        if self.isAsciiBytes() {
+            self.lowercaseAscii();
+            return
+        }
         self = self.lowercased()
     }
 
@@ -721,7 +768,22 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Locale-independent. Handles multi-character expansions —
     /// e.g. German `ß` → `SS`.
     public mutating func uppercase() {
+        if self.isAsciiBytes() {
+            self.uppercaseAscii();
+            return
+        }
         self = self.uppercased()
+    }
+
+    // True when every byte is below 0x80, so ASCII case mapping is exact.
+    private func isAsciiBytes() -> Bool {
+        let p = self.ptr();
+        for i in 0..<self.len() {
+            if unsafe p.offset(by: i).read() > 127 {
+                return false
+            }
+        }
+        true
     }
 
     // ========================================================================
@@ -730,6 +792,10 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
 
     /// Replaces every occurrence of `pattern` with `replacement`, in place.
     public mutating func replace(pattern: some Str and not Static, with replacement: some Str and not Static) {
+        // No match (or an empty pattern) leaves the string, and its buffer, alone.
+        if pattern.isEmpty or not self.contains(pattern) {
+            return
+        }
         self = self.replaced(pattern, with: replacement)
     }
 
@@ -850,7 +916,10 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// Sends the whole buffer in a single `write` so the hasher gets
     /// to choose how to consume it.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(Slice.lend(start: self.ptr(), count: self.len()))
+        hasher.write(unsafe Slice.lend(start: self.ptr(), count: self.len()));
+        // The length ends the string, so ["ab", "c"] and ["a", "bc"]
+        // feed the hasher different input. Must match `StringSlice.hash`.
+        hasher.write(uint64: UInt64(truncating: self.len()))
     }
 
     /// Returns a shallow clone — storage is shared until either side mutates.

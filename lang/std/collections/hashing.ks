@@ -1,4 +1,4 @@
-// Default hashing implementation using a wyhash-derived per-byte mixer.
+// Default hashing implementation: a streaming word-at-a-time mixer.
 
 module std.collections
 
@@ -10,21 +10,23 @@ import std.collections.(Slice)
 // DEFAULT HASHER
 // ============================================================================
 
-/// The standard `Hasher` implementation, backed by a wyhash-derived
-/// per-byte mixer.
+/// The standard `Hasher` implementation: a word-at-a-time
+/// multiply-xorshift mixer with Murmur3's `fmix64` finalizer.
 ///
 /// Used by `Dictionary` and `Set` whenever the user doesn't pick a
-/// specific hasher. Each byte folds into a 64-bit running state via
-/// `state = (state ^ byte) * MULT`; `finish()` runs Murmur3's fmix64
-/// finalizer to scramble the result so every input bit avalanches
-/// across the output.
+/// specific hasher. Input is folded in 8 bytes per round, and integers
+/// (through `write(uint64:)`) take a single round. It streams: bytes are
+/// buffered into whole words, so split writes hash the same as one write.
+/// `finish()` folds in the total byte count and runs `fmix64`, so every
+/// input bit avalanches across the output. Variable-length values end
+/// their own input (`String` writes its length), which keeps `["ab", "c"]`
+/// and `["a", "bc"]` apart.
 ///
 /// **Not adversarially safe.** The mixer is unkeyed, so an attacker
 /// who can choose keys can craft collisions. For HashDoS resistance,
-/// swap in a keyed hasher (planned: `SipHasher13`) by spelling out
-/// `Dictionary[K, V, SipHasher13]` directly. For non-adversarial
-/// workloads — internal IDs, parser symbols, config values — this
-/// hasher is faster and has better distribution than FNV-1a.
+/// swap in a keyed hasher by spelling out `Dictionary[K, V, MyHasher]`.
+/// For non-adversarial workloads — internal IDs, parser symbols, config
+/// values — this hasher is fast and distributes well.
 ///
 /// # Examples
 ///
@@ -37,91 +39,87 @@ import std.collections.(Slice)
 /// let d: [String: Int64] = ["a": 1];   // DefaultHasher under the hood
 /// ```
 ///
-/// # Algorithm
-///
-/// Initialization seeds `state` with the wyhash secret
-/// `0x9e3779b97f4a7c15` (the "golden ratio" constant SplitMix64 uses).
-/// Each byte updates the state with `state = (state ^ byte) *
-/// 0x100000001b3`, which combines wyhash's mixing constant with
-/// FNV-1a's prime so every bit of the byte propagates across the
-/// 64-bit state. `finish()` runs Murmur3's `fmix64` finalizer
-/// (xor-shift-multiply twice) so consecutive integer keys produce
-/// non-clustered hashes.
-///
 /// # Representation
 ///
-/// One `UInt64` field, `state`, holding the running digest.
+/// `state` (the running digest), `pending` and `pendingCount` (up to 7
+/// bytes not yet forming a word, little-endian), and `total` (bytes seen).
 public struct DefaultHasher: Hasher, Defaultable {
-    /// Running 64-bit digest; updated by `write` and finalized by
-    /// `finish`.
     private var state: UInt64
+    private var pending: UInt64
+    private var pendingCount: Int64
+    private var total: Int64
 
     // ========================================================================
     // CONSTRUCTORS
     // ========================================================================
 
-    /// @name Empty
-    /// Creates a fresh hasher seeded with the SplitMix64 golden-ratio
-    /// constant `0x9e3779b97f4a7c15`.
-    ///
-    /// The same input fed to two new hashers always produces the same
-    /// `finish()` value — this hasher is deterministic across runs (no
-    /// random seeding).
+    /// @name Default
+    /// A hasher seeded with the golden-ratio constant SplitMix64 uses.
     public init() {
-        // SplitMix64 / wyhash seed (golden ratio).
-        self.state = 11400714819323198485;
+        self.state = 11400714819323198485;  // 0x9e3779b97f4a7c15
+        self.pending = 0;
+        self.pendingCount = 0;
+        self.total = 0;
     }
 
     // ========================================================================
     // HASHER PROTOCOL
     // ========================================================================
 
-    /// Folds every byte of `bytes` into the running hash state.
-    ///
-    /// May be called any number of times before `finish()`; the result
-    /// is identical to having received all the bytes in a single call.
-    /// Safe to call with an empty slice (no-op).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var h = DefaultHasher();
-    /// h.write("hello".asByteSlice());
-    /// h.write(" world".asByteSlice());
-    /// // Equivalent to a single write of "hello world".asByteSlice()
-    /// ```
+    /// Tops up the pending partial word, mixes whole 8-byte little-endian
+    /// words straight from `bytes`, and keeps the remainder pending.
     public mutating func write(bytes: Slice[UInt8]) {
         let count = bytes.count;
         let ptr = bytes.pointer;
-        // FNV prime, reused as the per-byte multiplier.
-        let mult = 1099511628211;
+        self.total = self.total + count;
         var i: Int64 = 0;
+        // Finish a partial word left by an earlier write.
+        while self.pendingCount > 0 and i < count {
+            self.pushByte(unsafe ptr.offset(by: i).read());
+            i = i + 1
+        }
+        while i + 8 <= count {
+            // Byte-wise assembly is alignment-safe; LLVM folds it into a
+            // single load where the target allows.
+            var word: UInt64 = 0;
+            var k: Int64 = 7;
+            while k >= 0 {
+                word = word.shiftLeft(by: 8).bitwiseOr(UInt64(from: unsafe ptr.offset(by: i + k).read()));
+                k = k - 1
+            }
+            self.mix(word);
+            i = i + 8
+        }
         while i < count {
-            let byte = unsafe ptr.offset(by: i).read();
-            self.state = self.state.bitwiseXor(UInt64(from: byte));
-            self.state = self.state.multiplyWrapping(mult);
-            // Per-byte avalanche: mix high bits down so adjacent
-            // states diverge faster than plain FNV-1a.
-            self.state = self.state.bitwiseXor(self.state.shiftRight(by: 32));
+            self.pushByte(unsafe ptr.offset(by: i).read());
             i = i + 1
         }
     }
 
-    /// Returns the finalized 64-bit digest.
-    ///
-    /// Runs Murmur3's `fmix64` finalizer over the running state — two
-    /// rounds of xor-shift-multiply that avalanche every input bit
-    /// across the output. Consecutive integer keys (a common bucket
-    /// query pattern) emerge well-distributed despite the simple
-    /// mixer, which would otherwise leak the input's low-bit
-    /// regularity into the bucket index.
-    ///
-    /// `finish()` mutates `state`; calling it twice on the same hasher
-    /// is undefined — construct a fresh `DefaultHasher()` per logical
-    /// hash.
+    /// The same as writing the value's 8 little-endian bytes. With no
+    /// partial word pending (the usual case) that's a single round.
+    public mutating func write(uint64 value: UInt64) {
+        self.total = self.total + 8;
+        if self.pendingCount == 0 {
+            self.mix(value);
+            return
+        }
+        let shift = self.pendingCount * 8;
+        self.mix(self.pending.bitwiseOr(value.shiftLeft(by: shift)));
+        self.pending = value.shiftRight(by: 64 - shift)
+    }
+
+    /// Murmur3's `fmix64` over the state.
     public mutating func finish() -> UInt64 {
         let m1 = 18397679294719823053;  // 0xff51afd7ed558ccd
         let m2 = 14181476777654086739;  // 0xc4ceb9fe1a85ec53
+        if self.pendingCount > 0 {
+            self.mix(self.pending);
+            self.pending = 0;
+            self.pendingCount = 0
+        }
+        // The byte count separates inputs that differ only in trailing zeros.
+        self.mix(UInt64(truncating: self.total));
         var x = self.state;
         x = x.bitwiseXor(x.shiftRight(by: 33));
         x = x.multiplyWrapping(m1);
@@ -130,5 +128,27 @@ public struct DefaultHasher: Hasher, Defaultable {
         x = x.bitwiseXor(x.shiftRight(by: 33));
         self.state = x;
         x
+    }
+
+    /// `state = (state ^ word) * K`, then fold the high half down: the
+    /// multiply only carries bits upward, so the shift brings them back
+    /// into the low bits the table index uses.
+    // Appends one byte to the pending word, mixing it once it's full.
+    private mutating func pushByte(byte: UInt8) {
+        let shift = self.pendingCount * 8;
+        self.pending = self.pending.bitwiseOr(UInt64(from: byte).shiftLeft(by: shift));
+        self.pendingCount = self.pendingCount + 1;
+        if self.pendingCount == 8 {
+            self.mix(self.pending);
+            self.pending = 0;
+            self.pendingCount = 0
+        }
+    }
+
+    private mutating func mix(word: UInt64) {
+        let k = 11400714819323198485;  // 0x9e3779b97f4a7c15, odd
+        var x = self.state.bitwiseXor(word);
+        x = x.multiplyWrapping(k);
+        self.state = x.bitwiseXor(x.shiftRight(by: 29))
     }
 }

@@ -15,11 +15,11 @@ module Test
             if gs.count != 5 { return 2 }
 
             // Each grapheme is a single ASCII char
-            let first = gs(unchecked: 0);
+            let first = unsafe gs(unchecked: 0);
             if first.charCount() != 1 { return 3 }
             if first.firstChar.isEqual(to: 'h') == false { return 4 }
 
-            let last = gs(unchecked: 4);
+            let last = unsafe gs(unchecked: 4);
             if last.firstChar.isEqual(to: 'o') == false { return 5 }
 
             // Empty string

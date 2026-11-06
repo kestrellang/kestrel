@@ -37,7 +37,7 @@ module Test
             unsafe ptr1.write(999);
             if unsafe ptr1.read() != 999 { return 7 }
             // Verify the array was modified through the pointer
-            if arr(unchecked: 1) != 999 { return 8 }
+            if unsafe arr(unchecked: 1) != 999 { return 8 }
 
             // Test equals
             if ptr.isEqual(to: ptr) == false { return 9 }

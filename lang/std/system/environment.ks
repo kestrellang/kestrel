@@ -36,6 +36,8 @@ public enum Environment {
 
     /// The raw bytes of variable `name`, or `None` if it is unset.
     public static func variableBytes(name: String) -> Optional[Array[UInt8]] {
+        // A name with a NUL byte can't name any variable.
+        if name.containsNulByte { return .None }
         let cname = name.toCString();
         let raw = unsafe native_getenv(cname.raw.asRaw());
         cname.free();
@@ -47,6 +49,7 @@ public enum Environment {
 
     /// True if variable `name` is set, even to the empty string.
     public static func hasVariable(name: String) -> Bool {
+        if name.containsNulByte { return false }
         let cname = name.toCString();
         let raw = unsafe native_getenv(cname.raw.asRaw());
         cname.free();
@@ -90,8 +93,11 @@ public enum Environment {
     ///
     /// `InvalidInput` if `name` is empty or contains `=`.
     public static func setVariable(name: String, to value: String) -> Result[(), IoError] {
-        let cname = name.toCString();
-        let cvalue = value.toCString();
+        let cname = try name.toNativeString();
+        let cvalue = match value.toNativeString() {
+            .Ok(c) => c,
+            .Err(e) => { cname.free(); return .Err(e) }
+        };
         let status = unsafe native_setenv(cname.raw.asRaw(), cvalue.raw.asRaw(), 1);
         cname.free();
         cvalue.free();
@@ -107,7 +113,7 @@ public enum Environment {
     ///
     /// Not thread-safe, for the same reason as `setVariable`.
     public static func removeVariable(name: String) -> Result[(), IoError] {
-        let cname = name.toCString();
+        let cname = try name.toNativeString();
         let status = unsafe native_unsetenv(cname.raw.asRaw());
         cname.free();
         if status != 0 {
@@ -145,7 +151,7 @@ public enum Environment {
 
     /// Changes the process's working directory. Affects every thread.
     public static func setCurrentDirectory(to path: String) -> Result[(), IoError] {
-        let cpath = path.toCString();
+        let cpath = try path.toNativeString();
         let status = unsafe native_chdir(cpath.raw.asRaw());
         cpath.free();
         if status != 0 {

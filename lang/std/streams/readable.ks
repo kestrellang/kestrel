@@ -87,7 +87,7 @@ extend Readable {
         if try self.read(into: one.asMutableSlice()) == 0 {
             return .Ok(.None)
         }
-        .Ok(.Some(one(unchecked: 0)))
+        .Ok(.Some(unsafe one(unchecked: 0)))
     }
 
     /// Reads to end of stream as UTF-8 text.

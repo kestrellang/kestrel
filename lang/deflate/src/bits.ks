@@ -72,6 +72,28 @@ struct BitReader {
     mutating func alignToByte() {
         self.consume(self.bitCount % 8);
     }
+
+    // Stored-block fast path: copies up to `max` whole bytes into `output`,
+    // first what the bit buffer holds, then the rest straight from `data`
+    // with a single append. The reader must be byte-aligned. Returns the
+    // bytes copied; fewer than `max` means the input ran out.
+    mutating func copyBytes(max: Int64, mutating into output: Array[UInt8]) -> Int64 {
+        var copied: Int64 = 0;
+        // Buffered real bytes; zero padding past the end doesn't count.
+        while copied < max and self.bitCount - self.paddingBytes * 8 >= 8 {
+            output.append(UInt8(truncating: self.buffer & 0xFF));
+            self.consume(8);
+            copied = copied + 1;
+        }
+        let available = self.data.count - self.position;
+        let n = if max - copied < available { max - copied } else { available };
+        if n > 0 {
+            output.append(contentsOf: self.data(self.position..<(self.position + n)));
+            self.position = self.position + n;
+            copied = copied + n;
+        }
+        copied
+    }
 }
 
 /// Writes bits least-significant first into a growing byte array.

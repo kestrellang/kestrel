@@ -163,7 +163,7 @@ public struct BytesView: Iterable, Cloneable {
     /// Caller must guarantee `0 <= index < count`. For ranges, the
     /// endpoints must be in `0..=count`; otherwise the resulting
     /// sub-view aliases out-of-bounds memory.
-    public subscript[I](unchecked index: I) -> I.BytesYield where I: BytesIndex {
+    public unsafe subscript[I](unchecked index: I) -> I.BytesYield where I: BytesIndex {
         get { index.readBytesUnchecked(from: self) }
     }
 
@@ -585,7 +585,7 @@ public struct GraphemesIterator: Iterator {
 
         // Return the grapheme
         if chars.count == 1 {
-            .Some(Grapheme(char: chars(unchecked: 0)))
+            .Some(Grapheme(char: unsafe chars(unchecked: 0)))
         } else {
             .Some(Grapheme(chars: chars))
         }
@@ -773,8 +773,9 @@ public struct GraphemesView: Iterable, Cloneable {
 /// after the trailing-no-terminator case has been emitted, so further
 /// calls return `None`.
 public struct LinesIterator: Iterator {
-    /// The element type yielded by `next()` — always `String`.
-    type Item = String
+    /// The element type yielded by `next()`: a zero-copy slice of the
+    /// source. Call `toOwned()` to keep a line as a `String`.
+    type Item = StringSlice
 
     private var source: StringSlice
     // Re-read on every access: the string may have changed since.
@@ -799,7 +800,7 @@ public struct LinesIterator: Iterator {
     /// Scans byte-by-byte for `\n` or `\r`, treating `\r\n` as a
     /// single terminator. The yielded string contains the bytes up
     /// to but not including the terminator.
-    public mutating func next() -> String? {
+    public mutating func next() -> StringSlice? {
         if self.done or self.byteIndex >= self.length {
             return .None
         }
@@ -852,25 +853,31 @@ public struct LinesIterator: Iterator {
             return .Some(self.createSubstring(start, self.length))
         }
 
-        let none: String? = .None;
+        let none: StringSlice? = .None;
         none
     }
 
-    /// Copies bytes `[start, end)` into a fresh `String` via `memcpy`.
-    private func createSubstring(start: Int64, end: Int64) -> String {
-        let count = end - start;
-        if count <= 0 {
-            return String()
+    /// Collects the remaining lines as owned strings. (A line borrows the
+    /// source string, so an array of slices can't exist.)
+    public consuming func collect() -> Array[String] {
+        var result = Array[String]();
+        while let .Some(line) = self.next() {
+            result.append(line.toOwned())
         }
-        let srcAt: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](self.ptr, start.raw);
-        String.fromRawBytes(srcAt, count)
+        result
+    }
+
+    /// Bytes `[start, end)` of the source as a slice sharing its storage.
+    private func createSubstring(start: Int64, end: Int64) -> StringSlice {
+        let base = self.source.start;
+        self.source.subslice(from: base + start, to: base + end)
     }
 }
 
 /// A view over the lines of a `String`, split on `\n`, `\r\n`, or `\r`.
 ///
-/// Returned by `String.lines`. The yielded strings (from iteration or
-/// single-line subscripting) do not include the terminator; a trailing
+/// Returned by `String.lines`. Iteration yields zero-copy `StringSlice`s and
+/// single-line subscripting yields a `String`; neither includes the terminator; a trailing
 /// line without a terminator is still emitted. Range subscripts
 /// (`lines(0..<n)`) yield a zero-copy `LinesView` sub-view whose
 /// underlying byte range still includes the original terminators —
@@ -882,7 +889,7 @@ public struct LinesIterator: Iterator {
 /// ```
 /// var lines = Array[String]();
 /// for line in "a\nb\nc".lines {
-///     lines.append(line);
+///     lines.append(line.toOwned());
 /// }
 /// lines.count;  // 3
 ///
@@ -894,8 +901,8 @@ public struct LinesIterator: Iterator {
 ///
 /// A `(ptr, length)` pair pointing into the source string.
 public struct LinesView: Iterable, Cloneable {
-    /// The element type yielded by iteration — always `String`.
-    type Item = String
+    /// The element type yielded by iteration: a zero-copy `StringSlice`.
+    type Item = StringSlice
     /// The iterator type returned by `iter()`.
     type TargetIterator = LinesIterator
 
@@ -2472,7 +2479,7 @@ fileprivate func _linesViewAt(view view: LinesView, lineIndex lineIndex: Int64) 
         let next = it.next();
         if let .Some(line) = next {
             if li == lineIndex {
-                return .Some(line)
+                return .Some(line.toOwned())
             }
             li = li + 1
         } else {
@@ -3513,7 +3520,10 @@ extend LinesView {
     /// O(first line length) — scans for the first terminator.
     public var first: String? {
         var it = self.iter();
-        it.next()
+        if let .Some(line) = it.next() {
+            return .Some(line.toOwned())
+        }
+        .None
     }
 }
 

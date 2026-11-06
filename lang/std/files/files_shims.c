@@ -57,9 +57,10 @@ int32_t kestrel_file_set_length(int32_t fd, int64_t length) { return ftruncate(f
 // ---------------------------------------------------------------------------
 // Metadata
 //
-// `out` receives five int64s: kind (0 file, 1 directory, 2 symbolic link,
+// `out` receives seven int64s: kind (0 file, 1 directory, 2 symbolic link,
 // 3 other), size, permission bits, modified and accessed time in
-// nanoseconds since the Unix epoch.
+// nanoseconds since the Unix epoch, device and inode. Keep in step with
+// `metadataCellCount` in metadata.ks.
 // ---------------------------------------------------------------------------
 
 static int64_t kind_of(mode_t mode) {
@@ -80,6 +81,8 @@ static void fill_metadata(const struct stat *st, int64_t *out) {
     out[3] = (int64_t)st->st_mtim.tv_sec * 1000000000 + st->st_mtim.tv_nsec;
     out[4] = (int64_t)st->st_atim.tv_sec * 1000000000 + st->st_atim.tv_nsec;
 #endif
+    out[5] = (int64_t)st->st_dev;
+    out[6] = (int64_t)st->st_ino;
 }
 
 // stat(2), or lstat(2) when `follow` is 0. 0, or -1 with errno set.

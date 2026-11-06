@@ -69,7 +69,7 @@ func main() -> lang.i32 {
                     var release = false;
                     var binFlag: String? = .None;
                     if matches.submatches.count > 0 {
-                        let sm = matches.submatches(unchecked: 0);
+                        let sm = unsafe matches.submatches(unchecked: 0);
                         release = sm.hasFlag("release");
                         binFlag = sm.value(of: "bin")
                     }
@@ -82,7 +82,7 @@ func main() -> lang.i32 {
                     } else if sub == "init" {
                         var lib = false;
                         if matches.submatches.count > 0 {
-                            lib = matches.submatches(unchecked: 0).hasFlag("lib")
+                            lib = unsafe matches.submatches(unchecked: 0).hasFlag("lib")
                         }
                         handleInit(lib: lib)
                     } else if sub == "publish" {
@@ -95,7 +95,7 @@ func main() -> lang.i32 {
                         var pkg: String? = .None;
                         var instRelease = true;
                         if matches.submatches.count > 0 {
-                            let sm2 = matches.submatches(unchecked: 0);
+                            let sm2 = unsafe matches.submatches(unchecked: 0);
                             force = sm2.hasFlag("force");
                             pkg = sm2.value(of: "package");
                             instRelease = not sm2.hasFlag("debug")
@@ -257,7 +257,7 @@ func sanitizeModuleName(name name: String) -> String {
     var result = String();
     var i: Int64 = 0;
     while i < name.bytes.count {
-        let b = name.bytes(unchecked: i);
+        let b = unsafe name.bytes(unchecked: i);
         let ok = (b >= 97 and b <= 122) or (b >= 65 and b <= 90) or (b >= 48 and b <= 57) or b == 95;
         if ok {
             result.append(name.asSlice().subslice(from: i, to: i + 1).toOwned())
@@ -462,7 +462,7 @@ func handleInstall(target target: String?, binFlag binFlag: String?, force force
                     // Build + install each target.
                     var i: Int64 = 0;
                     while i < targets.count {
-                        let bin = targets(unchecked: i);
+                        let bin = unsafe targets(unchecked: i);
                         i = i + 1;
                         match installOne(bin: bin, built: built, binDir: binDir, force: force, release: release) {
                             .Ok(_) => {},
@@ -493,7 +493,7 @@ func resolveInstallRoot(target target: String?) -> ResolvedPackage throws FlockE
             var verOpt: String? = .None;
             var i: Int64 = 0;
             while i < t.bytes.count {
-                if t.bytes(unchecked: i) == 64 { // '@'
+                if unsafe t.bytes(unchecked: i) == 64 { // '@'
                     name = t.asSlice().subslice(from: 0, to: i).toOwned();
                     verOpt = .Some(t.asSlice().subslice(from: i + 1, to: t.bytes.count).toOwned());
                     break
@@ -718,7 +718,7 @@ func collectBuild(root root: ResolvedPackage) -> ResolvedBuild throws FlockError
                 let flags = splitWhitespace(output);
                 j = 0;
                 while j < flags.count {
-                    let flag = flags(unchecked: j);
+                    let flag = unsafe flags(unchecked: j);
                     // Parse -l, -L, and -framework flags from command output
                     if flag.starts(with: "-l") {
                         allLinkLibs.append(flag.asSlice().subslice(from: 2, to: flag.bytes.count).toOwned())
@@ -731,7 +731,7 @@ func collectBuild(root root: ResolvedPackage) -> ResolvedBuild throws FlockError
                     j = j + 1;
                     // Handle "-framework Name" as two separate tokens
                     if flag == "-framework" and j < flags.count {
-                        allFrameworks.append(flags(unchecked: j));
+                        allFrameworks.append(unsafe flags(unchecked: j));
                         j = j + 1
                     }
                 }
@@ -833,7 +833,7 @@ func selectBin(bins bins: Array[BinTarget], binFlag binFlag: String?, packageNam
         },
         .None => {
             if bins.count == 1 {
-                return .Ok(bins(unchecked: 0).clone())
+                return .Ok(unsafe bins(unchecked: 0).clone())
             }
             // Prefer the package-named default (src/main.ks).
             for element in bins {
@@ -877,7 +877,7 @@ func pathContains(path path: String, dir dir: String) -> Bool {
     var i: Int64 = 0;
     let len = path.bytes.count;
     while i <= len {
-        if i == len or path.bytes(unchecked: i) == 58 { // ':'
+        if i == len or unsafe path.bytes(unchecked: i) == 58 { // ':'
             if i > start {
                 let seg = path.asSlice().subslice(from: start, to: i).toOwned();
                 if seg == dir {
@@ -909,7 +909,7 @@ func splitWhitespace(s: String) -> Array[String] {
     let len = s.bytes.count;
 
     while i < len {
-        let b = s.bytes(unchecked: i);
+        let b = unsafe s.bytes(unchecked: i);
         let isSpace = b == 32 or b == 9 or b == 10 or b == 13;
         if isSpace {
             if start >= 0 {
@@ -952,14 +952,14 @@ func lastPathComponent(path: String) -> String {
     let len = path.bytes.count;
     // Skip trailing slash
     var end = len;
-    if end > 0 and path.bytes(unchecked: end - 1) == 47 {
+    if end > 0 and unsafe path.bytes(unchecked: end - 1) == 47 {
         end = end - 1
     }
 
     // Find last slash
     var i = end - 1;
     while i >= 0 {
-        if path.bytes(unchecked: i) == 47 { // '/'
+        if unsafe path.bytes(unchecked: i) == 47 { // '/'
             return path.asSlice().subslice(from: i + 1, to: end).toOwned()
         }
         i = i - 1
@@ -973,7 +973,7 @@ func trimWhitespace(s: String) -> String {
     let len = s.bytes.count;
     var start: Int64 = 0;
     while start < len {
-        let b = s.bytes(unchecked: start);
+        let b = unsafe s.bytes(unchecked: start);
         if b == 32 or b == 9 or b == 10 or b == 13 {
             start = start + 1
         } else {
@@ -982,7 +982,7 @@ func trimWhitespace(s: String) -> String {
     }
     var end = len;
     while end > start {
-        let b = s.bytes(unchecked: end - 1);
+        let b = unsafe s.bytes(unchecked: end - 1);
         if b == 32 or b == 9 or b == 10 or b == 13 {
             end = end - 1
         } else {

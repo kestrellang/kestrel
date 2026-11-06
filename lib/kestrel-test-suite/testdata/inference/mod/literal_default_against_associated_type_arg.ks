@@ -18,7 +18,7 @@ module Test
 @main
 func main() -> lang.i64 {
     let s = "#hi";
-    let firstByte = s.bytes(unchecked: 0);
+    let firstByte = unsafe s.bytes(unchecked: 0);
     if firstByte == 35 { // '#'
         return 0
     }

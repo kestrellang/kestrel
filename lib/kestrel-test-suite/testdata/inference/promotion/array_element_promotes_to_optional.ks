@@ -12,7 +12,7 @@ module Test
 func main() -> lang.i64 {
     let xs: [Int64?] = [1, .None, 3];
     if xs.count != 3 { return 1; }
-    if xs(unchecked: 0) != .Some(1) { return 2; }
-    if xs(unchecked: 1) != .None { return 3; }
+    if unsafe xs(unchecked: 0) != .Some(1) { return 2; }
+    if unsafe xs(unchecked: 1) != .None { return 3; }
     0
 }

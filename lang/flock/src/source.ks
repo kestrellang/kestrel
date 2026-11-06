@@ -189,7 +189,7 @@ func splitOnSlash(s: String) -> Array[String] {
     let len = s.bytes.count;
 
     while i < len {
-        let byte = s.bytes(unchecked: i);
+        let byte = unsafe s.bytes(unchecked: i);
         if byte == 47 { // '/'
             if i > start {
                 result.append(s.asSlice().subslice(from: start, to: i).toOwned())

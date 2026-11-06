@@ -56,12 +56,24 @@ public enum Directory {
     }
 
     /// Removes `path` and everything in it (`rm -r`). Symbolic links are
-    /// removed, never followed.
+    /// removed, never followed, and that includes `path` itself: if it's a
+    /// link to a directory, the link goes and the directory stays.
     public static func removeAll(path: Path) -> Result[(), IoError] {
+        // `entries` opens `path` with `opendir`, which follows a link, so
+        // check the argument with `lstat` first.
+        if (try symbolicLinkMetadata(path)).isSymbolicLink {
+            return withNativePath(path, { (p) in unsafe native_unlink(p) })
+        }
+        Directory.removeTree(path)
+    }
+
+    /// `removeAll` below the top level. Entry kinds come from the
+    /// directory listing, which doesn't follow links.
+    fileprivate static func removeTree(path: Path) -> Result[(), IoError] {
         for entry in try Directory.entries(path) {
             let entry = try entry;
             if entry.kind == .Directory {
-                try Directory.removeAll(entry.path)
+                try Directory.removeTree(entry.path)
             } else {
                 // A bare `remove` here would name `Directory.remove`, so
                 // unlink directly.
@@ -74,7 +86,7 @@ public enum Directory {
     /// The entries of `path`, read lazily, without `.` and `..`, in the
     /// order the file system returns them.
     public static func entries(path: Path) -> Result[DirectoryEntries, IoError] {
-        let cpath = path.text.toCString();
+        let cpath = try path.toNativePath();
         let dir = unsafe native_directory_open(cpath.raw.asRaw());
         let error = IoError.last();
         cpath.free();
@@ -94,15 +106,15 @@ public enum Directory {
         }
         template.append(prefix);
         template.append("XXXXXX");
-        let ctemplate = template.toCString();
+        let ctemplate = try template.toNativeString();
         let r = unsafe native_make_temporary_directory(ctemplate.raw.asRaw());
         let error = IoError.last();
-        let made = textFromNative(ctemplate.raw.asRaw());
+        let made = pathFromNative(ctemplate.raw.asRaw());
         ctemplate.free();
         if r < 0 {
             return .Err(error)
         }
-        .Ok(Path(made))
+        .Ok(made)
     }
 }
 
@@ -151,10 +163,10 @@ public struct DirectoryEntries: Iterator, not Copyable {
             self.dir = RawPointer.nullPointer();
             return if r == 0 { .None } else { .Some(.Err(error)) }
         }
-        let name = textFromNative(unsafe cells.cast[RawPointer]().read());
+        let name = pathFromNative(unsafe cells.cast[RawPointer]().read());
         let code = Int64(from: unsafe cells.cast[UInt8]().offset(by: 8).cast[Int32]().read());
         unsafe free(cells);
-        let path = self.base.joined(with: Path(name.clone()));
+        let path = self.base.joined(with: name);
         // d_type is unknown on some file systems: ask lstat.
         let kind = if code == 4 {
             match symbolicLinkMetadata(path) {
@@ -164,7 +176,7 @@ public struct DirectoryEntries: Iterator, not Copyable {
         } else {
             FileKind.of(code)
         };
-        .Some(.Ok(DirectoryEntry(path: path, name: name, kind: kind)))
+        .Some(.Ok(DirectoryEntry(path: path, name: name.string, kind: kind)))
     }
 
     deinit {

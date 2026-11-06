@@ -99,8 +99,8 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
     var values: Array[String] = [];
     var named: Dictionary[String, String] = [:];
     for i in 0..<patternSegments.count {
-        let pattern = patternSegments(unchecked: i);
-        let actual = requestSegments(unchecked: i);
+        let pattern = unsafe patternSegments(unchecked: i);
+        let actual = unsafe requestSegments(unchecked: i);
         if pattern.starts(with: ":") {
             let name = pattern.asSlice().subslice(from: 1, to: pattern.bytes.count).toOwned();
             values.append(actual.clone());
