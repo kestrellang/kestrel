@@ -252,18 +252,26 @@ extend Slice[T]: ArrayMatchable {
 /// the index).
 public protocol SliceIndex[T] {
     type SliceOutput
+    @sugarOnly
     static func lend(consuming index: Self, base: Slice[T]) -> &SliceOutput
+    @sugarOnly
     static func lendMutating(consuming index: Self, mutating base: Slice[T]) -> &mutating SliceOutput
+    @sugarOnly
     static func lendUnchecked(consuming index: Self, base: Slice[T]) -> &SliceOutput
+    @sugarOnly
     static func lendMutatingUnchecked(consuming index: Self, mutating base: Slice[T]) -> &mutating SliceOutput
     /// `.None` when the index or range doesn't fit.
+    @sugarOnly
     static func lendChecked(consuming index: Self, base: Slice[T]) -> Optional[&SliceOutput]
+    @sugarOnly
     static func lendMutatingChecked(consuming index: Self, mutating base: Slice[T]) -> Optional[&mutating SliceOutput]
 }
 
 /// A range that `xs(within: range)` clamps into the slice and lends.
 public protocol SliceClampable[T] {
+    @sugarOnly
     static func lendWithin(consuming range: Self, base: Slice[T]) -> &Slice[T]
+    @sugarOnly
     static func lendMutatingWithin(consuming range: Self, mutating base: Slice[T]) -> &mutating Slice[T]
 }
 

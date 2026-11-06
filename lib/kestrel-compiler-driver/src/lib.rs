@@ -380,6 +380,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::NoMember { .. } => "NoMember",
         InferError::AmbiguousMember { .. } => "AmbiguousMember",
         InferError::MemberNotVisible { .. } => "MemberNotVisible",
+        InferError::SugarOnlyMember { .. } => "SugarOnlyMember",
         InferError::MemberIsStatic { .. } => "MemberIsStatic",
         InferError::NoAssociatedType { .. } => "NoAssociatedType",
         InferError::InfiniteType { .. } => "InfiniteType",
@@ -451,6 +452,12 @@ fn format_error(err: &InferError) -> String {
         InferError::MemberNotVisible { name, .. } => {
             format!(
                 "MemberNotVisible '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
+        InferError::SugarOnlyMember { name, .. } => {
+            format!(
+                "SugarOnlyMember '{}' at {}:{}",
                 name, span.file_id, span.start
             )
         },

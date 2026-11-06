@@ -18,7 +18,7 @@ use kestrel_span::Span;
 use crate::collections::{HashMap, HashSet};
 use crate::constraint::{CallArg, Constraint, Reason, labels_match};
 use crate::ctx::InferCtx;
-use crate::error::InferError;
+use crate::error::{InferError, sugar_only_error};
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify;
 
@@ -1850,6 +1850,13 @@ fn gen_struct_init(
         // type-directed disambiguation which happens during solving.
         if let [init] = matched.as_slice() {
             let init = *init;
+            // `@sugarOnly` init requirements (`init(intLiteral:)`) are built by
+            // literal lowering, never by a written call outside their module.
+            if let Some(requirement) =
+                kestrel_name_res::sugar_only_hidden(qctx, init, ctx.owner, root)
+            {
+                ctx.report_error(sugar_only_error(qctx, requirement, "init", result_tv, span));
+            }
             matched_init = Some(init);
             // Record which init was selected so MIR lowering can use the init entity
             ctx.resolutions.insert(expr_id, init);

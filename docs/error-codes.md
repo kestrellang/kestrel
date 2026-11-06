@@ -63,7 +63,7 @@ the type checker, and the code is assigned in one place,
 | E109 | type mismatch | The value's type is not the one the context requires (also: a mutating closure where a non-mutating one is expected). |
 | E113 | wrong number of arguments / wrong label / no matching overload / ambiguous trailing closure | The call's shape (arity, argument labels, type-argument count) fits no declaration, or a trailing closure could fill more than one closure-typed parameter. |
 | E114 | literal not accepted | The literal's kind cannot be written as the expected type. |
-| E115 | member '{name}' is not accessible | Visibility forbids the access from this scope. |
+| E115 | member '{name}' is not accessible / '{name}' can only be used through its syntax | Visibility forbids the access from this scope, or the member is (or implements) a `@sugarOnly` requirement named outside its protocol's module. |
 | E116 | wrong kind of member use | A static member used on an instance, an instance method on a type, a type parameter as a value, or a method not called. |
 | E117 | infinite type | Unification would build a recursive type. |
 | E118 | opaque return type error | A circular `some P` return, or a `some P` that hides a non-`Copyable` type. |
