@@ -335,7 +335,7 @@ func copyBytes(from source: Array[UInt8], offset sourceStart: Int64, mutating in
     let src = source.asUnsafeSlice().pointer.offset(by: sourceStart);
     let dst = target.asUnsafeSlice().pointer.offset(by: targetStart);
     for i in 0..<count {
-        dst.offset(by: i).write(src.offset(by: i).read());
+        unsafe dst.offset(by: i).write(src.offset(by: i).read());
     }
 }
 
