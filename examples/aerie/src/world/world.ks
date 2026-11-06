@@ -98,9 +98,7 @@ struct World {
         if not World.inRange(cy) or not self.chunks.contains(key) {
             return false;
         }
-        let _ = self.chunks.modify(key) { (chunk) in
-            chunk.put(x - cx * chunkSize, y - cy * chunkSize, z - cz * chunkSize, block);
-        };
+        self.chunks(unwrap: key).put(x - cx * chunkSize, y - cy * chunkSize, z - cz * chunkSize, block);
         let _ = self.edited.insert(key);
         true
     }

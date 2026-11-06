@@ -78,7 +78,7 @@ struct Game: not Copyable {
         self.player.position = state.position;
         self.player.yaw = state.yaw;
         self.player.pitch = state.pitch;
-        if self.settings.startTime.isNone() {
+        if self.settings.startTime.isNone {
             self.sky.timeOfDay = state.timeOfDay;
         }
     }

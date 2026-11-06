@@ -19,7 +19,7 @@ struct SaveFile {
             return .None;
         }
         let state = SaveState.decode(bytes);
-        if state.isNone() {
+        if state.isNone {
             println("\(self.path) is from another version of Aerie; starting a new world");
         }
         state

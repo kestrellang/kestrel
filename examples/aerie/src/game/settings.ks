@@ -31,7 +31,7 @@ struct Settings {
         Settings(
             viewRadius: view.clamp(minViewRadius, maxViewRadius),
             startTime: Float32(parsing: getenv("AERIE_TIME") ?? ""),
-            skipTitle: getenv("AERIE_PLAY").isSome(),
+            skipTitle: getenv("AERIE_PLAY").isSome,
             savePath: if save == "none" { .None } else { .Some(save) },
             maxFrames: Int64(parsing: getenv("AERIE_FRAMES") ?? "") ?? 0,
             vsync: (getenv("AERIE_VSYNC") ?? "1") != "0",
