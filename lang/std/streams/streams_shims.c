@@ -3,9 +3,12 @@
 // They live in C so every StandardInput / StandardOutput value shares one
 // buffer (two values can't interleave half-lines), and so the output buffer
 // is flushed by `atexit` however the process ends normally: returning from
-// main, or std.system's `exit`.
+// main, or std.system's `exit`. Abnormal ends (an overflow or bounds trap,
+// a bad access, `abort`) skip `atexit`, so a one-shot handler for those
+// signals flushes the buffer before the default action runs.
 
 #include <errno.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,7 +79,35 @@ int64_t kestrel_stdin_read(unsigned char *bytes, int64_t count) {
 
 static void flush_at_exit(void) { kestrel_stdout_flush(); }
 
-__attribute__((constructor)) static void kestrel_streams_init(void) { atexit(flush_at_exit); }
+// Flushes buffered output, then lets the signal's default action run.
+// SA_RESETHAND restored that default before this ran, so returning re-runs
+// the faulting instruction (or `abort` re-raises), and the process still
+// dies by the same signal. `write` is async-signal-safe; a trap inside
+// `kestrel_stdout_write` itself could flush a half-copied buffer, which is
+// still better than losing it.
+static void flush_on_fatal_signal(int sig) {
+    (void)sig;
+    int saved = errno;
+    kestrel_stdout_flush();
+    errno = saved;
+}
+
+__attribute__((constructor)) static void kestrel_streams_init(void) {
+    atexit(flush_at_exit);
+    static const int fatal[] = { SIGILL, SIGTRAP, SIGABRT, SIGFPE, SIGSEGV, SIGBUS };
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = flush_on_fatal_signal;
+    action.sa_flags = SA_RESETHAND;
+    sigemptyset(&action.sa_mask);
+    for (size_t i = 0; i < sizeof fatal / sizeof fatal[0]; i++) {
+        // Leave alone any handler something else installed first.
+        struct sigaction old;
+        if (sigaction(fatal[i], NULL, &old) == 0 && old.sa_handler == SIG_DFL) {
+            sigaction(fatal[i], &action, NULL);
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // errno

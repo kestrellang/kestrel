@@ -86,7 +86,7 @@ public enum Directory {
     /// The entries of `path`, read lazily, without `.` and `..`, in the
     /// order the file system returns them.
     public static func entries(path: Path) -> Result[DirectoryEntries, IoError] {
-        let cpath = try path.text.toNativeString();
+        let cpath = try path.toNativePath();
         let dir = unsafe native_directory_open(cpath.raw.asRaw());
         let error = IoError.last();
         cpath.free();
@@ -109,12 +109,12 @@ public enum Directory {
         let ctemplate = try template.toNativeString();
         let r = unsafe native_make_temporary_directory(ctemplate.raw.asRaw());
         let error = IoError.last();
-        let made = textFromNative(ctemplate.raw.asRaw());
+        let made = pathFromNative(ctemplate.raw.asRaw());
         ctemplate.free();
         if r < 0 {
             return .Err(error)
         }
-        .Ok(Path(made))
+        .Ok(made)
     }
 }
 
@@ -163,10 +163,10 @@ public struct DirectoryEntries: Iterator, not Copyable {
             self.dir = RawPointer.nullPointer();
             return if r == 0 { .None } else { .Some(.Err(error)) }
         }
-        let name = textFromNative(unsafe cells.cast[RawPointer]().read());
+        let name = pathFromNative(unsafe cells.cast[RawPointer]().read());
         let code = Int64(from: unsafe cells.cast[UInt8]().offset(by: 8).cast[Int32]().read());
         unsafe free(cells);
-        let path = self.base.joined(with: Path(name.clone()));
+        let path = self.base.joined(with: name);
         // d_type is unknown on some file systems: ask lstat.
         let kind = if code == 4 {
             match symbolicLinkMetadata(path) {
@@ -176,7 +176,7 @@ public struct DirectoryEntries: Iterator, not Copyable {
         } else {
             FileKind.of(code)
         };
-        .Some(.Ok(DirectoryEntry(path: path, name: name, kind: kind)))
+        .Some(.Ok(DirectoryEntry(path: path, name: name.string, kind: kind)))
     }
 
     deinit {

@@ -349,6 +349,48 @@ public struct Float64:
         self == 0.0
     }}
 
+    /// True if the sign bit is set: negatives, `-0.0`, and NaNs with the
+    /// sign bit on. Unlike `isNegative`, this tells `-0.0` from `+0.0`.
+    public var isSignMinus: Bool { get {
+        self.bitPattern.shiftRight(by: 64 - 1) == 1
+    }}
+
+    /// The smaller of `self` and `other`, as IEEE 754-2019 `minimum`
+    /// defines it: NaN if either is NaN, and `-0.0` below `+0.0`.
+    /// For a min that skips NaN instead, compare with `compare`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).minimum(2.0);               // 1.0
+    /// (1.0).minimum(Float64.nan);  // nan
+    /// (0.0).minimum(-0.0);              // -0.0
+    /// ```
+    public func minimum(other: Float64) -> Float64 {
+        if self.isNaN or other.isNaN { return Float64.nan }
+        if self < other { return self }
+        if other < self { return other }
+        // Equal: only the zeros' signs can differ.
+        if self.isSignMinus { self } else { other }
+    }
+
+    /// The larger of `self` and `other`, as IEEE 754-2019 `maximum`
+    /// defines it: NaN if either is NaN, and `+0.0` above `-0.0`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).maximum(2.0);               // 2.0
+    /// (1.0).maximum(Float64.nan);  // nan
+    /// (-0.0).maximum(0.0);              // 0.0
+    /// ```
+    public func maximum(other: Float64) -> Float64 {
+        if self.isNaN or other.isNaN { return Float64.nan }
+        if self > other { return self }
+        if other > self { return other }
+        if self.isSignMinus { other } else { self }
+    }
+
     /// The raw IEEE-754 bit pattern reinterpreted as an unsigned integer
     /// (UInt64 for Float64). No value conversion — the bits are
     /// preserved exactly, so `sign`/`exponent`/`significand` can be extracted by

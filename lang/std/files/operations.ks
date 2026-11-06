@@ -19,8 +19,8 @@ public func remove(path: Path) -> Result[(), IoError] {
 /// Renames `source` to `destination`, replacing a file already there.
 /// Both must be on the same file system (`CrossesDevices` otherwise).
 public func rename(source: Path, to destination: Path) -> Result[(), IoError] {
-    let from = try source.text.toNativeString();
-    let to = match destination.text.toNativeString() {
+    let from = try source.toNativePath();
+    let to = match destination.toNativePath() {
         .Ok(c) => c,
         .Err(e) => { from.free(); return .Err(e) }
     };
@@ -57,8 +57,8 @@ public func copy(source: Path, to destination: Path) -> Result[Int64, IoError] {
 /// Creates a symbolic link at `link` that points to `target`. `target`
 /// isn't checked; it may not exist.
 public func createSymbolicLink(at link: Path, to target: Path) -> Result[(), IoError] {
-    let t = try target.text.toNativeString();
-    let l = match link.text.toNativeString() {
+    let t = try target.toNativePath();
+    let l = match link.toNativePath() {
         .Ok(c) => c,
         .Err(e) => { t.free(); return .Err(e) }
     };
@@ -72,7 +72,7 @@ public func createSymbolicLink(at link: Path, to target: Path) -> Result[(), IoE
 /// Where the symbolic link `path` points, as stored in the link.
 public func readSymbolicLink(path: Path) -> Result[Path, IoError] {
     var capacity: Int64 = 256;
-    let cpath = try path.text.toNativeString();
+    let cpath = try path.toNativePath();
     loop {
         let buffer = unsafe malloc(capacity);
         let n = unsafe native_read_link(cpath.raw.asRaw(), buffer, capacity);
@@ -84,10 +84,10 @@ public func readSymbolicLink(path: Path) -> Result[Path, IoError] {
         }
         if n < capacity {
             unsafe buffer.cast[UInt8]().offset(by: n).write(0);
-            let text = textFromNative(buffer);
+            let target = pathFromNative(buffer);
             unsafe free(buffer);
             cpath.free();
-            return .Ok(Path(text))
+            return .Ok(target)
         }
         unsafe free(buffer);
         capacity = capacity * 2

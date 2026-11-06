@@ -116,7 +116,7 @@ public func symbolicLinkMetadata(path: Path) -> Result[Metadata, IoError] {
 
 internal func readMetadata(path: Path, follow: Bool) -> Result[Metadata, IoError] {
     let out = unsafe malloc(metadataCellCount * 8);
-    let cpath = try path.text.toNativeString();
+    let cpath = try path.toNativePath();
     let r = unsafe native_path_metadata(cpath.raw.asRaw(), if follow { 1 } else { 0 }, out);
     let error = IoError.last();
     cpath.free();

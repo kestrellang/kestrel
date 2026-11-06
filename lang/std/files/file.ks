@@ -45,7 +45,7 @@ public struct File: Readable, Writable, Seekable, not Copyable {
     /// `NotFound` if the file doesn't exist and `options` don't create it,
     /// `AlreadyExists` if `createNew` is set and it does.
     public static func open(path: Path, options: OpenOptions) -> Result[File, IoError] {
-        let cpath = try path.text.toNativeString();
+        let cpath = try path.toNativePath();
         let fd = unsafe native_open(cpath.raw.asRaw(), options.nativeFlags(), Int32(from: options.permissions.mode));
         let error = IoError.last();
         cpath.free();
