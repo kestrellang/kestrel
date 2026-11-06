@@ -24,6 +24,11 @@
 //! ### E460 -- `missing_property_setter` (Error, Correctness)
 //! **Message:** "property '{name}' requires a setter to satisfy protocol '{proto}'"
 //!
+//! ### E405 -- `missing_property_ref_accessor` (Error, Correctness)
+//! **Message:** "property '{name}' must lend a reference (`ref`) to satisfy protocol '{proto}'"
+//! A `{ ref }` / `{ mutating ref }` requirement met by a computed property
+//! without the matching ref accessor (a `get` returns a copy, not the place).
+//!
 //! ### E462 -- `conflicting_associated_type` (Error, Correctness)
 //! **Message:** "conflicting associated type '{name}' inherited by protocol '{proto}'"
 //!
@@ -33,16 +38,16 @@
 //! ### E469 -- `wrong_parameter_convention` (Error, Correctness)
 //! **Message:** "parameter '{param}' of method '{name}' has the wrong convention for protocol '{proto}'"
 //!
-//! ### E642 -- `unsafe_witness_for_safe_requirement` (Error, Correctness)
+//! ### E643 -- `unsafe_witness_for_safe_requirement` (Error, Correctness)
 //! **Message:** "'{name}' is unsafe, but the requirement it satisfies in protocol '{proto}' is not"
 //! Generic code calls the requirement without `unsafe`, so its witness must
 //! not need it. Primary label: the witness (`util::entity_span`).
 //!
-//! ### E643 -- `missing_unsafe_conformance` (Error, Correctness)
+//! ### E644 -- `missing_unsafe_conformance` (Error, Correctness)
 //! **Message:** "'{proto}' is an unsafe protocol; write the conformance as `unsafe {proto}`"
 //! Primary label: the conformance item (its `ConformanceItem` syntax range).
 //!
-//! ### E644 -- `unnecessary_unsafe_conformance` (Warning, Usage)
+//! ### E645 -- `unnecessary_unsafe_conformance` (Warning, Usage)
 //! **Message:** "'{proto}' is not an unsafe protocol; `unsafe` here has no effect"
 //! Primary label: the conformance item.
 
@@ -55,9 +60,9 @@ use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::unsafety::{UnsafetyOf, is_unsafe_protocol};
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, ExtensionTarget, InitEffect, MutatingRead, NodeKind,
-    QualifiedTarget, ReceiverKind, Settable, TypeAnnotation, TypeParams, WhereClause,
-    WhereConstraint,
+    Callable, Computed, ConformanceItem, Conformances, ExtensionTarget, InitEffect,
+    MutatingAccessor, MutatingRead, NodeKind, QualifiedTarget, ReceiverKind, Settable,
+    TypeAnnotation, TypeParams, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
@@ -149,19 +154,25 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "E642",
-        name: "unsafe_witness_for_safe_requirement",
+        id: "E405",
+        name: "missing_property_ref_accessor",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
         id: "E643",
-        name: "missing_unsafe_conformance",
+        name: "unsafe_witness_for_safe_requirement",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
         id: "E644",
+        name: "missing_unsafe_conformance",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E645",
         name: "unnecessary_unsafe_conformance",
         default_severity: Severity::Warning,
         category: Category::Usage,
@@ -576,9 +587,21 @@ fn check_protocol_requirements(
                     if cx.query.has::<MutatingRead>(field_entity) {
                         diags.push(modifying_witness_diag(&name, &proto_name, &decl_span));
                     }
+                    // A missing `mutating ref` is the precise report; E460's
+                    // "needs a setter" would point at the wrong fix.
+                    let ref_diag = missing_ref_accessor_diag(
+                        cx,
+                        child,
+                        field_entity,
+                        &name,
+                        &proto_name,
+                        &decl_span,
+                    );
+                    let missing_ref = ref_diag.is_some();
+                    diags.extend(ref_diag);
                     let proto_needs_set = cx.query.get::<Settable>(child).is_some();
                     let impl_has_set = cx.query.get::<Settable>(field_entity).is_some();
-                    if proto_needs_set && !impl_has_set {
+                    if proto_needs_set && !impl_has_set && !missing_ref {
                         diags.push(AnalyzeDiagnostic {
                             descriptor_id: DESCRIPTORS[6].id,
                             severity: DESCRIPTORS[6].default_severity,
@@ -1846,6 +1869,54 @@ fn resolve_type_entity(
 /// Types are checked separately by `check_method_return_type`; param types
 /// aren't compared here because type-param / Self substitution isn't modeled
 /// by entity equality.
+/// E405 when the protocol property `requirement` requires `ref` / `mutating
+/// ref` and the computed `witness` lacks the matching accessor. A stored
+/// field lends itself in place (witness_lower synthesizes the accessor);
+/// a stored `let` missing `mutating ref` is already E460 (no setter).
+fn missing_ref_accessor_diag(
+    cx: &CompilationContext<'_>,
+    requirement: Entity,
+    witness: Entity,
+    name: &str,
+    proto_name: &str,
+    decl_span: &kestrel_span::Span,
+) -> Option<AnalyzeDiagnostic> {
+    if !cx.query.has::<Computed>(witness) {
+        return None;
+    }
+    let ref_kinds = |e: Entity| -> Vec<bool> {
+        cx.query
+            .children_of(e)
+            .iter()
+            .filter(|&&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::RefAccessor))
+            .map(|&c| cx.query.has::<MutatingAccessor>(c))
+            .collect()
+    };
+    let provided = ref_kinds(witness);
+    let missing = ref_kinds(requirement)
+        .into_iter()
+        .find(|m| !provided.contains(m))?;
+    let accessor = if missing { "mutating ref" } else { "ref" };
+    let descriptor = DESCRIPTORS.iter().find(|d| d.id == "E405")?;
+    Some(AnalyzeDiagnostic {
+        descriptor_id: descriptor.id,
+        severity: descriptor.default_severity,
+        message: format!(
+            "property '{name}' must lend a reference (`{accessor}`) to satisfy protocol \
+             '{proto_name}'"
+        ),
+        labels: vec![DiagLabel {
+            span: decl_span.clone(),
+            message: format!("'{name}' has no `{accessor}` accessor"),
+            is_primary: true,
+        }],
+        notes: vec![format!(
+            "the requirement lends the place itself; declare `{accessor} {{ … }}` or make \
+             '{name}' a stored property"
+        )],
+    })
+}
+
 /// E477 for a property/subscript witness whose read provider is `modifying`.
 fn modifying_witness_diag(
     name: &str,
@@ -2552,7 +2623,7 @@ fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
         .expect("conformance_completeness descriptor")
 }
 
-/// E643 / E644: an unsafe protocol's conformance must say `unsafe P`, and a
+/// E644 / E645: an unsafe protocol's conformance must say `unsafe P`, and a
 /// safe protocol's should not.
 fn check_conformance_unsafety(
     cx: &CompilationContext<'_>,
@@ -2571,13 +2642,13 @@ fn check_conformance_unsafety(
     let proto = util::entity_name(cx.query, protocol);
     let (d, message, label) = if needs_unsafe {
         (
-            descriptor("E643"),
+            descriptor("E644"),
             format!("'{proto}' is an unsafe protocol; write the conformance as `unsafe {proto}`"),
             "conformance to an unsafe protocol",
         )
     } else {
         (
-            descriptor("E644"),
+            descriptor("E645"),
             format!("'{proto}' is not an unsafe protocol; `unsafe` here has no effect"),
             "unnecessary `unsafe`",
         )
@@ -2601,7 +2672,7 @@ fn check_conformance_unsafety(
     });
 }
 
-/// E642: a witness may not need `unsafe` when its requirement doesn't —
+/// E643: a witness may not need `unsafe` when its requirement doesn't —
 /// generic code reaches the witness through the safe requirement.
 fn check_witness_unsafety(
     cx: &CompilationContext<'_>,
@@ -2615,7 +2686,7 @@ fn check_witness_unsafety(
     if !unsafe_of(witness) || unsafe_of(requirement) {
         return;
     }
-    let d = descriptor("E642");
+    let d = descriptor("E643");
     diags.push(AnalyzeDiagnostic {
         descriptor_id: d.id,
         severity: d.default_severity,

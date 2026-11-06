@@ -513,14 +513,14 @@ pub(super) static RULES: &[(K, R)] = &[
     ),
     (
         K::RefClause,
-        R::Seq(&[R::Kind(K::Identifier), R::Kind(K::CodeBlock)]),
+        R::Seq(&[R::Kind(K::Identifier), R::Opt(&R::Kind(K::CodeBlock))]),
     ),
     (
         K::MutatingRefClause,
         R::Seq(&[
             R::Kind(K::Mutating),
             R::Kind(K::Identifier),
-            R::Kind(K::CodeBlock),
+            R::Opt(&R::Kind(K::CodeBlock)),
         ]),
     ),
     (

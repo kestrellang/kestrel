@@ -1,9 +1,9 @@
 // test: diagnostics
 // stdlib: false
 //
-// E643: a conformance to an `unsafe protocol` must be written `unsafe P`,
+// E644: a conformance to an `unsafe protocol` must be written `unsafe P`,
 // since the conformer vouches for the protocol's contract.
-// E644: `unsafe` on a conformance to a safe protocol has no effect.
+// E645: `unsafe` on a conformance to a safe protocol has no effect.
 
 module Test
 

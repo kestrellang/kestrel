@@ -282,7 +282,10 @@ fn build_member_groups(
             if !is_member_kind(kind) {
                 continue;
             }
-            if signature::is_private(world, child) || is_doc_hidden(world, child) {
+            if signature::is_private(world, child)
+                || is_doc_hidden(world, child)
+                || is_sugar_only_witness(world, child)
+            {
                 continue;
             }
             let raw_name = world
@@ -549,6 +552,22 @@ fn is_public_top_level(world: &World, entity: Entity) -> bool {
 
 /// `@doc(.Hidden)`, on the declaration or on the `extend` that declares it.
 /// The declaration stays usable; it is only left off the docs pages.
+/// A type's implementation of a `@sugarOnly` requirement (`Int64.modAssign`):
+/// only its syntax can reach it, so it is left off the type's page. The
+/// requirement itself stays on the protocol's page, since conformers write it.
+fn is_sugar_only_witness(world: &World, entity: Entity) -> bool {
+    let ctx = world.query_context();
+    let mut root = entity;
+    while let Some(parent) = ctx.parent_of(root) {
+        root = parent;
+    }
+    ctx.query(kestrel_name_res::SugarOnlyRequirement {
+        member: entity,
+        root,
+    })
+    .is_some_and(|requirement| requirement != entity)
+}
+
 fn is_doc_hidden(world: &World, entity: Entity) -> bool {
     kestrel_ast_builder::attrs::is_doc_hidden(&world.query_context(), entity)
 }

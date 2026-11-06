@@ -8,7 +8,7 @@ import std.result.(Optional)
 import std.memory.(UnsafeSlice, UnsafeSliceIterator, Pointer)
 import std.iter.(Iterable)
 import std.text.(Formattable, Formatter, FormatOptions, StringBuilder, String)
-import std.collections.(Array)
+import std.collections.(Array, Slice, SliceIndex, SliceClampable)
 
 // ============================================================================
 // SLICE PROTOCOL
@@ -17,10 +17,11 @@ import std.collections.(Array)
 /// Shared read-only protocol for contiguous collections.
 ///
 /// `Sliceable[T]` is the contiguous-collection counterpart to `Str` in
-/// `std.text`: one kernel method (`asSlice`), all read-only logic in a
-/// protocol extension. Both `Array[T]` and `UnsafeSlice[T]` conform, so
-/// generic code constrained to `S: Sliceable[T]` accepts either without
-/// overloading.
+/// `std.text`: one kernel method (`asSlice`), and the index places and all
+/// read-only logic in a protocol extension.
+/// `Array[T]`, `Slice[T]` and `UnsafeSlice[T]` conform, so generic code
+/// constrained to `S: Sliceable[T]` accepts any of them without
+/// overloading, and `s(i)` borrows the element rather than copying it.
 ///
 /// # Examples
 ///
@@ -31,39 +32,24 @@ import std.collections.(Array)
 ///     total
 /// }
 /// sum([1, 2, 3]);              // works with Array
-/// sum([1, 2, 3].asUnsafeSlice());    // works with UnsafeSlice
+/// sum([1, 2, 3](1..<3));       // works with Slice
 /// ```
 public protocol Sliceable[T]: Iterable {
-    /// The elements as a raw `(pointer, count)` view. Only valid until the
-    /// collection next changes, so shared algorithms use it within one
-    /// call and never hand it out.
-    func asUnsafeSlice() -> UnsafeSlice[T]
+    /// The elements as a `Slice`, in place. Every shared algorithm reads
+    /// through it.
+    func asSlice() -> &Slice[T]
+
+    // The index places, lent: generic code over `Sliceable` borrows
+    // elements through these instead of copying. The extension below
+    // gives defaults that forward to `asSlice()`.
+    subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
+    subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] { ref }
+    subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] { ref }
+    subscript(clamped index: Int64)? -> T { ref }
+    subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] { ref }
+    subscript(wrapped index: Int64)? -> T { ref }
 }
 
-// ============================================================================
-// UNIFIED INDEX PROTOCOLS
-// ============================================================================
-
-public protocol SeqIndex[T] {
-    type SeqOutput
-    func readSeq(from slice: UnsafeSlice[T]) -> SeqOutput
-    func readSeqChecked(from slice: UnsafeSlice[T]) -> SeqOutput?
-    func readSeqUnchecked(from slice: UnsafeSlice[T]) -> SeqOutput
-    func writeSeq(to slice: UnsafeSlice[T], with value: SeqOutput)
-    func writeSeqUnchecked(to slice: UnsafeSlice[T], with value: SeqOutput)
-}
-
-public protocol SeqClampable[T] {
-    type SeqClampedOutput
-    func readSeqClamped(from slice: UnsafeSlice[T]) -> SeqClampedOutput
-    func writeSeqClamped(to slice: UnsafeSlice[T], with value: SeqClampedOutput)
-}
-
-public protocol SeqWrappable[T] {
-    type SeqWrappedOutput
-    func readSeqWrapped(from slice: UnsafeSlice[T]) -> SeqWrappedOutput
-    func writeSeqWrapped(to slice: UnsafeSlice[T], with value: SeqWrappedOutput)
-}
 
 /// Resolves any range-like type to a half-open `Range[Int64]` given a
 /// collection length. Used by `removeSubrange` and `replaceSubrange` so
@@ -71,419 +57,6 @@ public protocol SeqWrappable[T] {
 /// `RangeThrough` through a single generic parameter.
 public protocol SeqRange {
     func resolve(count: Int64) -> Range[Int64]
-}
-
-// ============================================================================
-// SeqIndex CONFORMANCES
-// ============================================================================
-
-extend Int64: SeqIndex[T] {
-    type SeqOutput = T
-
-    public func readSeq(from slice: UnsafeSlice[T]) -> T {
-        if self < 0 or self >= slice.count {
-            fatalError("Index out of bounds")
-        }
-        unsafe slice.pointer.offset(by: self).read()
-    }
-
-    public func readSeqChecked(from slice: UnsafeSlice[T]) -> T? {
-        if self >= 0 and self < slice.count {
-            .Some(unsafe slice.pointer.offset(by: self).read())
-        } else {
-            .None
-        }
-    }
-
-    public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> T {
-        unsafe slice.pointer.offset(by: self).read()
-    }
-
-    public func writeSeq(to slice: UnsafeSlice[T], with value: T) {
-        if self < 0 or self >= slice.count {
-            fatalError("Index out of bounds")
-        }
-        unsafe slice.pointer.offset(by: self).assign(value)
-    }
-
-    public func writeSeqUnchecked(to slice: UnsafeSlice[T], with value: T) {
-        unsafe slice.pointer.offset(by: self).assign(value)
-    }
-}
-
-extend Range[Int64]: SeqIndex[T] {
-    type SeqOutput = UnsafeSlice[T]
-
-    public func readSeq(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        let start = self.start;
-        let end = self.end;
-        if start < 0 or end > slice.count or start > end {
-            fatalError("Range out of bounds")
-        }
-        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: end - start)
-    }
-
-    public func readSeqChecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T]? {
-        let start = self.start;
-        let end = self.end;
-        if start >= 0 and end <= slice.count and start <= end {
-            .Some(unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: end - start))
-        } else {
-            .None
-        }
-    }
-
-    public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: self.start), count: self.end - self.start)
-    }
-
-    public func writeSeq(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
-        let start = self.start;
-        let end = self.end;
-        if start < 0 or end > slice.count or start > end {
-            fatalError("Range out of bounds")
-        }
-        let rangeLen = end - start;
-        if value.count != rangeLen {
-            fatalError("Slice length doesn't match range length")
-        }
-        var i = 0;
-        while i < rangeLen {
-            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
-            i = i + 1;
-        }
-    }
-
-    public func writeSeqUnchecked(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
-        let start = self.start;
-        let rangeLen = self.end - start;
-        if value.count != rangeLen {
-            fatalError("Slice length doesn't match range length")
-        }
-        var i = 0;
-        while i < rangeLen {
-            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
-            i = i + 1;
-        }
-    }
-}
-
-extend ClosedRange[Int64]: SeqIndex[T] {
-    type SeqOutput = UnsafeSlice[T]
-
-    public func readSeq(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        let start = self.start;
-        let endExclusive = self.end + 1;
-        if start < 0 or endExclusive > slice.count or start > endExclusive {
-            fatalError("Range out of bounds")
-        }
-        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
-    }
-
-    public func readSeqChecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T]? {
-        let start = self.start;
-        let endExclusive = self.end + 1;
-        if start >= 0 and endExclusive <= slice.count and start <= endExclusive {
-            .Some(unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start))
-        } else {
-            .None
-        }
-    }
-
-    public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        let start = self.start;
-        let endExclusive = self.end + 1;
-        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: endExclusive - start)
-    }
-
-    public func writeSeq(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
-        let start = self.start;
-        let endExclusive = self.end + 1;
-        if start < 0 or endExclusive > slice.count or start > endExclusive {
-            fatalError("Range out of bounds")
-        }
-        let rangeLen = endExclusive - start;
-        if value.count != rangeLen {
-            fatalError("Slice length doesn't match range length")
-        }
-        var i = 0;
-        while i < rangeLen {
-            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
-            i = i + 1;
-        }
-    }
-
-    public func writeSeqUnchecked(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
-        let start = self.start;
-        let rangeLen = self.end + 1 - start;
-        if value.count != rangeLen {
-            fatalError("Slice length doesn't match range length")
-        }
-        var i = 0;
-        while i < rangeLen {
-            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
-            i = i + 1;
-        }
-    }
-}
-
-// Partial range: start.. — slice from start to end of collection
-extend RangeFrom[Int64]: SeqIndex[T] {
-    type SeqOutput = UnsafeSlice[T]
-
-    public func readSeq(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        let start = self.start;
-        let len = slice.count;
-        if start < 0 or start > len {
-            fatalError("Index out of bounds")
-        }
-        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: len - start)
-    }
-
-    public func readSeqChecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T]? {
-        let start = self.start;
-        let len = slice.count;
-        if start >= 0 and start <= len {
-            .Some(unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: len - start))
-        } else {
-            .None
-        }
-    }
-
-    public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        let start = self.start;
-        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: slice.count - start)
-    }
-
-    public func writeSeq(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
-        let start = self.start;
-        let len = slice.count;
-        if start < 0 or start > len {
-            fatalError("Index out of bounds")
-        }
-        let rangeLen = len - start;
-        if value.count != rangeLen {
-            fatalError("Slice length doesn't match range length")
-        }
-        var i = 0;
-        while i < rangeLen {
-            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
-            i = i + 1;
-        }
-    }
-
-    public func writeSeqUnchecked(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
-        let start = self.start;
-        let rangeLen = slice.count - start;
-        if value.count != rangeLen {
-            fatalError("Slice length doesn't match range length")
-        }
-        var i = 0;
-        while i < rangeLen {
-            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
-            i = i + 1;
-        }
-    }
-}
-
-// Partial range: ..<end — slice from beginning up to (exclusive) end
-extend RangeUpTo[Int64]: SeqIndex[T] {
-    type SeqOutput = UnsafeSlice[T]
-
-    public func readSeq(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        let end = self.end;
-        if end < 0 or end > slice.count {
-            fatalError("Index out of bounds")
-        }
-        unsafe UnsafeSlice(pointer: slice.pointer, count: end)
-    }
-
-    public func readSeqChecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T]? {
-        let end = self.end;
-        if end >= 0 and end <= slice.count {
-            .Some(unsafe UnsafeSlice(pointer: slice.pointer, count: end))
-        } else {
-            .None
-        }
-    }
-
-    public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        unsafe UnsafeSlice(pointer: slice.pointer, count: self.end)
-    }
-
-    public func writeSeq(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
-        let end = self.end;
-        if end < 0 or end > slice.count {
-            fatalError("Index out of bounds")
-        }
-        if value.count != end {
-            fatalError("Slice length doesn't match range length")
-        }
-        var i = 0;
-        while i < end {
-            unsafe slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
-            i = i + 1;
-        }
-    }
-
-    public func writeSeqUnchecked(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
-        let end = self.end;
-        if value.count != end {
-            fatalError("Slice length doesn't match range length")
-        }
-        var i = 0;
-        while i < end {
-            unsafe slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
-            i = i + 1;
-        }
-    }
-}
-
-// Partial range: ..=end — slice from beginning through (inclusive) end
-extend RangeThrough[Int64]: SeqIndex[T] {
-    type SeqOutput = UnsafeSlice[T]
-
-    public func readSeq(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        let endExclusive = self.end + 1;
-        if endExclusive < 0 or endExclusive > slice.count {
-            fatalError("Index out of bounds")
-        }
-        unsafe UnsafeSlice(pointer: slice.pointer, count: endExclusive)
-    }
-
-    public func readSeqChecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T]? {
-        let endExclusive = self.end + 1;
-        if endExclusive >= 0 and endExclusive <= slice.count {
-            .Some(unsafe UnsafeSlice(pointer: slice.pointer, count: endExclusive))
-        } else {
-            .None
-        }
-    }
-
-    public func readSeqUnchecked(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        unsafe UnsafeSlice(pointer: slice.pointer, count: self.end + 1)
-    }
-
-    public func writeSeq(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
-        let endExclusive = self.end + 1;
-        if endExclusive < 0 or endExclusive > slice.count {
-            fatalError("Index out of bounds")
-        }
-        if value.count != endExclusive {
-            fatalError("Slice length doesn't match range length")
-        }
-        var i = 0;
-        while i < endExclusive {
-            unsafe slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
-            i = i + 1;
-        }
-    }
-
-    public func writeSeqUnchecked(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
-        let endExclusive = self.end + 1;
-        if value.count != endExclusive {
-            fatalError("Slice length doesn't match range length")
-        }
-        var i = 0;
-        while i < endExclusive {
-            unsafe slice.pointer.offset(by: i).assign(value.pointer.offset(by: i).read());
-            i = i + 1;
-        }
-    }
-}
-
-// ============================================================================
-// SeqClampable CONFORMANCES
-// ============================================================================
-
-extend Int64: SeqClampable[T] {
-    type SeqClampedOutput = T?
-
-    public func readSeqClamped(from slice: UnsafeSlice[T]) -> T? {
-        let len = slice.count;
-        if len == 0 {
-            return .None
-        }
-        var idx = self;
-        if idx < 0 { idx = 0 }
-        if idx >= len { idx = len - 1 }
-        .Some(unsafe slice.pointer.offset(by: idx).read())
-    }
-
-    public func writeSeqClamped(to slice: UnsafeSlice[T], with value: T?) {
-        if let .Some(v) = value {
-            let len = slice.count;
-            if len == 0 {
-                return
-            }
-            var idx = self;
-            if idx < 0 { idx = 0 }
-            if idx >= len { idx = len - 1 }
-            unsafe slice.pointer.offset(by: idx).assign(v)
-        }
-    }
-}
-
-extend Range[Int64]: SeqClampable[T] {
-    type SeqClampedOutput = UnsafeSlice[T]
-
-    public func readSeqClamped(from slice: UnsafeSlice[T]) -> UnsafeSlice[T] {
-        let len = slice.count;
-        var start = self.start;
-        var end = self.end;
-        if start < 0 { start = 0 }
-        if end > len { end = len }
-        if start > end { start = end }
-        unsafe UnsafeSlice(pointer: slice.pointer.offset(by: start), count: end - start)
-    }
-
-    public func writeSeqClamped(to slice: UnsafeSlice[T], with value: UnsafeSlice[T]) {
-        let len = slice.count;
-        var start = self.start;
-        var end = self.end;
-        if start < 0 { start = 0 }
-        if end > len { end = len }
-        if start > end { start = end }
-        let rangeLen = end - start;
-        if value.count != rangeLen {
-            fatalError("Slice length doesn't match clamped range length")
-        }
-        var i = 0;
-        while i < rangeLen {
-            unsafe slice.pointer.offset(by: start + i).assign(value.pointer.offset(by: i).read());
-            i = i + 1;
-        }
-    }
-}
-
-// ============================================================================
-// SeqWrappable CONFORMANCES
-// ============================================================================
-
-extend Int64: SeqWrappable[T] {
-    type SeqWrappedOutput = T?
-
-    public func readSeqWrapped(from slice: UnsafeSlice[T]) -> T? {
-        let len = slice.count;
-        if len == 0 {
-            return .None
-        }
-        var idx = self % len;
-        if idx < 0 { idx = idx + len }
-        .Some(unsafe slice.pointer.offset(by: idx).read())
-    }
-
-    public func writeSeqWrapped(to slice: UnsafeSlice[T], with value: T?) {
-        if let .Some(v) = value {
-            let len = slice.count;
-            if len == 0 {
-                return
-            }
-            var idx = self % len;
-            if idx < 0 { idx = idx + len }
-            unsafe slice.pointer.offset(by: idx).assign(v)
-        }
-    }
 }
 
 // ============================================================================
@@ -522,50 +95,81 @@ extend RangeThrough[Int64]: SeqRange {
 // UNIFIED SUBSCRIPTS
 // ============================================================================
 
-// Read-only here. `Array`, `Slice` and `UnsafeSlice` declare their own
-// subscripts (in-place places for `Array` and `Slice`), which take precedence.
+// Default index places: each lends through `asSlice()`. `Array`, `Slice`
+// and `UnsafeSlice` declare their own, which also write in place.
 extend Sliceable[T] {
-    public subscript[I](index: I) -> I.SeqOutput where I: SeqIndex[T] {
-        get { index.readSeq(from: self.asUnsafeSlice()) }
+    public subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lend(index, self.asSlice()) }
     }
 
-    public subscript[I](checked index: I) -> I.SeqOutput? where I: SeqIndex[T] {
-        get { index.readSeqChecked(from: self.asUnsafeSlice()) }
+    public subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendChecked(index, self.asSlice()) }
     }
 
-    public subscript[I](unchecked index: I) -> I.SeqOutput where I: SeqIndex[T] {
-        get { index.readSeqUnchecked(from: self.asUnsafeSlice()) }
+    public subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendUnchecked(index, self.asSlice()) }
     }
 
-    public subscript[I](clamped index: I) -> I.SeqClampedOutput where I: SeqClampable[T] {
-        get { index.readSeqClamped(from: self.asUnsafeSlice()) }
+    public subscript(clamped index: Int64)? -> T {
+        ref { self.asSlice().lendClamped(index) }
     }
 
-    public subscript[I](wrapped index: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] {
-        get { index.readSeqWrapped(from: self.asUnsafeSlice()) }
+    public subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] {
+        ref { R.lendWithin(range, self.asSlice()) }
+    }
+
+    public subscript(wrapped index: Int64)? -> T {
+        ref { self.asSlice().lendWrapped(index) }
+    }
+
+    /// The elements as a raw `(pointer, count)` view, for algorithms that
+    /// walk the buffer directly. Only valid until the collection next
+    /// changes, so never hand it out.
+    public func asUnsafeSlice() -> UnsafeSlice[T] {
+        self.asSlice().asUnsafeSlice()
     }
 }
 
-// Writable raw slices: writes go straight through the pointer.
+// Raw slices write straight through the pointer.
 extend UnsafeSlice[T] {
-    public subscript[I](index: I) -> I.SeqOutput where I: SeqIndex[T] {
-        get { index.readSeq(from: self) }
-        set { index.writeSeq(to: self, with: newValue) }
+    /// The elements as a `Slice`, in place.
+    public func asSlice() -> &Slice[T] {
+        Slice.lend(start: self.pointer, count: self.count)
     }
 
-    public subscript[I](unchecked index: I) -> I.SeqOutput where I: SeqIndex[T] {
-        get { index.readSeqUnchecked(from: self) }
-        set { index.writeSeqUnchecked(to: self, with: newValue) }
+    /// Like `asSlice()`, for writing through.
+    public mutating func asMutableSlice() -> &mutating Slice[T] {
+        Slice.lendMutating(start: self.pointer, count: self.count)
     }
 
-    public subscript[I](clamped index: I) -> I.SeqClampedOutput where I: SeqClampable[T] {
-        get { index.readSeqClamped(from: self) }
-        set { index.writeSeqClamped(to: self, with: newValue) }
+    public subscript[I](index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lend(index, self.asSlice()) }
+        mutating ref { I.lendMutating(index, self.asMutableSlice()) }
     }
 
-    public subscript[I](wrapped index: I) -> I.SeqWrappedOutput where I: SeqWrappable[T] {
-        get { index.readSeqWrapped(from: self) }
-        set { index.writeSeqWrapped(to: self, with: newValue) }
+    public subscript[I](checked index: I)? -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendChecked(index, self.asSlice()) }
+        mutating ref { I.lendMutatingChecked(index, self.asMutableSlice()) }
+    }
+
+    public subscript[I](unchecked index: I) -> I.SliceOutput where I: SliceIndex[T] {
+        ref { I.lendUnchecked(index, self.asSlice()) }
+        mutating ref { I.lendMutatingUnchecked(index, self.asMutableSlice()) }
+    }
+
+    public subscript(clamped index: Int64)? -> T {
+        ref { self.asSlice().lendClamped(index) }
+        mutating ref { self.asMutableSlice().lendMutatingClamped(index) }
+    }
+
+    public subscript[R](within range: R) -> Slice[T] where R: SliceClampable[T] {
+        ref { R.lendWithin(range, self.asSlice()) }
+        mutating ref { R.lendMutatingWithin(range, self.asMutableSlice()) }
+    }
+
+    public subscript(wrapped index: Int64)? -> T {
+        ref { self.asSlice().lendWrapped(index) }
+        mutating ref { self.asMutableSlice().lendMutatingWrapped(index) }
     }
 }
 
@@ -608,7 +212,8 @@ extend Sliceable[T] {
 
     // -- Element access ------------------------------------------------------
 
-    /// First element, or `.None` for an empty collection. O(1).
+    /// Lends the first element in place, or `.None` for an empty collection.
+    /// O(1). A binding (`let f = xs.first()`) copies it out.
     ///
     /// Read-only — to remove the first element from an `Array`, use
     /// `popFirst()`.
@@ -619,16 +224,14 @@ extend Sliceable[T] {
     /// [1, 2, 3].first();  // Some(1)
     /// [].first();          // None
     /// ```
-    public func first() -> T? {
+    public func first() -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        if s.count > 0 {
-            .Some(unsafe s.pointer.read())
-        } else {
-            .None
-        }
+        if s.count == 0 { return .None; }
+        .Some(unsafe s.pointer.value)
     }
 
-    /// Last element, or `.None` for an empty collection. O(1).
+    /// Lends the last element in place, or `.None` for an empty collection.
+    /// O(1).
     ///
     /// Read-only — to remove the last element from an `Array`, use
     /// `pop()`.
@@ -639,13 +242,10 @@ extend Sliceable[T] {
     /// [1, 2, 3].last();  // Some(3)
     /// [].last();          // None
     /// ```
-    public func last() -> T? {
+    public func last() -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        if s.count > 0 {
-            .Some(unsafe s.pointer.offset(by: s.count - 1).read())
-        } else {
-            .None
-        }
+        if s.count == 0 { return .None; }
+        .Some(unsafe s.pointer.offset(by: s.count - 1).value)
     }
 
     /// A uniformly random element drawn from `rng`, or `.None` for an
@@ -854,43 +454,36 @@ extend Sliceable[T] {
         .None
     }
 
-    /// First element matching `predicate`, or `None`. O(n).
+    /// Lends the first element matching `predicate`, or `None`. O(n).
     ///
     /// # Examples
     ///
     /// ```
     /// [1, 2, 3, 4, 5].first(where: { it > 3 });  // Some(4)
     /// ```
-    public func first(where predicate: (T) -> Bool) -> T? {
+    public func first(where predicate: (T) -> Bool) -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        let myPtr = s.pointer;
         for i in 0..<s.count {
-            let elem = unsafe myPtr.offset(by: i).read();
-            if predicate(elem) {
-                return .Some(elem)
+            if predicate(unsafe s.pointer.offset(by: i).value) {
+                return .Some(unsafe s.pointer.offset(by: i).value)
             }
         }
         .None
     }
 
-    /// Last element matching `predicate`, or `None`. O(n).
+    /// Lends the last element matching `predicate`, or `None`. O(n).
     ///
     /// # Examples
     ///
     /// ```
     /// [1, 2, 3, 2, 1].last(where: { it > 1 });  // Some(2)
     /// ```
-    public func last(where predicate: (T) -> Bool) -> T? {
+    public func last(where predicate: (T) -> Bool) -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        if s.count == 0 {
-            return .None
-        }
-        let myPtr = s.pointer;
         var i = s.count - 1;
         while i >= 0 {
-            let elem = unsafe myPtr.offset(by: i).read();
-            if predicate(elem) {
-                return .Some(elem)
+            if predicate(unsafe s.pointer.offset(by: i).value) {
+                return .Some(unsafe s.pointer.offset(by: i).value)
             }
             i = i - 1
         }
@@ -1072,7 +665,7 @@ extend Sliceable[T] where T: Equatable {
             return false
         }
         for i in 0..<a.count {
-            if unsafe a.pointer.offset(by: i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
+            if unsafe a.pointer.offset(by: i).read().isEqual(to: unsafe b.pointer.offset(by: i).read()) == false {
                 return false
             }
         }
@@ -1141,7 +734,7 @@ extend Sliceable[T] where T: Equatable {
             return false
         }
         for i in 0..<b.count {
-            if unsafe a.pointer.offset(by: i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
+            if unsafe a.pointer.offset(by: i).read().isEqual(to: unsafe b.pointer.offset(by: i).read()) == false {
                 return false
             }
         }
@@ -1166,7 +759,7 @@ extend Sliceable[T] where T: Equatable {
         }
         let offset = a.count - b.count;
         for i in 0..<b.count {
-            if unsafe a.pointer.offset(by: offset + i).read().isEqual(to: b.pointer.offset(by: i).read()) == false {
+            if unsafe a.pointer.offset(by: offset + i).read().isEqual(to: unsafe b.pointer.offset(by: i).read()) == false {
                 return false
             }
         }
@@ -1179,7 +772,7 @@ extend Sliceable[T] where T: Equatable {
 // ============================================================================
 
 extend Sliceable[T] where T: Comparable {
-    /// Smallest element, or `None` if empty. O(n).
+    /// Lends the smallest element, or `None` if empty. O(n).
     ///
     /// Ties go to the first occurrence.
     ///
@@ -1189,23 +782,18 @@ extend Sliceable[T] where T: Comparable {
     /// [3, 1, 4].min();  // Some(1)
     /// [].min();          // None
     /// ```
-    public func min() -> T? {
+    public func min() -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        if s.count == 0 {
-            return .None
-        }
-        let myPtr = s.pointer;
-        var result = unsafe myPtr.read();
+        if s.count == 0 { return .None; }
+        // Track the winner's index so nothing is copied.
+        var best = 0;
         for i in 1..<s.count {
-            let elem = unsafe myPtr.offset(by: i).read();
-            if elem < result {
-                result = elem
-            }
+            if unsafe s.pointer.offset(by: i).value < unsafe s.pointer.offset(by: best).value { best = i; }
         }
-        .Some(result)
+        .Some(unsafe s.pointer.offset(by: best).value)
     }
 
-    /// Largest element, or `None` if empty. O(n).
+    /// Lends the largest element, or `None` if empty. O(n).
     ///
     /// Ties go to the first occurrence.
     ///
@@ -1215,20 +803,14 @@ extend Sliceable[T] where T: Comparable {
     /// [3, 1, 4].max();  // Some(4)
     /// [].max();          // None
     /// ```
-    public func max() -> T? {
+    public func max() -> Optional[&T] {
         let s = self.asUnsafeSlice();
-        if s.count == 0 {
-            return .None
-        }
-        let myPtr = s.pointer;
-        var result = unsafe myPtr.read();
+        if s.count == 0 { return .None; }
+        var best = 0;
         for i in 1..<s.count {
-            let elem = unsafe myPtr.offset(by: i).read();
-            if elem > result {
-                result = elem
-            }
+            if unsafe s.pointer.offset(by: i).value > unsafe s.pointer.offset(by: best).value { best = i; }
         }
-        .Some(result)
+        .Some(unsafe s.pointer.offset(by: best).value)
     }
 
     /// `true` if elements are in non-decreasing order. O(n).

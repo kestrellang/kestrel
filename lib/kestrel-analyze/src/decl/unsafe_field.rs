@@ -8,7 +8,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### E645 -- `unsafe_stored_field` (Error, Correctness)
+//! ### E646 -- `unsafe_stored_field` (Error, Correctness)
 //! **Message:** "only a computed property can be `unsafe`"
 //!
 //! **Labels:**
@@ -26,7 +26,7 @@ use crate::util;
 use kestrel_ast_builder::{FieldBacking, FieldClass, IsUnsafe, NodeKind};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "E645",
+    id: "E646",
     name: "unsafe_stored_field",
     default_severity: Severity::Error,
     category: Category::Correctness,

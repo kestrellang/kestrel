@@ -291,8 +291,8 @@ fn check_target(
         // In an initializer, self.field assignments are always allowed.
         HirExpr::Field { base, name, .. } => {
             // Indirection write peel through a READ-ONLY wrapper: the field is
-            // reached via `pointeeRef()` (a `&T` place) because the wrapper is
-            // `Indirection` but not `MutableIndirection` — no `pointeeMutRef()`.
+            // reached via `value`'s `ref` (a `&T` place) because the wrapper is
+            // `Indirection` but not `MutableIndirection` — no `mutating ref`.
             // Same class as E208: a `&T` place can't be written. (D2)
             if cx
                 .typed

@@ -37,7 +37,7 @@ public protocol ExistentialBox: Indirection {
 /// storage; dropping the last handle destroys the payload exactly once.
 /// Most of the contract is inherited rather than invented — sharing is
 /// `Cloneable.clone()`, releasing is the conformer's own `deinit`, and reading
-/// the payload is `MutableIndirection.pointeeRef()` (which also supplies
+/// the payload is `MutableIndirection.value` (which also supplies
 /// transparent member access, so `box.field` reaches the payload's field).
 /// Only creation, shared mutation, identity and uniqueness are new.
 ///
@@ -56,7 +56,7 @@ public protocol ExistentialBox: Indirection {
 ///     let box: B = B(value);          // init(consuming value: Target)
 ///     let alias = box.clone();        // shares the managed storage
 ///     box.isIdentical(to: alias);     // true — one storage, two handles
-///     alias.pointeeRef()              // read the payload through the peel
+///     alias.value                     // read the payload in place
 /// }
 /// ```
 ///

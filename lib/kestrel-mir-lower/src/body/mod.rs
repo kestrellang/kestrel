@@ -2191,6 +2191,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .collect()
     }
 
+    /// The single-use expression refs (`ref_results`, not named bindings)
+    /// tracked in scope right now, in creation order.
+    pub(crate) fn tracked_expr_refs(&self) -> Vec<ValueId> {
+        self.scope_stack
+            .iter()
+            .flat_map(|s| s.entries.iter())
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(v)
+                    if self.ref_results.contains(v) && !self.ref_binding_vals.contains_key(v) =>
+                {
+                    Some(*v)
+                },
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn snapshot_scope(&self) -> ScopeSnapshot {
         ScopeSnapshot {
             scopes: self.scope_stack.iter().map(|s| s.entries.clone()).collect(),
@@ -4461,23 +4478,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if let Some(accessor) = self.ctx.find_ref_accessor_child(member, true) {
             self.ctx.register_name(accessor);
             let mut call_args: Vec<CallArg> = Vec::new();
-            let type_args = if is_static {
+            let callee = if is_static {
                 let AccessorReceiver::Expr(receiver_expr) = receiver else {
                     return None;
                 };
                 let self_type = self.type_from_type_ref(receiver_expr);
-                self.prepend_receiver_type_args(self_type, vec![])
+                self.place_accessor_callee(accessor, self_type, vec![])
             } else {
                 let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(&receiver)?;
                 let ta = self.resolve_type_args(expr_id);
                 call_args.push(recv_arg);
-                self.prepend_receiver_type_args(receiver_ty, ta)
+                self.place_accessor_callee(accessor, receiver_ty, ta)
             };
             for a in &index_args {
                 let v = self.lower_expr(a.value);
                 call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }
-            let callee = Callee::direct_with_args(accessor, type_args, None);
             let ref_val = self.emit_call_returning(callee, call_args, pointee_ty);
             return Some(CallArg {
                 value: ref_val,
@@ -4793,20 +4809,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .ctx
             .find_ref_accessor_child(member, false)
             .unwrap_or(member);
-        if let Some(protocol) = self.ctx.is_protocol_method(read_callee) {
-            self.ctx.register_name(protocol);
-            let key = self.ctx.witness_method_key(read_callee);
-            let callee = Callee::Witness {
-                protocol,
-                method: key,
-                self_type: receiver_ty,
-                method_type_args: type_args.to_vec(),
-            };
-            return self.emit_call_returning(callee, args, result_ty);
-        }
         self.ctx.register_name(read_callee);
-        let ta = self.prepend_receiver_type_args(receiver_ty, type_args.to_vec());
-        let callee = Callee::direct_with_args(read_callee, ta, None);
+        let callee = self.place_accessor_callee(read_callee, receiver_ty, type_args.to_vec());
         self.emit_call_returning(callee, args, result_ty)
     }
 
@@ -5013,6 +5017,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     ) -> (CallArg, TyId) {
         let declared = crate::ty::resolve_type_annotation(self.ctx, prop);
         let prop_ty = self.subst_receiver_args(receiver_ty, declared);
+        // A place property (`var item: T { ref … mutating ref … }`) lends
+        // through its accessor child: the `mutating ref` for a mutable use,
+        // else the `ref`. The caller prepares `receiver` with that
+        // accessor's receiver convention.
+        let mutating = convention == ParamConvention::MutBorrow;
+        if let Some(accessor) = self.ctx.find_ref_accessor_child(prop, mutating) {
+            self.ctx.register_name(accessor);
+            let callee = self.place_accessor_callee(accessor, receiver_ty, vec![]);
+            let value = self.emit_call_returning(callee, vec![receiver], prop_ty);
+            return (CallArg { value, convention }, prop_ty);
+        }
         self.ctx.register_name(prop);
         let type_args = self.prepend_receiver_type_args(receiver_ty, vec![]);
         let callee = Callee::direct_with_args(prop, type_args, None);
@@ -5482,6 +5497,51 @@ pub(crate) fn synthesize_instance_var_getter(
     bctx.emit_ret(result);
     let body = bctx.body;
     if let Some(f) = ctx.module.functions.get_mut(&getter_entity) {
+        f.body = Some(body);
+    }
+}
+
+/// Synthesize the MIR body of a ref accessor for a stored INSTANCE var
+/// witnessing a protocol `var { ref [mutating ref] }` requirement: it lends
+/// `self.field` in place, the body a written `ref { self.field }` lowers to
+/// (a view of the borrowed `self`; for `mutating ref`, a borrow of the field
+/// address of the mutably borrowed `self`). The FunctionDef must already
+/// exist with the `self` param at `ValueId(0)` and a `&T` / `&mutating T`
+/// return type.
+pub(crate) fn synthesize_instance_var_ref(
+    ctx: &mut LowerCtx,
+    accessor: Entity,
+    self_ty: TyId,
+    field_idx: FieldIdx,
+    field_ty: TyId,
+    mutating: bool,
+) {
+    let empty = HirBody::empty();
+    let captures = Arc::new(ClosureCaptureMap::default());
+    let mut bctx = OssaBodyCtx::new(ctx, &empty, None, captures, accessor, false);
+    let entry = bctx.new_block();
+    bctx.body.entry = entry;
+    bctx.current_block = Some(entry);
+    bctx.push_scope();
+    bctx.body.param_count = 1;
+    let self_val = bctx.body.alloc_value(ValueDef {
+        ty: self_ty,
+        ownership: Ownership::Guaranteed,
+        borrow_source: None,
+        root: RootProvenance::Param(0),
+        span: None,
+    });
+    let result = if mutating {
+        let field_addr = bctx.emit_field_addr(self_val, self_ty, field_idx);
+        let borrow = bctx.emit_begin_borrow_addr(field_addr, field_ty);
+        bctx.emit_destroy_value(field_addr);
+        borrow
+    } else {
+        bctx.emit_struct_extract(self_val, field_idx, field_ty)
+    };
+    bctx.emit_ret(result);
+    let body = bctx.body;
+    if let Some(f) = ctx.module.functions.get_mut(&accessor) {
         f.body = Some(body);
     }
 }
