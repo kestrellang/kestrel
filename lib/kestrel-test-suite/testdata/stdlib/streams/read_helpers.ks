@@ -2,7 +2,6 @@
 // stdlib: true
 
 // `readByte`, `readAll`, `readExact` and `readText` on any `Readable`.
-// Replaces std.io's io_read_helpers.
 
 module Test
 

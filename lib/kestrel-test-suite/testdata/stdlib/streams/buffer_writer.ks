@@ -1,8 +1,7 @@
 // test: execution
 // stdlib: true
 
-// `Buffer` collects written bytes in memory. Replaces std.io's
-// io_buffer_writer test.
+// `Buffer` collects written bytes in memory.
 
 module Test
 

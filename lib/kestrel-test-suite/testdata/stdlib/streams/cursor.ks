@@ -1,8 +1,7 @@
 // test: execution
 // stdlib: true
 
-// `Cursor` reads from bytes in memory and seeks within them. Replaces
-// std.io's io_cursor test.
+// `Cursor` reads from bytes in memory and seeks within them.
 
 module Test
 

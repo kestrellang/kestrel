@@ -2,7 +2,7 @@
 // stdlib: true
 // backends: cranelift,llvm
 
-// F40 regression against the shipped stdlib shape, moved from std.io.
+// F40 regression against the shipped stdlib shape.
 //
 // `IoError` is a struct of an `IoErrorKind` enum and an `Int32` code.
 // Cranelift once collapsed a small aggregate to `Scalar(I64)`, so an

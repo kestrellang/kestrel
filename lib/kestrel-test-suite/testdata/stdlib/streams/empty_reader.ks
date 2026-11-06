@@ -1,7 +1,7 @@
 // test: execution
 // stdlib: true
 
-// `Empty` is always at end of stream. Replaces std.io's io_empty_reader.
+// `Empty` is always at end of stream.
 
 module Test
 

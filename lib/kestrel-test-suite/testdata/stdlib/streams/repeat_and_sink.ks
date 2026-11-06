@@ -2,7 +2,6 @@
 // stdlib: true
 
 // `Repeat` fills any buffer with one byte; `Sink` takes everything.
-// Replaces std.io's io_repeat_reader and io_sink_writer.
 
 module Test
 

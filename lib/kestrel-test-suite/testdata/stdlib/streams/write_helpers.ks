@@ -2,7 +2,7 @@
 // stdlib: true
 
 // `write(byte:)`, `write(text:)`, `write(line:)`, `write(formatted:)` and
-// `writeAll` on any `Writable`. Replaces std.io's io_write_helpers.
+// `writeAll` on any `Writable`.
 
 module Test
 

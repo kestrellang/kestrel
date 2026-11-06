@@ -5,7 +5,7 @@
 // `Readable.read(into:)` takes a `mutating Slice[UInt8]`: a reader can
 // only write the elements the caller handed it, never past them, and a
 // write never reaches storage another array shares (the raw view runs the
-// copy-on-write check first). Moved from std.io.
+// copy-on-write check first).
 
 module Test
 

@@ -2,7 +2,7 @@
 // stdlib: true
 
 // `IoError`: kinds from errno, the static constructors, descriptions and
-// formatting. Replaces std.io's io_error_types and io_error_formattable.
+// formatting.
 
 module Test
 
