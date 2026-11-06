@@ -279,6 +279,16 @@ pub(super) fn solve_assign_target(
     expr: kestrel_hir::body::HirExprId,
     span: Span,
 ) -> SolveResult {
+    // A failable place read lends `Optional[&T]` and can't be assigned
+    // (the analyzer's E214). Check the value against the copied-out
+    // `Optional[T]` instead, so `d(k) = 3` / `= null` still type the value
+    // without a cascading `&T` mismatch.
+    if ctx.place_assign_values.contains(&expr)
+        && let Some((optional, pointee)) = lent_optional_payload(ctx, target)
+    {
+        let decayed = ctx.enum_ty(optional, vec![pointee]);
+        return solve_coerce(ctx, value, decayed, expr, span);
+    }
     match ctx.slot(ctx.resolve(target)) {
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
             let pointee = *pointee;
@@ -425,6 +435,17 @@ pub(super) fn solve_coerce(
             let decayed = ctx.named(optional, vec![pointee]);
             return solve_coerce(ctx, decayed, to, expr, span);
         }
+    }
+
+    // 1c. Anywhere else, an `Optional[&T]` coerced into a known
+    //     `Optional[U]` with a non-ref `U` (`get { self.d(key) }` returning
+    //     `Int64?`) is a copy-out too.
+    if let Some((optional, pointee)) = optional_ref_pointee(ctx, fr)
+        && optional_value_payload(ctx, tr)
+    {
+        ctx.optional_ref_decays.insert(expr);
+        let decayed = ctx.named(optional, vec![pointee]);
+        return solve_coerce(ctx, decayed, to, expr, span);
     }
 
     // 2. `from` is a ref, `to` is not — copy-out DECAY (binding decay,
@@ -861,6 +882,21 @@ pub(super) fn reconcile_closure_conventions(
 /// Shared `Optional[&T]` → the `Optional` entity and `T`. `None` for any other
 /// type (an `Optional[&mutating T]`, or an `Optional` whose payload is not yet
 /// known).
+/// Is `tv` an `Optional` whose payload is resolved and not a reference?
+fn optional_value_payload(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    let Some(optional) = ctx.resolver.builtin(Builtin::OptionalEnum) else {
+        return false;
+    };
+    let (TySlot::Resolved(TyKind::Enum { entity, args })
+    | TySlot::Resolved(TyKind::Struct { entity, args })) = ctx.slot(ctx.resolve(tv))
+    else {
+        return false;
+    };
+    *entity == optional
+        && args.len() == 1
+        && matches!(ctx.slot(ctx.resolve(args[0])), TySlot::Resolved(k) if !matches!(k, TyKind::Ref { .. }))
+}
+
 /// A position where a lent `Optional[&T]` decays to `Optional[T]` (unless
 /// the target itself is `Optional[&T]`): a binding initializer, a call
 /// argument (`print("\(xs.first())")`), or a method receiver
@@ -873,6 +909,24 @@ pub(crate) fn optional_ref_decay_site(
     ctx.binding_init_exprs.contains(&expr)
         || ctx.call_arg_exprs.contains(&expr)
         || ctx.method_receiver_exprs.contains(&expr)
+}
+
+/// `tv` as `Optional[&T]` or `Optional[&mutating T]` (a lent failable
+/// read): the Optional entity and `T`.
+fn lent_optional_payload(ctx: &InferCtx<'_>, tv: TyVar) -> Option<(Entity, TyVar)> {
+    let optional = ctx.resolver.builtin(Builtin::OptionalEnum)?;
+    let TySlot::Resolved(TyKind::Enum { entity, args } | TyKind::Struct { entity, args }) =
+        ctx.slot(ctx.resolve(tv))
+    else {
+        return None;
+    };
+    if *entity != optional || args.len() != 1 {
+        return None;
+    }
+    let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(ctx.resolve(args[0])) else {
+        return None;
+    };
+    Some((optional, *pointee))
 }
 
 pub(crate) fn optional_ref_pointee(ctx: &InferCtx<'_>, tv: TyVar) -> Option<(Entity, TyVar)> {

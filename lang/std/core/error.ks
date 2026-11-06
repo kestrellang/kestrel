@@ -50,6 +50,7 @@ public protocol Tryable {
     type Residual
 
     /// Splits `self` into the success value or the early-return residual.
+    @sugarOnly
     @builtin(.TryExtractMethod)
     consuming func tryExtract() -> ControlFlow[Output, Residual]
 }
@@ -63,6 +64,7 @@ public protocol Tryable {
 @builtin(.FromResidualProtocol)
 public protocol FromResidual[Residual] {
     /// Builds an instance carrying `residual` as its failure payload.
+    @sugarOnly
     @builtin(.FromResidualMethod)
     static func fromResidual(consuming residual: Residual) -> Self
 }
@@ -78,6 +80,7 @@ protocol FromValue[Output] {
     /// Takes `value` `consuming`: the promotion site transfers ownership, so
     /// `from` moves it into the wrapper rather than cloning a borrow and leaking
     /// the original (the kestrel-wall per-GET query-result leak).
+    @sugarOnly
     @builtin(.FromValueMethod)
     static func from(consuming value: Output) -> Self
 }

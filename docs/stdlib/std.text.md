@@ -360,12 +360,11 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Clamping`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.BytesClampedYield where I: BytesClampable { get }
+public subscript(clamped: Int64) -> UInt8? { get }
 ```
 
-Reads at `index` with bounds saturated to `[0, count)`. Single-
-byte indexes yield `UInt8?` (`None` on empty view); range indexes
-yield `BytesView` (always valid, possibly empty).
+The byte at `index` saturated into `[0, count)`, or `.None` when
+the view is empty.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -407,6 +406,17 @@ Reads at `index` with no bounds check.
 Caller must guarantee `0 <= index < count`. For ranges, the
 endpoints must be in `0..=count`; otherwise the resulting
 sub-view aliases out-of-bounds memory.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Within`
+
+```kestrel
+public subscript[I](within: I) -> I.BytesClampedYield where I: BytesClampable { get }
+```
+
+The sub-view of `range` clamped into `[0, count)` (always valid,
+possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1438,12 +1448,11 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Clamping`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.CharsClampedYield where I: CharsClampable { get }
+public subscript(clamped: Int64) -> Char? { get }
 ```
 
-Reads at `index` with bounds saturated to `[0, count)`. Single-
-char indexes yield `Char?` (`None` on empty view); range indexes
-yield `CharsView` (always valid, possibly empty).
+The char at `index` saturated into `[0, count)`, or `.None` when
+the view is empty.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1468,6 +1477,17 @@ Reads a single code point (`Char`) for `Int64` indexes, or a
 zero-copy `CharsView` sub-view for `Range[Int64]` /
 `ClosedRange[Int64]`. All access is O(n) because UTF-8 is
 variable-width. Panics on out-of-bounds.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Within`
+
+```kestrel
+public subscript[I](within: I) -> I.CharsClampedYield where I: CharsClampable { get }
+```
+
+The sub-view of `range` clamped into `[0, count)` (always valid,
+possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -2684,12 +2704,11 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Clamping`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.GraphemesClampedYield where I: GraphemesClampable { get }
+public subscript(clamped: Int64) -> Grapheme? { get }
 ```
 
-Reads at `index` saturated to `[0, count)`. Single-grapheme
-indexes yield `Grapheme?` (`.None` only when the view is empty);
-range indexes yield `GraphemesView` (always valid, possibly empty).
+The grapheme at `index` saturated into `[0, count)`, or `.None` when
+the view is empty.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -2714,6 +2733,17 @@ public subscript[I](I) -> I.GraphemesYield where I: GraphemesIndex { get }
 `ClosedRange[Int64]` yield a zero-copy `GraphemesView` sub-view
 covering those clusters. **O(n)** — walks the segmenter from the
 start. Panics on out-of-bounds.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Within`
+
+```kestrel
+public subscript[I](within: I) -> I.GraphemesClampedYield where I: GraphemesClampable { get }
+```
+
+The sub-view of `range` clamped into `[0, count)` (always valid,
+possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3280,12 +3310,11 @@ _Defined in `lang/std/text/views.ks`._
 #### subscript `Clamping`
 
 ```kestrel
-public subscript[I](clamped: I) -> I.LinesClampedYield where I: LinesClampable { get }
+public subscript(clamped: Int64) -> String? { get }
 ```
 
-Reads at `index` saturated to `[0, count)`. Single-line indexes
-yield `String?` (`.None` only when the view holds no lines);
-range indexes yield `LinesView` (always valid, possibly empty).
+The line at `index` saturated into `[0, count)`, or `.None` when
+the view is empty.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -3311,6 +3340,17 @@ public subscript[I](I) -> I.LinesYield where I: LinesIndex { get }
 `LinesView` sub-view covering those lines (terminators preserved
 in the underlying bytes). **O(n)** — walks the buffer from the
 start. Panics on out-of-bounds.
+
+_Defined in `lang/std/text/views.ks`._
+
+#### subscript `Within`
+
+```kestrel
+public subscript[I](within: I) -> I.LinesClampedYield where I: LinesClampable { get }
+```
+
+The sub-view of `range` clamped into `[0, count)` (always valid,
+possibly empty).
 
 _Defined in `lang/std/text/views.ks`._
 

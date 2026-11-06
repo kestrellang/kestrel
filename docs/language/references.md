@@ -93,7 +93,7 @@ struct Buffer {
 // buf(at: 0) = 5;   buf(at: 0) += 2;   — all in place, no copies
 ```
 
-`ref` provides reads (borrowing receiver), `mutating ref` provides writes (mutating receiver). You can also mix: a `get` for reads plus a `mutating ref` for in-place writes. A member with only `ref` is read-only — assigning through it is E201/E207. Duplicate providers are rejected (`get`+`ref` is E619, `set`+`mutating ref` is E620, a write provider without any read provider is E622). A protocol can require a place with bodyless clauses, `var value: T { ref mutating ref }`: generic code reads and writes it in place, and a conformer meets it with its own `ref` / `mutating ref` accessors or a stored field (a `get`-only property is E405). Ref accessor bodies stay out of protocols and protocol extensions (E621), and a bodyless `ref` outside a protocol is E640.
+`ref` provides reads (borrowing receiver), `mutating ref` provides writes (mutating receiver). You can also mix: a `get` for reads plus a `mutating ref` for in-place writes. A member with only `ref` is read-only — assigning through it is E201/E207. Duplicate providers are rejected (`get`+`ref` is E619, `set`+`mutating ref` is E620, a write provider without any read provider is E622). A protocol can require a place with bodyless clauses, `var value: T { ref mutating ref }`: generic code reads and writes it in place, and a conformer meets it with its own `ref` / `mutating ref` accessors or a stored field (a `get`-only property is E405). A protocol extension can give default bodies (`extend P { var value: T { ref { … } } }`), used by any conformer that doesn't declare its own; a body in the protocol itself, a bodyless clause in an extension, and `modifying` accessors in either are E621. A bodyless `ref` outside a protocol is E640.
 
 `modifying ref` lends `&T` like `ref` but takes a mutating receiver, for a
 read that has to update `self` first (filling a cache, for example); reads
@@ -206,7 +206,6 @@ That's the entire model. There are no lifetime parameters, no `'a`, no borrow an
 
 ## Not Yet Supported
 
-- **Dictionary reference APIs** (and `Set` lookups, which sit on the dictionary) — planned, pending dictionary storage work. Interim: `Dictionary.modify(key) { (mutating v) in ... }` for in-place updates.
 - **`Hashable`/`Matchable` conformances for `&T`** — reject cleanly for now.
 - **Storable references** (escaping the root's scope, lifetime annotations) — permanently out of scope by design.
 

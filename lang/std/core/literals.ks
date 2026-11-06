@@ -17,6 +17,7 @@ import std.core.(Bool)
 public protocol ExpressibleByBoolLiteral {
     /// @name Bool Literal
     /// Builds an instance from a boolean literal.
+    @sugarOnly
     init(boolLiteral value: lang.i1)
 }
 
@@ -29,6 +30,7 @@ public protocol ExpressibleByBoolLiteral {
 public protocol ExpressibleByIntLiteral {
     /// @name Int Literal
     /// Builds an instance from an integer literal.
+    @sugarOnly
     init(intLiteral value: lang.i64)
 }
 
@@ -37,6 +39,7 @@ public protocol ExpressibleByIntLiteral {
 public protocol ExpressibleByFloatLiteral {
     /// @name Float Literal
     /// Builds an instance from a floating-point literal.
+    @sugarOnly
     init(floatLiteral value: lang.f64)
 }
 
@@ -48,6 +51,7 @@ public protocol ExpressibleByFloatLiteral {
 public protocol ExpressibleByStringLiteral {
     /// @name String Literal
     /// Builds an instance from a string literal.
+    @sugarOnly
     init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64)
 }
 
@@ -56,6 +60,7 @@ public protocol ExpressibleByStringLiteral {
 public protocol ExpressibleByCharLiteral {
     /// @name Char Literal
     /// Builds an instance from a character literal.
+    @sugarOnly
     init(charLiteral value: lang.i32)
 }
 
@@ -89,6 +94,7 @@ public protocol _ExpressibleByArrayLiteral {
     /// which stores them in its own storage. This convention is what the
     /// MIR lowering's structural predicate looks for — implementations
     /// that deviate will be silently skipped during literal lowering.
+    @sugarOnly
     init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[Element], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64)
 }
 
@@ -99,6 +105,7 @@ public protocol _ExpressibleByArrayLiteral {
 public protocol ExpressibleByArrayLiteral: _ExpressibleByArrayLiteral {
     /// @name Array Literal
     /// Builds an instance from a literal slice of elements.
+    @sugarOnly
     init(arrayLiteral elements: LiteralSlice[Element])
 }
 
@@ -127,6 +134,7 @@ public protocol _ExpressibleByDictionaryLiteral {
     /// implementation. MIR lowering matches on the unwrapped param
     /// shape, so an impl that deviates from this convention will be
     /// skipped during literal lowering.
+    @sugarOnly
     init(consuming _dictionaryLiteralPointer: lang.ptr[(Key, Value)], consuming _dictionaryLiteralCount: lang.i64)
 }
 
@@ -135,6 +143,7 @@ public protocol _ExpressibleByDictionaryLiteral {
 public protocol ExpressibleByDictionaryLiteral: _ExpressibleByDictionaryLiteral {
     /// @name Dictionary Literal
     /// Builds an instance from a literal slice of key-value pairs.
+    @sugarOnly
     init(dictionaryLiteral elements: LiteralSlice[(Key, Value)])
 }
 

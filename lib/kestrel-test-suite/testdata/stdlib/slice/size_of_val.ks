@@ -15,10 +15,10 @@ func main() -> Int64 {
     let fat: lang.ptr[lang.slice[Int64]] = lang.slice_from_parts(xs.asUnsafeSlice().pointer.raw, 5);
     let whole: lang.ptr[Slice[Int64]] = lang.cast_ptr[_, Slice[Int64]](fat);
     let narrow: lang.ptr[lang.slice[Int32]] = lang.cast_ptr[_, lang.slice[Int32]](fat);
-    let a = Int64(intLiteral: lang.sizeof_val[Slice[Int64]](whole));
-    let b = Int64(intLiteral: lang.sizeof_val[lang.slice[Int32]](narrow));
-    let c = Int64(intLiteral: lang.alignof_val[Slice[Int64]](whole));
-    let d = Int64(intLiteral: lang.alignof_val[lang.slice[Int32]](narrow));
+    let a = Int64(raw: lang.sizeof_val[Slice[Int64]](whole));
+    let b = Int64(raw: lang.sizeof_val[lang.slice[Int32]](narrow));
+    let c = Int64(raw: lang.alignof_val[Slice[Int64]](whole));
+    let d = Int64(raw: lang.alignof_val[lang.slice[Int32]](narrow));
     print("\(a) \(b) \(c) \(d)\n");
     0
 }

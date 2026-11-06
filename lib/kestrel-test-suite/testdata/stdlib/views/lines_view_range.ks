@@ -58,7 +58,7 @@ module Test
             if oob.isSome { return 17 }
 
             // ---- past-end: clamped saturates to count ----
-            let clamp = s.lines(clamped: std.core.Range[std.numeric.Int64](-5, 999));
+            let clamp = s.lines(within: std.core.Range[std.numeric.Int64](-5, 999));
             if clamp.toString().isEqual(to: "alpha\nbeta\ngamma") == false { return 18 }
 
             // ---- negative start, checked ----

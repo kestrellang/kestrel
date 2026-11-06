@@ -847,6 +847,27 @@ pub(super) fn solve_member(
         });
     }
 
+    // `@sugarOnly`: outside its protocol's module the requirement (and every
+    // witness of it) is reached only through its syntax, which marks its
+    // lookups as protocol dispatch.
+    if !ctx.protocol_dispatch_members.contains(&expr)
+        && let Some(requirement) = kestrel_name_res::sugar_only_hidden(
+            ctx.query_ctx,
+            resolution.entity,
+            ctx.owner,
+            ctx.root,
+        )
+    {
+        ctx.poison(result);
+        return SolveResult::Error(crate::error::sugar_only_error(
+            ctx.query_ctx,
+            requirement,
+            name,
+            receiver,
+            &span,
+        ));
+    }
+
     // Applicability (bidi §5.1 steps 4 and 6): the declaring extension's
     // target pattern and where clauses — equality clauses included (N2) —
     // must hold for this receiver. A member resolved THROUGH a protocol (the

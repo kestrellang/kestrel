@@ -18,6 +18,7 @@ public protocol BitwiseAnd[Other = Self] {
     type Output
 
     /// Returns `self & other`.
+    @sugarOnly
     @builtin(.BitwiseAndOperatorMethod)
     consuming func bitwiseAnd(consuming other: Other) -> Output
 }
@@ -28,6 +29,7 @@ public protocol BitwiseOr[Other = Self] {
     type Output
 
     /// Returns `self | other`.
+    @sugarOnly
     @builtin(.BitwiseOrOperatorMethod)
     consuming func bitwiseOr(consuming other: Other) -> Output
 }
@@ -38,6 +40,7 @@ public protocol BitwiseXor[Other = Self] {
     type Output
 
     /// Returns `self ^ other`.
+    @sugarOnly
     @builtin(.BitwiseXorOperatorMethod)
     consuming func bitwiseXor(consuming other: Other) -> Output
 }
@@ -48,6 +51,7 @@ public protocol BitwiseNot {
     type Output
 
     /// Returns `~self` — every bit flipped.
+    @sugarOnly
     @builtin(.BitwiseNotOperatorMethod)
     consuming func bitwiseNot() -> Output
 }
@@ -66,6 +70,7 @@ public protocol LeftShift[Other = Int64] {
     type Output
 
     /// Returns `self << count`.
+    @sugarOnly
     @builtin(.ShiftLeftOperatorMethod)
     consuming func shiftLeft(consuming by count: Other) -> Output
 }
@@ -79,6 +84,7 @@ public protocol RightShift[Other = Int64] {
     type Output
 
     /// Returns `self >> count`.
+    @sugarOnly
     @builtin(.ShiftRightOperatorMethod)
     consuming func shiftRight(consuming by count: Other) -> Output
 }
