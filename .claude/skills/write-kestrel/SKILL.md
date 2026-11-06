@@ -169,14 +169,22 @@ match value {
     1..<10 => "Small",                         // exclusive range
     1..=10 => "Small",                         // inclusive range
     .Circle(radius: r) => r,                   // destructure
-    .Some(x) if x > 10 => x,                  // guard
+    some x if x > 10 => x,                    // guard
+    null => "Absent",                          // Optional's empty case
     _ => "Other"
 }
 
-if let .Some(val) = optional { }               // if-let
-guard let .Some(val) = optional else { return; } // guard-let
-while let .Some(item) = iter.next() { }        // while-let
+if let some val = optional { }                 // if-let
+guard let some val = optional else { return; } // guard-let
+while let some item = iter.next() { }          // while-let
+guard let null = lookup(key) else { return; }  // require absence
+guard let .Ok(some id) = fetch() else { return; } // nests anywhere
+guard let some .Str(raw) = json.value(for: "k") else { return; } // and takes nested patterns
 ```
+
+**Optional patterns: write `some x` and `null`, not `.Some(x)` / `.None`.** `some` takes any
+nested pattern (`some .Str(s)`, `some (a, b)`, `some _`). `null` is also the empty-Optional
+value: `let name: String? = null;`.
 
 ## Control Flow
 
@@ -336,7 +344,7 @@ in the expected type.
 - `T throws E` → `Result[T, E]`
 
 ```kestrel
-let name: String? = .None;
+let name: String? = null;
 let nums: [Int64] = [1, 2, 3];
 let ages: [String: Int64] = [:];
 func parse(input: String) -> Int64 throws ParseError { }
@@ -426,7 +434,7 @@ let owned: any[OwnedBox] Shape = Circle(r: 3);   // explicit box
 let both: any Shape and Printable = Circle(r: 1); // composition
 func sum(xs: any Iterator[Item = Int64]) -> Int64 { … } // pinned associated type
 
-if let .Some(c) = s as? Circle { … }             // as? borrows: Optional[&Circle]
+if let some c = s as? Circle { … }               // as? borrows: Optional[&Circle]
 match consuming o as? Circle { .Ok(c) => …, .Err(back) => … }  // needs any[OwnedBox]
 if s is Circle { … }                              // typed like `true`
 match s { c is Circle => c.r, is Rect { w, .. } => w, _ => 0 }
