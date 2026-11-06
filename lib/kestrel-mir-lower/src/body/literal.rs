@@ -268,6 +268,11 @@ impl OssaBodyCtx<'_, '_> {
             // Stage 1.5: a ref element decays to an owned copy (the buffer
             // owns its elements); the copy ends the ref's borrow.
             let elem_val = self.decay_if_ref(elem_val);
+            // An element that branches (`try`, `if`, `match`) threads the
+            // buffer and stride through new blocks under new names; write
+            // through the current ones, not the stranded pre-branch ids.
+            let ptr = self.resolve_value(ptr);
+            let stride = self.resolve_value(stride);
             let elem_ptr = if i == 0 {
                 ptr
             } else {
@@ -374,6 +379,9 @@ impl OssaBodyCtx<'_, '_> {
             // Build (key, val) tuple
             let pair = self.emit_tuple(pair_ty, vec![key, val]);
 
+            // As for arrays: a branching entry renames the buffer and stride.
+            let ptr = self.resolve_value(ptr);
+            let stride = self.resolve_value(stride);
             let elem_ptr = if i == 0 {
                 ptr
             } else {

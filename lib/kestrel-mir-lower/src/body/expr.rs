@@ -648,6 +648,23 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_literal(Immediate::unit())
     }
 
+    /// The protocol property requirement `expr_id` resolves to (a field
+    /// declared in a protocol), if any.
+    fn protocol_property_requirement(&self, expr_id: HirExprId) -> Option<kestrel_hecs::Entity> {
+        let resolved = self.typed.as_ref()?.resolutions.get(&expr_id).copied()?;
+        if self.ctx.world.get::<Callable>(resolved).is_some()
+            || self.ctx.world.get::<NodeKind>(resolved) != Some(&NodeKind::Field)
+        {
+            return None;
+        }
+        let parent = self.ctx.world.parent_of(resolved)?;
+        matches!(
+            self.ctx.world.get::<NodeKind>(parent),
+            Some(NodeKind::Protocol)
+        )
+        .then_some(resolved)
+    }
+
     pub(crate) fn lower_field_access(
         &mut self,
         expr_id: HirExprId,
@@ -660,6 +677,25 @@ impl OssaBodyCtx<'_, '_> {
             let view = self.lower_indirection_chain(base, &peels, false);
             let result_ty = self.resolve_expr_type(expr_id);
             let pointee_ty = lower_resolved_ty(self.ctx, &peels.last().unwrap().target);
+            // A property requirement read through an existential has no
+            // field to extract: the payload's type is only known at run
+            // time, so call its getter through the function table.
+            if let Some(requirement) = self.protocol_property_requirement(expr_id)
+                && matches!(
+                    self.ctx.module.ty_arena.get(pointee_ty),
+                    MirTy::RawExistential { .. }
+                )
+            {
+                let arg = CallArg {
+                    value: view,
+                    convention: ParamConvention::Borrow,
+                };
+                if let Some(result) =
+                    self.emit_dynamic_call(requirement, pointee_ty, vec![arg], result_ty)
+                {
+                    return result;
+                }
+            }
             let field_idx = match self.ctx.module.ty_arena.get(pointee_ty) {
                 MirTy::Named { entity, .. } => self.ctx.resolve_field_idx(*entity, field_name),
                 _ => None,

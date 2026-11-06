@@ -56,7 +56,7 @@ impl OssaBodyCtx<'_, '_> {
         // only for its words: end it now, as a direct call ends a borrowed
         // ref argument, so it can't reach a control-flow merge (E497).
         if self.ref_results.contains(&recv) {
-            self.end_ref_if_single_use(recv);
+            self.end_ref_and_sources(recv);
         }
         Some(result)
     }
