@@ -85,7 +85,7 @@ bb7(%v71: @owned Int64, %v72: @owned Int64, %v73: @owned Pointer[std.numeric.Int
     %v94 = begin_borrow_addr %v93, std.numeric.Int64  // @guaranteed std.numeric.Int64
     %v95 = copy_value %v94  // @owned std.numeric.Int64
     end_borrow %v94
-    %v96 = call std.result.Optional.from[std.numeric.Int64](%v95)  // @owned std.result.Optional[std.numeric.Int64]
+    %v96 = call @witness std.core.FromValue.from(_:) for std.result.Optional[std.numeric.Int64][std.numeric.Int64](%v95)  // @owned std.result.Optional[std.numeric.Int64]
     destroy_value %v93
     destroy_addr %v92, Test.Counter
     destroy_value %v92
@@ -103,11 +103,9 @@ bb9(%v98: @owned std.result.Optional[std.numeric.Int64], %v99: @owned Int64, %v1
     destroy_addr %v107, std.result.Optional[std.numeric.Int64]
     destroy_value %v107
     destroy_value %v106
-    destroy_addr %v35, std.result.Optional[std.numeric.Int64]
     destroy_value %v105
     destroy_addr %v35, std.result.Optional[std.numeric.Int64]
     destroy_value %v104
-    destroy_addr %v7, std.result.Optional[Test.Counter]
     destroy_value %v103
     destroy_addr %v7, std.result.Optional[Test.Counter]
     destroy_value %v102
