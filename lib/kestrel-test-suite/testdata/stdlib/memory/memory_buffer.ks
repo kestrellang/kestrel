@@ -38,16 +38,16 @@ module Test
 
             // Test read(at:) with bounds checking
             let r1 = buf.read(at: 0);
-            if r1.isNone() { return 10 }
+            if r1.isNone { return 10 }
             if r1.unwrap() != 42 { return 11 }
 
             // Test read(at:) out of bounds
             let rOob = buf.read(at: 100);
-            if rOob.isSome() { return 12 }
+            if rOob.isSome { return 12 }
 
             // Test read(at:) negative index
             let rNeg = buf.read(at: -1);
-            if rNeg.isSome() { return 13 }
+            if rNeg.isSome { return 13 }
 
             // Test asUnsafeSlice
             let sl = buf.asUnsafeSlice();
@@ -57,13 +57,13 @@ module Test
 
             // Test slice(from:to:) - valid range
             let sub = buf.slice(from: 0, to: 3);
-            if sub.isNone() { return 17 }
+            if sub.isNone { return 17 }
             if sub.unwrap().count != 3 { return 18 }
             if sub.unwrap()(unchecked: 0) != 42 { return 19 }
 
             // Test slice(from:to:) - out of bounds
             let subOob = buf.slice(from: 0, to: 100);
-            if subOob.isSome() { return 20 }
+            if subOob.isSome { return 20 }
 
             // Test resize
             buf.resize(to: 20);

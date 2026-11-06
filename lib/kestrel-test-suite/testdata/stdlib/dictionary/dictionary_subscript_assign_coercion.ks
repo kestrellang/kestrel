@@ -40,7 +40,7 @@ func main() -> lang.i64 {
 
     // Assigning null removes / leaves absent.
     d("b") = null;
-    if d("b").isSome() { return 4; }
+    if d("b").isSome { return 4; }
 
     0
 }

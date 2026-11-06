@@ -1,6 +1,6 @@
 //! `@sugarOnly` requirements: reached only through their syntax.
 //!
-//! A protocol requirement marked `@sugarOnly` (`modAssign` behind `%=`,
+//! A protocol requirement marked `@sugarOnly` (`remainderAssign` behind `%=`,
 //! `tryExtract` behind `try`) is still implemented by conformers, but outside
 //! the protocol's module nothing may call it — or any type's implementation
 //! of it — by name. The compiler's own desugaring is exempt: callers that
@@ -27,7 +27,7 @@ use crate::visibility::internal_boundary;
 /// - Any other member answers the first `@sugarOnly` requirement it
 ///   witnesses: a requirement of a protocol its owner conforms to, with the
 ///   same name and argument labels. That covers witnesses on the type
-///   (`Int64.modAssign`), in its extensions, and default implementations in
+///   (`Int64.remainderAssign`), in its extensions, and default implementations in
 ///   protocol extensions (`extend Equatable { func notEqual }`).
 ///
 /// Witnessing is decided by name + labels, which is how conformance itself

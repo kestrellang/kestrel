@@ -120,9 +120,9 @@ public func hexDigit(byte: UInt8) -> Int64 {
 /// ```
 public func hexChar(value: Int64) -> UInt8 {
     if value < 10 {
-        UInt8(from: value + 48)
+        UInt8(truncating: value + 48)
     } else {
-        UInt8(from: value + 55)
+        UInt8(truncating: value + 55)
     }
 }
 

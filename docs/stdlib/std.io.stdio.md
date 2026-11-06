@@ -45,7 +45,7 @@ _Defined in `lang/std/io/stdio.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(from: UnsafeSlice[UInt8]) -> Result[Int64, IoError]
+public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Calls `write(2)` on `STDERR_FILENO`.
@@ -140,7 +140,7 @@ _Defined in `lang/std/io/stdio.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(from: UnsafeSlice[UInt8]) -> Result[Int64, IoError]
+public mutating func write(from: Slice[UInt8]) -> Result[Int64, IoError]
 ```
 
 Calls `write(2)` on `STDOUT_FILENO`.

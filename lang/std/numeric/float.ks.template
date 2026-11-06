@@ -1,5 +1,6 @@
 // {{TYPE_NAME}} - {{BITS}}-bit floating point ({{PRECISION_KIND_HEADER}})
-// Generated from float.ks.template - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/float.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 // ============================================================================
 // {{TYPE_NAME_UPPER}}
@@ -205,9 +206,9 @@ public struct {{TYPE_NAME}}:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.{{LANG_TYPE}}` bit pattern. Internal; used
-    /// by intrinsics.
-    init(raw value: lang.{{LANG_TYPE}}) {
+    /// Wraps an existing `lang.{{LANG_TYPE}}` value. The FFI counterpart of
+    /// `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.{{LANG_TYPE}}) {
         self.raw = value
     }
 
@@ -500,7 +501,9 @@ public struct {{TYPE_NAME}}:
     /// Absolute value — clears the sign bit. NaN stays NaN; `-0.0` becomes
     /// `+0.0`.
     public func abs() -> {{TYPE_NAME}} {
-        if Bool(boolLiteral: lang.{{LANG_TYPE}}_lt(self.raw, {{ZERO_LITERAL}})) { self.negate() } else { self }
+        // `copysign` from +0.0 clears the sign bit: `-0.0` and NaN payloads
+        // keep their magnitude (a `< 0` test misses `-0.0`).
+        {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_copysign(self.raw, {{ZERO_LITERAL}}))
     }
 
     /// Largest integer ≤ `self`. Rounds toward `-infinity`.

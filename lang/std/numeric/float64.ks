@@ -1,5 +1,6 @@
 // Float64 - 64-bit floating point (double precision)
-// Generated from float.ks.template - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/float.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 // ============================================================================
 // FLOAT64
@@ -205,9 +206,9 @@ public struct Float64:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.f64` bit pattern. Internal; used
-    /// by intrinsics.
-    init(raw value: lang.f64) {
+    /// Wraps an existing `lang.f64` value. The FFI counterpart of
+    /// `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.f64) {
         self.raw = value
     }
 
@@ -977,8 +978,8 @@ public struct Float64:
         var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
-            mantissa = bnMulSmall(mantissa, UInt32(from: 10));
-            mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+            mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
+            mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
             hasDigits = true;
             index = index + 1;
             if index < len {
@@ -991,8 +992,8 @@ public struct Float64:
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
-                    mantissa = bnMulSmall(mantissa, UInt32(from: 10));
-                    mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+                    mantissa = bnMulSmall(mantissa, UInt32(truncating: 10));
+                    mantissa = bnAddSmall(mantissa, UInt64(truncating: currentByte - 48));
                     fracCount = fracCount + 1;
                     hasDigits = true;
                     index = index + 1;
@@ -1071,13 +1072,13 @@ public struct Float64:
         let parts = floatRoundDecimal(mantissa, k, 52, -1074, 971);
         var rawBits = UInt64.zero;
         if parts.overflow {
-            rawBits = UInt64(from: 2047).shiftLeft(by: 52)
+            rawBits = UInt64(truncating: 2047).shiftLeft(by: 52)
         } else if parts.m == UInt64.zero {
             rawBits = UInt64.zero
-        } else if parts.m >= UInt64(from: 4503599627370496) {
+        } else if parts.m >= UInt64(truncating: 4503599627370496) {
             let rawExp = parts.e + 1075;
-            rawBits = UInt64(from: rawExp).shiftLeft(by: 52)
-                .bitwiseOr(parts.m.bitwiseAnd(UInt64(from: 4503599627370495)))
+            rawBits = UInt64(truncating: rawExp).shiftLeft(by: 52)
+                .bitwiseOr(parts.m.bitwiseAnd(UInt64(truncating: 4503599627370495)))
         } else {
             rawBits = parts.m
         }
@@ -1157,15 +1158,15 @@ public struct Float64:
             // Exact IEEE-754 decomposition of the non-negative `value` into
             // m * 2^e (m an integer significand, e a binary exponent).
             let bits = UInt64(raw: lang.f64_to_bits(value.raw));
-            let rawExp = Int64(from: bits.shiftRight(by: 52).bitwiseAnd(UInt64(from: 2047)));
-            let rawMant = bits.bitwiseAnd(UInt64(from: 4503599627370495));
+            let rawExp = Int64(truncating: bits.shiftRight(by: 52).bitwiseAnd(UInt64(truncating: 2047)));
+            let rawMant = bits.bitwiseAnd(UInt64(truncating: 4503599627370495));
             var m = UInt64.zero;
             var e: Int64 = 0;
             if rawExp == 0 {
                 m = rawMant;
                 e = -1074
             } else {
-                m = rawMant.bitwiseOr(UInt64(from: 4503599627370496));
+                m = rawMant.bitwiseOr(UInt64(truncating: 4503599627370496));
                 e = rawExp - 1075
             }
 

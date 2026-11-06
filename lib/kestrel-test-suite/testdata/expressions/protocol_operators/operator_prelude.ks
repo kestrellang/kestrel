@@ -26,10 +26,10 @@ public protocol DivideOperatorProtocol {
     func divide(rhs: Self) -> Self
 }
 
-@builtin(.ModuloOperatorProtocol)
-public protocol ModuloOperatorProtocol {
-    @builtin(.ModuloOperatorMethod)
-    func modulo(rhs: Self) -> Self
+@builtin(.RemainderOperatorProtocol)
+public protocol RemainderOperatorProtocol {
+    @builtin(.RemainderOperatorMethod)
+    func remainder(rhs: Self) -> Self
 }
 
 @builtin(.NegateOperatorProtocol)

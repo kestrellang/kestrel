@@ -16,30 +16,30 @@ module Test
 
             // ---- chars.firstIndex(where:) ----
             let spacePos = s.chars.firstIndex(where: { (c) in c.isEqual(to: ' ') });
-            if spacePos.isNone() { return 3 }
+            if spacePos.isNone { return 3 }
             if spacePos.unwrap().byteOffset != 5 { return 4 }
 
             // chars.firstIndex(where:) no match
             let noMatch = s.chars.firstIndex(where: { (c) in c.isAsciiDigit });
-            if noMatch.isSome() { return 5 }
+            if noMatch.isSome { return 5 }
 
             // ---- lastIndex(of:) via Str ----
             let lastHello = s.lastIndex(of: "hello");
-            if lastHello.isNone() { return 6 }
+            if lastHello.isNone { return 6 }
             if lastHello.unwrap().value != 12 { return 7 }
 
             // lastIndex(of:) first occurrence
             let firstWorld = s.lastIndex(of:"world");
-            if firstWorld.isNone() { return 8 }
+            if firstWorld.isNone { return 8 }
             if firstWorld.unwrap().value != 6 { return 9 }
 
             // lastIndex(of:) no match
             let noRev = s.lastIndex(of:"xyz");
-            if noRev.isSome() { return 10 }
+            if noRev.isSome { return 10 }
 
             // lastIndex(of:) empty string
             let emptyRev = s.lastIndex(of:"");
-            if emptyRev.isNone() { return 11 }
+            if emptyRev.isNone { return 11 }
             // Should return length of string
             if emptyRev.unwrap().value != 17 { return 12 }
 

@@ -64,7 +64,7 @@ extend Slice[T] {
         let raw = self.asUnsafeSlice();
         var i = raw.count - 1;
         while i > 0 {
-            let j = Int64(from: rng.nextUInt64(below: UInt64(from: i) + 1));
+            let j = Int64(truncating: rng.nextUInt64(below: UInt64(truncating: i) + 1));
             swapRaw(raw, i, j);
             i = i - 1
         }

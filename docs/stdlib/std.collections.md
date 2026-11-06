@@ -46,7 +46,7 @@ and `arr(within: r)` lends the part of `r` inside the array.
 `count` is the number of elements; `capacity` is how many can fit
 without reallocating. When `append` would exceed capacity the buffer
 doubles (starting from 4 if previously zero). Use
-`reserveCapacity(minimumCapacity:)` to pre-allocate, and
+`reserveCapacity(_:)` to pre-allocate, and
 `shrinkToFit()` to release excess.
 
 ### Representation
@@ -1570,10 +1570,11 @@ _Defined in `lang/std/collections/builder.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(contentsOf: UnsafeSlice[T])
+public mutating func append(contentsOf: &some Sliceable[T] and not Static and not Copyable and not Sized)
 ```
 
-Appends every element of `slice`.
+Appends every element of `other` (an `Array`, `Slice`, or any
+other `Sliceable`), copying in a single pass.
 
 _Defined in `lang/std/collections/builder.ks`._
 
@@ -2171,7 +2172,7 @@ _Defined in `lang/std/collections/hashing.ks`._
 #### function `write`
 
 ```kestrel
-public mutating func write(UnsafeSlice[UInt8])
+public mutating func write(Slice[UInt8])
 ```
 
 Folds every byte of `bytes` into the running hash state.
@@ -2184,9 +2185,9 @@ Safe to call with an empty slice (no-op).
 
 ```
 var h = DefaultHasher();
-h.write(bytes: "hello".utf8Bytes());
-h.write(bytes: " world".utf8Bytes());
-// Equivalent to a single write of "hello world".utf8Bytes()
+h.write("hello".asByteSlice());
+h.write(" world".asByteSlice());
+// Equivalent to a single write of "hello world".asByteSlice()
 ```
 
 _Defined in `lang/std/collections/hashing.ks`._
@@ -2284,7 +2285,7 @@ _Defined in `lang/std/collections/deque.ks`._
 #### subscript `Indexed`
 
 ```kestrel
-subscript(Int64) -> T { ref mutating ref }
+public subscript(Int64) -> T { ref mutating ref }
 ```
 
 O(1) random access by logical index.
@@ -2563,13 +2564,13 @@ _Defined in `lang/std/collections/deque.ks`._
 #### function `reserveCapacity`
 
 ```kestrel
-public mutating func reserveCapacity(minimumCapacity: Int64)
+public mutating func reserveCapacity(Int64)
 ```
 
 Ensures the buffer can hold at least `capacity` elements without
 reallocating.
 
-If the current capacity already meets or exceeds `capacity`, this
+If the current capacity already meets or exceeds `minimumCapacity`, this
 is a no-op. Otherwise the ring buffer is reallocated and
 linearized. Useful before a burst of `pushBack`/`pushFront` calls
 when the final size is known in advance.
@@ -2578,7 +2579,7 @@ when the final size is known in advance.
 
 ```
 var d = Deque[Int64]();
-d.reserveCapacity(minimumCapacity: 100);
+d.reserveCapacity(100);
 ```
 
 _Defined in `lang/std/collections/deque.ks`._
@@ -2586,7 +2587,7 @@ _Defined in `lang/std/collections/deque.ks`._
 #### subscript `subscript`
 
 ```kestrel
-subscript(checked: Int64) -> T? { ref mutating ref }
+public subscript(checked: Int64) -> T? { ref mutating ref }
 ```
 
 Like `d(index)`, but the place may not exist: `.None` instead of a
@@ -4289,13 +4290,13 @@ _Defined in `lang/std/collections/heap.ks`._
 #### function `reserveCapacity`
 
 ```kestrel
-public mutating func reserveCapacity(minimumCapacity: Int64)
+public mutating func reserveCapacity(Int64)
 ```
 
 Ensures the backing array can hold at least `capacity` elements
 without reallocating.
 
-If the current capacity already meets or exceeds `capacity`, this
+If the current capacity already meets or exceeds `minimumCapacity`, this
 is a no-op. Otherwise the backing array grows to accommodate the
 requested number of slots.
 
@@ -4303,7 +4304,7 @@ requested number of slots.
 
 ```
 var h = Heap[Int64]();
-h.reserveCapacity(minimumCapacity: 100);
+h.reserveCapacity(100);
 ```
 
 _Defined in `lang/std/collections/heap.ks`._
@@ -6845,7 +6846,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `drop`
 
 ```kestrel
-public func drop(first: Int64) -> UnsafeSlice[T]
+public func drop(first: Int64) -> &Slice[T]
 ```
 
 Returns a slice with the first `count` elements skipped. O(1).
@@ -6859,7 +6860,7 @@ Panics if `count > self.count`.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].drop(first: 2);  // UnsafeSlice[3, 4, 5]
+[1, 2, 3, 4, 5].drop(first: 2);  // [3, 4, 5]
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -6867,7 +6868,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `drop`
 
 ```kestrel
-public func drop(last: Int64) -> UnsafeSlice[T]
+public func drop(last: Int64) -> &Slice[T]
 ```
 
 Returns a slice with the last `count` elements skipped. O(1).
@@ -6881,7 +6882,7 @@ Panics if `count > self.count`.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].drop(last: 2);  // UnsafeSlice[1, 2, 3]
+[1, 2, 3, 4, 5].drop(last: 2);  // [1, 2, 3]
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7104,10 +7105,10 @@ collections are vacuously sorted.
 
 _Defined in `lang/std/collections/sliceable.ks`._
 
-#### function `isValidIndex`
+#### function `isValid`
 
 ```kestrel
-public func isValidIndex(Int64) -> Bool
+public func isValid(index: Int64) -> Bool
 ```
 
 `true` if `index` is in `[0, count)`.
@@ -7115,9 +7116,9 @@ public func isValidIndex(Int64) -> Bool
 ##### Examples
 
 ```
-[10, 20, 30].isValidIndex(2);   // true
-[10, 20, 30].isValidIndex(3);   // false
-[10, 20, 30].isValidIndex(-1);  // false
+[10, 20, 30].isValid(index: 2);   // true
+[10, 20, 30].isValid(index: 3);   // false
+[10, 20, 30].isValid(index: -1);  // false
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._
@@ -7255,7 +7256,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `prefix`
 
 ```kestrel
-public func prefix(Int64) -> UnsafeSlice[T]
+public func prefix(Int64) -> &Slice[T]
 ```
 
 Returns a slice over the first `count` elements. O(1).
@@ -7267,7 +7268,7 @@ Panics if `count > self.count`.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].prefix(3);  // UnsafeSlice[1, 2, 3]
+[1, 2, 3, 4, 5].prefix(3);  // [1, 2, 3]
 [1, 2].prefix(0);            // empty slice
 ```
 
@@ -7400,7 +7401,7 @@ _Defined in `lang/std/collections/sliceable.ks`._
 #### function `suffix`
 
 ```kestrel
-public func suffix(Int64) -> UnsafeSlice[T]
+public func suffix(Int64) -> &Slice[T]
 ```
 
 Returns a slice over the last `count` elements. O(1).
@@ -7412,7 +7413,7 @@ Panics if `count > self.count`.
 ##### Examples
 
 ```
-[1, 2, 3, 4, 5].suffix(2);  // UnsafeSlice[4, 5]
+[1, 2, 3, 4, 5].suffix(2);  // [4, 5]
 ```
 
 _Defined in `lang/std/collections/sliceable.ks`._

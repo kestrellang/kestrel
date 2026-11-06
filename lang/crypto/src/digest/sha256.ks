@@ -79,7 +79,7 @@ public struct SHA256: Digest {
             let w2 = w(i - 2);
             let s0 = w15.rotateRight(by: 7) ^ w15.rotateRight(by: 18) ^ (w15 >> 3);
             let s1 = w2.rotateRight(by: 17) ^ w2.rotateRight(by: 19) ^ (w2 >> 10);
-            w(i) = w(i - 16) + s0 + w(i - 7) + s1;
+            w(i) = (w(i - 16)).addWrapping(s0).addWrapping(w(i - 7)).addWrapping(s1);
         }
 
         var a = state(0);
@@ -94,29 +94,29 @@ public struct SHA256: Digest {
         for i in 0..<64 {
             let s1 = e.rotateRight(by: 6) ^ e.rotateRight(by: 11) ^ e.rotateRight(by: 25);
             let ch = (e & f) ^ (!e & g);
-            let temp1 = h + s1 + ch + k(i) + w(i);
+            let temp1 = h.addWrapping(s1).addWrapping(ch).addWrapping(k(i)).addWrapping(w(i));
             let s0 = a.rotateRight(by: 2) ^ a.rotateRight(by: 13) ^ a.rotateRight(by: 22);
             let maj = (a & b) ^ (a & c) ^ (b & c);
-            let temp2 = s0 + maj;
+            let temp2 = s0.addWrapping(maj);
 
             h = g;
             g = f;
             f = e;
-            e = d + temp1;
+            e = d.addWrapping(temp1);
             d = c;
             c = b;
             b = a;
-            a = temp1 + temp2;
+            a = temp1.addWrapping(temp2);
         }
 
-        state(0) = state(0) + a;
-        state(1) = state(1) + b;
-        state(2) = state(2) + c;
-        state(3) = state(3) + d;
-        state(4) = state(4) + e;
-        state(5) = state(5) + f;
-        state(6) = state(6) + g;
-        state(7) = state(7) + h;
+        state(0) = state(0).addWrapping(a);
+        state(1) = state(1).addWrapping(b);
+        state(2) = state(2).addWrapping(c);
+        state(3) = state(3).addWrapping(d);
+        state(4) = state(4).addWrapping(e);
+        state(5) = state(5).addWrapping(f);
+        state(6) = state(6).addWrapping(g);
+        state(7) = state(7).addWrapping(h);
     }
 }
 

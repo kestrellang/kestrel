@@ -268,7 +268,7 @@ caller wants binary fidelity — e.g. reading a fixed-width header.
 
 ### Errors
 
-Returns `.Err(invalidInput())` if EOF is reached before `buf.count`
+Returns `.Err(IoError.invalidInput())` if EOF is reached before `buf.count`
 bytes have been collected.
 
 ### Examples

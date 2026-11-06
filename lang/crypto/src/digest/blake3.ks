@@ -31,13 +31,13 @@ public struct BLAKE3: Digest {
             // last chunk can still be marked as the root.
             if self.chunk.count == 1024 {
                 let chunkValue = self.chunk.output().chainingValue();
-                let totalChunks = self.chunk.counter + 1;
+                let totalChunks = self.chunk.counter.addWrapping(1);
                 self.pushChunk(chunkValue, totalChunks);
                 self.chunk = BLAKE3Chunk(BLAKE3.IV, totalChunks);
             }
             var take = 1024 - self.chunk.count;
             if take > input.count - offset { take = input.count - offset; }
-            self.chunk.update(input.drop(first: offset).prefix(take));
+            self.chunk.update(input.drop(first: offset).prefix(take).asUnsafeSlice());
             offset = offset + take;
         }
     }
@@ -102,8 +102,8 @@ public struct BLAKE3: Digest {
         state.append(iv(1));
         state.append(iv(2));
         state.append(iv(3));
-        state.append(UInt32(from: counter & 0xffffffff));
-        state.append(UInt32(from: counter >> 32));
+        state.append(UInt32(truncating: counter & 0xffffffff));
+        state.append(UInt32(truncating: counter >> 32));
         state.append(blockLength);
         state.append(flags);
 
@@ -137,13 +137,13 @@ public struct BLAKE3: Digest {
         a: Int64, b: Int64, c: Int64, d: Int64,
         x: UInt32, y: UInt32
     ) {
-        v(a) = v(a) + v(b) + x;
+        v(a) = v(a).addWrapping(v(b)).addWrapping(x);
         v(d) = (v(d) ^ v(a)).rotateRight(by: 16);
-        v(c) = v(c) + v(d);
+        v(c) = v(c).addWrapping(v(d));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 12);
-        v(a) = v(a) + v(b) + y;
+        v(a) = v(a).addWrapping(v(b)).addWrapping(y);
         v(d) = (v(d) ^ v(a)).rotateRight(by: 8);
-        v(c) = v(c) + v(d);
+        v(c) = v(c).addWrapping(v(d));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 7);
     }
 
@@ -202,7 +202,7 @@ struct BLAKE3Chunk {
             self.chainingValue,
             BLAKE3.words(self.block),
             self.counter,
-            UInt32(from: self.block.count),
+            UInt32(truncating: self.block.count),
             self.startFlag() | BLAKE3.chunkEnd
         )
     }

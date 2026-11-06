@@ -6,7 +6,7 @@ module Test
         @main
         func main() -> lang.i64 {
             // Formattable delegates to description() for named kinds
-            let nf = std.io.error.notFound();
+            let nf = std.io.error.IoError.notFound();
             if not nf.formatted().isEqual(to: "no such file or directory") { return 1 }
 
             // Interpolation goes through Formattable too

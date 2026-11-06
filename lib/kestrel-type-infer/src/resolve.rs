@@ -1366,7 +1366,7 @@ impl WorldResolver<'_> {
             }
             // A matching member that was filtered out by visibility?
             if let Some((candidate, visibility)) =
-                self.find_hidden_member(*entity, name, &extensions)
+                self.find_hidden_member(*entity, name, &extensions, None)
             {
                 return Err(MemberError::NotVisible {
                     candidate,
@@ -1386,6 +1386,16 @@ impl WorldResolver<'_> {
 
         let member = match matches.len() {
             0 => {
+                // A hidden overload these labels pick (`d(0)` next to a
+                // public `d(checked:)`) is a visibility error, not a label one.
+                if let Some((candidate, visibility)) =
+                    self.find_hidden_member(*entity, name, &extensions, Some(&arg_labels))
+                {
+                    return Err(MemberError::NotVisible {
+                        candidate,
+                        visibility,
+                    });
+                }
                 // No label match — recover a representative candidate so the
                 // downstream arg-binding emits a precise "wrong argument label"
                 // diagnostic instead of a vague "no member". Safe when exactly
@@ -1447,30 +1457,40 @@ impl WorldResolver<'_> {
     /// name match, returning the first hit along with its declared `Vis`.
     /// Used only when normal resolution came up empty, so the diagnostic can
     /// distinguish "is private" from "no member".
+    /// A member named `name` (keyword sentinels included, so subscripts and
+    /// inits count) that the visibility filter hid from this body, for an
+    /// E115 instead of "no member". With `labels`, only one the call's
+    /// labels would have matched.
     fn find_hidden_member(
         &self,
         entity: Entity,
         name: &str,
         extensions: &[Entity],
+        labels: Option<&[BindArg<'_>]>,
     ) -> Option<(Entity, Vis)> {
         let probe = |parent: Entity| -> Option<(Entity, Vis)> {
-            for &child in self.ctx.children_of(parent) {
-                if self.ctx.get::<Name>(child).is_some_and(|n| n.0 == name) {
-                    let vis = self.ctx.get::<Vis>(child).cloned().unwrap_or(Vis::Public);
-                    return Some((child, vis));
-                }
-            }
-            None
+            self.ctx
+                .children_of(parent)
+                .iter()
+                .copied()
+                .find_map(|child| {
+                    if kestrel_name_res::helpers::member_lookup_name(self.ctx, child) != Some(name)
+                    {
+                        return None;
+                    }
+                    if labels.is_some_and(|l| !self.matches_labels(child, l)) {
+                        return None;
+                    }
+                    let visible = self.ctx.query(kestrel_name_res::IsVisibleFrom {
+                        target: child,
+                        context: self.body_owner,
+                    });
+                    (!visible).then(|| (child, kestrel_name_res::effective_vis(self.ctx, child)))
+                })
         };
-        if let Some(hit) = probe(entity) {
-            return Some(hit);
-        }
-        for &ext in extensions {
-            if let Some(hit) = probe(ext) {
-                return Some(hit);
-            }
-        }
-        None
+        std::iter::once(entity)
+            .chain(extensions.iter().copied())
+            .find_map(probe)
     }
 
     /// Search a concrete type entity's children, then its conforming extensions,

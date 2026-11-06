@@ -588,7 +588,7 @@ func f() {}",
     fn ordering_ks_bodies_lower() {
         let (world, root, _) = setup(
             include_str!("../../../lang/std/core/ordering.ks"),
-            "reverse",
+            "reversed",
         );
         let ctx = world.query_context();
         let bodies: Vec<_> = world.iter_component::<Valued>().map(|(e, _)| e).collect();

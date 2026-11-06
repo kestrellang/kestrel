@@ -118,7 +118,7 @@ public struct Argon2id {
     }
 
     static func le32(value: Int64) -> Array[UInt8] {
-        UInt32(from: value).toBytesLittleEndian()
+        UInt32(truncating: value).toBytesLittleEndian()
     }
 
     static func wordsFromBytes(bytes: Array[UInt8]) -> Array[UInt64] {
@@ -177,11 +177,11 @@ struct Argon2State {
         var addresses = Array[UInt64](repeating: 0, count: 128);
         var addressInput = Array[UInt64](repeating: 0, count: 128);
         if independent {
-            addressInput(0) = UInt64(from: pass);
-            addressInput(1) = UInt64(from: lane);
-            addressInput(2) = UInt64(from: slice);
-            addressInput(3) = UInt64(from: self.blockCount);
-            addressInput(4) = UInt64(from: self.iterations);
+            addressInput(0) = UInt64(truncating: pass);
+            addressInput(1) = UInt64(truncating: lane);
+            addressInput(2) = UInt64(truncating: slice);
+            addressInput(3) = UInt64(truncating: self.blockCount);
+            addressInput(4) = UInt64(truncating: self.iterations);
             let argon2idType: UInt64 = 2;
             addressInput(5) = argon2idType;
         }
@@ -205,7 +205,7 @@ struct Argon2State {
             } else {
                 self.memory((lane * self.columns + previous) * 128)
             };
-            var referenceLane = Int64(from: (pseudoRandom >> 32) % UInt64(from: self.lanes));
+            var referenceLane = Int64(truncating: (pseudoRandom >> 32) % UInt64(truncating: self.lanes));
             if pass == 0 and slice == 0 { referenceLane = lane; }
             let referenceColumn = self.indexAlpha(pass, slice, i, pseudoRandom & 0xffffffff, referenceLane == lane);
 
@@ -240,9 +240,9 @@ struct Argon2State {
             }
         }
 
-        let x = (j1 * j1) >> 32;
-        let y = (UInt64(from: area) * x) >> 32;
-        let relative = area - 1 - Int64(from: y);
+        let x = (j1.multiplyWrapping(j1)) >> 32;
+        let y = ((UInt64(truncating: area)).multiplyWrapping(x)) >> 32;
+        let relative = area - 1 - Int64(truncating: y);
 
         // Where that window starts: the segment after this one, from the
         // second pass on.
@@ -253,7 +253,7 @@ struct Argon2State {
     /// Advances the address counter and regenerates 128 reference
     /// addresses: G(0, G(0, input)).
     static func nextAddresses(mutating input: Array[UInt64], mutating addresses: Array[UInt64]) {
-        input(6) = input(6) + 1;
+        input(6) = input(6).addWrapping(1);
         let zero = Array[UInt64](repeating: 0, count: 128);
         addresses = Argon2State.compress(zero, Argon2State.compress(zero, input));
     }
@@ -301,13 +301,13 @@ struct Argon2State {
     /// BLAKE2b's G with an added multiplication of the low 32-bit halves
     /// (RFC 9106 §3.6), which makes the work hard to shortcut in hardware.
     static func gb(mutating v: Array[UInt64], a: Int64, b: Int64, c: Int64, d: Int64) {
-        v(a) = v(a) + v(b) + 2 * (v(a) & 0xffffffff) * (v(b) & 0xffffffff);
+        v(a) = v(a).addWrapping(v(b)).addWrapping(((v(a) & 0xffffffff) * (v(b) & 0xffffffff)).multiplyWrapping(2));
         v(d) = (v(d) ^ v(a)).rotateRight(by: 32);
-        v(c) = v(c) + v(d) + 2 * (v(c) & 0xffffffff) * (v(d) & 0xffffffff);
+        v(c) = v(c).addWrapping(v(d)).addWrapping(((v(c) & 0xffffffff) * (v(d) & 0xffffffff)).multiplyWrapping(2));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 24);
-        v(a) = v(a) + v(b) + 2 * (v(a) & 0xffffffff) * (v(b) & 0xffffffff);
+        v(a) = v(a).addWrapping(v(b)).addWrapping(((v(a) & 0xffffffff) * (v(b) & 0xffffffff)).multiplyWrapping(2));
         v(d) = (v(d) ^ v(a)).rotateRight(by: 16);
-        v(c) = v(c) + v(d) + 2 * (v(c) & 0xffffffff) * (v(d) & 0xffffffff);
+        v(c) = v(c).addWrapping(v(d)).addWrapping(((v(c) & 0xffffffff) * (v(d) & 0xffffffff)).multiplyWrapping(2));
         v(b) = (v(b) ^ v(c)).rotateRight(by: 63);
     }
 }

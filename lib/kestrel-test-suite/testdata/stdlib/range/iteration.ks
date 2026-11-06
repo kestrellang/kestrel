@@ -14,7 +14,7 @@ module Test
             var done: std.core.Bool = false;
             while done == false {
                 let next = iter.next();
-                if next.isSome() {
+                if next.isSome {
                     sum = sum + next.unwrap()
                 } else {
                     done = true

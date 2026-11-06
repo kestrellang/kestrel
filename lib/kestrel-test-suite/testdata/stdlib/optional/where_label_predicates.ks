@@ -19,10 +19,10 @@ module Test
 
             let someOpt2: std.result.Optional[std.numeric.Int64] = .Some(10);
             let dropped = someOpt2.filter(where: { (x) in x > 50 });
-            if dropped.isSome() { return 5 }
+            if dropped.isSome { return 5 }
 
             let noneFiltered = none.filter(where: { (x) in x > 5 });
-            if noneFiltered.isSome() { return 6 }
+            if noneFiltered.isSome { return 6 }
 
             0
         }

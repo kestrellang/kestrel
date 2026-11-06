@@ -1522,6 +1522,11 @@ pub(crate) fn try_intrinsic(
             let unit = bctx.emit_literal(Immediate::unit());
             return Some(bctx.emit_op1(op, unit, result_ty));
         },
+        "overflow_checks" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let unit = bctx.emit_literal(Immediate::unit());
+            return Some(bctx.emit_op1(Op::OverflowChecks, unit, result_ty));
+        },
         "ptr_null" => {
             let ty_arg = *type_args.first()?;
             let result_ty = bctx.resolve_expr_type(expr_id);

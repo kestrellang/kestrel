@@ -385,7 +385,7 @@ public struct Deque[T]: Iterable, Cloneable {
     /// Ensures the buffer can hold at least `capacity` elements without
     /// reallocating.
     ///
-    /// If the current capacity already meets or exceeds `capacity`, this
+    /// If the current capacity already meets or exceeds `minimumCapacity`, this
     /// is a no-op. Otherwise the ring buffer is reallocated and
     /// linearized. Useful before a burst of `pushBack`/`pushFront` calls
     /// when the final size is known in advance.
@@ -394,11 +394,11 @@ public struct Deque[T]: Iterable, Cloneable {
     ///
     /// ```
     /// var d = Deque[Int64]();
-    /// d.reserveCapacity(minimumCapacity: 100);
+    /// d.reserveCapacity(100);
     /// ```
-    public mutating func reserveCapacity(minimumCapacity capacity: Int64) {
-        if capacity > self.cap() {
-            self.grow(minCapacity: capacity)
+    public mutating func reserveCapacity(minimumCapacity: Int64) {
+        if minimumCapacity > self.cap() {
+            self.grow(minCapacity: minimumCapacity)
         }
     }
 
@@ -586,7 +586,7 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d(1) = 99;
     /// d(1);  // 99
     /// ```
-    subscript(index: Int64) -> T {
+    public subscript(index: Int64) -> T {
         ref {
             let phys = self.physicalIndex(index);
             if phys < 0 { fatalError("Deque: index out of bounds") }
@@ -613,7 +613,7 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d(checked: 1);  // .Some(20)
     /// d(checked: 5);  // .None
     /// ```
-    subscript(checked index: Int64)? -> T {
+    public subscript(checked index: Int64)? -> T {
         ref {
             let phys = self.physicalIndex(index);
             if phys < 0 { return null; }

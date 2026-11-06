@@ -12,7 +12,7 @@ All operators desugar to protocol method calls (`ProtocolCall` expressions). The
 | `Sub` | `a - b` | `Subtractable` | `subtract` | — |
 | `Mul` | `a * b` | `Multipliable` | `multiply` | — |
 | `Div` | `a / b` | `Divisible` | `divide` | — |
-| `Rem` | `a % b` | `Modulo` | `modulo` | — |
+| `Rem` | `a % b` | `Remainder` | `remainder` | — |
 | `Eq` | `a == b` | `Equal` | `equals` | — |
 | `Ne` | `a != b` | `NotEqual` | `notEquals` | — |
 | `Lt` | `a < b` | `Less` | `lessThan` | — |
@@ -129,7 +129,7 @@ method through `TypedBody::protocol_method_name`, never the HIR name.
 | `SubAssign` | `x -= y` | `SubtractAssign` | `subtractAssign` | — |
 | `MulAssign` | `x *= y` | `MultiplyAssign` | `multiplyAssign` | — |
 | `DivAssign` | `x /= y` | `DivideAssign` | `divideAssign` | — |
-| `RemAssign` | `x %= y` | `ModuloAssign` | `modAssign` | — |
+| `RemAssign` | `x %= y` | `RemainderAssign` | `remainderAssign` | — |
 | `BitAndAssign` | `x &= y` | `BitwiseAndAssign` | `bitwiseAndAssign` | — |
 | `BitOrAssign` | `x \|= y` | `BitwiseOrAssign` | `bitwiseOrAssign` | — |
 | `BitXorAssign` | `x ^= y` | `BitwiseXorAssign` | `bitwiseXorAssign` | — |

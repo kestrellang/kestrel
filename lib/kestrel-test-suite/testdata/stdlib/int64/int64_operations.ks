@@ -13,7 +13,7 @@ module Test
             if a.subtract(b) != 7 { return 2 }
             if a.multiply(b) != 30 { return 3 }
             if a.divide(b) != 3 { return 4 }
-            if a.modulo(b) != 1 { return 5 }
+            if a.remainder(b) != 1 { return 5 }
 
             // Test negate and abs
             let neg: std.numeric.Int64 = -5;

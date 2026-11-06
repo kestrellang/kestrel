@@ -28,7 +28,7 @@ module Test
             let emptyDict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             var emptyIter = emptyDict.iter();
             let first = emptyIter.next();
-            if first.isSome() { return 4 }
+            if first.isSome { return 4 }
 
             // iter() - verify all expected keys are present
             var found1 = false;

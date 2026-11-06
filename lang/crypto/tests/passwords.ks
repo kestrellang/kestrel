@@ -56,7 +56,7 @@ func main() {
     let h15 = PasswordHash.hash("roundtrip", with: .Bcrypt(cost: 4)).expect("h"); check("roundtrip .Bcrypt(c", "\(PasswordHash(encoded: h15.encoded).expect("p").verify("roundtrip")) \(h15.needsRehash())", "true true");
     check("recommended needsRehash false", "\(PasswordHash(encoded: PasswordHash.hash("x", with: PasswordScheme.recommended).expect("r").encoded).expect("p").needsRehash())", "false");
     match PasswordHash.hash("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", with: .Bcrypt(cost: 4)) { .Err(.InvalidLength) => { print("PASS bcrypt 73 bytes -> InvalidLength\n"); }, _ => { print("FAIL bcrypt 73\n"); } }
-    check("bcrypt 72 bytes ok", "\(PasswordHash.hash("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", with: .Bcrypt(cost: 4)).isOk())", "true");
+    check("bcrypt 72 bytes ok", "\(PasswordHash.hash("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", with: .Bcrypt(cost: 4)).isOk)", "true");
     match PasswordHash.hash("x", with: .Bcrypt(cost: 3)) { .Err(.InvalidParameter) => { print("PASS bcrypt cost 3 -> InvalidParameter\n"); }, _ => { print("FAIL bcrypt cost 3\n"); } }
     check("reject $argon2id$m=64,t=2,p=1$c", "\(PasswordHash(encoded: "$argon2id$m=64,t=2,p=1$c29tZXNhbHRzb21lc2FsdA$AAAA").isSome)", "false");
     check("reject $argon2id$v=19$m=64,t=2$", "\(PasswordHash(encoded: "$argon2id$v=19$m=64,t=2$c29tZXNhbHRzb21lc2FsdA$AAAA").isSome)", "false");

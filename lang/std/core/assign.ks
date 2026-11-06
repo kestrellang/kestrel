@@ -44,12 +44,12 @@ public protocol DivideAssign[Other = Self] {
 }
 
 /// Raw protocol backing the `%=` operator.
-@builtin(.ModuloAssignProtocol)
-public protocol ModuloAssign[Other = Self] {
+@builtin(.RemainderAssignProtocol)
+public protocol RemainderAssign[Other = Self] {
     /// Mutates `self` to `self % other`.
     @sugarOnly
-    @builtin(.ModuloAssignMethod)
-    mutating func modAssign(other: Other)
+    @builtin(.RemainderAssignMethod)
+    mutating func remainderAssign(other: Other)
 }
 
 /// Raw protocol backing the `&=` operator.
