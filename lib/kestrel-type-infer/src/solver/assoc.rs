@@ -377,12 +377,36 @@ pub(crate) fn solve_associated(
 
             solve_equal(ctx, assoc_tv, result, span)
         },
+        // A type that declares the protocol but binds none of its associated
+        // type is E455's to report at the declaration; poison instead of a
+        // second "no associated type" pointing into the protocol's source.
+        None if declares_assoc_protocol(ctx, &kind, &key) => {
+            ctx.poison(result);
+            SolveResult::Solved
+        },
         None => SolveResult::Error(InferError::NoAssociatedType {
             container,
             name: name.to_string(),
             span,
         }),
     }
+}
+
+/// Does `kind` declare conformance to the protocol that owns the associated
+/// type `key` names? Only an entity key knows its protocol.
+fn declares_assoc_protocol(
+    ctx: &InferCtx<'_>,
+    kind: &TyKind,
+    key: &crate::constraint::AssocKey,
+) -> bool {
+    let assoc = match key {
+        crate::constraint::AssocKey::Entity(e)
+        | crate::constraint::AssocKey::Conformance { assoc: e, .. } => *e,
+        crate::constraint::AssocKey::Name(_) => return false,
+    };
+    ctx.query_ctx
+        .parent_of(assoc)
+        .is_some_and(|protocol| ctx.resolver.conforms_to(kind, protocol))
 }
 
 /// Is `kind` the bare alias a `Self.Item` projection collapses to — an

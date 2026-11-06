@@ -470,7 +470,7 @@ extend UnsafeSlice[T]: unsafe ArrayMatchable {
 /// # Representation
 ///
 /// A `Pointer[T]` cursor and an `Int64` countdown.
-public struct UnsafeSliceIterator[T]: Iterator {
+public struct UnsafeSliceIterator[T]: Iterator, DoubleEndedIterator {
     type Item = T
 
     private var ptr: Pointer[T]
@@ -490,6 +490,17 @@ public struct UnsafeSliceIterator[T]: Iterator {
             self.ptr = self.ptr.offset(by: 1);
             self.remaining = self.remaining - 1;
             .Some(value)
+        } else {
+            .None
+        }
+    }
+
+    /// Yields the last remaining element, or `.None` when the count reaches
+    /// zero. The front cursor stays put; the count shrinks from the back.
+    public mutating func nextBack() -> Optional[T] {
+        if self.remaining > 0 {
+            self.remaining = self.remaining - 1;
+            .Some(unsafe self.ptr.offset(by: self.remaining).read())
         } else {
             .None
         }

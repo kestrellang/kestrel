@@ -224,6 +224,19 @@ pub(super) fn solve_equal_decayed(
     span: Span,
 ) -> SolveResult {
     let vr = ctx.resolve(value);
+    // An Error side poisons an unresolved other side, as in `solve_coerce`:
+    // `unify` absorbs Error without binding, which left a for-loop's
+    // iterator var open under a missing associated type (`_ !: Iterator`).
+    let tr = ctx.resolve(target);
+    if ctx.is_error(vr) || ctx.is_error(tr) {
+        if ctx.is_error(vr) && matches!(ctx.slot(tr), TySlot::Unresolved { .. }) {
+            ctx.poison(target);
+        }
+        if ctx.is_error(tr) && matches!(ctx.slot(vr), TySlot::Unresolved { .. }) {
+            ctx.poison(value);
+        }
+        return SolveResult::Solved;
+    }
     let (pointee, value_is_ref) = match ctx.slot(vr) {
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => (*pointee, true),
         TySlot::Resolved(_) | TySlot::Unresolved { literal: Some(_) } => (vr, false),

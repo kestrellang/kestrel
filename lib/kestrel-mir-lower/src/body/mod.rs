@@ -514,8 +514,9 @@ pub(crate) struct PendingWriteback {
     type_args: Vec<TyId>,
     /// The receiver PLACE, evaluated once (@guaranteed mut place). The get
     /// call used a sub-borrow of it; the setter consumes it as its MutBorrow
-    /// receiver.
-    recv_place: ValueId,
+    /// receiver. `None` for a static member (`S.calc += 1`): its accessors
+    /// take no receiver.
+    recv_place: Option<ValueId>,
     /// Index values, lowered once; re-borrowed per call.
     index_vals: Vec<ValueId>,
     /// Temp slot holding the element during the mutating operation.
@@ -3833,6 +3834,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if ret_ref_mutating.is_none() {
             for &borrow_val in &borrows {
                 let src = self.body.value(borrow_val).borrow_source;
+                // An unnamed ref passed straight through (`xs(0).append(v)`'s
+                // receiver) dies with this call: end it through `end_ref` so
+                // the borrows it holds on its sources (`xs`, the index) end
+                // too. A plain end_borrow left `xs` mut-borrowed to scope exit,
+                // so a later closure capture of `xs` read under it (OSSA ICE).
+                if self.ref_results.contains(&borrow_val)
+                    && !self.ref_binding_vals.contains_key(&borrow_val)
+                {
+                    self.end_ref(borrow_val);
+                    continue;
+                }
                 self.emit_end_borrow(borrow_val);
                 // A sub-borrow of a ref (receiver/arg prep) was that ref's
                 // single use — refs aren't nameable, so once the dependent
@@ -4656,6 +4668,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         Some(setter)
     }
 
+    /// The setter a get→modify→set writeback of `member` calls back:
+    /// [`Self::write_setter`], or a `{ get set }` protocol requirement
+    /// itself (witness `"name.set"`). Without the requirement case a
+    /// generic `x.n -= 1` modified the getter's temporary and was lost.
+    fn writeback_setter(
+        &self,
+        member: kestrel_hecs::Entity,
+        receiver: HirExprId,
+    ) -> Option<kestrel_hecs::Entity> {
+        self.write_setter(member, Some(receiver))
+            .or_else(|| self.ctx.requirement_setter(member))
+    }
+
     /// An owned copy of an observed stored field read off its receiver
     /// place; `None` for any other member (those have a getter to call).
     fn read_observed_storage(
@@ -4825,16 +4850,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         index_args: &[kestrel_hir::body::HirCallArg],
         member: kestrel_hecs::Entity,
     ) -> Option<ValueId> {
-        // Statics keep today's rejection (not carved by the analyzer either).
-        if self
+        let is_static = self
             .ctx
             .world
             .get::<kestrel_ast_builder::Static>(member)
-            .is_some()
-        {
-            return None;
-        }
-        let setter = self.write_setter(member, Some(receiver.root_expr()))?;
+            .is_some();
+        let setter = self.writeback_setter(member, receiver.root_expr())?;
         // NotCopyable elements can't ride a copy-out — backstop the analyzer
         // (mirrors emit_move_out_of_borrow_backstop's accumulate pattern).
         if self.is_non_copyable(pointee_ty) {
@@ -4866,8 +4887,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // sub-borrow so the place survives the call (emit_call_inner ends
         // arg borrows after non-ret_borrow calls), and the setter consumes
         // the place itself as its MutBorrow receiver at drain time.
-        let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(receiver)?;
-        let recv_place = recv_arg.value;
+        // A static member's receiver is its type (`S` in `S.calc += 1`):
+        // there is no place to evaluate.
+        let (recv_place, receiver_ty) = match receiver {
+            AccessorReceiver::Expr(base) if is_static => (None, self.type_from_type_ref(*base)),
+            _ if is_static => return None,
+            _ => {
+                let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(receiver)?;
+                (Some(recv_arg.value), receiver_ty)
+            },
+        };
         let index_vals: Vec<ValueId> = index_args
             .iter()
             .map(|a| self.lower_expr(a.value))
@@ -4875,7 +4904,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
         // GET: copy the element out. An observed stored field reads its
         // storage directly (it has no getter to call).
-        let got = match self.read_observed_storage(recv_place, receiver_ty, member) {
+        let observed =
+            recv_place.and_then(|place| self.read_observed_storage(place, receiver_ty, member));
+        let got = match observed {
             Some(got) => got,
             None => self.emit_read_provider_call(
                 member,
@@ -4904,23 +4935,26 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         Some(slot_addr)
     }
 
-    /// Call `member`'s READ provider on a sub-borrow of `recv_place`: the
-    /// `ref` accessor child when present (a ref+set cross-mix leaves the
-    /// parent bodyless; the caller copies out of the @guaranteed ref
-    /// result), else the getter on the member itself.
+    /// Call `member`'s READ provider on a sub-borrow of `recv_place` (none
+    /// for a static member): the `ref` accessor child when present (a
+    /// ref+set cross-mix leaves the parent bodyless; the caller copies out
+    /// of the @guaranteed ref result), else the getter on the member itself.
     fn emit_read_provider_call(
         &mut self,
         member: kestrel_hecs::Entity,
-        recv_place: ValueId,
+        recv_place: Option<ValueId>,
         index_vals: &[ValueId],
         receiver_ty: TyId,
         type_args: &[TyId],
         result_ty: TyId,
     ) -> ValueId {
-        let mut args: Vec<CallArg> = vec![CallArg {
-            value: self.emit_begin_borrow(recv_place),
-            convention: ParamConvention::Borrow,
-        }];
+        let mut args: Vec<CallArg> = Vec::new();
+        if let Some(place) = recv_place {
+            args.push(CallArg {
+                value: self.emit_begin_borrow(place),
+                convention: ParamConvention::Borrow,
+            });
+        }
         for &v in index_vals {
             args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
         }
@@ -4991,7 +5025,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
         if let Some((receiver, index_args, member, _)) = self.accessor_member_prelude(expr_id)
             && self
-                .write_setter(member, Some(receiver.root_expr()))
+                .writeback_setter(member, receiver.root_expr())
                 .is_some()
         {
             return self.fabricate_setter_writeback_slot(expr_id, &receiver, &index_args, member);
@@ -5134,9 +5168,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         prop: Entity,
         convention: ParamConvention,
     ) -> (CallArg, TyId) {
-        let declared = crate::ty::resolve_type_annotation(self.ctx, prop);
-        let prop_ty = self.subst_receiver_args(receiver_ty, declared);
-        let prop_ty = self.requirement_ty_at(prop, receiver_ty, prop_ty);
+        let prop_ty = self.computed_prop_ty(prop, receiver_ty);
         // A place property (`var item: T { ref … mutating ref … }`) lends
         // through its accessor child: the `mutating ref` for a mutable use,
         // else the `ref`. The caller prepares `receiver` with that
@@ -5160,6 +5192,50 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return (arg, pointee);
         }
         (self.prepare_call_arg(result, convention), prop_ty)
+    }
+
+    /// Computed property `prop`'s type at a receiver of type `receiver_ty`:
+    /// its declared type with the receiver's type args (and a protocol
+    /// requirement's `Self`) substituted.
+    pub(crate) fn computed_prop_ty(&mut self, prop: Entity, receiver_ty: TyId) -> TyId {
+        let declared = crate::ty::resolve_type_annotation(self.ctx, prop);
+        let prop_ty = self.subst_receiver_args(receiver_ty, declared);
+        self.requirement_ty_at(prop, receiver_ty, prop_ty)
+    }
+
+    /// A subscript store through a value-returning get/set computed
+    /// property (`u.g(0) = 5`, `g: G { get set }`): get `u.g` into a
+    /// writeback slot and lend the slot as the subscript's receiver, so the
+    /// property's setter writes the mutated value back when the statement
+    /// ends. `None` when the property lends a place instead (a `mutating
+    /// ref` accessor or a `&mutating` getter) or has no setter.
+    pub(crate) fn computed_prefix_writeback_receiver(
+        &mut self,
+        receiver: HirExprId,
+        receiver_ty: TyId,
+        prop: Entity,
+    ) -> Option<(CallArg, TyId)> {
+        if self.ctx.find_ref_accessor_child(prop, true).is_some() {
+            return None;
+        }
+        let prop_ty = self.computed_prop_ty(prop, receiver_ty);
+        if matches!(self.ctx.module.ty_arena.get(prop_ty), MirTy::Ref { .. }) {
+            return None;
+        }
+        self.writeback_setter(prop, receiver)?;
+        let slot_addr = self.fabricate_writeback_slot_typed(
+            prop_ty,
+            Vec::new(),
+            &AccessorReceiver::Expr(receiver),
+            &[],
+            prop,
+        )?;
+        let slot_borrow = self.emit_begin_mut_borrow_addr(slot_addr, prop_ty);
+        let arg = CallArg {
+            value: slot_borrow,
+            convention: ParamConvention::MutBorrow,
+        };
+        Some((arg, prop_ty))
     }
 
     /// A protocol requirement's declared type (`var item: Item`, read as
@@ -5315,10 +5391,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 self.end_lent_slot_borrow(lent, &wb.lent_refs);
             }
             let new_val = self.emit_take(wb.slot_addr, wb.elem_ty);
-            let mut args: Vec<CallArg> = vec![CallArg {
-                value: wb.recv_place,
-                convention: ParamConvention::MutBorrow,
-            }];
+            let mut args: Vec<CallArg> = wb
+                .recv_place
+                .map(|value| CallArg {
+                    value,
+                    convention: ParamConvention::MutBorrow,
+                })
+                .into_iter()
+                .collect();
             for &v in &wb.index_vals {
                 args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }

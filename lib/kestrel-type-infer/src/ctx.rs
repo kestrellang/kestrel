@@ -1133,6 +1133,23 @@ impl<'a> InferCtx<'a> {
         self.types[root.0 as usize] = TySlot::Resolved(TyKind::Error);
     }
 
+    /// Poison `tv` for a failure that is still to be reported about it, and
+    /// return a copy of its type as it was, for the diagnostic to name.
+    /// Poisoning first left the message naming the Error type (`_ !:
+    /// AddAssign`).
+    /// An unresolved `tv` has nothing to show: it is returned poisoned, so the
+    /// report is suppressed as a cascade like any other on an Error type.
+    pub fn poison_keeping_shown(&mut self, tv: TyVar) -> TyVar {
+        let slot = self.slot(self.resolve(tv)).clone();
+        self.poison(tv);
+        if !matches!(slot, TySlot::Resolved(ref k) if !matches!(k, TyKind::Error)) {
+            return tv;
+        }
+        let shown = self.fresh();
+        self.types[shown.0 as usize] = slot;
+        shown
+    }
+
     /// Mark `tv` as a wildcard (created from explicit `_` in a type-arg position).
     /// Wildcard TyVars that stay Unresolved don't generate "could not infer type"
     /// diagnostics. Call after creating the TyVar; propagation to unified vars

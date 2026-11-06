@@ -694,6 +694,14 @@ pub(super) fn solve_member(
                             span,
                         });
                     }
+                    // An operator's hidden method (`subtract` for `-`) is never
+                    // the user's word: its `Conforms` constraint already reports
+                    // `S !: Subtractable`, so a second "no member 'subtract'"
+                    // only leaks the hook name. Poison the result instead.
+                    if ctx.operator_members.contains_key(&expr) {
+                        ctx.poison(result);
+                        return SolveResult::Solved;
+                    }
                     return SolveResult::Error(member_not_found_error(
                         ctx, receiver, &recv_kind, name, is_call, span,
                     ));
@@ -872,6 +880,13 @@ pub(super) fn solve_member(
     for source in sources {
         match applicability(ctx, source, &recv_kind) {
             kestrel_entail::Tri::Holds => {},
+            // An operator hook (`subtract` for `-`) found on a protocol the
+            // receiver doesn't conform to: the operator's `Conforms` already
+            // reports `S !: Subtractable`, so poison instead of a second error.
+            kestrel_entail::Tri::Fails if ctx.operator_members.contains_key(&expr) => {
+                ctx.poison(result);
+                return SolveResult::Solved;
+            },
             kestrel_entail::Tri::Fails if !crate::solver_entail::has_open_var(ctx, receiver) => {
                 return SolveResult::Error(InferError::NoMember {
                     receiver,
