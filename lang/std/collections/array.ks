@@ -1786,8 +1786,9 @@ extend Array[T] where T: Formattable {
     }
 }
 
-/// Prints as `[e1, e2, ...]`. The `format` body is the one on
-/// `extend Sliceable[T] where T: Formattable`.
+/// Renders as `"[e1, e2, ...]"`, so arrays work in string interpolation and
+/// `print`. The `format` witness comes from `extend Sliceable[T] where
+/// T: Formattable`.
 extend Array[T]: Formattable where T: Formattable {}
 
 // ============================================================================

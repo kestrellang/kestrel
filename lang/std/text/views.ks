@@ -3602,9 +3602,11 @@ public struct SplitViewIterator: Iterator, Cloneable {
             }
         }
 
-        // No more separators — return trailing remainder
+        // No more separators — return the remainder. It is empty when the
+        // source ends with a separator (`start > 0` means one was consumed),
+        // and that empty segment is kept, just as a leading one is.
         self.done = true;
-        if start < self.sourceLen {
+        if start < self.sourceLen or start > 0 {
             return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.end))
         }
         .None
@@ -3743,9 +3745,10 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
             }
         }
 
-        // No more matches — return remainder
+        // No more matches — return the remainder, keeping a trailing empty
+        // segment like SplitViewIterator does.
         self.done = true;
-        if start < self.sourceLen {
+        if start < self.sourceLen or start > 0 {
             return .Some(self.slice.subslice(from: self.slice.start + start, to: self.slice.end))
         }
         .None

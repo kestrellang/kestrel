@@ -656,7 +656,8 @@ func unpackSample(row: Array[UInt8], index: Int64, depth: Int64) -> Int64 {
 }
 
 /// Reverses one PNG filter in place. `previous` is the unfiltered row
-/// above (zeros for the first row of a pass).
+/// above (zeros for the first row of a pass). PNG defines these sums
+/// modulo 256, so they wrap rather than trap.
 func unfilter(mutating row: Array[UInt8], previous: Array[UInt8], filter: Int64, stride: Int64) {
     let n = row.count;
     if filter == 0 { return; }
@@ -665,18 +666,18 @@ func unfilter(mutating row: Array[UInt8], previous: Array[UInt8], filter: Int64,
     let up = previous.asUnsafeSlice().pointer;
     if filter == 1 {
         for i in stride..<n {
-            unsafe p.offset(by: i).write(p.offset(by: i).read() + p.offset(by: i - stride).read());
+            unsafe p.offset(by: i).write(p.offset(by: i).read().addWrapping(p.offset(by: i - stride).read()));
         }
     } else if filter == 2 {
         for i in 0..<n {
-            unsafe p.offset(by: i).write(p.offset(by: i).read() + up.offset(by: i).read());
+            unsafe p.offset(by: i).write(p.offset(by: i).read().addWrapping(up.offset(by: i).read()));
         }
     } else if filter == 3 {
         for i in 0..<n {
             var left: Int64 = 0;
             if i >= stride { left = unsafe Int64(from: p.offset(by: i - stride).read()); }
             let avg = unsafe (left + Int64(from: up.offset(by: i).read())) / 2;
-            unsafe p.offset(by: i).write(p.offset(by: i).read() + UInt8(truncating: avg));
+            unsafe p.offset(by: i).write(p.offset(by: i).read().addWrapping(UInt8(truncating: avg)));
         }
     } else {
         for i in 0..<n {
@@ -687,7 +688,7 @@ func unfilter(mutating row: Array[UInt8], previous: Array[UInt8], filter: Int64,
                 corner = unsafe Int64(from: up.offset(by: i - stride).read());
             }
             let above = unsafe Int64(from: up.offset(by: i).read());
-            unsafe p.offset(by: i).write(p.offset(by: i).read() + UInt8(truncating: paeth(left, above, corner)));
+            unsafe p.offset(by: i).write(p.offset(by: i).read().addWrapping(UInt8(truncating: paeth(left, above, corner))));
         }
     }
 }
