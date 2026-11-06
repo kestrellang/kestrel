@@ -60,7 +60,7 @@ public struct HKDF[H] where H: Digest {
             var mac = HMAC[H](key: prk);
             mac.update(prev);
             mac.update(info.asUnsafeSlice());
-            let counter: UInt8 = UInt8(from: i);
+            let counter: UInt8 = UInt8(truncating: i);
             let counterBuf: Array[UInt8] = [counter];
             mac.update(counterBuf);
             let block = mac.finalize();

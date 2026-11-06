@@ -88,6 +88,26 @@ impl OssaBodyCtx<'_, '_> {
         self.lower_literal_primitive(lit, result_ty)
     }
 
+    /// The literal `-v` when `method` is `negate` applied to the integer
+    /// literal `v`, so the negation folds into the literal. `-0` is left
+    /// alone: for a float-typed literal, `negate` gives `-0.0`.
+    pub(crate) fn negated_int_literal(
+        &self,
+        receiver: HirExprId,
+        method: &str,
+    ) -> Option<HirLiteral> {
+        if method != "negate" {
+            return None;
+        }
+        match &self.hir.exprs[receiver] {
+            kestrel_hir::body::HirExpr::Literal {
+                value: HirLiteral::Integer(v),
+                ..
+            } if *v != 0 => Some(HirLiteral::Integer(v.wrapping_neg())),
+            _ => None,
+        }
+    }
+
     fn lower_literal_primitive(&mut self, lit: &HirLiteral, target_ty: TyId) -> ValueId {
         let imm = match lit {
             HirLiteral::Integer(v) => match self.ctx.module.ty_arena.get(target_ty) {

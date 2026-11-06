@@ -2306,7 +2306,7 @@ _Defined in `lang/std/core/protocols.ks`._
 #### function `write`
 
 ```kestrel
-mutating func write(UnsafeSlice[UInt8])
+mutating func write(Slice[UInt8])
 ```
 
 Mixes `bytes` into the running hash state.
@@ -2481,6 +2481,52 @@ Returns the less-than-or-equal result as `Output` — typically `Bool`.
 
 _Defined in `lang/std/core/comparison.ks`._
 
+## protocol `LossyConvertible`
+
+```kestrel
+public protocol LossyConvertible[From]
+```
+
+Protocol for the explicit lossy forms of a conversion, for sources
+where `init(from:)` would trap because the value may not fit.
+
+Each integer type conforms once per source it can't always hold, so
+`Int8(truncating: x)` and `Int8(clamping: x)` work for every wider or
+differently-signed `x`.
+
+### Examples
+
+```
+let big: Int64 = 300;
+Int8(truncating: big);   // 44  (low 8 bits)
+Int8(clamping: big);     // 127
+```
+
+_Defined in `lang/std/core/convertible.ks`._
+
+### Members
+
+#### initializer `Clamping`
+
+```kestrel
+init(clamping: From)
+```
+
+Converts `value`, saturating to `Self`'s minimum or maximum when it
+doesn't fit. Never traps.
+
+_Defined in `lang/std/core/convertible.ks`._
+
+#### initializer `Truncating`
+
+```kestrel
+init(truncating: From)
+```
+
+Keeps the low bits of `value`, reinterpreted as `Self`. Never traps.
+
+_Defined in `lang/std/core/convertible.ks`._
+
 ## protocol `Matchable`
 
 ```kestrel
@@ -2506,62 +2552,6 @@ func matches(Self) -> Bool
 Returns `true` if `other` matches the receiver.
 
 _Defined in `lang/std/core/protocols.ks`._
-
-## protocol `Modulo`
-
-```kestrel
-public protocol Modulo[Other = Self]
-```
-
-Raw protocol backing the `%` operator.
-
-For integers this is the remainder of truncated division, with the sign of
-the dividend. If you need Euclidean / floor-style remainder semantics
-(result with the sign of the divisor), compute `((a % b) + b) % b`.
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
-### Members
-
-#### typealias `Output`
-
-```kestrel
-type Output
-```
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
-#### function `modulo`
-
-```kestrel
-consuming func modulo(consuming Other) -> Output
-```
-
-Returns `self % other`.
-
-_Defined in `lang/std/core/arithmetic.ks`._
-
-## protocol `ModuloAssign`
-
-```kestrel
-public protocol ModuloAssign[Other = Self]
-```
-
-Raw protocol backing the `%=` operator.
-
-_Defined in `lang/std/core/assign.ks`._
-
-### Members
-
-#### function `modAssign`
-
-```kestrel
-mutating func modAssign(Other)
-```
-
-Mutates `self` to `self % other`.
-
-_Defined in `lang/std/core/assign.ks`._
 
 ## protocol `Multipliable`
 
@@ -2941,10 +2931,10 @@ The receiver compared less than the argument.
 
 _Defined in `lang/std/core/ordering.ks`._
 
-#### function `reverse`
+#### function `reversed`
 
 ```kestrel
-public func reverse() -> Ordering
+public func reversed() -> Ordering
 ```
 
 Swaps `Less` and `Greater`; leaves `Equal` alone. Useful for sorting
@@ -2953,8 +2943,8 @@ in reverse without writing a second comparator.
 ##### Examples
 
 ```
-Ordering.Less.reverse()     // .Greater
-Ordering.Equal.reverse()    // .Equal
+Ordering.Less.reversed()     // .Greater
+Ordering.Equal.reversed()    // .Equal
 ```
 
 _Defined in `lang/std/core/ordering.ks`._
@@ -5396,6 +5386,62 @@ func rangeUpTo() -> Output
 Builds the partial range `(-∞, self)`.
 
 _Defined in `lang/std/core/range.ks`._
+
+## protocol `Remainder`
+
+```kestrel
+public protocol Remainder[Other = Self]
+```
+
+Raw protocol backing the `%` operator.
+
+For integers this is the remainder of truncated division, with the sign of
+the dividend: `-7 % 3` is `-1`. For a result that is never negative, use
+the integers' Euclidean `modulo(by:)`: `(-7).modulo(by: 3)` is `2`.
+
+_Defined in `lang/std/core/arithmetic.ks`._
+
+### Members
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/arithmetic.ks`._
+
+#### function `remainder`
+
+```kestrel
+consuming func remainder(consuming Other) -> Output
+```
+
+Returns `self % other`.
+
+_Defined in `lang/std/core/arithmetic.ks`._
+
+## protocol `RemainderAssign`
+
+```kestrel
+public protocol RemainderAssign[Other = Self]
+```
+
+Raw protocol backing the `%=` operator.
+
+_Defined in `lang/std/core/assign.ks`._
+
+### Members
+
+#### function `remainderAssign`
+
+```kestrel
+mutating func remainderAssign(Other)
+```
+
+Mutates `self` to `self % other`.
+
+_Defined in `lang/std/core/assign.ks`._
 
 ## protocol `RightShift`
 

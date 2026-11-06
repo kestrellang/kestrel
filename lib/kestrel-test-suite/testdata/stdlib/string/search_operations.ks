@@ -13,7 +13,7 @@ module Test
 
             // Test firstIndex
             let pos = s.firstIndex(of: "world");
-            if pos.isNone() { return 3 }
+            if pos.isNone { return 3 }
             if pos.unwrap().value != 6 { return 4 }
 
             // Test starts/ends with

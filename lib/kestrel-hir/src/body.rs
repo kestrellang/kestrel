@@ -856,8 +856,8 @@ pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
     ),
     (
         BinaryOp::Rem,
-        Builtin::ModuloOperatorProtocol,
-        "modulo",
+        Builtin::RemainderOperatorProtocol,
+        "remainder",
         None,
     ),
     (
@@ -1034,8 +1034,8 @@ pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, Builtin, &str, Option<
     ),
     (
         CompoundAssignOp::RemAssign,
-        Builtin::ModuloAssignProtocol,
-        "modAssign",
+        Builtin::RemainderAssignProtocol,
+        "remainderAssign",
         None,
     ),
     (

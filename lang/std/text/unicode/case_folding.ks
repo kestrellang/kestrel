@@ -167,7 +167,7 @@ public func caseFold(c: Char) -> Char {
     let blockIdx = FOLD_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
     let delta = FOLD_STAGE2(unchecked: Int64(from: blockIdx) * 256 + Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     if delta == 0 { return c }
-    Char(unchecked: UInt32(from: Int64(from: cp).add(Int64(from: delta))))
+    Char(unchecked: UInt32(truncating: Int64(from: cp).add(Int64(from: delta))))
 }
 
 /// `true` iff folding `c` produces more than one codepoint. Linear
@@ -178,7 +178,7 @@ public func hasCaseFoldExpansion(c: Char) -> Bool {
     var i: Int64 = 0;
     while i < FOLD_EXPANSIONS_COUNT {
         let entry = FOLD_EXPANSIONS(unchecked: i);
-        if UInt32(from: entry.0) == cp { return true }
+        if UInt32(truncating: entry.0) == cp { return true }
         i = i + 1
     }
     false
@@ -200,11 +200,11 @@ public func caseFoldExpansion(c: Char) -> String {
     var i: Int64 = 0;
     while i < FOLD_EXPANSIONS_COUNT {
         let entry = FOLD_EXPANSIONS(unchecked: i);
-        if UInt32(from: entry.0) == cp {
+        if UInt32(truncating: entry.0) == cp {
             var result = String();
-            result.append(char: Char(unchecked: UInt32(from: entry.2)));
-            if entry.1 >= 2 { result.append(char: Char(unchecked: UInt32(from: entry.3))) }
-            if entry.1 >= 3 { result.append(char: Char(unchecked: UInt32(from: entry.4))) }
+            result.append(char: Char(unchecked: UInt32(truncating: entry.2)));
+            if entry.1 >= 2 { result.append(char: Char(unchecked: UInt32(truncating: entry.3))) }
+            if entry.1 >= 3 { result.append(char: Char(unchecked: UInt32(truncating: entry.4))) }
             return result
         }
         i = i + 1

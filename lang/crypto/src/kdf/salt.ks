@@ -29,6 +29,6 @@ public struct Salt: ByteValue, RandomByteValue, Equatable, Hashable {
 
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(self.storage.asUnsafeSlice());
+        hasher.write(self.storage.asSlice());
     }
 }

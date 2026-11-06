@@ -789,9 +789,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         }
 
         let hashValue: UInt64 = self.hashKey(key);
-        let capU: UInt64 = UInt64(from: myCap);
-        let mod: UInt64 = hashValue.modulo(capU);
-        var index: Int64 = Int64(from: mod);
+        let capU: UInt64 = UInt64(truncating: myCap);
+        let mod: UInt64 = hashValue.remainder(capU);
+        var index: Int64 = Int64(truncating: mod);
         let myBuckets = self.buckets();
         var i: Int64 = 0;
 
@@ -825,9 +825,9 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             return .None
         }
 
-        let capU: UInt64 = UInt64(from: myCap);
-        let mod: UInt64 = hashValue.modulo(capU);
-        var index: Int64 = Int64(from: mod);
+        let capU: UInt64 = UInt64(truncating: myCap);
+        let mod: UInt64 = hashValue.remainder(capU);
+        var index: Int64 = Int64(truncating: mod);
         let myBuckets = self.buckets();
         var i: Int64 = 0;
 
@@ -898,10 +898,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         // Move every live entry into the new table (linear probing). The
         // old buckets are left moved-out, so freeing them drops nothing.
-        let newCapU: UInt64 = UInt64(from: newCap);
+        let newCapU: UInt64 = UInt64(truncating: newCap);
         for i in 0..<s.cap {
             if let .Occupied(key, value, hashValue) = unsafe s.buckets.offset(by: i).take() {
-                var slotIndex: Int64 = Int64(from: hashValue.modulo(newCapU));
+                var slotIndex: Int64 = Int64(truncating: hashValue.remainder(newCapU));
                 while not bucketIsEmpty(unsafe newBuckets.offset(by: slotIndex).value) {
                     slotIndex = (slotIndex + 1) % newCap
                 }
@@ -931,7 +931,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ["a": 1, "b": 2].contains("z");  // false
     /// ```
     public func contains(key: K) -> Bool {
-        self.findEntry(key).isSome()
+        self.findEntry(key).isSome
     }
 
     // ========================================================================
@@ -1589,8 +1589,8 @@ extend Dictionary[K, V, H]: Hashable where K: Hashable, V: Hashable, H: Hasher, 
             var entryHasher = H();
             pair.0.hash(into: entryHasher);
             pair.1.hash(into: entryHasher);
-            // `+` wraps by default, so the sum is a safe commutative combiner.
-            combined = combined + entryHasher.finish();
+            // Wrapping addition is a safe commutative combiner.
+            combined = combined.addWrapping(entryHasher.finish());
         }
         self.count.hash(into: hasher);
         combined.hash(into: hasher);

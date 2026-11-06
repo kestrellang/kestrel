@@ -625,6 +625,9 @@ fn compile_op1(
         Op::PtrToAddress => arg,
         Op::PtrIsNull => builder.ins().icmp_imm(IntCC::Equal, arg, 0),
         Op::PtrNull(_) => builder.ins().iconst(ptr_ty, 0),
+        Op::OverflowChecks => builder
+            .ins()
+            .iconst(ir::types::I8, i64::from(fc.ctx.options.overflow_checks())),
         Op::PtrTo(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);

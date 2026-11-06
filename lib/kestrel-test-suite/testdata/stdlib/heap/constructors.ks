@@ -48,7 +48,7 @@ module Test
 
             // Test reserveCapacity
             var h6 = std.collections.Heap[std.numeric.Int64]();
-            h6.reserveCapacity(minimumCapacity: 100);
+            h6.reserveCapacity(100);
             if h6.count != 0 { return 13 }
             // Push should still work normally
             h6.push(7);

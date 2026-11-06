@@ -5,10 +5,12 @@
 
 // Regression (#159): signed `minValue / -1` overflows. The raw op was lowered to
 // bare native `sdiv`/`srem` — Cranelift TRAPPED on it, LLVM made it UB (folded).
-// The spec (int64.ks docs) is that it WRAPS: div → minValue, rem → 0. Both
-// backends now swap the divisor -1→1 exactly on this overflow case so the native
-// op yields min/1=min and min%1=0. Operands are routed through opaque functions
-// so the optimizer can't constant-fold past the runtime op.
+// The raw op WRAPS: div → minValue, rem → 0. Both backends swap the divisor
+// -1→1 exactly on this overflow case so the native op yields min/1=min and
+// min%1=0. `/` now traps on this case when overflow checks are on, so the
+// division goes through `divideWrapping`, which is the raw op. `%` never traps.
+// Operands are routed through opaque functions so the optimizer can't
+// constant-fold past the runtime op.
 
 module Test
 
@@ -22,12 +24,12 @@ func li8(v: Int8) -> Int8 { v }
 func main() -> lang.i64 {
     let m = Int64.minValue;
     let negOne: Int64 = -1;
-    if li64(m) / li64(negOne) != Int64.minValue { return 1 }
+    if li64(m).divideWrapping(li64(negOne)) != Int64.minValue { return 1 }
     if li64(m) % li64(negOne) != 0 { return 2 }
 
     let m8 = Int8.minValue;
     let n8: Int8 = -1;
-    if li8(m8) / li8(n8) != Int8.minValue { return 3 }
+    if li8(m8).divideWrapping(li8(n8)) != Int8.minValue { return 3 }
     if li8(m8) % li8(n8) != 0 { return 4 }
 
     // Non-overflow signed division still works (no spurious swap).

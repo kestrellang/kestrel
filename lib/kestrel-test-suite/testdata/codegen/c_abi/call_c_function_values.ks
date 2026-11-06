@@ -55,11 +55,11 @@ func main() -> lang.i64 {
         offset = 6;
         println(hook.callback(100, hook.userdata));
         let maybe = maybeDouble(1);
-        println(maybe.function.isSome());
+        println(maybe.function.isSome);
         if let .Some(f) = maybe.function {
             println(f(12, state));
         }
-        println(maybeDouble(0).function.isSome());
+        println(maybeDouble(0).function.isSome);
     }
     0
 }

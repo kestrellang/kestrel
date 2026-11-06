@@ -30,13 +30,13 @@ func errorMessage(db: RawPointer) -> String {
 func bindParams(stmt: RawPointer, bindings: Array[SqliteValue]) -> () throws SqliteError {
     var i: Int64 = 0;
     while i < bindings.count {
-        let paramIndex = Int32(from: i + 1);
+        let paramIndex = Int32(truncating: i + 1);
         let bindResult = match bindings(i) {
             .Integer(v) => unsafe ffi.sqlite3_bind_int64(stmt, paramIndex, v),
             .Real(v) => unsafe ffi.sqlite3_bind_double(stmt, paramIndex, v.raw),
             .Text(v) => {
                 let cstr = v.toCString();
-                let byteCount = Int32(from: v.bytes.count);
+                let byteCount = Int32(truncating: v.bytes.count);
                 let r = unsafe ffi.sqlite3_bind_text(stmt, paramIndex, cstr.raw.asRaw(), byteCount, SQLITE_TRANSIENT());
                 cstr.free();
                 r
@@ -58,7 +58,7 @@ func executeOnDb(db: RawPointer, sql: SQL) -> () throws SqliteError {
     let prepResult = unsafe ffi.sqlite3_prepare_v2(
         db,
         ctemplate.raw.asRaw(),
-        Int32(from: -1),
+        Int32(truncating: -1),
         Pointer(to: stmtRaw).asRaw(),
         RawPointer.nullPointer()
     );
@@ -86,7 +86,7 @@ func queryOnDb[R](db: RawPointer, sql: SQL) -> Array[R] throws SqliteError where
     let prepResult = unsafe ffi.sqlite3_prepare_v2(
         db,
         ctemplate.raw.asRaw(),
-        Int32(from: -1),
+        Int32(truncating: -1),
         Pointer(to: stmtRaw).asRaw(),
         RawPointer.nullPointer()
     );
@@ -144,7 +144,7 @@ func getCachedStmt(
             let prepResult = unsafe ffi.sqlite3_prepare_v2(
                 db,
                 ctemplate.raw.asRaw(),
-                Int32(from: -1),
+                Int32(truncating: -1),
                 Pointer(to: stmtRaw).asRaw(),
                 RawPointer.nullPointer()
             );
@@ -240,7 +240,7 @@ func readRow(stmt: RawPointer) -> Row {
     var columns = [];
     var i: Int64 = 0;
     while i < colCount {
-        let col = Int32(from: i);
+        let col = Int32(truncating: i);
         let colType = unsafe ffi.sqlite3_column_type(stmt, col);
         if colType == ffi.SQLITE_INTEGER() {
             columns.append(SqliteValue.Integer(unsafe ffi.sqlite3_column_int64(stmt, col)));

@@ -15,7 +15,7 @@ func main() -> lang.i64 {
     let err: Result[Int64, Int64] = .Err(99);
     let tapped = err.inspectErr({ (e) in seen = e });
     if seen != 99 { return 1 }
-    if tapped.isErr() == false { return 2 }
+    if tapped.isErr == false { return 2 }
     if tapped.unwrapErr() != 99 { return 3 }
 
     // Ok: the Err-branch tap never runs; the captured place is untouched.
@@ -23,7 +23,7 @@ func main() -> lang.i64 {
     let ok: Result[Int64, Int64] = .Ok(42);
     let passed = ok.inspectErr({ (e) in untouched = 0 });
     if untouched != 5 { return 4 }
-    if passed.isOk() == false { return 5 }
+    if passed.isOk == false { return 5 }
     if passed.unwrap() != 42 { return 6 }
 
     0

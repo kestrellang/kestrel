@@ -43,7 +43,7 @@ func main() -> lang.i64 {
 
     // nested optional: the bind exposes the inner `Int64?`
     let nested: Int64?? = .Some(.Some(4));
-    let inner = nested?.isSome();
+    let inner = nested?.isSome;
     if inner != .Some(true) { return 7 }
 
     // generic tail promotes even when `T` is itself optional

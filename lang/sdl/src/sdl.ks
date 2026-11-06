@@ -139,7 +139,7 @@ public struct Milliseconds {
     public var value: UInt32
 
     public init(value: Int64) {
-        self.value = UInt32(from: value);
+        self.value = UInt32(truncating: value);
     }
 }
 

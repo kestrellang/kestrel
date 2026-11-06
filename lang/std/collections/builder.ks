@@ -4,7 +4,8 @@ module std.collections
 
 import std.core.(Bool, fatalError)
 import std.numeric.(Int64)
-import std.memory.(Layout, Pointer, UnsafeSlice, SystemAllocator, CowBox)
+import std.memory.(Layout, Pointer, SystemAllocator, CowBox)
+import std.collections.(Sliceable)
 import std.iter.(Iterable)
 
 /// Write-only buffer for efficient array construction. No COW, no
@@ -108,12 +109,14 @@ public struct ArrayBuilder[T] {
         self.len = self.len + 1
     }
 
-    /// Appends every element of `slice`.
-    public mutating func append(contentsOf slice: UnsafeSlice[T]) {
-        let n = slice.count;
+    /// Appends every element of `other` (an `Array`, `Slice`, or any
+    /// other `Sliceable`), copying in a single pass.
+    public mutating func append(contentsOf other: &some Sliceable[T] and not Static and not Copyable and not Sized) {
+        let sl = other.asUnsafeSlice();
+        let n = sl.count;
         if n == 0 { return }
         self.grow(self.len + n);
-        let src = slice.pointer;
+        let src = sl.pointer;
         for i in 0..<n {
             unsafe self.ptr.offset(by: self.len + i).write(src.offset(by: i).read())
         }

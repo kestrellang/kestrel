@@ -410,7 +410,7 @@ public struct TextureView: not Copyable {
             view: self.handle,
             depthSlice: raw.WGPU_U32_UNDEFINED,
             resolveTarget: RawPointer.nullPointer(),
-            loadOp: if clear.isSome() { raw.WGPULoadOp_Clear } else { raw.WGPULoadOp_Load },
+            loadOp: if clear.isSome { raw.WGPULoadOp_Clear } else { raw.WGPULoadOp_Load },
             storeOp: raw.WGPUStoreOp_Store,
             clearValue: (clear ?? Color.black).cValue
         ))
@@ -425,7 +425,7 @@ public struct TextureView: not Copyable {
             view: self.handle,
             depthSlice: raw.WGPU_U32_UNDEFINED,
             resolveTarget: target.handle,
-            loadOp: if clear.isSome() { raw.WGPULoadOp_Clear } else { raw.WGPULoadOp_Load },
+            loadOp: if clear.isSome { raw.WGPULoadOp_Clear } else { raw.WGPULoadOp_Load },
             storeOp: raw.WGPUStoreOp_Discard,
             clearValue: (clear ?? Color.black).cValue
         ))
@@ -437,7 +437,7 @@ public struct TextureView: not Copyable {
     /// `readOnly` buffer is tested against but never written, so it can be
     /// bound to shaders in the same pass.
     public func depthAttachment(clear clear: Float32? = .Some(1.0), stencilClear stencilClear: Int64 = 0, readOnly readOnly: Bool = false) -> DepthAttachment {
-        let load = if clear.isSome() { raw.WGPULoadOp_Clear } else { raw.WGPULoadOp_Load };
+        let load = if clear.isSome { raw.WGPULoadOp_Clear } else { raw.WGPULoadOp_Load };
         let depthOps = self.format.hasDepth and not readOnly;
         let stencilOps = self.format.hasStencil and not readOnly;
         DepthAttachment(cValue: raw.WGPURenderPassDepthStencilAttachment(
@@ -1090,7 +1090,7 @@ extend Device {
             colorTargets.append(raw.WGPUColorTargetState(
                 nextInChain: Pointer.nullPointer(),
                 format: target.format.cValue,
-                blend: if target.blend.cValue.isSome() { blends.asPointer().offset(by: t) } else { Pointer.nullPointer() },
+                blend: if target.blend.cValue.isSome { blends.asPointer().offset(by: t) } else { Pointer.nullPointer() },
                 writeMask: mask
             ));
             t = t + 1;
@@ -1136,7 +1136,7 @@ extend Device {
                 },
                 unclippedDepth: 0
             ),
-            depthStencil: if depth.isSome() { Pointer(to: depthState) } else { Pointer.nullPointer() },
+            depthStencil: if depth.isSome { Pointer(to: depthState) } else { Pointer.nullPointer() },
             multisample: raw.WGPUMultisampleState(
                 nextInChain: Pointer.nullPointer(),
                 count: UInt32(from: sampleCount),
@@ -1283,12 +1283,12 @@ extend CommandEncoder {
             label: view(descriptor.label),
             colorAttachmentCount: UInt64(from: attachments.count),
             colorAttachments: attachments.asPointer(),
-            depthStencilAttachment: if descriptor.depth.isSome() { Pointer(to: depthRaw) } else { Pointer.nullPointer() },
+            depthStencilAttachment: if descriptor.depth.isSome { Pointer(to: depthRaw) } else { Pointer.nullPointer() },
             occlusionQuerySet: match descriptor.occlusionQueries {
                 .Some(q) => q.handle,
                 .None => RawPointer.nullPointer()
             },
-            timestampWrites: if descriptor.timestamps.isSome() { Pointer(to: timestamps).asRaw() } else { RawPointer.nullPointer() }
+            timestampWrites: if descriptor.timestamps.isSome { Pointer(to: timestamps).asRaw() } else { RawPointer.nullPointer() }
         );
         let pass = RenderPass(handle: unsafe raw.wgpuCommandEncoderBeginRenderPass(self.handle, cDescriptor));
         body(pass);

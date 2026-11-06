@@ -38,27 +38,27 @@ fileprivate func bnTrim(n: Array[UInt32]) -> Array[UInt32] {
 fileprivate func bnIsZero(n: Array[UInt32]) -> Bool { n.count == 0 }
 
 fileprivate func bnFromU64(v: UInt64) -> Array[UInt32] {
-    let mask = UInt64(from: 4294967295);
+    let mask = UInt64(truncating: 4294967295);
     var out = Array[UInt32]();
-    out.append(UInt32(from: v.bitwiseAnd(mask)));
-    out.append(UInt32(from: v.shiftRight(by: 32)));
+    out.append(UInt32(truncating: v.bitwiseAnd(mask)));
+    out.append(UInt32(truncating: v.shiftRight(by: 32)));
     bnTrim(out)
 }
 
 fileprivate func bnMulSmall(n: Array[UInt32], m: UInt32) -> Array[UInt32] {
-    let mask = UInt64(from: 4294967295);
+    let mask = UInt64(truncating: 4294967295);
     let mm = UInt64(from: m);
     var out = Array[UInt32]();
     var carry = UInt64.zero;
     var i: Int64 = 0;
     while i < n.count {
         let prod = UInt64(from: n(i)).multiply(mm).add(carry);
-        out.append(UInt32(from: prod.bitwiseAnd(mask)));
+        out.append(UInt32(truncating: prod.bitwiseAnd(mask)));
         carry = prod.shiftRight(by: 32);
         i = i + 1
     };
     while carry > UInt64.zero {
-        out.append(UInt32(from: carry.bitwiseAnd(mask)));
+        out.append(UInt32(truncating: carry.bitwiseAnd(mask)));
         carry = carry.shiftRight(by: 32)
     };
     bnTrim(out)
@@ -135,7 +135,7 @@ fileprivate func bnIncrement(n: Array[UInt32]) -> Array[UInt32] {
     var out = Array[UInt32]();
     var i: Int64 = 0;
     while i < n.count { out.append(n(i)); i = i + 1 };
-    let allOnes = UInt32(from: 4294967295);
+    let allOnes = UInt32(truncating: 4294967295);
     var carry = true;
     var j: Int64 = 0;
     while j < out.count and carry {
@@ -169,22 +169,22 @@ fileprivate func bnCmp(a: Array[UInt32], b: Array[UInt32]) -> Int64 {
 
 // a - b, assuming a >= b
 fileprivate func bnSub(a: Array[UInt32], b: Array[UInt32]) -> Array[UInt32] {
-    let mask = UInt64(from: 4294967295);
-    let base = UInt64(from: 4294967296);
+    let mask = UInt64(truncating: 4294967295);
+    let base = UInt64(truncating: 4294967296);
     var out = Array[UInt32]();
     var borrow: Int64 = 0;
     var i: Int64 = 0;
     while i < a.count {
         var av = UInt64(from: a(i));
         let bv = if i < b.count { UInt64(from: b(i)) } else { UInt64.zero };
-        let sub = bv.add(UInt64(from: borrow));
+        let sub = bv.add(UInt64(truncating: borrow));
         if av < sub {
             av = av.add(base);
             borrow = 1
         } else {
             borrow = 0
         };
-        out.append(UInt32(from: av.subtract(sub).bitwiseAnd(mask)));
+        out.append(UInt32(truncating: av.subtract(sub).bitwiseAnd(mask)));
         i = i + 1
     };
     bnTrim(out)
@@ -192,7 +192,7 @@ fileprivate func bnSub(a: Array[UInt32], b: Array[UInt32]) -> Array[UInt32] {
 
 fileprivate func bnMul(a: Array[UInt32], b: Array[UInt32]) -> Array[UInt32] {
     if bnIsZero(a) or bnIsZero(b) { return Array[UInt32]() };
-    let mask = UInt64(from: 4294967295);
+    let mask = UInt64(truncating: 4294967295);
     var acc = Array[UInt64]();
     var z: Int64 = 0;
     while z < a.count + b.count { acc.append(UInt64.zero); z = z + 1 };
@@ -212,7 +212,7 @@ fileprivate func bnMul(a: Array[UInt32], b: Array[UInt32]) -> Array[UInt32] {
     };
     var out = Array[UInt32]();
     var k: Int64 = 0;
-    while k < acc.count { out.append(UInt32(from: acc(k).bitwiseAnd(mask))); k = k + 1 };
+    while k < acc.count { out.append(UInt32(truncating: acc(k).bitwiseAnd(mask))); k = k + 1 };
     bnTrim(out)
 }
 
@@ -223,8 +223,8 @@ fileprivate func bnDivSmall(n: Array[UInt32], d: UInt64) -> Array[UInt32] {
     var i = n.count - 1;
     while i >= 0 {
         let cur = rem.shiftLeft(by: 32).bitwiseOr(UInt64(from: n(i)));
-        qRev.append(UInt32(from: cur.divide(d)));
-        rem = cur.modulo(d);
+        qRev.append(UInt32(truncating: cur.divide(d)));
+        rem = cur.remainder(d);
         i = i - 1
     };
     var q = Array[UInt32]();
@@ -237,7 +237,7 @@ fileprivate func bnPow5(k: Int64) -> Array[UInt32] {
     var out = Array[UInt32]();
     out.append(UInt32.one);
     var i: Int64 = 0;
-    while i < k { out = bnMulSmall(out, UInt32(from: 5)); i = i + 1 };
+    while i < k { out = bnMulSmall(out, UInt32(truncating: 5)); i = i + 1 };
     out
 }
 
@@ -247,7 +247,7 @@ fileprivate func bnPow5(k: Int64) -> Array[UInt32] {
 fileprivate func bnDivRound5_2(num: Array[UInt32], da: Int64, db: Int64) -> Array[UInt32] {
     var q = bnShrBits(num, db);
     var a: Int64 = 0;
-    while a < da { q = bnDivSmall(q, UInt64(from: 5)); a = a + 1 };
+    while a < da { q = bnDivSmall(q, UInt64(truncating: 5)); a = a + 1 };
     let den = bnShlBits(bnPow5(da), db);
     let r = bnSub(num, bnMul(q, den));
     let twoR = bnShlBits(r, 1);
@@ -263,18 +263,18 @@ fileprivate func bnToDecimalDigits(n0: Array[UInt32]) -> Array[Int64] {
     if bnIsZero(n0) { out.append(0); return out };
     var n = n0;
     var digitsRev = Array[Int64]();
-    let ten = UInt64(from: 10);
+    let ten = UInt64(truncating: 10);
     while bnIsZero(n) == false {
         var rem = UInt64.zero;
         var qRev = Array[UInt32]();
         var i = n.count - 1;
         while i >= 0 {
             let cur = rem.shiftLeft(by: 32).bitwiseOr(UInt64(from: n(i)));
-            qRev.append(UInt32(from: cur.divide(ten)));
-            rem = cur.modulo(ten);
+            qRev.append(UInt32(truncating: cur.divide(ten)));
+            rem = cur.remainder(ten);
             i = i - 1
         };
-        digitsRev.append(Int64(from: rem));
+        digitsRev.append(Int64(truncating: rem));
         var q = Array[UInt32]();
         var j = qRev.count - 1;
         while j >= 0 { q.append(qRev(j)); j = j - 1 };
@@ -311,7 +311,7 @@ fileprivate func bnToU64(n: Array[UInt32]) -> UInt64 {
 
 // n + v  (v small, used for digit accumulation)
 fileprivate func bnAddSmall(n: Array[UInt32], v: UInt64) -> Array[UInt32] {
-    let mask = UInt64(from: 4294967295);
+    let mask = UInt64(truncating: 4294967295);
     var out = Array[UInt32]();
     var i: Int64 = 0;
     while i < n.count { out.append(n(i)); i = i + 1 };
@@ -320,10 +320,10 @@ fileprivate func bnAddSmall(n: Array[UInt32], v: UInt64) -> Array[UInt32] {
     while carry > UInt64.zero {
         if j < out.count {
             let s = UInt64(from: out(j)).add(carry);
-            out(j) = UInt32(from: s.bitwiseAnd(mask));
+            out(j) = UInt32(truncating: s.bitwiseAnd(mask));
             carry = s.shiftRight(by: 32)
         } else {
-            out.append(UInt32(from: carry.bitwiseAnd(mask)));
+            out.append(UInt32(truncating: carry.bitwiseAnd(mask)));
             carry = carry.shiftRight(by: 32)
         };
         j = j + 1
@@ -423,7 +423,7 @@ func floatFixedDigits(m: UInt64, e: Int64, precision: Int64) -> Array[Int64] {
     // value × 10^p = m × 5^p × 2^(e+p)
     var num = bnFromU64(m);
     var p: Int64 = 0;
-    while p < precision { num = bnMulSmall(num, UInt32(from: 5)); p = p + 1 };
+    while p < precision { num = bnMulSmall(num, UInt32(truncating: 5)); p = p + 1 };
     let twoExp = e + precision;
     if twoExp >= 0 {
         return bnToDecimalDigits(bnShlBits(num, twoExp))
@@ -505,13 +505,13 @@ func floatShortestDigits(m: UInt64, e: Int64, lowerGapIsHalf: Bool) -> FloatSig 
     };
     let mEven = m.bitwiseAnd(UInt64.one) == UInt64.zero;
     // Upper midpoint  U = (2m+1) * 2^(e-1).
-    let uNum = bnFromU64(m.multiply(UInt64(from: 2)).add(UInt64.one));
+    let uNum = bnFromU64(m.multiply(UInt64(truncating: 2)).add(UInt64.one));
     let uE2 = e - 1;
     // Lower midpoint  L = (2m-1) * 2^(e-1)  [uniform]  or  (4m-1) * 2^(e-2) [half].
-    var lNum = bnFromU64(m.multiply(UInt64(from: 2)).subtract(UInt64.one));
+    var lNum = bnFromU64(m.multiply(UInt64(truncating: 2)).subtract(UInt64.one));
     var lE2 = e - 1;
     if lowerGapIsHalf {
-        lNum = bnFromU64(m.multiply(UInt64(from: 4)).subtract(UInt64.one));
+        lNum = bnFromU64(m.multiply(UInt64(truncating: 4)).subtract(UInt64.one));
         lE2 = e - 2
     };
 
@@ -523,7 +523,7 @@ func floatShortestDigits(m: UInt64, e: Int64, lowerGapIsHalf: Bool) -> FloatSig 
         var dv = UInt64.zero;
         var i: Int64 = 0;
         while i < sr.digits.count {
-            dv = dv.multiply(UInt64(from: 10)).add(UInt64(from: sr.digits(i)));
+            dv = dv.multiply(UInt64(truncating: 10)).add(UInt64(truncating: sr.digits(i)));
             i = i + 1
         };
         let dint = bnFromU64(dv);
@@ -552,23 +552,23 @@ func floatFixedString(m: UInt64, e: Int64, precision: Int64) -> String {
     var out = String();
     if precision == 0 {
         var i: Int64 = 0;
-        while i < len { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 };
+        while i < len { out.appendByte(UInt8(truncating: digits(i) + 48)); i = i + 1 };
         return out
     };
     if len <= precision {
-        out.appendByte(UInt8(from: 48));   // '0'
-        out.appendByte(UInt8(from: 46));   // '.'
+        out.appendByte(UInt8(truncating: 48));   // '0'
+        out.appendByte(UInt8(truncating: 46));   // '.'
         var pad = precision - len;
         var c: Int64 = 0;
-        while c < pad { out.appendByte(UInt8(from: 48)); c = c + 1 };
+        while c < pad { out.appendByte(UInt8(truncating: 48)); c = c + 1 };
         var i: Int64 = 0;
-        while i < len { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 }
+        while i < len { out.appendByte(UInt8(truncating: digits(i) + 48)); i = i + 1 }
     } else {
         let intLen = len - precision;
         var i: Int64 = 0;
-        while i < intLen { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 };
-        out.appendByte(UInt8(from: 46));   // '.'
-        while i < len { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 }
+        while i < intLen { out.appendByte(UInt8(truncating: digits(i) + 48)); i = i + 1 };
+        out.appendByte(UInt8(truncating: 46));   // '.'
+        while i < len { out.appendByte(UInt8(truncating: digits(i) + 48)); i = i + 1 }
     };
     out
 }
@@ -576,14 +576,14 @@ func floatFixedString(m: UInt64, e: Int64, precision: Int64) -> String {
 // Append a base-10 exponent ("e18", "e-324") to `out`. `upper` selects 'E'.
 fileprivate func appendExponent(out: String, decExp: Int64, upper: Bool) -> String {
     var s = out;
-    if upper { s.appendByte(UInt8(from: 69)) } else { s.appendByte(UInt8(from: 101)) };
+    if upper { s.appendByte(UInt8(truncating: 69)) } else { s.appendByte(UInt8(truncating: 101)) };
     var ex = decExp;
-    if ex < 0 { s.appendByte(UInt8(from: 45)); ex = 0 - ex };
+    if ex < 0 { s.appendByte(UInt8(truncating: 45)); ex = 0 - ex };
     if ex == 0 {
-        s.appendByte(UInt8(from: 48))
+        s.appendByte(UInt8(truncating: 48))
     } else {
         var tmp = String();
-        while ex > 0 { tmp.appendByte(UInt8(from: ex % 10 + 48)); ex = ex / 10 };
+        while ex > 0 { tmp.appendByte(UInt8(truncating: ex % 10 + 48)); ex = ex / 10 };
         var k = tmp.bytes.count - 1;
         while k >= 0 { s.appendByte(tmp.bytes(unchecked: k)); k = k - 1 }
     };
@@ -599,24 +599,24 @@ func floatShortestFixedString(sr: FloatSig) -> String {
     let decExp = sr.decExp;
     var out = String();
     if decExp < 0 {
-        out.appendByte(UInt8(from: 48));   // "0"
-        out.appendByte(UInt8(from: 46));   // "."
+        out.appendByte(UInt8(truncating: 48));   // "0"
+        out.appendByte(UInt8(truncating: 46));   // "."
         var z: Int64 = 0;
-        while z < (0 - decExp) - 1 { out.appendByte(UInt8(from: 48)); z = z + 1 };
+        while z < (0 - decExp) - 1 { out.appendByte(UInt8(truncating: 48)); z = z + 1 };
         var i: Int64 = 0;
-        while i < len { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 }
+        while i < len { out.appendByte(UInt8(truncating: digits(i) + 48)); i = i + 1 }
     } else if decExp >= len - 1 {
         // integer, possibly with trailing zeros
         var i: Int64 = 0;
-        while i < len { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 };
+        while i < len { out.appendByte(UInt8(truncating: digits(i) + 48)); i = i + 1 };
         var z: Int64 = 0;
-        while z < decExp - (len - 1) { out.appendByte(UInt8(from: 48)); z = z + 1 }
+        while z < decExp - (len - 1) { out.appendByte(UInt8(truncating: 48)); z = z + 1 }
     } else {
         let intLen = decExp + 1;
         var i: Int64 = 0;
-        while i < intLen { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 };
-        out.appendByte(UInt8(from: 46));   // "."
-        while i < len { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 }
+        while i < intLen { out.appendByte(UInt8(truncating: digits(i) + 48)); i = i + 1 };
+        out.appendByte(UInt8(truncating: 46));   // "."
+        while i < len { out.appendByte(UInt8(truncating: digits(i) + 48)); i = i + 1 }
     };
     out
 }
@@ -626,11 +626,11 @@ func floatShortestFixedString(sr: FloatSig) -> String {
 func floatShortestSciString(sr: FloatSig, upper: Bool) -> String {
     let digits = sr.digits;
     var out = String();
-    out.appendByte(UInt8(from: digits(0) + 48));
+    out.appendByte(UInt8(truncating: digits(0) + 48));
     if digits.count > 1 {
-        out.appendByte(UInt8(from: 46));   // "."
+        out.appendByte(UInt8(truncating: 46));   // "."
         var j: Int64 = 1;
-        while j < digits.count { out.appendByte(UInt8(from: digits(j) + 48)); j = j + 1 }
+        while j < digits.count { out.appendByte(UInt8(truncating: digits(j) + 48)); j = j + 1 }
     };
     appendExponent(out, sr.decExp, upper)
 }
@@ -641,13 +641,13 @@ func floatSciString(m: UInt64, e: Int64, precision: Int64, upper: Bool) -> Strin
     let sr = floatSigDigits(m, e, precision + 1);
     let digits = sr.digits;
     var out = String();
-    out.appendByte(UInt8(from: digits(0) + 48));
+    out.appendByte(UInt8(truncating: digits(0) + 48));
     if precision > 0 {
-        out.appendByte(UInt8(from: 46));   // '.'
+        out.appendByte(UInt8(truncating: 46));   // '.'
         var j: Int64 = 1;
         while j <= precision {
             let d = if j < digits.count { digits(j) } else { 0 };
-            out.appendByte(UInt8(from: d + 48));
+            out.appendByte(UInt8(truncating: d + 48));
             j = j + 1
         }
     };
@@ -663,41 +663,41 @@ func floatHexString(rawExp: Int64, rawMant: UInt64, mantBits: Int64, bias: Int64
     let xChar: Int64 = if upper { 88 } else { 120 };   // 'X' / 'x'
     let pChar: Int64 = if upper { 80 } else { 112 };   // 'P' / 'p'
     var out = String();
-    out.appendByte(UInt8(from: 48));   // '0'
-    out.appendByte(UInt8(from: xChar));
+    out.appendByte(UInt8(truncating: 48));   // '0'
+    out.appendByte(UInt8(truncating: xChar));
     let isZero = rawExp == 0 and rawMant == UInt64.zero;
     // A subnormal (and zero) has a leading 0 and the minimum exponent.
     let lead: Int64 = if rawExp == 0 { 0 } else { 1 };
     let exp: Int64 = if isZero { 0 } else if rawExp == 0 { 1 - bias } else { rawExp - bias };
-    out.appendByte(UInt8(from: 48 + lead));
+    out.appendByte(UInt8(truncating: 48 + lead));
 
     // Left-align the fraction to whole hex digits, then drop trailing zeros.
     let pad = (4 - mantBits % 4) % 4;
     let total = (mantBits + pad) / 4;
     let frac = rawMant.shiftLeft(by: pad);
     var count = total;
-    while count > 0 and frac.shiftRight(by: (total - count) * 4).bitwiseAnd(UInt64(from: 15)) == UInt64.zero {
+    while count > 0 and frac.shiftRight(by: (total - count) * 4).bitwiseAnd(UInt64(truncating: 15)) == UInt64.zero {
         count = count - 1
     };
     if count > 0 {
-        out.appendByte(UInt8(from: 46));   // '.'
+        out.appendByte(UInt8(truncating: 46));   // '.'
         var i: Int64 = 0;
         while i < count {
-            let d = Int64(from: frac.shiftRight(by: (total - 1 - i) * 4).bitwiseAnd(UInt64(from: 15)));
+            let d = Int64(truncating: frac.shiftRight(by: (total - 1 - i) * 4).bitwiseAnd(UInt64(truncating: 15)));
             let base: Int64 = if d < 10 { 48 } else if upper { 55 } else { 87 };
-            out.appendByte(UInt8(from: base + d));
+            out.appendByte(UInt8(truncating: base + d));
             i = i + 1
         }
     };
 
-    out.appendByte(UInt8(from: pChar));
-    out.appendByte(UInt8(from: if exp < 0 { 45 } else { 43 }));   // '-' / '+'
+    out.appendByte(UInt8(truncating: pChar));
+    out.appendByte(UInt8(truncating: if exp < 0 { 45 } else { 43 }));   // '-' / '+'
     // Decimal exponent digits, most significant first.
     let magnitude: Int64 = if exp < 0 { 0 - exp } else { exp };
     var place: Int64 = 1;
     while place * 10 <= magnitude { place = place * 10 };
     while place > 0 {
-        out.appendByte(UInt8(from: 48 + (magnitude / place) % 10));
+        out.appendByte(UInt8(truncating: 48 + (magnitude / place) % 10));
         place = place / 10
     };
     out

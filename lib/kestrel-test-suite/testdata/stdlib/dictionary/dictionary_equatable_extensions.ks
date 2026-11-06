@@ -44,12 +44,12 @@ module Test
 
             // firstKey(of:) - value exists
             let fk = a.firstKey(of: 20);
-            if fk.isNone() { return 7 }
+            if fk.isNone { return 7 }
             if fk.unwrap() != 2 { return 8 }
 
             // firstKey(of:) - value not found
             let fkNone = a.firstKey(of: 999);
-            if fkNone.isSome() { return 9 }
+            if fkNone.isSome { return 9 }
 
             // allKeys(of:) - single match
             let keys10 = a.allKeys(of: 10);

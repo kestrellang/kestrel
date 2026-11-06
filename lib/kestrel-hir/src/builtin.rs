@@ -134,8 +134,8 @@ pub enum Builtin {
     MultiplyOperatorMethod,
     DivideOperatorProtocol,
     DivideOperatorMethod,
-    ModuloOperatorProtocol,
-    ModuloOperatorMethod,
+    RemainderOperatorProtocol,
+    RemainderOperatorMethod,
     NegateOperatorProtocol,
     NegateOperatorMethod,
 
@@ -207,8 +207,8 @@ pub enum Builtin {
     MultiplyAssignMethod,
     DivideAssignProtocol,
     DivideAssignMethod,
-    ModuloAssignProtocol,
-    ModuloAssignMethod,
+    RemainderAssignProtocol,
+    RemainderAssignMethod,
     BitwiseAndAssignProtocol,
     BitwiseAndAssignMethod,
     BitwiseOrAssignProtocol,
@@ -410,8 +410,8 @@ impl Builtin {
             Self::MultiplyOperatorMethod => "MultiplyOperatorMethod",
             Self::DivideOperatorProtocol => "Divisible",
             Self::DivideOperatorMethod => "DivideOperatorMethod",
-            Self::ModuloOperatorProtocol => "Modulo",
-            Self::ModuloOperatorMethod => "ModuloOperatorMethod",
+            Self::RemainderOperatorProtocol => "Remainder",
+            Self::RemainderOperatorMethod => "RemainderOperatorMethod",
             Self::NegateOperatorProtocol => "Negatable",
             Self::NegateOperatorMethod => "NegateOperatorMethod",
 
@@ -483,8 +483,8 @@ impl Builtin {
             Self::MultiplyAssignMethod => "MultiplyAssignMethod",
             Self::DivideAssignProtocol => "DivideAssign",
             Self::DivideAssignMethod => "DivideAssignMethod",
-            Self::ModuloAssignProtocol => "ModuloAssign",
-            Self::ModuloAssignMethod => "ModuloAssignMethod",
+            Self::RemainderAssignProtocol => "RemainderAssign",
+            Self::RemainderAssignMethod => "RemainderAssignMethod",
             Self::BitwiseAndAssignProtocol => "BitwiseAndAssign",
             Self::BitwiseAndAssignMethod => "BitwiseAndAssignMethod",
             Self::BitwiseOrAssignProtocol => "BitwiseOrAssign",
@@ -650,8 +650,8 @@ impl Builtin {
             "MultiplyOperatorMethod" => Some(Self::MultiplyOperatorMethod),
             "DivideOperatorProtocol" => Some(Self::DivideOperatorProtocol),
             "DivideOperatorMethod" => Some(Self::DivideOperatorMethod),
-            "ModuloOperatorProtocol" => Some(Self::ModuloOperatorProtocol),
-            "ModuloOperatorMethod" => Some(Self::ModuloOperatorMethod),
+            "RemainderOperatorProtocol" => Some(Self::RemainderOperatorProtocol),
+            "RemainderOperatorMethod" => Some(Self::RemainderOperatorMethod),
             "NegateOperatorProtocol" => Some(Self::NegateOperatorProtocol),
             "NegateOperatorMethod" => Some(Self::NegateOperatorMethod),
 
@@ -731,8 +731,8 @@ impl Builtin {
             "MultiplyAssignMethod" => Some(Self::MultiplyAssignMethod),
             "DivideAssignProtocol" => Some(Self::DivideAssignProtocol),
             "DivideAssignMethod" => Some(Self::DivideAssignMethod),
-            "ModuloAssignProtocol" => Some(Self::ModuloAssignProtocol),
-            "ModuloAssignMethod" => Some(Self::ModuloAssignMethod),
+            "RemainderAssignProtocol" => Some(Self::RemainderAssignProtocol),
+            "RemainderAssignMethod" => Some(Self::RemainderAssignMethod),
             "BitwiseAndAssignProtocol" => Some(Self::BitwiseAndAssignProtocol),
             "BitwiseAndAssignMethod" => Some(Self::BitwiseAndAssignMethod),
             "BitwiseOrAssignProtocol" => Some(Self::BitwiseOrAssignProtocol),
@@ -923,7 +923,7 @@ impl Builtin {
             | Self::SubtractOperatorProtocol
             | Self::MultiplyOperatorProtocol
             | Self::DivideOperatorProtocol
-            | Self::ModuloOperatorProtocol
+            | Self::RemainderOperatorProtocol
             | Self::NegateOperatorProtocol
             | Self::EqualsOperatorProtocol
             | Self::NotEqualsOperatorProtocol
@@ -951,7 +951,7 @@ impl Builtin {
             | Self::SubtractAssignProtocol
             | Self::MultiplyAssignProtocol
             | Self::DivideAssignProtocol
-            | Self::ModuloAssignProtocol
+            | Self::RemainderAssignProtocol
             | Self::BitwiseAndAssignProtocol
             | Self::BitwiseOrAssignProtocol
             | Self::BitwiseXorAssignProtocol
@@ -963,7 +963,7 @@ impl Builtin {
             | Self::SubtractOperatorMethod
             | Self::MultiplyOperatorMethod
             | Self::DivideOperatorMethod
-            | Self::ModuloOperatorMethod
+            | Self::RemainderOperatorMethod
             | Self::NegateOperatorMethod
             | Self::EqualsOperatorMethod
             | Self::NotEqualsOperatorMethod
@@ -991,7 +991,7 @@ impl Builtin {
             | Self::SubtractAssignMethod
             | Self::MultiplyAssignMethod
             | Self::DivideAssignMethod
-            | Self::ModuloAssignMethod
+            | Self::RemainderAssignMethod
             | Self::BitwiseAndAssignMethod
             | Self::BitwiseOrAssignMethod
             | Self::BitwiseXorAssignMethod

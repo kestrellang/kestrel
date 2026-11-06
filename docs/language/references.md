@@ -114,7 +114,7 @@ b.slot() = 7;
 println("\(copied)");   // still 41 — a copy, not a view
 ```
 
-Decay applies to: bindings of ref-returning call results, assignment right-hand sides, `return`ed values in owned positions, `match`/`if` result merges, `??` right-hand sides, string interpolation holes, and array/tuple/dictionary literal elements. Note the asymmetry: `let r = &x;` *holds* a reference, while `let v = b.peek();` *copies* — holding requires the explicit `&`.
+Decay applies to: bindings of ref-returning call results, assignment right-hand sides, `return`ed values in owned positions, `match`/`if` result merges, `??` right-hand sides, string interpolation holes, and array/tuple/dictionary literal elements (except a tuple element whose slot the expected type pins to `&T`; see below). Note the asymmetry: `let r = &x;` *holds* a reference, while `let v = b.peek();` *copies* — holding requires the explicit `&`.
 
 Decay is a copy, so decaying a reference to a non-`Copyable`, non-`Cloneable` value is rejected as a move out of a borrow (E503).
 
@@ -137,6 +137,16 @@ println("through field: \(c.item)");
 ```
 
 Wrapping a reference into an aggregate taints the aggregate with the reference's root: a `Cursor` is subject to the same escape rules as the reference it carries, and it cannot be stored in globals, statics, or other places that outlive its root. Filling a `&T` slot requires an actual reference — an owned value does not auto-borrow into a ref-typed tuple element or field.
+
+When the expected type pins a tuple slot to a reference, as a return type or a `let` annotation does, a ref-returning call in that slot keeps its reference instead of decaying:
+
+```kestrel
+func split(xs: Array[Int64], at: Int64) -> (&Slice[Int64], &Slice[Int64]) {
+    (xs(..<at), xs(at..))   // both elements lend into `xs`
+}
+
+let (lo, hi) = split(xs, 2); // each binding is a `&Slice[Int64]`
+```
 
 ## Conformances: `extend &T: P`
 

@@ -77,15 +77,15 @@ public protocol Divisible[Other = Self] {
 /// Raw protocol backing the `%` operator.
 ///
 /// For integers this is the remainder of truncated division, with the sign of
-/// the dividend. If you need Euclidean / floor-style remainder semantics
-/// (result with the sign of the divisor), compute `((a % b) + b) % b`.
-@builtin(.ModuloOperatorProtocol)
-public protocol Modulo[Other = Self] {
+/// the dividend: `-7 % 3` is `-1`. For a result that is never negative, use
+/// the integers' Euclidean `modulo(by:)`: `(-7).modulo(by: 3)` is `2`.
+@builtin(.RemainderOperatorProtocol)
+public protocol Remainder[Other = Self] {
     type Output
 
     /// Returns `self % other`.
-    @builtin(.ModuloOperatorMethod)
-    consuming func modulo(consuming other: Other) -> Output
+    @builtin(.RemainderOperatorMethod)
+    consuming func remainder(consuming other: Other) -> Output
 }
 
 /// Raw protocol backing the unary `-` operator.

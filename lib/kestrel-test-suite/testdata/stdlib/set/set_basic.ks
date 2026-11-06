@@ -38,7 +38,7 @@ module Test
 
             // Test remove() - returns .None for missing element
             let removed2 = s.remove(999);
-            if removed2.isSome() { return 14 }
+            if removed2.isSome { return 14 }
 
             // Test clear()
             s.clear();

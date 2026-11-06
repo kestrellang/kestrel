@@ -21,23 +21,23 @@ module Test
             // ---- bytes(checked:) ----
             // 'h' = 104
             let b0 = s.bytes(checked: 0);
-            if b0.isNone() { return 5 }
+            if b0.isNone { return 5 }
             let byteH: std.numeric.UInt8 = 104;
             if b0.unwrap() != byteH { return 6 }
 
             // 'e' = 101
             let b1 = s.bytes(checked: 1);
-            if b1.isNone() { return 7 }
+            if b1.isNone { return 7 }
             let byteE: std.numeric.UInt8 = 101;
             if b1.unwrap() != byteE { return 8 }
 
             // Out of bounds returns None
             let bOob = s.bytes(checked: 100);
-            if bOob.isSome() { return 9 }
+            if bOob.isSome { return 9 }
 
             // Negative index returns None
             let bNeg = s.bytes(checked: -1);
-            if bNeg.isSome() { return 10 }
+            if bNeg.isSome { return 10 }
 
             // ---- bytes(unchecked:) ----
             // 'o' = 111

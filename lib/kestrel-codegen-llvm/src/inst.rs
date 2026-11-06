@@ -773,6 +773,10 @@ fn compile_op1<'ctx>(
             cmp_to_bool(cx, builder, cmp)
         },
         Op::PtrNull(_) => mem::null_ptr(cx).into(),
+        Op::OverflowChecks => cx
+            .i8_type()
+            .const_int(u64::from(fc.ctx.options.overflow_checks()), false)
+            .into(),
         Op::PtrTo(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let slot = fc.alloca(repr.size(), repr.align());

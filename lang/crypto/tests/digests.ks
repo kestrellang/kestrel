@@ -11,7 +11,7 @@ import crypto.key.(SymmetricKey)
 
 func pattern(n: Int64) -> Array[UInt8] {
     var out: [UInt8] = [];
-    for i in 0..<n { out.append(UInt8(from: i % 251)); }
+    for i in 0..<n { out.append(UInt8(truncating: i % 251)); }
     out
 }
 
