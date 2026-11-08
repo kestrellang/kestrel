@@ -1,4 +1,4 @@
-// Heap[T] - binary min-heap backed by Array
+// Heap[T, A] - binary min-heap backed by Array
 
 module std.collections
 
@@ -8,8 +8,10 @@ import std.result.(Optional)
 
 import std.iter.(Iterator, Iterable)
 import std.collections.(Array, ArrayIterator)
+import std.memory.(Allocator, GlobalAllocator)
+import std.core.(Defaultable)
 
-/// Binary min-heap backed by `Array[T]`.
+/// Binary min-heap backed by `Array[T, A]`.
 ///
 /// O(log n) `push`/`pop`, O(1) `peek` at the minimum element. Builds
 /// from an existing array in O(n) via Floyd's heapify. Iteration yields
@@ -29,12 +31,12 @@ import std.collections.(Array, ArrayIterator)
 ///
 /// # Representation
 ///
-/// A single `Array[T]` field in standard binary-heap layout: the minimum
+/// A single `Array[T, A]` field in standard binary-heap layout: the minimum
 /// lives at index 0, children of node `i` are at `2i + 1` and `2i + 2`.
 ///
 /// # Memory Model
 ///
-/// Delegates storage to `Array[T]`, inheriting its COW value semantics.
+/// Delegates storage to `Array[T, A]`, inheriting its COW value semantics.
 /// Copying a `Heap` is O(1); the first mutation on a shared copy triggers
 /// the array's copy-on-write barrier.
 ///
@@ -43,78 +45,38 @@ import std.collections.(Array, ArrayIterator)
 /// - `peek()` always returns the minimum element.
 /// - After `pop()`, the next-smallest element becomes the new minimum.
 /// - Iteration order is unspecified (internal heap layout).
-public struct Heap[T]: Iterable, Cloneable where T: Comparable {
+public struct Heap[T, A = GlobalAllocator]: Iterable, Cloneable where T: Comparable, A: Allocator {
     /// `Iterable` element type.
     type Item = T
     /// `Iterable` iterator type — reuses the backing array's iterator.
-    type TargetIterator = ArrayIterator[T]
+    type TargetIterator = ArrayIterator[T, A]
 
-    private var data: Array[T]
+    fileprivate var data: Array[T, A]
 
     // ========================================================================
     // CONSTRUCTORS
     // ========================================================================
 
-    /// @name Empty
-    /// Creates an empty min-heap with no allocation.
-    ///
-    /// No heap memory is allocated until the first `push`. Use
-    /// `Heap(capacity:)` to pre-allocate when the expected size is known.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var h = Heap[Int64]();
-    /// h.isEmpty;  // true
-    /// ```
-    public init() {
-        self.data = Array[T]();
+    /// @name With Allocator
+    /// An empty heap whose storage will come from `allocator`.
+    public init(allocator allocator: A) {
+        self.data = Array[T, A](allocator: allocator);
     }
 
-    /// @name With Capacity
-    /// Creates an empty min-heap with at least `capacity` slots reserved.
-    ///
-    /// Pre-allocates the backing array so that up to `capacity` elements
-    /// can be pushed without triggering a reallocation.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var h = Heap[Int64](capacity: 100);
-    /// h.count;  // 0
-    /// ```
-    public init(capacity capacity: Int64) {
-        self.data = Array[T](capacity: capacity);
+    /// @name With Capacity And Allocator
+    /// An empty heap with room for `capacity` elements, allocated from
+    /// `allocator`.
+    public init(capacity capacity: Int64, allocator allocator: A) {
+        self.data = Array[T, A](capacity: capacity, allocator: allocator);
     }
 
-    /// @name From Iterable
-    /// Builds a min-heap by collecting elements then heapifying in O(n).
-    ///
-    /// All elements are first appended to the backing array, then
-    /// Floyd's algorithm establishes the heap invariant in a single
-    /// bottom-up pass. This is faster than pushing elements one at a
-    /// time (O(n) vs O(n log n)).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let h = Heap(from: [5, 3, 1, 4, 2]);
-    /// h.peek();   // .Some(1)
-    /// h.count;    // 5
-    /// ```
-    public init[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
-        self.data = Array[T]();
-        var iter = iterable.iter();
-        while let .Some(item) = iter.next() {
-            self.data.append(item)
-        }
-        self.heapify();
-    }
+    /// The allocator this heap's storage comes from.
+    public var allocator: A { self.data.allocator }
 
     /// @name From Data
     /// Internal constructor that wraps an existing array as the heap's
     /// backing store. Used by `clone()` to avoid a redundant heapify.
-    init(data data: Array[T]) {
+    init(data data: Array[T, A]) {
         self.data = data;
     }
 
@@ -260,7 +222,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
     /// var iter = h.iter();
     /// // yields elements in heap-array order, not 1, 3, 5
     /// ```
-    public func iter() -> ArrayIterator[T] {
+    public func iter() -> ArrayIterator[T, A] {
         self.data.iter()
     }
 
@@ -283,7 +245,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
     /// h.peek();   // .Some(1) -- original unchanged
     /// h2.peek();  // .Some(0)
     /// ```
-    public func clone() -> Heap[T] {
+    public func clone() -> Heap[T, A] {
         Heap(data: self.data.clone())
     }
 
@@ -291,46 +253,110 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
     // INTERNAL
     // ========================================================================
 
-    /// Bubbles element at `index` upward until the min-heap invariant holds.
+    // The sifts move a hole instead of swapping: the moving element is
+    // taken out once, each step moves one neighbour into the hole, and the
+    // element goes into the final hole. Elements are reached through the
+    // buffer pointer, past the bounds and copy-on-write checks (the buffer
+    // is made unique first).
+
+    /// Moves the element at `index` up until its parent is no greater.
     private mutating func siftUp(index: Int64) {
-        var i = index;
-        while i > 0 {
-            let parent = (i - 1) / 2;
-            if self.data(i).compare(self.data(parent)) == Ordering.Less {
-                self.data.swap(at: i, with: parent);
-                i = parent
-            } else {
-                break
-            }
+        let p = self.data.asMutableSlice().asUnsafeSlice().pointer;
+        let moving = unsafe p.offset(by: index).take();
+        var hole = index;
+        while hole > 0 {
+            let parent = (hole - 1) / 2;
+            if moving.compare(unsafe p.offset(by: parent).value) != Ordering.Less { break }
+            unsafe p.offset(by: hole).write(unsafe p.offset(by: parent).take());
+            hole = parent
         }
+        unsafe p.offset(by: hole).write(moving)
     }
 
-    /// Pushes element at `index` downward until the min-heap invariant holds.
+    /// Moves the element at `index` down until no child is smaller.
     private mutating func siftDown(index: Int64) {
         let n = self.data.count;
-        var i = index;
+        let p = self.data.asMutableSlice().asUnsafeSlice().pointer;
+        let moving = unsafe p.offset(by: index).take();
+        var hole = index;
         loop {
-            let left = 2 * i + 1;
-            let right = 2 * i + 2;
-            var smallest = i;
-            if left < n and self.data(left).compare(self.data(smallest)) == Ordering.Less {
-                smallest = left
+            var child = 2 * hole + 1;
+            if child >= n { break }
+            let right = child + 1;
+            if right < n and unsafe p.offset(by: right).value.compare(unsafe p.offset(by: child).value) == Ordering.Less {
+                child = right
             }
-            if right < n and self.data(right).compare(self.data(smallest)) == Ordering.Less {
-                smallest = right
-            }
-            if smallest == i { break; }
-            self.data.swap(at: i, with: smallest);
-            i = smallest
+            if unsafe p.offset(by: child).value.compare(moving) != Ordering.Less { break }
+            unsafe p.offset(by: hole).write(unsafe p.offset(by: child).take());
+            hole = child
         }
+        unsafe p.offset(by: hole).write(moving)
     }
 
-    /// Floyd's algorithm: sift down from the last internal node to the root.
-    private mutating func heapify() {
+    fileprivate mutating func heapify() {
         var i = self.data.count / 2 - 1;
         while i >= 0 {
             self.siftDown(i);
             i = i - 1
         }
+    }
+}
+
+// Constructors that make their own allocator.
+extend Heap[T, A] where A: Defaultable {
+    /// @name Empty
+    /// Creates an empty min-heap with no allocation.
+    ///
+    /// No heap memory is allocated until the first `push`. Use
+    /// `Heap(capacity:)` to pre-allocate when the expected size is known.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var h = Heap[Int64]();
+    /// h.isEmpty;  // true
+    /// ```
+    public init() {
+        self.init(allocator: A());
+    }
+
+    /// @name With Capacity
+    /// Creates an empty min-heap with at least `capacity` slots reserved.
+    ///
+    /// Pre-allocates the backing array so that up to `capacity` elements
+    /// can be pushed without triggering a reallocation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var h = Heap[Int64](capacity: 100);
+    /// h.count;  // 0
+    /// ```
+    public init(capacity capacity: Int64) {
+        self.init(capacity: capacity, allocator: A());
+    }
+
+    /// @name From Iterable
+    /// Builds a min-heap by collecting elements then heapifying in O(n).
+    ///
+    /// All elements are first appended to the backing array, then
+    /// Floyd's algorithm establishes the heap invariant in a single
+    /// bottom-up pass. This is faster than pushing elements one at a
+    /// time (O(n) vs O(n log n)).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let h = Heap(from: [5, 3, 1, 4, 2]);
+    /// h.peek();   // .Some(1)
+    /// h.count;    // 5
+    /// ```
+    public init[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
+        self.init(allocator: A());
+        var iter = iterable.iter();
+        while let .Some(item) = iter.next() {
+            self.data.append(item)
+        }
+        self.heapify();
     }
 }
