@@ -1162,13 +1162,31 @@ fn method_compare_env(
             .get::<TypeParams>(type_entity)
             .map(|tp| tp.0.clone())
             .unwrap_or_default();
-        let target_args: Vec<AstType> = match cx.query.get::<ExtensionTarget>(parent) {
-            Some(ExtensionTarget(AstType::Named { segments, .. })) => segments
-                .last()
-                .map(|s| s.type_args.clone())
-                .unwrap_or_default(),
-            _ => Vec::new(),
-        };
+        // The target's args as lowering sees them: written args, padded with
+        // the declared defaults (`extend Array[T]` is `Array[T, GlobalAllocator]`),
+        // aliases expanded. Empty when none are written (`extend Range`).
+        // Nominal targets only: a tuple or ref target's `Self` is structural.
+        let target_args: Vec<ResolvedTy> = cx
+            .query
+            .query(kestrel_hir_lower::LowerExtensionTargetTypeArgs {
+                extension: parent,
+                root: cx.root,
+            })
+            .filter(|_| {
+                matches!(
+                    cx.query.get::<ExtensionTarget>(parent),
+                    Some(ExtensionTarget(
+                        AstType::Named { .. }
+                            | AstType::Array(..)
+                            | AstType::Optional(..)
+                            | AstType::Dictionary(..)
+                    ))
+                )
+            })
+            .unwrap_or_default()
+            .iter()
+            .map(|a| kestrel_type_infer::compare::resolve_hir_type(cx.query, a))
+            .collect();
         // The extension's own params map positionally, exactly as
         // `build_proto_param_subs` maps them for the protocol's args.
         let ext_params = cx
@@ -1183,25 +1201,16 @@ fn method_compare_env(
         // and `Self` is that specialization (`param_subs` do not rewrite
         // `self_ty`).
         let mut specialized = false;
-        for (&t, arg) in type_params.iter().zip(target_args.iter()) {
-            if let Some(ty) = resolve_conformance_type_arg(cx, arg, parent, &HashMap::new())
-                && !matches!(ty, ResolvedTy::Param { .. })
-            {
-                env.param_subs.push((t, ty));
+        for (&t, ty) in type_params.iter().zip(target_args.iter()) {
+            if !matches!(ty, ResolvedTy::Param { .. } | ResolvedTy::Error) {
+                env.param_subs.push((t, ty.clone()));
                 specialized = true;
             }
         }
         if specialized {
-            let args = target_args
-                .iter()
-                .map(|a| {
-                    resolve_conformance_type_arg(cx, a, parent, &HashMap::new())
-                        .unwrap_or(ResolvedTy::Error)
-                })
-                .collect();
             env.self_ty = Some(ResolvedTy::Named {
                 entity: type_entity,
-                args,
+                args: target_args,
             });
         }
     }

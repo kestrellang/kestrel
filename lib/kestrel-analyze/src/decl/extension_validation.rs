@@ -6,6 +6,7 @@
 //!    and protocols. Primitives, type aliases, and unknown types are rejected.
 //! 2. **Wrong type parameter count** — The number of type arguments on the
 //!    extension target must match the target type's declared type parameters.
+//!    Trailing parameters with a default may be omitted.
 //!
 //! ## Diagnostics
 //!
@@ -21,7 +22,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{ExtensionTarget, NodeKind, TypeParams};
+use kestrel_ast_builder::{ExtensionTarget, NodeKind, TypeAnnotation, TypeParams};
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -105,15 +106,22 @@ impl DeclCheck for ExtensionValidationAnalyzer {
                 }
 
                 // Check 2: type parameter count must match
-                let expected_count = cx
+                let params = cx
                     .query
                     .get::<TypeParams>(entity)
-                    .map(|tp| tp.0.len())
-                    .unwrap_or(0);
+                    .map(|tp| tp.0.clone())
+                    .unwrap_or_default();
+                let expected_count = params.len();
+                // Trailing params with a default may be left off; lowering
+                // fills them in (`extend Array[T]` is `Array[T, GlobalAllocator]`).
+                let required_count = params
+                    .iter()
+                    .rposition(|&p| cx.query.get::<TypeAnnotation>(p).is_none())
+                    .map_or(0, |i| i + 1);
                 let got_count = segments.last().map(|s| s.type_args.len()).unwrap_or(0);
 
                 // Only check if type args were explicitly provided (got > 0)
-                if got_count > 0 && got_count != expected_count {
+                if got_count > 0 && (got_count > expected_count || got_count < required_count) {
                     let target_name = util::entity_name(cx.query, entity);
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[1].id,

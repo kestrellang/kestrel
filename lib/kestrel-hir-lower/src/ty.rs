@@ -1627,6 +1627,8 @@ impl QueryFn for LowerCallableTypes {
 ///
 /// For `extend Box[lang.i64]`, returns `Some(vec![HirTy for i64])`.
 /// For `extend Box` (no type args), returns `Some(vec![])`.
+/// Written args are padded with the target's declared defaults
+/// (`extend Array[T]` lowers to `[T, GlobalAllocator]`).
 /// Returns None if the entity has no ExtensionTarget component.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct LowerExtensionTargetTypeArgs {
@@ -1663,11 +1665,11 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
             _ => None,
         };
         if let Some(args) = sugar_args {
-            return Some(
-                args.into_iter()
-                    .map(|a| lower_ast_type(ctx, self.extension, self.root, a))
-                    .collect(),
-            );
+            let lowered = args
+                .into_iter()
+                .map(|a| lower_ast_type(ctx, self.extension, self.root, a))
+                .collect();
+            return Some(self.fill_defaults(ctx, lowered));
         }
         let AstType::Named { segments, .. } = &target.0 else {
             return Some(vec![]);
@@ -1712,7 +1714,22 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
                 }
             })
             .collect();
-        Some(args)
+        Some(self.fill_defaults(ctx, args))
+    }
+}
+
+impl LowerExtensionTargetTypeArgs {
+    /// Pads written args with the target's trailing type-param defaults, so
+    /// `extend Array[T]` extends `Array[T, GlobalAllocator]` (Rust's rule):
+    /// an extension that names some args means the defaults for the rest.
+    fn fill_defaults(&self, ctx: &QueryContext<'_>, args: Vec<HirTy>) -> Vec<HirTy> {
+        let Some(target) = ctx.query(ExtensionTargetEntity {
+            extension: self.extension,
+            root: self.root,
+        }) else {
+            return args;
+        };
+        fill_type_arg_defaults(ctx, self.root, target, args)
     }
 }
 

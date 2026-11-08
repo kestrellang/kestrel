@@ -530,12 +530,27 @@ pub(crate) fn default_literal_var(
     // Fresh TyVars for the default's type params, so `DefaultArrayLiteralType[T]`
     // becomes `Array[?]` with a real inference slot that later Associated /
     // Coerce constraints flow element types into.
-    let type_param_count = ctx
+    let type_params: Vec<Entity> = ctx
         .query_ctx
         .get::<TypeParams>(entity)
-        .map(|tp| tp.0.len())
-        .unwrap_or(0);
-    let args: Vec<TyVar> = (0..type_param_count).map(|_| ctx.fresh()).collect();
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    // A param with a declared default (`Array`'s `A = GlobalAllocator`) takes
+    // it now: nothing else can pin it on an unannotated literal (an annotated
+    // one is checked against its target instead), and leaving it open would
+    // let a generic bound on it (`B: Allocator`) be judged against an open var.
+    let args: Vec<TyVar> = type_params
+        .iter()
+        .map(|&param| {
+            match ctx.query_ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+                entity: param,
+                root: ctx.root,
+            }) {
+                Some(default_ty) => crate::generate::lower_hir_ty(ctx, &default_ty),
+                None => ctx.fresh(),
+            }
+        })
+        .collect();
     // The default forms a type like an annotation does, so it gets the same
     // well-formedness: `[{ k }]` is `Array[() -> Int64]` and must be Static
     // (a view closure used to escape and dangle), and `[R(...)]` must be
