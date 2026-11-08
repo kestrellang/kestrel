@@ -1,0 +1,8 @@
+x^3 on [0, 1] with 100 steps:
+  left 0.245025  right 0.255025  mid 0.249988  trapezium 0.250025  simpson 0.250000
+1/x on [1, 100] with 1000 steps:
+  left 4.654991  right 4.556981  mid 4.604763  trapezium 4.605986  simpson 4.605170
+x on [0, 5000] with 5000000 steps:
+  left 12499997.500000  right 12500002.500000  mid 12500000.000000  trapezium 12500000.000000  simpson 12500000.000000
+x on [0, 6000] with 6000000 steps:
+  left 17999997.000000  right 18000003.000000  mid 18000000.000000  trapezium 18000000.000000  simpson 18000000.000000

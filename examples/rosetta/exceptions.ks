@@ -25,7 +25,7 @@ func parseNatural(s: String) -> Int64 throws ParseError {
     var sign: Int64 = 1;
     for (i, c) in s.chars.iter().enumerate() {
         if i == 0 and c == '-' { sign = -1; continue }
-        guard let .Some(d) = c.digitValue() else { throw .BadDigit(c) }
+        guard let some d = c.digitValue() else { throw .BadDigit(c) }
         n = n * 10 + Int64(from: d);
     }
     if sign < 0 { throw .Negative(-n) }

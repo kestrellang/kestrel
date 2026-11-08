@@ -2,8 +2,6 @@
 // https://rosettacode.org/wiki/Pangram_checker
 module Main
 
-import std.collections.Set
-
 func isPangram(s: String) -> Bool {
     let letters = Set[Char](from: s.lowercased().chars.iter().filter { it.isAsciiLowercase }.collect());
     letters.count == 26

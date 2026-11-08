@@ -16,8 +16,8 @@ func modInverse(a: Int64, m: Int64) -> Int64? {
         oldS = s;
         s = nextS;
     }
-    if oldR != 1 { return .None }
-    .Some(oldS.modulo(by: m))
+    if oldR != 1 { return null }
+    oldS.modulo(by: m)
 }
 
 func crt(residues: Array[Int64], moduli: Array[Int64]) -> Int64? {
@@ -28,14 +28,14 @@ func crt(residues: Array[Int64], moduli: Array[Int64]) -> Int64? {
         let inv = try modInverse(p, m);
         sum = sum + r * inv * p;
     }
-    .Some(sum.modulo(by: product))
+    sum.modulo(by: product)
 }
 
 @main
 func main() {
     println(crt([2, 3, 2], [3, 5, 7]) ?? -1);
     match crt([1, 2], [4, 6]) {
-        .Some(x) => println(x),
-        .None => println("no solution: moduli aren't coprime"),
+        some x => println(x),
+        null => println("no solution: moduli aren't coprime"),
     }
 }

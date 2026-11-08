@@ -18,7 +18,7 @@ func canPlace(grid: Array[Int64], cell: Int64, digit: Int64) -> Bool {
 // Backtracking over empty cells in order.
 func solve(mutating grid: Array[Int64]) -> Bool {
     let empty = grid.firstIndex(of: 0);
-    guard let .Some(cell) = empty else { return true }
+    guard let some cell = empty else { return true }
     for digit in 1..=9 {
         if canPlace(grid, cell, digit) {
             grid(cell) = digit;

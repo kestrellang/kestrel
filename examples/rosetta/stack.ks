@@ -20,7 +20,7 @@ func main() {
     println("empty: \(s.isEmpty)");
     for i in 1..=3 { s.push(i * 10); }
     println("top: \(s.peek() ?? 0)");
-    while let .Some(x) = s.pop() {
+    while let some x = s.pop() {
         println("popped \(x)");
     }
     println("empty: \(s.isEmpty)");

@@ -7,7 +7,7 @@ func evaluate(expr: String) -> Float64 {
     println("token  stack");
     for piece in expr.split(" ") {
         let token = piece.toOwned();
-        if let .Some(x) = Float64(parsing: token) {
+        if let some x = Float64(parsing: token) {
             stack.append(x);
         } else {
             let b = stack.pop() ?? 0.0;

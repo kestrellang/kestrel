@@ -2,8 +2,6 @@
 // https://rosettacode.org/wiki/Set
 module Main
 
-import std.collections.Set
-
 @main
 func main() {
     let a: Set[Int64] = [1, 2, 3, 4, 5];

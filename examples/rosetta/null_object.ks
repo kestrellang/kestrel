@@ -10,12 +10,12 @@ func find(name: String, in names: Array[String]) -> Int64? {
 @main
 func main() {
     let names = ["ann", "bob", "cy"];
-    let missing: Int64? = .None;
-    println("missing is None: \(missing == .None)");
+    let missing: Int64? = null;
+    println("missing is None: \(missing == null)");
     for name in ["bob", "dee"] {
         match find(name, in: names) {
-            .Some(i) => println("\(name) is at \(i)"),
-            .None => println("\(name) is not there"),
+            some i => println("\(name) is at \(i)"),
+            null => println("\(name) is not there"),
         }
     }
     // Defaulting and chaining.

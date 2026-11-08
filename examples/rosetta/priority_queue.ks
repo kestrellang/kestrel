@@ -2,8 +2,6 @@
 // https://rosettacode.org/wiki/Priority_queue
 module Main
 
-import std.collections.Heap
-
 struct Task {
     let priority: Int64;
     let name: String;
@@ -23,7 +21,7 @@ func main() {
     queue.push(Task(priority: 5, name: "Make tea"));
     queue.push(Task(priority: 1, name: "Solve RC tasks"));
     queue.push(Task(priority: 2, name: "Tax return"));
-    while let .Some(task) = queue.pop() {
+    while let some task = queue.pop() {
         println("\(task.priority) \(task.name)");
     }
 }

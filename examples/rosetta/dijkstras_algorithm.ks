@@ -2,8 +2,6 @@
 // https://rosettacode.org/wiki/Dijkstra%27s_algorithm
 module Main
 
-import std.collections.Heap
-
 struct Edge {
     let from: String;
     let to: String;
@@ -27,7 +25,7 @@ func shortestPath(edges: Array[Edge], source: String, target: String) -> (Int64,
     var frontier = Heap[Visit]();
     dist.insert(source, 0);
     frontier.push(Visit(dist: 0, node: source));
-    while let .Some(visit) = frontier.pop() {
+    while let some visit = frontier.pop() {
         if visit.dist > (dist(visit.node) ?? visit.dist) { continue }
         for edge in edges {
             if edge.from != visit.node { continue }
@@ -41,7 +39,7 @@ func shortestPath(edges: Array[Edge], source: String, target: String) -> (Int64,
     }
     var path = [target];
     var node = target;
-    while let .Some(p) = prev(node) {
+    while let some p = prev(node) {
         path.insert(p, at: 0);
         node = p;
     }

@@ -3,8 +3,6 @@
 // Depth-first search with an explicit stack and a seeded generator.
 module Main
 
-import std.numeric.Lcg64
-
 @main
 func main() {
     let w = 12;
@@ -16,7 +14,7 @@ func main() {
     var visited = Array[Bool](repeating: false, count: w * h);
     var stack: Array[Int64] = [0];
     visited(0) = true;
-    while let .Some(cell) = stack.last() {
+    while let some cell = stack.last() {
         let x = cell % w;
         let y = cell / w;
         var options = Array[Int64]();

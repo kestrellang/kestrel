@@ -2,8 +2,6 @@
 // https://rosettacode.org/wiki/Tree_traversal
 module Main
 
-import std.collections.Deque
-
 indirect enum Tree {
     case Node(value: Int64, left: Tree, right: Tree)
     case Leaf
@@ -40,7 +38,7 @@ func levelOrder(t: Tree) -> Array[Int64] {
     var out = Array[Int64]();
     var queue = Deque[Tree]();
     queue.pushBack(t);
-    while let .Some(next) = queue.popFront() {
+    while let some next = queue.popFront() {
         if let .Node(v, l, r) = next {
             out.append(v);
             queue.pushBack(l);

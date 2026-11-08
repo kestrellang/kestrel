@@ -2,8 +2,6 @@
 // https://rosettacode.org/wiki/Monte_Carlo_methods
 module Main
 
-import std.numeric.Lcg64
-
 func estimatePi(samples: Int64, mutating rng: Lcg64) -> Float64 {
     var inside: Int64 = 0;
     for _ in 0..<samples {

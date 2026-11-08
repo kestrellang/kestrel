@@ -11,8 +11,8 @@ func main() {
     for i in 0..<(n - 1) {
         let v = seq(i);
         seq(i + 1) = match last(v) {
-            .Some(j) => i - j,
-            .None => 0,
+            some j => i - j,
+            null => 0,
         };
         last.insert(v, i);
     }

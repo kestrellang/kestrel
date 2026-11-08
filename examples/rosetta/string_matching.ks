@@ -10,11 +10,11 @@ func main() {
     println("contains \"bc\": \(s.contains("bc"))");
     println("contains \"xy\": \(s.contains("xy"))");
     match s.firstIndex(of: "cd") {
-        .Some(i) => println("first \"cd\" at byte \(i.value)"),
-        .None => println("no \"cd\""),
+        some i => println("first \"cd\" at byte \(i.value)"),
+        null => println("no \"cd\""),
     }
     match s.lastIndex(of: "cd") {
-        .Some(i) => println("last \"cd\" at byte \(i.value)"),
-        .None => println("no \"cd\""),
+        some i => println("last \"cd\" at byte \(i.value)"),
+        null => println("no \"cd\""),
     }
 }

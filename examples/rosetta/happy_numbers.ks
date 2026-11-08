@@ -2,8 +2,6 @@
 // https://rosettacode.org/wiki/Happy_numbers
 module Main
 
-import std.collections.Set
-
 func digitSquareSum(n: Int64) -> Int64 {
     var rest = n;
     var sum: Int64 = 0;

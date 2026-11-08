@@ -21,8 +21,8 @@ func decode(s: String) -> String {
     var count: Int64 = 0;
     for c in s.chars {
         match c.digitValue() {
-            .Some(d) => count = count * 10 + Int64(from: d),
-            .None => {
+            some d => count = count * 10 + Int64(from: d),
+            null => {
                 out.append(c.toString().repeated(count));
                 count = 0;
             }

@@ -19,13 +19,13 @@ func toRpn(infix: String) -> String {
         if token == "(" {
             ops.append(token);
         } else if token == ")" {
-            while let .Some(top) = ops.pop() {
+            while let some top = ops.pop() {
                 if top == "(" { break }
                 output.append(top);
             }
         } else if precedence(token) > 0 {
             // Pop operators that bind tighter (or equal, for left-associative ones).
-            while let .Some(top) = ops.last() {
+            while let some top = ops.last() {
                 let p = precedence(top);
                 let q = precedence(token);
                 if p > q or (p == q and token != "^") {
@@ -39,7 +39,7 @@ func toRpn(infix: String) -> String {
             output.append(token);
         }
     }
-    while let .Some(op) = ops.pop() { output.append(op); }
+    while let some op = ops.pop() { output.append(op); }
     output.joined(" ")
 }
 

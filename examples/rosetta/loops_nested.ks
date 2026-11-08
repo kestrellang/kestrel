@@ -2,8 +2,6 @@
 // https://rosettacode.org/wiki/Loops/Nested
 module Main
 
-import std.numeric.Lcg64
-
 @main
 func main() {
     var rng = Lcg64(seed: 99);

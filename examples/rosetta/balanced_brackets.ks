@@ -2,8 +2,6 @@
 // https://rosettacode.org/wiki/Balanced_brackets
 module Main
 
-import std.numeric.Lcg64
-
 func isBalanced(s: String) -> Bool {
     var depth: Int64 = 0;
     for c in s.chars {

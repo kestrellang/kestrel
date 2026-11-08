@@ -13,10 +13,10 @@ func binarySearch[T](haystack: Array[T], needle: T) -> Int64? where T: Comparabl
         } else if value > needle {
             hi = mid - 1;
         } else {
-            return .Some(mid);
+            return mid;
         }
     }
-    .None
+    null
 }
 
 @main
@@ -24,8 +24,8 @@ func main() {
     let a = [1, 3, 4, 7, 9, 11, 15, 22, 30];
     for needle in [7, 1, 30, 8] {
         match binarySearch(a, needle) {
-            .Some(i) => println("\(needle) found at index \(i)"),
-            .None => println("\(needle) not found"),
+            some i => println("\(needle) found at index \(i)"),
+            null => println("\(needle) not found"),
         }
     }
     // Arrays also have a built-in binary search.

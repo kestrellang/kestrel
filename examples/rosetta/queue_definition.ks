@@ -2,8 +2,6 @@
 // https://rosettacode.org/wiki/Queue/Definition
 module Main
 
-import std.collections.Deque
-
 // FIFO queue on top of the standard ring-buffer Deque.
 struct Queue[T] {
     var items: Deque[T];
@@ -24,7 +22,7 @@ func main() {
     q.push("third");
     println("pop: \(q.pop() ?? "-")");
     q.push("fourth");
-    while let .Some(x) = q.pop() {
+    while let some x = q.pop() {
         println("pop: \(x)");
     }
     println("empty: \(q.isEmpty)");

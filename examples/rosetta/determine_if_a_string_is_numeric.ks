@@ -3,8 +3,8 @@
 module Main
 
 func isNumeric(s: String) -> Bool {
-    if let .Some(_) = Int64(parsing: s) { return true }
-    if let .Some(_) = Float64(parsing: s) { return true }
+    if let some _ = Int64(parsing: s) { return true }
+    if let some _ = Float64(parsing: s) { return true }
     false
 }
 

@@ -18,13 +18,13 @@ struct Parser {
     }
 
     func peek() -> Char? {
-        if self.pos < self.chars.count { .Some(self.chars(self.pos)) } else { .None }
+        if self.pos < self.chars.count { self.chars(self.pos) } else { null }
     }
 
     // expr := term (('+' | '-') term)*
     mutating func expr() -> Expr {
         var left = self.term();
-        while let .Some(c) = self.peek() {
+        while let some c = self.peek() {
             if c != '+' and c != '-' { break }
             self.pos = self.pos + 1;
             left = .Binary(op: c, left: left, right: self.term());
@@ -35,7 +35,7 @@ struct Parser {
     // term := factor (('*' | '/') factor)*
     mutating func term() -> Expr {
         var left = self.factor();
-        while let .Some(c) = self.peek() {
+        while let some c = self.peek() {
             if c != '*' and c != '/' { break }
             self.pos = self.pos + 1;
             left = .Binary(op: c, left: left, right: self.factor());
@@ -52,7 +52,7 @@ struct Parser {
             return inner
         }
         var digits = StringBuilder();
-        while let .Some(c) = self.peek() {
+        while let some c = self.peek() {
             if not c.isAsciiDigit and c != '.' { break }
             digits.append(char: c);
             self.pos = self.pos + 1;
