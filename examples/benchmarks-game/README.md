@@ -65,7 +65,7 @@ Profiling these programs with `perf` led to three changes, measured at -O2 on on
 - **No SIMD types or intrinsics.** n-body, spectral-norm and mandelbrot are close to the scalar or auto-vectorized C, but the winners hand-write AVX.
 - **`Dictionary` cache misses.** After this branch's Dictionary rework, k-nucleotide is memory-bound on the entry load of the 140k-key tables (Rust #3, the same algorithm on hashbrown: 3.44 s).
 - **binary-trees allocation.** With std's arena it is 1.3x behind C #3 (APR pools, 2.25 s) and 1.2x behind Rust #2 (bumpalo, 2.56 s).
-- **reverse-complement I/O.** Three fixes in this branch cut page faults from 193k to 62k: a destructuring `let` moves out of its hidden temp instead of copying (the tuple-returning reader forked its buffer), `readAll` reads in place into spare capacity, and `Array(repeating: 0, count:)` gets `calloc`ed memory instead of writing every byte. What's left is mostly the buffer growing by `realloc`.
+- **reverse-complement I/O.** Three fixes in this branch cut page faults from 193k to 62k: a destructuring `let` moves out of its hidden temp instead of copying (the tuple-returning reader forked its buffer), `readAll` reads in place into spare capacity, and `Array(repeating: 0, count:)` gets `calloc`ed memory instead of writing every byte. The remaining gap to C hasn't been profiled yet.
 
 ## Running
 
