@@ -1,11 +1,12 @@
 // Hashers: `DefaultHasher` (keyed SipHash-1-3, used by `Dictionary` and
-// `Set`) and `FastHasher` (an unkeyed word-at-a-time mixer).
+// `Set`) and `FastHasher` (foldhash, unkeyed).
 
 module std.collections
 
 import std.core.(Hasher, Hashable, Defaultable)
 import std.numeric.(UInt8, UInt64, Int64, DefaultRandom)
 import std.collections.(Slice)
+import std.memory.(Pointer)
 
 // ============================================================================
 // DEFAULT HASHER (SIPHASH-1-3)
@@ -38,9 +39,8 @@ func sipProcessKey() -> (UInt64, UInt64) {
 ///
 /// `DefaultHasher()` uses a random per-process key; `DefaultHasher(key0:key1:)`
 /// takes an explicit 128-bit key and gives the reference SipHash-1-3 value
-/// of the bytes written. Like `FastHasher` it streams (split writes hash
-/// the same as one write) and integers go through `write(uint64:)` as one
-/// word. It's slower than `FastHasher`; pick that for trusted keys when
+/// of the bytes written. It streams (split writes hash the same as one
+/// write) and integers go through `write(uint64:)` as one word. It's slower than `FastHasher`; pick that for trusted keys when
 /// hashing is the bottleneck.
 ///
 /// # Examples
@@ -168,19 +168,27 @@ public struct DefaultHasher: Hasher, Defaultable {
 }
 
 // ============================================================================
-// FAST HASHER
+// FAST HASHER (FOLDHASH)
 // ============================================================================
 
-/// A fast, unkeyed `Hasher`: a word-at-a-time multiply-xorshift mixer
-/// with Murmur3's `fmix64` finalizer.
+// foldhash's fixed seeds (hex digits of pi): ARBITRARY4..7 are the fold
+// and expand seeds; ARBITRARY3 starts the accumulator (see `init`).
+let foldSeed: UInt64 = 4983270260364809079;      // 0x452821e638d01377
+let foldExpandSeed: UInt64 = 13714699805381954668;   // 0xbe5466cf34e90c6c
+let foldExpandSeed2: UInt64 = 13883517620612518109;  // 0xc0ac29b7c97c50dd
+let foldExpandSeed3: UInt64 = 4577018097722394903;   // 0x3f84d5b5b5470917
+
+/// foldhash's fast variant (Orson Peters, the default in Rust's
+/// `hashbrown`), with its fixed seeds: a fast, unkeyed `Hasher` built on
+/// the folded multiply (the 128-bit product of two words, its halves
+/// XORed together). It passes SMHasher and gives the same values as the
+/// Rust crate's `foldhash::fast::FixedState`.
 ///
-/// Input is folded in 8 bytes per round, and integers (through
-/// `write(uint64:)`) take a single round. It streams: bytes are buffered
-/// into whole words, so split writes hash the same as one write.
-/// `finish()` folds in the total byte count and runs `fmix64`, so every
-/// input bit avalanches across the output. Variable-length values end
-/// their own input (`String` writes its length), which keeps `["ab", "c"]`
-/// and `["a", "bc"]` apart.
+/// Each `write(bytes:)` is absorbed as one block, so unlike `DefaultHasher`
+/// splitting a write changes the hash; variable-length values end their
+/// own input (`String` writes its length) to keep `["ab", "c"]` and
+/// `["a", "bc"]` apart. Integers collect in a 128-bit buffer and are
+/// folded in two at a time.
 ///
 /// **Not adversarially safe.** It's unkeyed, so anyone who chooses the
 /// keys can craft collisions, but hashes and iteration order are the same
@@ -200,114 +208,174 @@ public struct DefaultHasher: Hasher, Defaultable {
 ///
 /// # Representation
 ///
-/// `state` (the running digest), `pending` and `pendingCount` (up to 7
-/// bytes not yet forming a word, little-endian), and `total` (bytes seen).
+/// `accumulator` (the running digest) and the integer buffer: `spongeLo`
+/// and `spongeHi` hold up to two pending words, `spongeLen` the bits used
+/// (0, 64 or 128).
 public struct FastHasher: Hasher, Defaultable {
-    private var state: UInt64
-    private var pending: UInt64
-    private var pendingCount: Int64
-    private var total: Int64
+    private var accumulator: UInt64
+    private var spongeLo: UInt64
+    private var spongeHi: UInt64
+    private var spongeLen: Int64
 
     // ========================================================================
     // CONSTRUCTORS
     // ========================================================================
 
     /// @name Default
-    /// A hasher seeded with the golden-ratio constant SplitMix64 uses.
+    /// A hasher with foldhash's fixed seed.
     public init() {
-        self.state = 11400714819323198485;  // 0x9e3779b97f4a7c15
-        self.pending = 0;
-        self.pendingCount = 0;
-        self.total = 0;
+        self.accumulator = 589684135938649225;  // 0x082efa98ec4e6c89
+        self.spongeLo = 0;
+        self.spongeHi = 0;
+        self.spongeLen = 0;
     }
 
     // ========================================================================
     // HASHER PROTOCOL
     // ========================================================================
 
-    /// Tops up the pending partial word, mixes whole 8-byte little-endian
-    /// words straight from `bytes`, and keeps the remainder pending.
+    /// Absorbs `bytes` as one block. Up to 16 bytes take one folded
+    /// multiply; longer inputs fold 16 or 64 bytes per step.
     public mutating func write(bytes: Slice[UInt8]) {
-        let count = bytes.count;
+        let len = bytes.count;
         let ptr = bytes.pointer;
-        self.total = self.total + count;
-        var i: Int64 = 0;
-        // Finish a partial word left by an earlier write.
-        while self.pendingCount > 0 and i < count {
-            self.pushByte(unsafe ptr.offset(by: i).read());
-            i = i + 1
-        }
-        while i + 8 <= count {
-            // Byte-wise assembly is alignment-safe; LLVM folds it into a
-            // single load where the target allows.
-            var word: UInt64 = 0;
-            var k: Int64 = 7;
-            while k >= 0 {
-                word = word.shiftLeft(by: 8).bitwiseOr(UInt64(from: unsafe ptr.offset(by: i + k).read()));
-                k = k - 1
+        let base = self.accumulator.rotateRight(by: len % 64);
+        if len > 16 {
+            let s1 = base.addWrapping(foldExpandSeed);
+            if len < 256 {
+                self.accumulator = foldMedium(ptr, 0, len, base, s1);
+                return
             }
-            self.mix(word);
-            i = i + 8
-        }
-        while i < count {
-            self.pushByte(unsafe ptr.offset(by: i).read());
-            i = i + 1
-        }
-    }
-
-    /// The same as writing the value's 8 little-endian bytes. With no
-    /// partial word pending (the usual case) that's a single round.
-    public mutating func write(uint64 value: UInt64) {
-        self.total = self.total + 8;
-        if self.pendingCount == 0 {
-            self.mix(value);
+            self.accumulator = foldLong(ptr, len, base, s1);
             return
         }
-        let shift = self.pendingCount * 8;
-        self.mix(self.pending.bitwiseOr(value.shiftLeft(by: shift)));
-        self.pending = value.shiftRight(by: 64 - shift)
+        var s0 = base;
+        var s1 = foldExpandSeed;
+        if len >= 8 {
+            s0 = s0.bitwiseXor(foldLoadWord(ptr, 0, 8));
+            s1 = s1.bitwiseXor(foldLoadWord(ptr, len - 8, 8))
+        } else if len >= 4 {
+            s0 = s0.bitwiseXor(foldLoadWord(ptr, 0, 4));
+            s1 = s1.bitwiseXor(foldLoadWord(ptr, len - 4, 4))
+        } else if len > 0 {
+            s0 = s0.bitwiseXor(foldLoadWord(ptr, 0, 1));
+            let mid = foldLoadWord(ptr, len / 2, 1);
+            let hi = foldLoadWord(ptr, len - 1, 1);
+            s1 = s1.bitwiseXor(hi.shiftLeft(by: 8).bitwiseOr(mid))
+        }
+        self.accumulator = foldedMultiply(s0, s1)
     }
 
-    /// Murmur3's `fmix64` over the state.
+    /// Buffers the word; once two are pending they're folded in together.
+    public mutating func write(uint64 value: UInt64) {
+        if self.spongeLen == 0 {
+            self.spongeLo = value;
+            self.spongeLen = 64;
+            return
+        }
+        if self.spongeLen == 64 {
+            self.spongeHi = value;
+            self.spongeLen = 128;
+            return
+        }
+        self.foldSponge();
+        self.spongeLo = value;
+        self.spongeHi = 0;
+        self.spongeLen = 64
+    }
+
+    /// Folds in any buffered words; otherwise the accumulator as is.
     public mutating func finish() -> UInt64 {
-        let m1 = 18397679294719823053;  // 0xff51afd7ed558ccd
-        let m2 = 14181476777654086739;  // 0xc4ceb9fe1a85ec53
-        if self.pendingCount > 0 {
-            self.mix(self.pending);
-            self.pending = 0;
-            self.pendingCount = 0
+        if self.spongeLen > 0 {
+            self.foldSponge();
+            self.spongeLo = 0;
+            self.spongeHi = 0;
+            self.spongeLen = 0
         }
-        // The byte count separates inputs that differ only in trailing zeros.
-        self.mix(UInt64(truncating: self.total));
-        var x = self.state;
-        x = x.bitwiseXor(x.shiftRight(by: 33));
-        x = x.multiplyWrapping(m1);
-        x = x.bitwiseXor(x.shiftRight(by: 33));
-        x = x.multiplyWrapping(m2);
-        x = x.bitwiseXor(x.shiftRight(by: 33));
-        self.state = x;
-        x
+        self.accumulator
     }
 
-    /// `state = (state ^ word) * K`, then fold the high half down: the
-    /// multiply only carries bits upward, so the shift brings them back
-    /// into the low bits the table index uses.
-    // Appends one byte to the pending word, mixing it once it's full.
-    private mutating func pushByte(byte: UInt8) {
-        let shift = self.pendingCount * 8;
-        self.pending = self.pending.bitwiseOr(UInt64(from: byte).shiftLeft(by: shift));
-        self.pendingCount = self.pendingCount + 1;
-        if self.pendingCount == 8 {
-            self.mix(self.pending);
-            self.pending = 0;
-            self.pendingCount = 0
-        }
+    private mutating func foldSponge() {
+        self.accumulator = foldedMultiply(
+            self.spongeLo.bitwiseXor(self.accumulator),
+            self.spongeHi.bitwiseXor(foldSeed))
     }
+}
 
-    private mutating func mix(word: UInt64) {
-        let k = 11400714819323198485;  // 0x9e3779b97f4a7c15, odd
-        var x = self.state.bitwiseXor(word);
-        x = x.multiplyWrapping(k);
-        self.state = x.bitwiseXor(x.shiftRight(by: 29))
+/// The 128-bit product `x * y` with its two halves XORed: foldhash's mixing
+/// step. Built from four 32×32-bit products, since there's no 128-bit
+/// integer type.
+func foldedMultiply(x: UInt64, y: UInt64) -> UInt64 {
+    let mask: UInt64 = 4294967295;
+    let x0 = x.bitwiseAnd(mask);
+    let x1 = x.shiftRight(by: 32);
+    let y0 = y.bitwiseAnd(mask);
+    let y1 = y.shiftRight(by: 32);
+    let ll = x0.multiplyWrapping(y0);
+    let lh = x0.multiplyWrapping(y1);
+    let hl = x1.multiplyWrapping(y0);
+    let hh = x1.multiplyWrapping(y1);
+    // Carry out of the low half: its top 32 bits plus the low halves of
+    // the cross terms (each under 2^32, so the sum can't overflow).
+    let mid = ll.shiftRight(by: 32).addWrapping(lh.bitwiseAnd(mask)).addWrapping(hl.bitwiseAnd(mask));
+    let hi = hh.addWrapping(lh.shiftRight(by: 32)).addWrapping(hl.shiftRight(by: 32)).addWrapping(mid.shiftRight(by: 32));
+    x.multiplyWrapping(y).bitwiseXor(hi)
+}
+
+/// `width` (1, 4 or 8) little-endian bytes at `ptr + at`. Byte-wise
+/// assembly is alignment-safe; LLVM folds it into one load.
+func foldLoadWord(ptr: Pointer[UInt8], at: Int64, width: Int64) -> UInt64 {
+    var word: UInt64 = 0;
+    var k = width - 1;
+    while k >= 0 {
+        word = word.shiftLeft(by: 8).bitwiseOr(UInt64(from: unsafe ptr.offset(by: at + k).read()));
+        k = k - 1
     }
+    word
+}
+
+/// foldhash's `hash_bytes_medium` over `ptr[start..<start + len]`
+/// (16 <= len): 16-byte chunks from the front pair up with 16-byte chunks
+/// from the back until they meet.
+func foldMedium(ptr: Pointer[UInt8], start: Int64, len: Int64, s0In: UInt64, s1In: UInt64) -> UInt64 {
+    var s0 = s0In;
+    var s1 = s1In;
+    var front: Int64 = 0;
+    while front + 16 <= len {
+        let backEnd = len - front;
+        if front >= backEnd { break };
+        let back = backEnd - 16;
+        let a = foldLoadWord(ptr, start + front, 8);
+        let b = foldLoadWord(ptr, start + front + 8, 8);
+        let c = foldLoadWord(ptr, start + back, 8);
+        let d = foldLoadWord(ptr, start + back + 8, 8);
+        s0 = foldedMultiply(a.bitwiseXor(s0), c.bitwiseXor(foldSeed));
+        s1 = foldedMultiply(b.bitwiseXor(s1), d.bitwiseXor(foldSeed));
+        front = front + 16
+    }
+    s0.bitwiseXor(s1)
+}
+
+/// foldhash's `hash_bytes_long` (256 <= len): four lanes over 64-byte
+/// chunks, then the tail (at least its last 16 bytes) through `foldMedium`.
+func foldLong(ptr: Pointer[UInt8], len: Int64, base: UInt64, s1In: UInt64) -> UInt64 {
+    var s0 = base;
+    var s1 = s1In;
+    var s2 = base.addWrapping(foldExpandSeed2);
+    var s3 = base.addWrapping(foldExpandSeed3);
+    let fold = foldSeed;
+    var i: Int64 = 0;
+    while i + 64 <= len {
+        s0 = foldedMultiply(foldLoadWord(ptr, i, 8).bitwiseXor(s0), foldLoadWord(ptr, i + 32, 8).bitwiseXor(fold));
+        s1 = foldedMultiply(foldLoadWord(ptr, i + 8, 8).bitwiseXor(s1), foldLoadWord(ptr, i + 40, 8).bitwiseXor(fold));
+        s2 = foldedMultiply(foldLoadWord(ptr, i + 16, 8).bitwiseXor(s2), foldLoadWord(ptr, i + 48, 8).bitwiseXor(fold));
+        s3 = foldedMultiply(foldLoadWord(ptr, i + 24, 8).bitwiseXor(s3), foldLoadWord(ptr, i + 56, 8).bitwiseXor(fold));
+        i = i + 64
+    }
+    s0 = s0.bitwiseXor(s2);
+    s1 = s1.bitwiseXor(s3);
+    let remainder = len - i;
+    if remainder == 0 { return s0.bitwiseXor(s1) };
+    let tail = if remainder > 16 { remainder } else { 16 };
+    foldMedium(ptr, len - tail, tail, s0, s1)
 }
