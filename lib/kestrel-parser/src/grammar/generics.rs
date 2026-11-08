@@ -5,7 +5,8 @@
 //! TypeParameter     = Name DefaultType?
 //! DefaultType       = '=' Ty               // a bare path, no type arguments
 //! ConformanceList   = ':' ConformanceItem (',' ConformanceItem)* ','?
-//! ConformanceItem   = NegativeConformance | Ty
+//! ConformanceItem   = NegativeConformance | UnsafeConformance | Ty
+//! UnsafeConformance = 'unsafe' Ty
 //! NegativeConformance = 'not' Ty
 //! WhereClause       = 'where' constraint (',' constraint)*
 //! constraint        = TypeEquality | TypeBound
@@ -69,6 +70,11 @@ pub(super) fn opt_conformance_list(p: &mut Parser<'_>) {
             p.bump(K::Not);
             ty(p);
             n.complete(p, K::NegativeConformance);
+        } else if p.at(K::Unsafe) {
+            let u = p.start();
+            p.bump(K::Unsafe);
+            ty(p);
+            u.complete(p, K::UnsafeConformance);
         } else {
             ty(p);
         }
@@ -79,6 +85,7 @@ pub(super) fn opt_conformance_list(p: &mut Parser<'_>) {
         // Trailing comma: the list ends at whatever cannot start a type.
         if !p.at_any(&[
             K::Not,
+            K::Unsafe,
             K::Identifier,
             K::LParen,
             K::LBracket,

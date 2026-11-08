@@ -196,6 +196,18 @@ pub struct AstParam {
     pub is_mut: bool,
     /// Whether this parameter specifically has consuming access mode.
     pub is_consuming: bool,
+    /// Spelled with a reference type (`x: &T`, `x: &mutating T`): `ty` is
+    /// the pointee and the ref kind set the access mode, so it passes like
+    /// `x: T` / `mutating x: T`. Only such a param may take an unsized `T`.
+    pub by_ref: bool,
+}
+
+impl AstParam {
+    /// Declared with a function type (`f: (T) -> U`), so an unlabeled
+    /// trailing closure may fill it (see `arg_binding`).
+    pub fn takes_closure(&self) -> bool {
+        matches!(self.ty, Some(AstType::Function { .. }))
+    }
 }
 
 /// A parameter destructuring pattern — lightweight tree that doesn't need arena allocation.
@@ -205,6 +217,8 @@ pub enum ParamPattern {
     Binding {
         name: String,
         is_mut: bool,
+        /// `Some(mutating)` for a `&x` / `&mutating x` binder.
+        by_ref: Option<bool>,
     },
     Tuple {
         elements: Vec<ParamPattern>,
@@ -253,6 +267,7 @@ impl AstParam {
             pattern: None,
             is_mut: is_consuming || SETTER_NEW_VALUE_MODE == ReceiverKind::Mutating,
             is_consuming,
+            by_ref: false,
         }
     }
 }
@@ -270,6 +285,101 @@ pub struct Settable;
 /// shared `ref` accessor (returns `&T`, Borrowing receiver).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MutatingAccessor;
+
+/// Marker on a Field/Subscript whose READ provider is a `modifying get` or
+/// `modifying ref` accessor: the accessor takes a mutable receiver, so every
+/// read needs a mutable base, exactly like a `mutating` method call. The
+/// single source of truth for "reading this member mutates self" — the
+/// analyzers (receiver mutability) and MIR lowering (receiver convention)
+/// both ask this marker.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MutatingRead;
+
+/// The accessor clauses a Field/Subscript spells, as written. Provider
+/// exclusivity (E619/E620) and the observer/lazy checks read this, because
+/// two clauses of one provider role land on the same entity slot (`get` and
+/// `modifying get` both own the member's body) and would otherwise be
+/// invisible once built.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct DeclaredAccessors {
+    pub get: bool,
+    pub modifying_get: bool,
+    pub set: bool,
+    pub ref_: bool,
+    pub modifying_ref: bool,
+    pub mutating_ref: bool,
+    pub will_set: bool,
+    pub did_set: bool,
+}
+
+impl DeclaredAccessors {
+    /// How many read providers are spelled (`get`, `modifying get`, `ref`,
+    /// `modifying ref`, or the `{ expr }` shorthand counted as `get`).
+    pub fn read_providers(&self) -> usize {
+        [self.get, self.modifying_get, self.ref_, self.modifying_ref]
+            .iter()
+            .filter(|b| **b)
+            .count()
+    }
+
+    /// A `modifying` accessor is spelled.
+    pub fn any_modifying(&self) -> bool {
+        self.modifying_get || self.modifying_ref
+    }
+
+    /// `willSet` and/or `didSet` is spelled.
+    pub fn any_observer(&self) -> bool {
+        self.will_set || self.did_set
+    }
+}
+
+/// Marker on the synthesized `NodeKind::Setter` of an observed stored field
+/// (`var x: T = v { willSet { … } didSet { … } }`). The field stays stored;
+/// this setter (`Valued` = the accessor block) runs `willSet`, stores
+/// `newValue` directly, then runs `didSet`. Writes from outside route through
+/// it; its own body and the container's initializers write the storage
+/// directly (observers never fire during initialization).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ObserverSetter;
+
+/// A field spelled `lazy`. When well-formed (an instance `var` of a
+/// concrete type with a type and an `= expr` initializer, no accessors),
+/// `cache` is its hidden stored `Optional` sibling (named `$name`, see
+/// [`FieldClass::lazy_cache`]) and the field itself is computed: a
+/// synthesized `modifying get` (`Valued` = the initializer expression) fills
+/// the cache on first read, and a [`LazySetter`] child stores into it.
+/// `cache` is `None` for a malformed `lazy` (E639 reports it; the field
+/// builds as a plain stored field).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Lazy {
+    pub cache: Option<Entity>,
+}
+
+/// Marker on the synthesized `NodeKind::Setter` of a `lazy var`: its body
+/// stores `.Some(newValue)` into the cache.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LazySetter;
+
+/// Marker on a Field/Subscript declared failable (`var first?: T`,
+/// `subscript(i: Int64)? -> T`): the place may not exist. Reads produce
+/// `Optional` of what the read provider yields, and assignment is rejected.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Failable;
+
+/// Marker on a computed Field/Subscript declared `T throws E` (a property
+/// with accessors, or any subscript): reads produce `Result[T, E]`, and,
+/// like a [`Failable`] place, it has no `set` and can't be assigned. Its
+/// `ref` / `mutating ref` lend `Result[&T, E]` / `Result[&mutating T, E]`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Throwing;
+
+/// A place that may not exist: [`Failable`] (`?`) or [`Throwing`]
+/// (`throws E`). Reads go through the accessor's effect-wrapped type, a
+/// `&mutating` payload binder writes through its `mutating ref`, and it
+/// can't be assigned (E214) or declare `set` (E637).
+pub fn is_effectful_place(c: &impl crate::syntax::Components, entity: Entity) -> bool {
+    c.component::<Failable>(entity).is_some() || c.component::<Throwing>(entity).is_some()
+}
 
 /// Has a body to lower — a handle to the body subtree: a `CodeBlock`, a
 /// function's `= expr` (`FunctionBody`), a parameter default's `= expr`
@@ -368,6 +478,10 @@ pub struct FieldClass {
     pub owner: FieldOwner,
     /// The `static` modifier only. Orthogonal to `owner`.
     pub is_static: bool,
+    /// The hidden `Optional` cache of a `lazy var` (see [`Lazy`]): stored,
+    /// but never a memberwise-init parameter — every initializer starts it
+    /// empty.
+    pub lazy_cache: bool,
 }
 
 impl FieldClass {
@@ -378,6 +492,16 @@ impl FieldClass {
         self.backing == FieldBacking::Stored
             && !self.is_static
             && matches!(self.owner, FieldOwner::Nominal)
+    }
+
+    /// Stored instance storage the user declared: not a `lazy var`'s hidden
+    /// cache. The roster of memberwise-init parameters, of the fields a
+    /// struct pattern names, and (syntactically,
+    /// `FieldDeclaration::is_declared_instance_storage`) of derived
+    /// conformances. Layout and pattern indices still use
+    /// [`Self::is_stored_instance`].
+    pub fn is_declared_storage(&self) -> bool {
+        self.is_stored_instance() && !self.lazy_cache
     }
 
     /// Backed by a `GlobalRef` rather than by instance storage.
@@ -434,8 +558,9 @@ pub struct Conformances(pub Vec<ConformanceItem>);
 /// A single conformance entry.
 #[derive(Clone, Debug)]
 pub enum ConformanceItem {
-    /// `T: Protocol`
-    Positive(AstType, SyntaxNodePtr),
+    /// `T: Protocol`. The flag is `T: unsafe Protocol`: the conformer
+    /// vouches for an unsafe protocol's contract.
+    Positive(AstType, SyntaxNodePtr, bool),
     /// `T: not Protocol`
     Negative(AstType, SyntaxNodePtr),
 }
@@ -458,6 +583,19 @@ pub struct ExtensionTarget(pub AstType);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExtensionLhsParamNames(pub Vec<String>);
 
+/// Candidate type parameters a NESTED position of an extension's target
+/// introduces: `X` in `extend Box[W[X]]`, `A`/`B` in `extend Box[(A, B)]`.
+/// A pattern parameter binds by matching the receiver's arg against the
+/// written pattern, not positionally against a target parameter.
+///
+/// These are only CANDIDATES: the builder can't tell `X` (a new parameter)
+/// from `Int64` (a type) in `extend Box[W[Int64]]`. Name resolution keeps
+/// the ones that resolve to no type (`ExtensionPatternParams`), the same
+/// rule a structural target's elements use. They are `TypeParameter`
+/// children of the extension but deliberately NOT in its `TypeParams`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExtensionPatternCandidates(pub Vec<Entity>);
+
 /// On a TypeAlias declared as `type Protocol.Assoc = T` — the qualifying
 /// protocol path. Absence means the alias is unqualified (`type Assoc = T`).
 /// Captured at build time so analyzers can resolve the protocol entity via
@@ -465,11 +603,45 @@ pub struct ExtensionLhsParamNames(pub Vec<String>);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct QualifiedTarget(pub AstType);
 
+// ===== Derives =====
+
+/// On the file entity of the source one `@derive(...)` expanded to (see
+/// `crate::derive`). The file has a `FileSyntax` but no `SourceText`: it is
+/// never shown. Its declarations are owned by `origin` (unbuilding `origin`
+/// removes them), and diagnostics inside it are reported at `attr_span`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DerivedFile {
+    pub origin: Entity,
+    /// The declaration carrying the `@derive`.
+    pub site: Entity,
+    /// The whole attribute, `@` to `)`.
+    pub attr_span: Span,
+}
+
+/// On an extension `@derive` generated: `extend S: P { <witnesses> }`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DerivedFrom {
+    /// The declaration carrying the `@derive` (the type, or an extension of it).
+    pub site: Entity,
+    /// The type whose fields the witnesses read. Code in the extension sees
+    /// the type's private members as if written inside it.
+    pub ty: Entity,
+    /// The protocol path as written in `@derive(...)`.
+    pub protocol: Vec<String>,
+}
+
 // ===== Modifiers =====
 
 /// Marker: enum has indirect representation.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IsIndirect;
+
+/// Marker: `unsafe` was written on this declaration (or it is an unsafe
+/// `lang` intrinsic). Read through [`crate::unsafety::UnsafetyOf`], which
+/// also covers `@extern` functions; on a protocol it means conformances must
+/// be written `unsafe P` (see [`crate::unsafety::is_unsafe_protocol`]).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct IsUnsafe;
 
 /// Marker: this is a compiler-intrinsic entity (lang module type or function).
 /// Codegen handles these specially — they don't have real bodies or layouts.
@@ -478,39 +650,64 @@ pub struct Intrinsic;
 
 // ===== Metadata =====
 
-/// Attributes on a declaration (e.g. `@inline`, `@available`).
+/// Attributes on a declaration (e.g. `@inline`, `@deprecated`), as written.
+///
+/// This is the raw syntax and the only stored form. Typed values come from
+/// the `AttrsOf` query (`crate::attrs`), which is the one place argument text
+/// is interpreted.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Attributes(pub Vec<AstAttribute>);
 
-impl Attributes {
-    /// The explicit C symbol of an `@extern(.., mangleName: "sym")` function,
-    /// if any. Callers fall back to the function's own name. Single source of
-    /// truth for MIR lowering and analyzers.
-    pub fn extern_mangle_name(&self) -> Option<String> {
-        self.0
-            .iter()
-            .find(|a| a.name == "extern")?
-            .args
-            .iter()
-            .find(|a| a.label.as_deref() == Some("mangleName"))
-            .map(|a| a.value.trim_matches('"').to_string())
-    }
-}
-
-/// A single attribute (e.g. `@inline(always)`).
+/// A single attribute (e.g. `@inline(.Always)`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AstAttribute {
     pub name: String,
     pub args: Vec<AstAttributeArg>,
-    /// Span of the full attribute (including `@` and args).
+    /// Span of the attribute's name token.
     pub span: Span,
 }
 
-/// A single argument within an attribute.
+/// A single argument within an attribute: `label: value` or `value`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AstAttributeArg {
     pub label: Option<String>,
-    pub value: String,
+    /// Span of the label token, when there is one.
+    pub label_span: Option<Span>,
+    pub value: AttrLiteral,
+    /// Span of the whole argument (label and value).
+    pub span: Span,
+}
+
+/// The syntactic shape of an attribute argument's value. Literal text is kept
+/// raw (a string keeps its quotes and escapes); `crate::attrs` decodes it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AttrLiteral {
+    /// A string literal, as written (with quotes).
+    Str(String),
+    /// An integer literal, as written.
+    Int(String),
+    /// A float literal, as written.
+    Float(String),
+    Bool(bool),
+    /// An implicit member `.Name`: the name, no dot.
+    Case(String),
+    /// A dotted path `a.b.C`.
+    Path(Vec<String>),
+    /// Nothing parseable (the parser already reported it).
+    Missing,
+}
+
+impl AttrLiteral {
+    /// The value as it reads in source, for diagnostics.
+    pub fn display(&self) -> String {
+        match self {
+            AttrLiteral::Str(s) | AttrLiteral::Int(s) | AttrLiteral::Float(s) => s.clone(),
+            AttrLiteral::Bool(b) => b.to_string(),
+            AttrLiteral::Case(c) => format!(".{c}"),
+            AttrLiteral::Path(p) => p.join("."),
+            AttrLiteral::Missing => String::new(),
+        }
+    }
 }
 
 /// Documentation comment text.
@@ -545,43 +742,6 @@ pub struct ImportItem {
 
 // ===== Compilation target =====
 
-/// Compilation target for conditional filtering via `@platform`, etc.
-/// Extensible: new dimensions (arch, features) can be added as fields.
-#[derive(Clone, Debug)]
-pub struct TargetConfig {
-    pub os: Option<Os>,
-}
-
-impl TargetConfig {
-    /// Detect the target from the current host platform.
-    pub fn host() -> Self {
-        Self {
-            os: Some(Os::host()),
-        }
-    }
-}
-
-/// Target operating system for `@platform(.darwin)` / `@platform(.linux)`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Os {
-    Darwin,
-    Linux,
-}
-
-impl Os {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "darwin" => Some(Os::Darwin),
-            "linux" => Some(Os::Linux),
-            _ => None,
-        }
-    }
-
-    pub fn host() -> Self {
-        match std::env::consts::OS {
-            "macos" => Os::Darwin,
-            "linux" => Os::Linux,
-            other => panic!("unsupported platform: {}", other),
-        }
-    }
-}
+/// The compilation target, used here for `@platform` filtering. Defined in
+/// `kestrel-target` so every stage shares one target.
+pub use kestrel_target::{Os, TargetConfig};

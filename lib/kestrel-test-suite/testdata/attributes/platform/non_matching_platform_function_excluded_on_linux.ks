@@ -8,7 +8,7 @@
 
 module Test
 
-@platform(.darwin)
+@platform(.Darwin)
 func excluded() -> lang.i64 { 42 }
 
 func main() {

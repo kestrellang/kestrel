@@ -81,34 +81,116 @@ pub(crate) fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
     apply_ref_decay_defaults_into(ctx, None)
 }
 
+/// Is a ref's pointee known to be unsized (`Slice[T]`)? A binding of such a
+/// ref keeps the reference: there is no value to copy out.
+pub(crate) fn pointee_is_unsized(ctx: &InferCtx<'_>, pointee: TyVar) -> bool {
+    pointee_sizedness(ctx, pointee) == Some(false)
+}
+
+/// Whether a ref's pointee is sized, or `None` while it is unresolved.
+pub(crate) fn pointee_sizedness(ctx: &InferCtx<'_>, pointee: TyVar) -> Option<bool> {
+    if matches!(ctx.slot(ctx.resolve(pointee)), TySlot::Unresolved { .. }) {
+        return None;
+    }
+    Some(super::conformance::solver_ty_is_sized(ctx, pointee, 0))
+}
+
 /// [`apply_ref_decay_defaults`], restricted to coercions whose target is
 /// `only` when given: the checker needs one binding's type NOW (its use as
 /// a receiver, bidi D3), and the copy-out decay is that binding's default.
 pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option<TyVar>) -> bool {
     let only = only.map(|t| ctx.resolve(t));
+    // The stalled binding may still be waiting on its initializer's result
+    // (`let got = items(0)`: the call's deferred decay targets the result,
+    // and the binding's Coerce waits on it), so that result counts too.
+    let wanted: Vec<TyVar> = only.map_or(Vec::new(), |o| {
+        let mut w = vec![o];
+        w.extend(ctx.constraints.iter().filter_map(|c| match c {
+            Constraint::Coerce { from, to, expr, .. }
+                if ctx.resolve(*to) == o && ctx.binding_init_exprs.contains(expr) =>
+            {
+                Some(ctx.resolve(*from))
+            },
+            _ => None,
+        }));
+        w
+    });
     let mut decays: Vec<(TyVar, TyVar)> = Vec::new();
+    // Bound / passed `Optional[&T]` values: (target, Optional entity, T, expr).
+    let mut optional_decays = Vec::new();
     for c in &ctx.constraints {
-        let (from, to) = match c {
-            Constraint::Coerce { from, to, .. } => (from, to),
+        if let Constraint::Coerce { from, to, expr, .. } = c
+            && equality::optional_ref_decay_site(ctx, *expr)
+            && let Some((optional, pointee)) = equality::optional_ref_pointee(ctx, *from)
+            // Not filtered by `only`: the stalled receiver is often the
+            // payload (`o?.x`, `.Some(r) => r.x`), not the binding. Every
+            // pending one belongs to an earlier, finished statement — a
+            // binding's Coerce is emitted after its initializer generates —
+            // so no annotation can still be coming for it.
+            && matches!(ctx.slot(ctx.resolve(*to)), TySlot::Unresolved { literal: None })
+        {
+            // An unsized payload (`Optional[&Slice[T]]`) has no value to copy
+            // out, so the binding keeps the reference.
+            // A stalled receiver (`only`) needs the type now: a pointee still
+            // unresolved there is a literal's, which is sized.
+            match pointee_sizedness(ctx, pointee) {
+                Some(true) => optional_decays.push((*to, optional, pointee, *expr)),
+                None if only.is_some() => optional_decays.push((*to, optional, pointee, *expr)),
+                Some(false) => decays.push((*to, ctx.resolve(*from))),
+                None => {},
+            }
+            continue;
+        }
+        let (from, to, binds) = match c {
+            Constraint::Coerce { from, to, expr, .. } => {
+                (from, to, ctx.binding_init_exprs.contains(expr))
+            },
             // Arm results / tuple-literal elements wait on the same race.
-            Constraint::EqualDecayed { value, target, .. } => (value, target),
+            Constraint::EqualDecayed { value, target, .. } => (value, target, true),
             _ => continue,
         };
         let fr = ctx.resolve(*from);
         let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(fr) else {
             continue;
         };
-        if only.is_some_and(|o| ctx.resolve(*to) != o) {
+        if only.is_some() && !wanted.contains(&ctx.resolve(*to)) {
             continue;
         }
         if matches!(
             ctx.slot(ctx.resolve(*to)),
             TySlot::Unresolved { literal: None }
         ) {
-            decays.push((*to, *pointee));
+            // An unsized pointee (`&Slice[T]`) has no value to copy out, so a
+            // binding keeps the reference. A generic argument still takes the
+            // pointee (`String(fromUtf8: buf(0..<n))` binds `S = Slice[UInt8]`):
+            // it is passed by borrow, so nothing is copied.
+            // A binding whose pointee is still unresolved (`let s = xs(0..<2)`
+            // before the literal defaults pick the range's type) waits: it
+            // may yet be unsized. A stalled receiver (`only`) needs the type
+            // now, and takes the pointee.
+            let pointee = *pointee;
+            let target = match (binds, pointee_sizedness(ctx, pointee)) {
+                (true, None) if only.is_none() => continue,
+                (true, Some(false)) => fr,
+                _ => pointee,
+            };
+            decays.push((*to, target));
         }
     }
     let mut progress = false;
+    for (to, optional, pointee, expr) in optional_decays {
+        if !matches!(
+            ctx.slot(ctx.resolve(to)),
+            TySlot::Unresolved { literal: None }
+        ) {
+            continue;
+        }
+        let decayed = ctx.named(optional, vec![pointee]);
+        if unify::unify(ctx, to, decayed).is_ok() {
+            ctx.optional_ref_decays.insert(expr);
+            progress = true;
+        }
+    }
     for (to, pointee) in decays {
         // Re-check: an earlier decay in this batch may have pinned it.
         if matches!(
@@ -345,22 +427,18 @@ pub(crate) fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
 /// to an Int32 field: the negate result is already Int32, so the literal should
 /// adopt Int32 instead of defaulting to Int64.
 ///
-/// Blocking is controlled by `relax_level`:
-///   0 — strict: InterpolationLink accumulators and arg-position literals
-///       in deferred Member/Call with unresolved receivers are both blocked.
-///   1 — relaxed: InterpolationLink blocking lifted (string interpolation
-///       literals default normally, unblocking downstream chains).
-///   2 — force: all blocking removed.
+/// Arg-position literals of a deferred Member/Call whose receiver is still
+/// unresolved are held back: dispatch may yet type them.
 ///
 /// Returns `true` when this call made any change.
-pub(crate) fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
+pub(crate) fn apply_literal_defaults(ctx: &mut InferCtx<'_>) -> bool {
     // Context first, and alone: a context pick can unblock arguments the
     // solver should type from it (`100 + 27` against `Int8` pins `100`, then
     // `27` must flow from `add`'s parameter, not default to Int64).
     if apply_context_literals(ctx) {
         return true;
     }
-    apply_literal_defaults_rest(ctx, relax_level)
+    apply_literal_defaults_rest(ctx)
 }
 
 /// The context-driven first pass of `apply_literal_defaults`.
@@ -422,8 +500,8 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
     progress
 }
 
-pub(crate) fn apply_literal_defaults_rest(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
-    apply_literal_defaults_from(ctx, relax_level, 0)
+pub(crate) fn apply_literal_defaults_rest(ctx: &mut InferCtx<'_>) -> bool {
+    apply_literal_defaults_from(ctx, 0)
 }
 
 /// Literal defaulting restricted to TyVars allocated at or after `start`.
@@ -444,7 +522,7 @@ pub(crate) fn default_literal_var(
         LiteralKind::Null => Builtin::DefaultNullLiteralType,
         LiteralKind::Array => Builtin::DefaultArrayLiteralType,
         LiteralKind::Dictionary => Builtin::DefaultDictionaryLiteralType,
-        LiteralKind::StringInterpolation => Builtin::DefaultStringInterpolation,
+        LiteralKind::StringInterpolation => Builtin::DefaultStringLiteralType,
     };
     let Some(entity) = ctx.resolver.builtin(feature) else {
         return false;
@@ -483,39 +561,13 @@ pub(crate) fn default_literal_var(
     true
 }
 
-pub(crate) fn apply_literal_defaults_from(
-    ctx: &mut InferCtx<'_>,
-    relax_level: u8,
-    start: usize,
-) -> bool {
+pub(crate) fn apply_literal_defaults_from(ctx: &mut InferCtx<'_>, start: usize) -> bool {
     let mut progress = false;
 
-    // Compute the set of literal TyVars that are "blocked" at this relax
-    // level. Level 2 removes all blocking; levels 0–1 block arg-position
-    // literals whose receiver is still unresolved; level 0 additionally
-    // blocks InterpolationLink accumulators.
+    // The literal TyVars held back: arg-position literals whose receiver is
+    // still unresolved.
     let blocked: crate::collections::HashSet<TyVar> = {
         let mut set = crate::collections::HashSet::default();
-
-        // InterpolationLink blocking — only at level 0. At level 1+,
-        // string interpolation accumulators default normally, unblocking
-        // downstream Member/Call chains that depend on the string type
-        // (e.g. interpolation → bytes subscript → UInt8 → == context).
-        if relax_level == 0 {
-            for constraint in &ctx.constraints {
-                if let Constraint::InterpolationLink { acc_tv, .. } = constraint {
-                    let acc_resolved = ctx.resolve(*acc_tv);
-                    if matches!(
-                        &ctx.types[acc_resolved.0 as usize],
-                        TySlot::Unresolved {
-                            literal: Some(LiteralKind::StringInterpolation)
-                        }
-                    ) {
-                        set.insert(acc_resolved);
-                    }
-                }
-            }
-        }
 
         for constraint in &ctx.constraints {
             let (receiver, args) = match constraint {

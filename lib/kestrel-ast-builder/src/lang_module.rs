@@ -40,6 +40,7 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     seed_scalar(world, lang, "f64");
     seed_scalar(world, lang, "str");
     seed_ptr(world, lang);
+    seed_slice(world, lang);
     // Structural singletons. `()` and `!` have no nominal entity of their own,
     // so seed synthetic ones (named "()" / "!") to make them extension targets.
     // MIR lowering maps these entities back to `MirTy::Tuple([])` / `MirTy::Never`
@@ -53,6 +54,13 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     // `HirTy::Ref` / `TyKind::Ref` / `MirTy::Ref` (see `try_lang_primitive`).
     seed_ref(world, lang, "&");
     seed_ref(world, lang, "&mutating");
+    // Tuples `(A, B, …)` likewise: one generic synthetic entity per arity
+    // (args = the elements) makes `extend (X, Y): P where …` a target. The
+    // type layer maps them back to `HirTy::Tuple` / `TyKind::Tuple` /
+    // `MirTy::Tuple`; `lang_tuple_arity` is the reverse detector.
+    for arity in 2..=MAX_EXTENDABLE_TUPLE_ARITY {
+        seed_tuple(world, lang, arity);
+    }
 
     // Intrinsic functions
     seed_integer_ops(world, lang);
@@ -61,8 +69,47 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     seed_pointer_ops(world, lang);
     seed_string_ops(world, lang);
     seed_misc_ops(world, lang);
+    mark_unsafe_intrinsics(world, lang);
 
     lang
+}
+
+/// Intrinsics that read, write or drop through a pointer. Using one needs an
+/// unsafe context; making, offsetting, casting or comparing a pointer does
+/// not. Read through `UnsafetyOf`, like any `unsafe func`.
+pub const UNSAFE_INTRINSICS: &[&str] = &[
+    "ptr_read",
+    "ptr_take",
+    "ptr_write",
+    "ptr_ref",
+    "ptr_mut_ref",
+    "ptr_mut_borrow",
+    "drop_in_place",
+    "clone_val_into",
+    "sizeof_val",
+    "alignof_val",
+];
+
+fn mark_unsafe_intrinsics(world: &mut World, lang: Entity) {
+    let unsafe_fns: Vec<Entity> = world
+        .children_of(lang)
+        .iter()
+        .copied()
+        .filter(|&e| {
+            world.get::<NodeKind>(e) == Some(&NodeKind::Function)
+                && world
+                    .get::<Name>(e)
+                    .is_some_and(|n| UNSAFE_INTRINSICS.contains(&n.0.as_str()))
+        })
+        .collect();
+    debug_assert_eq!(
+        unsafe_fns.len(),
+        UNSAFE_INTRINSICS.len(),
+        "every listed intrinsic is seeded"
+    );
+    for e in unsafe_fns {
+        world.set(e, IsUnsafe);
+    }
 }
 
 // ===== Type seeding =====
@@ -96,10 +143,63 @@ fn seed_ptr(world: &mut World, lang: Entity) {
     world.set(ptr, TypeParams(vec![t]));
 }
 
+/// Create `lang.slice[T]` — a run of `T`s whose count is known only at
+/// runtime. Unsized (`kestrel_semantics::sizedness`): it is only ever held
+/// behind a pointer or ref, which is two words, (data, count).
+fn seed_slice(world: &mut World, lang: Entity) {
+    let slice = world.spawn();
+    world.set(slice, NodeKind::Struct);
+    world.set(slice, Name("slice".into()));
+    world.set(slice, Vis::Public);
+    world.set(slice, Typed);
+    world.set(slice, Intrinsic);
+    world.set_parent(slice, lang);
+
+    let t = world.spawn();
+    world.set(t, NodeKind::TypeParameter);
+    world.set(t, Name("T".into()));
+    world.set_parent(t, slice);
+
+    world.set(slice, TypeParams(vec![t]));
+}
+
 /// Create `lang.&` / `lang.&mutating` — generic synthetic entities for the
 /// reference types, pointee type param named `T`. Extension LHS args bind by
 /// NAME against the target's declared params (resolve_extension_type_param),
 /// so ref extensions spell the pointee `T`: `extend &T: P where T: P`.
+/// The largest tuple arity an extension can target (`extend (A, …, L)`).
+pub const MAX_EXTENDABLE_TUPLE_ARITY: usize = 12;
+
+/// The name of the synthetic `lang` entity for tuples of `arity` (≥ 2):
+/// `(,)`, `(,,)`, …. THE naming — seeding and every lookup use it.
+pub fn lang_tuple_name(arity: usize) -> String {
+    format!("({})", ",".repeat(arity.saturating_sub(1)))
+}
+
+/// Create the generic synthetic entity for `arity`-tuples, with one type
+/// parameter per element. An extension binds the names it writes to these
+/// positionally (`ExtensionLhsParams`); the parameter names never surface.
+fn seed_tuple(world: &mut World, lang: Entity, arity: usize) {
+    let tuple = world.spawn();
+    world.set(tuple, NodeKind::Struct);
+    world.set(tuple, Name(lang_tuple_name(arity)));
+    world.set(tuple, Vis::Public);
+    world.set(tuple, Typed);
+    world.set(tuple, Intrinsic);
+    world.set_parent(tuple, lang);
+
+    let params = (0..arity)
+        .map(|i| {
+            let p = world.spawn();
+            world.set(p, NodeKind::TypeParameter);
+            world.set(p, Name(format!("T{i}")));
+            world.set_parent(p, tuple);
+            p
+        })
+        .collect();
+    world.set(tuple, TypeParams(params));
+}
+
 fn seed_ref(world: &mut World, lang: Entity, name: &str) {
     let r = world.spawn();
     world.set(r, NodeKind::Struct);
@@ -207,6 +307,7 @@ fn seed_fn(world: &mut World, lang: Entity, name: &str, params: &[(&str, AstType
                     pattern: None,
                     is_mut: false,
                     is_consuming: false,
+                    by_ref: false,
                 })
                 .collect(),
             receiver: None,
@@ -269,6 +370,7 @@ fn seed_generic_fn_multi(
                     pattern: None,
                     is_mut: false,
                     is_consuming: false,
+                    by_ref: false,
                 })
                 .collect(),
             receiver: None,
@@ -312,6 +414,8 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
         );
     }
     seed_fn(world, lang, "i1_not", &[("a", i1.clone())], i1.clone());
+    // Whether `+ - *` trap on overflow in this build (on at -O0 by default).
+    seed_fn(world, lang, "overflow_checks", &[], i1.clone());
 
     for ty_name in int_types {
         let ty = lang_ty(ty_name);
@@ -349,7 +453,7 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
             );
         }
         // Unchecked signed div/rem: same signature, no safety guards (UB on
-        // divide-by-zero / min/-1). Back `divideUnchecked`/`moduloUnchecked`.
+        // divide-by-zero / min/-1). Back `divideUnchecked`/`remainderUnchecked`.
         for op in ["div", "rem"] {
             seed_fn(
                 world,
@@ -411,6 +515,18 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
                     i1.clone(),
                 );
             }
+        }
+
+        // High half of the double-width product (signed or unsigned), same
+        // type as the operands. Backs `multiplyFull`.
+        for sign in ["signed", "unsigned"] {
+            seed_fn(
+                world,
+                lang,
+                &format!("{ty_name}_{sign}_mul_high"),
+                &[("a", ty.clone()), ("b", ty.clone())],
+                ty.clone(),
+            );
         }
 
         // Unary ops returning same type. `bswap` is skipped for i8: reversing
@@ -692,6 +808,81 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
     );
     seed_generic_fn(world, lang, "sizeof", &[], i64_ty.clone());
     seed_generic_fn(world, lang, "alignof", &[], i64_ty.clone());
+    // Size / alignment of the value at an address — the only way to measure
+    // an unsized pointee, whose layout lives in its function table
+    // (existentials). For a sized `T` they are `sizeof` / `alignof`.
+    seed_generic_fn(
+        world,
+        lang,
+        "sizeof_val",
+        &[("ptr", ptr_t.clone())],
+        i64_ty.clone(),
+    );
+    seed_generic_fn(
+        world,
+        lang,
+        "alignof_val",
+        &[("ptr", ptr_t.clone())],
+        i64_ty.clone(),
+    );
+    // `addr`'s address with `from`'s table: how a pointer computed through
+    // raw address arithmetic gets back an unsized pointee's table
+    // (`RcBox.valuePtr`). For a sized `T` it is just `addr`.
+    seed_generic_fn_multi(
+        world,
+        lang,
+        "ptr_with_meta",
+        &["T", "U"],
+        &[
+            ("addr", ptr_of(param_ty("T"))),
+            ("from", ptr_of(param_ty("U"))),
+        ],
+        ptr_of(param_ty("T")),
+    );
+
+    // Clone `*src` into the uninitialized `*dst`. An unsized pointee clones
+    // through its function table (existentials); a sized one through its
+    // `Cloneable` witness. Only for `T: Cloneable` payloads.
+    seed_generic_fn(
+        world,
+        lang,
+        "clone_val_into",
+        &[("src", ptr_t.clone()), ("dst", ptr_t.clone())],
+        unit_ty(),
+    );
+
+    // Slices: pack a thin pointer and a count into a fat `ptr[slice[T]]`,
+    // and read the count back. The data pointer is `cast_ptr[_, T]`, which
+    // reads a fat pointer's first word.
+    let slice_ptr = ptr_of(AstType::Named {
+        segments: vec![
+            PathSegment {
+                name: "lang".into(),
+                type_args: vec![],
+                span: Span::synthetic(0),
+            },
+            PathSegment {
+                name: "slice".into(),
+                type_args: vec![t.clone()],
+                span: Span::synthetic(0),
+            },
+        ],
+        span: Span::synthetic(0),
+    });
+    seed_generic_fn(
+        world,
+        lang,
+        "slice_from_parts",
+        &[("ptr", ptr_t.clone()), ("count", i64_ty.clone())],
+        slice_ptr.clone(),
+    );
+    seed_generic_fn(
+        world,
+        lang,
+        "slice_count",
+        &[("ptr", slice_ptr)],
+        i64_ty.clone(),
+    );
 
     // Pointer queries (generic — work on any ptr[T])
     seed_generic_fn(world, lang, "ptr_is_null", &[("ptr", ptr_t.clone())], i1_ty);

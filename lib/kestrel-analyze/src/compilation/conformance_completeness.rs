@@ -24,6 +24,11 @@
 //! ### E460 -- `missing_property_setter` (Error, Correctness)
 //! **Message:** "property '{name}' requires a setter to satisfy protocol '{proto}'"
 //!
+//! ### E405 -- `missing_property_ref_accessor` (Error, Correctness)
+//! **Message:** "property '{name}' must lend a reference (`ref`) to satisfy protocol '{proto}'"
+//! A `{ ref }` / `{ mutating ref }` requirement met by a computed property
+//! without the matching ref accessor (a `get` returns a copy, not the place).
+//!
 //! ### E462 -- `conflicting_associated_type` (Error, Correctness)
 //! **Message:** "conflicting associated type '{name}' inherited by protocol '{proto}'"
 //!
@@ -32,6 +37,19 @@
 //!
 //! ### E469 -- `wrong_parameter_convention` (Error, Correctness)
 //! **Message:** "parameter '{param}' of method '{name}' has the wrong convention for protocol '{proto}'"
+//!
+//! ### E643 -- `unsafe_witness_for_safe_requirement` (Error, Correctness)
+//! **Message:** "'{name}' is unsafe, but the requirement it satisfies in protocol '{proto}' is not"
+//! Generic code calls the requirement without `unsafe`, so its witness must
+//! not need it. Primary label: the witness (`util::entity_span`).
+//!
+//! ### E644 -- `missing_unsafe_conformance` (Error, Correctness)
+//! **Message:** "'{proto}' is an unsafe protocol; write the conformance as `unsafe {proto}`"
+//! Primary label: the conformance item (its `ConformanceItem` syntax range).
+//!
+//! ### E645 -- `unnecessary_unsafe_conformance` (Warning, Usage)
+//! **Message:** "'{proto}' is not an unsafe protocol; `unsafe` here has no effect"
+//! Primary label: the conformance item.
 
 use std::collections::{HashMap, HashSet};
 
@@ -40,10 +58,11 @@ use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
+use kestrel_ast_builder::unsafety::{UnsafetyOf, is_unsafe_protocol};
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, ExtensionTarget, InitEffect, NodeKind,
-    QualifiedTarget, ReceiverKind, Settable, TypeAnnotation, TypeParams, WhereClause,
-    WhereConstraint,
+    Callable, Computed, ConformanceItem, Conformances, ExtensionTarget, InitEffect,
+    MutatingAccessor, MutatingRead, NodeKind, QualifiedTarget, ReceiverKind, Settable,
+    TypeAnnotation, TypeParams, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
@@ -55,7 +74,7 @@ use kestrel_name_res::{
 use kestrel_type_infer::compare::{
     AssocBinding, TypeCompareEnv, TypeCompareResult, compare_hir_types,
 };
-use kestrel_type_infer::conformance::type_satisfies;
+use kestrel_type_infer::conformance::resolved_satisfies;
 use kestrel_type_infer::entailment::constraint_entailed_by;
 use kestrel_type_infer::resolve::{WhereClause as ResolvedWhereClause, WhereSubject};
 use kestrel_type_infer::result::ResolvedTy;
@@ -134,6 +153,30 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E405",
+        name: "missing_property_ref_accessor",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E643",
+        name: "unsafe_witness_for_safe_requirement",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E644",
+        name: "missing_unsafe_conformance",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E645",
+        name: "unnecessary_unsafe_conformance",
+        default_severity: Severity::Warning,
+        category: Category::Usage,
+    },
 ];
 
 pub struct ConformanceCompletenessAnalyzer;
@@ -203,7 +246,7 @@ fn check_type_conformances(
     };
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(protocol) = resolve_conformance(cx, ast_ty, conforming_entity) else {
@@ -212,6 +255,7 @@ fn check_type_conformances(
         if cx.query.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
             continue;
         }
+        check_conformance_unsafety(cx, item, protocol, conforming_entity, diags);
 
         let proto_param_subs =
             build_proto_param_subs(cx, entity, protocol, ast_ty, conforming_entity);
@@ -238,7 +282,7 @@ fn check_extension_conformances(
     };
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(protocol) = resolve_conformance(cx, ast_ty, extension) else {
@@ -247,6 +291,7 @@ fn check_extension_conformances(
         if cx.query.get::<NodeKind>(protocol) != Some(&NodeKind::Protocol) {
             continue;
         }
+        check_conformance_unsafety(cx, item, protocol, extension, diags);
 
         let proto_param_subs = build_proto_param_subs(cx, target, protocol, ast_ty, extension);
         check_protocol_requirements(cx, target, protocol, extension, &proto_param_subs, diags);
@@ -313,6 +358,15 @@ fn check_protocol_requirements(
         // visible to readers as a (would-be) default, so the conformance is
         // not missing in the sense E454 is meant to flag.
         if cx.query.get::<kestrel_ast_builder::Valued>(child).is_some() {
+            continue;
+        }
+        // An `@unavailable` requirement can never be called, so it needs no
+        // witness (attributes design §B6).
+        if cx
+            .query
+            .query(kestrel_ast_builder::attrs::UseRestrictionOf { entity: child })
+            .is_some_and(|r| r.kind == kestrel_ast_builder::attrs::RestrictionKind::Unavailable)
+        {
             continue;
         }
         let child_kind = cx.query.get::<NodeKind>(child);
@@ -456,6 +510,7 @@ fn check_protocol_requirements(
                 }
 
                 if let Some(impl_method) = matched_impl {
+                    check_witness_unsafety(cx, child, impl_method, &name, &proto_name, diags);
                     // Init return types are derived from the effect ((), ()?, () throws E),
                     // so skip the structural return type check — check_init_effect validates
                     // effect compatibility instead. Without this skip, widening (non-failable
@@ -492,12 +547,31 @@ fn check_protocol_requirements(
             Some(NodeKind::Field) => {
                 // Required property — check if provided with matching type
                 if let Some(&field_entity) = provided.fields.get(name.as_str()) {
+                    check_witness_unsafety(cx, child, field_entity, &name, &proto_name, diags);
                     // Setter requirement: if the protocol declares `{ get set }`
                     // the impl must also be settable (either a `var` stored
                     // property or a computed property with a `set` accessor).
+                    // A `{ get }` requirement reads without changing `self`;
+                    // a `modifying` read provider needs a mutable receiver, so
+                    // a borrowed witness call could not honor it.
+                    if cx.query.has::<MutatingRead>(field_entity) {
+                        diags.push(modifying_witness_diag(&name, &proto_name, &decl_span));
+                    }
+                    // A missing `mutating ref` is the precise report; E460's
+                    // "needs a setter" would point at the wrong fix.
+                    let ref_diag = missing_ref_accessor_diag(
+                        cx,
+                        child,
+                        field_entity,
+                        &name,
+                        &proto_name,
+                        &decl_span,
+                    );
+                    let missing_ref = ref_diag.is_some();
+                    diags.extend(ref_diag);
                     let proto_needs_set = cx.query.get::<Settable>(child).is_some();
                     let impl_has_set = cx.query.get::<Settable>(field_entity).is_some();
-                    if proto_needs_set && !impl_has_set {
+                    if proto_needs_set && !impl_has_set && !missing_ref {
                         diags.push(AnalyzeDiagnostic {
                             descriptor_id: DESCRIPTORS[6].id,
                             severity: DESCRIPTORS[6].default_severity,
@@ -617,7 +691,7 @@ fn check_associated_type_conflicts(
 
     let mut by_name: HashMap<String, Vec<(Entity, Entity)>> = HashMap::new();
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(parent_protocol) = resolve_conformance(cx, ast_ty, protocol) else {
@@ -700,7 +774,7 @@ fn collect_declared_associated_types(
         return;
     };
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(parent_protocol) = resolve_conformance(cx, ast_ty, protocol) else {
@@ -1334,13 +1408,16 @@ fn type_compare_env_for_conformance(
         .into_iter()
         .filter_map(|member| {
             let name = member_lookup_name(cx, member.entity)?;
-            let ty = if let Some(binding) = find_associated_type_binding_entity(
-                cx,
-                type_entity,
-                decl,
-                &name,
-                member.declaring_protocol,
-            ) {
+            let binding = cx
+                .query
+                .query(kestrel_name_res::AssociatedTypeBinding {
+                    type_entity,
+                    assoc: member.entity,
+                    conformance_source: decl,
+                    root: cx.root,
+                })
+                .map(|(alias, _)| alias);
+            let ty = if let Some(binding) = binding {
                 cx.query.query(LowerTypeAnnotation {
                     entity: binding,
                     root: cx.root,
@@ -1394,7 +1471,7 @@ fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> Re
             mutating,
         };
     }
-    let args = cx
+    let args: Vec<ResolvedTy> = cx
         .query
         .get::<TypeParams>(type_entity)
         .map(|params| {
@@ -1405,6 +1482,11 @@ fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> Re
                 .collect()
         })
         .unwrap_or_default();
+    // `extend (X, Y): P`: `Self` is the tuple `(X, Y)` of the synthetic
+    // `lang.(,)`'s params — the params the extension's names bind to.
+    if kestrel_name_res::extensions::lang_tuple_arity(cx.query, type_entity).is_some() {
+        return ResolvedTy::Tuple(args);
+    }
     ResolvedTy::Named {
         entity: type_entity,
         args,
@@ -1598,165 +1680,16 @@ fn resolve_conformance_type_arg(
     }
 }
 
-/// Find the impl's binding for `assoc_name` on `type_entity`, searching the
-/// type itself, its extensions, and — when the associated type is inherited
-/// from a parent protocol — any extensions on the parent protocols that
-/// bind `<Proto>.<assoc_name> = …`. Qualified bindings must match
-/// `protocol`; unqualified bindings are accepted.
-///
-/// Example: `Optional` conforms to `Equatable`, and
-/// `extend Equatable: Equal[Self] { type Equal.Output = Bool }` supplies
-/// the `Equal.Output = Bool` binding for every Equatable type.
-/// `decl`, the block declaring the conformance being checked, is searched
-/// first so its own bindings win ties: a type conforming to one protocol
-/// twice (`Instant: Subtractable[Duration]`, `Subtractable[Instant]`) binds a
-/// different unqualified `Output` in each sibling extension, and only the
-/// declaring block knows which applies. A qualified binding elsewhere
-/// (`type Less.Output = Bool`) still beats an unqualified one in `decl`.
-fn find_associated_type_binding_entity(
-    cx: &CompilationContext<'_>,
-    type_entity: Entity,
-    decl: Option<Entity>,
-    assoc_name: &str,
-    protocol: Entity,
-) -> Option<Entity> {
-    let mut search: Vec<Entity> = decl.into_iter().collect();
-    search.push(type_entity);
-    let extensions = cx.query.query(ExtensionsFor {
-        target: type_entity,
-        root: cx.root,
-    });
-    search.extend(extensions.iter());
-
-    // Also walk the conforming type's protocol closure: a binding on an
-    // extension of any parent protocol (e.g. Equatable) counts for impls
-    // that reach the method through that parent.
-    let conformed_protocols = cx.query.query(ConformingProtocols {
-        entity: type_entity,
-        root: cx.root,
-    });
-    for proto in &conformed_protocols {
-        let proto_exts = cx.query.query(ExtensionsFor {
-            target: *proto,
-            root: cx.root,
-        });
-        search.extend(proto_exts.iter());
-    }
-
-    // First pass: prefer bindings qualified to this exact protocol —
-    // `type Equal.Output = Bool` trumps a sibling `type Output = String`
-    // that would otherwise apply to any conformed protocol.
-    let mut fallback: Option<Entity> = None;
-    for &entity in &search {
-        for child in util::children_named_of_kind(cx.query, entity, assoc_name, NodeKind::TypeAlias)
-        {
-            if cx.query.get::<TypeAnnotation>(child).is_none() {
-                continue;
-            }
-
-            match cx.query.get::<QualifiedTarget>(child) {
-                Some(target) => {
-                    let AstType::Named { segments, .. } = &target.0 else {
-                        continue;
-                    };
-                    let path: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-                    let context = cx.query.parent_of(child).unwrap_or(cx.root);
-                    let matches = matches!(
-                        cx.query.query(ResolveTypePath {
-                            segments: path,
-                            context,
-                            root: cx.root,
-                        }),
-                        TypeResolution::Found(e) if e == protocol,
-                    );
-                    if matches {
-                        return Some(child);
-                    }
-                },
-                None => {
-                    // Unqualified alias. The binding is scoped to whatever
-                    // protocol the enclosing scope declares conformance to —
-                    // `type Output = T` inside `enum Result: Tryable { … }`
-                    // or `extend Optional[T]: Tryable { … }` is
-                    // `Tryable.Output`, not `Equal.Output`. Save as a
-                    // fallback; a later qualified match wins.
-                    if fallback.is_none() && entity_conforms_to(cx, entity, protocol) {
-                        fallback = Some(child);
-                    }
-                },
-            }
-        }
-    }
-    fallback
-}
-
-/// True if `entity` declares conformance to `protocol` (directly or
-/// transitively via refinement). Used to decide whether an unqualified
-/// `type Output = …` inside the entity's scope is the binding for
-/// `protocol.Output`.
-fn entity_conforms_to(cx: &CompilationContext<'_>, entity: Entity, protocol: Entity) -> bool {
-    let Some(conformances) = cx.query.get::<Conformances>(entity) else {
-        return false;
-    };
-    let context = cx.query.parent_of(entity).unwrap_or(cx.root);
-    let mut seeds: Vec<Entity> = Vec::new();
-    for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
-            continue;
-        };
-        let AstType::Named { segments, .. } = ast_ty else {
-            continue;
-        };
-        let path: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-        if let TypeResolution::Found(e) = cx.query.query(ResolveTypePath {
-            segments: path,
-            context,
-            root: cx.root,
-        }) {
-            if e == protocol {
-                return true;
-            }
-            seeds.push(e);
-        }
-    }
-    let closure = kestrel_name_res::expand_protocol_closure(cx.query, cx.root, seeds);
-    closure.contains(&protocol)
-}
-
-/// Resolve an AstType to an entity for type comparison.
-/// When `self_type` is provided, `Self` resolves to that entity.
+/// Resolve an AstType to an entity for type comparison. `Self` stays
+/// unresolved, as it always has here: in a protocol requirement it means the
+/// conformer, not the declaring protocol.
 fn resolve_type_entity(
     cx: &CompilationContext<'_>,
     ast_ty: &kestrel_ast::AstType,
     context: Entity,
 ) -> Option<Entity> {
-    resolve_type_entity_with_self(cx, ast_ty, context, None)
-}
-
-/// Resolve an AstType to an entity, substituting `Self` with `self_type` if provided.
-fn resolve_type_entity_with_self(
-    cx: &CompilationContext<'_>,
-    ast_ty: &kestrel_ast::AstType,
-    context: Entity,
-    self_type: Option<Entity>,
-) -> Option<Entity> {
-    let segments: Vec<String> = match ast_ty {
-        kestrel_ast::AstType::Named { segments, .. } => {
-            segments.iter().map(|s| s.name.clone()).collect()
-        },
-        kestrel_ast::AstType::Array(_, _) => vec!["Array".into()],
-        kestrel_ast::AstType::Dictionary(_, _, _) => vec!["Dictionary".into()],
-        kestrel_ast::AstType::Optional(_, _) => vec!["Optional".into()],
-        kestrel_ast::AstType::Result { .. } => vec!["Result".into()],
-        _ => return None,
-    };
-    match cx.query.query(ResolveTypePath {
-        segments,
-        context,
-        root: cx.root,
-    }) {
+    match kestrel_name_res::resolve_annotation(cx.query, ast_ty, context, cx.root) {
         TypeResolution::Found(entity) => Some(entity),
-        TypeResolution::SelfType => self_type,
         _ => None,
     }
 }
@@ -1765,6 +1698,78 @@ fn resolve_type_entity_with_self(
 /// Types are checked separately by `check_method_return_type`; param types
 /// aren't compared here because type-param / Self substitution isn't modeled
 /// by entity equality.
+/// E405 when the protocol property `requirement` requires `ref` / `mutating
+/// ref` and the computed `witness` lacks the matching accessor. A stored
+/// field lends itself in place (witness_lower synthesizes the accessor);
+/// a stored `let` missing `mutating ref` is already E460 (no setter).
+fn missing_ref_accessor_diag(
+    cx: &CompilationContext<'_>,
+    requirement: Entity,
+    witness: Entity,
+    name: &str,
+    proto_name: &str,
+    decl_span: &kestrel_span::Span,
+) -> Option<AnalyzeDiagnostic> {
+    if !cx.query.has::<Computed>(witness) {
+        return None;
+    }
+    let ref_kinds = |e: Entity| -> Vec<bool> {
+        cx.query
+            .children_of(e)
+            .iter()
+            .filter(|&&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::RefAccessor))
+            .map(|&c| cx.query.has::<MutatingAccessor>(c))
+            .collect()
+    };
+    let provided = ref_kinds(witness);
+    let missing = ref_kinds(requirement)
+        .into_iter()
+        .find(|m| !provided.contains(m))?;
+    let accessor = if missing { "mutating ref" } else { "ref" };
+    let descriptor = DESCRIPTORS.iter().find(|d| d.id == "E405")?;
+    Some(AnalyzeDiagnostic {
+        descriptor_id: descriptor.id,
+        severity: descriptor.default_severity,
+        message: format!(
+            "property '{name}' must lend a reference (`{accessor}`) to satisfy protocol \
+             '{proto_name}'"
+        ),
+        labels: vec![DiagLabel {
+            span: decl_span.clone(),
+            message: format!("'{name}' has no `{accessor}` accessor"),
+            is_primary: true,
+        }],
+        notes: vec![format!(
+            "the requirement lends the place itself; declare `{accessor} {{ … }}` or make \
+             '{name}' a stored property"
+        )],
+    })
+}
+
+/// E477 for a property/subscript witness whose read provider is `modifying`.
+fn modifying_witness_diag(
+    name: &str,
+    proto_name: &str,
+    span: &kestrel_span::Span,
+) -> AnalyzeDiagnostic {
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[5].id, // E477
+        severity: DESCRIPTORS[5].default_severity,
+        message: format!(
+            "'{name}' satisfies a `{{ get }}` requirement with a `modifying` accessor \
+             for protocol '{proto_name}'"
+        ),
+        labels: vec![DiagLabel {
+            span: span.clone(),
+            message: format!("'{name}' mutates its receiver when read"),
+            is_primary: true,
+        }],
+        notes: vec![
+            "protocol reads borrow `self`; use a plain `get` or `ref` for the witness".into(),
+        ],
+    }
+}
+
 fn signatures_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
     let (Some(proto), Some(imp)) = (proto, imp) else {
         // If either side lacks a Callable component we can't prove a mismatch —
@@ -1983,30 +1988,6 @@ fn collect_provided_members_for_conformance(
     }
 }
 
-/// Convert a `ResolvedTy` to a `HirTy` for a bound-aware conformance check
-/// (`type_satisfies`). Spans are irrelevant to the check, so a dummy is used.
-/// Concrete nominals/tuples/refs are reproduced faithfully (so a real violation
-/// can be disproven); abstract positions (`Param`/`SelfType`/projections/opaque/
-/// functions) collapse to `Infer`, which `type_satisfies` permits — matching its
-/// conservative "reject only on a provable concrete violation" contract.
-fn resolved_ty_to_hir(ty: &ResolvedTy) -> kestrel_hir::ty::HirTy {
-    use kestrel_hir::ty::HirTy;
-    let sp = kestrel_span::Span::new(0, 0..0);
-    match ty {
-        // `Struct` vs `Enum` doesn't matter: `nominal_satisfies` keys off the
-        // entity's own NodeKind, not the HirTy variant.
-        ResolvedTy::Named { entity, args } => HirTy::Struct {
-            entity: *entity,
-            args: args.iter().map(resolved_ty_to_hir).collect(),
-            span: sp,
-        },
-        ResolvedTy::Tuple(elems) => {
-            HirTy::Tuple(elems.iter().map(resolved_ty_to_hir).collect(), sp)
-        },
-        _ => HirTy::Infer(sp),
-    }
-}
-
 /// True if every where clause on `extension` (substituted via `proto_subs`
 /// from the protocol's type params to the conforming type's bindings) is
 /// entailed by `context_clauses`. Empty extension clauses always entail.
@@ -2028,7 +2009,7 @@ fn extension_clauses_entailed(
         cx.query.get::<NodeKind>(type_entity),
         Some(NodeKind::Struct | NodeKind::Enum)
     )
-    .then(|| resolved_ty_to_hir(&self_type_for_compare(cx, type_entity)));
+    .then(|| self_type_for_compare(cx, type_entity));
     ext_clauses.iter().all(|c| {
         if let (
             ResolvedWhereClause::Bound {
@@ -2039,7 +2020,7 @@ fn extension_clauses_entailed(
             Some(self_ty),
         ) = (c, &concrete_self)
         {
-            return type_satisfies(cx.query, self_ty, *protocol, cx.root);
+            return resolved_satisfies(cx.query, self_ty, *protocol, cx.root);
         }
         // A bound whose param maps to a CONCRETE type can't be discharged by
         // param-to-param entailment — it needs a real conforms-to check
@@ -2058,7 +2039,7 @@ fn extension_clauses_entailed(
             && let Some(binding) = proto_subs.get(&param)
             && !matches!(binding, ResolvedTy::Param { .. })
         {
-            return type_satisfies(cx.query, &resolved_ty_to_hir(binding), *protocol, cx.root);
+            return resolved_satisfies(cx.query, binding, *protocol, cx.root);
         }
         // Param-to-param (or unsubstituted) bound: discharge by entailment from
         // the conformance context's own where clauses.
@@ -2174,7 +2155,7 @@ fn find_conformance_declaration(
             continue;
         };
         for item in &conformances.0 {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
+            let ConformanceItem::Positive(ast_ty, ..) = item else {
                 continue;
             };
             if resolve_conformance(cx, ast_ty, decl) == Some(target_proto) {
@@ -2418,6 +2399,18 @@ fn check_ambiguous_method_satisfaction(
                         && receivers_match(proto_call, impl_call)
                         && first_param_convention_mismatch(proto_call, impl_call).is_none()
                         && param_types_match(cx, type_entity, proto, child, impl_method)
+                        // A different return type is a different requirement:
+                        // `iter() -> Int64` (Walk) never satisfies Iterable's
+                        // `iter() -> TargetIterator`.
+                        && method_return_type_matches(
+                            cx,
+                            child,
+                            impl_method,
+                            type_entity,
+                            proto,
+                            &[],
+                            None,
+                        )
                     {
                         matching_protocols.push(proto);
                     }
@@ -2462,4 +2455,97 @@ fn check_ambiguous_method_satisfaction(
             }
         }
     }
+}
+
+fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
+    DESCRIPTORS
+        .iter()
+        .find(|d| d.id == id)
+        .expect("conformance_completeness descriptor")
+}
+
+/// E644 / E645: an unsafe protocol's conformance must say `unsafe P`, and a
+/// safe protocol's should not.
+fn check_conformance_unsafety(
+    cx: &CompilationContext<'_>,
+    item: &ConformanceItem,
+    protocol: Entity,
+    decl: Entity,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let ConformanceItem::Positive(_, syntax, written_unsafe) = item else {
+        return;
+    };
+    let needs_unsafe = is_unsafe_protocol(cx.query, protocol);
+    if needs_unsafe == *written_unsafe {
+        return;
+    }
+    let proto = util::entity_name(cx.query, protocol);
+    let (d, message, label) = if needs_unsafe {
+        (
+            descriptor("E644"),
+            format!("'{proto}' is an unsafe protocol; write the conformance as `unsafe {proto}`"),
+            "conformance to an unsafe protocol",
+        )
+    } else {
+        (
+            descriptor("E645"),
+            format!("'{proto}' is not an unsafe protocol; `unsafe` here has no effect"),
+            "unnecessary `unsafe`",
+        )
+    };
+    let decl_span = util::entity_span(cx.query, decl);
+    let range = syntax.text_range();
+    let span = kestrel_span::Span::new(
+        decl_span.file_id,
+        usize::from(range.start())..usize::from(range.end()),
+    );
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message,
+        labels: vec![DiagLabel {
+            span,
+            message: label.into(),
+            is_primary: true,
+        }],
+        notes: vec![],
+    });
+}
+
+/// E643: a witness may not need `unsafe` when its requirement doesn't —
+/// generic code reaches the witness through the safe requirement.
+fn check_witness_unsafety(
+    cx: &CompilationContext<'_>,
+    requirement: Entity,
+    witness: Entity,
+    name: &str,
+    proto_name: &str,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let unsafe_of = |entity| cx.query.query(UnsafetyOf { entity }).is_some();
+    if !unsafe_of(witness) || unsafe_of(requirement) {
+        return;
+    }
+    let d = descriptor("E643");
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message: format!(
+            "'{name}' is unsafe, but the requirement it satisfies in protocol '{proto_name}' is not"
+        ),
+        labels: vec![
+            DiagLabel {
+                span: util::entity_span(cx.query, witness),
+                message: "unsafe witness".into(),
+                is_primary: true,
+            },
+            DiagLabel {
+                span: util::entity_span(cx.query, requirement),
+                message: "safe requirement".into(),
+                is_primary: false,
+            },
+        ],
+        notes: vec!["mark the requirement `unsafe`, or make the witness safe".into()],
+    });
 }

@@ -1,4 +1,5 @@
 pub mod abi;
+pub mod c_bridge;
 pub mod context;
 pub mod error;
 pub mod func;
@@ -25,8 +26,22 @@ pub struct CodegenOptions {
     pub libraries: Vec<String>,
     pub library_paths: Vec<String>,
     pub frameworks: Vec<String>,
+    /// Extra arguments passed verbatim to the linker driver.
+    pub link_args: Vec<String>,
     pub c_sources: Vec<std::path::PathBuf>,
     pub emit_clif: bool,
+    /// `--overflow-checks on|off`; `None` derives it from `opt_level`.
+    pub overflow_checks_override: Option<bool>,
+}
+
+impl CodegenOptions {
+    /// Whether integer `+ - *` (and `-minValue`, `minValue / -1`, `pow`)
+    /// trap on overflow. On for unoptimized builds, off for optimized ones,
+    /// unless `overflow_checks_override` says otherwise
+    /// (`docs/design/integer-overflow.md`, ruling O1).
+    pub fn overflow_checks(&self) -> bool {
+        self.overflow_checks_override.unwrap_or(self.opt_level == 0)
+    }
 }
 
 pub struct CompilationResult {
@@ -62,4 +77,26 @@ pub fn compile_and_link(
 
     let _ = std::fs::remove_file(&obj_path);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CodegenOptions;
+
+    /// Overflow checks default on at -O0 and off above it; the flag wins.
+    #[test]
+    fn overflow_checks_follow_opt_level_unless_overridden() {
+        let at = |opt_level, overflow_checks_override| {
+            CodegenOptions {
+                opt_level,
+                overflow_checks_override,
+                ..Default::default()
+            }
+            .overflow_checks()
+        };
+        assert!(at(0, None));
+        assert!(!at(2, None));
+        assert!(!at(0, Some(false)));
+        assert!(at(2, Some(true)));
+    }
 }

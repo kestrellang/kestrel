@@ -1,73 +1,41 @@
 module notes.main
 
-import perch.app.(App)
-import perch.request.(Request)
-import perch.response.(Response)
-import perch.middleware.(Logger)
-import perch.router.(GroupBuilder)
+import perch.(App, Logger, Get, Put, Post, Delete, ServerError)
 import talon.sqlite.shared_database.(SharedDatabase)
 import notes.context.(AppCtx)
 import notes.db.(initSchema)
 import notes.middleware.(AuthMiddleware)
-import notes.handlers.(
-    handleRegister, handleLogin,
-    handleListNotes, handleCreateNote, handleGetNote, handleUpdateNote, handleDeleteNote, handleMoveNote,
-    handleListFolders, handleCreateFolder, handleGetFolder, handleUpdateFolder, handleDeleteFolder
-)
+import notes.handlers.(Auth, Notes, Folders)
 
 @main
-func main() {
-    match initSchema("notes.db") {
-        .Ok(_) => {},
-        .Err(e) => {
-            println("Failed to initialize database: " + e.description());
-            return
-        }
+func main() -> () throws ServerError {
+    try initSchema("notes.db");
+
+    let db = try SharedDatabase("notes.db");
+    let app = App(AppCtx(db: db)).using(Logger());
+
+    app.on(Post("/auth/create"), Auth.register);
+    app.on(Post("/auth/login"), Auth.login);
+
+    let noteRoutes = app.group("/notes").using(AuthMiddleware());
+    noteRoutes.on(Get(), Notes.list);
+    noteRoutes.on(Put(), Notes.create);
+    noteRoutes.on(Get("/:id"), Notes.read);
+    noteRoutes.on(Post("/:id"), Notes.update);
+    noteRoutes.on(Delete("/:id"), Notes.delete);
+    noteRoutes.on(Post("/:id/folder"), Notes.move);
+
+    let folderRoutes = app.group("/folders").using(AuthMiddleware());
+    folderRoutes.on(Get(), Folders.list);
+    folderRoutes.on(Put(), Folders.create);
+    folderRoutes.on(Get("/:id"), Folders.read);
+    folderRoutes.on(Post("/:id"), Folders.update);
+    folderRoutes.on(Delete("/:id"), Folders.delete);
+
+    // PORT overrides the default 8080.
+    let port: UInt16 = match Environment.variable("PORT") {
+        .Some(raw) => UInt16(parsing: raw) ?? 8080,
+        .None => 8080
     };
-
-    let db = match SharedDatabase("notes.db") {
-        .Ok(d) => d,
-        .Err(e) => {
-            println("Failed to open database: " + e.description());
-            return
-        }
-    };
-    let ctx = AppCtx(db: db);
-
-    var app = App[AppCtx](ctx);
-    app.use(Logger[AppCtx]());
-
-    // Public auth routes
-    app.route(post: "/auth/create", handleRegister);
-    app.route(post: "/auth/login", handleLogin);
-
-    // Authenticated note routes
-    var noteRoutes = GroupBuilder[AppCtx]("/notes");
-    noteRoutes.use(AuthMiddleware());
-    noteRoutes.route(get: "", handleListNotes);
-    noteRoutes.route(put: "", handleCreateNote);
-    noteRoutes.route(get: "/:id", handleGetNote);
-    noteRoutes.route(post: "/:id", handleUpdateNote);
-    noteRoutes.route(delete: "/:id", handleDeleteNote);
-    noteRoutes.route(post: "/:id/folder", handleMoveNote);
-    app.addGroup(noteRoutes);
-
-    // Authenticated folder routes
-    var folderRoutes = GroupBuilder[AppCtx]("/folders");
-    folderRoutes.use(AuthMiddleware());
-    folderRoutes.route(get: "", handleListFolders);
-    folderRoutes.route(put: "", handleCreateFolder);
-    folderRoutes.route(get: "/:id", handleGetFolder);
-    folderRoutes.route(post: "/:id", handleUpdateFolder);
-    folderRoutes.route(delete: "/:id", handleDeleteFolder);
-    app.addGroup(folderRoutes);
-
-    let port: UInt16 = 8080;
-    println("Notes API listening on http://localhost:8080");
-    match app.listen(port) {
-        .Ok(_) => {},
-        .Err(e) => {
-            println("Error: " + e.description());
-        }
-    }
+    try app.listen(port);
 }

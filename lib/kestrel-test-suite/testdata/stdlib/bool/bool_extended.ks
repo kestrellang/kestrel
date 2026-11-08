@@ -8,11 +8,11 @@ module Test
             let t: std.core.Bool = true;
             let f: std.core.Bool = false;
 
-            // Test matches
-            if t.matches(t) == false { return 1 }
-            if t.matches(f) { return 2 }
-            if f.matches(f) == false { return 3 }
-            if f.matches(t) { return 4 }
+            // Test matches (`matches` is sugar-only: reached through patterns)
+            match t { true => {}, _ => { return 1 } }
+            match t { false => { return 2 }, _ => {} }
+            match f { false => {}, _ => { return 3 } }
+            match f { true => { return 4 }, _ => {} }
 
             // Test format - default formatting
             let trueStr = t.formatted();

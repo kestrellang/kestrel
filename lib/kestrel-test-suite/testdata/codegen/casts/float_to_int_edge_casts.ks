@@ -18,19 +18,19 @@ module Test
 func main() -> lang.i32 {
     // NaN, +-inf, and out-of-range finite values -> None.
     let nan = Float64.nan;
-    if nan.toInt64().isSome() { return 1 };
+    if nan.toInt64().isSome { return 1 };
 
     let inf = Float64.infinity;
-    if inf.toInt64().isSome() { return 2 };
+    if inf.toInt64().isSome { return 2 };
 
     let neginf = inf.negate();
-    if neginf.toInt64().isSome() { return 3 };
+    if neginf.toInt64().isSome { return 3 };
 
     let big: Float64 = 10000000000000000000.0;       // > Int64.max
-    if big.toInt64().isSome() { return 4 };
+    if big.toInt64().isSome { return 4 };
 
     let nbig: Float64 = -10000000000000000000.0;      // < Int64.min
-    if nbig.toInt64().isSome() { return 5 };
+    if nbig.toInt64().isSome { return 5 };
 
     // In-range values truncate toward zero.
     let pos: Float64 = 3.7;

@@ -122,6 +122,22 @@ func fold(initial: Int64, f: (Int64, Int64) -> Int64) -> Int64 {
 fold(0) { (acc, n) in acc + n }
 ```
 
+A trailing closure fills an unlabeled parameter first. Failing that, it
+fills a *labeled* parameter whose type is a function type, so labeled
+closure parameters need no label at the call site:
+
+```kestrel
+func run(times n: Int64, body f: (Int64) -> Int64) -> Int64 { f(n) }
+
+run(times: 4) { it * 2 }                   // fills `body:`
+xs.iter().filter { it > 0 }                // fills `filter(where:)`
+xs.iter().fold(from: 0) { (acc, x) in acc + x }   // fills `by:`
+```
+
+If it could fill more than one parameter (say two defaulted closure
+parameters), the call is ambiguous (E113): pass it inside the parentheses
+with its label.
+
 Combined with `it`, this is the idiomatic collection style:
 
 ```kestrel
@@ -131,6 +147,59 @@ let doubled = numbers.map { it * 2 };          // [2, 4, 6]
 var total: Int64 = 0;
 [1, 2, 3, 4].iter().forEach { total = total + it };   // total == 10
 ```
+
+## Closures Over References
+
+A closure can take a reference. Adapters over `refs()` and `mutatingRefs()`
+hand each `&T` / `&mutating T` item straight to the closure, with no copy:
+
+```kestrel
+let total = people.refs().fold(from: 0, by: { (acc, p) in acc + p.age });
+people.mutatingRefs().forEach { (p) in p.age += 1; };
+```
+
+The parameter's reference type is inferred from the iterator; an explicit
+`&T` annotation on a parameter is still E480 (parameters spell a
+convention, not a reference type). A function type that *returns* a
+reference stays illegal (E491): `-> &T` is a return convention, not part
+of a function type.
+
+## Placeholders
+
+A `_` in a call's arguments builds a closure without writing one out.
+
+**Holes.** A bare `_` argument leaves that slot open. The call becomes a
+closure with one parameter per hole, left to right:
+
+```kestrel
+let addOne = add(_, 1);                  // { (a) in add(a, 1) }
+let between = clamp(_, min: 0, max: _);  // { (x, hi) in clamp(x, min: 0, max: hi) }
+let make = Point(x: _, y: _);            // { (x, y) in Point(x: x, y: y) }
+```
+
+**Argument placeholders.** A `_` inside a larger argument makes that
+*argument* a one-parameter closure. Every `_` in it is the same value:
+
+```kestrel
+let names = users.map(_.name);               // users.map { it.name }
+let adults = users.filter(where: _.age >= 18);
+let full = users.map(_.first + " " + _.last);
+let doubled = xs.map(_ + _);                 // { x in x + x }, one parameter
+let tags = users.map("\(_.name)!");          // interpolation passes through
+```
+
+Rules:
+
+- **Nearest wins.** A hole binds to the innermost call (`f(g(_))` is
+  `f({ p in g(p) })`); an argument placeholder binds to the innermost argument
+  (`xs.map(f(_.x))` is `xs.map(f({ p in p.x }))`).
+- **Closures are a boundary.** `_` doesn't reach into a closure literal:
+  `f({ _.x })` is an error (E811). Use `it` there.
+- **Everything else in the call runs on every call.** `log(_, timestamp())`
+  calls `timestamp()` each time the closure runs, not once.
+- **The parameter type comes from context**, as for `{ it.name }`. With no
+  expected function type (`let f = keep(_.name)`), it can't be inferred.
+- `_` outside a call's arguments (`let f = _.name`) is E811.
 
 ## Multi-Statement Closures
 
@@ -1002,7 +1071,7 @@ configure(myBuilder) { (b) in
 }
 ```
 
-(The closure parameter is unlabeled here — a trailing closure only binds to an unlabeled parameter. For a labeled one such as `Iterator.filter(where:)`, spell the label: `filter(where: { it > 0 })`.)
+(A trailing closure fills an unlabeled parameter or a labeled closure-typed one, such as `Iterator.filter(where:)`: `filter { it > 0 }`.)
 
 ### Accumulating
 

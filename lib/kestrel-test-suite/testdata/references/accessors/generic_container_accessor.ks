@@ -14,20 +14,20 @@ struct Slot[T] {
     var p: Pointer[T]
 
     var item: T {
-        ref { self.p.value }
-        mutating ref { self.p.mutatingValue }
+        ref { unsafe self.p.value }
+        mutating ref { unsafe self.p.mutatingValue }
     }
 
     subscript(at index: Int64) -> T {
-        ref { self.p.offset(by: index).value }
-        mutating ref { self.p.offset(by: index).mutatingValue }
+        ref { unsafe self.p.offset(by: index).value }
+        mutating ref { unsafe self.p.offset(by: index).mutatingValue }
     }
 }
 
 @main
 func main() -> lang.i64 {
     let p = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    p.write(5);
+    unsafe p.write(5);
     var s = Slot[Int64](p: p);
 
     if s.item != 5 { return 1; }
@@ -37,7 +37,7 @@ func main() -> lang.i64 {
     if s.item != 10 { return 3; }
 
     let sp = SystemAllocator().allocate(Layout.of[String]()).unwrap().cast[String]();
-    sp.write("hi");
+    unsafe sp.write("hi");
     var t = Slot[String](p: sp);
     if t.item != "hi" { return 4; }
     t.item = "yo";

@@ -55,6 +55,13 @@ struct NormalizeState {
     assoc_stack: Vec<Entity>,
 }
 
+/// A fully written type (an `is T` target) as a `ResolvedTy`, aliases and
+/// projections reduced. Same reduction as [`compare_hir_types`].
+pub fn resolve_hir_type(qctx: &QueryContext<'_>, ty: &HirTy) -> ResolvedTy {
+    let env = TypeCompareEnv::default();
+    normalize_hir_type(qctx, ty, &env, &mut NormalizeState::default())
+}
+
 pub fn compare_hir_types(
     qctx: &QueryContext<'_>,
     expected: &HirTy,
@@ -107,6 +114,26 @@ fn normalize_hir_type(
         HirTy::Opaque { .. } => ResolvedTy::Error,
         // Aliases arrive expanded; a bounded one compares as its expansion.
         HirTy::Alias { expanded, .. } => normalize_hir_type(qctx, expanded, env, state),
+        HirTy::RawExistential {
+            bounds, bindings, ..
+        } => ResolvedTy::RawExistential {
+            bounds: bounds
+                .iter()
+                .filter_map(|b| match b {
+                    HirTy::Protocol { entity, args, .. } => Some((
+                        *entity,
+                        args.iter()
+                            .map(|a| normalize_hir_type(qctx, a, env, state))
+                            .collect(),
+                    )),
+                    _ => None,
+                })
+                .collect(),
+            bindings: bindings
+                .iter()
+                .map(|b| (b.assoc, normalize_hir_type(qctx, &b.ty, env, state)))
+                .collect(),
+        },
         HirTy::AbstractAssoc { entity, .. } => {
             if let Some(sub) = state.param_subs.get(entity) {
                 return sub.clone();
@@ -224,6 +251,12 @@ fn contains_error(ty: &ResolvedTy) -> bool {
                 .iter()
                 .any(|(_, args)| args.iter().any(contains_error))
                 || origin_args.iter().any(contains_error)
+        },
+        ResolvedTy::RawExistential { bounds, bindings } => {
+            bounds
+                .iter()
+                .any(|(_, args)| args.iter().any(contains_error))
+                || bindings.iter().any(|(_, t)| contains_error(t))
         },
         ResolvedTy::Param { .. } | ResolvedTy::SelfType { .. } | ResolvedTy::Never => false,
     }

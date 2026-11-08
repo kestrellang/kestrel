@@ -142,6 +142,11 @@ pub fn resolve_where_clauses(
     // Static` (or when its owner is itself `not Static`).
     inject_implicit_static_bounds(ctx, entity, root, &mut result);
 
+    // And the implicit `T: Sized` (existentials design §2): generic code may
+    // hold its params by value, so a param accepts an unsized argument (a
+    // raw existential) only when relaxed with `where T: not Sized`.
+    inject_implicit_sized_bounds(ctx, entity, root, &mut result);
+
     result
 }
 
@@ -430,11 +435,60 @@ fn inject_implicit_static_bounds(
     }
 }
 
+/// The implicit `T: Sized` bound — the twin of `inject_implicit_static_bounds`
+/// (same exclusions: extensions have no callers passing type args, and
+/// intrinsics such as `lang.ptr[T]` must accept an unsized pointee). Params
+/// relaxed with `where T: not Sized` get nothing.
+fn inject_implicit_sized_bounds(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    root: Entity,
+    result: &mut Vec<WhereClause>,
+) {
+    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Extension) {
+        return;
+    }
+    if ctx.get::<Intrinsic>(entity).is_some() {
+        return;
+    }
+    let Some(type_params) = ctx.get::<TypeParams>(entity) else {
+        return;
+    };
+    let Some(sized) = ctx.query(ResolveBuiltin {
+        builtin: Builtin::Sized,
+        root,
+    }) else {
+        return;
+    };
+    for &param in &type_params.0 {
+        let requirement = ctx.query(kestrel_semantics::TypeParamSizeRequirement {
+            param,
+            context: entity,
+            root,
+        });
+        if requirement == kestrel_semantics::SizeRequirement::MayBeUnsized {
+            continue;
+        }
+        let already_bound = result.iter().any(|wc| {
+            matches!(wc,
+                WhereClause::Bound { subject: WhereSubject::Param(p), protocol: pr, .. }
+                if *p == param && *pr == sized)
+        });
+        if !already_bound {
+            result.push(WhereClause::Bound {
+                subject: WhereSubject::Param(param),
+                protocol: sized,
+                protocol_type_args: Vec::new(),
+            });
+        }
+    }
+}
+
 /// Resolve a where-clause bound subject (`T`, `Self`, `T.Assoc`, …) to a
 /// `WhereSubject`, preserving the receiver where the current resolver can see
 /// it. `None` means unresolvable — the clause is dropped, as before.
 ///
-/// A projection subject (`T.Assoc: P`) must keep its base: `resolve_type_entity`
+/// A projection subject (`T.Assoc: P`) must keep its base: `annotation_entity`
 /// resolves the whole dotted path in one shot and keeps only the last entity,
 /// collapsing `T.Assoc` to `Assoc` and losing the receiver. So the projection
 /// shape is tried first and only falls back to the collapsing path.
@@ -455,7 +509,8 @@ fn resolve_bound_subject(
     if is_bare_self(ast_ty) {
         return Some(WhereSubject::SelfType);
     }
-    resolve_type_entity(ctx, ast_ty, entity, root).map(WhereSubject::Param)
+    // Resolved in **`entity`'s own scope**: the clause-bearer's, not the asker's.
+    kestrel_name_res::annotation_entity(ctx, ast_ty, entity, root).map(WhereSubject::Param)
 }
 
 /// The subject is the single segment `Self`. Spelled against the AST rather
@@ -469,7 +524,7 @@ fn is_bare_self(ast_ty: &AstType) -> bool {
 /// If `ast_ty` is a dotted path rooted at a type parameter (`T.Assoc`,
 /// `C.Iter.Item`, …), return it as a nested `WhereSubject::Projection` that
 /// keeps every receiver. Returns `None` for a plain type/param subject
-/// (handled by `resolve_type_entity`) or any shape whose root is not a type
+/// (handled by `annotation_entity`) or any shape whose root is not a type
 /// parameter — those still take the collapsing path.
 fn resolve_projection_subject(
     ctx: &QueryContext<'_>,
@@ -512,48 +567,6 @@ fn resolve_projection_subject(
             assoc,
         }),
     )
-}
-
-/// Resolve a where-clause name in **`entity`'s own scope**. Private to this
-/// module: every other reader takes the resolved clauses (G29 removed the last
-/// raw-AST re-resolution, `resolve.rs::gather_bounds_from_where_clause`).
-fn resolve_type_entity(
-    ctx: &QueryContext<'_>,
-    ast_ty: &AstType,
-    entity: Entity,
-    root: Entity,
-) -> Option<Entity> {
-    let AstType::Named { segments, .. } = ast_ty else {
-        return None;
-    };
-    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-    match ctx.query(ResolveTypePath {
-        segments: seg_names,
-        context: entity,
-        root,
-    }) {
-        TypeResolution::Found(e) => Some(e),
-        TypeResolution::SelfType => resolve_self_entity(ctx, entity, root),
-        _ => None,
-    }
-}
-
-/// Walk up from `start` to find the enclosing type entity that `Self` refers to.
-fn resolve_self_entity(ctx: &QueryContext<'_>, start: Entity, root: Entity) -> Option<Entity> {
-    let mut current = Some(start);
-    while let Some(e) = current {
-        match ctx.get::<NodeKind>(e) {
-            Some(NodeKind::Extension) => {
-                return ctx.query(kestrel_name_res::ExtensionTargetEntity { extension: e, root });
-            },
-            Some(NodeKind::Struct) | Some(NodeKind::Enum) | Some(NodeKind::Protocol) => {
-                return Some(e);
-            },
-            _ => {},
-        }
-        current = ctx.parent_of(e);
-    }
-    None
 }
 
 /// `V = RHS` — resolve a bare type-param or associated-type LHS in `entity`'s
@@ -628,7 +641,7 @@ fn resolve_bound(
     let protocols = protocols
         .iter()
         .filter_map(|protocol_ty| {
-            let protocol = resolve_type_entity(ctx, protocol_ty, entity, root)?;
+            let protocol = kestrel_name_res::annotation_entity(ctx, protocol_ty, entity, root)?;
             Some((
                 protocol,
                 extract_protocol_type_args(ctx, entity, root, protocol_ty),

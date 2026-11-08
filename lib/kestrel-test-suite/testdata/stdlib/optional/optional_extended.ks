@@ -36,7 +36,7 @@ module Test
 
             // Test inspect on None (returns None)
             let inspectedNone = none.inspect({ (x) in });
-            if inspectedNone.isSome() { return 8 }
+            if inspectedNone.isSome { return 8 }
 
             // Test xor - Some xor None = Some
             let xorResult1 = someOpt.xor(.None);
@@ -48,26 +48,26 @@ module Test
 
             // Test xor - Some xor Some = None
             let xorResult3 = someOpt.xor(.Some(99));
-            if xorResult3.isSome() { return 11 }
+            if xorResult3.isSome { return 11 }
 
             // Test xor - None xor None = None
             let xorResult4 = none.xor(.None);
-            if xorResult4.isSome() { return 12 }
+            if xorResult4.isSome { return 12 }
 
             // Test zip - Some zip Some = Some tuple
             let zipped = someOpt.zip(with: .Some(100));
-            if zipped.isNone() { return 13 }
+            if zipped.isNone { return 13 }
             let pair = zipped.unwrap();
             if pair.0 != 42 { return 14 }
             if pair.1 != 100 { return 15 }
 
             // Test zip - Some zip None = None
             let zippedNone: std.result.Optional[(std.numeric.Int64, std.numeric.Int64)] = someOpt.zip(with: .None);
-            if zippedNone.isSome() { return 16 }
+            if zippedNone.isSome { return 16 }
 
             // Test zip - None zip Some = None
             let noneZipped: std.result.Optional[(std.numeric.Int64, std.numeric.Int64)] = none.zip(with: .Some(100));
-            if noneZipped.isSome() { return 17 }
+            if noneZipped.isSome { return 17 }
 
             0
         }

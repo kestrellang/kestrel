@@ -50,6 +50,13 @@ pub fn is_mut_borrow_param(cx: &BodyContext<'_>, local: LocalId) -> bool {
 /// var to the pointee type before the member resolves), and the resolved
 /// callee's `CallableRefReturn` (entity-keyed ground truth).
 pub fn ref_place(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<bool> {
+    // A member with a `mutating ref` accessor (`xs(at: i)`, `box.value`) is a
+    // place like a stored field, not a reference value: its writability
+    // follows its base. Its read type is the `ref` accessor's `&T`, which
+    // would otherwise make `xs(at: 0).x = 1` look like a write through `&T`.
+    if member_has_mutating_ref(cx, expr_id) {
+        return None;
+    }
     if let Some(ResolvedTy::Ref { mutating, .. }) = cx.typed.expr_types.get(&expr_id) {
         return Some(*mutating);
     }
@@ -70,6 +77,59 @@ pub fn ref_place(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<bool> {
             root: cx.root,
         })
         .map(|r| r.mutating)
+}
+
+/// The base a place reaches a STORED REFERENCE field through: `v` for
+/// `v.p` and for the field subscript `v.base(i)`, when `p` / `base` is a
+/// stored instance field of type `&T` / `&mutating T`. `None` otherwise.
+///
+/// A `&mutating` field gives no interior mutability: writing through it is
+/// a write to the holder, so it needs the same mutable base a write to any
+/// other field does (`let v: View` or a borrowing `self` can only read
+/// through `v.p`). Shared by the assignment (E201) and access-mode (E204)
+/// analyzers, which gate a `&mutating` [`ref_place`] /
+/// [`field_subscript_ref`] answer on this base's mutability.
+pub fn stored_ref_field_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<HirExprId> {
+    let (field, base) = match &cx.hir.exprs[expr_id] {
+        HirExpr::Field { base, .. } => (*cx.typed.resolutions.get(&expr_id)?, *base),
+        HirExpr::MethodCall { receiver, .. } => {
+            (*cx.typed.field_subscripts.get(&expr_id)?, *receiver)
+        },
+        _ => return None,
+    };
+    let stored = cx
+        .query
+        .get::<kestrel_ast_builder::FieldClass>(field)
+        .is_some_and(|c| c.is_stored_instance());
+    let ann = cx.query.get::<kestrel_ast_builder::TypeAnnotation>(field)?;
+    (stored && matches!(ann.0, kestrel_ast::AstType::Ref { .. })).then_some(base)
+}
+
+/// A subscript on a stored REFERENCE field (`self.base(i)` with
+/// `let base: &mutating Array[T]`): the place lives in the referent, so its
+/// mutability is the field's reference kind — not the field's `let`/`var`
+/// or its base's. `Some(true)` = through `&mutating`, `Some(false)` = through
+/// shared `&`, `None` = not a field subscript, or the field isn't a ref.
+/// Shared by the assignment (E201/E202/E208) and access-mode (E204/E207)
+/// analyzers, mirroring how a plain `self.base` field read is classified by
+/// [`ref_place`].
+pub fn field_subscript_ref(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<bool> {
+    if !matches!(cx.hir.exprs[expr_id], HirExpr::MethodCall { .. }) {
+        return None;
+    }
+    let field = *cx.typed.field_subscripts.get(&expr_id)?;
+    // Gate the forced lowering on the syntax (see `ast_contains_ref`).
+    let ann = cx.query.get::<kestrel_ast_builder::TypeAnnotation>(field)?;
+    if !matches!(ann.0, kestrel_ast::AstType::Ref { .. }) {
+        return None;
+    }
+    match cx.query.query(kestrel_hir_lower::LowerTypeAnnotation {
+        entity: field,
+        root: cx.root,
+    })? {
+        kestrel_hir::ty::HirTy::Ref { mutating, .. } => Some(mutating),
+        _ => None,
+    }
 }
 
 /// Stage 1.5 accessor places: when `expr` is a member expression (`x(i)`,
@@ -99,6 +159,46 @@ pub fn accessor_place_mut_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> Opti
     if cx.query.has::<kestrel_ast_builder::Static>(member) {
         return None;
     }
+    member_has_write_provider(cx, expr_id).then_some(base)
+}
+
+/// The effectful member a member expression resolves to, if any: failable
+/// (`var first?: T`, `subscript(...)? -> T`) or throwing (`-> T throws E`).
+/// Such a place may not exist (see `kestrel_ast_builder::is_effectful_place`).
+pub fn failable_member(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<kestrel_hecs::Entity> {
+    if !matches!(
+        cx.hir.exprs[expr_id],
+        HirExpr::Field { .. } | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+    ) {
+        return None;
+    }
+    let member = cx.typed.resolutions.get(&expr_id).copied()?;
+    kestrel_ast_builder::is_effectful_place(cx.query, member).then_some(member)
+}
+
+/// Does the member `expr_id` resolves to (a subscript or computed property)
+/// have a `mutating ref` accessor.
+pub fn member_has_mutating_ref(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    if !matches!(
+        cx.hir.exprs[expr_id],
+        HirExpr::Field { .. } | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+    ) {
+        return false;
+    }
+    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
+        return false;
+    };
+    cx.query
+        .query(kestrel_hir_lower::PlaceAccessors { entity: member })
+        .is_some_and(|info| info.mutating_ref_accessor.is_some())
+}
+
+/// Does the member `expr_id` resolves to (a subscript or computed property)
+/// have a WRITE provider: a `mutating ref` accessor or a setter.
+pub fn member_has_write_provider(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    let Some(&member) = cx.typed.resolutions.get(&expr_id) else {
+        return false;
+    };
     let has_mutating_ref = cx
         .query
         .query(kestrel_hir_lower::PlaceAccessors { entity: member })
@@ -108,7 +208,7 @@ pub fn accessor_place_mut_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> Opti
         .children_of(member)
         .iter()
         .any(|&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::Setter));
-    (has_mutating_ref || has_setter_child).then_some(base)
+    has_mutating_ref || has_setter_child
 }
 
 /// Syntactic pre-check: does this annotation mention a reference type
@@ -134,6 +234,7 @@ pub fn ast_contains_ref(ty: &kestrel_ast::AstType) -> bool {
         AstType::Dictionary(k, v, _) => ast_contains_ref(k) || ast_contains_ref(v),
         AstType::Result { ok, err, .. } => ast_contains_ref(ok) || ast_contains_ref(err),
         AstType::Some { bounds, .. } => bounds.iter().any(ast_contains_ref),
+        AstType::Any { .. } => ty.any_children().into_iter().any(ast_contains_ref),
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => false,
     }
 }
@@ -168,6 +269,7 @@ pub fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Closure { span, .. }
         | HirExpr::Block { span, .. }
         | HirExpr::Error { span }
+        | HirExpr::TakePayload { span, .. }
         | HirExpr::Sugar { span, .. } => span.clone(),
     }
 }
@@ -195,6 +297,7 @@ pub fn pat_span(hir: &HirBody, id: HirPatId) -> Span {
         | HirPat::Array { span, .. }
         | HirPat::Or { span, .. }
         | HirPat::At { span, .. }
+        | HirPat::TypeTest { span, .. }
         | HirPat::Error { span, .. } => span.clone(),
     }
 }
@@ -269,4 +372,112 @@ pub fn body_close_brace_span(ctx: &QueryContext<'_>, entity: Entity) -> Option<S
         }
     }
     None
+}
+
+/// THE exception to label-only overloading: same-name, same-label callables
+/// may coexist only when each witnesses a DIFFERENT requirement slot — a
+/// different protocol's requirement, or the same requirement of a different
+/// instantiation of one parameterized protocol (`Int64: Convertible[Int8],
+/// Convertible[Int16]` — one `init(from:)` each). `owners` lists the
+/// declaration (type body or extension) holding each callable, one entry per
+/// callable. Allowed when every owner writes a conformance whose protocol
+/// declares a `name(labels)` requirement, and those conformances give at least
+/// `owners.len()` distinct slots (protocol + args, defaults applied). A
+/// same-label overload beside a single witness is a duplicate.
+pub fn same_label_witnesses_allowed(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    type_entity: Entity,
+    owners: &[Entity],
+    name: &str,
+    labels: &[Option<String>],
+) -> bool {
+    let insts = ctx.query(kestrel_name_res::ConformingProtocolInstantiations {
+        entity: type_entity,
+        root,
+    });
+    let slots: Vec<(Entity, Entity, Vec<kestrel_hir::ty::HirTy>)> = insts
+        .iter()
+        .filter(|(protocol, source, _)| {
+            owners.contains(source) && declares_requirement(ctx, *protocol, name, labels)
+        })
+        .map(|(protocol, source, ast_args)| {
+            let args =
+                kestrel_hir_lower::conformance_protocol_args(ctx, root, *protocol, *source, ast_args);
+            (*protocol, *source, args)
+        })
+        .collect();
+    let every_owner = owners.iter().all(|o| slots.iter().any(|(_, s, _)| s == o));
+    let mut distinct: Vec<(Entity, &Vec<kestrel_hir::ty::HirTy>)> = Vec::new();
+    for (protocol, _, args) in &slots {
+        let same = |(p, seen): &(Entity, &Vec<kestrel_hir::ty::HirTy>)| {
+            p == protocol
+                && seen.len() == args.len()
+                && seen.iter().zip(args).all(|(a, b)| a.same_type(b))
+        };
+        if !distinct.iter().any(same) {
+            distinct.push((*protocol, args));
+        }
+    }
+    every_owner && distinct.len() >= owners.len().max(2)
+}
+
+/// Does `protocol` declare a function (or, for `"init"`, an initializer)
+/// requirement named `name` with exactly these `labels`?
+fn declares_requirement(
+    ctx: &QueryContext<'_>,
+    protocol: Entity,
+    name: &str,
+    labels: &[Option<String>],
+) -> bool {
+    let is_init = name == "init";
+    let kind = if is_init { NodeKind::Initializer } else { NodeKind::Function };
+    children_of_kind(ctx, protocol, kind)
+        .into_iter()
+        // entity_name (not the Name component) — keys for anonymous
+        // functions carry the "<anonymous>" fallback and must still match.
+        .filter(|&c| is_init || entity_name(ctx, c) == name)
+        .any(|c| {
+            ctx.get::<kestrel_ast_builder::Callable>(c).is_some_and(|callable| {
+                callable
+                    .params
+                    .iter()
+                    .map(|p| p.label.clone())
+                    .eq(labels.iter().cloned())
+            })
+        })
+}
+
+/// The requirement a `ProtocolCall` (`expr`) dispatches through — what every
+/// body analyzer asks of a desugared call. A `?.` bind's is the mode
+/// inference settled on; a tagged desugaring names its own; only an untagged
+/// call (no stdlib tag) is matched by written name AND call-site labels.
+pub fn protocol_call_method(cx: &BodyContext<'_>, expr: HirExprId) -> Option<Entity> {
+    let HirExpr::ProtocolCall {
+        protocol,
+        method,
+        requirement,
+        args,
+        ..
+    } = &cx.hir.exprs[expr]
+    else {
+        return None;
+    };
+    if let Some(builtin) = cx.typed.chain_requirement(expr) {
+        return cx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin,
+            root: cx.root,
+        });
+    }
+    if let Some(requirement) = requirement {
+        return Some(*requirement);
+    }
+    let labels: Vec<Option<String>> = args.iter().map(|a| a.label.clone()).collect();
+    children_named_of_kind(cx.query, *protocol, method.as_str_or_empty(), NodeKind::Function)
+        .into_iter()
+        .find(|&c| {
+            cx.query
+                .get::<kestrel_ast_builder::Callable>(c)
+                .is_some_and(|callable| callable.params.iter().map(|p| p.label.clone()).eq(labels.iter().cloned()))
+        })
 }

@@ -1,0 +1,14 @@
+[package]
+name = "wgpu"
+version = "0.1.0"
+description = "WebGPU bindings for Kestrel, over wgpu-native"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[build]
+# Links wgpu-native's static library from $WGPU_NATIVE_DIR (an unpacked
+# wgpu-native release: `include/`, `lib/`), defaulting to /usr/local, plus
+# what it needs from the system: on macOS the Objective-C runtime and the
+# Metal, QuartzCore and AppKit frameworks it draws through.
+link-cmd = "echo -l:${WGPU_NATIVE_DIR:-/usr/local}/lib/libwgpu_native.a -lm -ldl -lpthread; if [ \"$(uname)\" = Darwin ]; then echo -lobjc -framework Metal -framework QuartzCore -framework Foundation -framework CoreGraphics -framework IOKit -framework AppKit; fi"

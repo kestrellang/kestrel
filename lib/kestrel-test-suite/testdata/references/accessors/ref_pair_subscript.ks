@@ -20,15 +20,15 @@ struct Buf {
     var p: Pointer[Score]
 
     subscript(at index: Int64) -> Score {
-        ref { self.p.offset(by: index).value }
-        mutating ref { self.p.offset(by: index).mutatingValue }
+        ref { unsafe self.p.offset(by: index).value }
+        mutating ref { unsafe self.p.offset(by: index).mutatingValue }
     }
 }
 
 @main
 func main() -> lang.i64 {
     let p = SystemAllocator().allocate(Layout.of[Score]()).unwrap().cast[Score]();
-    p.write(Score(points: 5));
+    unsafe p.write(Score(points: 5));
     var b = Buf(p: p);
 
     // Read through the ref accessor (member access through the place).

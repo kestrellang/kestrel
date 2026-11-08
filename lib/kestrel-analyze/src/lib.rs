@@ -43,6 +43,8 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::dead_code::DeadCodeAnalyzer);
     r.add_body_check(body::guard::GuardDivergenceAnalyzer);
     r.add_body_check(body::condition_check::ConditionCheckAnalyzer);
+    r.add_body_check(body::type_test::TypeTestAnalyzer);
+    r.add_body_check(body::c_function::CFunctionAnalyzer);
     r.add_body_check(body::param_pattern::ParamPatternAnalyzer);
     r.add_body_check(body::assignment::AssignmentAnalyzer);
 
@@ -52,6 +54,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::closure::ClosureAnalyzer);
     r.add_body_check(body::access_mode::AccessModeAnalyzer);
     r.add_body_check(body::exclusive_args::ExclusiveArgsAnalyzer);
+    r.add_body_check(body::optional_chain::OptionalChainAnalyzer);
     // TODO(move-checker): retire in favor of a MIR/OSSA-level move check.
     r.add_body_check(body::move_tracking::MoveTrackingAnalyzer);
     r.add_body_check(body::dangle_ref::DangleRefAnalyzer);
@@ -65,6 +68,9 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     // Literal/lexing checks (E700-E799)
     r.add_body_check(body::string_escape::StringEscapeAnalyzer);
     r.add_body_check(body::integer_literal_range::IntegerLiteralRangeAnalyzer);
+    r.add_body_check(body::restricted_use::RestrictedUseAnalyzer);
+    r.add_body_check(body::unsafe_use::UnsafeUseAnalyzer);
+    r.add_body_check(body::packed_field_borrow::PackedFieldBorrowAnalyzer);
 
     // Declaration checks
     r.add_decl_check(decl::function_body::FunctionBodyAnalyzer);
@@ -72,6 +78,9 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::static_context::StaticContextAnalyzer);
     r.add_decl_check(decl::static_value_type::StaticValueTypeAnalyzer);
     r.add_decl_check(decl::closure_field::ClosureFieldAnalyzer);
+    r.add_decl_check(decl::unsized_param::UnsizedParamAnalyzer);
+    r.add_decl_check(decl::existential_box::ExistentialBoxAnalyzer);
+    r.add_body_check(decl::existential_box::ExistentialBoxBodyAnalyzer);
     r.add_decl_check(decl::builtin_marker_protocol::BuiltinMarkerProtocolAnalyzer);
     r.add_decl_check(decl::duplicate_builtin::DuplicateBuiltinAnalyzer);
     r.add_decl_check(decl::conformance_rules::ConformanceRulesAnalyzer);
@@ -81,6 +90,9 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::field::FieldAnalyzer);
     r.add_decl_check(decl::subscript::SubscriptAnalyzer);
     r.add_decl_check(decl::place_accessor::PlaceAccessorAnalyzer);
+    r.add_decl_check(decl::observer::ObserverAnalyzer);
+    r.add_decl_check(decl::lazy::LazyAnalyzer);
+    r.add_body_check(decl::lazy::LazyBodyAnalyzer);
     r.add_decl_check(decl::ref_return::RefReturnAnalyzer);
     r.add_decl_check(decl::extern_ffi_safe::ExternFfiSafeAnalyzer);
     r.add_decl_check(decl::default_param_ordering::DefaultParamOrderingAnalyzer);
@@ -94,13 +106,17 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::conformance_target::ConformanceTargetAnalyzer);
     r.add_decl_check(decl::import_target::ImportTargetAnalyzer);
     r.add_decl_check(decl::recursive_enum::RecursiveEnumAnalyzer);
-    r.add_decl_check(decl::indirect_enum::IndirectEnumAnalyzer);
+    r.add_decl_check(decl::opaque_cycle::OpaqueCycleAnalyzer);
+    r.add_decl_check(decl::unsafe_field::UnsafeFieldAnalyzer);
     r.add_decl_check(decl::parent_protocol_conformance::ParentProtocolConformanceAnalyzer);
     r.add_decl_check(decl::protocol_field_conformance::ProtocolFieldConformanceAnalyzer);
     r.add_decl_check(decl::generics::GenericsAnalyzer);
     r.add_decl_check(decl::generics::TypeArgArityAnalyzer);
     r.add_decl_check(decl::visibility::VisibilityAnalyzer);
     r.add_decl_check(decl::type_alias_validation::TypeAliasValidationAnalyzer);
+    r.add_decl_check(decl::restricted_signature::RestrictedSignatureAnalyzer);
+    r.add_decl_check(decl::attribute_semantics::AttributeSemanticsAnalyzer);
+    r.add_decl_check(decl::derive_site::DeriveSiteAnalyzer);
 
     // Compilation checks
     r.add_compilation_check(compilation::type_alias_cycles::TypeAliasCycleAnalyzer);
@@ -113,7 +129,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_compilation_check(
         compilation::type_annotation_resolution::TypeAnnotationResolutionAnalyzer,
     );
-    r.add_compilation_check(compilation::unknown_attribute::UnknownAttributeAnalyzer);
+    r.add_compilation_check(compilation::attribute_validation::AttributeValidationAnalyzer);
     r.add_compilation_check(compilation::entry_point::EntryPointAnalyzer);
 
     r

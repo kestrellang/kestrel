@@ -95,6 +95,7 @@ struct SavedState {
     ret_borrow: bool,
     /// Per-body value ids — same swap rationale as `value_forwarding`.
     ref_results: std::collections::HashSet<ValueId>,
+    ref_arg_borrows: HashMap<ValueId, Vec<ValueId>>,
     /// Named ref bindings are per-body too (value ids + the closure's own
     /// locals). A PARENT binding may now be captured (E212 retired): the view
     /// tier hands its target address to the env, so inside the body the
@@ -382,6 +383,7 @@ impl OssaBodyCtx<'_, '_> {
             value_forwarding: mem::take(&mut self.value_forwarding),
             ret_borrow: mem::replace(&mut self.ret_borrow, false),
             ref_results: mem::take(&mut self.ref_results),
+            ref_arg_borrows: mem::take(&mut self.ref_arg_borrows),
             ref_binding_vals: mem::take(&mut self.ref_binding_vals),
             ref_binding_remaining: mem::take(&mut self.ref_binding_remaining),
             addr_anchors: mem::take(&mut self.addr_anchors),
@@ -559,6 +561,7 @@ impl OssaBodyCtx<'_, '_> {
         self.value_forwarding = saved.value_forwarding;
         self.ret_borrow = saved.ret_borrow;
         self.ref_results = saved.ref_results;
+        self.ref_arg_borrows = saved.ref_arg_borrows;
         self.ref_binding_vals = saved.ref_binding_vals;
         self.ref_binding_remaining = saved.ref_binding_remaining;
         self.addr_anchors = saved.addr_anchors;
@@ -785,8 +788,13 @@ impl OssaBodyCtx<'_, '_> {
     /// The frame address of a projected view capture (`self.n`, `p.a`).
     fn view_addr_of_place(&mut self, cp: &CapturedPlace, cap_ty: TyId) -> ValueId {
         // Address route: project the field's address off an addressable base
-        // (`try_field_addr_chain` is the shared place walk).
-        if let Some(addr) = self.try_field_addr_chain(cp.repr) {
+        // (`field_addr_chain` is the shared place walk). Capture planning
+        // stops at observed fields, so a written capture never crosses one.
+        let access = match cp.kind {
+            CaptureKind::Read => super::place::Access::Read,
+            _ => super::place::Access::Write,
+        };
+        if let Some(addr) = self.field_addr_chain(cp.repr, access) {
             return addr;
         }
         // Base isn't addressable (a borrowed receiver, an rvalue): fall back to
@@ -796,11 +804,27 @@ impl OssaBodyCtx<'_, '_> {
         self.anchor_value_in_slot(v, cap_ty)
     }
 
+    /// The capture of a borrowed UNSIZED value (`s: Slice[T]`): it has no
+    /// by-value bits to store in a sized slot — its representation is its
+    /// (fat) address — so the capture is that address. `None` otherwise.
+    fn unsized_borrow_addr(&mut self, v: ValueId, cap_ty: TyId) -> Option<ValueId> {
+        if self.body.value(v).ownership != Ownership::Guaranteed
+            || !self.ctx.module.is_unsized(cap_ty)
+        {
+            return None;
+        }
+        let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
+        Some(self.emit_op1(Op::PtrTo(cap_ty), v, ptr_ty))
+    }
+
     /// Materialize `v`'s bits into a fresh frame slot and return the slot
     /// address. Never consumes, copies (clones) or moves `v`: an @owned value
     /// is borrowed for the store, a @guaranteed one is stored directly
     /// (`emit_store_init_borrowed` is the no-CopyValue store).
     fn anchor_value_in_slot(&mut self, v: ValueId, cap_ty: TyId) -> ValueId {
+        if let Some(addr) = self.unsized_borrow_addr(v, cap_ty) {
+            return addr;
+        }
         let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
         let one = self.emit_literal(Immediate::i64(1));
         let addr = self.emit_op1(Op::StackAlloc(cap_ty), one, ptr_ty);
@@ -869,7 +893,11 @@ impl OssaBodyCtx<'_, '_> {
                 // var-rooted field is a `FieldAddr` copy that borrows nothing:
                 // a hand-rolled extract left the root borrowed until scope
                 // exit, so consuming the root later (`eat(r)`) was an ICE.
-                let v = match self.lower_place(cp.repr, super::place::FieldViews::Forbid) {
+                let v = match self.lower_place(
+                    cp.repr,
+                    super::place::FieldViews::Forbid,
+                    super::place::Access::Read,
+                ) {
                     Some(place) => self.read_place(&place),
                     None => self.lower_place_value_parent(cp.repr),
                 };
@@ -938,6 +966,11 @@ impl OssaBodyCtx<'_, '_> {
             //                   convention guarantees an escaping closure's
             //                   captures are @owned and take the move branch.
             let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
+            if !self.is_var_local(&root)
+                && let Some(addr) = self.unsized_borrow_addr(mir_val, cap_ty)
+            {
+                return addr;
+            }
             let one = self.emit_literal(Immediate::i64(1));
             let addr = self.emit_op1(Op::StackAlloc(cap_ty), one, ptr_ty);
             if self.is_var_local(&root) {

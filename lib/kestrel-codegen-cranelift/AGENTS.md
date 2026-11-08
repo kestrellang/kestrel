@@ -37,8 +37,9 @@ invariants. It is not exhaustive — when you discover a new rule, add it here.
 
 ## Type layout: `tc.repr` is the single authority
 
-- `TypeCache::repr` / `classify` (`ty.rs`) is the **sole** place that decides a
-  type's Cranelift representation. `build_signature`, `compile_struct`,
+- `TypeCache::repr` / `classify` (`kestrel_codegen::repr`, shared with the LLVM
+  backend; `ty.rs` only plugs in `ir::Type` via the `Cranelift` marker) is the
+  **sole** place that decides a type's Cranelift representation. `build_signature`, `compile_struct`,
   `compile_struct_extract`, `compile_enum`, `resolve_scalar` — all derive their
   cl types from it. Never re-derive a layout decision locally; if you need a
   type's repr, call `repr`.

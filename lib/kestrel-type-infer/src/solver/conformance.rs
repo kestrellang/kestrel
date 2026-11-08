@@ -72,7 +72,7 @@ pub(super) fn direct_param_bound_protocols(ctx: &InferCtx<'_>, param: Entity) ->
     };
     let mut protocols = Vec::new();
     for item in &confs.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let kestrel_ast_builder::AstType::Named { segments, .. } = ast_ty else {
@@ -155,6 +155,10 @@ pub(super) fn solve_conforms(
         //   DoesNotConform (an unguarded permit would instantiate a pointee
         //   witness at `&U` — the witness_instantiation_collapse ICE class).
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
+            // A reference is two words even to an unsized pointee.
+            if is_sized_builtin(ctx, protocol) {
+                return SolveResult::Solved;
+            }
             if is_static_builtin(ctx, protocol) {
                 if poison_ty_on_failure {
                     ctx.poison(ty);
@@ -228,6 +232,8 @@ pub(super) fn solve_conforms(
             // conformance path below can't answer it.
             let conforms = if is_static_builtin(ctx, protocol) {
                 solver_ty_is_static(ctx, resolved, 0)
+            } else if is_sized_builtin(ctx, protocol) {
+                solver_ty_is_sized(ctx, resolved, 0)
             } else if let Some(want_cloneable) = copyable_builtin_kind(ctx, protocol) {
                 type_conforms_copyable(ctx, resolved, want_cloneable)
             } else {
@@ -246,9 +252,11 @@ pub(super) fn solve_conforms(
                 // is why `projection_base_admits` has to sit here: for an
                 // associated-type projection `conforms_to` is the SOLE decider,
                 // and it answers declares-only (G17 C4).
-                if !(ctx.resolver.conforms_to(&kind, protocol)
-                    && projection_base_admits(ctx, &kind, protocol))
-                {
+                // An existential that names `protocol` declares it in effect
+                // (`any P: P`); the kernel decides whether it holds.
+                let declared = ctx.resolver.conforms_to(&kind, protocol)
+                    || crate::existential::names_protocol(ctx, resolved, protocol);
+                if !(declared && projection_base_admits(ctx, &kind, protocol)) {
                     false
                 } else {
                     match crate::solver_entail::conformance(ctx, resolved, protocol) {
@@ -319,15 +327,32 @@ pub(super) fn solve_conforms(
             } else if typearg_failure_is_duplicate(ctx, resolved, protocol, origin) {
                 SolveResult::Solved
             } else {
+                // E157: `?.` on a type with no payload names that type, so
+                // keep a copy of it before poisoning overwrites the slot.
+                if ctx.resolver.builtin(Builtin::OptionalChainProtocol) == Some(protocol) {
+                    let shown = ctx.fresh();
+                    ctx.types[shown.0 as usize] = ctx.slot(resolved).clone();
+                    if poison_ty_on_failure {
+                        ctx.poison(ty);
+                    }
+                    return SolveResult::Error(InferError::OptionalChainNotConforming {
+                        ty: shown,
+                        span,
+                    });
+                }
                 if poison_ty_on_failure {
                     ctx.poison(ty);
                 }
-                SolveResult::Error(InferError::DoesNotConform {
-                    ty,
-                    protocol,
-                    protocol_args: protocol_args.clone(),
-                    span,
-                })
+                // E146 names what blocks `any P: P`.
+                SolveResult::Error(
+                    crate::existential::self_conformance_error(ctx, resolved, protocol, &span)
+                        .unwrap_or_else(|| InferError::DoesNotConform {
+                            ty,
+                            protocol,
+                            protocol_args: protocol_args.clone(),
+                            span,
+                        }),
+                )
             }
         },
         TySlot::Redirect(_) => unreachable!("resolve() follows redirects"),
@@ -444,7 +469,21 @@ pub(super) fn unify_bound_protocol_args(
         });
     let mut applicable: Vec<ApplicableConformance> = Vec::new();
     for (proto, source, ast_args) in &insts {
-        if *proto != protocol || ast_args.is_empty() {
+        if *proto != protocol {
+            continue;
+        }
+        // Declared args completed with defaults (`Int64: Multipliable` is
+        // `Multipliable[Self]`): skipping a defaulted conformance left a
+        // sibling `Multipliable[Meters]` as the ONLY applicable one, which
+        // then pinned every `Int64 * Int64`'s `Other` to `Meters`.
+        let decl_args = kestrel_hir_lower::conformance_protocol_args(
+            ctx.query_ctx,
+            ctx.root,
+            protocol,
+            *source,
+            ast_args,
+        );
+        if decl_args.is_empty() {
             continue;
         }
         // Map the source's free type params to the receiver's concrete args:
@@ -507,11 +546,6 @@ pub(super) fn unify_bound_protocol_args(
                 }
                 (subs, target_args)
             };
-        // Lower the declared protocol args (in the source's scope) to HirTy.
-        let decl_args: Vec<kestrel_hir::ty::HirTy> = ast_args
-            .iter()
-            .map(|a| kestrel_hir_lower::lower_ast_type(ctx.query_ctx, *source, ctx.root, a))
-            .collect();
         applicable.push(ApplicableConformance {
             decl_args,
             subs,
@@ -531,10 +565,14 @@ pub(super) fn unify_bound_protocol_args(
     // zero → every declared instantiation contradicts the bound: reject.
     if applicable.len() > 1 {
         applicable.retain(|c| {
-            !want_args
-                .iter()
-                .zip(c.decl_args.iter())
-                .any(|(&w, d)| tv_definitely_incompatible(ctx, w, d))
+            !want_args.iter().zip(c.decl_args.iter()).any(|(&w, d)| match d {
+                // A default's `Self` is the receiver itself.
+                kestrel_hir::ty::HirTy::SelfType(..) => matches!(
+                    ctx.slot(ctx.resolve(w)),
+                    TySlot::Resolved(k) if k.entity().is_some_and(|e| e != entity)
+                ),
+                _ => tv_definitely_incompatible(ctx, w, d),
+            })
         });
         if applicable.is_empty() {
             return Err(());
@@ -575,7 +613,8 @@ pub(super) fn unify_bound_protocol_args(
     }
 
     for (want, decl) in want_args.iter().zip(decl_args.iter()) {
-        let decl_tv = lower_hir_ty_sub(ctx, decl, None, resolved, &subs);
+        // `Some(protocol)` reads a default's `Self` as the receiver.
+        let decl_tv = lower_hir_ty_sub(ctx, decl, Some(protocol), resolved, &subs);
         if unify::unify(ctx, *want, decl_tv).is_err() {
             return Err(());
         }
@@ -605,8 +644,9 @@ pub(super) struct ApplicableConformance {
 }
 
 /// Does the (resolved state of) `tv` PROVABLY conflict with `hir`? Only a
-/// nominal-vs-nominal entity mismatch (recursively through args) counts;
-/// unresolved vars, `Param` patterns, and every non-nominal shape are
+/// nominal-vs-nominal entity mismatch (recursively through args) counts,
+/// plus an open literal against a nominal that literal can't spell;
+/// other unresolved vars, `Param` patterns, and every non-nominal shape are
 /// "can't rule out" — this must never reject on incompleteness.
 pub(super) fn tv_definitely_incompatible(
     ctx: &InferCtx<'_>,
@@ -622,6 +662,21 @@ pub(super) fn tv_definitely_incompatible(
     let (t_entity, t_args) = match ctx.slot(resolved) {
         TySlot::Resolved(TyKind::Struct { entity, args })
         | TySlot::Resolved(TyKind::Enum { entity, args }) => (*entity, args.clone()),
+        // An open literal can only become a type that literal can spell:
+        // `n.multiply(256)` never means `Multipliable[Meters]`.
+        TySlot::Unresolved { literal: Some(lit) } if h_args.is_empty() => {
+            let kind = match hir {
+                HirTy::Enum { .. } => TyKind::Enum {
+                    entity: h_entity,
+                    args: Vec::new(),
+                },
+                _ => TyKind::Struct {
+                    entity: h_entity,
+                    args: Vec::new(),
+                },
+            };
+            return !crate::unify::conforms_to_literal_protocol(ctx, &kind, *lit);
+        },
         _ => return false,
     };
     t_entity != h_entity
@@ -636,7 +691,7 @@ pub(super) fn tv_definitely_incompatible(
 /// inspects (nominal / `()` / `!` / type-param) are reified faithfully; anything
 /// else maps to `HirTy::Error`, which `type_satisfies` permits. Unresolved slots
 /// likewise map to `Error` (permit) — this only runs on otherwise-resolved types.
-pub(super) fn reify_tv(ctx: &InferCtx<'_>, tv: TyVar) -> kestrel_hir::ty::HirTy {
+pub(crate) fn reify_tv(ctx: &InferCtx<'_>, tv: TyVar) -> kestrel_hir::ty::HirTy {
     let resolved = ctx.resolve(tv);
     match ctx.slot(resolved) {
         TySlot::Resolved(kind) => reify_kind(ctx, &kind.clone()),
@@ -644,7 +699,7 @@ pub(super) fn reify_tv(ctx: &InferCtx<'_>, tv: TyVar) -> kestrel_hir::ty::HirTy 
     }
 }
 
-pub(super) fn reify_kind(ctx: &InferCtx<'_>, kind: &TyKind) -> kestrel_hir::ty::HirTy {
+pub(crate) fn reify_kind(ctx: &InferCtx<'_>, kind: &TyKind) -> kestrel_hir::ty::HirTy {
     use kestrel_hir::ty::HirTy;
     let span = Span::synthetic(0);
     let reify_args = |args: &[TyVar]| args.iter().map(|&a| reify_tv(ctx, a)).collect();
@@ -672,6 +727,26 @@ pub(super) fn reify_kind(ctx: &InferCtx<'_>, kind: &TyKind) -> kestrel_hir::ty::
         TyKind::Ref { pointee, mutating } => HirTy::Ref {
             inner: Box::new(reify_tv(ctx, *pointee)),
             mutating: *mutating,
+            span,
+        },
+        // Keep the bounds: conformance of an existential is decided from
+        // them (`any P: P`, existentials design §6).
+        TyKind::RawExistential { bounds, bindings } => HirTy::RawExistential {
+            bounds: bounds
+                .iter()
+                .map(|(entity, args)| HirTy::Protocol {
+                    entity: *entity,
+                    args: reify_args(args),
+                    span: span.clone(),
+                })
+                .collect(),
+            bindings: bindings
+                .iter()
+                .map(|&(assoc, ty)| kestrel_hir::ty::HirAssocBinding {
+                    assoc,
+                    ty: reify_tv(ctx, ty),
+                })
+                .collect(),
             span,
         },
         _ => HirTy::Error(span),
@@ -726,7 +801,7 @@ impl CopyLayer for SolverCopyLayer<'_, '_> {
         sem
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, kestrel_copy_fold::ConditionalCopy> {
         Cow::Owned(self.ctx.query_ctx.query(ConditionalCopyableParams {
             entity,
             root: self.ctx.root,
@@ -740,6 +815,73 @@ impl CopyLayer for SolverCopyLayer<'_, '_> {
     fn member_semantics(&self, &tv: &TyVar) -> CopySemantics {
         // Depth bookkeeping = layer plumbing.
         solver_copy_class(self.ctx, tv, self.depth + 1)
+    }
+}
+
+impl kestrel_semantics::CopyShapeLayer for SolverCopyLayer<'_, '_> {
+    fn query(&self) -> &kestrel_hecs::QueryContext<'_> {
+        self.ctx.query_ctx
+    }
+
+    fn root(&self) -> Entity {
+        self.ctx.root
+    }
+
+    // HOOK: the body being solved scopes the bound lookup, so a method's or
+    // extension's `where T: Copyable` counts (the param's own declaring
+    // entity is always consulted too — see `param_bound_contexts`).
+    fn param_context(&self, _param: Entity) -> Entity {
+        self.ctx.owner
+    }
+
+    fn self_context(&self) -> Entity {
+        self.ctx.owner
+    }
+
+    fn copy_shape<'t>(&self, &tv: &'t TyVar) -> kestrel_semantics::CopyShape<'t, TyVar> {
+        use kestrel_semantics::CopyShape;
+        // The never-block leaves answer `Cloneable`, so BOTH questions pass.
+        if self.depth > 64 {
+            return CopyShape::Leaf(CopySemantics::Cloneable); // recursion guard
+        }
+        let TySlot::Resolved(kind) = self.ctx.slot(self.ctx.resolve(tv)) else {
+            return CopyShape::Leaf(CopySemantics::Cloneable); // unresolved
+        };
+        match kind {
+            TyKind::Error => CopyShape::Leaf(CopySemantics::Cloneable),
+            TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => CopyShape::Nominal {
+                entity: *entity,
+                args: Cow::Owned(args.clone()),
+            },
+            TyKind::SelfType { entity } => CopyShape::SelfType(*entity),
+            TyKind::Param { entity } => CopyShape::Param(*entity),
+            // Canonical fold (copy-drift #2 resolved 2026-06-10): a mixed tuple
+            // like `(Int64, RcBox)` is Cloneable — it satisfies `T: Copyable` AND
+            // `T: Cloneable` bounds (MIR already clone-elaborates its copies).
+            // `()` folds to Copyable, no longer vacuously Cloneable.
+            TyKind::Tuple(elems) => CopyShape::Tuple(Cow::Owned(elems.clone())),
+            // A ref-as-TYPE is Copyable (stage 2b ruling: payload/field refs
+            // bit-copy — the copy aliases the same storage, may-alias model).
+            // Not known Cloneable. The pointee question ("can a read through
+            // this ref place copy?") is the Expr-origin peel in solve_conforms,
+            // never this fold — this classifies the ref VALUE for gating-arg
+            // folds (`Optional[&File]` is Copyable even though File isn't).
+            TyKind::Ref { .. } => CopyShape::Leaf(CopySemantics::Copyable),
+            TyKind::Opaque { not_copyable, .. } => CopyShape::Opaque {
+                not_copyable: *not_copyable,
+            },
+            TyKind::RawExistential { bounds, .. } => {
+                CopyShape::RawExistential(bounds.iter().map(|(protocol, _)| *protocol).collect())
+            },
+            TyKind::Function { kind, .. } => CopyShape::Function(*kind),
+            // Protocol existentials are Copyable (not known Cloneable); an
+            // associated projection (`I.Item`) is Copyable-by-default
+            // (implicit bound), like a type param.
+            TyKind::Protocol { .. }
+            | TyKind::Never
+            | TyKind::TypeAlias { .. }
+            | TyKind::AssocProjection { .. } => CopyShape::Leaf(CopySemantics::Copyable),
+        }
     }
 }
 
@@ -758,96 +900,109 @@ impl CopyLayer for SolverCopyLayer<'_, '_> {
 /// `type_conforms_copyable`; reading the class directly for clone-vs-bitcopy
 /// decisions or diagnostics would inherit a wrong answer.
 pub(crate) fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> CopySemantics {
-    if depth > 64 {
-        return CopySemantics::Cloneable; // recursion guard — never block (both questions)
-    }
-    let resolved = ctx.resolve(tv);
-    let kind = match ctx.slot(resolved) {
-        TySlot::Resolved(k) => k.clone(),
-        _ => return CopySemantics::Cloneable, // unresolved: never block (both questions)
-    };
-    match kind {
-        TyKind::Error => CopySemantics::Cloneable, // never block (both questions)
-        TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
-            instance_semantics(&SolverCopyLayer { ctx, depth }, entity, &args)
-        },
-        // A protocol's abstract `Self` is only as copyable as its refinements;
-        // a concrete `Self` is its nominal (empty args: a gated base folds to
-        // NotCopyable).
-        TyKind::SelfType { entity }
-            if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(entity)
-                == Some(&kestrel_ast_builder::NodeKind::Protocol) =>
-        {
-            ctx.query_ctx
-                .query(kestrel_semantics::ProtocolSelfCopySemantics {
-                    protocol: entity,
-                    context: ctx.owner,
-                    root: ctx.root,
-                })
-        },
-        TyKind::SelfType { entity } => {
-            instance_semantics(&SolverCopyLayer { ctx, depth }, entity, &[])
-        },
-        // HOOK: structural parent context scopes the bound lookup.
-        TyKind::Param { entity } => {
-            let context = ctx.query_ctx.parent_of(entity).unwrap_or(entity);
-            ctx.query_ctx
-                .query(TypeParamCopyRequirement {
-                    param: entity,
-                    context,
-                    root: ctx.root,
-                })
-                .into()
-        },
-        // Canonical fold (copy-drift #2 resolved 2026-06-10): a mixed tuple
-        // like `(Int64, RcBox)` is Cloneable — it satisfies `T: Copyable` AND
-        // `T: Cloneable` bounds (MIR already clone-elaborates its copies).
-        // `()` folds to Copyable, no longer vacuously Cloneable.
-        TyKind::Tuple(elems) => {
-            fold_members(elems.iter().map(|&e| solver_copy_class(ctx, e, depth + 1)))
-        },
-        // A ref-as-TYPE is Copyable (stage 2b ruling: payload/field refs
-        // bit-copy — the copy aliases the same storage, may-alias model).
-        // Not known Cloneable. The pointee question ("can a read through
-        // this ref place copy?") is the Expr-origin peel in solve_conforms,
-        // never this fold — this classifies the ref VALUE for gating-arg
-        // folds (`Optional[&File]` is Copyable even though File isn't).
-        TyKind::Ref { .. } => CopySemantics::Copyable,
-        // `some P and not Copyable`: the underlier may be move-only, so use
-        // sites must move, never bit-copy. Plain `some P` guarantees a
-        // duplicable underlier (enforced post-solve on the defining body).
-        TyKind::Opaque { not_copyable, .. } => {
-            if not_copyable {
-                CopySemantics::NotCopyable
-            } else {
-                CopySemantics::Copyable
-            }
-        },
-        // A closure value's copy class is fixed by its KIND (plan D6): normal
-        // views bit-copy, `mutating`/`consuming` are move-only, `escaping`
-        // shares its environment through the box's clone.
-        TyKind::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(kind),
-        // Mirror `hir_type_copy_semantics`: protocol existentials are Copyable
-        // (not known Cloneable).
-        TyKind::Protocol { .. } | TyKind::Never | TyKind::TypeAlias { .. } => {
-            CopySemantics::Copyable
-        },
-        // Associated projection (`I.Item`) is Copyable-by-default (implicit
-        // bound), like a type param — matches `hir_type_copy_semantics` and MIR
-        // `ty_query`. Not known to be Cloneable, so only satisfies Copyable.
-        TyKind::AssocProjection { .. } => CopySemantics::Copyable,
-    }
+    kestrel_semantics::ty_copy_semantics(&SolverCopyLayer { ctx, depth }, &tv)
 }
 
 /// Boundary mapping from the tri-state classifier to the solver's boolean
 /// conformance question — sole caller is `solve_conforms`. `want_cloneable`
 /// selects the Cloneable (`true`) vs Copyable (`false`) question.
 pub(super) fn type_conforms_copyable(ctx: &InferCtx<'_>, tv: TyVar, want_cloneable: bool) -> bool {
+    // A `Copyable` bound promises an implicitly copyable *value*, which needs
+    // a compile-time size: a Cloneable raw existential is Cloneable but not
+    // Copyable (and `T: Copyable` implies `T: Sized`, see
+    // `TypeParamSizeRequirement`).
+    if !want_cloneable && !solver_ty_is_sized(ctx, tv, 0) {
+        return false;
+    }
     match solver_copy_class(ctx, tv, 0) {
         CopySemantics::NotCopyable => false,
         CopySemantics::Cloneable => true,
         CopySemantics::Copyable => !want_cloneable,
     }
+}
+
+/// Is `protocol` the `Sized` builtin (existentials)?
+pub(crate) fn is_sized_builtin(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
+    ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Sized,
+        root: ctx.root,
+    }) == Some(protocol)
+}
+
+/// `SizedLayer` over `TyVar` — the solver's face of the sizedness rule
+/// (`kestrel_semantics::ty_is_sized`). Depth bookkeeping mirrors
+/// `SolverStaticLayer`.
+struct SolverSizedLayer<'a, 'i> {
+    ctx: &'a InferCtx<'i>,
+    depth: u32,
+}
+
+impl kestrel_semantics::SizedLayer for SolverSizedLayer<'_, '_> {
+    type Ty = TyVar;
+
+    fn assoc_is_sized(&self, assoc: Entity) -> bool {
+        !kestrel_semantics::assoc_may_be_unsized(self.ctx.query_ctx, assoc, self.ctx.root)
+    }
+
+    fn nominal_sizedness(&self, entity: Entity) -> kestrel_semantics::Sizedness {
+        self.ctx
+            .query_ctx
+            .query(kestrel_semantics::NominalSizedness {
+                entity,
+                root: self.ctx.root,
+            })
+    }
+
+    fn shape<'t>(&self, &tv: &'t TyVar) -> SizedShape<'t, TyVar> {
+        if self.depth > 64 {
+            return SizedShape::Leaf; // recursion guard — never block
+        }
+        let TySlot::Resolved(kind) = self.ctx.slot(self.ctx.resolve(tv)) else {
+            return SizedShape::Leaf; // unresolved: never block
+        };
+        match kind {
+            TyKind::RawExistential { .. } => SizedShape::RawExistential,
+            TyKind::Struct { entity, args } => SizedShape::Struct {
+                entity: *entity,
+                args: Cow::Owned(args.clone()),
+            },
+            TyKind::Param { entity } => SizedShape::Param(*entity),
+            TyKind::AssocProjection { assoc, .. } => SizedShape::AssocProjection(*assoc),
+            TyKind::Enum { .. }
+            | TyKind::Protocol { .. }
+            | TyKind::SelfType { .. }
+            | TyKind::TypeAlias { .. }
+            | TyKind::Tuple(_)
+            | TyKind::Function { .. }
+            | TyKind::Ref { .. }
+            | TyKind::Opaque { .. }
+            | TyKind::Never
+            | TyKind::Error => SizedShape::Leaf,
+        }
+    }
+
+    /// Judged from the body being inferred (`ctx.owner`), so a member of an
+    /// `extend Box[T] where T: Sized` extension sees `T` as Sized.
+    fn param_is_sized(&self, param: Entity) -> bool {
+        self.ctx
+            .query_ctx
+            .query(kestrel_semantics::TypeParamSizeRequirement {
+                param,
+                context: self.ctx.owner,
+                root: self.ctx.root,
+            })
+            == kestrel_semantics::SizeRequirement::RequiresSized
+    }
+
+    fn component_is_sized(&self, &tv: &TyVar) -> bool {
+        solver_ty_is_sized(self.ctx, tv, self.depth + 1)
+    }
+}
+
+/// Is `tv` Sized (existentials design §2)? The rule itself is
+/// `kestrel_semantics::ty_is_sized`; `depth` bounds the recursion.
+pub(crate) fn solver_ty_is_sized(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> bool {
+    kestrel_semantics::ty_is_sized(&SolverSizedLayer { ctx, depth }, &tv)
 }
 
 /// Is `protocol` the `Static` builtin (references 2a)?
@@ -859,7 +1014,7 @@ pub(crate) fn is_static_builtin(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
 }
 
 /// `StaticLayer` over `TyVar` — the solver's hooks into the per-instantiation
-/// staticness rule (`kestrel_semantics::instance_is_static`, the single
+/// staticness rule (`kestrel_semantics::ty_is_static`, the single
 /// source of truth across semantics / solver / analyze). Depth bookkeeping
 /// mirrors `SolverCopyLayer`.
 pub(super) struct SolverStaticLayer<'a, 'i> {
@@ -869,6 +1024,14 @@ pub(super) struct SolverStaticLayer<'a, 'i> {
 
 impl StaticLayer for SolverStaticLayer<'_, '_> {
     type Ty = TyVar;
+
+    fn raw_existential_is_static(&self, bounds: &[Entity]) -> bool {
+        kestrel_semantics::raw_existential_is_static(
+            self.ctx.query_ctx,
+            bounds.iter().copied(),
+            self.ctx.root,
+        )
+    }
 
     fn nominal_staticness(&self, entity: Entity) -> Staticness {
         self.ctx
@@ -880,57 +1043,62 @@ impl StaticLayer for SolverStaticLayer<'_, '_> {
             .staticness
     }
 
-    fn member_is_static(&self, &tv: &TyVar) -> bool {
+    fn shape<'t>(&self, &tv: &'t TyVar) -> StaticShape<'t, TyVar> {
+        if self.depth > 64 {
+            return StaticShape::Leaf; // recursion guard — never block
+        }
+        let TySlot::Resolved(kind) = self.ctx.slot(self.ctx.resolve(tv)) else {
+            return StaticShape::Leaf; // unresolved: never block
+        };
+        match kind {
+            TyKind::Ref { .. } => StaticShape::Ref,
+            TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
+                StaticShape::Nominal {
+                    entity: *entity,
+                    args: Cow::Owned(args.clone()),
+                }
+            },
+            // Unlike the HIR and analyze layers (`BaseOnly`), the solver
+            // judges `Self` as an instantiation with no args, so a
+            // conditional base is unprovable here (mirrors the copy layer's
+            // empty-args rule).
+            TyKind::SelfType { entity } => StaticShape::Nominal {
+                entity: *entity,
+                args: Cow::Owned(Vec::new()),
+            },
+            TyKind::Param { entity } => StaticShape::Param(*entity),
+            TyKind::Tuple(elems) => StaticShape::Tuple(Cow::Owned(elems.clone())),
+            TyKind::RawExistential { bounds, .. } => {
+                StaticShape::RawExistential(bounds.iter().map(|(protocol, _)| *protocol).collect())
+            },
+            TyKind::Function { kind, .. } => StaticShape::Function {
+                is_view: kind.is_view(),
+            },
+            TyKind::Error
+            | TyKind::Protocol { .. }
+            | TyKind::Opaque { .. }
+            | TyKind::Never
+            | TyKind::TypeAlias { .. }
+            | TyKind::AssocProjection { .. } => StaticShape::Leaf,
+        }
+    }
+
+    fn param_is_static(&self, param: Entity) -> bool {
+        let context = self.ctx.query_ctx.parent_of(param).unwrap_or(param);
+        self.ctx.query_ctx.query(TypeParamStaticRequirement {
+            param,
+            context,
+            root: self.ctx.root,
+        }) == StaticRequirement::RequiresStatic
+    }
+
+    fn component_is_static(&self, &tv: &TyVar) -> bool {
         solver_ty_is_static(self.ctx, tv, self.depth + 1)
     }
 }
 
-/// Per-instantiation staticness for the solver: structural contains-ref over
-/// resolved type vars. Never-block arms (unresolved / Error / depth guard)
-/// answer `true` — in 2a nothing unresolved can become non-Static, and a
-/// missed rejection is a mono-stage gap, not a miscompile (Static has no
-/// runtime semantics). The universal fast path: `Staticness::Static` bases
-/// return without touching args.
+/// Is this solver type provably Static? The rule itself is
+/// `kestrel_semantics::ty_is_static`; `depth` bounds the recursion.
 pub(crate) fn solver_ty_is_static(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> bool {
-    if depth > 64 {
-        return true; // recursion guard — never block
-    }
-    let resolved = ctx.resolve(tv);
-    let kind = match ctx.slot(resolved) {
-        TySlot::Resolved(k) => k.clone(),
-        _ => return true, // unresolved: never block
-    };
-    match kind {
-        // The axiom: a reference is never Static.
-        TyKind::Ref { .. } => false,
-        TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
-            instance_is_static(&SolverStaticLayer { ctx, depth }, entity, &args)
-        },
-        // Empty args: a conditional base is unprovable here (mirrors the
-        // copy layer's empty-args rule).
-        TyKind::SelfType { entity } => {
-            instance_is_static(&SolverStaticLayer { ctx, depth }, entity, &[])
-        },
-        TyKind::Param { entity } => {
-            let context = ctx.query_ctx.parent_of(entity).unwrap_or(entity);
-            ctx.query_ctx.query(TypeParamStaticRequirement {
-                param: entity,
-                context,
-                root: ctx.root,
-            }) == StaticRequirement::RequiresStatic
-        },
-        TyKind::Tuple(elems) => elems
-            .iter()
-            .all(|&e| solver_ty_is_static(ctx, e, depth + 1)),
-        // A view-kind closure is not Static (references 2c); owning kinds are.
-        TyKind::Function { kind, .. } => !kind.is_view(),
-        // Protocol / opaque / alias / assoc-projection / Never / Error:
-        // conservative never-block leaves — refs can't reach them in 2a.
-        TyKind::Error
-        | TyKind::Protocol { .. }
-        | TyKind::Opaque { .. }
-        | TyKind::Never
-        | TyKind::TypeAlias { .. }
-        | TyKind::AssocProjection { .. } => true,
-    }
+    ty_is_static(&SolverStaticLayer { ctx, depth }, &tv)
 }

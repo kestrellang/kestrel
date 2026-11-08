@@ -38,10 +38,10 @@ func run() -> Int64 {
     let b = alias.collect();
     if a.count != 3 { return 3 }
     if b.count != 3 { return 4 }
-    if a(unchecked: 0).toOwned().isEqual(to: "one") == false { return 5 }
-    if a(unchecked: 2).toOwned().isEqual(to: "three") == false { return 6 }
-    if b(unchecked: 0).toOwned().isEqual(to: "one") == false { return 7 }
-    if b(unchecked: 2).toOwned().isEqual(to: "three") == false { return 8 }
+    if unsafe a(unchecked: 0).toOwned().isEqual(to: "one") == false { return 5 }
+    if unsafe a(unchecked: 2).toOwned().isEqual(to: "three") == false { return 6 }
+    if unsafe b(unchecked: 0).toOwned().isEqual(to: "one") == false { return 7 }
+    if unsafe b(unchecked: 2).toOwned().isEqual(to: "three") == false { return 8 }
 
     // Nothing has been released yet: both handles are still live.
     if drops != 0 { return 9 }

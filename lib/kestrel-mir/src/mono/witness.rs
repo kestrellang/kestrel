@@ -11,6 +11,7 @@ use crate::item::witness::WitnessDef;
 use crate::item::witness::WitnessMethodKey;
 use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
+use crate::ty_query::TypeEnv;
 
 // -- Error type --
 
@@ -159,6 +160,34 @@ pub fn match_pattern(
         // Structural recursion on wrapper types
         (MirTy::Pointer(a), MirTy::Pointer(b)) => match_pattern(arena, a, b, bindings),
 
+        // A raw existential: the same bounds in canonical order, args and
+        // pinned associated types matched structurally (an `any P: P`
+        // witness's pattern may carry the enclosing generic's params).
+        (
+            MirTy::RawExistential {
+                bounds: b1,
+                bindings: p1,
+            },
+            MirTy::RawExistential {
+                bounds: b2,
+                bindings: p2,
+            },
+        ) => {
+            b1.len() == b2.len()
+                && p1.len() == p2.len()
+                && b1.iter().zip(&b2).all(|((e1, a1), (e2, a2))| {
+                    e1 == e2
+                        && a1.len() == a2.len()
+                        && a1
+                            .iter()
+                            .zip(a2)
+                            .all(|(&p, &c)| match_pattern(arena, p, c, bindings))
+                })
+                && p1.iter().zip(&p2).all(|((a1, t1), (a2, t2))| {
+                    a1 == a2 && match_pattern(arena, *t1, *t2, bindings)
+                })
+        },
+
         // Refs match exactly by mutability — `extend &T: P` witnesses carry
         // `Ref{TypeParam}` implementing types; a `&mutating` self never
         // matches a `&` pattern (no subsumption — each mutability conforms
@@ -239,7 +268,7 @@ pub fn match_pattern(
 pub fn find_witness_with_method(
     arena: &TyArena,
     witnesses: &[WitnessDef],
-    protocols: &indexmap::IndexMap<Entity, ProtocolDef>,
+    env: &TypeEnv<'_>,
     protocol: Entity,
     method: &WitnessMethodKey,
     self_type: TyId,
@@ -247,6 +276,7 @@ pub fn find_witness_with_method(
 ) -> Result<(usize, HashMap<Entity, TyId>), MonoError> {
     // Extract the protocol's type args from the call-site method_type_args.
     // For `Convertible[Int64].init(from:)`, method_type_args[0] = Int64.
+    let protocols = env.protocols;
     let proto_param_count = protocols
         .get(&protocol)
         .map(|p| p.type_params.len())
@@ -271,8 +301,8 @@ pub fn find_witness_with_method(
         // treating them as wildcards.
         let mut bindings = HashMap::new();
         if match_pattern(arena, witness.implementing_type, self_type, &mut bindings)
-            && witness_proto_args_match(arena, witness, expected_proto_args, &bindings)
-            && super::entail::witness_constraints_hold(arena, witnesses, witness, &bindings)
+            && witness_proto_args_match(arena, witness, expected_proto_args, &mut bindings)
+            && super::entail::witness_constraints_hold(arena, env, witnesses, witness, &bindings)
         {
             candidates.push((i, bindings));
         }
@@ -382,13 +412,16 @@ fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> boo
 /// binds `T → Int64`) is substituted before comparing — treating it as a
 /// match-anything wildcard let a `ClosedRange[Int64]` witness satisfy a
 /// `RandomBounds[Int16]` call site and sample at the wrong layout (silent
-/// miscompile). Only a genuinely free param (`extend T: Proto[FreeParam]`,
-/// never mentioned in the implementing type) still matches anything.
+/// miscompile). A genuinely free param (`extend T: Proto[FreeParam]`, never
+/// mentioned in the implementing type) matches anything — and is BOUND to the
+/// call site's arg here, so the witness's `where` clauses are judged on it:
+/// left unbound, `extend Result[T, H]: FromResidual[E] where E: Reportable`
+/// read as "undecidable, permitted" and absorbed a non-Reportable residual.
 fn witness_proto_args_match(
     arena: &TyArena,
     witness: &WitnessDef,
     expected: &[TyId],
-    bindings: &HashMap<Entity, TyId>,
+    bindings: &mut HashMap<Entity, TyId>,
 ) -> bool {
     if expected.is_empty() {
         return true;
@@ -404,7 +437,7 @@ fn witness_proto_args_match(
         .iter()
         .zip(expected.iter())
         .all(|(&w, &e)| match arena.get(w) {
-            MirTy::TypeParam(p) => bindings.get(p).is_none_or(|&bound| bound == e),
+            MirTy::TypeParam(p) => *bindings.entry(*p).or_insert(e) == e,
             _ => w == e,
         })
 }
@@ -413,7 +446,7 @@ fn witness_proto_args_match(
 pub fn resolve_witness_call(
     arena: &mut TyArena,
     witnesses: &[WitnessDef],
-    protocols: &indexmap::IndexMap<Entity, ProtocolDef>,
+    env: &TypeEnv<'_>,
     functions: &indexmap::IndexMap<Entity, FunctionDef>,
     entity_names: &indexmap::IndexMap<Entity, String>,
     protocol: Entity,
@@ -424,7 +457,7 @@ pub fn resolve_witness_call(
     let (witness_idx, bindings) = find_witness_with_method(
         arena,
         witnesses,
-        protocols,
+        env,
         protocol,
         method,
         self_type,
@@ -445,7 +478,8 @@ pub fn resolve_witness_call(
     // Map protocol type params to their concrete values from the call site.
     // For `extend Int64: SeqIndex[T]`, proto_type_args = [TypeParam(T_ext)]
     // and method_type_args = [String]. This creates T_ext → String.
-    let proto_tp_entities = protocols
+    let proto_tp_entities = env
+        .protocols
         .get(&protocol)
         .map(|p| &p.type_params[..])
         .unwrap_or(&[]);
@@ -563,33 +597,28 @@ pub fn resolve_associated_type(
     self_type: TyId,
     assoc_entity: Entity,
 ) -> Option<TyId> {
-    let verbose = std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok();
-    if verbose {
-        eprintln!(
-            "  resolve_assoc_type: proto={:?} self={:?} ({:?}) assoc={:?}",
-            protocol,
-            self_type,
-            arena.get(self_type).clone(),
-            assoc_entity
-        );
-    }
+    kestrel_debug::ktrace!(
+        "vtable",
+        "resolve_assoc_type: proto={:?} self={:?} ({:?}) assoc={:?}",
+        protocol,
+        self_type,
+        arena.get(self_type),
+        assoc_entity
+    );
     for witness in witnesses {
         if witness.protocol != protocol {
             continue;
         }
-        if verbose {
-            eprintln!(
-                "    witness: impl={:?} ({:?}) bindings={:?}",
-                witness.implementing_type,
-                arena.get(witness.implementing_type).clone(),
-                witness.type_bindings
-            );
-        }
+        kestrel_debug::ktrace!(
+            "vtable",
+            "  witness: impl={:?} ({:?}) bindings={:?}",
+            witness.implementing_type,
+            arena.get(witness.implementing_type),
+            witness.type_bindings
+        );
         let mut bindings = HashMap::new();
         if !match_pattern(arena, witness.implementing_type, self_type, &mut bindings) {
-            if verbose {
-                eprintln!("    -> no match");
-            }
+            kestrel_debug::ktrace!("vtable", "    -> no match");
             continue;
         }
         for &(entity, bound_ty) in &witness.type_bindings {
@@ -653,6 +682,23 @@ mod tests {
 
     fn entity(id: u32) -> Entity {
         Entity::from_raw(id)
+    }
+
+    /// A `TypeEnv` over just these protocols (no nominals, no builtins).
+    fn test_env(protocols: &indexmap::IndexMap<Entity, ProtocolDef>) -> TypeEnv<'_> {
+        static EMPTY_S: std::sync::LazyLock<indexmap::IndexMap<Entity, crate::StructDef>> =
+            std::sync::LazyLock::new(indexmap::IndexMap::new);
+        static EMPTY_E: std::sync::LazyLock<indexmap::IndexMap<Entity, crate::EnumDef>> =
+            std::sync::LazyLock::new(indexmap::IndexMap::new);
+        TypeEnv {
+            structs: &EMPTY_S,
+            enums: &EMPTY_E,
+            protocols,
+            cloneable_protocol: None,
+            copyable_protocol: None,
+            static_protocol: None,
+            sized_protocol: None,
+        }
     }
 
     fn proto_map(protos: Vec<ProtocolDef>) -> indexmap::IndexMap<Entity, ProtocolDef> {
@@ -824,7 +870,7 @@ mod tests {
         let (idx, bindings) = find_witness_with_method(
             &a,
             &witnesses,
-            &protocols,
+            &test_env(&protocols),
             proto,
             &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             i64,
@@ -860,7 +906,7 @@ mod tests {
         let (idx, bindings) = find_witness_with_method(
             &a,
             &witnesses,
-            &protocols,
+            &test_env(&protocols),
             proto,
             &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             concrete,
@@ -898,7 +944,7 @@ mod tests {
         let result = find_witness_with_method(
             &a,
             &witnesses,
-            &protocols,
+            &test_env(&protocols),
             equatable,
             &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             i64,
@@ -918,7 +964,7 @@ mod tests {
         let result = find_witness_with_method(
             &a,
             &witnesses,
-            &protocols,
+            &test_env(&protocols),
             proto,
             &WitnessMethodKey::new("isEqual", vec![Some("to".into())]),
             i64,
@@ -962,7 +1008,7 @@ mod tests {
         let resolved = resolve_witness_call(
             &mut a,
             &[witness],
-            &proto_map(vec![ProtocolDef::new(iterator, "Iterator")]),
+            &test_env(&proto_map(vec![ProtocolDef::new(iterator, "Iterator")])),
             &func_map(vec![func]),
             &indexmap::IndexMap::new(),
             iterator,

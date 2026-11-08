@@ -3,20 +3,22 @@ use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::{self, AbiParam, InstBuilder, MemFlags, TrapCode, Value};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_module::Module;
-use kestrel_hecs::Entity;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::{CallArg, InstKind};
-use kestrel_mir::mono::{MonoEnum, MonoModule, MonoStruct};
 use kestrel_mir::{
     DivGuard, FieldIdx, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy,
-    MonoFuncId, Op, ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
+    MonoFuncId, Op, ParamConvention, Signedness, StructLayout, TyId, ValueId, VariantIdx,
 };
 
 use crate::abi::{self, PassMode, ReturnMode};
 use crate::error::CodegenError;
 use crate::func::FuncCompiler;
-use crate::ty::{TypeCache, TypeRepr, float_bits_to_cl, int_bits_to_cl};
+use crate::ty::{Cranelift, TypeRepr, float_bits_to_cl, int_bits_to_cl};
 use crate::{imm, mem};
+use kestrel_codegen::layout::{
+    discriminant_width, find_mono_enum, ret_ty_is_never, struct_field_offset, struct_field_type,
+    tuple_elem_offset,
+};
 
 /// Returns true if the instruction diverges (call to a !-returning function).
 // Operand contract legend (enforced by verify_value_repr):
@@ -239,12 +241,11 @@ pub fn compile_inst(
                 .repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let is_guaranteed = fc.body.values[operand.index()].ownership
                 == kestrel_mir::value::Ownership::Guaranteed;
-            let disc_width = discriminant_width(
+            let disc_width = discriminant_width::<Cranelift>(
                 operand_ty,
                 fc.body.values[result.index()].ty,
                 &fc.ctx.module.ty_arena,
                 fc.ctx.module,
-                &fc.ctx.tc,
             );
             let val = match repr {
                 // Twin of the LLVM `Discriminant` handling in
@@ -483,13 +484,7 @@ pub fn compile_inst(
                 )
                 .0
             } else {
-                struct_field_offset(
-                    *ty,
-                    *field,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                )
+                struct_field_offset(*ty, *field, &fc.ctx.module.ty_arena, fc.ctx.module)
             };
             let addr = if offset != 0 {
                 builder.ins().iadd_imm(base_val, offset as i64)
@@ -630,6 +625,9 @@ fn compile_op1(
         Op::PtrToAddress => arg,
         Op::PtrIsNull => builder.ins().icmp_imm(IntCC::Equal, arg, 0),
         Op::PtrNull(_) => builder.ins().iconst(ptr_ty, 0),
+        Op::OverflowChecks => builder
+            .ins()
+            .iconst(ir::types::I8, i64::from(fc.ctx.options.overflow_checks())),
         Op::PtrTo(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
@@ -637,11 +635,25 @@ fn compile_op1(
             slot
         },
         Op::PtrCast(_) | Op::PtrBitcast(_) => arg,
+        // Same layout as the (data, table) tuple it views.
+        Op::FatPtr(_) => arg,
+        // Legalized at mono (`mono::fat`) when the pointee is unsized, so
+        // only the static case reaches codegen.
+        Op::SizeOfVal(ty) => {
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            builder.ins().iconst(ptr_ty, repr.size() as i64)
+        },
+        Op::AlignOfVal(ty) => {
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            builder.ins().iconst(ptr_ty, repr.align() as i64)
+        },
         Op::RefToPtr => arg,
         // Project word `i` out of a closure value. A `FuncThick` is always
         // addressed (TypeRepr::Aggregate), so `arg` is the base address and the
         // word is a plain pointer-sized load at `i * ptr_size`.
-        Op::ClosureWord(i) => {
+        // A fat (data, table) value is addressed like a closure value; a
+        // table word is the same load. Cranelift pointers are integers.
+        Op::ClosureWord(i) | Op::FatWord(i) | Op::WordInt(i) => {
             let off = (i as u64 * fc.ctx.ptr_size) as i32;
             builder
                 .ins()
@@ -721,7 +733,7 @@ fn compile_op1(
 /// Return a divisor safe to feed to native `sdiv`/`srem`: `1` when the operation
 /// would be the overflowing `minValue / -1` (so the native op yields `min/1=min`
 /// and `min%1=0`, matching the spec's wrap), otherwise the original divisor. A
-/// zero divisor is left untouched so the native op still traps on div-by-zero.
+/// zero divisor is left untouched; `trap_on_zero_divisor` handles it.
 fn signed_div_overflow_guard(
     builder: &mut FunctionBuilder,
     bits: IntBits,
@@ -737,6 +749,16 @@ fn signed_div_overflow_guard(
     let is_min = builder.ins().icmp(IntCC::Equal, lhs, min_v);
     let is_overflow = builder.ins().band(is_neg_one, is_min);
     builder.ins().select(is_overflow, one, rhs)
+}
+
+/// Trap explicitly on a zero divisor, like every other runtime check. Native
+/// x86 `idiv`/`div` raise SIGFPE on zero (only `sdiv` got a clean trap, as a
+/// side effect of Cranelift's own lowering), so `%` and unsigned `/` died with
+/// a different signal than the rest. Twin of LLVM's `emit_div_by_zero_trap`.
+fn trap_on_zero_divisor(builder: &mut FunctionBuilder, guard: DivGuard, rhs: Value) {
+    if guard == DivGuard::Checked {
+        builder.ins().trapz(rhs, TrapCode::unwrap_user(1));
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -807,12 +829,12 @@ fn compile_op2(
         // Signed div/rem: `minValue / -1` overflows. Cranelift `sdiv`/`srem` TRAP
         // on it, but the spec (int64.ks docs) says it WRAPS (div→minValue, rem→0).
         // Swap the divisor -1→1 exactly in that case so the native op produces
-        // min/1=min and min%1=0 — no trap, correct wrap. Division-by-zero still
-        // traps natively (the swap leaves a 0 divisor untouched). Mirrored in the
-        // LLVM backend (which additionally needs an explicit div-by-zero trap).
+        // min/1=min and min%1=0 — no trap, correct wrap. A zero divisor traps
+        // explicitly first. Mirrored in the LLVM backend.
         Op::Div(bits, Signedness::Signed, guard) => {
-            // Unchecked drops the min/-1 swap (native sdiv then traps on that edge
-            // and on div-by-zero — UB-equivalent). The user guarantees validity.
+            // Unchecked drops both guards (native sdiv then traps on those edges
+            // — UB-equivalent). The user guarantees validity.
+            trap_on_zero_divisor(builder, guard, rhs);
             let safe = if guard == DivGuard::Checked {
                 signed_div_overflow_guard(builder, bits, lhs, rhs)
             } else {
@@ -820,8 +842,12 @@ fn compile_op2(
             };
             builder.ins().sdiv(lhs, safe)
         },
-        Op::Div(_, Signedness::Unsigned, _) => builder.ins().udiv(lhs, rhs),
+        Op::Div(_, Signedness::Unsigned, guard) => {
+            trap_on_zero_divisor(builder, guard, rhs);
+            builder.ins().udiv(lhs, rhs)
+        },
         Op::Rem(bits, Signedness::Signed, guard) => {
+            trap_on_zero_divisor(builder, guard, rhs);
             let safe = if guard == DivGuard::Checked {
                 signed_div_overflow_guard(builder, bits, lhs, rhs)
             } else {
@@ -829,7 +855,10 @@ fn compile_op2(
             };
             builder.ins().srem(lhs, safe)
         },
-        Op::Rem(_, Signedness::Unsigned, _) => builder.ins().urem(lhs, rhs),
+        Op::Rem(_, Signedness::Unsigned, guard) => {
+            trap_on_zero_divisor(builder, guard, rhs);
+            builder.ins().urem(lhs, rhs)
+        },
         Op::AddOverflows(bits, sign) => {
             emit_overflow_check(builder, bits, sign, OverflowKind::Add, lhs, rhs)
         },
@@ -839,6 +868,8 @@ fn compile_op2(
         Op::MulOverflows(bits, sign) => {
             emit_overflow_check(builder, bits, sign, OverflowKind::Mul, lhs, rhs)
         },
+        Op::MulHigh(_, Signedness::Signed) => builder.ins().smulhi(lhs, rhs),
+        Op::MulHigh(_, Signedness::Unsigned) => builder.ins().umulhi(lhs, rhs),
         Op::FAdd(_) => builder.ins().fadd(lhs, rhs),
         Op::FSub(_) => builder.ins().fsub(lhs, rhs),
         Op::FMul(_) => builder.ins().fmul(lhs, rhs),
@@ -973,16 +1004,24 @@ fn compile_op3(
 
 /// Resolve an aggregate-slot operand's store value. A REF slot (stage 2b)
 /// stores the ADDRESS: a @guaranteed pointee-typed operand's codegen value
-/// IS that address, and an @owned `MirTy::Ref` operand already carries the
-/// pointer scalar — neither may go through `resolve_scalar` (it would load
-/// a scalar POINTEE through the address).
+/// IS that address, so it must not go through `resolve_scalar` (that would
+/// load a scalar POINTEE through it). A REF-typed operand is the `&&U = &U`
+/// collapse (a generic `&T` slot at `T=&U`): the slot stores the operand's
+/// pointer, which `resolve_scalar` yields for both ownerships — the same
+/// rule as ref-typed call args.
 fn resolve_slot_value(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
     slot_ty: TyId,
     value_id: ValueId,
 ) -> Value {
-    if matches!(fc.ctx.module.ty_arena.get(slot_ty), MirTy::Ref { .. }) {
+    let arena = &fc.ctx.module.ty_arena;
+    let slot_is_ref = matches!(arena.get(slot_ty), MirTy::Ref { .. });
+    let operand_is_ref = matches!(
+        arena.get(fc.body.values[value_id.index()].ty),
+        MirTy::Ref { .. }
+    );
+    if slot_is_ref && !operand_is_ref {
         fc.get_value(builder, value_id)
     } else {
         fc.resolve_scalar(builder, value_id)
@@ -1002,13 +1041,8 @@ fn compile_struct(
         TypeRepr::Zst => Ok(builder.ins().iconst(ptr_ty, 0)),
         TypeRepr::Scalar(t) => {
             if fields.len() == 1 {
-                let field_ty = struct_field_type(
-                    ty,
-                    fields[0].0,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                );
+                let field_ty =
+                    struct_field_type(ty, fields[0].0, &fc.ctx.module.ty_arena, fc.ctx.module);
                 // This is where F40's wrong value was minted, so this is where the
                 // layout authorities are cross-checked. `resolve_slot_value` on an
                 // AGGREGATE field yields that field's stack-slot ADDRESS — fine as
@@ -1030,20 +1064,10 @@ fn compile_struct(
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
             mem::zero_memory(builder, slot, repr.size());
             for &(field_idx, value_id) in fields {
-                let offset = struct_field_offset(
-                    ty,
-                    field_idx,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                );
-                let field_ty = struct_field_type(
-                    ty,
-                    field_idx,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                );
+                let offset =
+                    struct_field_offset(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
+                let field_ty =
+                    struct_field_type(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
                 let val = resolve_slot_value(fc, builder, field_ty, value_id);
                 let field_repr = fc
                     .ctx
@@ -1060,20 +1084,10 @@ fn compile_struct(
             let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
             mem::zero_memory(builder, slot, size);
             for &(field_idx, value_id) in fields {
-                let offset = struct_field_offset(
-                    ty,
-                    field_idx,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                );
-                let field_ty = struct_field_type(
-                    ty,
-                    field_idx,
-                    &fc.ctx.module.ty_arena,
-                    fc.ctx.module,
-                    &fc.ctx.tc,
-                );
+                let offset =
+                    struct_field_offset(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
+                let field_ty =
+                    struct_field_type(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
                 let val = resolve_slot_value(fc, builder, field_ty, value_id);
                 let field_repr = fc
                     .ctx
@@ -1163,7 +1177,7 @@ fn compile_enum(
         if let MirTy::Named { entity, type_args } = arena.get(enum_ty) {
             let entity = *entity;
             let type_args = type_args.clone();
-            if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc) {
+            if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module) {
                 let disc = e.cases[variant.index()].discriminant;
                 (
                     int_bits_to_cl(e.discriminant_width),
@@ -1217,7 +1231,7 @@ fn store_variant_payload(
     if let MirTy::Named { entity, type_args } = arena.get(enum_ty) {
         let entity = *entity;
         let type_args = type_args.clone();
-        if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc)
+        if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module)
             && let Some(Layout::Enum(el)) = &e.type_info.layout
             && let Some(vl) = el.variant_layouts.get(variant.index())
         {
@@ -1405,13 +1419,7 @@ fn compile_struct_extract(
     let is_borrowed =
         fc.body.values[operand.index()].ownership == kestrel_mir::value::Ownership::Guaranteed;
 
-    let field_ty = struct_field_type(
-        operand_ty,
-        field,
-        &fc.ctx.module.ty_arena,
-        fc.ctx.module,
-        &fc.ctx.tc,
-    );
+    let field_ty = struct_field_type(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module);
     let field_repr = fc
         .ctx
         .tc
@@ -1441,13 +1449,7 @@ fn compile_struct_extract(
     // @guaranteed operands are always pointers (Option B invariant).
     // Return the field address — CopyValue handles the load.
     if is_borrowed {
-        let offset = struct_field_offset(
-            operand_ty,
-            field,
-            &fc.ctx.module.ty_arena,
-            fc.ctx.module,
-            &fc.ctx.tc,
-        );
+        let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module);
         let addr = if offset != 0 {
             builder.ins().iadd_imm(base, offset as i64)
         } else {
@@ -1458,15 +1460,11 @@ fn compile_struct_extract(
         // address. A REF-typed result (clone/drop shim projections) keeps
         // the slot's address per the representation contract; loading here
         // would make its consumers deref one level too many.
-        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-            && !matches!(
-                fc.ctx
-                    .module
-                    .ty_arena
-                    .get(fc.body.values[result.index()].ty),
-                MirTy::Ref { .. }
-            )
-        {
+        if kestrel_codegen::ref_slot_loads_pointee(
+            fc.ctx.module,
+            field_ty,
+            fc.body.values[result.index()].ty,
+        ) {
             return Ok(builder
                 .ins()
                 .load(fc.ctx.ptr_ty, MemFlags::new(), addr, Offset32::new(0)));
@@ -1488,13 +1486,7 @@ fn compile_struct_extract(
     }
 
     // @owned aggregate: compute field offset and load.
-    let offset = struct_field_offset(
-        operand_ty,
-        field,
-        &fc.ctx.module.ty_arena,
-        fc.ctx.module,
-        &fc.ctx.tc,
-    );
+    let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module);
     let addr = if offset != 0 {
         builder.ins().iadd_imm(base, offset as i64)
     } else {
@@ -1534,15 +1526,11 @@ fn compile_tuple_extract(
             // Stage 2b ref slot with a POINTEE-typed result: load the
             // stored address (see compile_struct_extract; Ref-typed
             // results keep the slot address).
-            if matches!(arena.get(elem_ty), MirTy::Ref { .. })
-                && !matches!(
-                    fc.ctx
-                        .module
-                        .ty_arena
-                        .get(fc.body.values[result.index()].ty),
-                    MirTy::Ref { .. }
-                )
-            {
+            if kestrel_codegen::ref_slot_loads_pointee(
+                fc.ctx.module,
+                elem_ty,
+                fc.body.values[result.index()].ty,
+            ) {
                 return Ok(builder.ins().load(
                     fc.ctx.ptr_ty,
                     MemFlags::new(),
@@ -1578,7 +1566,7 @@ fn compile_enum_payload(
     if let MirTy::Named { entity, type_args } = arena.get(operand_ty) {
         let entity = *entity;
         let type_args = type_args.clone();
-        if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc) {
+        if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module) {
             let payload_offset = e.payload_offset();
             if let Some(Layout::Enum(el)) = &e.type_info.layout
                 && let Some(vl) = el.variant_layouts.get(variant.index())
@@ -1591,15 +1579,11 @@ fn compile_enum_payload(
                     // Stage 2b ref slot with a POINTEE-typed result: load
                     // the stored address (see compile_struct_extract;
                     // Ref-typed results keep the slot address).
-                    if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
-                        && !matches!(
-                            fc.ctx
-                                .module
-                                .ty_arena
-                                .get(fc.body.values[result.index()].ty),
-                            MirTy::Ref { .. }
-                        )
-                    {
+                    if kestrel_codegen::ref_slot_loads_pointee(
+                        fc.ctx.module,
+                        field_ty,
+                        fc.body.values[result.index()].ty,
+                    ) {
                         return Ok(builder.ins().load(
                             fc.ctx.ptr_ty,
                             MemFlags::new(),
@@ -1682,6 +1666,7 @@ fn compile_call(
     match callee {
         Callee::Resolved(mono_id) => compile_resolved_call(fc, builder, *mono_id, args, result),
         Callee::Thin(func_val_id) => compile_thin_call(fc, builder, *func_val_id, args, result),
+        Callee::C(func_val_id) => compile_c_call(fc, builder, *func_val_id, args, result),
         Callee::Thick(closure_val_id) => {
             compile_thick_call(fc, builder, *closure_val_id, args, result)
         },
@@ -1705,10 +1690,6 @@ fn compile_call(
             )))
         },
     }
-}
-
-fn ret_ty_is_never(module: &MonoModule, ret: TyId) -> bool {
-    matches!(module.ty_arena.get(ret), MirTy::Never)
 }
 
 fn compile_resolved_call(
@@ -1754,7 +1735,7 @@ fn compile_resolved_call(
             .ctx
             .tc
             .repr(param.ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-        let pass = abi::param_pass_mode(param.convention, repr, ptr_ty);
+        let pass = abi::param_pass_mode(param.convention, repr);
         let val = fc.get_value(builder, call_arg.value);
         let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
             == kestrel_mir::value::Ownership::Guaranteed;
@@ -1880,7 +1861,6 @@ fn compile_thin_call(
     args: &[CallArg],
     result: Option<ValueId>,
 ) -> Result<bool, CodegenError> {
-    let ptr_ty = fc.ctx.ptr_ty;
     let func_ptr = fc.get_value(builder, func_val_id);
 
     // Infer types from the ValueId's type (FuncThin or Pointer(FuncThin))
@@ -1898,6 +1878,49 @@ fn compile_thin_call(
             "thin call on non-FuncThin".into(),
         ));
     };
+    emit_kestrel_indirect_call(fc, builder, func_ptr, &param_tys, ret_ty, args, result)
+}
+
+/// A call through a C function value: call its type's bridge (Kestrel ABI)
+/// with the address first; the bridge makes the C call.
+fn compile_c_call(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    func_val_id: ValueId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let func_ty = fc.body.values[func_val_id.index()].ty;
+    let Some(decl) = kestrel_codegen::c_abi::CDecl::of_func_c(&fc.ctx.module.ty_arena, func_ty)
+    else {
+        return Err(CodegenError::Unsupported("C call on non-FuncC".into()));
+    };
+    let param_tys = crate::c_bridge::call_bridge_params(func_ty, &decl);
+    let addr_arg = CallArg {
+        value: func_val_id,
+        convention: ParamConvention::Consuming,
+    };
+    let args: Vec<CallArg> = std::iter::once(addr_arg)
+        .chain(args.iter().cloned())
+        .collect();
+    let bridge = crate::c_bridge::call_bridge(fc.ctx, func_ty)?;
+    let fref = fc.ctx.cl_module.declare_func_in_func(bridge, builder.func);
+    let bridge_ptr = builder.ins().func_addr(fc.ctx.ptr_ty, fref);
+    emit_kestrel_indirect_call(fc, builder, bridge_ptr, &param_tys, decl.ret, &args, result)
+}
+
+/// Call `func_ptr`, a Kestrel-ABI function of `param_tys` and `ret_ty`.
+fn emit_kestrel_indirect_call(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    func_ptr: Value,
+    param_tys: &[(TyId, ParamConvention)],
+    ret_ty: TyId,
+    args: &[CallArg],
+    result: Option<ValueId>,
+) -> Result<bool, CodegenError> {
+    let ptr_ty = fc.ctx.ptr_ty;
+    let arena = &fc.ctx.module.ty_arena;
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, arena, fc.ctx.module);
     let ret_mode = abi::return_mode(ret_repr);
@@ -1908,9 +1931,9 @@ fn compile_thin_call(
     if matches!(ret_mode, ReturnMode::Sret) {
         sig.params.push(AbiParam::new(ptr_ty));
     }
-    for (ty, convention) in &param_tys {
+    for (ty, convention) in param_tys {
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
-        match abi::param_pass_mode(*convention, repr, ptr_ty) {
+        match abi::param_pass_mode(*convention, repr) {
             PassMode::ByVal(t) => sig.params.push(AbiParam::new(t)),
             PassMode::ByRef => sig.params.push(AbiParam::new(ptr_ty)),
             PassMode::Zst => {},
@@ -1937,7 +1960,7 @@ fn compile_thin_call(
         }
         let (ty, convention) = &param_tys[i];
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
-        let pass = abi::param_pass_mode(*convention, repr, ptr_ty);
+        let pass = abi::param_pass_mode(*convention, repr);
         let val = fc.get_value(builder, call_arg.value);
         let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
             == kestrel_mir::value::Ownership::Guaranteed;
@@ -2039,7 +2062,7 @@ fn compile_thick_call(
     sig.params.push(AbiParam::new(ptr_ty)); // env_ptr
     for (ty, convention) in &param_tys {
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
-        match abi::param_pass_mode(*convention, repr, ptr_ty) {
+        match abi::param_pass_mode(*convention, repr) {
             PassMode::ByVal(t) => sig.params.push(AbiParam::new(t)),
             PassMode::ByRef => sig.params.push(AbiParam::new(ptr_ty)),
             PassMode::Zst => {},
@@ -2067,7 +2090,7 @@ fn compile_thick_call(
         }
         let (ty, convention) = &param_tys[i];
         let repr = fc.ctx.tc.repr(*ty, arena, fc.ctx.module);
-        let pass = abi::param_pass_mode(*convention, repr, ptr_ty);
+        let pass = abi::param_pass_mode(*convention, repr);
         let val = fc.get_value(builder, call_arg.value);
         let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
             == kestrel_mir::value::Ownership::Guaranteed;
@@ -2131,100 +2154,3 @@ fn compile_thick_call(
 // ======================================================================
 // Layout helpers
 // ======================================================================
-
-/// Width of a `Discriminant` read: an enum's tag width, else the result
-/// type's (an integer switch reads its value at its own width; see
-/// `emit_int_discriminant`), else the 32-bit tag default.
-fn discriminant_width(
-    ty: TyId,
-    result_ty: TyId,
-    arena: &TyArena,
-    module: &MonoModule,
-    tc: &TypeCache,
-) -> ir::Type {
-    if let MirTy::Named { entity, type_args } = arena.get(ty) {
-        let entity = *entity;
-        let type_args = type_args.clone();
-        if let Some(e) = find_mono_enum(&entity, &type_args, module, tc) {
-            return int_bits_to_cl(e.discriminant_width);
-        }
-    }
-    match arena.get(result_ty) {
-        MirTy::I8 => ir::types::I8,
-        MirTy::I16 => ir::types::I16,
-        MirTy::I64 => ir::types::I64,
-        _ => ir::types::I32,
-    }
-}
-
-fn struct_field_offset(
-    container_ty: TyId,
-    field_idx: FieldIdx,
-    arena: &TyArena,
-    module: &MonoModule,
-    tc: &TypeCache,
-) -> u64 {
-    if let MirTy::Named { entity, type_args } = arena.get(container_ty) {
-        let entity = *entity;
-        let type_args = type_args.clone();
-        if let Some(s) = find_mono_struct(&entity, &type_args, module, tc)
-            && let Some(Layout::Struct(sl)) = &s.type_info.layout
-        {
-            return sl.field_offsets[field_idx.index()];
-        }
-    }
-    0
-}
-
-fn struct_field_type(
-    container_ty: TyId,
-    field_idx: FieldIdx,
-    arena: &TyArena,
-    module: &MonoModule,
-    tc: &TypeCache,
-) -> TyId {
-    if let MirTy::Named { entity, type_args } = arena.get(container_ty) {
-        let entity = *entity;
-        let type_args = type_args.clone();
-        if let Some(s) = find_mono_struct(&entity, &type_args, module, tc) {
-            return s.fields[field_idx.index()].ty;
-        }
-    }
-    container_ty
-}
-
-fn tuple_elem_offset(
-    tc: &mut TypeCache,
-    arena: &TyArena,
-    module: &MonoModule,
-    elems: &[TyId],
-    index: u32,
-) -> (u64, TyId) {
-    let mut layout = StructLayout::new();
-    for (i, &elem) in elems.iter().enumerate() {
-        let repr = tc.repr(elem, arena, module);
-        layout.append_field(StructLayout::scalar(repr.size(), repr.align()));
-        if i == index as usize {
-            return (layout.field_offsets[i], elem);
-        }
-    }
-    (0, elems[index as usize])
-}
-
-pub fn find_mono_struct<'m>(
-    entity: &Entity,
-    type_args: &[TyId],
-    module: &'m MonoModule,
-    _tc: &TypeCache,
-) -> Option<&'m MonoStruct> {
-    module.structs.get(&(*entity, type_args.to_vec()))
-}
-
-pub fn find_mono_enum<'m>(
-    entity: &Entity,
-    type_args: &[TyId],
-    module: &'m MonoModule,
-    _tc: &TypeCache,
-) -> Option<&'m MonoEnum> {
-    module.enums.get(&(*entity, type_args.to_vec()))
-}

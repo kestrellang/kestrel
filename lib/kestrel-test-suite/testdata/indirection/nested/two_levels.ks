@@ -5,7 +5,7 @@
 // Bounded transitivity (R5): RcBox[RcBox[Account]] reaches Account through
 // two peels. The outer wrapper has no `balance` -> peel -> inner RcBox has
 // no `balance` -> peel -> Account.balance. A write threads back through both
-// pointeeMutRef() projections.
+// `value` projections.
 module Test
 
 import std.memory.(RcBox)

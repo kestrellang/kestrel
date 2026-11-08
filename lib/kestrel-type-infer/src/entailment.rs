@@ -227,7 +227,11 @@ mod tests {
         world.set(ext, ExtensionTarget(named("P")));
         world.set(
             ext,
-            Conformances(vec![ConformanceItem::Positive(named("Q"), fake_syntax())]),
+            Conformances(vec![ConformanceItem::Positive(
+                named("Q"),
+                fake_syntax(),
+                false,
+            )]),
         );
         world.set_parent(ext, root);
 

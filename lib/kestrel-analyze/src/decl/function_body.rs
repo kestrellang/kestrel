@@ -21,7 +21,8 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Attributes, Intrinsic, NodeKind, Valued};
+use kestrel_ast_builder::attrs::attrs_of;
+use kestrel_ast_builder::{Intrinsic, NodeKind, Valued};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E623",
@@ -60,12 +61,10 @@ impl DeclCheck for FunctionBodyAnalyzer {
         }
 
         // Skip extern and builtin functions
-        if let Some(attrs) = cx.query.get::<Attributes>(cx.entity)
-            && attrs
-                .0
-                .iter()
-                .any(|a| a.name == "extern" || a.name == "builtin")
-        {
+        // `mentions`: a malformed `@extern` is reported by AttributeValidation;
+        // asking for a body as well would be a second error for one mistake.
+        let attrs = attrs_of(cx.query, cx.entity);
+        if attrs.mentions("extern") || attrs.mentions("builtin") {
             return vec![];
         }
 

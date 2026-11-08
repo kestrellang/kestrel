@@ -15,7 +15,7 @@ module Test
 
             // Peek doesn't consume
             let p1 = iter.peek();
-            if p1.isNone() { return 1 }
+            if p1.isNone { return 1 }
             if p1.unwrap() != 1 { return 2 }
 
             // Peek again returns same value
@@ -34,7 +34,7 @@ module Test
             iter.next();
             iter.next();
             let pEnd = iter.peek();
-            if pEnd.isSome() { return 6 }
+            if pEnd.isSome { return 6 }
 
             0
         }

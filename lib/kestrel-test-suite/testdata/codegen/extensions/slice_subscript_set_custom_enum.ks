@@ -22,14 +22,14 @@ func main() -> lang.i64 {
     arr(2) = Color.Blue;
 
     // Unchecked subscript set
-    arr(unchecked: 1) = Color.Blue;
-    arr(unchecked: 3) = Color.Green;
+    unsafe arr(unchecked: 1) = Color.Blue;
+    unsafe arr(unchecked: 3) = Color.Green;
 
     // Verify via unchecked read
-    match arr(unchecked: 0) { .Green => {}, _ => return 1 }
-    match arr(unchecked: 1) { .Blue => {}, _ => return 2 }
-    match arr(unchecked: 2) { .Blue => {}, _ => return 3 }
-    match arr(unchecked: 3) { .Green => {}, _ => return 4 }
+    match unsafe arr(unchecked: 0) { .Green => {}, _ => return 1 }
+    match unsafe arr(unchecked: 1) { .Blue => {}, _ => return 2 }
+    match unsafe arr(unchecked: 2) { .Blue => {}, _ => return 3 }
+    match unsafe arr(unchecked: 3) { .Green => {}, _ => return 4 }
 
     // Verify via checked read
     match arr(0) { .Green => {}, _ => return 5 }

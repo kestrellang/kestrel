@@ -7,13 +7,14 @@
 
 use std::path::PathBuf;
 
-use kestrel_ast_builder::{Attributes, FileId, FilePath, Settable, Valued};
+use kestrel_ast_builder::attrs::attrs_of;
+use kestrel_ast_builder::{FileId, FilePath, Settable, Valued};
 use kestrel_hecs::Entity;
 use kestrel_mir::body::OssaBody;
 use kestrel_mir::item::function::{FunctionDef, FunctionKind};
 use kestrel_mir::item::static_def::{FileConstantData, StaticDef};
 use kestrel_mir::op::IntBits;
-use kestrel_mir::{FieldIdx, Immediate, MirTy, TyId, WitnessMethodKey};
+use kestrel_mir::{FieldIdx, Immediate, MirTy, TyId};
 use kestrel_syntax_tree::SyntaxKind;
 use kestrel_syntax_tree::ast::{self, AstNode};
 
@@ -216,8 +217,9 @@ fn synthesize_main_wrapper(ctx: &mut LowerCtx, master_init: Option<Entity>) {
             vec![],
         );
 
-        let ret_val = match (exitable, exitcode_ent) {
-            (Some(exitable), Some(exitcode_ent)) => {
+        let report = ctx.builtin_witness_key(Builtin::ExitableReport);
+        let ret_val = match (exitable, exitcode_ent, report) {
+            (Some(exitable), Some(exitcode_ent), Some(report)) => {
                 let exitcode_ty = ctx.module.ty_arena.named(exitcode_ent, vec![]);
                 let i8_ty = ctx.module.ty_arena.i8();
                 let field = ctx
@@ -232,7 +234,7 @@ fn synthesize_main_wrapper(ctx: &mut LowerCtx, master_init: Option<Entity>) {
                     Some(code),
                     Callee::Witness {
                         protocol: exitable,
-                        method: WitnessMethodKey::simple("report"),
+                        method: report,
                         self_type: run_ret,
                         method_type_args: vec![],
                     },
@@ -451,10 +453,8 @@ fn extract_literal_initializer(ctx: &LowerCtx, entity: Entity, ty: TyId) -> Opti
 }
 
 fn extract_file_constant(ctx: &LowerCtx, entity: Entity, ty: TyId) -> Option<FileConstantData> {
-    let attrs = ctx.world.get::<Attributes>(entity)?;
-    let attr = attrs.0.iter().find(|a| a.name == "fileconstant")?;
-    let raw = &attr.args.first()?.value;
-    let relative_path = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"'))?;
+    let attrs = attrs_of(&ctx.query, entity);
+    let relative_path = attrs.file_constant()?;
 
     let element_ty = match ctx.module.ty_arena.get(ty) {
         MirTy::Named { type_args, .. } if type_args.len() == 1 => type_args[0],

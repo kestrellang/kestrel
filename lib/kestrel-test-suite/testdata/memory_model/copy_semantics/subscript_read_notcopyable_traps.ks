@@ -32,13 +32,13 @@ import std.numeric.(Int64)
 struct Res: not Copyable {
     var tag: Int64
     var drops: Pointer[Int64]
-    deinit { self.drops.write(self.drops.read() + 1); }
+    deinit { unsafe self.drops.write(self.drops.read() + 1); }
 }
 
 @main
 func main() -> lang.i64 {
     let drops = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    drops.write(0);
+    unsafe drops.write(0);
     var rs = [Res(tag: 1, drops: drops)]; // ERROR: Res !: Copyable
     // Bit-copies the non-Copyable element out of the array — must trap.
     let t = rs(0).tag;

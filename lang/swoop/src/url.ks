@@ -100,7 +100,7 @@ public func parseClientUrl(raw: String) -> ClientUrl throws SwoopError {
     var pathStart = len;
     var si = afterScheme;
     while si < len {
-        if raw.bytes(unchecked: si) == 47 { // '/'
+        if unsafe raw.bytes(unchecked: si) == 47 { // '/'
             pathStart = si;
             break
         }
@@ -122,7 +122,7 @@ public func parseClientUrl(raw: String) -> ClientUrl throws SwoopError {
         let portStr = hpSlice.subslice(from: colonIdx.value + 1, to: hpSlice.end).toOwned();
         let port64 = parseDecimal(portStr);
         if port64 > 0 and port64 <= 65535 {
-            port = UInt16(from: port64)
+            port = UInt16(truncating: port64)
         } else {
             throw SwoopError.invalidUrl("invalid port")
         }

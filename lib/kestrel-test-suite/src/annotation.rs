@@ -25,6 +25,9 @@ pub struct TestConfig {
     pub stdlib: bool,
     /// Extra .ks files to include (relative to the test file's directory).
     pub include: Vec<String>,
+    /// C files to compile and link into an execution test's binary
+    /// (`// c-source: helper.c`, relative to the test file's directory).
+    pub c_sources: Vec<String>,
     pub skip: Option<String>,
     pub expect_exit: Option<i32>,
     pub expect_stdout: Option<String>,
@@ -53,6 +56,7 @@ impl Default for TestConfig {
             test_mode: TestMode::Diagnostics,
             stdlib: true,
             include: Vec::new(),
+            c_sources: Vec::new(),
             skip: None,
             expect_exit: None,
             expect_stdout: None,
@@ -79,8 +83,12 @@ pub struct Annotation {
 pub enum AnnotationKind {
     /// Any error, optionally matching a message substring.
     Error { message: Option<String> },
-    /// Error with a specific analyzer descriptor code (e.g. "E441").
-    ErrorCode { code: String },
+    /// Error with a specific descriptor code (e.g. "E441"), optionally
+    /// also matching a message substring (`// ERROR(E441): message`).
+    ErrorCode {
+        code: String,
+        message: Option<String>,
+    },
     /// Any warning, optionally matching a message substring.
     Warning { message: Option<String> },
 }
@@ -156,6 +164,9 @@ pub fn parse_test_config(source: &str) -> TestConfig {
             "include" => {
                 config.include.push(value.trim().to_string());
             },
+            "c-source" => {
+                config.c_sources.push(value.trim().to_string());
+            },
             "skip" => {
                 config.skip = Some(value.to_string());
             },
@@ -204,6 +215,7 @@ pub fn parse_test_config(source: &str) -> TestConfig {
 /// - `// ERROR` — any error on this line
 /// - `// ERROR: message` — error with message substring
 /// - `// ERROR(E441)` — error with specific analyzer code
+/// - `// ERROR(E441): message` — that code AND a message substring
 /// - `// WARN` / `// WARN: message` — warnings
 pub fn parse_annotations(source: &str) -> Vec<Annotation> {
     let mut annotations = Vec::new();
@@ -229,14 +241,21 @@ fn try_parse_annotation(line: &str, line_num: usize) -> Option<Annotation> {
     let comment = find_annotation_comment(line)?;
     let comment = comment.trim();
 
-    // Try `ERROR(Exxxx)` pattern first
+    // Try `ERROR(Exxxx)` / `ERROR(Exxxx): message` first. The code ends at
+    // the FIRST `)`: a message may itself end in `)`.
     if let Some(rest) = comment.strip_prefix("ERROR(")
-        && let Some(code) = rest.strip_suffix(')')
+        && let Some((code, after)) = rest.split_once(')')
     {
+        let message = after
+            .trim()
+            .strip_prefix(':')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         return Some(Annotation {
             line: line_num,
             kind: AnnotationKind::ErrorCode {
                 code: code.trim().to_string(),
+                message,
             },
         });
     }
@@ -347,7 +366,20 @@ module Test
         let annotations = parse_annotations(source);
         assert_eq!(annotations.len(), 1);
         match &annotations[0].kind {
-            AnnotationKind::ErrorCode { code } => assert_eq!(code, "E441"),
+            AnnotationKind::ErrorCode { code, .. } => assert_eq!(code, "E441"),
+            _ => panic!("expected ErrorCode annotation"),
+        }
+    }
+
+    #[test]
+    fn error_code_with_message_ending_in_paren() {
+        let source = "struct S: P { // ERROR(E405): must lend a reference (`ref`)";
+        let anns = parse_annotations(source);
+        match &anns[0].kind {
+            AnnotationKind::ErrorCode { code, message } => {
+                assert_eq!(code, "E405");
+                assert_eq!(message.as_deref(), Some("must lend a reference (`ref`)"));
+            },
             _ => panic!("expected ErrorCode annotation"),
         }
     }

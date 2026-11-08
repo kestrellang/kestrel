@@ -8,7 +8,7 @@
 
 module Test
 
-@platform(.linux)
+@platform(.Linux)
 func excluded() -> lang.i64 { 42 }
 
 func main() {

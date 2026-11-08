@@ -113,6 +113,9 @@ pub struct ExtensionDeclaration {
 }
 
 impl ExtensionDeclaration {
+    pub fn attribute_list(&self) -> Option<AttributeList> {
+        support::child(&self.syntax)
+    }
     pub fn extend_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Extend)
     }
@@ -153,6 +156,9 @@ impl ProtocolDeclaration {
         support::child(&self.syntax)
     }
     pub fn visibility(&self) -> Option<Visibility> {
+        support::child(&self.syntax)
+    }
+    pub fn unsafe_modifier(&self) -> Option<UnsafeModifier> {
         support::child(&self.syntax)
     }
     pub fn protocol_token(&self) -> Option<SyntaxToken> {
@@ -296,6 +302,9 @@ impl FunctionDeclaration {
     pub fn static_modifier(&self) -> Option<StaticModifier> {
         support::child(&self.syntax)
     }
+    pub fn unsafe_modifier(&self) -> Option<UnsafeModifier> {
+        support::child(&self.syntax)
+    }
     pub fn mutating_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Mutating)
     }
@@ -353,6 +362,9 @@ impl SubscriptDeclaration {
     pub fn static_modifier(&self) -> Option<StaticModifier> {
         support::child(&self.syntax)
     }
+    pub fn unsafe_modifier(&self) -> Option<UnsafeModifier> {
+        support::child(&self.syntax)
+    }
     pub fn subscript_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Subscript)
     }
@@ -360,6 +372,9 @@ impl SubscriptDeclaration {
         support::child(&self.syntax)
     }
     pub fn parameter_list(&self) -> Option<ParameterList> {
+        support::child(&self.syntax)
+    }
+    pub fn failable_marker(&self) -> Option<FailableMarker> {
         support::child(&self.syntax)
     }
     pub fn return_type(&self) -> Option<ReturnType> {
@@ -401,6 +416,12 @@ impl FieldDeclaration {
     pub fn static_modifier(&self) -> Option<StaticModifier> {
         support::child(&self.syntax)
     }
+    pub fn unsafe_modifier(&self) -> Option<UnsafeModifier> {
+        support::child(&self.syntax)
+    }
+    pub fn lazy_modifier(&self) -> Option<LazyModifier> {
+        support::child(&self.syntax)
+    }
     pub fn let_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Let)
     }
@@ -410,20 +431,23 @@ impl FieldDeclaration {
     pub fn name(&self) -> Option<Name> {
         support::child(&self.syntax)
     }
+    pub fn failable_marker(&self) -> Option<FailableMarker> {
+        support::child(&self.syntax)
+    }
     pub fn colon_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Colon)
     }
     pub fn ty(&self) -> Option<Ty> {
         support::child(&self.syntax)
     }
-    pub fn property_accessors(&self) -> Option<PropertyAccessors> {
-        support::child(&self.syntax)
+    pub fn property_accessorses(&self) -> AstChildren<PropertyAccessors> {
+        support::children(&self.syntax)
     }
     pub fn equals_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Equals)
     }
-    pub fn expression(&self) -> Option<Expression> {
-        support::child(&self.syntax)
+    pub fn expressions(&self) -> AstChildren<Expression> {
+        support::children(&self.syntax)
     }
     pub fn semicolon_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Semicolon)
@@ -509,6 +533,9 @@ impl InitializerDeclaration {
     pub fn visibility(&self) -> Option<Visibility> {
         support::child(&self.syntax)
     }
+    pub fn unsafe_modifier(&self) -> Option<UnsafeModifier> {
+        support::child(&self.syntax)
+    }
     pub fn init_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Init)
     }
@@ -548,6 +575,9 @@ pub struct DeinitDeclaration {
 }
 
 impl DeinitDeclaration {
+    pub fn attribute_list(&self) -> Option<AttributeList> {
+        support::child(&self.syntax)
+    }
     pub fn deinit_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Deinit)
     }
@@ -649,6 +679,30 @@ impl ImportItem {
 impl AstNode for ImportItem {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::ImportItem
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `AttributeList` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AttributeList {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl AttributeList {
+    pub fn attributes(&self) -> AstChildren<Attribute> {
+        support::children(&self.syntax)
+    }
+}
+
+impl AstNode for AttributeList {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::AttributeList
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -772,30 +826,6 @@ impl AstNode for ExtensionBody {
     }
 }
 
-/// `AttributeList` node.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AttributeList {
-    pub(crate) syntax: SyntaxNode,
-}
-
-impl AttributeList {
-    pub fn attributes(&self) -> AstChildren<Attribute> {
-        support::children(&self.syntax)
-    }
-}
-
-impl AstNode for AttributeList {
-    fn can_cast(kind: SyntaxKind) -> bool {
-        kind == SyntaxKind::AttributeList
-    }
-    fn cast(syntax: SyntaxNode) -> Option<Self> {
-        Self::can_cast(syntax.kind()).then_some(Self { syntax })
-    }
-    fn syntax(&self) -> &SyntaxNode {
-        &self.syntax
-    }
-}
-
 /// `Visibility` node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Visibility {
@@ -820,6 +850,30 @@ impl Visibility {
 impl AstNode for Visibility {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::Visibility
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `UnsafeModifier` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnsafeModifier {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl UnsafeModifier {
+    pub fn unsafe_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Unsafe)
+    }
+}
+
+impl AstNode for UnsafeModifier {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::UnsafeModifier
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -1261,6 +1315,30 @@ impl AstNode for Expression {
     }
 }
 
+/// `FailableMarker` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FailableMarker {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl FailableMarker {
+    pub fn question_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Question)
+    }
+}
+
+impl AstNode for FailableMarker {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::FailableMarker
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
 /// `SubscriptBody` node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SubscriptBody {
@@ -1318,6 +1396,30 @@ impl PropertyAccessors {
 impl AstNode for PropertyAccessors {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::PropertyAccessors
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `LazyModifier` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LazyModifier {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl LazyModifier {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+}
+
+impl AstNode for LazyModifier {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::LazyModifier
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -1429,6 +1531,117 @@ impl MutatingRefClause {
 impl AstNode for MutatingRefClause {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::MutatingRefClause
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ModifyingGetterClause` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ModifyingGetterClause {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ModifyingGetterClause {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+    pub fn get_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Get)
+    }
+    pub fn code_block(&self) -> Option<CodeBlock> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ModifyingGetterClause {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ModifyingGetterClause
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ModifyingRefClause` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ModifyingRefClause {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ModifyingRefClause {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+    pub fn code_block(&self) -> Option<CodeBlock> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ModifyingRefClause {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ModifyingRefClause
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `WillSetClause` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WillSetClause {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl WillSetClause {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+    pub fn code_block(&self) -> Option<CodeBlock> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for WillSetClause {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::WillSetClause
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `DidSetClause` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DidSetClause {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl DidSetClause {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+    pub fn code_block(&self) -> Option<CodeBlock> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for DidSetClause {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::DidSetClause
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -1784,6 +1997,9 @@ impl ConformanceItem {
     pub fn negative_conformance(&self) -> Option<NegativeConformance> {
         support::child(&self.syntax)
     }
+    pub fn unsafe_conformance(&self) -> Option<UnsafeConformance> {
+        support::child(&self.syntax)
+    }
     pub fn ty(&self) -> Option<Ty> {
         support::child(&self.syntax)
     }
@@ -1834,6 +2050,33 @@ impl AstNode for NegativeConformance {
     }
 }
 
+/// `UnsafeConformance` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnsafeConformance {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl UnsafeConformance {
+    pub fn unsafe_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Unsafe)
+    }
+    pub fn ty(&self) -> Option<Ty> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for UnsafeConformance {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::UnsafeConformance
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
 /// `TypeArgumentList` node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeArgumentList {
@@ -1845,6 +2088,9 @@ impl TypeArgumentList {
         support::token(&self.syntax, SyntaxKind::LBracket)
     }
     pub fn types(&self) -> AstChildren<Ty> {
+        support::children(&self.syntax)
+    }
+    pub fn type_arg_bindings(&self) -> AstChildren<TypeArgBinding> {
         support::children(&self.syntax)
     }
     pub fn comma_token(&self) -> Option<SyntaxToken> {
@@ -1954,6 +2200,36 @@ impl PathElement {
 impl AstNode for PathElement {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::PathElement
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `TypeArgBinding` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeArgBinding {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl TypeArgBinding {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+    pub fn equals_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Equals)
+    }
+    pub fn ty(&self) -> Option<Ty> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for TypeArgBinding {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::TypeArgBinding
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -2105,6 +2381,9 @@ pub struct TyFunction {
 }
 
 impl TyFunction {
+    pub fn attribute(&self) -> Option<Attribute> {
+        support::child(&self.syntax)
+    }
     pub fn mutating_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::Mutating)
     }
@@ -2279,14 +2558,47 @@ impl TySome {
     pub fn and_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::And)
     }
-    pub fn negative_conformance(&self) -> Option<NegativeConformance> {
-        support::child(&self.syntax)
+    pub fn negative_conformances(&self) -> AstChildren<NegativeConformance> {
+        support::children(&self.syntax)
     }
 }
 
 impl AstNode for TySome {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::TySome
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `TyAny` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TyAny {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl TyAny {
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+    pub fn type_argument_list(&self) -> Option<TypeArgumentList> {
+        support::child(&self.syntax)
+    }
+    pub fn types(&self) -> AstChildren<Ty> {
+        support::children(&self.syntax)
+    }
+    pub fn and_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::And)
+    }
+}
+
+impl AstNode for TyAny {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::TyAny
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -3284,6 +3596,9 @@ impl ExprBinary {
     pub fn greater_greater_token(&self) -> Option<SyntaxToken> {
         support::token(&self.syntax, SyntaxKind::GreaterGreater)
     }
+    pub fn pipe_greater_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::PipeGreater)
+    }
     pub fn rhs(&self) -> Option<Expression> {
         support::children(&self.syntax).nth(1)
     }
@@ -3691,6 +4006,60 @@ impl AstNode for ExprTry {
     }
 }
 
+/// `ExprUnsafe` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprUnsafe {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprUnsafe {
+    pub fn unsafe_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Unsafe)
+    }
+    pub fn expression(&self) -> Option<Expression> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ExprUnsafe {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprUnsafe
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ExprUnsafeBlock` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprUnsafeBlock {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprUnsafeBlock {
+    pub fn unsafe_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Unsafe)
+    }
+    pub fn code_block(&self) -> Option<CodeBlock> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ExprUnsafeBlock {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprUnsafeBlock
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
 /// `ExprClosure` node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExprClosure {
@@ -3757,6 +4126,174 @@ impl ExprMatch {
 impl AstNode for ExprMatch {
     fn can_cast(kind: SyntaxKind) -> bool {
         kind == SyntaxKind::ExprMatch
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ExprCast` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprCast {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprCast {
+    pub fn consuming_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Consuming)
+    }
+    pub fn expression(&self) -> Option<Expression> {
+        support::child(&self.syntax)
+    }
+    pub fn as_question_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::AsQuestion)
+    }
+    pub fn ty(&self) -> Option<Ty> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ExprCast {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprCast
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ExprTypeTest` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprTypeTest {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprTypeTest {
+    pub fn expression(&self) -> Option<Expression> {
+        support::child(&self.syntax)
+    }
+    pub fn is_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Is)
+    }
+    pub fn not_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Not)
+    }
+    pub fn ty(&self) -> Option<Ty> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ExprTypeTest {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprTypeTest
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ExprPlaceholder` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprPlaceholder {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprPlaceholder {
+    pub fn underscore_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Underscore)
+    }
+}
+
+impl AstNode for ExprPlaceholder {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprPlaceholder
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ExprPlaceholderUse` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprPlaceholderUse {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprPlaceholderUse {
+    pub fn underscore_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Underscore)
+    }
+}
+
+impl AstNode for ExprPlaceholderUse {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprPlaceholderUse
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ExprOptionalBind` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprOptionalBind {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprOptionalBind {
+    pub fn expression(&self) -> Option<Expression> {
+        support::child(&self.syntax)
+    }
+    pub fn question_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Question)
+    }
+    pub fn dot_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Dot)
+    }
+}
+
+impl AstNode for ExprOptionalBind {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprOptionalBind
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
+/// `ExprOptionalChain` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExprOptionalChain {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl ExprOptionalChain {
+    pub fn expression(&self) -> Option<Expression> {
+        support::child(&self.syntax)
+    }
+}
+
+impl AstNode for ExprOptionalChain {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::ExprOptionalChain
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         Self::can_cast(syntax.kind()).then_some(Self { syntax })
@@ -4585,6 +5122,51 @@ impl AstNode for OrPattern {
     }
 }
 
+/// `IsPattern` node.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IsPattern {
+    pub(crate) syntax: SyntaxNode,
+}
+
+impl IsPattern {
+    pub fn var_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Var)
+    }
+    pub fn identifier_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Identifier)
+    }
+    pub fn is_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Is)
+    }
+    pub fn ty(&self) -> Option<Ty> {
+        support::child(&self.syntax)
+    }
+    pub fn l_brace_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::LBrace)
+    }
+    pub fn struct_pattern_members(&self) -> AstChildren<StructPatternMember> {
+        support::children(&self.syntax)
+    }
+    pub fn comma_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::Comma)
+    }
+    pub fn r_brace_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.syntax, SyntaxKind::RBrace)
+    }
+}
+
+impl AstNode for IsPattern {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::IsPattern
+    }
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        Self::can_cast(syntax.kind()).then_some(Self { syntax })
+    }
+    fn syntax(&self) -> &SyntaxNode {
+        &self.syntax
+    }
+}
+
 /// `TuplePatternElement` node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TuplePatternElement {
@@ -4744,13 +5326,17 @@ impl AstNode for ArrayPatternRest {
     }
 }
 
-/// One of: GetterClause, SetterClause, RefClause, MutatingRefClause.
+/// One of: GetterClause, SetterClause, RefClause, MutatingRefClause, ModifyingGetterClause, ModifyingRefClause, WillSetClause, DidSetClause.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AccessorClause {
     GetterClause(GetterClause),
     SetterClause(SetterClause),
     RefClause(RefClause),
     MutatingRefClause(MutatingRefClause),
+    ModifyingGetterClause(ModifyingGetterClause),
+    ModifyingRefClause(ModifyingRefClause),
+    WillSetClause(WillSetClause),
+    DidSetClause(DidSetClause),
 }
 
 impl AstNode for AccessorClause {
@@ -4761,6 +5347,10 @@ impl AstNode for AccessorClause {
                 | SyntaxKind::SetterClause
                 | SyntaxKind::RefClause
                 | SyntaxKind::MutatingRefClause
+                | SyntaxKind::ModifyingGetterClause
+                | SyntaxKind::ModifyingRefClause
+                | SyntaxKind::WillSetClause
+                | SyntaxKind::DidSetClause
         )
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
@@ -4771,6 +5361,14 @@ impl AstNode for AccessorClause {
             SyntaxKind::MutatingRefClause => {
                 AccessorClause::MutatingRefClause(MutatingRefClause { syntax })
             },
+            SyntaxKind::ModifyingGetterClause => {
+                AccessorClause::ModifyingGetterClause(ModifyingGetterClause { syntax })
+            },
+            SyntaxKind::ModifyingRefClause => {
+                AccessorClause::ModifyingRefClause(ModifyingRefClause { syntax })
+            },
+            SyntaxKind::WillSetClause => AccessorClause::WillSetClause(WillSetClause { syntax }),
+            SyntaxKind::DidSetClause => AccessorClause::DidSetClause(DidSetClause { syntax }),
             _ => return None,
         })
     }
@@ -4780,6 +5378,10 @@ impl AstNode for AccessorClause {
             AccessorClause::SetterClause(it) => &it.syntax,
             AccessorClause::RefClause(it) => &it.syntax,
             AccessorClause::MutatingRefClause(it) => &it.syntax,
+            AccessorClause::ModifyingGetterClause(it) => &it.syntax,
+            AccessorClause::ModifyingRefClause(it) => &it.syntax,
+            AccessorClause::WillSetClause(it) => &it.syntax,
+            AccessorClause::DidSetClause(it) => &it.syntax,
         }
     }
 }
@@ -4805,6 +5407,30 @@ impl From<RefClause> for AccessorClause {
 impl From<MutatingRefClause> for AccessorClause {
     fn from(node: MutatingRefClause) -> AccessorClause {
         AccessorClause::MutatingRefClause(node)
+    }
+}
+
+impl From<ModifyingGetterClause> for AccessorClause {
+    fn from(node: ModifyingGetterClause) -> AccessorClause {
+        AccessorClause::ModifyingGetterClause(node)
+    }
+}
+
+impl From<ModifyingRefClause> for AccessorClause {
+    fn from(node: ModifyingRefClause) -> AccessorClause {
+        AccessorClause::ModifyingRefClause(node)
+    }
+}
+
+impl From<WillSetClause> for AccessorClause {
+    fn from(node: WillSetClause) -> AccessorClause {
+        AccessorClause::WillSetClause(node)
+    }
+}
+
+impl From<DidSetClause> for AccessorClause {
+    fn from(node: DidSetClause) -> AccessorClause {
+        AccessorClause::DidSetClause(node)
     }
 }
 
@@ -4955,7 +5581,7 @@ impl From<Expression> for Condition {
     }
 }
 
-/// One of: ExprInteger, ExprFloat, ExprString, ExprRawString, ExprChar, ExprBool, ExprNull, ExprUnit, ExprInterpolatedString, ExprArray, ExprDictionary, ExprTuple, ExprGrouping, ExprPath, ExprTupleIndex, ExprImplicitMemberAccess, ExprUnary, ExprPostfix, ExprBinary, ExprAssignment, ExprCompoundAssignment, ExprCall, ExprIf, ExprWhile, ExprFor, ExprLoop, ExprBreak, ExprContinue, ExprReturn, ExprThrow, ExprTry, ExprClosure, ExprMatch.
+/// One of: ExprInteger, ExprFloat, ExprString, ExprRawString, ExprChar, ExprBool, ExprNull, ExprUnit, ExprInterpolatedString, ExprArray, ExprDictionary, ExprTuple, ExprGrouping, ExprPath, ExprTupleIndex, ExprImplicitMemberAccess, ExprUnary, ExprPostfix, ExprBinary, ExprAssignment, ExprCompoundAssignment, ExprCall, ExprIf, ExprWhile, ExprFor, ExprLoop, ExprBreak, ExprContinue, ExprReturn, ExprThrow, ExprTry, ExprUnsafe, ExprUnsafeBlock, ExprClosure, ExprMatch, ExprCast, ExprTypeTest, ExprPlaceholder, ExprPlaceholderUse, ExprOptionalBind, ExprOptionalChain.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
     ExprInteger(ExprInteger),
@@ -4989,8 +5615,16 @@ pub enum Expr {
     ExprReturn(ExprReturn),
     ExprThrow(ExprThrow),
     ExprTry(ExprTry),
+    ExprUnsafe(ExprUnsafe),
+    ExprUnsafeBlock(ExprUnsafeBlock),
     ExprClosure(ExprClosure),
     ExprMatch(ExprMatch),
+    ExprCast(ExprCast),
+    ExprTypeTest(ExprTypeTest),
+    ExprPlaceholder(ExprPlaceholder),
+    ExprPlaceholderUse(ExprPlaceholderUse),
+    ExprOptionalBind(ExprOptionalBind),
+    ExprOptionalChain(ExprOptionalChain),
 }
 
 impl AstNode for Expr {
@@ -5028,8 +5662,16 @@ impl AstNode for Expr {
                 | SyntaxKind::ExprReturn
                 | SyntaxKind::ExprThrow
                 | SyntaxKind::ExprTry
+                | SyntaxKind::ExprUnsafe
+                | SyntaxKind::ExprUnsafeBlock
                 | SyntaxKind::ExprClosure
                 | SyntaxKind::ExprMatch
+                | SyntaxKind::ExprCast
+                | SyntaxKind::ExprTypeTest
+                | SyntaxKind::ExprPlaceholder
+                | SyntaxKind::ExprPlaceholderUse
+                | SyntaxKind::ExprOptionalBind
+                | SyntaxKind::ExprOptionalChain
         )
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
@@ -5071,8 +5713,18 @@ impl AstNode for Expr {
             SyntaxKind::ExprReturn => Expr::ExprReturn(ExprReturn { syntax }),
             SyntaxKind::ExprThrow => Expr::ExprThrow(ExprThrow { syntax }),
             SyntaxKind::ExprTry => Expr::ExprTry(ExprTry { syntax }),
+            SyntaxKind::ExprUnsafe => Expr::ExprUnsafe(ExprUnsafe { syntax }),
+            SyntaxKind::ExprUnsafeBlock => Expr::ExprUnsafeBlock(ExprUnsafeBlock { syntax }),
             SyntaxKind::ExprClosure => Expr::ExprClosure(ExprClosure { syntax }),
             SyntaxKind::ExprMatch => Expr::ExprMatch(ExprMatch { syntax }),
+            SyntaxKind::ExprCast => Expr::ExprCast(ExprCast { syntax }),
+            SyntaxKind::ExprTypeTest => Expr::ExprTypeTest(ExprTypeTest { syntax }),
+            SyntaxKind::ExprPlaceholder => Expr::ExprPlaceholder(ExprPlaceholder { syntax }),
+            SyntaxKind::ExprPlaceholderUse => {
+                Expr::ExprPlaceholderUse(ExprPlaceholderUse { syntax })
+            },
+            SyntaxKind::ExprOptionalBind => Expr::ExprOptionalBind(ExprOptionalBind { syntax }),
+            SyntaxKind::ExprOptionalChain => Expr::ExprOptionalChain(ExprOptionalChain { syntax }),
             _ => return None,
         })
     }
@@ -5109,8 +5761,16 @@ impl AstNode for Expr {
             Expr::ExprReturn(it) => &it.syntax,
             Expr::ExprThrow(it) => &it.syntax,
             Expr::ExprTry(it) => &it.syntax,
+            Expr::ExprUnsafe(it) => &it.syntax,
+            Expr::ExprUnsafeBlock(it) => &it.syntax,
             Expr::ExprClosure(it) => &it.syntax,
             Expr::ExprMatch(it) => &it.syntax,
+            Expr::ExprCast(it) => &it.syntax,
+            Expr::ExprTypeTest(it) => &it.syntax,
+            Expr::ExprPlaceholder(it) => &it.syntax,
+            Expr::ExprPlaceholderUse(it) => &it.syntax,
+            Expr::ExprOptionalBind(it) => &it.syntax,
+            Expr::ExprOptionalChain(it) => &it.syntax,
         }
     }
 }
@@ -5301,6 +5961,18 @@ impl From<ExprTry> for Expr {
     }
 }
 
+impl From<ExprUnsafe> for Expr {
+    fn from(node: ExprUnsafe) -> Expr {
+        Expr::ExprUnsafe(node)
+    }
+}
+
+impl From<ExprUnsafeBlock> for Expr {
+    fn from(node: ExprUnsafeBlock) -> Expr {
+        Expr::ExprUnsafeBlock(node)
+    }
+}
+
 impl From<ExprClosure> for Expr {
     fn from(node: ExprClosure) -> Expr {
         Expr::ExprClosure(node)
@@ -5310,6 +5982,42 @@ impl From<ExprClosure> for Expr {
 impl From<ExprMatch> for Expr {
     fn from(node: ExprMatch) -> Expr {
         Expr::ExprMatch(node)
+    }
+}
+
+impl From<ExprCast> for Expr {
+    fn from(node: ExprCast) -> Expr {
+        Expr::ExprCast(node)
+    }
+}
+
+impl From<ExprTypeTest> for Expr {
+    fn from(node: ExprTypeTest) -> Expr {
+        Expr::ExprTypeTest(node)
+    }
+}
+
+impl From<ExprPlaceholder> for Expr {
+    fn from(node: ExprPlaceholder) -> Expr {
+        Expr::ExprPlaceholder(node)
+    }
+}
+
+impl From<ExprPlaceholderUse> for Expr {
+    fn from(node: ExprPlaceholderUse) -> Expr {
+        Expr::ExprPlaceholderUse(node)
+    }
+}
+
+impl From<ExprOptionalBind> for Expr {
+    fn from(node: ExprOptionalBind) -> Expr {
+        Expr::ExprOptionalBind(node)
+    }
+}
+
+impl From<ExprOptionalChain> for Expr {
+    fn from(node: ExprOptionalChain) -> Expr {
+        Expr::ExprOptionalChain(node)
     }
 }
 
@@ -5479,7 +6187,7 @@ impl From<EnumCaseDeclaration> for Item {
     }
 }
 
-/// One of: WildcardPattern, BindingPattern, RefBindingPattern, TuplePattern, LiteralPattern, RangePattern, EnumPattern, NullPattern, SomePattern, StructPattern, ArrayPattern, AtPattern, RestPattern, OrPattern.
+/// One of: WildcardPattern, BindingPattern, RefBindingPattern, TuplePattern, LiteralPattern, RangePattern, EnumPattern, NullPattern, SomePattern, StructPattern, ArrayPattern, AtPattern, RestPattern, OrPattern, IsPattern.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Pat {
     WildcardPattern(WildcardPattern),
@@ -5496,6 +6204,7 @@ pub enum Pat {
     AtPattern(AtPattern),
     RestPattern(RestPattern),
     OrPattern(OrPattern),
+    IsPattern(IsPattern),
 }
 
 impl AstNode for Pat {
@@ -5516,6 +6225,7 @@ impl AstNode for Pat {
                 | SyntaxKind::AtPattern
                 | SyntaxKind::RestPattern
                 | SyntaxKind::OrPattern
+                | SyntaxKind::IsPattern
         )
     }
     fn cast(syntax: SyntaxNode) -> Option<Self> {
@@ -5534,6 +6244,7 @@ impl AstNode for Pat {
             SyntaxKind::AtPattern => Pat::AtPattern(AtPattern { syntax }),
             SyntaxKind::RestPattern => Pat::RestPattern(RestPattern { syntax }),
             SyntaxKind::OrPattern => Pat::OrPattern(OrPattern { syntax }),
+            SyntaxKind::IsPattern => Pat::IsPattern(IsPattern { syntax }),
             _ => return None,
         })
     }
@@ -5553,6 +6264,7 @@ impl AstNode for Pat {
             Pat::AtPattern(it) => &it.syntax,
             Pat::RestPattern(it) => &it.syntax,
             Pat::OrPattern(it) => &it.syntax,
+            Pat::IsPattern(it) => &it.syntax,
         }
     }
 }
@@ -5638,6 +6350,12 @@ impl From<RestPattern> for Pat {
 impl From<OrPattern> for Pat {
     fn from(node: OrPattern) -> Pat {
         Pat::OrPattern(node)
+    }
+}
+
+impl From<IsPattern> for Pat {
+    fn from(node: IsPattern) -> Pat {
+        Pat::IsPattern(node)
     }
 }
 
@@ -5754,7 +6472,7 @@ impl From<StructPatternRest> for StructPatternMember {
     }
 }
 
-/// One of: TyPath, TyUnit, TyNever, TyInferred, TyTuple, TyFunction, TyArray, TyDictionary, TyOptional, TyResult, TySome, TyRef, TyMutRef, TyParen.
+/// One of: TyPath, TyUnit, TyNever, TyInferred, TyTuple, TyFunction, TyArray, TyDictionary, TyOptional, TyResult, TySome, TyAny, TyRef, TyMutRef, TyParen.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TyKind {
     TyPath(TyPath),
@@ -5768,6 +6486,7 @@ pub enum TyKind {
     TyOptional(TyOptional),
     TyResult(TyResult),
     TySome(TySome),
+    TyAny(TyAny),
     TyRef(TyRef),
     TyMutRef(TyMutRef),
     TyParen(TyParen),
@@ -5788,6 +6507,7 @@ impl AstNode for TyKind {
                 | SyntaxKind::TyOptional
                 | SyntaxKind::TyResult
                 | SyntaxKind::TySome
+                | SyntaxKind::TyAny
                 | SyntaxKind::TyRef
                 | SyntaxKind::TyMutRef
                 | SyntaxKind::TyParen
@@ -5806,6 +6526,7 @@ impl AstNode for TyKind {
             SyntaxKind::TyOptional => TyKind::TyOptional(TyOptional { syntax }),
             SyntaxKind::TyResult => TyKind::TyResult(TyResult { syntax }),
             SyntaxKind::TySome => TyKind::TySome(TySome { syntax }),
+            SyntaxKind::TyAny => TyKind::TyAny(TyAny { syntax }),
             SyntaxKind::TyRef => TyKind::TyRef(TyRef { syntax }),
             SyntaxKind::TyMutRef => TyKind::TyMutRef(TyMutRef { syntax }),
             SyntaxKind::TyParen => TyKind::TyParen(TyParen { syntax }),
@@ -5825,6 +6546,7 @@ impl AstNode for TyKind {
             TyKind::TyOptional(it) => &it.syntax,
             TyKind::TyResult(it) => &it.syntax,
             TyKind::TySome(it) => &it.syntax,
+            TyKind::TyAny(it) => &it.syntax,
             TyKind::TyRef(it) => &it.syntax,
             TyKind::TyMutRef(it) => &it.syntax,
             TyKind::TyParen(it) => &it.syntax,
@@ -5895,6 +6617,12 @@ impl From<TyResult> for TyKind {
 impl From<TySome> for TyKind {
     fn from(node: TySome) -> TyKind {
         TyKind::TySome(node)
+    }
+}
+
+impl From<TyAny> for TyKind {
+    fn from(node: TyAny) -> TyKind {
+        TyKind::TyAny(node)
     }
 }
 

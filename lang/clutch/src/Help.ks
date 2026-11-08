@@ -203,7 +203,7 @@ public func generateHelp(
 
         for i in 0..<subcommandNames.count {
             buf.append("    ");
-            let sn = subcommandNames(unchecked: i);
+            let sn = unsafe subcommandNames(unchecked: i);
             buf.append(sn);
 
             var sp = subPadTo - sn.bytes.count;
@@ -213,7 +213,7 @@ public func generateHelp(
             }
 
             if i < subcommandAbouts.count {
-                buf.append(subcommandAbouts(unchecked: i));
+                buf.append(unsafe subcommandAbouts(unchecked: i));
             }
 
             buf.append("\n");

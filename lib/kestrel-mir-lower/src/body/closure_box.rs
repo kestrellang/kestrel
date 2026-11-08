@@ -28,8 +28,9 @@
 //! (post-mono block splitting is not available in `expand`). The plan's
 //! "null/nop shims" wording covers this — see the E2a report.
 
-use kestrel_ast_builder::{Callable, NodeKind};
+use kestrel_ast_builder::Callable;
 use kestrel_hecs::Entity;
+use kestrel_hir::Builtin;
 use kestrel_mir::body::OssaBody;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::{CallArg, InstKind, Instruction};
@@ -84,7 +85,7 @@ pub(crate) struct BoxBinding {
 /// pick the wrong one here would already have failed E454/E458 in the stdlib.
 ///
 /// Pure and ECS-free on purpose — this is the part worth unit-testing.
-fn is_box_init_shape(c: &Callable) -> bool {
+pub(crate) fn is_box_init_shape(c: &Callable) -> bool {
     matches!(c.params.as_slice(), [p] if p.label.is_none() && p.is_consuming)
 }
 
@@ -119,15 +120,13 @@ impl OssaBodyCtx<'_, '_> {
     /// stdlib supplies no `@builtin(.SharedBox)` type (a `stdlib: false` test):
     /// the caller then falls back to the historical stack environment.
     pub(crate) fn resolve_box_binding(&mut self, payload_ty: TyId) -> Option<BoxBinding> {
-        let mut b = self.resolve_box_common(kestrel_hir::Builtin::SharedBox, payload_ty)?;
+        let mut b =
+            self.resolve_box_common(Builtin::SharedBox, Builtin::ExistentialBoxInit, payload_ty)?;
         let entity = match self.ctx.module.ty_arena.get(b.handle_ty) {
             MirTy::Named { entity, .. } => *entity,
             _ => return None,
         };
-        let shared_mut_ref =
-            self.find_box_member(entity, NodeKind::Function, "sharedMutRef()", |c, name| {
-                name == "sharedMutRef" && c.params.is_empty()
-            });
+        let shared_mut_ref = self.find_box_member(entity, Builtin::SharedBoxSharedMutRef);
         self.ctx.register_name(shared_mut_ref);
         b.shared_mut_ref = Some(shared_mut_ref);
         Some(b)
@@ -138,18 +137,14 @@ impl OssaBodyCtx<'_, '_> {
     /// different requirements: a unique box is taken from (once) or destroyed
     /// (once), never shared.
     pub(crate) fn resolve_unique_box_binding(&mut self, payload_ty: TyId) -> Option<BoxBinding> {
-        let mut b = self.resolve_box_common(kestrel_hir::Builtin::UniqueBox, payload_ty)?;
+        let mut b =
+            self.resolve_box_common(Builtin::UniqueBox, Builtin::UniqueBoxInit, payload_ty)?;
         let entity = match self.ctx.module.ty_arena.get(b.handle_ty) {
             MirTy::Named { entity, .. } => *entity,
             _ => return None,
         };
-        let take_value =
-            self.find_box_member(entity, NodeKind::Function, "takeValue()", |c, name| {
-                name == "takeValue" && c.params.is_empty()
-            });
-        let destroy = self.find_box_member(entity, NodeKind::Function, "destroy()", |c, name| {
-            name == "destroy" && c.params.is_empty()
-        });
+        let take_value = self.find_box_member(entity, Builtin::UniqueBoxTakeValue);
+        let destroy = self.find_box_member(entity, Builtin::UniqueBoxDestroy);
         self.ctx.register_name(take_value);
         self.ctx.register_name(destroy);
         b.take_value = Some(take_value);
@@ -161,7 +156,8 @@ impl OssaBodyCtx<'_, '_> {
     /// handle type, peel it to its raw pointer word and find `init`.
     fn resolve_box_common(
         &mut self,
-        builtin: kestrel_hir::Builtin,
+        builtin: Builtin,
+        init_tag: Builtin,
         payload_ty: TyId,
     ) -> Option<BoxBinding> {
         let entity = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
@@ -174,19 +170,12 @@ impl OssaBodyCtx<'_, '_> {
         let handle_ty = self.ctx.module.ty_arena.named(entity, type_args.clone());
         let (wrappers, raw_ty) = self.unwrap_handle_to_pointer(handle_ty)?;
 
-        // Match the requirement's SHAPE, not its arity: a box type is free to
-        // carry other one-parameter inits (`RcBox` has a private
-        // `init(inner inner: Pointer[Storage[T]])` that adopts an
-        // already-counted block). Picking that one stores the payload straight
-        // into the handle field as a forged pointer — a silent SIGSEGV at every
-        // escaping-closure call. Arity alone only worked because the public
-        // init happened to be declared first.
-        let init = self.find_box_member(
-            entity,
-            NodeKind::Initializer,
-            "init(consuming value: Target)",
-            |c, _| is_box_init_shape(c),
-        );
+        // The tagged init, never "a one-parameter init": `RcBox` also has a
+        // private `init(inner inner: Pointer[Storage[T]])` adopting an
+        // already-counted block; picking it stored the payload straight into
+        // the handle field as a forged pointer (a silent SIGSEGV at every
+        // escaping-closure call).
+        let init = self.find_box_member(entity, init_tag);
         self.ctx.register_name(init);
 
         Some(BoxBinding {
@@ -205,7 +194,10 @@ impl OssaBodyCtx<'_, '_> {
     /// `MirTy::Pointer` is reached, returning `(wrappers outermost-first, raw
     /// pointer type)`. `RcBox[E]` → `std.memory.Pointer[RcBoxStorage[E]]` →
     /// `MirTy::Pointer(RcBoxStorage[E])`.
-    fn unwrap_handle_to_pointer(&mut self, handle_ty: TyId) -> Option<(Vec<TyId>, TyId)> {
+    pub(crate) fn unwrap_handle_to_pointer(
+        &mut self,
+        handle_ty: TyId,
+    ) -> Option<(Vec<TyId>, TyId)> {
         let mut wrappers = Vec::new();
         let mut cur = handle_ty;
         // Small bound: a handle is a thin wrapper, not a deep tower.
@@ -233,19 +225,43 @@ impl OssaBodyCtx<'_, '_> {
         None
     }
 
-    /// Find the ONE member of the binding matching a requirement shape,
-    /// searching the type entity itself and every extension of it
-    /// (`sharedMutRef` and the `SharedBox` conformance live in an extension).
+    /// The binding's member for the `@builtin`-tagged `tag`: the tagged
+    /// entity itself when it sits on the binding (or an extension of it —
+    /// `UniqueBox.takeValue`), else the ONE binding member carrying the tagged
+    /// PROTOCOL requirement's witness key (`SharedBox.sharedMutRef`, whose
+    /// implementation lives on whichever type is the swappable binding).
     ///
     /// Infallible by construction: by the time this runs the box TYPE is
     /// already resolved (the `ResolveBuiltin` query succeeded and the handle
-    /// peeled to a raw pointer), so a missing or duplicated requirement is a
-    /// broken stdlib, never the legitimate "no box available" case. See
-    /// [`exactly_one_box_member`].
-    fn find_box_member(
+    /// peeled to a raw pointer), so a missing tag or a missing / duplicated
+    /// member is a broken stdlib, never the legitimate "no box available"
+    /// case. See [`exactly_one_box_member`].
+    fn find_box_member(&mut self, entity: Entity, tag: Builtin) -> Entity {
+        let what = tag.name();
+        let Some(requirement) = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: tag,
+            root: self.ctx.root,
+        }) else {
+            return exactly_one_box_member::<Entity>(&[], what);
+        };
+        // Collect ALL matches rather than taking the first: "first hit wins"
+        // is what made the selection depend on declaration order (F4). The
+        // tag sitting on the binding itself is its own (sole) witness.
+        let matches = self.ctx.witness_candidates(entity, requirement);
+        if matches.contains(&requirement) {
+            return requirement;
+        }
+        exactly_one_box_member(&matches, what)
+    }
+
+    /// Find the ONE member of `entity` (or its extensions) whose shape
+    /// matches `pred`. Only for boxes with no `@builtin` tags yet (the
+    /// indirect-enum `OwnedBox`); a tagged box uses [`Self::find_box_member`].
+    /// Missing or duplicated matches are a broken stdlib (ICE).
+    pub(crate) fn find_box_member_by_shape(
         &mut self,
         entity: Entity,
-        kind: NodeKind,
+        kind: kestrel_ast_builder::NodeKind,
         requirement: &str,
         pred: impl Fn(&Callable, &str) -> bool,
     ) -> Entity {
@@ -263,7 +279,7 @@ impl OssaBodyCtx<'_, '_> {
         let mut matches = Vec::new();
         for parent in parents {
             for &child in self.ctx.query.children_of(parent).iter() {
-                if self.ctx.query.get::<NodeKind>(child) != Some(&kind) {
+                if self.ctx.query.get::<kestrel_ast_builder::NodeKind>(child) != Some(&kind) {
                     continue;
                 }
                 let name = self
@@ -777,6 +793,7 @@ mod tests {
             pattern: None,
             is_mut: false,
             is_consuming,
+            by_ref: false,
         }
     }
 

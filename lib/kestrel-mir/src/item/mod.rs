@@ -3,6 +3,7 @@ pub mod function;
 pub mod protocol;
 pub mod static_def;
 pub mod struct_def;
+pub mod vtable;
 pub mod witness;
 
 use kestrel_hecs::Entity;
@@ -10,7 +11,7 @@ use kestrel_hecs::Entity;
 use crate::layout::{EnumLayout, StructLayout};
 use crate::{FieldIdx, VariantIdx};
 
-pub use enum_def::{EnumCaseDef, EnumDef};
+pub use enum_def::{EnumCaseDef, EnumDef, IndirectPayload};
 pub use function::{
     CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef, WhereClause,
     WhereConstraint,
@@ -18,6 +19,7 @@ pub use function::{
 pub use protocol::{AssociatedTypeDef, ProtocolDef, ProtocolMethodDef};
 pub use static_def::{FileConstantData, StaticDef};
 pub use struct_def::{FieldDef, StructDef};
+pub use vtable::{VTableEntry, VTableTemplate};
 pub use witness::{WitnessDef, WitnessMethodBinding, WitnessMethodKey};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,13 +121,6 @@ pub enum Layout {
     Enum(EnumLayout),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct TargetConfig {
-    pub pointer_width: u64,
-}
-
-impl TargetConfig {
-    pub fn host_64() -> Self {
-        Self { pointer_width: 8 }
-    }
-}
+/// The compilation target, shared with the AST builder and the backends so
+/// MIR layout uses the same pointer width codegen emits.
+pub use kestrel_target::TargetConfig;

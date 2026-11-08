@@ -15,7 +15,7 @@ struct Tracked: Cloneable {
     var payload: String
     var clones: Pointer[Int64]
     func clone() -> Tracked {
-        self.clones.write(self.clones.read() + 1);
+        unsafe self.clones.write(self.clones.read() + 1);
         Tracked(payload: self.payload.clone(), clones: self.clones)
     }
     func size() -> Int64 { self.payload.bytes.count }
@@ -25,8 +25,8 @@ struct Tracked: Cloneable {
 struct Buf {
     var p: Pointer[Tracked]
     subscript(at index: Int64) -> Tracked {
-        ref { self.p.offset(by: index).value }
-        mutating ref { self.p.offset(by: index).mutatingValue }
+        ref { unsafe self.p.offset(by: index).value }
+        mutating ref { unsafe self.p.offset(by: index).mutatingValue }
     }
 }
 
@@ -35,28 +35,28 @@ func describe(t: Tracked) -> Int64 { t.size() }
 @main
 func main() -> lang.i64 {
     let clones = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    clones.write(0);
+    unsafe clones.write(0);
     let p = SystemAllocator().allocate(Layout.of[Tracked]()).unwrap().cast[Tracked]();
-    p.write(Tracked(payload: "alpha", clones: clones));
+    unsafe p.write(Tracked(payload: "alpha", clones: clones));
     var b = Buf(p: p);
-    let baseline = clones.read();
+    let baseline = unsafe clones.read();
 
     // Member read through the place — no clone.
     if b(at: 0).size() != 5 { return 1; }
-    if clones.read() != baseline { return 2; }
+    if unsafe clones.read() != baseline { return 2; }
 
     // Borrow-convention argument — borrows the place, no clone.
     if describe(b(at: 0)) != 5 { return 3; }
-    if clones.read() != baseline { return 4; }
+    if unsafe clones.read() != baseline { return 4; }
 
     // Mutating method through the mutating ref — in place, no clone.
     b(at: 0).grow();
     if b(at: 0).size() != 6 { return 5; }
-    if clones.read() != baseline { return 6; }
+    if unsafe clones.read() != baseline { return 6; }
 
     // Binding decay clones exactly once.
     let copied = b(at: 0);
-    if clones.read() != baseline + 1 { return 7; }
+    if unsafe clones.read() != baseline + 1 { return 7; }
     if copied.size() != 6 { return 8; }
     0
 }

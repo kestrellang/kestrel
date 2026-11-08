@@ -1,7 +1,8 @@
 pub(crate) mod body;
 mod context;
+mod existential;
 mod items;
-mod name;
+mod ref_sources;
 pub mod ty;
 mod validate;
 
@@ -21,12 +22,16 @@ pub fn lower_module(world: &World, root: Entity) -> MirModule {
 
     // Phase 2: witness tables
     items::witness_lower::lower_witnesses(&mut ctx);
+    // `any P: P` for every existential box the module mentions.
+    existential::lower_self_conformance_witnesses(&mut ctx);
 
     // Phase 3: static init thunks + master init + inject into main
     items::static_lower::synthesize_static_inits(&mut ctx);
 
     // Phase 4: validate no MirTy::Error escaped
     let _error_count = validate::validate_no_error_types(&ctx, &ctx.module);
+    // Phase 5: no write skipped a property's observers
+    let _observer_skips = validate::validate_observed_writes(&ctx, &ctx.module);
 
     ctx.finish()
 }
@@ -591,7 +596,7 @@ mod tests {
         let bodies_before = mir.functions.values().filter(|f| f.body.is_some()).count();
         let funcs_before = mir.functions.len();
 
-        let target = kestrel_mir::TargetConfig::host_64();
+        let target = kestrel_mir::TargetConfig::host();
         let mut next_entity = 900_000;
         let errors = kestrel_mir::passes::run_pipeline(&mut mir, &target, &mut next_entity);
 
@@ -666,7 +671,7 @@ mod tests {
 
         let mut mir = lower_module(c.world(), c.root());
 
-        let target = kestrel_mir::TargetConfig::host_64();
+        let target = kestrel_mir::TargetConfig::host();
         let mut next_entity = 900_000;
         let pre_errors = kestrel_mir::passes::run_pipeline(&mut mir, &target, &mut next_entity);
         assert_eq!(
@@ -754,7 +759,7 @@ mod tests {
 
         let mut mir = lower_module(c.world(), c.root());
 
-        let target = kestrel_mir::TargetConfig::host_64();
+        let target = kestrel_mir::TargetConfig::host();
         let mut next_entity = 900_000;
         let pre_errors = kestrel_mir::passes::run_pipeline(&mut mir, &target, &mut next_entity);
         assert_eq!(

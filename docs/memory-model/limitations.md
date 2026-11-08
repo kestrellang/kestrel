@@ -66,10 +66,10 @@ func bad() -> &Int64 {
 
 | Restriction | Code |
 |-------------|------|
-| Ref types in **parameter** position — access modes are the only spelling (permanent by design) | E480 |
+| A ref-typed parameter with a `mutating`/`consuming` keyword, or through a type alias | E480 |
 | `&x` at a **call site** — borrowing is the callee's convention, never spelled by the caller | E488 |
 | Ref type in a `let`/`var` **annotation** — write `let r = &x;`, not `let r: &Int64 = ...` | E482 |
-| Ref types inside **function types** (params or returns) | E480/E486 |
+| Ref returns inside **function types** | E486 |
 | Nested references (`&&T`) | E487 |
 | Refs in **globals / static storage** — long-lived storage requires `Static` types | E505 |
 | Ref-returning functions as **first-class values** | E491/E492 |

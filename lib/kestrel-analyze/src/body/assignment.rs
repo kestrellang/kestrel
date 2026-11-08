@@ -28,9 +28,14 @@
 //! **Labels:**
 //! - Primary: the assignment target
 //!   - Span source: `util::expr_span` on the target `HirExprId`
-//!   - Message: "field is not settable"
+//!   - Message: "field is not settable" (a `let` field), or "cannot assign
+//!     through immutable binding" (a mutable field on an immutable base, or a
+//!     write through a stored `&mutating` field whose holder is immutable)
 //!
-//! **Notes:** (none)
+//! **Notes:**
+//! - "a '&mutating' field gives no interior mutability: writing through it
+//!   needs a mutable holder (a 'var', or a 'mutating' method)" (stored ref
+//!   field writes only)
 //!
 //! ### E202 — `assign_to_expression` (Error, Correctness)
 //!
@@ -58,6 +63,14 @@
 //!   - Message: "this is a '&T' place; only '&mutating T' places can be written"
 //!
 //! **Notes:** (none)
+//!
+//! ### E214 — `assign_to_failable_place` (Error, Correctness)
+//!
+//! **Message:** "cannot assign to failable place '{name}'"
+//!
+//! A failable member (`var first?: T`, `subscript(...)? -> T`) may not
+//! exist, so plain and compound assignment through it are rejected — there
+//! is no place to store into when it is absent.
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -91,6 +104,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E214",
+        name: "assign_to_failable_place",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct AssignmentAnalyzer;
@@ -118,6 +137,9 @@ impl BodyCheck for AssignmentAnalyzer {
             let HirExpr::Assign { target, .. } = expr else {
                 continue;
             };
+            if push_if_failable(cx, *target, &mut diags) {
+                continue;
+            }
             check_target(cx, *target, is_initializer, &mut diags);
         }
 
@@ -139,6 +161,9 @@ impl BodyCheck for AssignmentAnalyzer {
             let HirExpr::ProtocolCall { receiver, .. } = &cx.hir.exprs[*inner] else {
                 continue;
             };
+            if push_if_failable(cx, *receiver, &mut diags) {
+                continue;
+            }
             if !matches!(
                 &cx.hir.exprs[*receiver],
                 HirExpr::Call { .. } | HirExpr::MethodCall { .. }
@@ -148,10 +173,14 @@ impl BodyCheck for AssignmentAnalyzer {
             // Stage 1.5: a member with a `mutating ref` accessor is a
             // writable place projection — base mutability is enforced by
             // the access-mode analyzer's mutating-receiver check.
-            if util::accessor_place_mut_base(cx, *receiver).is_some() {
+            if util::accessor_place_mut_base(cx, *receiver).is_some()
+                || util::member_has_mutating_ref(cx, *receiver)
+            {
                 continue;
             }
-            match util::ref_place(cx, *receiver) {
+            match util::ref_place(cx, *receiver)
+                .or_else(|| util::field_subscript_ref(cx, *receiver))
+            {
                 // `&mutating T` call result — a writable place.
                 Some(true) => {},
                 // `&T` — the access-mode analyzer reports E207 on the
@@ -176,6 +205,47 @@ impl BodyCheck for AssignmentAnalyzer {
 
         diags
     }
+}
+
+/// E214: `target` resolves to a failable member. Returns whether it did.
+fn push_if_failable(
+    cx: &BodyContext<'_>,
+    target: HirExprId,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) -> bool {
+    let Some(member) = util::failable_member(cx, target) else {
+        return false;
+    };
+    let name = match cx.query.get::<NodeKind>(member) {
+        Some(NodeKind::Subscript) => "subscript".to_string(),
+        _ => cx
+            .query
+            .get::<kestrel_ast_builder::Name>(member)
+            .map(|n| n.0.clone())
+            .unwrap_or_default(),
+    };
+    let effect = if cx.query.has::<kestrel_ast_builder::Throwing>(member) {
+        "throwing"
+    } else {
+        "failable"
+    };
+    let d = &DESCRIPTORS[4];
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: d.id,
+        severity: d.default_severity,
+        message: format!("cannot assign to {effect} place '{name}'"),
+        labels: vec![DiagLabel {
+            span: util::expr_span(cx.hir, target),
+            message: "this place may not exist".into(),
+            is_primary: true,
+        }],
+        notes: vec![
+            "write through its `mutating ref` with a `&mutating` payload binder \
+             (`if let .Some(&mutating v) = …`), or through the type's own API"
+                .into(),
+        ],
+    });
+    true
 }
 
 /// Validate an assignment target, emitting diagnostics for violations.
@@ -221,8 +291,8 @@ fn check_target(
         // In an initializer, self.field assignments are always allowed.
         HirExpr::Field { base, name, .. } => {
             // Indirection write peel through a READ-ONLY wrapper: the field is
-            // reached via `pointeeRef()` (a `&T` place) because the wrapper is
-            // `Indirection` but not `MutableIndirection` — no `pointeeMutRef()`.
+            // reached via `value`'s `ref` (a `&T` place) because the wrapper is
+            // `Indirection` but not `MutableIndirection` — no `mutating ref`.
             // Same class as E208: a `&T` place can't be written. (D2)
             if cx
                 .typed
@@ -238,8 +308,15 @@ fn check_target(
             // Ref-returning getter (`cell.mutatingValue = v`): the place's
             // writability comes from the REFERENCE type, not the binding —
             // skip the Settable/base-mutability checks. `&T` is read-only.
+            // A stored `&mutating` field still needs a mutable base.
             match util::ref_place(cx, target) {
-                Some(true) => return,
+                Some(true) => {
+                    if !ref_field_base_is_mutable(cx, target) {
+                        let message = format!("cannot assign to immutable field '{name}'");
+                        push_write_through_ref_field(cx, target, message, diags);
+                    }
+                    return;
+                },
                 Some(false) => {
                     push_assign_through_shared_ref(cx, target, &mut *diags);
                     return;
@@ -418,8 +495,16 @@ fn check_target(
         // the field's type. Same logic as the Call arm above.
         HirExpr::MethodCall { receiver, .. } => {
             // `&mutating T`-returning method call — writable place (see Call).
-            match util::ref_place(cx, target) {
-                Some(true) => return,
+            // A subscript through a stored ref field writes the referent:
+            // the field's ref kind decides (see `util::field_subscript_ref`).
+            match util::ref_place(cx, target).or_else(|| util::field_subscript_ref(cx, target)) {
+                Some(true) => {
+                    if !ref_field_base_is_mutable(cx, target) {
+                        let message = "cannot assign to subscript on immutable binding".into();
+                        push_write_through_ref_field(cx, target, message, diags);
+                    }
+                    return;
+                },
                 Some(false) => {
                     push_assign_through_shared_ref(cx, target, &mut *diags);
                     return;
@@ -494,6 +579,32 @@ fn push_assign_to_expression(
 }
 
 /// E208: the target is a `&T` place — readable through, never writable.
+/// E201 for a write through a stored `&mutating` field whose holder is
+/// not mutable (`v.p.x = 1` with `let v`, `self.base(i) = x` in a
+/// borrowing method).
+fn push_write_through_ref_field(
+    cx: &BodyContext<'_>,
+    target: HirExprId,
+    message: String,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[1].id,
+        severity: DESCRIPTORS[1].default_severity,
+        message,
+        labels: vec![DiagLabel {
+            span: util::expr_span(cx.hir, target),
+            message: "cannot assign through immutable binding".into(),
+            is_primary: true,
+        }],
+        notes: vec![
+            "a '&mutating' field gives no interior mutability: writing through it \
+             needs a mutable holder (a 'var', or a 'mutating' method)"
+                .into(),
+        ],
+    });
+}
+
 fn push_assign_through_shared_ref(
     cx: &BodyContext<'_>,
     target: HirExprId,
@@ -521,6 +632,13 @@ fn is_self_local(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
     }
 }
 
+/// A `&mutating` place reached through a stored ref field (`v.p`,
+/// `self.base(i)`) is writable only through a mutable base: a ref field
+/// gives no interior mutability (see `util::stored_ref_field_base`).
+fn ref_field_base_is_mutable(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    util::stored_ref_field_base(cx, expr_id).is_none_or(|base| is_mutable_base(cx, base))
+}
+
 /// Check whether a base path is mutable. Walks through field / tuple-index
 /// chains: the path is mutable only if the root local is `var` AND every
 /// intermediate field along the chain is settable.
@@ -529,7 +647,7 @@ fn is_mutable_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
     // (the assignment-side surface of E207's const-cast guard — the
     // fact itself is classified once, in `util::ref_place`).
     if let Some(mutating) = util::ref_place(cx, expr_id) {
-        return mutating;
+        return mutating && ref_field_base_is_mutable(cx, expr_id);
     }
     match &cx.hir.exprs[expr_id] {
         HirExpr::Local(local_id, _) => {

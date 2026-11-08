@@ -121,6 +121,15 @@ Switch(x, [
 
 Column selection uses the **necessity heuristic**: pick the column with the most distinct constructors to minimize branching.
 
+### Type tests (`is T`)
+
+An `is T` pattern on an existential is `Constructor::TypeTest(T)`, arity 1
+(the payload viewed as `T`). Its access path element is
+`PathElement::Payload(T)`, a borrow of the payload in place. A box over a raw
+existential classifies as `TypeShape::Infinite`, so like integer literals the
+type tests never cover it: a match needs `_`, and a repeated `is T` arm is
+unreachable.
+
 ## Deduplication Invariants
 
 Each piece of pattern-matching logic exists in exactly one place:

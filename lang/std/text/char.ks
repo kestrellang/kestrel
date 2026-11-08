@@ -3,10 +3,10 @@
 module std.text
 
 import std.core.(Equatable, Comparable, Ordering, Bool, Matchable, ExpressibleByCharLiteral, Hashable, Hasher, RangeMatchable)
-import std.numeric.(Int64, UInt8, UInt32)
+import std.numeric.(Int64, UInt8, UInt32, UInt64)
 import std.result.(Optional)
-import std.collections.(Array)
-import std.memory.(ArraySlice, Pointer)
+import std.collections.(Array, Slice)
+import std.memory.(Pointer)
 import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.text.unicode as unicode
 
@@ -453,13 +453,9 @@ public struct Char: Equatable, Comparable, Matchable, ExpressibleByCharLiteral, 
         self._value.compare(other._value)
     }
 
-    /// Hashes this character by writing its 4-byte scalar value to the hasher.
-    ///
-    /// Uses native byte order — fine for in-process hash maps; do not
-    /// use the result for content-addressed storage.
+    /// Hashes this character by writing its scalar value as one word.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let val = self._value;
-        hasher.write(ArraySlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: 4))
+        hasher.write(uint64: UInt64(from: self._value))
     }
 
     /// Returns true if `self >= bound`. Used by `RangeMatchable` for `case 'a'...'z'`.
@@ -570,14 +566,14 @@ public struct Grapheme: Equatable, Cloneable {
             self._first = Char(unchecked: 0);
             self._rest = .None
         } else if n == 1 {
-            self._first = chars(unchecked: 0);
+            self._first = unsafe chars(unchecked: 0);
             self._rest = .None
         } else {
-            self._first = chars(unchecked: 0);
+            self._first = unsafe chars(unchecked: 0);
             var rest = Array[Char]();
             var i: Int64 = 1;
             while i < n {
-                rest.append(chars(unchecked: i));
+                rest.append(unsafe chars(unchecked: i));
                 i = i + 1
             }
             self._rest = .Some(rest)
@@ -650,7 +646,7 @@ public struct Grapheme: Equatable, Cloneable {
             let n = r.count;
             var i: Int64 = 0;
             while i < n {
-                len = len + r(unchecked: i).utf8Length();
+                len = len + unsafe r(unchecked: i).utf8Length();
                 i = i + 1
             }
         }
@@ -688,7 +684,7 @@ public struct Grapheme: Equatable, Cloneable {
                 }
                 var i: Int64 = 0;
                 while i < an {
-                    if a(unchecked: i).isEqual(to: b(unchecked: i)) == false {
+                    if unsafe a(unchecked: i).isEqual(to: b(unchecked: i)) == false {
                         return false
                     }
                     i = i + 1
@@ -709,7 +705,7 @@ extend Grapheme: Comparable {
         let minLen = if myChars.count < otherChars.count { myChars.count } else { otherChars.count };
         for (i, c) in myChars.iter().enumerate() {
             if i >= minLen { break }
-            let cmp = c.compare(otherChars(unchecked: i));
+            let cmp = c.compare(unsafe otherChars(unchecked: i));
             if cmp != .Equal { return cmp }
         }
         myChars.count.compare(otherChars.count)
@@ -798,7 +794,7 @@ public struct Utf8DecodeResult {
 func readByteAt(ptr: lang.ptr[lang.i8], offset: Int64) -> lang.i32 {
     let rawOffset: lang.i64 = offset.raw;
     let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](ptr, rawOffset);
-    let signedByte: lang.i8 = lang.ptr_read(bytePtr);
+    let signedByte: lang.i8 = unsafe lang.ptr_read(bytePtr);
     let asI32: lang.i32 = lang.cast_i8_i32(signedByte);
     lang.i32_and(asI32, 0xFF)
 }
@@ -812,7 +808,7 @@ func readByteAt(ptr: lang.ptr[lang.i8], offset: Int64) -> lang.i32 {
 func writeByteAt(ptr: lang.ptr[lang.i8], offset: Int64, byte: lang.i8) {
     let rawOffset: lang.i64 = offset.raw;
     let bytePtr: lang.ptr[lang.i8] = lang.ptr_offset[lang.i8](ptr, rawOffset);
-    lang.ptr_write(bytePtr, byte)
+    unsafe lang.ptr_write(bytePtr, byte)
 }
 
 /// Decodes one UTF-8 character starting at `index` inside the buffer of `length` bytes pointed to by `ptr`.

@@ -122,7 +122,7 @@ struct JsonCursor: Cloneable {
 
         let srcBytes = self.source.bytes;
         for (offset, expectedByte) in expected.bytes.iter().enumerate() {
-            if srcBytes(unchecked: self.pos + offset) != expectedByte {
+            if unsafe srcBytes(unchecked: self.pos + offset) != expectedByte {
                 throw JsonParseError("expected '" + expected + "'", startPos)
             }
         }
@@ -333,7 +333,7 @@ func parseRawString(mutating cursor: JsonCursor) -> String throws JsonParseError
         // Fast path: scan a run of plain bytes (no '"', no '\').
         let runStart = cursor.pos;
         while cursor.pos < cursor.len {
-            let b = srcBytes(unchecked: cursor.pos);
+            let b = unsafe srcBytes(unchecked: cursor.pos);
             if b == 34 or b == 92 {
                 break
             }
@@ -347,7 +347,7 @@ func parseRawString(mutating cursor: JsonCursor) -> String throws JsonParseError
             throw JsonParseError("unterminated string", cursor.pos)
         }
 
-        if srcBytes(unchecked: cursor.pos) == 34 {
+        if unsafe srcBytes(unchecked: cursor.pos) == 34 {
             cursor.pos = cursor.pos + 1;
             return .Ok(result)
         }
@@ -375,7 +375,7 @@ func unescape(mutating cursor: JsonCursor) -> Char throws JsonParseError {
             let codepoint = try parseUnicodeEscape(cursor);
             // Surrogate halves and out-of-range values have no scalar; reject
             // them rather than unwrapping a `.None`.
-            guard let some decoded = Char(UInt32(from: codepoint)) else {
+            guard let some decoded = Char(UInt32(truncating: codepoint)) else {
                 throw JsonParseError("invalid unicode escape", cursor.pos - 6)
             }
             .Ok(decoded)

@@ -13,3 +13,5 @@ perch = { path = "../../lang/perch" }
 talon-sqlite = { path = "../../lang/talon-sqlite" }
 quill = { path = "../../lang/quill" }
 quill-json = { path = "../../lang/quill-json" }
+crypto = { path = "../../lang/crypto" }
+datetime = { path = "../../lang/datetime" }

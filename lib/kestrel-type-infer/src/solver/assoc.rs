@@ -113,7 +113,7 @@ pub(crate) fn emit_alias_bounds(
     }
 }
 
-pub(super) fn solve_associated(
+pub(crate) fn solve_associated(
     ctx: &mut InferCtx<'_>,
     container: TyVar,
     key: crate::constraint::AssocKey,
@@ -142,6 +142,13 @@ pub(super) fn solve_associated(
         _ => unreachable!(),
     };
 
+    // A raw existential pins associated types in its bindings
+    // (`rawany Iterator[Item = Int64]`, existentials design §9).
+    if let Some(bound) = crate::existential::pinned_assoc_of(ctx, &kind, &key) {
+        ctx.equal(result, bound, span);
+        return SolveResult::Solved;
+    }
+
     let found = match &key {
         crate::constraint::AssocKey::Entity(assoc) => ctx
             .resolver
@@ -169,26 +176,21 @@ pub(super) fn solve_associated(
         Some(assoc) => {
             // Build substitution map from the container's type parameters → its
             // concrete type args, so e.g. `Array[i32].Element = T` resolves to
-            // `i32` rather than a bare `Param{T}`. The map is empty for tuple,
-            // function, never, etc. containers.
-            let container_subs: Vec<(Entity, TyVar)> = match &kind {
-                TyKind::Struct { entity, args }
-                | TyKind::Enum { entity, args }
-                | TyKind::Protocol { entity, args }
-                | TyKind::TypeAlias { entity, args } => {
+            // `i32` rather than a bare `Param{T}`. Entity and args come from ONE
+            // answer (`entity_and_args`), so a tuple binds `lang.(,)`'s params to
+            // its elements — the same view member lookup uses.
+            let container_subs: Vec<(Entity, TyVar)> = ctx
+                .resolver
+                .entity_and_args(&kind)
+                .map(|(entity, args)| {
                     let type_params: Vec<Entity> = ctx
                         .query_ctx
-                        .get::<TypeParams>(*entity)
+                        .get::<TypeParams>(entity)
                         .map(|tp| tp.0.clone())
                         .unwrap_or_default();
-                    type_params
-                        .iter()
-                        .zip(args.iter())
-                        .map(|(&p, &tv)| (p, tv))
-                        .collect()
-                },
-                _ => Vec::new(),
-            };
+                    type_params.into_iter().zip(args).collect()
+                })
+                .unwrap_or_default();
 
             // Extension free-param substitution: when the binding came from
             // `extend ConcreteType: Proto[FreeParams]`, the resolved HirTy may
@@ -254,6 +256,22 @@ pub(super) fn solve_associated(
 
             let mut all_subs = container_subs;
             all_subs.extend(extension_subs);
+
+            // A pattern extension's binding (`extend Box[(A, B)]: P { type
+            // Element = A }`) names its pattern params: bind them by matching
+            // the container's args against the written target.
+            let container_args: Vec<TyVar> = ctx
+                .resolver
+                .entity_and_args(&kind)
+                .map(|(_, args)| args)
+                .unwrap_or_default();
+            crate::generate::bind_extension_pattern_params(
+                ctx,
+                assoc.source_extension,
+                &container_args,
+                &mut all_subs,
+                &span,
+            );
 
             // Check where_clause_assoc_subs first — if a where clause directly
             // equated this associated type (e.g., `where Item = Optional[T]`),
@@ -421,30 +439,25 @@ fn conformance_binding(
         return ConformancePick::Wait;
     }
 
+    // Each conformance's args WITH defaults: `Int64: Multipliable` is
+    // `Multipliable[Int64]`, so `Int64 * Int64` selects it over a sibling
+    // `Multipliable[Meters]` (a written-args-only compare never could).
     let mut selected = conformances.into_iter().filter(|(source, ast_ty)| {
-        let written = kestrel_name_res::extract_ast_type_args(ast_ty);
-        written.len() == protocol_args.len()
-            && written.iter().zip(protocol_args).all(|(arg, &tv)| {
-                let hir = kestrel_hir_lower::lower_ast_type(ctx.query_ctx, *source, ctx.root, arg);
-                written_arg_matches(ctx, &hir, tv)
+        let args = effective_conformance_args(ctx, *source, protocol, ast_ty);
+        // A defaulted `Self` arg names the conformer itself, not the protocol.
+        args.len() == protocol_args.len()
+            && args.iter().zip(protocol_args).all(|(arg, &tv)| match arg {
+                kestrel_hir::ty::HirTy::SelfType(..) => {
+                    matches!(ctx.slot(ctx.resolve(tv)), TySlot::Resolved(k) if k.entity() == Some(recv))
+                },
+                _ => written_arg_matches(ctx, arg, tv),
             })
     });
     let (Some((source, _)), None) = (selected.next(), selected.next()) else {
         return ConformancePick::Unselected;
     };
 
-    let binding = ctx
-        .query_ctx
-        .children_of(source)
-        .iter()
-        .copied()
-        .find(|&child| {
-            ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-                && ctx
-                    .query_ctx
-                    .get::<Name>(child)
-                    .is_some_and(|n| n.0 == name)
-        });
+    let binding = conformance_assoc_alias(ctx, source, protocol, name);
     let Some(resolved) = binding.and_then(|alias| {
         ctx.query_ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
             entity: alias,
@@ -459,6 +472,70 @@ fn conformance_binding(
     })
 }
 
+/// A conformance's protocol args as HIR types, defaults filled
+/// (`conformance_args_with_defaults`) and lowered in the declaring scope.
+fn effective_conformance_args(
+    ctx: &InferCtx<'_>,
+    source: Entity,
+    protocol: Entity,
+    ast_ty: &kestrel_ast_builder::AstType,
+) -> Vec<kestrel_hir::ty::HirTy> {
+    let written = kestrel_name_res::extract_ast_type_args(ast_ty);
+    kestrel_name_res::conformance_args_with_defaults(ctx.query_ctx, protocol, written)
+        .iter()
+        .map(|arg| kestrel_hir_lower::lower_ast_type(ctx.query_ctx, source, ctx.root, arg))
+        .collect()
+}
+
+/// The `name` alias a conformance's declaration binds for `protocol`: one
+/// qualified to it (`type Mul.Output = N`), else an unqualified one
+/// (`type Output = Meters` in `extend N: Mul[Meters]`). A type body that
+/// binds several protocols' `Output` must not answer with the first.
+fn conformance_assoc_alias(
+    ctx: &InferCtx<'_>,
+    source: Entity,
+    protocol: Entity,
+    name: &str,
+) -> Option<Entity> {
+    let aliases = ctx
+        .query_ctx
+        .children_of(source)
+        .iter()
+        .copied()
+        .filter(|&child| {
+            ctx.query_ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
+                && ctx
+                    .query_ctx
+                    .get::<Name>(child)
+                    .is_some_and(|n| n.0 == name)
+        });
+    let mut unqualified = None;
+    for alias in aliases {
+        let Some(target) = ctx
+            .query_ctx
+            .get::<kestrel_ast_builder::QualifiedTarget>(alias)
+        else {
+            unqualified = unqualified.or(Some(alias));
+            continue;
+        };
+        let kestrel_ast_builder::AstType::Named { segments, .. } = &target.0 else {
+            continue;
+        };
+        let path = segments.iter().map(|s| s.name.clone()).collect();
+        if matches!(
+            ctx.query_ctx.query(kestrel_name_res::ResolveTypePath {
+                segments: path,
+                context: source,
+                root: ctx.root,
+            }),
+            kestrel_name_res::TypeResolution::Found(p) if p == protocol
+        ) {
+            return Some(alias);
+        }
+    }
+    unqualified
+}
+
 /// Whether a conformance's written protocol arg (`Meters` in
 /// `Subtractable[Meters]`) is the solved `tv`. An extension's own type param
 /// matches anything; an unresolved or unmodelled position does not match, so
@@ -470,6 +547,7 @@ fn written_arg_matches(ctx: &InferCtx<'_>, written: &kestrel_hir::ty::HirTy, tv:
     };
     match (written, kind) {
         (HirTy::Param(..), _) => true,
+        (HirTy::SelfType(entity, _), kind) => kind.entity() == Some(*entity),
         (HirTy::Struct { entity, args, .. }, TyKind::Struct { entity: e, args: a })
         | (HirTy::Enum { entity, args, .. }, TyKind::Enum { entity: e, args: a }) => {
             entity == e

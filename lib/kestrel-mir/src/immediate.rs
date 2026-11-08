@@ -23,6 +23,26 @@ pub enum ImmediateKind {
         self_type: Option<TyId>,
     },
     MonoFunctionRef(MonoFuncId),
+    /// The C-ABI address of an `@export(.C)` or `@extern(.C)` function, named
+    /// where an `@extern(.C) (…) -> …` is expected: an export's wrapper, an
+    /// import's C symbol. `ty` is its `MirTy::FuncC`. Mono rewrites it to
+    /// [`ImmediateKind::MonoCFunctionRef`].
+    CFunctionRef {
+        func: Entity,
+        type_args: Vec<TyId>,
+        self_type: Option<TyId>,
+        ty: TyId,
+    },
+    MonoCFunctionRef(MonoFuncId, TyId),
+    /// The address of an existential function table: `template`
+    /// (`MirModule::vtable_templates`) instantiated at `payload`. Mono
+    /// rewrites it to [`ImmediateKind::MonoVTable`].
+    VTable {
+        template: Entity,
+        payload: TyId,
+    },
+    /// A resolved table (`MonoModule::vtables`).
+    MonoVTable(crate::MonoVTableId),
     NullPtr(TyId),
     SizeOf(TyId),
     AlignOf(TyId),
@@ -126,11 +146,15 @@ impl Immediate {
             },
             ImmediateKind::BoolLiteral(_) => arena.bool(),
             ImmediateKind::StringLiteral(_) => arena.str_ty(),
-            ImmediateKind::StringPointer(_) => {
+            // A table's address is a raw byte pointer.
+            ImmediateKind::StringPointer(_)
+            | ImmediateKind::VTable { .. }
+            | ImmediateKind::MonoVTable(_) => {
                 let i8 = arena.i8();
                 arena.pointer(i8)
             },
             ImmediateKind::Unit => arena.unit(),
+            ImmediateKind::CFunctionRef { ty, .. } | ImmediateKind::MonoCFunctionRef(_, ty) => *ty,
             ImmediateKind::NullPtr(ty) | ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) => {
                 *ty
             },

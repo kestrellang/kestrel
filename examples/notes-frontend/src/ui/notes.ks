@@ -26,7 +26,7 @@ func noteList(notes: Array[Value]) -> Document {
     var cards = Document();
     var i: Int64 = 0;
     while i < notes.count {
-        cards.append(noteCard(notes(unchecked: i)));
+        cards.append(noteCard(unsafe notes(unchecked: i)));
         i = i + 1
     };
     div([cls("note-list")]) { cards }
@@ -100,7 +100,7 @@ func folderPicker(nid: Int64, currentFolderId: Int64, folders: Array[Value]) -> 
 
     var i: Int64 = 0;
     while i < folders.count {
-        let folder = folders(unchecked: i);
+        let folder = unsafe folders(unchecked: i);
         let fid = getInt(folder, "id");
         let name = getStr(folder, "name");
         let optAttrs = if fid == currentFolderId {
@@ -137,7 +137,9 @@ public func noteEditorView(note: Value?, folderId: Int64) -> Document {
         .Some(n) => getStr(n, "body"),
         .None => ""
     };
-    let formAction = if isNew { "/fragments/notes" } else { "/fragments/note/\(nid)" };
+    // Annotated: without it the if/else fails to unify a plain literal
+    // branch with an interpolated one (E109, a compiler bug).
+    let formAction: String = if isNew { "/fragments/notes" } else { "/fragments/note/\(nid)" };
     let submitLabel = if isNew { "Create Note" } else { "Save Changes" };
     let submitIcon = if isNew { "plus" } else { "check" };
 

@@ -62,7 +62,7 @@ pub enum Signedness {
 /// Whether a signed `Div`/`Rem` carries its safety guards (divide-by-zero trap
 /// and the `Int.MIN / -1` overflow guard). `Unchecked` skips both, emitting the
 /// bare hardware divide — undefined behaviour on those edges, like C. Backs the
-/// `divideUnchecked`/`moduloUnchecked` stdlib methods for hot loops where the
+/// `divideUnchecked`/`remainderUnchecked` stdlib methods for hot loops where the
 /// caller guarantees a valid divisor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DivGuard {
@@ -101,6 +101,14 @@ pub enum Op {
     AddOverflows(IntBits, Signedness),
     SubOverflows(IntBits, Signedness),
     MulOverflows(IntBits, Signedness),
+    /// The high half of the double-width product `a * b` (operands extended
+    /// by the signedness). With the wrapping `Mul` it gives the full product.
+    MulHigh(IntBits, Signedness),
+    /// `true` when this build checks integer overflow (`+ - *` trap instead
+    /// of wrapping). Takes a unit arg. Codegen resolves it to a constant from
+    /// `CodegenOptions::overflow_checks()`, so MIR (and its cache) stays the
+    /// same across `-O` levels.
+    OverflowChecks,
 
     FAdd(FloatBits),
     FSub(FloatBits),
@@ -175,6 +183,33 @@ pub enum Op {
     /// arithmetic on an address (kestrel-codegen-llvm/AGENTS.md).
     ClosureWord(u32),
 
+    // -- Two-word (data, table) values: existentials plan Phase 9 --
+    /// Pointer-sized word `i` at an address, as a raw pointer: a fat value's
+    /// data (0) or table (1) word, or a function / sub-table word of a table.
+    /// Word-indexed so lowering needs no pointer width. Codegen shares
+    /// `ClosureWord`'s lowering.
+    FatWord(u32),
+    /// Like [`Op::FatWord`], read as a pointer-sized integer (a table's size
+    /// or align word).
+    WordInt(u32),
+    /// View a `(Pointer[i8], Pointer[i8])` tuple as the fat value of type
+    /// `ty` (same layout; codegen is the identity).
+    FatPtr(TyId),
+    /// `lang.sizeof_val(p)`: the size of `*p`, read from `p`'s table when the
+    /// pointee is unsized. Legalized at mono (`mono::fat`); codegen only sees
+    /// sized pointees.
+    SizeOfVal(TyId),
+    /// `lang.alignof_val(p)`, like [`Op::SizeOfVal`].
+    AlignOfVal(TyId),
+    /// `lang.ptr_with_meta(addr, from)`: `addr`'s address with `from`'s table
+    /// (or just `addr` when the result is thin). Result type `ty`.
+    PtrWithMeta(TyId),
+    /// `lang.clone_val_into(src, dst)`: clone `*src` (a `ty`) into the
+    /// uninitialized `*dst`. Legalized at mono: the table's clone word for an
+    /// unsized `ty`, else the clone thunk at `ty`
+    /// (`MirModule::existential_clone_thunk`).
+    CloneIntoVal(TyId),
+
     StrPtr,
     StrLen,
 
@@ -218,6 +253,11 @@ macro_rules! op_ty_variants {
             SizeOf,
             AlignOf,
             StackAlloc,
+            FatPtr,
+            SizeOfVal,
+            AlignOfVal,
+            PtrWithMeta,
+            CloneIntoVal,
         }
     };
 }

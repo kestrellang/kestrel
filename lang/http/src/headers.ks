@@ -145,7 +145,7 @@ public struct Headers: Cloneable {
     public mutating func remove(name: String) {
         var i: Int64 = 0;
         while i < self.entries.count {
-            let pair = self.entries(unchecked: i);
+            let pair = unsafe self.entries(unchecked: i);
             if pair.0.equalsIgnoreAsciiCase(name) {
                  self.entries.remove(at: i);
             } else {
@@ -166,7 +166,7 @@ public struct Headers: Cloneable {
     /// h.has(name: "missing");  // false
     /// ```
     public func has(name: String) -> Bool {
-        self.value(forName: name).isSome()
+        self.value(forName: name).isSome
     }
 
     /// The total number of header entries (including duplicate names).

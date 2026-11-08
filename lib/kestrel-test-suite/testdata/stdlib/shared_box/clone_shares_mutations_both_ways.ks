@@ -23,11 +23,11 @@ func main() -> lang.i64 {
     let b = a.clone();
 
     a.sharedMutRef().bump(by: 5);                 // mutating method through the projection
-    let seenThroughB: Int64 = b.pointeeRef().n;
+    let seenThroughB: Int64 = b.value.n;
     if seenThroughB != 5 { return 1; }            // b observes a's mutation
 
     b.sharedMutRef().bump(by: 4);
-    let seenThroughA: Int64 = a.pointeeRef().n;
+    let seenThroughA: Int64 = a.value.n;
     if seenThroughA != 9 { return 2; }            // a observes b's mutation
 
     if a.isIdentical(to: b) == false { return 3; }

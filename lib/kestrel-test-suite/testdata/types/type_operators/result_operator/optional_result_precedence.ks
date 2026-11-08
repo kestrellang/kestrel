@@ -3,7 +3,7 @@
 // skip: blocked on type alias normalization
 
 module Test
-import std.io.stdio.println
+import std.streams.println
 
 struct MyError {}
 
@@ -11,6 +11,6 @@ func main() -> lang.i64 {
     let someOk: std.numeric.Int64 throws MyError? = .Some(.Ok(42));
     let none: std.numeric.Int64 throws MyError? = .None;
      println(someOk.unwrap().unwrap());
-     println(none.isNone());
+     println(none.isNone);
     0
 }

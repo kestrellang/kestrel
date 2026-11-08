@@ -17,8 +17,8 @@ module Test
             if f or f { return 4 }
 
             // Test logicalNot
-            if t.logicalNot() { return 5 }
-            if f.logicalNot() == false { return 6 }
+            if not t { return 5 }
+            if (not f) == false { return 6 }
 
             // Test equals
             if t.isEqual(to: t) == false { return 7 }

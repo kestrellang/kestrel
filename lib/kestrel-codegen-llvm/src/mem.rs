@@ -5,15 +5,22 @@
 //! reach one-past-the-end). The only `int<->ptr` conversions are `int_to_ptr`/
 //! `ptr_to_int`, used solely for `Op::PtrFromAddress`/`Op::PtrToAddress`.
 //!
+//! Every load, store, copy and fill assumes alignment 1 ([`load`], [`store`]):
+//! a field of a `@layout(.Packed)` struct can sit at any address, and the
+//! pointer to it is an ordinary `ptr`, so no access can promise more. LLVM's
+//! alignment inference raises it again wherever the address is provably
+//! aligned (allocas, offsets from them). Cranelift's `MemFlags::new()` makes
+//! the same no-alignment promise.
+//!
 //! `copy_aggregate`/`zero_memory` use `llvm.memcpy`/`llvm.memset`;
 //! `alloc_stack_slot` lives on `FuncCompiler` (it needs the entry block) — see
 //! `func.rs`.
 
 use inkwell::AddressSpace;
-use inkwell::builder::Builder;
+use inkwell::builder::{Builder, BuilderError};
 use inkwell::context::Context;
-use inkwell::types::IntType;
-use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
+use inkwell::types::{BasicType, IntType};
+use inkwell::values::{BasicValue, BasicValueEnum, InstructionValue, IntValue, PointerValue};
 
 use crate::ty::TypeRepr;
 
@@ -131,6 +138,33 @@ pub fn zero_memory<'ctx>(
     builder.build_memset(ptr, 1, zero, n).unwrap();
 }
 
+/// Load a `ty` from `ptr` with alignment 1 (see the module docs). The only
+/// way the backend loads.
+pub fn load<'ctx>(
+    builder: &Builder<'ctx>,
+    ty: impl BasicType<'ctx>,
+    ptr: PointerValue<'ctx>,
+    name: &str,
+) -> Result<BasicValueEnum<'ctx>, BuilderError> {
+    let value = builder.build_load(ty, ptr, name)?;
+    if let Some(inst) = value.as_instruction_value() {
+        let _ = inst.set_alignment(1);
+    }
+    Ok(value)
+}
+
+/// Store `value` to `ptr` with alignment 1 (see the module docs). The only
+/// way the backend stores.
+pub fn store<'ctx>(
+    builder: &Builder<'ctx>,
+    ptr: PointerValue<'ctx>,
+    value: impl BasicValue<'ctx>,
+) -> Result<InstructionValue<'ctx>, BuilderError> {
+    let inst = builder.build_store(ptr, value)?;
+    let _ = inst.set_alignment(1);
+    Ok(inst)
+}
+
 /// Store a value (scalar or aggregate-by-address) to `dest` per its repr.
 pub fn store_to_repr<'ctx>(
     cx: &'ctx Context,
@@ -142,7 +176,7 @@ pub fn store_to_repr<'ctx>(
 ) {
     match repr {
         TypeRepr::Scalar(_) => {
-            builder.build_store(dest, value).unwrap();
+            store(builder, dest, value).unwrap();
         },
         TypeRepr::Aggregate { size, .. } => {
             // `value` is the source address.
@@ -169,7 +203,7 @@ pub fn load_from_repr<'ctx>(
     addr: PointerValue<'ctx>,
 ) -> BasicValueEnum<'ctx> {
     match repr {
-        TypeRepr::Scalar(s) => builder.build_load(s.llvm(cx), addr, "ld").unwrap(),
+        TypeRepr::Scalar(s) => load(builder, s.llvm(cx), addr, "ld").unwrap(),
         TypeRepr::Aggregate { .. } => addr.into(),
         TypeRepr::Zst => null_ptr(cx).into(),
     }

@@ -79,9 +79,7 @@ impl<'a, 'ctx> FuncCompiler<'a, 'ctx> {
                 .repr(ty, &self.ctx.module.ty_arena, self.ctx.module);
             if let TypeRepr::Scalar(t) = repr {
                 let cx = self.ctx.cx;
-                return builder
-                    .build_load(t.llvm(cx), val.into_pointer_value(), "g")
-                    .unwrap();
+                return mem::load(builder, t.llvm(cx), val.into_pointer_value(), "g").unwrap();
             }
         }
         val

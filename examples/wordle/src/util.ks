@@ -8,7 +8,7 @@ public func splitGuesses(s: String) -> Array[String] {
     var start: Int64 = 0;
     var i: Int64 = 0;
     while i < s.bytes.count {
-        if s.bytes(unchecked: i) == 44 {
+        if unsafe s.bytes(unchecked: i) == 44 {
             // ',' separator
             if i > start {
                 out.append(s.asSlice().subslice(from: start, to: i).toOwned())
@@ -28,7 +28,7 @@ public func joinGuesses(guesses: Array[String]) -> String {
     var i: Int64 = 0;
     while i < guesses.count {
         if i > 0 { out.append(",") };
-        out.append(guesses(unchecked: i));
+        out.append(unsafe guesses(unchecked: i));
         i = i + 1
     }
     out
@@ -56,7 +56,7 @@ public func normalizeGuess(raw: String) -> String {
     if raw.bytes.count != 5 { return "" };
     var i: Int64 = 0;
     while i < 5 {
-        let b = raw.bytes(unchecked: i);
+        let b = unsafe raw.bytes(unchecked: i);
         let isLower = b >= 97 and b <= 122;
         let isUpper = b >= 65 and b <= 90;
         if not (isLower or isUpper) { return "" };

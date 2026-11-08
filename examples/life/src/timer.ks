@@ -7,18 +7,18 @@ struct Timer {
     var lastTickMs: Int64
 
     static func start() -> Timer {
-        let now = monotonicMs();
+        let now = unsafe monotonicMs();
         Timer(startMs: now, lastTickMs: now)
     }
 
     mutating func tick() -> Int64 {
-        let now = monotonicMs();
+        let now = unsafe monotonicMs();
         let dt = now - self.lastTickMs;
         self.lastTickMs = now;
         dt
     }
 
     func elapsed() -> Int64 {
-        monotonicMs() - self.startMs
+        unsafe monotonicMs() - self.startMs
     }
 }

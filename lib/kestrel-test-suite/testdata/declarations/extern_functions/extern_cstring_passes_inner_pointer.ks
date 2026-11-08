@@ -20,7 +20,7 @@ func strlen(s: CString) -> lang.i64
 @main
 func main() -> lang.i64 {
     let cstr = "kestrel".toCString();
-    let n = strlen(cstr);
+    let n = unsafe strlen(cstr);
     cstr.free();
     if lang.i64_ne(n, 7) { return 1 }
     0

@@ -35,7 +35,7 @@ public func parseCommand(
 
     // pos is advanced non-linearly (consuming value tokens), so while is correct here
     while pos < tokens.count {
-        let token = tokens(unchecked: pos);
+        let token = unsafe tokens(unchecked: pos);
 
         if seenDoubleDash {
             matches = try handlePositional(arguments, matches, token, positionalIndex);
@@ -81,7 +81,7 @@ public func parseCommand(
                             msg.append(rest);
                             throw ParseError.MissingValue(msg)
                         }
-                        matches.setValue(name: argDef.name, value: tokens(unchecked: pos))
+                        matches.setValue(name: argDef.name, value: unsafe tokens(unchecked: pos))
                     }
                 }
             }
@@ -114,7 +114,7 @@ public func parseCommand(
                             msg.append(flagChar);
                             throw ParseError.MissingValue(msg)
                         }
-                        matches.setValue(name: argDef.name, value: tokens(unchecked: pos));
+                        matches.setValue(name: argDef.name, value: unsafe tokens(unchecked: pos));
                         charPos = token.bytes.count
                     }
                 }
@@ -239,7 +239,7 @@ func handlePositional(
 func sliceFrom(arr: Array[String], start: Int64) -> Array[String] {
     var result = [];
     for i in start..<arr.count {
-        result.append(arr(unchecked: i));
+        result.append(unsafe arr(unchecked: i));
     }
     result
 }

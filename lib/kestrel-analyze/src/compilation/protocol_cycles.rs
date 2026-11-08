@@ -111,7 +111,7 @@ fn enter_protocol(
     detector.enter(protocol)?;
     if let Some(conformances) = cx.query.get::<Conformances>(protocol) {
         for item in &conformances.0 {
-            let ConformanceItem::Positive(ast_type, _) = item else {
+            let ConformanceItem::Positive(ast_type, ..) = item else {
                 continue;
             };
             if let Some(parent) = resolve_protocol(cx, ast_type, protocol) {

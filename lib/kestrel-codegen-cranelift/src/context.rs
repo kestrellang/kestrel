@@ -27,8 +27,18 @@ pub struct CodegenCtx<'m> {
     pub ptr_size: u64,
 
     pub func_ids: Vec<Option<FuncId>>,
+    /// The target's C struct-passing rules (`kestrel_codegen::c_abi`).
+    pub c_abi: kestrel_codegen::c_abi::CAbi,
+    /// Per mono function crossing the C boundary, its C-ABI symbol: the
+    /// imported C function of an `@extern`, the wrapper of an `@export`.
+    /// C function values (`MonoCFunctionRef`) take these.
+    pub c_symbols: HashMap<usize, FuncId>,
+    /// Call bridges for calls through C function values, per `FuncC` type.
+    pub c_call_bridges: HashMap<kestrel_mir::TyId, FuncId>,
     pub string_data: HashMap<String, cranelift_module::DataId>,
     pub static_data: HashMap<Entity, cranelift_module::DataId>,
+    /// Existential function tables, indexed like `MonoModule::vtables`.
+    pub vtable_data: Vec<cranelift_module::DataId>,
     pub func_builder_ctx: FunctionBuilderContext,
     pub clif_outputs: Vec<(String, String)>,
 }
@@ -78,8 +88,12 @@ impl<'m> CodegenCtx<'m> {
             ptr_ty,
             ptr_size,
             func_ids: vec![None; module.functions.len()],
+            c_abi: target.c_abi(),
+            c_symbols: HashMap::new(),
+            c_call_bridges: HashMap::new(),
             string_data: HashMap::new(),
             static_data: HashMap::new(),
+            vtable_data: Vec::new(),
             func_builder_ctx: FunctionBuilderContext::new(),
             clif_outputs: Vec::new(),
         })
@@ -88,7 +102,10 @@ impl<'m> CodegenCtx<'m> {
     pub fn compile_all(&mut self) -> Result<(), CodegenError> {
         self.define_all_statics()?;
         self.declare_all_functions()?;
+        self.define_c_bridges()?;
+        self.define_all_vtables()?;
         self.define_all_functions()?;
+        crate::c_bridge::define_call_bridges(self)?;
         Ok(())
     }
 
@@ -109,6 +126,71 @@ impl<'m> CodegenCtx<'m> {
         // The entry point is the `@main`-marked function (propagated from
         // FunctionDef.is_main through monomorphization). Independent of name.
         func.is_main
+    }
+
+    // -- Existential function tables --
+
+    /// Each `MonoVTable` as a read-only array of pointer-sized words with
+    /// relocations (`kestrel_mir::item::vtable` has the layout). All are
+    /// declared before any is defined: tables point at one another.
+    fn define_all_vtables(&mut self) -> Result<(), CodegenError> {
+        let err = |e: cranelift_module::ModuleError| CodegenError::DataSection(format!("{e}"));
+        for table in &self.module.vtables {
+            let id = self
+                .cl_module
+                .declare_data(&table.name, Linkage::Local, false, false)
+                .map_err(err)?;
+            self.vtable_data.push(id);
+        }
+        let word = self.ptr_size as usize;
+        for (i, table) in self.module.vtables.iter().enumerate() {
+            let mut bytes = vec![0u8; word * table.entries.len().max(1)];
+            let mut desc = DataDescription::new();
+            let mut relocs = Vec::new();
+            for (slot, entry) in table.entries.iter().enumerate() {
+                let at = slot * word;
+                let int = match entry {
+                    kestrel_mir::mono::MonoVTableEntry::Size(ty) => {
+                        Some(self.tc.repr(*ty, &self.module.ty_arena, self.module).size())
+                    },
+                    kestrel_mir::mono::MonoVTableEntry::Align(ty) => Some(
+                        self.tc
+                            .repr(*ty, &self.module.ty_arena, self.module)
+                            .align(),
+                    ),
+                    other => {
+                        relocs.push((at, other.clone()));
+                        None
+                    },
+                };
+                if let Some(v) = int {
+                    bytes[at..at + word].copy_from_slice(&v.to_le_bytes()[..word]);
+                }
+            }
+            desc.define(bytes.into_boxed_slice());
+            for (at, entry) in relocs {
+                match entry {
+                    kestrel_mir::mono::MonoVTableEntry::Func(f) => {
+                        let Some(fid) = self.func_ids[f.index()] else {
+                            continue;
+                        };
+                        let fref = self.cl_module.declare_func_in_data(fid, &mut desc);
+                        desc.write_function_addr(at as u32, fref);
+                    },
+                    kestrel_mir::mono::MonoVTableEntry::Table(t) => {
+                        let gv = self
+                            .cl_module
+                            .declare_data_in_data(self.vtable_data[t.index()], &mut desc);
+                        desc.write_data_addr(at as u32, gv, 0);
+                    },
+                    _ => {},
+                }
+            }
+            self.cl_module
+                .define_data(self.vtable_data[i], &desc)
+                .map_err(err)?;
+        }
+        Ok(())
     }
 
     // -- Statics --
@@ -248,22 +330,57 @@ impl<'m> CodegenCtx<'m> {
     // -- Functions --
 
     fn declare_all_functions(&mut self) -> Result<(), CodegenError> {
-        // Extern imports with the same symbol must share a FuncId.
         // Local functions always get unique IDs — even if mangled names
-        // collide, each mono function is a distinct compilation unit.
-        let mut extern_declared: HashMap<String, FuncId> = HashMap::new();
+        // collide, each mono function is a distinct compilation unit. An
+        // `@extern` is a local thunk too (see `c_bridge`).
         for (i, func) in self.module.functions.iter().enumerate() {
-            if let Some(ext) = &func.extern_info
-                && let Some(&existing_id) = extern_declared.get(&ext.symbol_name)
-            {
-                self.func_ids[i] = Some(existing_id);
+            let func_id = self.declare_function(func, i)?;
+            self.func_ids[i] = Some(func_id);
+        }
+        Ok(())
+    }
+
+    /// Define every `@extern` import thunk and `@export` wrapper. Imports with
+    /// the same symbol share one C declaration.
+    fn define_c_bridges(&mut self) -> Result<(), CodegenError> {
+        let module = self.module;
+        let mut c_imports: HashMap<String, FuncId> = HashMap::new();
+        for (i, func) in module.functions.iter().enumerate() {
+            let Some(ext) = &func.extern_info else {
+                continue;
+            };
+            let kestrel_fn = self.func_ids[i].expect("function must be declared");
+            let decl = kestrel_codegen::c_abi::CDecl::of_function(func);
+            if ext.export {
+                let wrapper = crate::c_bridge::define_export_wrapper(
+                    self,
+                    &decl,
+                    kestrel_fn,
+                    &ext.symbol_name,
+                )?;
+                self.c_symbols.insert(i, wrapper);
                 continue;
             }
-            let func_id = self.declare_function(func, i)?;
-            if let Some(ext) = &func.extern_info {
-                extern_declared.insert(ext.symbol_name.clone(), func_id);
-            }
-            self.func_ids[i] = Some(func_id);
+            let (csig, sig) = crate::c_bridge::c_signature(self, &decl);
+            let c_fn = match c_imports.get(&ext.symbol_name) {
+                Some(&id) => id,
+                None => {
+                    let id = self
+                        .cl_module
+                        .declare_function(&ext.symbol_name, Linkage::Import, &sig)
+                        .map_err(|e| CodegenError::FunctionDefinition {
+                            name: ext.symbol_name.clone(),
+                            source: Box::new(e),
+                        })?;
+                    c_imports.insert(ext.symbol_name.clone(), id);
+                    id
+                },
+            };
+            let target = crate::c_bridge::CTarget::Symbol(c_fn);
+            crate::c_bridge::define_import_thunk(
+                self, &decl, &func.name, kestrel_fn, target, &csig,
+            )?;
+            self.c_symbols.insert(i, c_fn);
         }
         Ok(())
     }
@@ -276,37 +393,20 @@ impl<'m> CodegenCtx<'m> {
         let is_main = self.is_main_function(func);
         let call_conv = self.isa.default_call_conv();
 
-        let (sig, linkage, name) = if let Some(ext) = &func.extern_info {
-            let sig = crate::abi::build_extern_signature(
-                func,
-                &mut self.tc,
-                &self.module.ty_arena,
-                self.module,
-                call_conv,
-            );
-            (sig, Linkage::Import, ext.symbol_name.clone())
-        } else if is_main {
-            let sig = crate::abi::build_signature(
-                func,
-                &mut self.tc,
-                &self.module.ty_arena,
-                self.module,
-                call_conv,
-            );
-            (sig, Linkage::Export, "main".to_string())
+        let sig = crate::abi::build_signature(
+            func,
+            &mut self.tc,
+            &self.module.ty_arena,
+            self.module,
+            call_conv,
+        );
+        let (linkage, name) = if is_main {
+            (Linkage::Export, "main".to_string())
         } else {
-            let sig = crate::abi::build_signature(
-                func,
-                &mut self.tc,
-                &self.module.ty_arena,
-                self.module,
-                call_conv,
-            );
             // Append mono index to guarantee unique names within the
             // Cranelift module. The linker sees mangled_name; the suffix
             // only prevents Cranelift's declare_function dedup.
-            let unique_name = format!("{}.mono{}", func.name, idx);
-            (sig, Linkage::Local, unique_name)
+            (Linkage::Local, format!("{}.mono{}", func.name, idx))
         };
 
         let func_id = self

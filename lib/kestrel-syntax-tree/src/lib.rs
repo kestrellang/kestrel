@@ -84,6 +84,7 @@ impl SyntaxKind {
                 | SyntaxKind::TyNever
                 | SyntaxKind::TyInferred
                 | SyntaxKind::TySome
+                | SyntaxKind::TyAny
                 | SyntaxKind::TyRef
                 | SyntaxKind::TyMutRef
                 | SyntaxKind::TyParen

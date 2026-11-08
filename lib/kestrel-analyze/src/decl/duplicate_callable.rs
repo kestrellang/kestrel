@@ -32,7 +32,7 @@ use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Callable, NodeKind};
-use kestrel_name_res::ConformingProtocols;
+use kestrel_hecs::Entity;
 use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
@@ -155,11 +155,16 @@ impl DeclCheck for DuplicateCallableAnalyzer {
                 continue;
             }
 
-            // Skip if these are protocol implementations — multiple methods with the
-            // same labels are valid when they implement different instantiations of a
-            // parameterized protocol (e.g., Convertible[Int8], Convertible[Int16]).
-            // Check if a conforming protocol declares a method matching this signature.
-            if is_protocol_method_impl(cx, &key.name, &key.labels) {
+            // Label-only overloading has ONE exception: each callable
+            // witnesses a different instantiation of a parameterized protocol.
+            if crate::util::same_label_witnesses_allowed(
+                cx.query,
+                cx.root,
+                conforming_type(cx),
+                &vec![cx.entity; callables.len()],
+                &key.name,
+                &key.labels,
+            ) {
                 continue;
             }
 
@@ -191,42 +196,18 @@ impl DeclCheck for DuplicateCallableAnalyzer {
     }
 }
 
-/// Check if a callable signature corresponds to a protocol method requirement.
-/// When the parent entity conforms to a protocol that declares a method with
-/// matching name and labels, the "duplicates" are implementations of different
-/// instantiations of a parameterized protocol — not true duplicates.
-fn is_protocol_method_impl(cx: &DeclContext<'_>, name: &str, labels: &[Option<String>]) -> bool {
-    let protocols = cx.query.query(ConformingProtocols {
-        entity: cx.entity,
-        root: cx.root,
-    });
-
-    for &proto in &protocols {
-        // Search protocol's children for a matching method
-        let candidates = if name == "init" {
-            util::children_of_kind(cx.query, proto, NodeKind::Initializer)
-        } else {
-            // entity_name (not the Name component) — keys for anonymous
-            // functions carry the "<anonymous>" fallback and must still match.
-            util::children_of_kind(cx.query, proto, NodeKind::Function)
-                .into_iter()
-                .filter(|&c| util::entity_name(cx.query, c) == name)
-                .collect()
-        };
-
-        for cand in candidates {
-            let Some(callable) = cx.query.get::<Callable>(cand) else {
-                continue;
-            };
-            let cand_labels: Vec<Option<String>> =
-                callable.params.iter().map(|p| p.label.clone()).collect();
-            if cand_labels == *labels {
-                return true;
-            }
-        }
+/// The type whose conformances an extension's callables witness: an
+/// extension's target, else the declaration itself.
+fn conforming_type(cx: &DeclContext<'_>) -> Entity {
+    if cx.query.get::<NodeKind>(cx.entity) != Some(&NodeKind::Extension) {
+        return cx.entity;
     }
-
-    false
+    cx.query
+        .query(kestrel_name_res::ExtensionTargetEntity {
+            extension: cx.entity,
+            root: cx.root,
+        })
+        .unwrap_or(cx.entity)
 }
 
 #[cfg(test)]

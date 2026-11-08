@@ -1,0 +1,10 @@
+[package]
+name = "kestrel-target"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+target-lexicon = "0.12"

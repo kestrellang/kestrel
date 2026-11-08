@@ -149,7 +149,9 @@ fn reaches_observable_extern(
     visited: &mut FxHashSet<usize>,
     path: &mut Vec<usize>,
 ) -> Option<String> {
-    if let Some(ext) = &mono.functions[fi].extern_info {
+    if let Some(ext) = &mono.functions[fi].extern_info
+        && ext.is_import()
+    {
         if MEMORY_EXTERNS.contains(&ext.symbol_name.as_str()) {
             return None;
         }

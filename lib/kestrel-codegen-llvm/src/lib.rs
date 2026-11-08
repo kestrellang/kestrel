@@ -13,6 +13,7 @@
 //! `Op::PtrToAddress`/`Op::PtrFromAddress` boundaries.
 
 pub mod abi;
+pub mod c_bridge;
 pub mod context;
 pub mod error;
 pub mod func;
@@ -43,9 +44,23 @@ pub struct CodegenOptions {
     pub libraries: Vec<String>,
     pub library_paths: Vec<String>,
     pub frameworks: Vec<String>,
+    /// Extra arguments passed verbatim to the linker driver.
+    pub link_args: Vec<String>,
     pub c_sources: Vec<std::path::PathBuf>,
     /// Emit textual LLVM IR (per function) into `CompilationResult::ir_text`.
     pub emit_ir: bool,
+    /// `--overflow-checks on|off`; `None` derives it from `opt_level`.
+    pub overflow_checks_override: Option<bool>,
+}
+
+impl CodegenOptions {
+    /// Whether integer `+ - *` (and `-minValue`, `minValue / -1`, `pow`)
+    /// trap on overflow. On for unoptimized builds, off for optimized ones,
+    /// unless `overflow_checks_override` says otherwise
+    /// (`docs/design/integer-overflow.md`, ruling O1).
+    pub fn overflow_checks(&self) -> bool {
+        self.overflow_checks_override.unwrap_or(self.opt_level == 0)
+    }
 }
 
 pub struct CompilationResult {
@@ -82,7 +97,9 @@ pub fn compile_and_link(
 
     let tmp_dir = std::env::temp_dir();
     let id = LINK_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let obj_name = format!("kestrel_llvm_{}_{}.o", std::process::id(), id);
+    // WebAssembly hands the linker bitcode (see `CodegenCtx::finish`).
+    let ext = if target.is_wasm() { "bc" } else { "o" };
+    let obj_name = format!("kestrel_llvm_{}_{}.{ext}", std::process::id(), id);
     let obj_path = tmp_dir.join(obj_name);
     std::fs::write(&obj_path, &result.object_bytes)?;
 

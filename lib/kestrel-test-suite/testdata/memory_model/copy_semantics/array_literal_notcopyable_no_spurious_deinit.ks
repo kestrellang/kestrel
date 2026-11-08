@@ -16,23 +16,23 @@ import std.numeric.(Int64)
 struct Res: not Copyable {
     var tag: Int64
     var drops: Pointer[Int64]
-    deinit { self.drops.write(self.drops.read() + 1); }
+    deinit { unsafe self.drops.write(self.drops.read() + 1); }
 }
 
 func build(drops: Pointer[Int64]) -> Int64 {
     var rs = [Res(tag: 1, drops: drops)]; // ERROR: Res !: Copyable
     // construction is a MOVE: no deinit yet
-    if drops.read() != 0 { return 1; }
+    if unsafe drops.read() != 0 { return 1; }
     0
 }
 
 @main
 func main() -> lang.i64 {
     let drops = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    drops.write(0);
+    unsafe drops.write(0);
     let status = build(drops);
     if status != 0 { return status.raw; }
     // exactly one deinit, at `build` scope exit
-    if drops.read() != 1 { return 2; }
+    if unsafe drops.read() != 1 { return 2; }
     0
 }

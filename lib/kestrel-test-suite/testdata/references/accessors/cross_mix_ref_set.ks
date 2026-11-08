@@ -17,10 +17,10 @@ struct Logged {
     var writes: Pointer[Int64]
 
     subscript(at index: Int64) -> Int64 {
-        ref { self.p.offset(by: index).value }
+        ref { unsafe self.p.offset(by: index).value }
         set {
-            self.writes.write(self.writes.read() + 1);
-            self.p.offset(by: index).write(newValue);
+            unsafe self.writes.write(self.writes.read() + 1);
+            unsafe self.p.offset(by: index).write(newValue);
         }
     }
 }
@@ -29,22 +29,22 @@ struct Logged {
 func main() -> lang.i64 {
     let p = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
     let w = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    p.write(5);
-    w.write(0);
+    unsafe p.write(5);
+    unsafe w.write(0);
     var l = Logged(p: p, writes: w);
 
     // Reads: through the ref accessor, no set-hook ticks.
     if l(at: 0) != 5 { return 1; }
-    if w.read() != 0 { return 2; }
+    if unsafe w.read() != 0 { return 2; }
 
     // Write: through the set hook.
     l(at: 0) = 9;
     if l(at: 0) != 9 { return 3; }
-    if w.read() != 1 { return 4; }
+    if unsafe w.read() != 1 { return 4; }
 
     // RMW: ref-read → op → set writeback; the hook ticks once.
     l(at: 0) += 3;
     if l(at: 0) != 12 { return 5; }
-    if w.read() != 2 { return 6; }
+    if unsafe w.read() != 2 { return 6; }
     0
 }

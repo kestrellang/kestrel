@@ -2,7 +2,7 @@
 // expect-stdout: 1\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 func doNothing() -> () = ()
 

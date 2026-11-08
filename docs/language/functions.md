@@ -402,6 +402,43 @@ Use cases:
 - Utility functions related to the type
 - Type-level operations
 
+## Pipe
+
+`x |> f` passes `x` to `f`, so a chain of calls reads left to right:
+
+```kestrel
+let report = path |> read |> parse |> summarize |> render;
+// same as render(summarize(parse(read(path))))
+```
+
+A call with a `_` on the right takes the value in that slot (no closure is
+built), which is how to pipe into a parameter other than the first or a
+labeled one:
+
+```kestrel
+let n = text |> Int64.parse(_, radix: 16) |> clamp(_, min: 0, max: 255);
+let s = user |> greet(_.name);       // greet(user.name)
+```
+
+Any other right side is evaluated and then called with the value:
+`x |> makeAdder(1)` is `makeAdder(1)(x)`, and `x |> { it * 2 }` calls the
+closure. `|>` never guesses a slot.
+
+- `|>` binds loosest of all operators: `a + b |> f` is `f(a + b)`.
+- A place on the left (`buf`, `self.items`) is passed exactly as if written
+  in the call, so a borrowing parameter borrows it. Any other left side is
+  evaluated first, before the call's other arguments, and only once.
+- A line may start with `|>`.
+
+When a pipe fails, the error names the likely mistake:
+
+| You wrote | The error suggests |
+|-----------|--------------------|
+| `5 \|> sub(1)` | `sub(_, 1)`: a call with no `_` is called with its result |
+| `5 \|> scale` (first parameter labeled `by`) | `scale(by: _)` |
+| `o \|> double ?? 0` | `(o \|> double) ?? 0`: `\|>` binds looser than `??` |
+| `5 \|> 3` | the right side is not callable |
+
 ## Nested Functions
 
 Functions can be declared inside other functions (though this is not commonly used):
@@ -439,10 +476,29 @@ func free(ptr: Ptr)  // Void return
 2. **FFI Safety**: All parameter and return types must conform to `FFISafe` protocol
 3. **No Body**: Extern functions cannot have a body
 4. **No Generics**: Extern functions cannot be generic
-5. **Parameter Modes**: Parameters are implicitly `consuming` (passed by value)
-   - Cannot use `mutating` on extern function parameters
-   - Can optionally write `consuming` explicitly
+5. **Parameter Modes**: A plain parameter `x: T` (or `consuming x: T`) is
+   passed to C by value. A reference parameter is a C pointer: `x: &T` is
+   `const T*` and `x: &mutating T` is `T*`. `mutating x: T` is an error
+   (E611); write `x: &mutating T`.
 6. **Mangling**: Use `mangleName:` to specify the C symbol name
+
+Structs follow the platform's C ABI (x86-64 System V and AArch64 AAPCS64),
+so a C function that takes or returns a struct by value can be bound
+directly. Small integers (`Int8`, `UInt16`, `Bool`, …) are sign- or
+zero-extended the way C expects.
+
+```kestrel
+struct Vec2: FFISafe { var x: Float32; var y: Float32 }
+
+@extern(.C, mangleName: "vec2_length")
+func length(v: Vec2) -> Float32               // struct by value
+
+@extern(.C, mangleName: "vec2_normalize")
+func normalize(v: &mutating Vec2)             // `Vec2*`
+
+@extern(.C, mangleName: "vec2_print")
+func print(v: &Vec2)                          // `const Vec2*`
+```
 
 ```kestrel
 // ERROR: Cannot have body
@@ -453,10 +509,67 @@ func bad(x: MyInt) -> MyInt { x }
 @extern(.C)
 func generic[T](x: T) -> T
 
-// ERROR: mutating not allowed
+// ERROR (E611): write `x: &mutating MyInt` for a `MyInt*`
 @extern(.C)
 func mutate(mutating x: MyInt) -> MyInt
 ```
+
+## Exported Functions
+
+`@export(.C)` gives a Kestrel function a C entry point, so C code can call
+it. The same parameter rules as `@extern` apply. `mangleName:` sets the C
+symbol, which otherwise is the function's name.
+
+```kestrel
+@export(.C, mangleName: "add_points")
+func addPoints(a: Vec2, b: Vec2) -> Vec2 { Vec2(x: a.x + b.x, y: a.y + b.y) }
+```
+
+### Callbacks
+
+A C function type, `@extern(.C) (A) -> R`, is the address of a function C
+can call: exactly a C function pointer, so it can be an `@extern` argument
+or result, or a field of an `FFISafe` struct. Naming an `@export(.C)` or
+`@extern(.C)` function where one is expected gives its C entry point. An
+ordinary function has none (E647) and a closure has no address at all
+(E624); pass closure state through the API's `void* userdata`. A `&T`
+param is a C pointer, as in an `@extern` declaration.
+
+```kestrel
+@export(.C, mangleName: "compare_ints")
+func compareInts(a: Pointer[Int32], b: Pointer[Int32]) -> Int32 { ... }
+
+@extern(.C, mangleName: "qsort")
+func qsort(base: RawPointer, count: UInt64, size: UInt64, compare: @extern(.C) (Pointer[Int32], Pointer[Int32]) -> Int32)
+
+unsafe qsort(numbers.asPointer().asRaw(), count, 4, compareInts);
+```
+
+Kestrel calls a C function value with the C ABI, in `unsafe` (E641),
+since nothing checks that the address is a live function of that type:
+
+```kestrel
+@extern(.C, mangleName: "get_handler")
+func getHandler() -> @extern(.C) (Int64) -> Int64
+
+let handler = unsafe getHandler();
+let result = unsafe handler(42);
+```
+
+A C function type is never null. A callback C allows to be `NULL` is a
+`std.ffi.NullableCFunction[F]`: the same layout, with `null` for `NULL`
+and `function` (an `F?`) to read it back.
+
+```kestrel
+struct LogHooks: FFISafe {
+    var onLog: NullableCFunction[@extern(.C) (Int32, CString) -> ()];
+}
+
+let hooks = LogHooks(onLog: null);
+let withLog = LogHooks(onLog: NullableCFunction(logMessage));
+```
+
+A C function can't yet be used where a Kestrel closure type is expected.
 
 ## Visibility
 

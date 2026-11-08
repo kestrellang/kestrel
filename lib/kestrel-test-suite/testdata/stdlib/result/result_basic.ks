@@ -9,12 +9,12 @@ module Test
             let err: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(99);
 
             // Test isOk
-            if ok.isOk() == false { return 1 }
-            if err.isOk() { return 2 }
+            if ok.isOk == false { return 1 }
+            if err.isOk { return 2 }
 
             // Test isErr
-            if ok.isErr() { return 3 }
-            if err.isErr() == false { return 4 }
+            if ok.isErr { return 3 }
+            if err.isErr == false { return 4 }
 
             // Test unwrap on Ok
             if ok.unwrap() != 42 { return 5 }

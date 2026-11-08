@@ -9,8 +9,7 @@
 //! (`--list-stages` lists them; `-s all` prints every stage). Default is `verify`.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use kestrel_ast_builder::{Os as AstOs, TargetConfig as AstTargetConfig};
-use kestrel_codegen::TargetConfig as CodegenTargetConfig;
+use kestrel_codegen::TargetConfig;
 use kestrel_codegen_cranelift as cranelift_backend;
 use kestrel_codegen_llvm as llvm_backend;
 use kestrel_compiler::Compiler;
@@ -22,6 +21,15 @@ enum Backend {
     Cranelift,
     /// LLVM 18 (via inkwell): used for optimized builds (`-O1`, `-O2`).
     Llvm,
+}
+
+/// Parses `--overflow-checks on|off`.
+fn parse_on_off(s: &str) -> Result<bool, String> {
+    match s {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        _ => Err(format!("expected `on` or `off`, got `{s}`")),
+    }
 }
 
 impl Backend {
@@ -126,6 +134,11 @@ struct BuildArgs {
     )]
     opt_level: u8,
 
+    /// Trap on integer overflow (`on`) or wrap (`off`). Defaults to on at
+    /// `-O0` and off at `-O1`/`-O2`.
+    #[arg(long = "overflow-checks", value_name = "on|off", value_parser = parse_on_off)]
+    overflow_checks: Option<bool>,
+
     /// Link with a library (repeatable; use `:libname.a` for static).
     #[arg(short = 'l', long = "link", value_name = "LIBRARY")]
     libraries: Vec<String>,
@@ -137,6 +150,11 @@ struct BuildArgs {
     /// Link a macOS framework (repeatable).
     #[arg(long = "framework", value_name = "NAME")]
     frameworks: Vec<String>,
+
+    /// Pass an argument straight to the linker driver (repeatable), e.g.
+    /// `--link-arg=-sUSE_SDL=2` for Emscripten.
+    #[arg(long = "link-arg", value_name = "ARG", allow_hyphen_values = true)]
+    link_args: Vec<String>,
 }
 
 #[derive(Args)]
@@ -269,7 +287,9 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
                 libraries: args.libraries,
                 library_paths: args.library_paths,
                 frameworks: args.frameworks,
+                link_args: args.link_args,
                 c_sources,
+                overflow_checks_override: args.overflow_checks,
                 ..Default::default()
             };
             compiler
@@ -282,7 +302,9 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
                 libraries: args.libraries,
                 library_paths: args.library_paths,
                 frameworks: args.frameworks,
+                link_args: args.link_args,
                 c_sources,
+                overflow_checks_override: args.overflow_checks,
                 ..Default::default()
             };
             compiler
@@ -346,8 +368,8 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     // spans, codes and notes and throw them away (F18).
     let outcome: Result<(), String> = match args.kind {
         DumpKind::Mir => dump_mir(&compiler, args.stage, args.function_filter.as_deref()),
-        DumpKind::Cranelift => dump_cranelift(globals, &compiler),
-        DumpKind::Llvm => dump_llvm(globals, &compiler, args.opt_level),
+        DumpKind::Cranelift => dump_cranelift(&compiler),
+        DumpKind::Llvm => dump_llvm(&compiler, args.opt_level),
         DumpKind::Diagnostics => {
             // Emitted below; no stdout output for this kind.
             Ok(())
@@ -376,17 +398,15 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
 
 /// Print cranelift IR for the whole module. Errors are returned, not printed,
 /// so `dump` can flush accumulated diagnostics first (F18).
-fn dump_cranelift(globals: &Globals, compiler: &Compiler) -> Result<(), String> {
-    let target = globals
-        .codegen_target()
-        .map_err(|_| "invalid target".to_string())?;
+fn dump_cranelift(compiler: &Compiler) -> Result<(), String> {
+    let target = compiler.target();
     let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
     let mono = compiler.monomorphize_mir(mir).map_err(|e| e.to_string())?;
     let options = cranelift_backend::CodegenOptions {
         emit_clif: true,
         ..Default::default()
     };
-    let result = cranelift_backend::compile(&mono, &target, &options).map_err(|e| e.to_string())?;
+    let result = cranelift_backend::compile(&mono, target, &options).map_err(|e| e.to_string())?;
     for (name, clif) in &result.clif_text {
         println!("; function: {name}");
         print!("{clif}");
@@ -396,10 +416,8 @@ fn dump_cranelift(globals: &Globals, compiler: &Compiler) -> Result<(), String> 
 }
 
 /// Print the optimized LLVM IR for the whole module at `opt_level`.
-fn dump_llvm(globals: &Globals, compiler: &Compiler, opt_level: u8) -> Result<(), String> {
-    let target = globals
-        .codegen_target()
-        .map_err(|_| "invalid target".to_string())?;
+fn dump_llvm(compiler: &Compiler, opt_level: u8) -> Result<(), String> {
+    let target = compiler.target();
     let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
     let mono = compiler.monomorphize_mir(mir).map_err(|e| e.to_string())?;
     let options = llvm_backend::CodegenOptions {
@@ -407,7 +425,7 @@ fn dump_llvm(globals: &Globals, compiler: &Compiler, opt_level: u8) -> Result<()
         emit_ir: true,
         ..Default::default()
     };
-    let result = llvm_backend::compile(&mono, &target, &options).map_err(|e| e.to_string())?;
+    let result = llvm_backend::compile(&mono, target, &options).map_err(|e| e.to_string())?;
     print!("{}", result.module_ir.unwrap_or_default());
     Ok(())
 }
@@ -564,7 +582,7 @@ impl Globals {
     /// Build a Compiler, loading stdlib (unless `--no-std`) and every input file.
     /// Returns the compiler and the stdlib directory (if loaded).
     fn load_compiler(&self, files: &[String]) -> Result<(Compiler, Option<PathBuf>), ExitCode> {
-        let mut compiler = Compiler::new().with_target(self.ast_target());
+        let mut compiler = Compiler::new().with_target(self.target()?);
         let mut std_dir_out = None;
 
         if !self.no_std {
@@ -600,31 +618,16 @@ impl Globals {
         Ok((compiler, std_dir_out))
     }
 
-    fn codegen_target(&self) -> Result<CodegenTargetConfig, ExitCode> {
+    /// The compilation target from `--target`, falling back to the host. Every
+    /// stage (`@platform`, MIR layout, codegen) reads this one value.
+    fn target(&self) -> Result<TargetConfig, ExitCode> {
         match self.target.as_deref() {
-            Some(triple) => CodegenTargetConfig::from_triple(triple).map_err(|e| {
+            Some(triple) => TargetConfig::from_triple(triple).map_err(|e| {
                 eprintln!("error: {}", e);
                 ExitCode::FAILURE
             }),
-            None => Ok(CodegenTargetConfig::host()),
+            None => Ok(TargetConfig::host()),
         }
-    }
-
-    /// Derive the ast-builder `TargetConfig` (for `@platform` conditionals) from
-    /// the requested triple, falling back to host.
-    fn ast_target(&self) -> AstTargetConfig {
-        let Some(triple) = &self.target else {
-            return AstTargetConfig::host();
-        };
-        let lower = triple.to_ascii_lowercase();
-        let os = if lower.contains("darwin") || lower.contains("apple") {
-            Some(AstOs::Darwin)
-        } else if lower.contains("linux") {
-            Some(AstOs::Linux)
-        } else {
-            None
-        };
-        AstTargetConfig { os }
     }
 }
 

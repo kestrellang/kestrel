@@ -190,6 +190,18 @@ pub fn resolved_is_stored_field(world: &QueryContext<'_>, entity: Entity) -> boo
     true
 }
 
+/// True if `entity` is a stored field with `willSet` / `didSet` observers.
+/// Writes to it must go through its observer setter, so it is never a raw
+/// write place: MIR routes writes through the setter (`write_setter`), and a
+/// closure captures the field's receiver rather than the field's storage.
+pub fn is_observed_field(world: &QueryContext<'_>, entity: Entity) -> bool {
+    world.children_of(entity).iter().any(|&child| {
+        world
+            .get::<kestrel_ast_builder::ObserverSetter>(child)
+            .is_some()
+    })
+}
+
 /// Roots an OWNING closure (`escaping`/`consuming`) can capture field by
 /// field: every capture of the root is a read of a projected place. Such a
 /// closure moves (or copies) just those fields and leaves the rest of the
@@ -469,10 +481,36 @@ impl Recorder<'_> {
         }
     }
 
+    /// Does the place chain `expr_id` project through an observed field?
+    /// Such a chain is not captured as a unit: its writes call the observer
+    /// setter, which needs the receiver, so the receiver is captured.
+    fn crosses_observed(&self, expr_id: HirExprId) -> bool {
+        match &self.hir.exprs[expr_id] {
+            HirExpr::Field { base, .. } => {
+                self.typed
+                    .resolutions
+                    .get(&expr_id)
+                    .is_some_and(|&field| is_observed_field(self.world, field))
+                    || self.crosses_observed(*base)
+            },
+            HirExpr::TupleIndex { base, .. } => self.crosses_observed(*base),
+            HirExpr::Sugar { inner, .. } => self.crosses_observed(*inner),
+            _ => false,
+        }
+    }
+
+    /// The capturable place an expression names, if any.
+    fn place_key(&self, expr_id: HirExprId) -> Option<PlaceKey> {
+        if self.crosses_observed(expr_id) {
+            return None;
+        }
+        place_key_of(self.world, self.typed, self.hir, expr_id)
+    }
+
     fn walk_expr(&mut self, expr_id: HirExprId, force_whole: bool) {
         // A place chain is captured as a unit — record it and stop (its only
         // child is the projection base, which is part of the place).
-        if let Some(key) = place_key_of(self.world, self.typed, self.hir, expr_id) {
+        if let Some(key) = self.place_key(expr_id) {
             self.record(key, expr_id, false, force_whole);
             return;
         }
@@ -480,7 +518,7 @@ impl Recorder<'_> {
         match &self.hir.exprs[expr_id] {
             HirExpr::Assign { target, value, .. } => {
                 // A write to a place rooted at a capture needs by-ref capture.
-                if let Some(key) = place_key_of(self.world, self.typed, self.hir, *target) {
+                if let Some(key) = self.place_key(*target) {
                     self.record(key, *target, true, force_whole);
                 } else {
                     self.walk_expr(*target, force_whole);
@@ -550,6 +588,14 @@ impl Recorder<'_> {
                 }
             },
             HirExpr::Sugar { inner, .. } => self.walk_expr(*inner, force_whole),
+            // `&place` reads the place; `&mutating place` writes through it,
+            // so a captured root needs a by-ref capture, like an assignment.
+            HirExpr::Borrow {
+                inner, mutating, ..
+            } => match self.place_key(*inner) {
+                Some(key) if *mutating => self.record(key, *inner, true, force_whole),
+                _ => self.walk_expr(*inner, force_whole),
+            },
             // A field/tuple access that is *not* a capturable stored-field
             // place (a getter, computed property, …) still uses its base — so
             // the base must be captured (e.g. `self.count` getter → capture
@@ -673,7 +719,7 @@ fn collect_bound_locals_expr(
     }
 }
 
-fn collect_pat_bindings(
+pub(crate) fn collect_pat_bindings(
     hir: &kestrel_hir::body::HirBody,
     pat_id: HirPatId,
     out: &mut HashSet<LocalId>,
@@ -689,6 +735,10 @@ fn collect_pat_bindings(
         } => {
             out.insert(*binding);
             collect_pat_bindings(hir, *subpattern, out);
+        },
+        HirPat::TypeTest { binding, sub, .. } => {
+            out.extend(*binding);
+            collect_pat_bindings(hir, *sub, out);
         },
         HirPat::Tuple { prefix, suffix, .. } => {
             for &p in prefix.iter().chain(suffix) {

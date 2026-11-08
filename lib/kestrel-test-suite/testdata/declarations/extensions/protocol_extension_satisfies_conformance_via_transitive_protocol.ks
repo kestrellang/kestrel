@@ -6,8 +6,9 @@ protocol Equatable {
     func isEqual(to other: Self) -> lang.i1
 }
 
+// `-> Self`, not `-> Slice[T]`: a bare protocol is not a value type (E144).
 protocol Slice[T] {
-    func asSlice() -> Slice[T]
+    func asSlice() -> Self
 }
 
 // `isEqual` provided by the protocol extension on Slice.
@@ -20,7 +21,7 @@ extend Slice[T] where T: Equatable {
 }
 
 struct MyArr[T]: Slice[T] {
-    func asSlice() -> Slice[T] { self }
+    func asSlice() -> MyArr[T] { self }
 }
 
 extend MyArr[T]: Equatable where T: Equatable { }

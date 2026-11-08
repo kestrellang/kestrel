@@ -15,14 +15,12 @@ import std.numeric.(Int64)
 @main
 func main() -> lang.i64 {
     var x: Int64 = 5;
-    // `var` only because the `pointee` setter below needs a mutable
-    // receiver binding; the capture itself works from a `let`.
-    var p = Pointer(to: x);
-    p.write(100);
+    let p = Pointer(to: x);
+    unsafe p.write(100);
     if x != 100 { return 1; }
 
-    // Writing through `pointee` hits the same place.
-    p.pointee = 7;
+    // Writing through `mutatingValue` hits the same place.
+    unsafe p.mutatingValue = 7;
     if x != 7 { return 2; }
     0
 }

@@ -4,9 +4,11 @@
 //! truth shared with the semantics (HirTy) and solver (TyVar) layers.
 
 use kestrel_hecs::{Entity, QueryContext};
+use std::borrow::Cow;
+
 use kestrel_semantics::{
-    NominalStaticness, StaticLayer, StaticRequirement, Staticness, TypeParamStaticRequirement,
-    instance_is_static,
+    NominalStaticness, StaticLayer, StaticRequirement, StaticShape, Staticness,
+    TypeParamStaticRequirement, ty_is_static,
 };
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -21,6 +23,10 @@ struct ResolvedStaticLayer<'a, 'q> {
 impl StaticLayer for ResolvedStaticLayer<'_, '_> {
     type Ty = ResolvedTy;
 
+    fn raw_existential_is_static(&self, bounds: &[Entity]) -> bool {
+        kestrel_semantics::raw_existential_is_static(self.query, bounds.iter().copied(), self.root)
+    }
+
     fn nominal_staticness(&self, entity: Entity) -> Staticness {
         self.query
             .query(NominalStaticness {
@@ -30,32 +36,35 @@ impl StaticLayer for ResolvedStaticLayer<'_, '_> {
             .staticness
     }
 
-    fn member_is_static(&self, ty: &ResolvedTy) -> bool {
+    fn shape<'t>(&self, ty: &'t ResolvedTy) -> StaticShape<'t, ResolvedTy> {
         match ty {
-            // The axiom: a reference is never Static.
-            ResolvedTy::Ref { .. } => false,
-            ResolvedTy::Named { entity, args } => instance_is_static(self, *entity, args),
-            // Base-only treatment for Self (mirrors the other layers).
-            ResolvedTy::SelfType { entity } => {
-                !matches!(self.nominal_staticness(*entity), Staticness::NotStatic)
+            ResolvedTy::Ref { .. } => StaticShape::Ref,
+            ResolvedTy::Named { entity, args } => StaticShape::Nominal {
+                entity: *entity,
+                args: Cow::Borrowed(args),
             },
-            ResolvedTy::Param { entity } => {
-                self.query.query(TypeParamStaticRequirement {
-                    param: *entity,
-                    context: self.context,
-                    root: self.root,
-                }) == StaticRequirement::RequiresStatic
+            ResolvedTy::SelfType { entity } => StaticShape::BaseOnly(*entity),
+            ResolvedTy::Param { entity } => StaticShape::Param(*entity),
+            ResolvedTy::Tuple(elems) => StaticShape::Tuple(Cow::Borrowed(elems)),
+            ResolvedTy::RawExistential { bounds, .. } => {
+                StaticShape::RawExistential(bounds.iter().map(|(protocol, _)| *protocol).collect())
             },
-            ResolvedTy::Tuple(elems) => elems.iter().all(|e| self.member_is_static(e)),
-            // A view-kind closure is not Static (references 2c); owning
-            // kinds are. Assoc projections / opaque / never / error are the
-            // conservative never-block leaves, mirroring the HIR layer.
-            ResolvedTy::Function { kind, .. } => !kind.is_view(),
+            ResolvedTy::Function { kind, .. } => StaticShape::Function {
+                is_view: kind.is_view(),
+            },
             ResolvedTy::AssocProjection { .. }
             | ResolvedTy::Opaque { .. }
             | ResolvedTy::Never
-            | ResolvedTy::Error => true,
+            | ResolvedTy::Error => StaticShape::Leaf,
         }
+    }
+
+    fn param_is_static(&self, param: Entity) -> bool {
+        self.query.query(TypeParamStaticRequirement {
+            param,
+            context: self.context,
+            root: self.root,
+        }) == StaticRequirement::RequiresStatic
     }
 }
 
@@ -66,10 +75,10 @@ pub fn resolved_ty_is_static(
     context: Entity,
     root: Entity,
 ) -> bool {
-    ResolvedStaticLayer {
+    let layer = ResolvedStaticLayer {
         query,
         context,
         root,
-    }
-    .member_is_static(ty)
+    };
+    ty_is_static(&layer, ty)
 }

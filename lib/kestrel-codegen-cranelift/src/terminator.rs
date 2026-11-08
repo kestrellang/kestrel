@@ -9,8 +9,8 @@ use kestrel_mir::{MirTy, ValueId};
 use crate::abi::{self, ReturnMode};
 use crate::error::CodegenError;
 use crate::func::FuncCompiler;
-use crate::inst::find_mono_enum;
 use crate::mem;
+use kestrel_codegen::layout::find_mono_enum;
 
 fn to_block_args(vals: &[Value]) -> Vec<BlockArg> {
     vals.iter().map(|v| BlockArg::Value(*v)).collect()
@@ -127,7 +127,9 @@ fn compile_return(
     // `resolve_scalar` below would LOAD a scalar pointee through it and
     // silently return it by value (the scalar_ret_borrow_not_loaded
     // miscompile). Bypass for aggregates too (only accidentally correct).
-    if fc.func.ret_borrow {
+    // A borrow of an unsized pointee is a fat (data, table) value, returned
+    // like any two-word aggregate (sret).
+    if fc.func.ret_borrow && !fc.ctx.module.is_fat(fc.func.ret) {
         let val = fc.get_value(builder, value_id);
         builder.ins().return_(&[val]);
         return Ok(());
@@ -209,7 +211,7 @@ fn compile_switch(
         MirTy::Named { entity, type_args } => {
             let entity = *entity;
             let type_args = type_args.clone();
-            if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc) {
+            if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module) {
                 crate::ty::int_bits_to_cl(e.discriminant_width)
             } else {
                 ir::types::I64

@@ -9,7 +9,7 @@ import http.method.(HttpMethod)
 import http.status.(StatusCode)
 import http.headers.(Headers)
 import swoop.error.(SwoopError)
-import std.io.error.(IoError)
+import std.streams.(IoError, Readable, Writable)
 import swoop.response.(Response)
 import http.wire.(findHeaderEnd, parseDecimal, dechunk, stringToBytes)
 import swoop.url.(ClientUrl)
@@ -21,11 +21,11 @@ import http.content.(Content)
 
 /// Sends an HTTP request without a body and reads the response.
 public func sendRequest[S](
-    stream: S,
+    mutating stream: S,
     method: HttpMethod,
     url: ClientUrl,
     headers: Headers
-) -> Response throws SwoopError where S: Readable, S: Writable {
+) -> Response throws SwoopError where S: Readable, S: Writable, S: not Copyable, S: not Static {
     var req = String();
 
     req.append(method.toString());
@@ -42,13 +42,12 @@ public func sendRequest[S](
     req.append("Connection: close\r\n");
     req.append("\r\n");
 
-    var sendStream = stream;
-    match sendAllString(sendStream, req) {
+    match sendAllString(stream, req) {
         .Ok(_) => {},
         .Err(e) => throw SwoopError.connectionFailed("failed to send request")
     }
 
-    readResponse(sendStream)
+    readResponse(stream)
 }
 
 // ============================================================================
@@ -57,12 +56,12 @@ public func sendRequest[S](
 
 /// Sends an HTTP request with a body and reads the response.
 public func sendRequest[S, C](
-    stream: S,
+    mutating stream: S,
     method: HttpMethod,
     url: ClientUrl,
     headers: Headers,
     content: C
-) -> Response throws SwoopError where S: Readable, S: Writable, C: Content {
+) -> Response throws SwoopError where S: Readable, S: Writable, S: not Copyable, S: not Static, C: Content {
     var req = String();
 
     req.append(method.toString());
@@ -91,20 +90,19 @@ public func sendRequest[S, C](
     req.append("Connection: close\r\n");
     req.append("\r\n");
 
-    var sendStream = stream;
-    match sendAllString(sendStream, req) {
+    match sendAllString(stream, req) {
         .Ok(_) => {},
         .Err(e) => throw SwoopError.connectionFailed("failed to send request")
     }
 
     if contentBytes.count > 0 {
-        match sendAllBytes(sendStream, contentBytes) {
+        match sendAllBytes(stream, contentBytes) {
             .Ok(_) => {},
             .Err(e) => throw SwoopError.connectionFailed("failed to send body")
         }
     }
 
-    readResponse(sendStream)
+    readResponse(stream)
 }
 
 // ============================================================================
@@ -112,8 +110,7 @@ public func sendRequest[S, C](
 // ============================================================================
 
 /// Reads an HTTP response from a stream.
-func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable {
-    var recvStream = stream;
+func readResponse[S](mutating stream: S) -> Response throws SwoopError where S: Readable, S: not Copyable, S: not Static {
 
     var buf = [];
     var chunk = Array[UInt8](repeating: 0, count: 4096);
@@ -121,8 +118,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
     var headerEnd: Int64 = -1;
 
     loop {
-        let slice = ArraySlice(pointer: chunk.asPointer(), count: 4096);
-        let n = match recvStream.read(into: slice) {
+        let n = match stream.read(into: chunk(..<4096)) {
             .Ok(bytes) => bytes,
             .Err(_) => throw SwoopError.connectionFailed("failed to read response")
         };
@@ -133,7 +129,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
             break
         }
 
-        let readSlice = chunk.asSlice()(0..<n);
+        let readSlice = &chunk(0..<n);
         buf.append(contentsOf: readSlice);
 
         headerEnd = findHeaderEnd(buf);
@@ -150,7 +146,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
         throw SwoopError.invalidResponse("no header terminator found")
     }
 
-    let headerStr = String(fromUtf8: buf.asSlice()(0..<headerEnd)) ?? String();
+    let headerStr = String(fromUtf8: buf(0..<headerEnd)) ?? String();
 
     let hdrSlice = headerStr.asSlice();
     guard let .Some(firstLineEnd) = headerStr.firstIndex(of: "\r\n") else {
@@ -175,7 +171,7 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
     let bodyStart = headerEnd + 4;
     var rawBuf = [];
 
-    let initialBody = buf.asSlice()(bodyStart..<buf.count);
+    let initialBody = &buf(bodyStart..<buf.count);
     rawBuf.append(contentsOf: initialBody);
 
     let isChunked = match headers.value(forName: "Transfer-Encoding") {
@@ -192,29 +188,27 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
                 readSize = remaining
             }
             var bodyChunk = Array[UInt8](repeating: 0, count: readSize);
-            let bodySlice = ArraySlice(pointer: bodyChunk.asPointer(), count: readSize);
-            let bn = match recvStream.read(into: bodySlice) {
+            let bn = match stream.read(into: bodyChunk(..<readSize)) {
                 .Ok(bytes) => bytes,
                 .Err(_) => break
             };
             if bn <= 0 {
                 break
             }
-            let chunkSlice = bodyChunk.asSlice()(0..<bn);
+            let chunkSlice = &bodyChunk(0..<bn);
             rawBuf.append(contentsOf: chunkSlice);
         }
     } else {
         loop {
             var readChunk = Array[UInt8](repeating: 0, count: 4096);
-            let readSlice = ArraySlice(pointer: readChunk.asPointer(), count: 4096);
-            let rn = match recvStream.read(into: readSlice) {
+            let rn = match stream.read(into: readChunk(..<4096)) {
                 .Ok(bytes) => bytes,
                 .Err(_) => break
             };
             if rn <= 0 {
                 break
             }
-            let chunkSlice = readChunk.asSlice()(0..<rn);
+            let chunkSlice = &readChunk(0..<rn);
             rawBuf.append(contentsOf: chunkSlice);
         }
     }
@@ -235,26 +229,11 @@ func readResponse[S](stream: S) -> Response throws SwoopError where S: Readable 
 // ============================================================================
 
 /// Sends all bytes of a string over a stream.
-func sendAllString[S](mutating stream: S, s: String) -> () throws IoError where S: Writable {
-    if s.bytes.count == 0 {
-        return .Ok(())
-    }
-    sendAllBytes(stream, stringToBytes(s))
+func sendAllString[S](mutating stream: S, s: String) -> () throws IoError where S: Writable, S: not Copyable, S: not Static {
+    stream.write(text: s)
 }
 
 /// Sends all bytes of a buffer over a stream.
-func sendAllBytes[S](mutating stream: S, buf: [UInt8]) -> () throws IoError where S: Writable {
-    let len = buf.count;
-    var sent: Int64 = 0;
-    while sent < len {
-        let ptr = buf.asPointer().offset(by: sent);
-        let remaining = len - sent;
-        let slice = ArraySlice(pointer: ptr, count: remaining);
-        let n = try stream.write(from: slice);
-        if n == 0 {
-            throw IoError(code: 32)
-        }
-        sent = sent + n
-    }
-    .Ok(())
+func sendAllBytes[S](mutating stream: S, buf: [UInt8]) -> () throws IoError where S: Writable, S: not Copyable, S: not Static {
+    stream.writeAll(from: buf.asSlice())
 }

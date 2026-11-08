@@ -5,7 +5,8 @@ module std.core
 
 import std.core.(Less, LessOrEqual, Greater, GreaterOrEqual, NotEqual, Equal)
 import std.text.(String)
-import std.memory.(ArraySlice, Pointer)
+import std.memory.(Pointer)
+import std.collections.(Slice)
 import std.numeric.(UInt64, Int64)
 
 /// Protocol for types whose values can be compared for equality.
@@ -29,6 +30,7 @@ import std.numeric.(UInt64, Int64)
 ///
 /// Point(x: 1, y: 2) == Point(x: 1, y: 2)   // true
 /// ```
+@builtin(.EquatableProtocol)
 public protocol Equatable {
     /// Returns `true` iff `self` and `other` are considered equal. Should
     /// be reflexive, symmetric, and transitive — `Hashable` requires equal
@@ -44,6 +46,8 @@ public protocol Equatable {
 @builtin(.Matchable)
 public protocol Matchable {
     /// Returns `true` if `other` matches the receiver.
+    @sugarOnly
+    @builtin(.MatchableMatches)
     func matches(other: Self) -> Bool
 }
 
@@ -57,14 +61,17 @@ public protocol Matchable {
 @builtin(.RangeMatchable)
 public protocol RangeMatchable[Bound = Self] {
     /// Returns `true` when `self >= bound`. Powers `start..` patterns.
+    @sugarOnly
     @builtin(.RangeMatchableIsAtLeast)
     func isAtLeast(bound: Bound) -> Bool
 
     /// Returns `true` when `self <= bound`. Powers `..=end` patterns.
+    @sugarOnly
     @builtin(.RangeMatchableIsAtMost)
     func isAtMost(bound: Bound) -> Bool
 
     /// Returns `true` when `self < bound`. Powers `..<end` patterns.
+    @sugarOnly
     @builtin(.RangeMatchableIsBelow)
     func isBelow(bound: Bound) -> Bool
 }
@@ -77,25 +84,32 @@ public protocol RangeMatchable[Bound = Self] {
 /// compiler has already verified. A conformer may assume `0 <= index <
 /// matchLength()` and `0 <= from <= to <= matchLength()` and skip its
 /// own bounds checks; the conformance is unsafe to satisfy if those
-/// invariants don't hold. `Array[T]` and `ArraySlice[T]` are the canonical
-/// conformers.
+/// invariants don't hold. `Array[T]`, `Slice[T]` and `UnsafeSlice[T]` are
+/// the canonical conformers.
 @builtin(.ArrayMatchable)
-public protocol ArrayMatchable {
+public unsafe protocol ArrayMatchable {
+    @builtin(.ArrayMatchableElement)
     type Element
+    /// What `..rest` binds: the view `matchSlice` returns (`&Slice[T]` for
+    /// arrays and slices).
+    type Rest
 
     /// Total number of elements available to match.
+    @sugarOnly
     @builtin(.ArrayMatchableMatchLength)
     func matchLength() -> Int64
 
     /// Returns the element at `index`. Caller (the compiler) guarantees
     /// `0 <= index < matchLength()` — implementations may skip bounds checks.
+    @sugarOnly
     @builtin(.ArrayMatchableMatchGet)
     func matchGet(index: Int64) -> Element
 
     /// Returns the slice `[from, to)`. Caller guarantees
     /// `0 <= from <= to <= matchLength()`.
+    @sugarOnly
     @builtin(.ArrayMatchableMatchSlice)
-    func matchSlice(from: Int64, to: Int64) -> ArraySlice[Element]
+    func matchSlice(from: Int64, to: Int64) -> Rest
 }
 
 /// Blanket extension giving every `Equatable` type the `==` and `!=`
@@ -139,6 +153,7 @@ extend Equatable: Equal[Self], NotEqual[Self] {
 ///     }
 /// }
 /// ```
+@builtin(.ComparableProtocol)
 public protocol Comparable: Equatable {
     /// Returns the ordering of `self` relative to `other`. Must be a
     /// total order — for any `a`, `b`, `c` exactly one of `Less`,
@@ -217,6 +232,7 @@ extend Comparable: RangeMatchable[Self] {
 ///     }
 /// }
 /// ```
+@builtin(.HashableProtocol)
 public protocol Hashable: Equatable {
     /// Feeds this value's bytes into `hasher`. Must be deterministic
     /// across calls and consistent with `isEqual`.
@@ -231,10 +247,22 @@ public protocol Hashable: Equatable {
 /// `Dictionary`, and any structure that wants stable hashes.
 public protocol Hasher {
     /// Mixes `bytes` into the running hash state.
-    mutating func write(bytes: ArraySlice[UInt8])
+    mutating func write(bytes: Slice[UInt8])
+    /// Mixes one 64-bit word into the state. Integers, `Bool` and `Char`
+    /// hash through this. The default writes the word's 8 bytes; a hasher
+    /// can mix it in one round instead.
+    mutating func write(uint64 value: UInt64)
     /// Returns the finalised hash. After calling `finish` the hasher's
     /// state is unspecified — don't reuse it.
     mutating func finish() -> UInt64
+}
+
+extend Hasher {
+    /// Writes the word's 8 bytes (in memory order) through `write(bytes:)`.
+    public mutating func write(uint64 value: UInt64) {
+        let word = value;
+        self.write(unsafe Slice.lend(start: Pointer(to: word).asRaw().cast[UInt8](), count: 8))
+    }
 }
 
 /// Protocol for types with a meaningful zero/default value.
@@ -244,6 +272,7 @@ public protocol Hasher {
 /// `""` for strings, the empty collection for containers. Don't
 /// conform just to satisfy a generic bound — the absence of a default
 /// is information.
+@builtin(.DefaultableProtocol)
 public protocol Defaultable {
     /// @name Default
     /// Builds the default-valued instance.

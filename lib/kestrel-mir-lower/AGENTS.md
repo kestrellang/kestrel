@@ -116,7 +116,8 @@ raw address.
 
 Any code that turns a HIR expression into a place (an address or a
 @guaranteed view) goes through `lower_place` or the addr-only walk
-(`try_field_addr_chain` / `try_var_addr`) in `body/place.rs` — ret_borrow
+(`field_addr_chain`, or `write_place_addr` for a write) in `body/place.rs`
+and `body/mod.rs` — ret_borrow
 returns, borrow lowering, field reads, and both call-arg conventions
 already do. Don't grow a new bespoke route: the pre-unification drift is
 exactly what produced three latent bugs (false E494 on every
@@ -136,7 +137,7 @@ pointer's bits as the value).
 - **`lower_place` is EFFECTFUL for ref-slot fields** — it emits the ref
   extraction (`extract_ref_slot`: instructions, borrow tracking,
   `ref_results` registration). Never call it as a maybe-probe and discard
-  the result. If you only want an address, use `try_field_addr_chain`
+  the result. If you only want an address, use `field_addr_chain`
   (a pure walk; it stops at ref slots — a `&T` field's storage is its
   POINTEE, and a `FieldAddr` there aliases the stored pointer's bits).
   If you call `lower_place`, consume BOTH the `Addr` and `View` arms.
@@ -185,6 +186,34 @@ to their structural `MirTy` (`I64` / `Tuple([])` / `Never`) via
 `implementing_type` matches the primitive self at call sites. A `Named{lang.i64}`
 witness never matches the `I64` self → `Callee::Witness not resolved`. See the
 type-infer AGENTS.md note for the parallel conformance/member-lookup mapping.
+
+**Binding a requirement to its witness is by SIGNATURE, never declaration
+order.** `requirement_subst` maps the protocol's params to the conformance's
+args (unwritten ones take their declared default ONCE, in
+`with_default_protocol_args` — the same list is stored as
+`witness.proto_type_args`), each declaring protocol's `Self` to the
+implementing type, and `Self.Assoc` to the bindings recorded first by
+`bind_associated_types`. `find_impl_among` matches candidates against that.
+Several same-label overloads with none matching is `None` (fall through to a
+protocol default, else unbound → loud mono error) — never "the first one".
+
+## Phase order — bodies lower BEFORE witness tables exist
+
+`lower_module` lowers every body (phase 1) before `lower_witnesses` builds the
+witness tables (phase 2). Body lowering must **never read `module.witnesses`**
+to decide anything (e.g. "does `T` conform?"): the table is empty, the answer
+is silently "no". Ask the front-end query (`ConformingProtocols`, the tagged
+requirement via `ResolveBuiltin`) and emit a `Callee::Witness`; mono resolves it.
+
+## Literals call their protocol requirement through the witness table
+
+Every literal kind resolves its `@builtin(.XLiteralInit)` requirement
+(`body/literal.rs::literal_init`) and emits a `Callee::Witness` with
+`self_type` = the literal's type — for concrete, `TypeParam` and projection
+types alike. The buffer/element types come from the requirement's own param
+types with `Self` substituted, never from the type's first generic arg or an
+init found by shape/labels (that picked a String init for an array literal).
+Only a type with no conformance falls back to the primitive.
 
 ## Body params: the first `param_count` ValueIds ARE the params
 

@@ -2,22 +2,21 @@
 
 module std.memory
 
-import std.core.(Bool, Cloneable, Indirection, MutableIndirection)
-import std.memory.(RcBox)
+import std.core.(Bool, Cloneable, Indirection, MutableIndirection, Sized, Static)
+import std.memory.(ExistentialBox, RcBox)
 
-/// Copy-on-write wrapper around `RcBox[T]`.
+/// Copy-on-write wrapper around `RcBox[T]`: value semantics on the heap.
 ///
-/// Mutable owners use `CowBox`; read-only shared owners (like
-/// `StringSlice`) hold the inner `RcBox` directly via `shareBox()`.
-/// The mutation protocol is `write()` → modify → `setValue()`.
+/// Copies share storage until one of them writes. `value` is the payload
+/// in place: reading borrows it, and writing forks a shared box first.
 ///
 /// # Examples
 ///
 /// ```
 /// var box = CowBox(MyStorage());
-/// var s = box.write();   // COW barrier — clones if shared
-/// s.len = s.len + 1;
-/// box.setValue(s);        // write back
+/// let other = box;          // shares storage
+/// box.value.len += 1;       // forks first; `other` is unchanged
+/// let r = &box.value;       // borrows, no copy
 /// ```
 ///
 /// # Representation
@@ -26,16 +25,19 @@ import std.memory.(RcBox)
 ///
 /// # Memory Model
 ///
-/// Same as `RcBox`: non-atomic refcount. Cloning bumps the count;
-/// `write` splits off a private copy when shared.
-public struct CowBox[T]: Cloneable where T: Cloneable {
+/// Same as `RcBox`: non-atomic refcount. Cloning bumps the count; a write
+/// through `value` splits off a private copy when shared.
+// `T: not Sized`: `any[CowBox] P` holds a raw existential (when `P` refines
+// `Cloneable`). Members that move a `T` say `where T: Sized`. `not Static`
+// likewise: `CowBox[T]` is `Static` exactly when `T` is.
+public struct CowBox[T]: Cloneable where T: Cloneable, T: not Sized, T: not Static {
     // `fileprivate` (not `private`) so the same-file `extend CowBox:
     // MutableIndirection` below can run the COW barrier on `inner`.
     fileprivate var inner: RcBox[T]
 
     /// @name From Value
     /// Allocates fresh storage holding `value` with refcount 1.
-    public init(consuming value: T) {
+    public init(consuming value: T) where T: Sized {
         self.inner = RcBox(value);
     }
 
@@ -45,66 +47,47 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
         self.inner = box;
     }
 
-    /// Read access — clones the value so the caller gets an independent
-    /// copy. getValue() returns a raw bitwise copy from the heap; cloning
-    /// ensures owned resources (byte buffers, etc.) are properly duplicated.
-    public func read() -> T {
-        self.inner.getValue().clone()
-    }
-
     /// COW barrier — makes the storage uniquely owned, cloning it if shared.
     ///
-    /// The clone reads through a reference to the heap value, so a shared
-    /// box is deep-copied exactly once. Every mutating entry point (`write`,
-    /// `modify`, `pointeeMutRef`) goes through here.
+    /// The fork clones the heap value in place (`RcBox.fork`), so a
+    /// shared box is deep-copied exactly once and an unsized payload works.
+    /// Every write (`value`'s `mutating ref`) goes through here.
+    ///
+    /// Always inlined: every `Array`/`Dictionary` write runs it, and the
+    /// unique case is one load and compare. The fork stays out of line
+    /// (`forkStorage`) so inlining doesn't pull the deep copy into callers.
+    @inline(.Always)
     public mutating func ensureUnique() {
-        if self.inner.isUnique() == false {
-            self.inner = RcBox(self.inner.valuePtr().value.clone())
+        if not self.inner.isUnique {
+            self.forkStorage()
         }
     }
 
-    /// Write access — clones storage if shared, then returns the
-    /// (now unique) value. Caller modifies and calls `setValue`.
-    public mutating func write() -> T {
-        self.ensureUnique();
-        self.inner.getValue()
+    /// Slow path of `ensureUnique`: replaces the shared box with a private copy.
+    @inline(.Never)
+    private mutating func forkStorage() {
+        self.inner = self.inner.fork()
     }
 
-    /// Writes `value` into the storage in place. Only valid after
-    /// a preceding `write()` call (which ensures uniqueness).
-    /// Takes `value` by consuming so the drop pass sees the caller's
-    /// local as moved (Dead) — prevents double-free of shared buffers.
-    public func setValue(consuming value: T) {
-        self.inner.setValue(value)
-    }
-
-    /// In-place mutation barrier: ensures unique storage (deep-copying if
-    /// shared), then passes the heap value to `body` as a `mutating` argument
-    /// to mutate directly — no per-call clone or write-back. This is the O(1)
-    /// replacement for the `read()` → modify → `setValue()` dance.
-    public mutating func modify[R](body: (mutating T) -> R) -> R {
-        self.ensureUnique();
-        self.inner.modify(body)
-    }
-
-    /// Returns a pointer to the wrapped value on the heap, bypassing
-    /// the clone that `read()` / `getValue()` would create. Use this
-    /// to read individual scalar fields without triggering `T.deinit`.
-    public func valuePtr() -> Pointer[T] {
+    /// Pointer to the payload on the heap. Internal plumbing for the
+    /// accessors below; writing through it skips the fork.
+    internal func valuePtr() -> Pointer[T] {
         self.inner.valuePtr()
     }
 
-    /// Returns `true` when no other clone shares this storage.
-    public func isUnique() -> Bool {
-        self.inner.isUnique()
+    /// The payload, in place. Reading borrows the shared storage; writing
+    /// (`c.value.len = 0`, a `mutating` argument, a mutating method) forks a
+    /// shared box first, so other copies never see the change.
+    public var value: T {
+        ref { unsafe self.inner.valuePtr().value }
+        mutating ref {
+            self.ensureUnique();
+            unsafe self.inner.valuePtr().mutatingValue
+        }
     }
 
-    /// Returns a shared `RcBox` pointing at the same storage
-    /// (refcount bumped). Use this to hand read-only access to
-    /// types like `StringSlice`.
-    public func shareBox() -> RcBox[T] {
-        self.inner.clone()
-    }
+    /// `true` when no other copy shares this storage.
+    public var isUnique: Bool { self.inner.isUnique }
 
     /// Shares storage with the returned clone (refcount bump).
     public func clone() -> CowBox[T] {
@@ -113,14 +96,18 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
 }
 
 // Transparent member access with copy-on-write: a READ peels through
-// `pointeeRef()` (no fork), while any WRITE / mutating-method peels through
-// `pointeeMutRef()`, which runs the COW barrier first — so `cow.field = v`
-// forks a shared box exactly like `cow.modify { … }` does.
-extend CowBox[T]: MutableIndirection where T: Cloneable {
+// `value`'s `ref` (no fork), while any WRITE / mutating-method peels through
+// its `mutating ref`, which runs the COW barrier first — so `cow.field = v`
+// forks a shared box exactly like `cow.value.field = v` does.
+//
+// The write barrier forks by cloning the payload into fresh storage
+// (`RcBox.fork`), which works for an unsized payload too: an
+// existential's table carries its size and clone.
+extend CowBox[T]: Indirection {
     type Target = T
-    public func pointeeRef() -> &T { self.valuePtr().value }
-    public mutating func pointeeMutRef() -> &mutating T {
-        self.ensureUnique();
-        self.valuePtr().mutatingValue
-    }
 }
+
+// `any[CowBox] P`: the struct's `init(consuming:)` is the witness.
+extend CowBox[T]: ExistentialBox {}
+
+extend CowBox[T]: MutableIndirection where T: Cloneable {}

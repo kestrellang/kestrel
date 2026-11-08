@@ -13,16 +13,16 @@ import std.numeric.(Int64)
 
 func dangleTail() -> &Int64 {
     var x = 42;
-    Pointer(to: x).value // WARN: storage dies when the function returns
+    unsafe Pointer(to: x).value // WARN: storage dies when the function returns
 }
 
 func dangleExplicitReturn() -> &mutating Int64 {
     var x = 7;
-    return Pointer(to: x).mutatingValue // WARN: storage dies when the function returns
+    return unsafe Pointer(to: x).mutatingValue // WARN: storage dies when the function returns
 }
 
 func dangleThroughLet() -> &Int64 {
     let y = 3;
     let p = Pointer(to: y);
-    p.value // WARN: storage dies when the function returns
+    unsafe p.value // WARN: storage dies when the function returns
 }

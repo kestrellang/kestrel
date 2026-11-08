@@ -1,7 +1,7 @@
 use kestrel_hecs::Entity;
 
 use crate::item::{Layout, TargetConfig};
-use crate::layout::{EnumLayout, StructLayout};
+use crate::layout::{EnumLayout, LayoutAttrs, LayoutKind, StructLayout};
 use crate::ty::{MirTy, TyArena};
 use crate::{IntBits, MirModule, TyId};
 
@@ -19,11 +19,12 @@ pub fn run_layout_pass(module: &mut MirModule, target: &TargetConfig) {
                 continue;
             }
             let field_tys: Vec<TyId> = s.fields.iter().map(|f| f.ty).collect();
+            let attrs = s.layout_attrs;
             if has_type_params(&module.ty_arena, &field_tys) {
                 continue;
             }
             if let Some(layout) =
-                compute_struct_layout(&module.ty_arena, module, &field_tys, target)
+                compute_struct_layout(&module.ty_arena, module, &field_tys, attrs, target)
             {
                 module.structs.get_mut(&entity).unwrap().type_info.layout =
                     Some(Layout::Struct(layout));
@@ -42,6 +43,7 @@ pub fn run_layout_pass(module: &mut MirModule, target: &TargetConfig) {
                 .iter()
                 .map(|c| c.payload_fields.iter().map(|f| f.ty).collect())
                 .collect();
+            let attrs = e.layout_attrs;
             if case_fields
                 .iter()
                 .any(|fields| has_type_params(&module.ty_arena, fields))
@@ -49,7 +51,7 @@ pub fn run_layout_pass(module: &mut MirModule, target: &TargetConfig) {
                 continue;
             }
             if let Some(layout) =
-                compute_enum_layout(&module.ty_arena, module, &case_fields, target)
+                compute_enum_layout(&module.ty_arena, module, &case_fields, attrs, target)
             {
                 module.enums.get_mut(&entity).unwrap().type_info.layout =
                     Some(Layout::Enum(layout));
@@ -81,6 +83,7 @@ fn ty_contains_param(arena: &TyArena, ty: TyId) -> bool {
             args.iter().any(|&a| ty_contains_param(arena, a))
         },
         MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
         | MirTy::FuncThick {
             params,
             ret,
@@ -108,18 +111,20 @@ pub fn primitive_size_and_align(ty: &MirTy, target: &TargetConfig) -> Option<(u6
         MirTy::F32 => Some((4, 4)),
         MirTy::F64 => Some((8, 8)),
         MirTy::Never => Some((0, 1)),
-        MirTy::Str => Some((target.pointer_width * 2, target.pointer_width)),
-        MirTy::Pointer(_) => Some((target.pointer_width, target.pointer_width)),
+        MirTy::Str => Some((target.pointer_size() * 2, target.pointer_size())),
+        MirTy::Pointer(_) => Some((target.pointer_size(), target.pointer_size())),
         // Ref's ABI is a raw pointer to the pointee (signature-only type).
-        MirTy::Ref { .. } => Some((target.pointer_width, target.pointer_width)),
-        MirTy::FuncThin { .. } => Some((target.pointer_width, target.pointer_width)),
+        MirTy::Ref { .. } => Some((target.pointer_size(), target.pointer_size())),
+        MirTy::FuncThin { .. } | MirTy::FuncC { .. } => {
+            Some((target.pointer_size(), target.pointer_size()))
+        },
         // View tier / bare: `{fn, env_ptr}`. Owning tier: `{fn, env_handle,
         // retain_fn, release_fn}` — the two extra words carry the type-erased
         // share/release operations (lockstep 9: layout ↔ both codegen `ty.rs`
         // ↔ both `compile_apply_partial`).
         MirTy::FuncThick { kind, .. } => Some((
-            target.pointer_width * crate::ty::func_thick_words(*kind),
-            target.pointer_width,
+            target.pointer_size() * crate::ty::func_thick_words(*kind),
+            target.pointer_size(),
         )),
         MirTy::Error => Some((0, 1)),
         _ => None,
@@ -179,21 +184,22 @@ fn compute_struct_layout(
     arena: &TyArena,
     module: &MirModule,
     field_tys: &[TyId],
+    attrs: LayoutAttrs,
     target: &TargetConfig,
 ) -> Option<StructLayout> {
-    let mut layout = StructLayout::new();
+    let mut layout = StructLayout::with_attrs(attrs);
     for &ty in field_tys {
         let (size, align) = size_and_align_of(arena, module, ty, target)?;
         layout.append_field(StructLayout::scalar(size, align));
     }
-    layout.pad_to_align();
-    Some(layout)
+    Some(layout.finish())
 }
 
 fn compute_enum_layout(
     arena: &TyArena,
     module: &MirModule,
     case_fields: &[Vec<TyId>],
+    attrs: LayoutAttrs,
     target: &TargetConfig,
 ) -> Option<EnumLayout> {
     let mut variant_layouts = Vec::with_capacity(case_fields.len());
@@ -206,12 +212,25 @@ fn compute_enum_layout(
         vl.pad_to_align();
         variant_layouts.push(vl);
     }
-    Some(build_enum_layout(&variant_layouts, case_fields.len()))
+    Some(build_enum_layout(
+        &variant_layouts,
+        case_fields.len(),
+        attrs,
+    ))
 }
 
-/// Build an EnumLayout from pre-computed variant layouts.
-pub fn build_enum_layout(variant_layouts: &[StructLayout], num_variants: usize) -> EnumLayout {
-    let disc_width = discriminant_width(num_variants);
+/// Build an EnumLayout from pre-computed variant layouts. The one enum layout
+/// constructor: `@layout(.C)` (payload-less enums only, checked by E910)
+/// makes the discriminant a C `int`, and `@align` raises the alignment.
+pub fn build_enum_layout(
+    variant_layouts: &[StructLayout],
+    num_variants: usize,
+    attrs: LayoutAttrs,
+) -> EnumLayout {
+    let disc_width = match attrs.kind {
+        LayoutKind::C => IntBits::I32,
+        LayoutKind::Default | LayoutKind::Packed => discriminant_width(num_variants),
+    };
     let disc_size = disc_width.byte_width();
     let disc_align = disc_size;
 
@@ -222,12 +241,14 @@ pub fn build_enum_layout(variant_layouts: &[StructLayout], num_variants: usize) 
         max_payload_align = max_payload_align.max(vl.align);
     }
 
-    let overall_align = disc_align.max(max_payload_align);
+    let natural_align = disc_align.max(max_payload_align);
     let payload_offset = if max_payload_align == 0 || disc_size.is_multiple_of(max_payload_align) {
         disc_size
     } else {
-        disc_size + (overall_align - disc_size % overall_align) % overall_align
+        disc_size + (natural_align - disc_size % natural_align) % natural_align
     };
+    // `@align` raises the whole value's alignment, not the payload's offset.
+    let overall_align = natural_align.max(attrs.min_align.unwrap_or(1));
     let total_size = payload_offset + max_payload_size;
     let padding = if overall_align == 0 {
         0
@@ -261,8 +282,9 @@ mod tests {
     use crate::item::struct_def::{FieldDef, StructDef};
     use crate::ty::MirTy;
 
+    /// A fixed 64-bit target, so the expected sizes don't depend on the host.
     fn target() -> TargetConfig {
-        TargetConfig::host_64()
+        TargetConfig::from_triple("x86_64-unknown-linux-gnu").unwrap()
     }
 
     #[test]

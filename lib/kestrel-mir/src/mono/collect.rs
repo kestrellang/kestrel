@@ -7,15 +7,14 @@ use crate::TyId;
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
 use crate::inst::InstKind;
-use crate::item::enum_def::EnumDef;
 use crate::item::function::{FunctionDef, FunctionKind, WhereConstraint};
 use crate::item::protocol::ProtocolDef;
-use crate::item::struct_def::StructDef;
 use crate::item::witness::WitnessDef;
 use crate::mono::types::InstantiationKey;
 use crate::mono::witness::{self, MonoError};
 use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
+use crate::ty_query::TypeEnv;
 
 // -- Collection result --
 
@@ -63,22 +62,16 @@ impl WitnessCache {
 
 pub fn collect_all(
     functions: &IndexMap<Entity, FunctionDef>,
-    structs: &IndexMap<Entity, StructDef>,
-    enums: &IndexMap<Entity, EnumDef>,
-    protocols: &IndexMap<Entity, ProtocolDef>,
+    env: TypeEnv<'_>,
     witnesses: &[WitnessDef],
     arena: &mut TyArena,
     entity_names: &IndexMap<Entity, String>,
+    vtable_templates: &IndexMap<Entity, crate::item::VTableTemplate>,
+    clone_thunk: Option<Entity>,
 ) -> Result<CollectionResult, Vec<MonoError>> {
-    let mut ctx = CollectionContext::new(
-        functions,
-        structs,
-        enums,
-        protocols,
-        witnesses,
-        arena,
-        entity_names,
-    );
+    let mut ctx = CollectionContext::new(functions, env, witnesses, arena, entity_names);
+    ctx.vtable_templates = Some(vtable_templates);
+    ctx.clone_thunk = clone_thunk;
     ctx.collect();
 
     if ctx.errors.is_empty() {
@@ -93,9 +86,9 @@ pub fn collect_all(
 
 struct CollectionContext<'a> {
     functions: &'a IndexMap<Entity, FunctionDef>,
-    structs: &'a IndexMap<Entity, StructDef>,
-    enums: &'a IndexMap<Entity, EnumDef>,
-    protocols: &'a IndexMap<Entity, ProtocolDef>,
+    /// Nominal / protocol defs and builtin protocol ids: what the copy
+    /// classifier and witness selection read.
+    env: TypeEnv<'a>,
     witnesses: &'a [WitnessDef],
     arena: &'a mut TyArena,
     entity_names: &'a IndexMap<Entity, String>,
@@ -105,23 +98,25 @@ struct CollectionContext<'a> {
     errors: Vec<MonoError>,
     /// Whether runaway polymorphic recursion was already reported.
     too_deep_reported: bool,
+    /// Table shapes; a table literal instantiates its entries' functions.
+    vtable_templates: Option<&'a IndexMap<Entity, crate::item::VTableTemplate>>,
+    /// Tables already scanned, by (template, payload).
+    seen_vtables: IndexSet<(Entity, TyId)>,
+    /// `MirModule::existential_clone_thunk`.
+    clone_thunk: Option<Entity>,
 }
 
 impl<'a> CollectionContext<'a> {
     fn new(
         functions: &'a IndexMap<Entity, FunctionDef>,
-        structs: &'a IndexMap<Entity, StructDef>,
-        enums: &'a IndexMap<Entity, EnumDef>,
-        protocols: &'a IndexMap<Entity, ProtocolDef>,
+        env: TypeEnv<'a>,
         witnesses: &'a [WitnessDef],
         arena: &'a mut TyArena,
         entity_names: &'a IndexMap<Entity, String>,
     ) -> Self {
         Self {
             functions,
-            structs,
-            enums,
-            protocols,
+            env,
             witnesses,
             arena,
             entity_names,
@@ -130,6 +125,9 @@ impl<'a> CollectionContext<'a> {
             witness_cache: WitnessCache::new(),
             errors: Vec::new(),
             too_deep_reported: false,
+            vtable_templates: None,
+            seen_vtables: IndexSet::new(),
+            clone_thunk: None,
         }
     }
 
@@ -169,10 +167,12 @@ impl<'a> CollectionContext<'a> {
 
             if let Some(parent_entity) = parent {
                 let is_concrete_nongeneric = self
+                    .env
                     .structs
                     .get(&parent_entity)
                     .is_some_and(|s| s.type_params.is_empty())
                     || self
+                        .env
                         .enums
                         .get(&parent_entity)
                         .is_some_and(|e| e.type_params.is_empty());
@@ -248,7 +248,7 @@ impl<'a> CollectionContext<'a> {
             &key.type_args,
             key.self_type,
             self.arena,
-            self.protocols,
+            self.env.protocols,
             self.witnesses,
         );
         let parent_self = key.self_type;
@@ -296,6 +296,14 @@ impl<'a> CollectionContext<'a> {
                         let concrete_ty =
                             substitute_and_resolve(self.arena, self.witnesses, operand_ty, &subst);
                         self.discover_clone_shim(concrete_ty, parent_self);
+                    },
+                    InstKind::Op2 {
+                        op: crate::Op::CloneIntoVal(ty),
+                        ..
+                    } => {
+                        let concrete_ty =
+                            substitute_and_resolve(self.arena, self.witnesses, *ty, &subst);
+                        self.discover_clone_into(concrete_ty);
                     },
                     _ => {},
                 }
@@ -397,7 +405,7 @@ impl<'a> CollectionContext<'a> {
                 match witness::resolve_witness_call(
                     self.arena,
                     self.witnesses,
-                    self.protocols,
+                    &self.env,
                     self.functions,
                     self.entity_names,
                     *protocol,
@@ -410,7 +418,7 @@ impl<'a> CollectionContext<'a> {
                         if let Ok((widx, bindings)) = witness::find_witness_with_method(
                             self.arena,
                             self.witnesses,
-                            self.protocols,
+                            &self.env,
                             *protocol,
                             method,
                             concrete_self,
@@ -452,17 +460,28 @@ impl<'a> CollectionContext<'a> {
                 }
             },
 
-            Callee::Thin(_) | Callee::Thick(_) | Callee::Resolved(_) => {},
+            Callee::Thin(_) | Callee::Thick(_) | Callee::C(_) | Callee::Resolved(_) => {},
         }
     }
 
     /// Scan an ImmediateKind for FunctionRef — discovers function references
     /// used as values (closures, first-class function pointers).
     fn scan_immediate(&mut self, imm: &ImmediateKind, subst: &SubstMap, parent_self: Option<TyId>) {
+        if let ImmediateKind::VTable { template, payload } = imm {
+            let payload = substitute_and_resolve(self.arena, self.witnesses, *payload, subst);
+            self.scan_vtable(*template, payload);
+            return;
+        }
         if let ImmediateKind::FunctionRef {
             func,
             type_args,
             self_type,
+        }
+        | ImmediateKind::CFunctionRef {
+            func,
+            type_args,
+            self_type,
+            ..
         } = imm
         {
             if !self.functions.contains_key(func) {
@@ -500,6 +519,64 @@ impl<'a> CollectionContext<'a> {
 
     /// The function that clones `nominal`, as decided once by the clone-shim
     /// pass. A struct or enum, never both — one lookup, no fallback chain.
+    /// A table at a concrete payload: instantiate every function entry at the
+    /// payload, and every sub-table (ancestors, composition bounds) the same
+    /// way. Tables are roots, like function refs.
+    fn scan_vtable(&mut self, template: Entity, payload: TyId) {
+        if !self.seen_vtables.insert((template, payload)) {
+            return;
+        }
+        let Some(tpl) = self.vtable_templates.and_then(|t| t.get(&template)) else {
+            return;
+        };
+        kestrel_debug::ktrace!("vtable", "collect {} at {:?}", tpl.name, payload);
+        for entry in tpl.entries.clone() {
+            match entry {
+                crate::item::VTableEntry::Func(func) => {
+                    let key = InstantiationKey::new(func, vec![payload], None);
+                    if self.seen.insert(key.clone()) {
+                        self.queue.push_back(key);
+                    }
+                },
+                crate::item::VTableEntry::Table(sub) => self.scan_vtable(sub, payload),
+                _ => {},
+            }
+        }
+    }
+
+    /// A sized `Op::CloneIntoVal` calls the clone thunk at the type (mono
+    /// `fat::legalize`); an unsized one goes through the payload's table,
+    /// whose clone word the table literal already instantiated.
+    fn discover_clone_into(&mut self, ty: TyId) {
+        let Some(thunk) = self.clone_thunk else {
+            return;
+        };
+        if has_type_param(self.arena, ty) {
+            return;
+        }
+        let mut tails = super::GenericTails {
+            arena: self.arena,
+            structs: self.env.structs,
+            witnesses: self.witnesses,
+        };
+        if crate::ty::is_unsized(&mut tails, ty) {
+            return;
+        }
+        let key = InstantiationKey::new(thunk, vec![ty], None);
+        if self.seen.insert(key.clone()) {
+            self.queue.push_back(key);
+        }
+    }
+
+    /// Is the concrete type `ty` duplicated by a clone (or bit-copy), rather
+    /// than move-only? Same classifier as the rest of MIR.
+    fn instance_may_clone(&self, ty: TyId) -> bool {
+        !matches!(
+            crate::ty_query::copy_behavior_in(self.arena, &self.env, ty, None),
+            crate::CopyBehavior::None
+        )
+    }
+
     fn clone_impl_of(&self, nominal: Entity) -> Option<Entity> {
         self.type_info_of(nominal).and_then(|ti| ti.clone_impl)
     }
@@ -510,10 +587,11 @@ impl<'a> CollectionContext<'a> {
     }
 
     fn type_info_of(&self, nominal: Entity) -> Option<&crate::item::TypeInfo> {
-        self.structs
+        self.env
+            .structs
             .get(&nominal)
             .map(|s| &s.type_info)
-            .or_else(|| self.enums.get(&nominal).map(|e| &e.type_info))
+            .or_else(|| self.env.enums.get(&nominal).map(|e| &e.type_info))
     }
 
     /// If `ty` is a Named type with a drop shim, enqueue the shim instantiation.
@@ -549,6 +627,14 @@ impl<'a> CollectionContext<'a> {
             MirTy::Named { entity, type_args } => {
                 let entity = *entity;
                 let type_args = type_args.clone();
+                // A conditionally Cloneable type (`extend X[T]: Cloneable
+                // where T: Cloneable`) has a clone impl that is only valid at
+                // instances meeting the bound. Instantiating it elsewhere
+                // (`X[File]`) fails post-mono verification, so ask the shared
+                // per-instance classifier first.
+                if !self.instance_may_clone(ty) {
+                    return;
+                }
                 if let Some(func) = self.clone_impl_of(entity) {
                     let key = InstantiationKey::new(func, type_args, parent_self);
                     if self.seen.insert(key.clone()) {
@@ -828,6 +914,26 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
                 .collect();
             if new != elems { arena.tuple(new) } else { ty }
         },
+        MirTy::FuncC {
+            params,
+            ret,
+            unsigned,
+        } => {
+            let new_params: Vec<(TyId, crate::ty::ParamConvention)> = params
+                .iter()
+                .map(|&(p, c)| (deep_resolve(arena, witnesses, p, depth + 1), c))
+                .collect();
+            let new_ret = deep_resolve(arena, witnesses, ret, depth + 1);
+            if new_params != params || new_ret != ret {
+                arena.intern(MirTy::FuncC {
+                    params: new_params,
+                    ret: new_ret,
+                    unsigned,
+                })
+            } else {
+                ty
+            }
+        },
         MirTy::FuncThin { params, ret }
         | MirTy::FuncThick {
             params,
@@ -883,6 +989,7 @@ fn references_type_param(arena: &TyArena, ty: TyId, entity: Entity) -> bool {
             .iter()
             .any(|&a| references_type_param(arena, a, entity)),
         MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
         | MirTy::FuncThick {
             params,
             ret,
@@ -907,6 +1014,7 @@ pub fn has_type_param(arena: &TyArena, ty: TyId) -> bool {
         MirTy::Tuple(elems) => elems.iter().any(|&e| has_type_param(arena, e)),
         MirTy::Named { type_args, .. } => type_args.iter().any(|&a| has_type_param(arena, a)),
         MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
         | MirTy::FuncThick {
             params,
             ret,
@@ -953,7 +1061,9 @@ fn ty_depth(arena: &TyArena, ty: TyId, cap: usize) -> usize {
         MirTy::Named { type_args, .. } => type_args.clone(),
         MirTy::Tuple(elems) => elems.clone(),
         MirTy::Pointer(inner) => vec![*inner],
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret, .. } => params
+        MirTy::FuncThin { params, ret }
+        | MirTy::FuncC { params, ret, .. }
+        | MirTy::FuncThick { params, ret, .. } => params
             .iter()
             .map(|(t, _)| *t)
             .chain(std::iter::once(*ret))
@@ -988,6 +1098,22 @@ mod tests {
     fn struct_map(structs: Vec<StructDef>) -> IndexMap<Entity, StructDef> {
         structs.into_iter().map(|s| (s.entity, s)).collect()
     }
+    fn test_env<'a>(
+        structs: &'a IndexMap<Entity, StructDef>,
+        enums: &'a IndexMap<Entity, crate::item::enum_def::EnumDef>,
+        protocols: &'a IndexMap<Entity, ProtocolDef>,
+    ) -> TypeEnv<'a> {
+        TypeEnv {
+            structs,
+            enums,
+            protocols,
+            cloneable_protocol: None,
+            copyable_protocol: None,
+            static_protocol: None,
+            sized_protocol: None,
+        }
+    }
+
     fn proto_map(protos: Vec<ProtocolDef>) -> IndexMap<Entity, ProtocolDef> {
         protos.into_iter().map(|p| (p.entity, p)).collect()
     }
@@ -1064,16 +1190,17 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let result = collect_all(
             &func_map(vec![func]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(&struct_map(vec![]), &IndexMap::new(), &proto_map(vec![])),
             &[],
             &mut arena,
             &IndexMap::new(),
+            &IndexMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1103,16 +1230,17 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let result = collect_all(
             &func_map(vec![func]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(&struct_map(vec![]), &IndexMap::new(), &proto_map(vec![])),
             &[],
             &mut arena,
             &IndexMap::new(),
+            &IndexMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1139,6 +1267,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         // main() calls generic_fn[Int64]
@@ -1169,16 +1298,17 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let result = collect_all(
             &func_map(vec![main_fn, generic_fn]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(&struct_map(vec![]), &IndexMap::new(), &proto_map(vec![])),
             &[],
             &mut arena,
             &IndexMap::new(),
+            &IndexMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1232,6 +1362,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
         let entry_call = Instruction::new(InstKind::Call {
             result: None,
@@ -1258,16 +1389,17 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let result = collect_all(
             &func_map(vec![main_fn, recur]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(&struct_map(vec![]), &IndexMap::new(), &proto_map(vec![])),
             &[],
             &mut arena,
             &IndexMap::new(),
+            &IndexMap::new(),
+            None,
         );
         let Err(errors) = result else {
             panic!("polymorphic recursion must be rejected");
@@ -1299,6 +1431,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let thunk = FunctionDef {
@@ -1315,16 +1448,17 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let result = collect_all(
             &func_map(vec![closure, thunk]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(&struct_map(vec![]), &IndexMap::new(), &proto_map(vec![])),
             &[],
             &mut arena,
             &IndexMap::new(),
+            &IndexMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1354,16 +1488,21 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let result = collect_all(
             &func_map(vec![method]),
-            &struct_map(vec![struct_def]),
-            &IndexMap::new(),
-            &proto_map(vec![]),
+            test_env(
+                &struct_map(vec![struct_def]),
+                &IndexMap::new(),
+                &proto_map(vec![]),
+            ),
             &[],
             &mut arena,
             &IndexMap::new(),
+            &IndexMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1405,6 +1544,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         // main() has a witness call
@@ -1436,6 +1576,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let mut names = IndexMap::new();
@@ -1443,12 +1584,16 @@ mod tests {
 
         let result = collect_all(
             &func_map(vec![main_fn, impl_func]),
-            &struct_map(vec![]),
-            &IndexMap::new(),
-            &proto_map(vec![protocol]),
+            test_env(
+                &struct_map(vec![]),
+                &IndexMap::new(),
+                &proto_map(vec![protocol]),
+            ),
             &[witness],
             &mut arena,
             &names,
+            &IndexMap::new(),
+            None,
         )
         .unwrap();
 

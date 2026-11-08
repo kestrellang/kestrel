@@ -47,59 +47,86 @@ pub fn set_attributes(
 }
 
 /// Extract a single attribute.
-fn extract_attribute(attr: &ast::Attribute, file_id: usize) -> Option<AstAttribute> {
+pub(crate) fn extract_attribute(attr: &ast::Attribute, file_id: usize) -> Option<AstAttribute> {
     let name_token = attr.identifier_token()?;
     let args = attr
         .attribute_args()
         .map(|args| {
             args.attribute_args()
-                .filter_map(|a| extract_attribute_arg(&a))
+                .map(|a| extract_attribute_arg(&a, file_id))
                 .collect()
         })
         .unwrap_or_default();
     // Span the name token: the node's range starts at its leading trivia
     // (the previous line's newline), which would put diagnostics a line early.
-    let range = name_token.text_range();
-    let span = Span::new(file_id, (range.start().into())..(range.end().into()));
     Some(AstAttribute {
         name: name_token.text().to_string(),
         args,
-        span,
+        span: token_span(&name_token, file_id),
     })
 }
 
+fn token_span(token: &kestrel_syntax_tree::SyntaxToken, file_id: usize) -> Span {
+    let range = token.text_range();
+    Span::new(file_id, (range.start().into())..(range.end().into()))
+}
+
 /// Extract a single attribute argument: `label: value` or `value`.
-fn extract_attribute_arg(arg: &ast::AttributeArg) -> Option<AstAttributeArg> {
+fn extract_attribute_arg(arg: &ast::AttributeArg, file_id: usize) -> AstAttributeArg {
     let tokens: Vec<_> = arg
         .syntax()
         .children_with_tokens()
         .filter_map(|e| e.into_token())
         .filter(|t| !t.kind().is_trivia())
         .collect();
-    match tokens.iter().position(|t| t.kind() == SyntaxKind::Colon) {
-        Some(pos) => Some(AstAttributeArg {
-            label: pos.checked_sub(1).map(|i| tokens[i].text().to_string()),
-            value: extract_value_from_tokens(&tokens[(pos + 1)..]).unwrap_or_default(),
-        }),
-        None => Some(AstAttributeArg {
-            label: None,
-            value: extract_value_from_tokens(&tokens)?,
-        }),
+    let (label, value_tokens) = match tokens.iter().position(|t| t.kind() == SyntaxKind::Colon) {
+        Some(pos) => (pos.checked_sub(1).map(|i| &tokens[i]), &tokens[(pos + 1)..]),
+        None => (None, &tokens[..]),
+    };
+    // The argument's span covers its tokens only (not leading trivia).
+    let span = match (tokens.first(), tokens.last()) {
+        (Some(first), Some(last)) => Span::new(
+            file_id,
+            first.text_range().start().into()..last.text_range().end().into(),
+        ),
+        _ => {
+            let r = arg.syntax().text_range();
+            Span::new(file_id, r.start().into()..r.end().into())
+        },
+    };
+    AstAttributeArg {
+        label: label.map(|t| t.text().to_string()),
+        label_span: label.map(|t| token_span(t, file_id)),
+        value: literal_from_tokens(value_tokens),
+        span,
     }
 }
 
-/// Extract a value from tokens, handling implicit member syntax (.Name).
-///
-/// For `@builtin(.Copyable)`, the tokens are [Dot, Identifier("Copyable")].
-/// We combine them into ".Copyable" so consumers can recognize the pattern.
-fn extract_value_from_tokens(tokens: &[kestrel_syntax_tree::SyntaxToken]) -> Option<String> {
-    if tokens.len() >= 2
-        && tokens[0].kind() == SyntaxKind::Dot
-        && tokens[1].kind() == SyntaxKind::Identifier
-    {
-        Some(format!(".{}", tokens[1].text()))
-    } else {
-        tokens.first().map(|t| t.text().to_string())
+/// Classify an argument's value tokens: a literal, an implicit member
+/// `.Name`, or a dotted path.
+fn literal_from_tokens(tokens: &[kestrel_syntax_tree::SyntaxToken]) -> AttrLiteral {
+    let Some(first) = tokens.first() else {
+        return AttrLiteral::Missing;
+    };
+    match first.kind() {
+        SyntaxKind::String => AttrLiteral::Str(first.text().to_string()),
+        SyntaxKind::Integer => AttrLiteral::Int(first.text().to_string()),
+        SyntaxKind::Float => AttrLiteral::Float(first.text().to_string()),
+        SyntaxKind::Boolean => AttrLiteral::Bool(first.text() == "true"),
+        SyntaxKind::Dot => tokens
+            .get(1)
+            .filter(|t| t.kind() == SyntaxKind::Identifier)
+            .map_or(AttrLiteral::Missing, |t| {
+                AttrLiteral::Case(t.text().to_string())
+            }),
+        SyntaxKind::Identifier => AttrLiteral::Path(
+            tokens
+                .iter()
+                .filter(|t| t.kind() == SyntaxKind::Identifier)
+                .map(|t| t.text().to_string())
+                .collect(),
+        ),
+        _ => AttrLiteral::Missing,
     }
 }
 
@@ -218,16 +245,23 @@ pub fn set_conformances(
         .conformance_items()
         .filter_map(|item| {
             let syntax = SyntaxNodePtr::new(item.syntax());
-            match item.negative_conformance() {
-                Some(neg) => Some(ConformanceItem::Negative(
+            if let Some(neg) = item.negative_conformance() {
+                return Some(ConformanceItem::Negative(
                     lower_opt_type(neg.ty(), file_id)?,
                     syntax,
-                )),
-                None => Some(ConformanceItem::Positive(
-                    lower_opt_type(item.ty(), file_id)?,
-                    syntax,
-                )),
+                ));
             }
+            // `unsafe P` nests its type one level down.
+            let unsafe_item = item.unsafe_conformance();
+            let ty = match &unsafe_item {
+                Some(u) => u.ty(),
+                None => item.ty(),
+            };
+            Some(ConformanceItem::Positive(
+                lower_opt_type(ty, file_id)?,
+                syntax,
+                unsafe_item.is_some(),
+            ))
         })
         .collect();
     if !items.is_empty() {
@@ -378,7 +412,7 @@ pub fn spawn_setter(
     file_entity: Entity,
     file_id: usize,
     is_static: bool,
-) {
+) -> Entity {
     let setter = world.spawn();
     world.set(setter, NodeKind::Setter);
     world.set(setter, FileId(file_entity));
@@ -396,6 +430,48 @@ pub fn spawn_setter(
         world.set(setter, Static);
     }
     set_documentation(world, setter, setter_clause);
+    setter
+}
+
+/// Mark a failable member (`var first?: T`, `subscript(…)? -> T`): its
+/// annotation becomes `T?`, the type every read provider produces (a `get`
+/// body returns `T?`; ref accessors lend `Optional[&T]`, see
+/// [`spawn_ref_accessor`]). Must run before the accessors are built.
+/// Mark a computed member declared `T throws E` [`Throwing`]. Call after
+/// its `TypeAnnotation` is set and before its accessors are built (their
+/// ref types read the marker).
+pub fn mark_throwing(world: &mut World, entity: Entity) {
+    if matches!(
+        world.get::<TypeAnnotation>(entity),
+        Some(TypeAnnotation(AstType::Result { .. }))
+    ) {
+        world.set(entity, Throwing);
+    }
+}
+
+pub fn mark_failable(world: &mut World, entity: Entity, span: kestrel_span::Span) {
+    world.set(entity, Failable);
+    if let Some(ty) = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone()) {
+        world.set(
+            entity,
+            TypeAnnotation(AstType::Optional(Box::new(ty), span)),
+        );
+    }
+}
+
+/// The accessor clauses an accessor block spells (see [`DeclaredAccessors`]).
+/// The `{ expr }` shorthand counts as `get`.
+pub fn declared_accessors(acc: &kestrel_syntax_tree::ast::PropertyAccessors) -> DeclaredAccessors {
+    DeclaredAccessors {
+        get: acc.declares_get() || acc.code_block().is_some(),
+        modifying_get: acc.modifying_getter().is_some(),
+        set: acc.declares_set(),
+        ref_: acc.ref_clause().is_some(),
+        modifying_ref: acc.modifying_ref_clause().is_some(),
+        mutating_ref: acc.mutating_ref_clause().is_some(),
+        will_set: acc.will_set().is_some(),
+        did_set: acc.did_set().is_some(),
+    }
 }
 
 /// Spawn a `NodeKind::RefAccessor` child entity under a Field or Subscript
@@ -406,12 +482,14 @@ pub fn spawn_setter(
 /// accessor has a RETURN type — the SYNTHESIZED `&T` / `&mutating T`
 /// wrapping the parent's declared type. The user writes `-> T`; a ref type
 /// never appears in source (declared `-> &T` subscripts stay E481). The
-/// `MutatingAccessor` marker distinguishes the two kinds.
+/// `MutatingAccessor` marker distinguishes the two kinds. A bodyless clause
+/// (`clause_body: None`) is a protocol requirement: the child carries the
+/// signature only, and conformers' accessors witness it.
 pub fn spawn_ref_accessor(
     world: &mut World,
     parent: Entity,
     clause: &SyntaxNode,
-    clause_body: &SyntaxNode,
+    clause_body: Option<&SyntaxNode>,
     params: Vec<AstParam>,
     receiver: Option<ReceiverKind>,
     mutating: bool,
@@ -430,21 +508,50 @@ pub fn spawn_ref_accessor(
         world.set(acc, EnclosingContainer(container));
     }
     world.set(acc, Callable { params, receiver });
-    world.set(acc, Valued(SyntaxNodePtr::new(clause_body)));
+    if let Some(body) = clause_body {
+        world.set(acc, Valued(SyntaxNodePtr::new(body)));
+    }
     if mutating {
         world.set(acc, MutatingAccessor);
     }
     // Synthesized ref return around the parent's declared type. Spanned at
     // the clause so any ref-placement diagnostic lands on the accessor.
+    // A failable member (`var first?: T`) is annotated `T?`; its accessors
+    // lend `Optional[&T]` / `Optional[&mutating T]` instead of `&T?`. A
+    // throwing one (`T throws E`) lends `Result[&T, E]` the same way.
     if let Some(parent_ty) = world.get::<TypeAnnotation>(parent).map(|t| t.0.clone()) {
-        world.set(
-            acc,
-            TypeAnnotation(AstType::Ref {
+        let span = get_decl_span(clause, file_id);
+        let ty = match parent_ty {
+            AstType::Optional(inner, opt_span) if world.has::<Failable>(parent) => {
+                AstType::Optional(
+                    Box::new(AstType::Ref {
+                        inner,
+                        mutating,
+                        span,
+                    }),
+                    opt_span,
+                )
+            },
+            AstType::Result {
+                ok,
+                err,
+                span: res_span,
+            } if world.has::<Throwing>(parent) => AstType::Result {
+                ok: Box::new(AstType::Ref {
+                    inner: ok,
+                    mutating,
+                    span,
+                }),
+                err,
+                span: res_span,
+            },
+            parent_ty => AstType::Ref {
                 inner: Box::new(parent_ty),
                 mutating,
-                span: get_decl_span(clause, file_id),
-            }),
-        );
+                span,
+            },
+        };
+        world.set(acc, TypeAnnotation(ty));
     }
     if is_static {
         world.set(acc, Static);

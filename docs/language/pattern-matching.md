@@ -121,6 +121,25 @@ value => use(value)           // immutable binding
 var value => { value = 1 }    // mutable binding
 ```
 
+### Reference Binding Pattern
+
+`&name` binds a shared reference into the matched value instead of copying it out; `&mutating name` binds a mutable one, so writes land in the matched place:
+
+```kestrel
+var s = Slot.Filled(1);
+if let .Filled(&mutating v) = s { v = 2; }   // s is now .Filled(2)
+
+var t = (1, 2);
+let (&mutating x, y) = t;                    // x writes t.0 in place
+
+func sum((&a, &b): (Int64, Int64)) -> Int64 { a + b }
+```
+
+Reference binders work in every pattern position: `match` arms, `if let`, `while let`, `guard let`, `let` destructuring, `for` patterns, and function and closure parameter patterns. The scrutinee is matched in place.
+
+- `&mutating` needs a mutable place to match (E210).
+- A `let` destructure of a temporary (`let (&x, y) = (1, 2);`) is rejected (E499), because the temporary dies at the end of the statement. Bind the value first, then destructure the binding.
+
 ### Literal Pattern
 
 Matches an exact value:
@@ -350,6 +369,31 @@ x @ (.Some(_) or .None) => use(x)
 x @ .Some(_) or .None => use(x)
 ```
 
+### Type-Test Patterns
+
+On an [existential](existentials.md) (`any P`), an `is` pattern tests the payload's concrete type:
+
+```kestrel
+func classify(s: any Shape) -> Int64 {
+    match s {
+        is Circle => 1,                       // test only
+        q is Square => q.side * 10,           // test, bind q: &Square
+        is Rect { w: 0, .. } => 2,            // test, then a struct pattern
+        r is Rect { w, .. } => r.h * 100 + w, // both
+        _ => 0,
+    }
+}
+
+if let c is Circle = s { use(c.r) }
+guard let q is Square = s else { return -1 }
+```
+
+- The binding **borrows** the payload (`&T`, which decays to a copy when `T: Copyable`), so `var c is Circle` is an error (E153). To move the payload out, use `consuming x as? T`.
+- `x @ is Circle` binds the whole existential, as `@` always does.
+- `c is Circle or c is Square` is rejected: `c` would have two different types. `is Circle or is Square` is fine.
+- The scrutinee must be an existential (E152). A target that can't conform to the existential's protocols never matches (warning E149).
+- A struct pattern on an existential (`Rect { .. }` without `is`) is not a type test; type tests always say `is`.
+
 ## If-Let Expressions
 
 Use `if let` for conditional pattern matching when you only care about one pattern:
@@ -467,6 +511,7 @@ Match expressions must be exhaustive - all possible values must be covered.
 | Array | Requires `_` or `[..]` wildcard |
 | Char | Requires `_` wildcard |
 | Int/String | Requires `_` wildcard |
+| Existential (`any P`) | Requires `_` wildcard: the set of payload types is open, so `is` arms never cover it. A repeated `is T` arm is unreachable |
 
 Guards are treated conservatively - the compiler assumes they may fail:
 
@@ -507,6 +552,8 @@ The ones you are most likely to meet:
 | E313 | Wrong payload arity for an enum case |
 | E314 | Tuple pattern arity doesn't match the tuple type |
 | E315 | Inconsistent bindings across `|` alternatives |
+| E210 | `&mutating` binder on an immutable scrutinee |
+| E499 | `&` binder in a `let` destructure of a temporary |
 
 ## Grammar
 
@@ -566,6 +613,7 @@ assoc_binding :=
     | "_"
     | IDENT
     | "var" IDENT
+    | "&" "mutating"? IDENT
     | IDENT ":" or_pattern
 
 if_let_expr := "if" condition_list block ("else" (block | if_expr))?

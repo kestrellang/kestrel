@@ -18,8 +18,12 @@ pub mod ctx;
 mod entail_layer;
 pub mod entailment;
 pub mod error;
+mod existential;
 pub mod generate;
 pub mod obligations;
+pub mod opaque;
+mod optional_chain;
+mod pipe;
 pub mod resolve;
 pub mod result;
 pub mod solver;
@@ -43,8 +47,11 @@ use resolve::WorldResolver;
 use result::TypedBody;
 
 pub use captures::{CaptureKind, CapturedPlace, ClosureCaptureMap, ClosureCaptures, PlaceKey};
-pub use conformance::{extension_bounds_hold, type_satisfies};
+pub use conformance::{
+    extension_bounds_hold, resolved_satisfies, type_satisfies, type_test_blocker,
+};
 pub use error::describe_fn_kind;
+pub use opaque::{OpaqueConcrete, OpaqueConcreteTy, origin_type_params, substitute_resolved_ty};
 
 /// Resolve the logical enclosing container for a function-like entity.
 /// Setters have an `EnclosingContainer` component set at build time;
@@ -111,6 +118,12 @@ impl QueryFn for InferBody {
 
         // Solve
         obligations::finish_body(&mut infer_ctx, &hir);
+
+        // Settle each `?.` bind's method now that members are resolved.
+        optional_chain::decide_chain_modes(&mut infer_ctx, &hir);
+
+        // A failed `|>` reports one fix-it instead of its call's errors.
+        pipe::reword_pipe_errors(&mut infer_ctx, &hir);
 
         // Detect circular opaque returns: if the concrete type behind `some P`
         // is itself another opaque, the body never grounded to a real type.
@@ -274,16 +287,12 @@ fn create_extension_self_type(
     let target_kind = query_ctx.get::<NodeKind>(target).cloned();
     let self_tv = if matches!(target_kind, Some(NodeKind::Protocol)) {
         ctx.self_type_ty(target)
-    } else if let Some(mutating) =
-        kestrel_name_res::extensions::lang_ref_mutability(query_ctx, target)
-    {
-        // Ref-target extension (`extend &T`): self IS the ref type — never
-        // the synthetic entity. `TyKind::Ref` keeps the transparent-place
-        // receiver peel working, so `self.method()` in the body dispatches
-        // on the POINTEE (via the extension's where bounds), not back onto
-        // the extension's own members.
-        let pointee = args.first().copied().unwrap_or_else(|| ctx.fresh());
-        ctx.ref_ty(pointee, mutating)
+    } else if let Some(kind) = resolve::structural_ty_kind(query_ctx, target, &args) {
+        // Structural-target extension (`extend &T`, `extend (X, Y)`): self IS
+        // the ref / tuple — never the synthetic entity. `TyKind::Ref` keeps
+        // the transparent-place receiver peel working (so `self.method()`
+        // dispatches on the POINTEE), and a tuple keeps `self.0`.
+        ctx.resolved(kind)
     } else {
         ctx.named(target, args.clone())
     };
@@ -1058,6 +1067,13 @@ fn get_or_create_subject_tv(
         return result_tv;
     }
 
+    // An extension-owned param (a pattern param `X` in `extend Box[W[X]]`,
+    // or a free RHS one): in the body it is the abstract param itself — the
+    // same `ctx.param` its uses lower to — so the clause bounds THAT.
+    if query_ctx.get::<NodeKind>(param) == Some(&NodeKind::TypeParameter) {
+        return ctx.param(param);
+    }
+
     // Fallback: create a fresh TyVar
     ctx.fresh()
 }
@@ -1091,14 +1107,17 @@ impl QueryFn for RetRefPointerDerived {
     type Output = bool;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> bool {
+        // A place (`var value: T { ref { ptr_ref(…) } }`) is a wrapper when
+        // its read accessor is: that body holds the intrinsic call.
+        let entity = place_read_accessor(ctx, self.entity).unwrap_or(self.entity);
         let Some(hir) = ctx.query(LowerBody {
-            entity: self.entity,
+            entity,
             root: self.root,
         }) else {
             return false;
         };
         let Some(typed) = ctx.query(InferBody {
-            entity: self.entity,
+            entity,
             root: self.root,
         }) else {
             return false;
@@ -1118,6 +1137,21 @@ impl QueryFn for RetRefPointerDerived {
                 .iter()
                 .all(|&e| is_ptr_ref_intrinsic_call(ctx, &hir, &typed, e))
     }
+}
+
+/// The non-mutating `ref` accessor of a place member (field or subscript),
+/// or `None` when `member` isn't a place with one.
+fn place_read_accessor(ctx: &QueryContext<'_>, member: Entity) -> Option<Entity> {
+    use kestrel_ast_builder::{MutatingAccessor, NodeKind};
+    if !matches!(
+        ctx.get::<NodeKind>(member),
+        Some(NodeKind::Field | NodeKind::Subscript)
+    ) {
+        return None;
+    }
+    ctx.children_of(member).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::RefAccessor) && !ctx.has::<MutatingAccessor>(c)
+    })
 }
 
 fn is_ptr_ref_intrinsic_call(
@@ -1151,4 +1185,34 @@ fn is_ptr_ref_intrinsic_call(
         ctx.get::<Name>(e).map(|n| n.0.as_str()),
         Some("ptr_ref" | "ptr_mut_ref")
     )
+}
+
+/// The accessor an `Indirection` peel lends the pointee through: the `ref` of
+/// `Indirection`'s `value` requirement, or (`mutating`) the `mutating ref` of
+/// `MutableIndirection`'s. Calls to it dispatch through the wrapper's witness
+/// table, so any conformer works: a type's own ref accessors or a stored
+/// field.
+pub fn indirection_accessor(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    mutating: bool,
+) -> Option<Entity> {
+    use kestrel_ast_builder::{MutatingAccessor, Name, NodeKind};
+    use kestrel_hir::Builtin;
+    let builtin = if mutating {
+        Builtin::MutableIndirection
+    } else {
+        Builtin::Indirection
+    };
+    let protocol = ctx.query(kestrel_name_res::ResolveBuiltin { builtin, root })?;
+    let place = ctx.children_of(protocol).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::Field)
+            && ctx
+                .get::<Name>(c)
+                .is_some_and(|n| n.0 == kestrel_hir::INDIRECTION_PLACE)
+    })?;
+    ctx.children_of(place).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::RefAccessor)
+            && ctx.has::<MutatingAccessor>(c) == mutating
+    })
 }

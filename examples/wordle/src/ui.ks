@@ -82,12 +82,12 @@ func boardHtml(guesses: Array[String], answer: String) -> String {
     while row < MAX_GUESSES {
         h.append(##"<div class="row">"##);
         if row < guesses.count {
-            let g = guesses(unchecked: row);
+            let g = unsafe guesses(unchecked: row);
             let scored = scoreGuess(g, answer);
             var i: Int64 = 0;
             while i < WORD_LEN {
                 let ch = g.asSlice().subslice(from: i, to: i + 1).toOwned();
-                let cls = stateClass(scored(unchecked: i));
+                let cls = stateClass(unsafe scored(unchecked: i));
                 var t = Template();
                 t.setRaw("cls", cls);
                 t.put("ch", ch);
@@ -139,9 +139,9 @@ func kbRowHtml(letters: String, states: Array[LetterState]) -> String {
     h.append(##"<div class="kb-row">"##);
     var i: Int64 = 0;
     while i < letters.bytes.count {
-        let b = letters.bytes(unchecked: i);
+        let b = unsafe letters.bytes(unchecked: i);
         let idx = Int64(from: b) - 65;
-        let cls = stateClass(states(unchecked: idx));
+        let cls = stateClass(unsafe states(unchecked: idx));
         let ch = letters.asSlice().subslice(from: i, to: i + 1).toOwned();
         var t = Template();
         t.setRaw("cls", cls);

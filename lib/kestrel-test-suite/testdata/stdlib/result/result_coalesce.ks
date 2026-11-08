@@ -23,9 +23,9 @@ module Test
             if (err ?? fallback()) != 7 { return 3 }
             if fallbackCalls != 1 { return 4 }
 
-            // direct coalesce call, no operator sugar
+            // ?? on Ok with a literal default
             let ok2: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Ok(1);
-            if ok2.coalesce({ 0 }) != 1 { return 5 }
+            if (ok2 ?? 0) != 1 { return 5 }
 
             // non-Copyable (String) success payload moves out cleanly
             let okStr: std.result.Result[std.text.String, std.numeric.Int64] = .Ok("hello");

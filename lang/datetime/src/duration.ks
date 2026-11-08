@@ -64,9 +64,29 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
         Duration(raw: n * 3600, rawNanos: 0)
     }
 
+    // Exact 24-hour days. For calendar days (DST-aware) use Period(days:).
+    public static func days(n: Int64) -> Duration {
+        Duration(raw: n * 86400, rawNanos: 0)
+    }
+
+    // From a fractional number of seconds, rounded to the nearest nanosecond.
+    // Fails with `nil` for NaN, infinity, or values outside Int64 seconds.
+    public init(fractionalSeconds seconds: Float64)? {
+        guard let .Some(whole) = seconds.toInt64() else { return null; }
+        let fraction = (seconds - Float64(from: whole)) * 1_000_000_000.0;
+        guard let .Some(nanos) = fraction.round().toInt64() else { return null; }
+        let d = Duration.normalized(secs: whole, nanos: nanos);
+        self.secs = d.secs;
+        self.nanos = d.nanos;
+    }
+
     public static var zero: Duration { Duration(raw: 0, rawNanos: 0) }
 
     // --- Properties ---
+
+    // Accessors treat a Duration as a signed magnitude: whole units truncate
+    // toward zero and the remainder keeps the sign (-1.5s = -1s and -500ms).
+    // Contrast Instant, a point on a line, whose seconds floor.
 
     public var totalSeconds: Int64 { self.secs }
 
@@ -74,11 +94,21 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
         self.secs * 1000 + self.nanos / 1_000_000
     }
 
+    public var totalMicroseconds: Int64 {
+        self.secs * 1_000_000 + self.nanos / 1000
+    }
+
     public var totalNanoseconds: Int64 {
         self.secs * Duration.NANOS_PER_SEC + self.nanos
     }
 
+    // Nanoseconds past `totalSeconds`; same sign as the duration.
     public var subsecondNanoseconds: Int64 { self.nanos }
+
+    // Seconds as a Float64 (loses precision beyond ~104 days at ns resolution).
+    public var fractionalSeconds: Float64 {
+        Float64(from: self.secs) + Float64(from: self.nanos) / 1_000_000_000.0
+    }
 
     public var isNegative: Bool { self.secs < 0 or (self.secs == 0 and self.nanos < 0) }
 
@@ -94,13 +124,7 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
         if self.isNegative { self.negated() } else { self }
     }
 
-    public func adding(other: Duration) -> Duration {
-        Duration.normalized(secs: self.secs + other.secs, nanos: self.nanos + other.nanos)
-    }
-
-    public func subtracting(other: Duration) -> Duration {
-        Duration.normalized(secs: self.secs - other.secs, nanos: self.nanos - other.nanos)
-    }
+    // Sums and differences are the `+` / `-` operators (operators.ks).
 
     public func multiplied(by factor: Int64) -> Duration {
         Duration.normalized(secs: self.secs * factor, nanos: self.nanos * factor)
@@ -114,7 +138,7 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
     // --- Rounding ---
 
     public func rounded(to unit: TimeUnit, mode mode: RoundMode = .HalfExpand) -> Duration {
-        let divisor = unit.nanoseconds();
+        let divisor = unit.nanoseconds;
         if divisor <= 1 { return self }
         let total = self.totalNanoseconds;
         let rounded = roundValue(total, divisor, mode);
@@ -148,30 +172,42 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
         b.build()
     }
 
+    // Compact human form: "1d 2h 3m 4.5s", "-1.5s", "0s". Days are 24 hours.
     public func humanString() -> String {
         let a = self.abs();
-        let h = a.secs / 3600;
+        let d = a.secs / 86400;
+        let h = (a.secs % 86400) / 3600;
         let m = (a.secs % 3600) / 60;
         let s = a.secs % 60;
         var b = StringBuilder();
         if self.isNegative { b.append("-"); }
         var wrote = false;
-        if h > 0 { b.append("\(h)h"); wrote = true; }
+        if d > 0 { b.append("\(d)d"); wrote = true; }
+        if h > 0 {
+            if wrote { b.append(" "); }
+            b.append("\(h)h");
+            wrote = true;
+        }
         if m > 0 {
             if wrote { b.append(" "); }
             b.append("\(m)m");
             wrote = true;
         }
-        if s > 0 or not wrote {
+        if s > 0 or a.nanos > 0 or not wrote {
             if wrote { b.append(" "); }
-            b.append("\(s)s");
+            b.append("\(s)");
+            if a.nanos > 0 {
+                b.append(".");
+                appendFractional(into: b, a.nanos);
+            }
+            b.append("s");
         }
         b.build()
     }
 
     // --- Parsing ---
 
-    // Parse ISO 8601 duration: PT2H30M5S, PT1.5S, -PT3H, etc.
+    // Parse ISO 8601 duration: PT2H30M5S, PT1.5S, -PT3H, P1DT2H (days = 24h), etc.
     public static func parse(from input: String) -> Duration throws ParseError {
         let bytes: Array[UInt8] = Array(from: input.bytes);
         var pos: Int64 = 0;
@@ -189,14 +225,36 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
         }
         pos = pos + 1;
 
-        // Expect 'T' (we only support time durations, not date durations)
-        guard pos < bytes.count and (bytes(pos) == 84 or bytes(pos) == 116) else {
-            throw ParseError.InvalidFormat("expected 'T'");
-        }
-        pos = pos + 1;
-
         var totalSecs: Int64 = 0;
         var totalNanos: Int64 = 0;
+
+        // Optional date part. Only days are accepted, as exact 24-hour units:
+        // years/months/weeks are calendar quantities and belong in Period.
+        let daysStart = pos;
+        var days: Int64 = 0;
+        while pos < bytes.count and bytes(pos) >= 48 and bytes(pos) <= 57 {
+            days = days * 10 + Int64(from: bytes(pos) - 48);
+            pos = pos + 1;
+        }
+        let hasDays = pos > daysStart;
+        if hasDays {
+            guard pos < bytes.count and (bytes(pos) == 68 or bytes(pos) == 100) else {
+                throw ParseError.InvalidFormat("expected 'D' (only days are allowed before 'T')");
+            }
+            pos = pos + 1;
+            totalSecs = days * 86400;
+        }
+
+        // Optional time part: 'T' followed by at least one component.
+        if pos < bytes.count {
+            guard bytes(pos) == 84 or bytes(pos) == 116 else {
+                throw ParseError.InvalidFormat("expected 'T'");
+            }
+            pos = pos + 1;
+            guard pos < bytes.count else { throw ParseError.InvalidFormat("expected a component after 'T'"); }
+        } else if not hasDays {
+            throw ParseError.InvalidFormat("empty duration");
+        }
 
         while pos < bytes.count {
             // Parse a number (possibly with decimal point)
@@ -204,6 +262,7 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
             var fracPart: Int64 = 0;
             var fracScale: Int64 = 1_000_000_000;
             var hasFrac = false;
+            let numStart = pos;
 
             while pos < bytes.count {
                 let b = Int64(from: bytes(pos));
@@ -229,6 +288,8 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
                     }
                 }
             }
+
+            guard pos > numStart else { throw ParseError.InvalidFormat("expected a number at position \(pos)"); }
 
             // Expect unit designator: H, M, or S
             guard pos < bytes.count else { throw ParseError.UnexpectedEnd; }

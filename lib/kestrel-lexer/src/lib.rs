@@ -315,6 +315,14 @@ pub enum Token {
     #[token("as")]
     As,
 
+    /// `as?` — existential downcast.
+    #[token("as?")]
+    AsQuestion,
+
+    /// `is` — existential type test (operator and pattern).
+    #[token("is")]
+    Is,
+
     #[token("break")]
     Break,
 
@@ -347,6 +355,9 @@ pub enum Token {
 
     #[token("try")]
     Try,
+
+    #[token("unsafe")]
+    Unsafe,
 
     #[token("throws")]
     Throws,
@@ -479,6 +490,10 @@ pub enum Token {
     #[token("|=")]
     PipeEquals,
 
+    /// `|>` — the pipe operator (`x |> f`).
+    #[token("|>")]
+    PipeGreater,
+
     #[token("^=")]
     CaretEquals,
 
@@ -586,6 +601,7 @@ impl Token {
                 | Token::Throw
                 | Token::Throws
                 | Token::Try
+                | Token::Unsafe
                 | Token::Type
                 | Token::Var
                 | Token::Where

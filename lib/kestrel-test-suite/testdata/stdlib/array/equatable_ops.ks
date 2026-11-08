@@ -32,19 +32,19 @@ module Test
             var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(1); arr.append(2); arr.append(3); arr.append(2); arr.append(1);
             let fi = arr.firstIndex(of: 2);
-            if fi.isNone() { return 7 }
+            if fi.isNone { return 7 }
             if fi.unwrap() != 1 { return 8 }
 
             let fiNone = arr.firstIndex(of: 10);
-            if fiNone.isSome() { return 9 }
+            if fiNone.isSome { return 9 }
 
             // lastIndex(of:)
             let li = arr.lastIndex(of: 2);
-            if li.isNone() { return 10 }
+            if li.isNone { return 10 }
             if li.unwrap() != 3 { return 11 }
 
             let liNone = arr.lastIndex(of: 10);
-            if liNone.isSome() { return 12 }
+            if liNone.isSome { return 12 }
 
             // starts(with:)
             var prefix12 = std.collections.Array[std.numeric.Int64]();
@@ -72,11 +72,11 @@ module Test
             let parts = splitArr.split(0).toArray();
             if parts.count != 3 { return 22 }
             if parts(0).count != 1 { return 23 }
-            if parts(0)(unchecked: 0) != 1 { return 24 }
+            if unsafe parts(0)(unchecked: 0) != 1 { return 24 }
             if parts(1).count != 1 { return 25 }
-            if parts(1)(unchecked: 0) != 2 { return 26 }
+            if unsafe parts(1)(unchecked: 0) != 2 { return 26 }
             if parts(2).count != 1 { return 27 }
-            if parts(2)(unchecked: 0) != 3 { return 28 }
+            if unsafe parts(2)(unchecked: 0) != 3 { return 28 }
 
             // split with no separator found
             let noSepParts = a.split(0).toArray();

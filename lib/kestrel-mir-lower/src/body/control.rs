@@ -23,6 +23,7 @@ impl OssaBodyCtx<'_, '_> {
         then_body: &HirBlock,
         else_body: Option<&HirBlock>,
     ) -> ValueId {
+        let returns = std::mem::take(&mut self.return_tail);
         let mark = self.ref_watermark();
         let cond_val = self.lower_expr(condition);
         // `HirExpr::If` is the single shape that `if`, `else if`, desugared
@@ -77,7 +78,20 @@ impl OssaBodyCtx<'_, '_> {
         self.switch_to(then_block);
         self.rebind_scope_values(&live_vals, &then_params);
         self.push_scope();
+        self.return_tail = returns;
         let then_val = self.lower_hir_block(then_body);
+        // An `if` with no `else` is a unit statement: a then-tail of another
+        // type (`if c { println("x") }`, whose tail is a `Result`) is
+        // discarded — the arm exit drops it with the arm's other temporaries
+        // — and the arm carries unit to the merge like the implicit else.
+        let then_val = if else_body.is_none()
+            && !self.is_terminated()
+            && self.body.value(then_val).ty != result_ty
+        {
+            self.emit_literal(Immediate::unit())
+        } else {
+            then_val
+        };
         // Arm-value decay copies in `capture_arm_exit` diagnose at the
         // branch's value expression (a tail-less block's value is unit —
         // never a ref/NotCopyable — so the enclosing span is fine there).
@@ -95,6 +109,7 @@ impl OssaBodyCtx<'_, '_> {
         self.rebind_scope_values(&live_vals, &else_params);
         self.push_scope();
         let else_exit = if let Some(else_body) = else_body {
+            self.return_tail = returns;
             let else_val = self.lower_hir_block(else_body);
             let prev_span = self.current_span.clone();
             if let Some(tail) = else_body.tail_expr {

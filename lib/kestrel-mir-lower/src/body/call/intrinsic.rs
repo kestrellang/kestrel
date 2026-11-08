@@ -17,6 +17,46 @@ struct IntrinsicEntry {
 
 static TABLE: &[IntrinsicEntry] = &[
     IntrinsicEntry {
+        name: "i8_signed_mul_high",
+        op: Op::MulHigh(IntBits::I8, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_unsigned_mul_high",
+        op: Op::MulHigh(IntBits::I8, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_signed_mul_high",
+        op: Op::MulHigh(IntBits::I16, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_unsigned_mul_high",
+        op: Op::MulHigh(IntBits::I16, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_signed_mul_high",
+        op: Op::MulHigh(IntBits::I32, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_unsigned_mul_high",
+        op: Op::MulHigh(IntBits::I32, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_signed_mul_high",
+        op: Op::MulHigh(IntBits::I64, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_unsigned_mul_high",
+        op: Op::MulHigh(IntBits::I64, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
         name: "i1_eq",
         op: Op::BoolEq,
         arity: 2,
@@ -1482,16 +1522,50 @@ pub(crate) fn try_intrinsic(
         type_args = bctx.resolve_type_args(callee_expr);
     }
     match name.as_str() {
+        // `*_val` measure the pointee at runtime: mono folds a sized pointee
+        // to the static answer and reads an unsized one's function table
+        // (`kestrel_mir::mono::fat`).
+        "sizeof_val" | "alignof_val" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let ptr = bctx.lower_expr(args.first()?.value);
+            let op = if name == "sizeof_val" {
+                Op::SizeOfVal(ty_arg)
+            } else {
+                Op::AlignOfVal(ty_arg)
+            };
+            return Some(bctx.emit_op1(op, ptr, result_ty));
+        },
+        // Mono picks the table's clone word or the clone thunk at `T`.
+        "clone_val_into" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            crate::existential::clone_thunk(bctx.ctx)?;
+            let src = bctx.lower_expr(args.first()?.value);
+            let dst = bctx.lower_expr(args.get(1)?.value);
+            return Some(bctx.emit_op2(Op::CloneIntoVal(ty_arg), src, dst, result_ty));
+        },
+        "ptr_with_meta" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let addr = bctx.lower_expr(args.first()?.value);
+            let from = bctx.lower_expr(args.get(1)?.value);
+            return Some(bctx.emit_op2(Op::PtrWithMeta(result_ty), addr, from, result_ty));
+        },
         "sizeof" | "alignof" => {
             let ty_arg = *type_args.first()?;
             let result_ty = bctx.resolve_expr_type(expr_id);
-            let op = if name == "sizeof" {
+            let op = if name.starts_with("sizeof") {
                 Op::SizeOf(ty_arg)
             } else {
                 Op::AlignOf(ty_arg)
             };
             let unit = bctx.emit_literal(Immediate::unit());
             return Some(bctx.emit_op1(op, unit, result_ty));
+        },
+        "overflow_checks" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let unit = bctx.emit_literal(Immediate::unit());
+            return Some(bctx.emit_op1(Op::OverflowChecks, unit, result_ty));
         },
         "ptr_null" => {
             let ty_arg = *type_args.first()?;
@@ -1504,6 +1578,29 @@ pub(crate) fn try_intrinsic(
             let result_ty = bctx.resolve_expr_type(expr_id);
             let arg = bctx.lower_expr(args.first()?.value);
             return Some(bctx.emit_op1(Op::PtrTo(ty_arg), arg, result_ty));
+        },
+        // `(ptr, count)` viewed as a fat `ptr[slice[T]]`: the count sits in
+        // the word a raw existential keeps its table in.
+        "slice_from_parts" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let ptr = bctx.lower_expr(args.first()?.value);
+            let count = bctx.lower_expr(args.get(1)?.value);
+            let i8_ty = bctx.ctx.module.ty_arena.i8();
+            let raw = bctx.ctx.module.ty_arena.pointer(i8_ty);
+            let data = bctx.emit_op1(Op::PtrCast(i8_ty), ptr, raw);
+            let meta = bctx.emit_op1(Op::PtrFromAddress(i8_ty), count, raw);
+            let pair_ty = bctx.ctx.module.ty_arena.tuple(vec![raw, raw]);
+            let pair = bctx.emit_tuple(pair_ty, vec![data, meta]);
+            return Some(bctx.emit_op1(Op::FatPtr(result_ty), pair, result_ty));
+        },
+        // A fat slice pointer's second word, as an integer.
+        "slice_count" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let ptr = bctx.lower_expr(args.first()?.value);
+            let i8_ty = bctx.ctx.module.ty_arena.i8();
+            let raw = bctx.ctx.module.ty_arena.pointer(i8_ty);
+            let meta = bctx.emit_op1(Op::FatWord(1), ptr, raw);
+            return Some(bctx.emit_op1(Op::PtrToAddress, meta, result_ty));
         },
         "ptr_from_address" => {
             let ty_arg = *type_args.first()?;

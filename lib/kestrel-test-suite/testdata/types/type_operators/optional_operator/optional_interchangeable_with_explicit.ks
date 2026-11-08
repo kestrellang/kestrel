@@ -2,7 +2,7 @@
 // stdlib: true
 
 module Test
-import std.io.stdio.println
+import std.streams.println
 
 func takeExplicit(x: std.result.Optional[std.numeric.Int64]) -> std.numeric.Int64 {
     x.unwrap(or: 0)

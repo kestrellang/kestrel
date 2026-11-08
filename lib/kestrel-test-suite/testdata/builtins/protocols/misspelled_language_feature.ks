@@ -2,5 +2,5 @@
 // stdlib: false
 
 module Test
-@builtin(.Copable)
+@builtin(.Copable) // ERROR: unknown builtin '.Copable'
 protocol Foo {}

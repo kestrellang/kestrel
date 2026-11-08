@@ -72,7 +72,7 @@ public protocol SharedBox: Cloneable, MutableIndirection {
     /// copy-on-write forking. Implementations without cheap uniqueness
     /// information (a tracing GC) may conservatively return `false`;
     /// callers must treat `false` as "fork before mutating".
-    func isUnique() -> Bool
+    var isUnique: Bool { get }
 }
 ```
 
@@ -82,11 +82,11 @@ Most of the contract is inherited rather than invented:
 |---|---|---|
 | share | `Cloneable.clone()` | the aggregate copy fold already routes struct/enum copies through it — a struct holding a handle becomes Cloneable and shares on copy for free |
 | release | the conformer's own `deinit` | ordinary drop rules; last release destroys the payload |
-| read payload | `MutableIndirection.pointeeRef()` | also gives transparent member access (`box.field`) |
+| read payload | `MutableIndirection.value` (its `ref`) | also gives transparent member access (`box.field`) |
 | create | `init(consuming:)` | protocol requirement |
 | shared mutation | `sharedMutRef()` | protocol requirement, see below |
 | identity | `isIdentical(to:)` | protocol requirement |
-| uniqueness | `isUnique()` | protocol requirement, may be conservative |
+| uniqueness | `isUnique` | protocol requirement, may be conservative |
 
 `sharedMutRef` is the one genuinely new operation, and it is the honest name
 for what escaping closures and classes do: mutate through a shared handle
@@ -143,8 +143,8 @@ and keeps it regardless of the binding.
 |---|---|---|---|
 | `escaping` closure (**shipped**) | synthesized environment struct | reference — aliases share state | `init`, `clone`, drop, `sharedMutRef` |
 | class (future) | synthesized storage struct | reference | the above + `isIdentical` for `===` |
-| `any P` (future) | the concrete `T`, when not inline | value facade over shared storage | `init`, `clone`, drop, `pointeeRef` |
-| `indirect enum` (future) | the recursive payload | **value** — copy-on-write | via the CoW layer: `clone` on copy, `isUnique` + fork on mutation |
+| `any P` (**shipped**, 0.17) | the concrete `T` | reference — copies share the payload | `init`, `clone`, drop, `value` |
+| `indirect enum` (**shipped**, 0.19) | a recursive case's whole payload | **value** — a unique `OwnedBox` per case, not this binding; a copy clones the payload | `OwnedBox` `init`, `clone`, drop, `takeValue`; reads project the box pointer in place |
 
 ### Escaping closures
 
@@ -166,7 +166,7 @@ capture-free closures stay bare function pointers and never allocate.
 ### Classes
 
 A `class C` is sugar for a hidden storage struct plus a handle type bound to
-`Box[C.Storage]`. Field reads go through `pointeeRef`, field writes and
+`Box[C.Storage]`. Field reads go through `value`, field writes and
 `mutating` methods through `sharedMutRef` (classes are the other sanctioned
 reference-semantics feature), `===` is `isIdentical(to:)`. Class values are
 Cloneable handles: assignment shares, and the existing copy fold propagates
@@ -174,17 +174,15 @@ that through aggregates unchanged.
 
 ### `any P` existentials
 
-Payloads too large for inline storage (or non-Copyable) are boxed. The
-existential carries the protocol witness table plus a type-erased handle.
-Erasure is the interesting part: the compiler must call `clone`/drop/project
-on `Box[T]` without knowing `T`, so monomorphization synthesizes a small
-per-`T` shim table (clone fn, drop fn, project fn) carried alongside the
-witness table — the same machinery existentials already need for their
-payload operations. No protocol change; purely an implementation concern.
-
-`any` stays value-semantic from the user's point of view: mutation of a
-boxed existential must fork (via the CoW layer) rather than write through
-`sharedMutRef`.
+`any P` is `DefaultBox[rawany P]`, and `DefaultBox` is `RcBox`: the
+existential *is* a shared box over an unsized payload, so copies share it
+(reference semantics; `any[CowBox] P` gives value semantics). The payload's
+drop, size, alignment and clone travel in the function table carried by the
+box's pointer, so `clone`/drop/`value` on `RcBox[rawany P]` are the
+ordinary box operations. A box only needs `ExistentialBox` (this protocol's
+`init(consuming:)` + `Indirection`) to hold an existential; `SharedBox`
+refines it. See [`docs/plans/existentials/existentials-design.md`](../plans/existentials/existentials-design.md)
+§3 and the user guide [`docs/language/existentials.md`](../language/existentials.md).
 
 ### `indirect enum`
 

@@ -127,13 +127,13 @@ public struct Swoop: Cloneable {
         let parsed = try parseClientUrl(fullUrl);
 
         if parsed.scheme == "https" {
-            let tlsStream = match TlsStream.connect(parsed.host, parsed.port) {
+            var tlsStream = match TlsStream.connect(parsed.host, parsed.port) {
                 .Ok(s) => s,
                 .Err(e) => throw SwoopError.connectionFailed("TLS connection failed to " + parsed.host)
             };
             sendRequest(tlsStream, method, parsed, self._headers)
         } else {
-            let stream = match TcpStream.connect(parsed.host, parsed.port) {
+            var stream = match TcpStream.connect(parsed.host, parsed.port) {
                 .Ok(s) => s,
                 .Err(e) => throw SwoopError.connectionFailed("could not connect to " + parsed.host)
             };
@@ -155,13 +155,13 @@ public struct Swoop: Cloneable {
         let parsed = try parseClientUrl(fullUrl);
 
         if parsed.scheme == "https" {
-            let tlsStream = match TlsStream.connect(parsed.host, parsed.port) {
+            var tlsStream = match TlsStream.connect(parsed.host, parsed.port) {
                 .Ok(s) => s,
                 .Err(e) => throw SwoopError.connectionFailed("TLS connection failed to " + parsed.host)
             };
             sendRequest(tlsStream, method, parsed, self._headers, content)
         } else {
-            let stream = match TcpStream.connect(parsed.host, parsed.port) {
+            var stream = match TcpStream.connect(parsed.host, parsed.port) {
                 .Ok(s) => s,
                 .Err(e) => throw SwoopError.connectionFailed("could not connect to " + parsed.host)
             };

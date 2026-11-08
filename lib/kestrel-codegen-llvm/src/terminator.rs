@@ -14,9 +14,9 @@ use kestrel_mir::{BlockId, MirTy, ValueId};
 use crate::abi::{self, ReturnMode};
 use crate::error::CodegenError;
 use crate::func::FuncCompiler;
-use crate::inst::find_mono_enum;
 use crate::mem;
-use crate::ty::{ScalarTy, int_bits_to_scalar};
+use crate::ty::ScalarTy;
+use kestrel_codegen::layout::find_mono_enum;
 
 /// Emit `llvm.trap` followed by `unreachable` (a real trapping terminator).
 pub fn emit_trap<'ctx>(fc: &FuncCompiler<'_, 'ctx>, builder: &Builder<'ctx>) {
@@ -152,7 +152,9 @@ fn compile_return<'ctx>(
     // ret_borrow: return the raw POINTER (a true `ptr`) — `resolve_scalar`
     // would load a scalar pointee through it (the
     // scalar_ret_borrow_not_loaded miscompile). Twin of the Cranelift branch.
-    if fc.func.ret_borrow {
+    // A borrow of an unsized pointee is a fat (data, table) value, returned
+    // like any two-word aggregate (sret). Twin of the Cranelift branch.
+    if fc.func.ret_borrow && !fc.ctx.module.is_fat(fc.func.ret) {
         let val = fc.get_value(value_id);
         builder.build_return(Some(&val)).unwrap();
         return Ok(());
@@ -267,7 +269,7 @@ fn compile_switch<'ctx>(
             let entity = *entity;
             let type_args = type_args.clone();
             match find_mono_enum(&entity, &type_args, fc.ctx.module) {
-                Some(e) => int_bits_to_scalar(e.discriminant_width),
+                Some(e) => ScalarTy::from_int_bits(e.discriminant_width),
                 None => ScalarTy::I64,
             }
         },

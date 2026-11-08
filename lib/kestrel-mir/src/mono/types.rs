@@ -38,6 +38,9 @@ pub type MonoTypeKey = (Entity, Vec<TyId>);
 #[derive(Debug)]
 pub struct MonoModule {
     pub functions: Vec<MonoFunction>,
+    /// Existential function tables, instantiated from
+    /// `MirModule::vtable_templates` (`item::vtable` has the layout).
+    pub vtables: Vec<MonoVTable>,
     pub structs: IndexMap<MonoTypeKey, MonoStruct>,
     pub enums: IndexMap<MonoTypeKey, MonoEnum>,
     pub statics: IndexMap<Entity, crate::item::static_def::StaticDef>,
@@ -54,6 +57,7 @@ impl MonoModule {
     pub fn new(ty_arena: TyArena) -> Self {
         Self {
             functions: Vec::new(),
+            vtables: Vec::new(),
             structs: IndexMap::new(),
             enums: IndexMap::new(),
             statics: IndexMap::new(),
@@ -61,6 +65,21 @@ impl MonoModule {
             entity_names: IndexMap::new(),
             instantiation_findings: Vec::new(),
             observable_drop: indexmap::IndexSet::new(),
+        }
+    }
+
+    /// Is a value of type `ty` a two-word (data, table) value? See
+    /// [`crate::ty::is_fat`]; struct tails come from this module's instances.
+    pub fn is_fat(&self, ty: crate::TyId) -> bool {
+        crate::ty::is_fat(&mut MonoTails(self), ty)
+    }
+
+    /// The element type when `ty`'s unsized tail is a `lang.slice[T]`.
+    pub fn slice_tail_elem(&self, ty: crate::TyId) -> Option<crate::TyId> {
+        let tail = crate::ty::unsized_tail(&mut MonoTails(self), ty)?;
+        match self.ty_arena.get(tail) {
+            crate::ty::MirTy::Slice(elem) => Some(*elem),
+            _ => None,
         }
     }
 
@@ -98,6 +117,8 @@ pub struct MonoFunction {
     /// `item::function::ret_convention`; codegen reads the bit, never
     /// re-matches the type.
     pub ret_borrow: bool,
+    /// `@inline`, copied from the generic definition to every instance.
+    pub inline: Option<crate::item::function::InlineMode>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -282,6 +303,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         };
         let id = module.add_function(func);
         assert_eq!(id.index(), 0);
@@ -339,4 +361,40 @@ mod tests {
         assert_eq!(c.discriminant, 1);
         assert_eq!(c.payload_fields.len(), 1);
     }
+}
+
+/// [`crate::ty::TailLookup`] over finished mono instances.
+struct MonoTails<'a>(&'a MonoModule);
+
+impl crate::ty::TailLookup for MonoTails<'_> {
+    fn arena(&self) -> &TyArena {
+        &self.0.ty_arena
+    }
+    fn last_field(&mut self, entity: Entity, args: &[crate::TyId]) -> Option<crate::TyId> {
+        self.0
+            .structs
+            .get(&(entity, args.to_vec()))
+            .and_then(|s| s.fields.last())
+            .map(|f| f.ty)
+    }
+}
+
+/// One existential function table: a template at a concrete payload. Codegen
+/// emits it as a read-only array of pointer-sized words.
+#[derive(Debug, Clone)]
+pub struct MonoVTable {
+    pub name: String,
+    pub entries: Vec<MonoVTableEntry>,
+}
+
+/// One resolved table word.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MonoVTableEntry {
+    Func(MonoFuncId),
+    /// Size of this payload type.
+    Size(crate::TyId),
+    /// Alignment of this payload type.
+    Align(crate::TyId),
+    Table(crate::MonoVTableId),
+    Null,
 }

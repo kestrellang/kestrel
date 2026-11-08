@@ -1,12 +1,17 @@
 module notes.main
 
-import perch.app.(App)
-import perch.request.(Request)
-import perch.response.(Response)
-import perch.middleware.(Logger)
+import perch.(
+    App, Logger, Get, Post, Delete, Request, Response, HttpError, IntoHttpError, IntoResponse,
+    Path, Query, Middleware, MiddlewareResult
+)
 import http.content.(Html)
 import http.cookie.(Cookie)
+import http.status.(StatusCode)
 import quill.value.(Value)
+import quill.deserialize.(Deserialize)
+import quill.error.(DeserializeError)
+import swoop.response.(Response as ApiResponse)
+import swoop.error.(SwoopError)
 import html.builder.(Document)
 
 import notes.api.(
@@ -14,52 +19,110 @@ import notes.api.(
     apiListNotes, apiGetNote, apiCreateNote, apiUpdateNote, apiDeleteNote, apiMoveNote,
     apiListFolders, apiCreateFolder
 )
-import notes.helpers.(getToken, parseForm, formField)
+import notes.helpers.(Form)
 import notes.ui.(
     loginPage, registerPage,
     appShell, noteListView, noteDetailView, noteEditorView,
     folderSidebar
 )
 
-struct Ctx: Cloneable {
-    var x: Int64
-    func clone() -> Ctx { Ctx(x: self.x) }
+// ============================================================================
+// Contexts and middleware
+// ============================================================================
+
+/// The app-wide context: the frontend keeps no state of its own.
+struct AppCtx: Cloneable {
+    func clone() -> AppCtx = AppCtx()
+}
+
+/// The context behind `Session`: the signed-in user's API token.
+struct SessionCtx {
+    var token: String
+}
+
+/// Reads the `token` cookie into a `SessionCtx`. Without one the request
+/// is answered with `otherwise`: a redirect to /login for full pages, a
+/// 401 for htmx fragments.
+struct Session: Middleware[AppCtx] {
+    type Output = SessionCtx
+    var otherwise: Response
+
+    func handle(request: Request, ctx: AppCtx) -> MiddlewareResult[SessionCtx] {
+        guard let some token = request.cookie("token") else {
+            return .Respond(self.otherwise.clone())
+        }
+        guard token.bytes.count > 0 else {
+            return .Respond(self.otherwise.clone())
+        }
+        .Continue(SessionCtx(token: token))
+    }
+}
+
+// ============================================================================
+// Errors: a failed API call is a 502 for fragment handlers
+// ============================================================================
+
+extend SwoopError: IntoHttpError {
+    public consuming func intoHttpError() -> HttpError =
+        HttpError(StatusCode(502), "Could not reach the notes API")
+}
+
+extend DeserializeError: IntoHttpError {
+    public consuming func intoHttpError() -> HttpError =
+        HttpError(StatusCode(502), "Unexpected response from the notes API")
+}
+
+/// The JSON body of an API call.
+func apiJson(result: Result[ApiResponse, SwoopError]) -> Value throws HttpError {
+    let response = try result;
+    try response.json()
+}
+
+/// `?folderId=<n>`; 0 (all notes) when absent or not a number.
+struct FolderFilter: Deserialize {
+    var folderId: Int64
+
+    static func fromValue(value: Value) -> FolderFilter throws DeserializeError {
+        guard let some .Str(raw) = value.value(for: "folderId") else { return FolderFilter(folderId: 0) }
+        FolderFilter(folderId: Int64(parsing: raw) ?? 0)
+    }
 }
 
 func render(doc doc: Document) -> Html { Html(doc.render()) }
 
 @main
 func main() {
-    var app = App[Ctx](Ctx(x: 0));
-    app.use(Logger[Ctx]());
+    let app = App(AppCtx()).using(Logger());
 
     // --- Auth pages ---
 
-    app.route(get: "/login", handleLoginPage);
-    app.route(post: "/login", handleLoginSubmit);
-    app.route(get: "/register", handleRegisterPage);
-    app.route(post: "/register", handleRegisterSubmit);
-    app.route(get: "/logout", handleLogout);
+    app.on(Get("/login"), Auth.showLogin);
+    app.on(Post("/login"), Auth.login);
+    app.on(Get("/register"), Auth.showRegister);
+    app.on(Post("/register"), Auth.register);
+    app.on(Get("/logout"), Auth.logout);
 
-    // --- App pages (full page loads) ---
+    // --- App pages (full page loads); signed out → /login ---
 
-    app.route(get: "/", handleHome);
-    app.route(get: "/new", handleNewNote);
-    app.route(get: "/note/:id", handleViewNote);
-    app.route(get: "/note/:id/edit", handleEditNote);
-    app.route(get: "/folder/:id", handleFolder);
+    let pages = app.group("").using(Session(otherwise: Response.redirect(to: "/login")));
+    pages.on(Get("/"), Pages.home);
+    pages.on(Get("/new"), Pages.newNote);
+    pages.on(Get("/note/:id"), Pages.viewNote);
+    pages.on(Get("/note/:id/edit"), Pages.editNote);
+    pages.on(Get("/folder/:id"), Pages.folder);
 
-    // --- HTMX fragment endpoints ---
+    // --- HTMX fragment endpoints; signed out → 401 ---
 
-    app.route(get: "/fragments/notes", handleNotesFragment);
-    app.route(post: "/fragments/notes", handleCreateNoteFragment);
-    app.route(get: "/fragments/note/:id", handleNoteFragment);
-    app.route(get: "/fragments/note/:id/edit", handleEditNoteFragment);
-    app.route(post: "/fragments/note/:id", handleUpdateNoteFragment);
-    app.route(post: "/fragments/note/:id/folder", handleMoveNoteFragment);
-    app.route(delete: "/fragments/note/:id", handleDeleteNoteFragment);
-    app.route(post: "/fragments/folders", handleCreateFolderFragment);
-    app.route(get: "/fragments/sidebar", handleSidebarFragment);
+    let fragments = app.group("/fragments").using(Session(otherwise: Response.unauthorized()));
+    fragments.on(Get("/notes"), Fragments.notes);
+    fragments.on(Post("/notes"), Fragments.createNote);
+    fragments.on(Get("/note/:id"), Fragments.note);
+    fragments.on(Get("/note/:id/edit"), Fragments.editNote);
+    fragments.on(Post("/note/:id"), Fragments.updateNote);
+    fragments.on(Post("/note/:id/folder"), Fragments.moveNote);
+    fragments.on(Delete("/note/:id"), Fragments.deleteNote);
+    fragments.on(Post("/folders"), Fragments.createFolder);
+    fragments.on(Get("/sidebar"), Fragments.sidebar);
 
     let port: UInt16 = 3001;
     println("Notes frontend on http://localhost:3001");
@@ -76,337 +139,173 @@ func main() {
 // Auth handlers
 // ============================================================================
 
-func handleLoginPage(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    if token.bytes.count > 0 { return Response.redirect(to: "/") };
-    Response.ok(render(doc: loginPage("")))
+struct Auth {
+    /// The login form, or home when already signed in.
+    static func showLogin(ctx: AppCtx, request: Request) -> Response throws HttpError {
+        if let some token = request.cookie("token") {
+            if token.bytes.count > 0 { return Response.redirect(to: "/") }
+        }
+        render(doc: loginPage("")).intoResponse()
+    }
+
+    /// Signs in through the API and stores its token in a cookie.
+    static func login(ctx: AppCtx, form: Form) -> Response throws HttpError {
+        guard let .Ok(apiRes) = apiLogin(form.field("email"), form.field("password")) else {
+            return render(doc: loginPage("Could not connect to the API")).intoResponse()
+        }
+        guard apiRes.status.isSuccess() else {
+            return render(doc: loginPage("Invalid email or password")).intoResponse()
+        }
+        guard let .Ok(json) = apiRes.json() else {
+            return render(doc: loginPage("Unexpected response")).intoResponse()
+        }
+        guard let some .Str(token) = json.value(for: "token") else {
+            return render(doc: loginPage("Unexpected response")).intoResponse()
+        }
+
+        var cookie = Cookie("token", token);
+        cookie.httpOnly = true;
+        cookie.path = "/";
+        cookie.maxAge = 86400;
+        Response.redirect(to: "/").withCookie(cookie)
+    }
+
+    static func showRegister(ctx: AppCtx, input: ()) -> Html throws HttpError = render(doc: registerPage(""))
+
+    /// Creates the account, then sends the user to sign in.
+    static func register(ctx: AppCtx, form: Form) -> Response throws HttpError {
+        let result = apiRegister(form.field("email"), form.field("firstName"), form.field("lastName"), form.field("password"));
+        guard let .Ok(apiRes) = result else {
+            return render(doc: registerPage("Could not connect to the API")).intoResponse()
+        }
+        guard apiRes.status.isSuccess() else {
+            let msg = match apiRes.json() {
+                .Ok(j) => match j.value(for: "error") {
+                    .Some(.Str(s)) => s,
+                    _ => "Registration failed"
+                },
+                .Err(_) => "Registration failed"
+            };
+            return render(doc: registerPage(msg)).intoResponse()
+        }
+
+        Response.redirect(to: "/login")
+    }
+
+    /// Clears the token cookie.
+    static func logout(ctx: AppCtx, input: ()) -> Response throws HttpError {
+        var cookie = Cookie("token", "");
+        cookie.maxAge = 0;
+        cookie.path = "/";
+        Response.redirect(to: "/login").withCookie(cookie)
+    }
 }
 
-func handleLoginSubmit(req: Request, ctx: Ctx) -> Response {
-    let fields = parseForm(req.body);
-    let email = formField(fields, "email");
-    let password = formField(fields, "password");
+// ============================================================================
+// Full page handlers: a note the API won't give us sends the user home.
+// ============================================================================
 
-    guard let .Ok(apiRes) = apiLogin(email, password) else {
-        return Response.ok(render(doc: loginPage("Could not connect to the API")))
-    }
-    guard apiRes.status.isSuccess() else {
-        return Response.ok(render(doc: loginPage("Invalid email or password")))
-    }
-    guard let .Ok(json) = apiRes.json() else {
-        return Response.ok(render(doc: loginPage("Unexpected response")))
+struct Pages {
+    static func home(ctx: SessionCtx, input: ()) -> Html throws HttpError =
+        renderAppPage(ctx.token, 0, "All Notes")
+
+    static func folder(ctx: SessionCtx, Path { value: folderId }: Path[Int64]) -> Html throws HttpError =
+        renderAppPage(ctx.token, folderId, "Folder")
+
+    static func newNote(ctx: SessionCtx, Query { value: filter }: Query[FolderFilter]) -> Html throws HttpError {
+        let folders = loadFolders(ctx.token);
+        render(doc: appShell("New Note — Notes", folderSidebar(folders, filter.folderId), noteEditorView(.None, filter.folderId)))
     }
 
-    let token = match json.value(for: "token") {
-        .Some(t) => match t {
-            .Str(s) => s,
-            _ => return Response.ok(render(doc: loginPage("Unexpected response")))
-        },
-        .None => return Response.ok(render(doc: loginPage("Unexpected response")))
-    };
+    static func viewNote(ctx: SessionCtx, Path { value: noteId }: Path[Int64]) -> Response throws HttpError {
+        guard let .Ok(note) = apiJson(apiGetNote(ctx.token, noteId)) else {
+            return Response.redirect(to: "/")
+        }
+        let folders = loadFolders(ctx.token);
+        render(doc: appShell("Note — Notes", folderSidebar(folders, 0), noteDetailView(note, folders))).intoResponse()
+    }
 
-    var cookie = Cookie("token", token);
-    cookie.httpOnly = true;
-    cookie.path = "/";
-    cookie.maxAge = 86400;
-    Response.redirect(to: "/").withCookie(cookie)
+    static func editNote(ctx: SessionCtx, Path { value: noteId }: Path[Int64]) -> Response throws HttpError {
+        guard let .Ok(note) = apiJson(apiGetNote(ctx.token, noteId)) else {
+            return Response.redirect(to: "/")
+        }
+        let noteFolderId = noteFolder(note);
+        let folders = loadFolders(ctx.token);
+        render(doc: appShell("Edit Note — Notes", folderSidebar(folders, 0), noteEditorView(.Some(note), noteFolderId))).intoResponse()
+    }
 }
 
-func handleRegisterPage(req: Request, ctx: Ctx) -> Response {
-    Response.ok(render(doc: registerPage("")))
-}
+// ============================================================================
+// HTMX fragment handlers: a failed API call throws (502).
+// ============================================================================
 
-func handleRegisterSubmit(req: Request, ctx: Ctx) -> Response {
-    let fields = parseForm(req.body);
-    let email = formField(fields, "email");
-    let firstName = formField(fields, "firstName");
-    let lastName = formField(fields, "lastName");
-    let password = formField(fields, "password");
-
-    guard let .Ok(apiRes) = apiRegister(email, firstName, lastName, password) else {
-        return Response.ok(render(doc: registerPage("Could not connect to the API")))
-    }
-    guard apiRes.status.isSuccess() else {
-        let msg = match apiRes.json() {
-            .Ok(j) => match j.value(for: "error") {
-                .Some(e) => match e { .Str(s) => s, _ => "Registration failed" },
-                .None => "Registration failed"
-            },
-            .Err(_) => "Registration failed"
+struct Fragments {
+    static func notes(ctx: SessionCtx, Query { value: filter }: Query[FolderFilter]) -> Html throws HttpError {
+        let allNotes = loadNotes(ctx.token);
+        if filter.folderId == 0 {
+            return render(doc: noteListView(allNotes, "All Notes"))
         };
-        return Response.ok(render(doc: registerPage(msg)))
+        render(doc: noteListView(filterByFolder(allNotes, filter.folderId), "Folder"))
     }
 
-    Response.redirect(to: "/login")
-}
+    static func note(ctx: SessionCtx, Path { value: noteId }: Path[Int64]) -> Html throws HttpError {
+        let note = try apiJson(apiGetNote(ctx.token, noteId));
+        render(doc: noteDetailView(note, loadFolders(ctx.token)))
+    }
 
-func handleLogout(req: Request, ctx: Ctx) -> Response {
-    var cookie = Cookie("token", "");
-    cookie.maxAge = 0;
-    cookie.path = "/";
-    Response.redirect(to: "/login").withCookie(cookie)
-}
+    static func editNote(ctx: SessionCtx, Path { value: noteId }: Path[Int64]) -> Html throws HttpError {
+        let note = try apiJson(apiGetNote(ctx.token, noteId));
+        let noteFolderId = noteFolder(note);
+        render(doc: noteEditorView(.Some(note), noteFolderId))
+    }
 
-// ============================================================================
-// Full page handlers
-// ============================================================================
+    static func createNote(ctx: SessionCtx, form: Form) -> Html throws HttpError {
+        let note = try apiJson(apiCreateNote(ctx.token, form.field("title"), form.field("body"), form.positiveId("folderId")));
+        render(doc: noteDetailView(note, loadFolders(ctx.token)))
+    }
 
-func handleHome(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.redirect(to: "/login") }
-    renderAppPage(token, 0, "All Notes")
-}
+    static func updateNote(ctx: SessionCtx, (Path { value: noteId }, form): (Path[Int64], Form)) -> Html throws HttpError {
+        let note = try apiJson(apiUpdateNote(ctx.token, noteId, form.field("title"), form.field("body")));
+        render(doc: noteDetailView(note, loadFolders(ctx.token)))
+    }
 
-func handleFolder(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.redirect(to: "/login") }
-    let folderId = match req.param("id") {
-        .Some(idStr) => match Int64(parsing: idStr) {
-            .Some(n) => n,
-            .None => return Response.redirect(to: "/")
-        },
-        .None => return Response.redirect(to: "/")
-    };
-    renderAppPage(token, folderId, "Folder")
-}
+    static func moveNote(ctx: SessionCtx, (Path { value: noteId }, form): (Path[Int64], Form)) -> Html throws HttpError {
+        let note = try apiJson(apiMoveNote(ctx.token, noteId, form.positiveId("folderId")));
+        render(doc: noteDetailView(note, loadFolders(ctx.token)))
+    }
 
-func handleNewNote(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.redirect(to: "/login") }
-    let folderId = match req.query("folderId") {
-        .Some(idStr) => match Int64(parsing: idStr) {
-            .Some(n) => n,
-            .None => 0
-        },
-        .None => 0
-    };
-    let folders = loadFolders(token);
-    Response.ok(render(doc: appShell("New Note — Notes", folderSidebar(folders, folderId), noteEditorView(.None, folderId))))
-}
+    static func deleteNote(ctx: SessionCtx, Path { value: noteId }: Path[Int64]) -> Html throws HttpError {
+        let _deleted = try apiDeleteNote(ctx.token, noteId);
+        render(doc: noteListView(loadNotes(ctx.token), "All Notes"))
+    }
 
-func handleViewNote(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.redirect(to: "/login") }
-    let noteId = match req.param("id") {
-        .Some(idStr) => match Int64(parsing: idStr) {
-            .Some(n) => n,
-            .None => return Response.redirect(to: "/")
-        },
-        .None => return Response.redirect(to: "/")
-    };
-    guard let .Ok(apiRes) = apiGetNote(token, noteId) else {
-        return Response.redirect(to: "/")
+    /// Creates a folder (a blank name creates nothing) and re-renders the sidebar.
+    static func createFolder(ctx: SessionCtx, form: Form) -> Html throws HttpError {
+        let name = form.field("name");
+        if name.bytes.count > 0 {
+            let _created = try apiCreateFolder(ctx.token, name);
+        };
+        render(doc: folderSidebar(loadFolders(ctx.token), 0))
     }
-    guard let .Ok(note) = apiRes.json() else {
-        return Response.redirect(to: "/")
-    }
-    let folders = loadFolders(token);
-    Response.ok(render(doc: appShell("Note — Notes", folderSidebar(folders, 0), noteDetailView(note, folders))))
-}
 
-func handleEditNote(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.redirect(to: "/login") }
-    let noteId = match req.param("id") {
-        .Some(idStr) => match Int64(parsing: idStr) {
-            .Some(n) => n,
-            .None => return Response.redirect(to: "/")
-        },
-        .None => return Response.redirect(to: "/")
-    };
-    guard let .Ok(apiRes) = apiGetNote(token, noteId) else {
-        return Response.redirect(to: "/")
-    }
-    guard let .Ok(note) = apiRes.json() else {
-        return Response.redirect(to: "/")
-    }
-    let noteFolderId = match note.value(for: "folderId") {
-        .Some(v) => match v { .Int(n) => n, _ => 0 },
-        .None => 0
-    };
-    let folders = loadFolders(token);
-    Response.ok(render(doc: appShell("Edit Note — Notes", folderSidebar(folders, 0), noteEditorView(.Some(note), noteFolderId))))
-}
-
-// ============================================================================
-// HTMX fragment handlers
-// ============================================================================
-
-func handleNotesFragment(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.unauthorized() }
-    let allNotes = loadNotes(token);
-    let folderId = match req.query("folderId") {
-        .Some(idStr) => match Int64(parsing: idStr) {
-            .Some(n) => n,
-            .None => 0
-        },
-        .None => 0
-    };
-    if folderId == 0 {
-        Response.ok(render(doc: noteListView(allNotes, "All Notes")))
-    } else {
-        let filtered = filterByFolder(allNotes, folderId);
-        Response.ok(render(doc: noteListView(filtered, "Folder")))
-    }
-}
-
-func handleNoteFragment(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.unauthorized() }
-    let noteId = match req.param("id") {
-        .Some(idStr) => match Int64(parsing: idStr) {
-            .Some(n) => n,
-            .None => return Response.badRequest(Html("Invalid id"))
-        },
-        .None => return Response.badRequest(Html("Missing id"))
-    };
-    guard let .Ok(apiRes) = apiGetNote(token, noteId) else {
-        return Response.internalServerError()
-    }
-    guard let .Ok(note) = apiRes.json() else {
-        return Response.internalServerError()
-    }
-    let folders = loadFolders(token);
-    Response.ok(render(doc: noteDetailView(note, folders)))
-}
-
-func handleEditNoteFragment(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.unauthorized() }
-    let noteId = match req.param("id") {
-        .Some(idStr) => match Int64(parsing: idStr) {
-            .Some(n) => n,
-            .None => return Response.badRequest(Html("Invalid id"))
-        },
-        .None => return Response.badRequest(Html("Missing id"))
-    };
-    guard let .Ok(apiRes) = apiGetNote(token, noteId) else {
-        return Response.internalServerError()
-    }
-    guard let .Ok(note) = apiRes.json() else {
-        return Response.internalServerError()
-    }
-    let noteFolderId = match note.value(for: "folderId") {
-        .Some(v) => match v { .Int(n) => n, _ => 0 },
-        .None => 0
-    };
-    Response.ok(render(doc: noteEditorView(.Some(note), noteFolderId)))
-}
-
-func handleCreateNoteFragment(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.unauthorized() }
-    let fields = parseForm(req.body);
-    let title = formField(fields, "title");
-    let body = formField(fields, "body");
-    let folderId: Int64? = match Int64(parsing: formField(fields, "folderId")) {
-        .Some(n) => if n > 0 { .Some(n) } else { .None },
-        .None => .None
-    };
-    guard let .Ok(apiRes) = apiCreateNote(token, title, body, folderId) else {
-        return Response.internalServerError()
-    }
-    guard let .Ok(note) = apiRes.json() else {
-        return Response.internalServerError()
-    }
-    let folders = loadFolders(token);
-    Response.ok(render(doc: noteDetailView(note, folders)))
-}
-
-func handleUpdateNoteFragment(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.unauthorized() }
-    let noteId = match req.param("id") {
-        .Some(idStr) => match Int64(parsing: idStr) {
-            .Some(n) => n,
-            .None => return Response.badRequest(Html("Invalid id"))
-        },
-        .None => return Response.badRequest(Html("Missing id"))
-    };
-    let fields = parseForm(req.body);
-    let title = formField(fields, "title");
-    let body = formField(fields, "body");
-    guard let .Ok(apiRes) = apiUpdateNote(token, noteId, title, body) else {
-        return Response.internalServerError()
-    }
-    guard let .Ok(note) = apiRes.json() else {
-        return Response.internalServerError()
-    }
-    let folders = loadFolders(token);
-    Response.ok(render(doc: noteDetailView(note, folders)))
-}
-
-func handleMoveNoteFragment(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.unauthorized() }
-    let noteId = match req.param("id") {
-        .Some(idStr) => match Int64(parsing: idStr) {
-            .Some(n) => n,
-            .None => return Response.badRequest(Html("Invalid id"))
-        },
-        .None => return Response.badRequest(Html("Missing id"))
-    };
-    let fields = parseForm(req.body);
-    let folderId: Int64? = match Int64(parsing: formField(fields, "folderId")) {
-        .Some(n) => if n > 0 { .Some(n) } else { .None },
-        .None => .None
-    };
-    guard let .Ok(apiRes) = apiMoveNote(token, noteId, folderId) else {
-        return Response.internalServerError()
-    }
-    guard let .Ok(note) = apiRes.json() else {
-        return Response.internalServerError()
-    }
-    let folders = loadFolders(token);
-    Response.ok(render(doc: noteDetailView(note, folders)))
-}
-
-func handleDeleteNoteFragment(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.unauthorized() }
-    let noteId = match req.param("id") {
-        .Some(idStr) => match Int64(parsing: idStr) {
-            .Some(n) => n,
-            .None => return Response.badRequest(Html("Invalid id"))
-        },
-        .None => return Response.badRequest(Html("Missing id"))
-    };
-    guard let .Ok(_) = apiDeleteNote(token, noteId) else {
-        return Response.internalServerError()
-    }
-    let notes = loadNotes(token);
-    Response.ok(render(doc: noteListView(notes, "All Notes")))
-}
-
-func handleCreateFolderFragment(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.unauthorized() }
-    let fields = parseForm(req.body);
-    let name = formField(fields, "name");
-    guard name.bytes.count > 0 else {
-        return Response.ok(render(doc: folderSidebar(loadFolders(token), 0)))
-    }
-    guard let .Ok(_) = apiCreateFolder(token, name) else {
-        return Response.internalServerError()
-    }
-    Response.ok(render(doc: folderSidebar(loadFolders(token), 0)))
-}
-
-func handleSidebarFragment(req: Request, ctx: Ctx) -> Response {
-    let token = getToken(req);
-    guard token.bytes.count > 0 else { return Response.unauthorized() }
-    Response.ok(render(doc: folderSidebar(loadFolders(token), 0)))
+    static func sidebar(ctx: SessionCtx, input: ()) -> Html throws HttpError =
+        render(doc: folderSidebar(loadFolders(ctx.token), 0))
 }
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-func renderAppPage(token: String, folderId: Int64, title: String) -> Response {
+func renderAppPage(token: String, folderId: Int64, title: String) -> Html {
     let notes = loadNotes(token);
     let folders = loadFolders(token);
-    Response.ok(render(doc: appShell("\(title) — Notes", folderSidebar(folders, folderId), noteListView(notes, title))))
+    render(doc: appShell("\(title) — Notes", folderSidebar(folders, folderId), noteListView(notes, title)))
+}
+
+/// The note's folder id; 0 when it's in none.
+func noteFolder(note: Value) -> Int64 {
+    guard let some .Int(n) = note.value(for: "folderId") else { return 0 }
+    n
 }
 
 func loadNotes(token: String) -> Array[Value] {
@@ -425,15 +324,8 @@ func filterByFolder(notes: Array[Value], folderId: Int64) -> Array[Value] {
     var result = Array[Value]();
     var i: Int64 = 0;
     while i < notes.count {
-        let note = notes(unchecked: i);
-        let noteFolderId = match note.value(for: "folderId") {
-            .Some(v) => match v {
-                .Int(n) => n,
-                _ => 0
-            },
-            .None => 0
-        };
-        if noteFolderId == folderId {
+        let note = unsafe notes(unchecked: i);
+        if noteFolder(note) == folderId {
             result.append(note)
         };
         i = i + 1

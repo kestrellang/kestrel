@@ -52,7 +52,7 @@ struct Tagged: ExpressibleByStringInterpolation, Cloneable {
         self.tag = 99;
     }
 
-    init(interpolation: TestAccumulator) {
+    init(consuming interpolation: TestAccumulator) {
         var acc = interpolation;
         self.template = acc.buf.build();
         self.tag = 42;

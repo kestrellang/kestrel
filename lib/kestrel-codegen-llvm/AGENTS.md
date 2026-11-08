@@ -32,7 +32,7 @@ hoist loads (LICM), and vectorize. Consequences:
   solely for those (plus the `main` aggregate-return marshalling).
 - `ScalarTy::Ptr` is neither int nor float; `is_float` is a positive match (NOT
   `!is_int`), and `bytes()` returns 8 (the backend assumes 64-bit — see
-  `TypeCache::new`'s `debug_assert`).
+  the `debug_assert` beside `TypeCache::new` in `CodegenCtx::new`).
 - `Str`/`FuncThick` are `{ ptr@0, <int/ptr>@ptr_size }`: `StrLen` loads the
   length as `I64` (NOT `ptr_scalar`, which is now a `ptr`); the closure fn/env
   slots are both `ptr`.
@@ -40,7 +40,7 @@ hoist loads (LICM), and vectorize. Consequences:
   single source: 2 words `{ fn@0, env@ptr }` at the view kinds, 4 words
   `{ fn@0, env_handle@ptr, retain_fn@2ptr, release_fn@3ptr }` at the boxed
   (`escaping`) kind. `compile_thick_call` reads fn@0/env@ptr for EVERY kind, so
-  only `ty.rs`, `compile_apply_partial` and `Op::ClosureWord` care about the
+  only `kestrel_codegen::repr`, `compile_apply_partial` and `Op::ClosureWord` care about the
   extra words (lockstep 9 — layout.rs and both backends must agree).
 
 ## Value model
@@ -56,7 +56,7 @@ hoist loads (LICM), and vectorize. Consequences:
 Layouts (size/align/field offsets, enum discriminant width, variant layouts)
 come from the MIR layout pass (`type_info.layout`) — the single source of truth.
 **Never recompute layout here.** The single-field newtype collapse in
-`ty::classify_named` must delegate to the field's repr (a `Float64` is `f64`,
+`classify_named` (`kestrel_codegen::repr`, shared with Cranelift) must delegate to the field's repr (a `Float64` is `f64`,
 not `i64`) — see [[per_instantiation_copy_semantics]].
 
 ## ABI (manual)
@@ -65,7 +65,7 @@ No LLVM `sret`/`byval`/`noalias` attributes (a deliberate follow-up — adding
 them is the next provenance tier, but it changes the platform ABI so it's not
 part of the typed-`ptr` base). Aggregates pass by pointer: a leading `ptr` sret
 param + manual `mem::copy_aggregate`. Param/return classification lives in
-`abi.rs` (`param_pass_mode`/`return_mode`); the sret/ByRef/aggregate param type
+`kestrel_codegen::abi` (`param_pass_mode`/`return_mode`, shared with Cranelift); the sret/ByRef/aggregate param type
 is `ptr_scalar.llvm` (now `ptr`), so the bodies are unchanged from the i64 era.
 Callers and callees both derive signatures from `ptr_scalar`, so they stay in
 lockstep; extern "C" pointer params are `ptr` (what C wants), integer params

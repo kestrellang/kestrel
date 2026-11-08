@@ -119,8 +119,8 @@ let GBP_STAGE2: LiteralSlice[Int32]
 public func graphemeBreakProperty(c: Char) -> GraphemeBreakProperty {
     let cp = c.value();
     if cp > 0x10FFFF { return .Other }
-    let blockIdx = GBP_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
-    let prop = GBP_STAGE2(unchecked: Int64(from: blockIdx) * 256 + Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
+    let blockIdx = unsafe GBP_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
+    let prop = unsafe GBP_STAGE2(unchecked: Int64(from: blockIdx) * 256 + Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     match prop {
         0 => .Other,
         1 => .CR,

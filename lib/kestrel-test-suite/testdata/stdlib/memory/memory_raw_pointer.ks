@@ -42,7 +42,7 @@ module Test
             let typedPtr = raw.cast[std.numeric.Int64]();
             if typedPtr.isNull { return 9 }
             // Read through the casted pointer should give the array element
-            if typedPtr.read() != 42 { return 10 }
+            if unsafe typedPtr.read() != 42 { return 10 }
 
             // Test init(address:) round-trip
             let addr = raw.address;

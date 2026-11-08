@@ -17,5 +17,5 @@ func main() -> lang.i64 {
     var slot: lang.i32 = 7;
     let p = lang.ptr_to(slot);
     let old = lang.atomic_add(p, 5);
-    lang.cast_i32_i64(lang.ptr_read(p))
+    lang.cast_i32_i64(unsafe lang.ptr_read(p))
 }

@@ -30,7 +30,7 @@ module Test
 
             // popFront on empty
             let empty1 = d.popFront();
-            if empty1.isSome() { return 9 }
+            if empty1.isSome { return 9 }
 
             // Test pushFront
             d.pushFront(3);
@@ -58,7 +58,7 @@ module Test
 
             // popBack on empty
             let empty2 = d.popBack();
-            if empty2.isSome() { return 18 }
+            if empty2.isSome { return 18 }
 
             // Mixed pushFront/pushBack
             d.pushBack(2);

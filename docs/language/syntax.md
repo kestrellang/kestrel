@@ -112,13 +112,11 @@ enum Shape {
     case Point // No associated value
 }
 
-// Recursive enum (must be marked indirect) - (Future)
-// Recursive cases require `indirect` (E429), but indirect enums are
-// not yet supported by the compiler (E465).
-// indirect enum List[T] {
-//     case Cons(head: T, tail: List[T])
-//     case Empty
-// }
+// Recursive enum: `indirect` boxes the recursive cases (E429 without it)
+indirect enum List[T] {
+    case Cons(head: T, tail: List[T])
+    case Empty
+}
 
 // Implicit Member Access
 let d: Direction = .North;
@@ -260,7 +258,7 @@ module my_app.utils;
 
 // Imports
 import std.collections.Map;
-import std.io as IO; // Renaming
+import std.files as Files; // Renaming
 ```
 
 ## Access Control
@@ -287,12 +285,41 @@ for i in 0..=9 { }       // inclusive range
 // Null Coalescing
 let val = optional ?? defaultVal;
 
-// Chaining - (Future)
-// let x = foo?.bar?.baz
+// Pipe — `x |> f` is `f(x)`; a `_` slot takes the value directly
+let report = path |> read |> parse |> render;
+let n = text |> Int64.parse(_, radix: 16) |> clamp(_, min: 0, max: 255);
+
+// Placeholders — `_` in a call's arguments builds a closure (see closures.md)
+let addOne = add(_, 1);           // { (a) in add(a, 1) }
+let names = users.map(_.name);    // users.map { it.name }
+
+// Optional chaining — see optional-chaining.md
+let city = user?.address?.city;   // String?, .None if any link is .None
+cache?.items.push(entry);         // mutates the payload in place
 
 // String interpolation — see string-interpolation.md
 let greeting = "Hello, \(name)!";
 ```
+
+### Operator precedence
+
+Loosest first. Every binary operator is left-associative except `??`.
+
+| Operators | Notes |
+|-----------|-------|
+| `\|>` | pipe: the whole left side is piped (`a + b \|> f` is `f(a + b)`) |
+| `or` | |
+| `??` | right-associative |
+| `and` | |
+| `==` `!=` `<` `>` `<=` `>=` `is` | |
+| `..=` `..<` | |
+| `+` `-` `\|` `^` | |
+| `*` `/` `%` `&` | |
+| `<<` `>>` | |
+| `as?` | |
+
+Because `|>` binds loosest, `x |> f ?? d` is `x |> (f ?? d)`. Write
+`(x |> f) ?? d` to default the result.
 
 ## Error Handling
 
@@ -326,7 +353,7 @@ Semicolons are **required** after:
 - Expression statements: `doSomething();`
 - Assignment statements: `count = count + 1;`
 - Module declarations: `module my_app.utils;`
-- Import statements: `import std.io;`
+- Import statements: `import std.files;`
 
 ### Optional/Omitted Semicolons
 

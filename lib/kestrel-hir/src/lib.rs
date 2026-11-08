@@ -12,6 +12,6 @@ pub mod res;
 pub mod ty;
 
 pub use body::*;
-pub use builtin::Builtin;
+pub use builtin::{Builtin, INDIRECTION_PLACE};
 pub use res::{Local, LocalId, Res};
 pub use ty::HirTy;

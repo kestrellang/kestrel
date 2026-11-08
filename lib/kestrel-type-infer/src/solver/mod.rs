@@ -21,34 +21,36 @@ use crate::generate::SubjectRoot;
 use crate::resolve::EqualityLhs;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
-use kestrel_ast_builder::arg_binding::{BindError, BindParam, Binding, bind_arguments};
+use kestrel_ast_builder::arg_binding::{BindArg, BindError, BindParam, Binding, bind_arguments};
 use kestrel_ast_builder::{Callable, InitEffect, Intrinsic, Name, NodeKind, TypeParams};
-use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
+use kestrel_copy_fold::CopyLayer;
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_semantics::{
-    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, NominalStaticness, StaticLayer,
-    StaticRequirement, Staticness, TypeParamCopyRequirement, TypeParamStaticRequirement,
-    instance_is_static,
+    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, NominalStaticness, SizedShape,
+    StaticLayer, StaticRequirement, StaticShape, Staticness, TypeParamStaticRequirement,
+    ty_is_static,
 };
 use kestrel_span::Span;
 
 pub(crate) mod assoc;
-mod call;
+pub(crate) mod call;
 mod conformance;
 mod defaults;
 mod equality;
 mod lower;
 mod member;
+pub(crate) use assoc::solve_associated;
 use assoc::*;
 use call::*;
 pub(crate) use conformance::*;
 pub(crate) use defaults::*;
 pub(crate) use equality::*;
 use lower::*;
+pub(crate) use member::{extension_applies, requirement_call, try_indirection_peel};
 use member::*;
 
 /// Diagnose type parameters at generic call sites that inference couldn't
@@ -296,6 +298,12 @@ pub(super) fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bo
                     .any(|(_, args)| args.iter().any(|&a| walk(ctx, a, seen)))
                     || origin_args.iter().any(|&a| walk(ctx, a, seen))
             },
+            TySlot::Resolved(TyKind::RawExistential { bounds, bindings }) => {
+                bounds
+                    .iter()
+                    .any(|(_, args)| args.iter().any(|&a| walk(ctx, a, seen)))
+                    || bindings.iter().any(|&(_, t)| walk(ctx, t, seen))
+            },
             TySlot::Resolved(
                 TyKind::Param { .. } | TyKind::SelfType { .. } | TyKind::Never | TyKind::Error,
             ) => false,
@@ -337,6 +345,7 @@ pub(super) fn expr_span(expr: &HirExpr) -> &Span {
         | HirExpr::Assign { span, .. }
         | HirExpr::Block { span, .. }
         | HirExpr::Error { span }
+        | HirExpr::TakePayload { span, .. }
         | HirExpr::Sugar { span, .. } => span,
     }
 }
@@ -360,8 +369,8 @@ pub(super) enum RefPos {
 /// Returns the violating position, or None. Legal positions (stage 2b): the
 /// top level (a ref-returning call result) and aggregate slots (nominal
 /// type args, tuple elements — the HIR formation walk checks annotations;
-/// inference can't mint them elsewhere). Still-illegal backstops: function
-/// types (E491), protocol args / opaque bounds / assoc-projection bases
+/// inference can't mint them elsewhere), and function-type params.
+/// Still-illegal backstops: function-type returns (E491), protocol args / opaque bounds / assoc-projection bases
 /// (E492 — positions the formation walk also still rejects).
 pub(super) fn find_ref_violation(
     ctx: &InferCtx<'_>,
@@ -393,10 +402,14 @@ pub(super) fn find_ref_violation(
         TyKind::Tuple(elems) => elems
             .iter()
             .find_map(|&e| find_ref_violation(ctx, e, RefPos::Slot, seen)),
+        // A closure may TAKE a ref (`xs.refs().map { r in r.n }`): a param
+        // borrows for the call, like a borrowing param. Only a ref-returning
+        // function type is illegal (E491): the ret_borrow ABI isn't
+        // expressible in function types.
         TyKind::Function { params, ret, .. } => params
             .iter()
-            .chain(std::iter::once(&ret))
-            .find_map(|&p| find_ref_violation(ctx, p, RefPos::InFn, seen)),
+            .find_map(|&p| find_ref_violation(ctx, p, RefPos::Top, seen))
+            .or_else(|| find_ref_violation(ctx, ret, RefPos::InFn, seen)),
         TyKind::AssocProjection { base, .. } => find_ref_violation(ctx, base, RefPos::Nested, seen),
         TyKind::Opaque {
             bounds,
@@ -809,9 +822,6 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 ctx.poison(result);
                 continue;
             },
-            // Unresolved InterpolationLink: the accumulator was resolved by
-            // literal defaults. Absorb silently.
-            Constraint::InterpolationLink { .. } => continue,
             // The iterable never resolved — its own "could not infer"
             // diagnostic covers it; poison the iterator so the loop body
             // doesn't cascade.
@@ -856,7 +866,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
 }
 
 /// Result of attempting to solve a single constraint.
-pub(super) enum SolveResult {
+pub(crate) enum SolveResult {
     /// Constraint was fully resolved.
     Solved,
     /// Not enough info yet — put back for later.
@@ -1038,7 +1048,14 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
             span,
         } => {
             let r = solve_implicit(ctx, expected, &name, args, result, expr, span);
-            if matches!(r, SolveResult::Error(_)) {
+            // `result` is the expected type's var (`.name` is typed as its
+            // home), and an error is only reported once that is concrete —
+            // poisoning it would overwrite a known type shared with the
+            // context (a `return .x`'s function return type), cascading
+            // `_` into every later use. Only an unresolved result is poisoned.
+            if matches!(r, SolveResult::Error(_))
+                && matches!(ctx.slot(ctx.resolve(result)), TySlot::Unresolved { .. })
+            {
                 ctx.poison(result);
             }
             r
@@ -1073,12 +1090,6 @@ pub(super) fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveRes
             }
             r
         },
-
-        Constraint::InterpolationLink {
-            result_tv,
-            acc_tv,
-            span,
-        } => solve_interpolation_link(ctx, result_tv, acc_tv, span),
 
         Constraint::ForLoopIterator {
             iterable,

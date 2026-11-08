@@ -42,8 +42,9 @@ node and every binding identifier is recorded in the body's `BodySourceMap`.
 - CST: `var? ident` / `& mutating? ident`.
 - HIR lowering: `pat.rs` `lower_pat_node` — `define_named_local(node, ident, is_mut || force_mut, span)` (records
   the identifier in the source map) then `HirPat::Binding { local, by_ref, span }`.
-  `force_mut` propagates an outer `var (a, b) = …` into sub-bindings. A `&` binder
-  outside a match arm → E211 and degrades to a plain binding (`by_ref: None`). A binder
+  `force_mut` propagates an outer `var (a, b) = …` into sub-bindings. `&` binders are
+  allowed in every position; `kestrel_hir::body::pat_borrows` is the one walk that finds
+  them (place mode, E210, E499 on a `let` of a temporary). A binder
   whose name the parser could not find → `HirPat::Error`.
 - Type-infer: `generate.rs:619-622` — `ctx.local_types.insert(local, scrutinee_tv)`.
 - MIR: decision tree emits an `Assign` to `Place::local(binding)` with the matched

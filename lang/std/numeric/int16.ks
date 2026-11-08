@@ -1,32 +1,34 @@
 // Int16 - 16-bit signed integer
-// Generated from integer.ks.template (docs synced from .ks.interface) - DO NOT EDIT
+// GENERATED FILE — never edit it directly. Edit lang/std/numeric/integer.ks.template
+// (or generate.py) and rerun `python3 generate.py` from lang/std/numeric.
 
 module std.numeric
 
 import std.ffi.(FFISafe)
 import std.core.(
     Equatable, Comparable, Ordering, Bool, Matchable, Hashable, Hasher,
-    Addable, Subtractable, Multipliable, Divisible, Modulo, Negatable,
+    Addable, Subtractable, Multipliable, Divisible, Remainder, Negatable,
     BitwiseAnd, BitwiseOr, BitwiseXor, BitwiseNot, LeftShift, RightShift,
-    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
+    AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, RemainderAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
-    ExpressibleByIntLiteral, Convertible, Defaultable,
+    ExpressibleByIntLiteral, Convertible, LossyConvertible, Defaultable,
     RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
-import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
-import std.memory.(ArraySlice, Pointer)
-import std.collections.(Slice)
+import std.text.(String, Str, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
+import std.memory.(UnsafeSlice, Pointer)
+import std.collections.(Sliceable, Slice)
 import std.numeric.(UInt8, Int64, UInt64)
 
 /// A 16-bit signed integer.
 ///
 /// Int16 is the 16-bit member of the integer family. The same surface
 /// area is provided across all widths; switch widths to trade range for memory
-/// or to match an FFI ABI. Arithmetic wraps on overflow by default — use the
-/// `*Checked` variants for overflow detection or `*Saturating` to clamp to
-/// `minValue`/`maxValue`. The type is `FFISafe` and lays out as a single
+/// or to match an FFI ABI. Arithmetic traps on overflow in unoptimized builds and wraps in
+/// optimized ones (`--overflow-checks` overrides). Use the `*Wrapping`,
+/// `*Checked`, `*Saturating` or `*Overflowing` variants to pick a behaviour
+/// that holds in every build. The type is `FFISafe` and lays out as a single
 /// `lang.i16` so it can cross C boundaries unchanged.
 ///
 /// # Examples
@@ -61,7 +63,7 @@ public struct Int16:
     Subtractable,
     Multipliable,
     Divisible,
-    Modulo,
+    Remainder,
     Negatable,
     BitwiseAnd,
     BitwiseOr,
@@ -73,7 +75,7 @@ public struct Int16:
     SubtractAssign,
     MultiplyAssign,
     DivideAssign,
-    ModuloAssign,
+    RemainderAssign,
     BitwiseAndAssign,
     BitwiseOrAssign,
     BitwiseXorAssign,
@@ -93,7 +95,12 @@ public struct Int16:
     Convertible[UInt8],
     Convertible[UInt16],
     Convertible[UInt32],
-    Convertible[UInt64]
+    Convertible[UInt64],
+    LossyConvertible[Int32],
+    LossyConvertible[Int64],
+    LossyConvertible[UInt16],
+    LossyConvertible[UInt32],
+    LossyConvertible[UInt64]
 {
     /// The underlying primitive `lang.i16` value. Exposed for FFI
     /// and intrinsic use; prefer the typed surface for everything else.
@@ -155,40 +162,165 @@ public struct Int16:
     }
 
     /// @name From Raw
-    /// Wraps an existing `lang.i16` without conversion. Internal
-    /// constructor used by intrinsics; not part of the public API.
-    init(raw value: lang.i16) {
+    /// Wraps an existing `lang.i16` without conversion. The FFI
+    /// counterpart of `raw`, for values coming back from intrinsics or C.
+    public init(raw value: lang.i16) {
         self.raw = value
     }
 
     /// @name From Integer
-    /// Converts from `Int8`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `Int8`. Lossless: every `Int8` fits in `Int16`.
     public init(from other: Int8) { self.raw = lang.cast_i8_i16(other.raw) }
     /// @name From Integer
-    /// Converts from `Int32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int32) { self.raw = lang.cast_i32_i16(other.raw) }
+    /// Converts from `Int32`, trapping when the value doesn't fit in
+    /// `Int16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
+    public init(from other: Int32) {
+        if other < Int32(from: Int16.minValue) or other > Int32(from: Int16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in Int16")
+        }
+        self.raw = lang.cast_i32_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `Int32` keeping only the low bits, reinterpreted as
+    /// `Int16`. Never traps.
+    public init(truncating other: Int32) { self.raw = lang.cast_i32_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `Int32`, saturating to `Int16.minValue` / `Int16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: Int32) {
+        if other < Int32(from: Int16.minValue) {
+            self.raw = Int16.minValue.raw
+        } else if other > Int32(from: Int16.maxValue) {
+            self.raw = Int16.maxValue.raw
+        } else {
+            self.raw = lang.cast_i32_i16(other.raw)
+        }
+    }
     /// @name From Integer
-    /// Converts from `Int64`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: Int64) { self.raw = lang.cast_i64_i16(other.raw) }
+    /// Converts from `Int64`, trapping when the value doesn't fit in
+    /// `Int16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
+    public init(from other: Int64) {
+        if other < Int64(from: Int16.minValue) or other > Int64(from: Int16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in Int16")
+        }
+        self.raw = lang.cast_i64_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `Int64` keeping only the low bits, reinterpreted as
+    /// `Int16`. Never traps.
+    public init(truncating other: Int64) { self.raw = lang.cast_i64_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `Int64`, saturating to `Int16.minValue` / `Int16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: Int64) {
+        if other < Int64(from: Int16.minValue) {
+            self.raw = Int16.minValue.raw
+        } else if other > Int64(from: Int16.maxValue) {
+            self.raw = Int16.maxValue.raw
+        } else {
+            self.raw = lang.cast_i64_i16(other.raw)
+        }
+    }
     /// @name From Integer
-    /// Converts from `UInt8`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
+    /// Converts from `UInt8`. Lossless: every `UInt8` fits in `Int16`.
     public init(from other: UInt8) { self.raw = lang.cast_u8_i16(other.raw) }
     /// @name From Integer
-    /// Converts from `UInt16`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt16) { self.raw = other.raw }
+    /// Converts from `UInt16`, trapping when the value doesn't fit in
+    /// `Int16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
+    public init(from other: UInt16) {
+        if other > UInt16(truncating: Int16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in Int16")
+        }
+        self.raw = other.raw
+    }
+    /// @name Truncating
+    /// Converts from `UInt16` keeping only the low bits, reinterpreted as
+    /// `Int16`. Never traps.
+    public init(truncating other: UInt16) { self.raw = other.raw }
+    /// @name Clamping
+    /// Converts from `UInt16`, saturating to `Int16.minValue` / `Int16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: UInt16) {
+        if other > UInt16(truncating: Int16.maxValue) {
+            self.raw = Int16.maxValue.raw
+        } else {
+            self.raw = other.raw
+        }
+    }
+    /// @name Bit Pattern
+    /// Reinterprets the bits of a same-width `UInt16` as `Int16`. Never traps.
+    public init(bitPattern other: UInt16) { self.raw = other.raw }
     /// @name From Integer
-    /// Converts from `UInt32`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt32) { self.raw = lang.cast_u32_i16(other.raw) }
+    /// Converts from `UInt32`, trapping when the value doesn't fit in
+    /// `Int16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
+    public init(from other: UInt32) {
+        if other > UInt32(truncating: Int16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in Int16")
+        }
+        self.raw = lang.cast_u32_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `UInt32` keeping only the low bits, reinterpreted as
+    /// `Int16`. Never traps.
+    public init(truncating other: UInt32) { self.raw = lang.cast_u32_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `UInt32`, saturating to `Int16.minValue` / `Int16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: UInt32) {
+        if other > UInt32(truncating: Int16.maxValue) {
+            self.raw = Int16.maxValue.raw
+        } else {
+            self.raw = lang.cast_u32_i16(other.raw)
+        }
+    }
     /// @name From Integer
-    /// Converts from `UInt64`. Narrowing conversions truncate the high
-    /// bits; signed→unsigned reinterprets the bit pattern.
-    public init(from other: UInt64) { self.raw = lang.cast_u64_i16(other.raw) }
+    /// Converts from `UInt64`, trapping when the value doesn't fit in
+    /// `Int16`. Use `init(truncating:)` or `init(clamping:)` when
+    /// out-of-range values are expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when `other` is outside `Int16.minValue...Int16.maxValue`.
+    public init(from other: UInt64) {
+        if other > UInt64(truncating: Int16.maxValue) {
+            fatalError("integer conversion overflow: value doesn't fit in Int16")
+        }
+        self.raw = lang.cast_u64_i16(other.raw)
+    }
+    /// @name Truncating
+    /// Converts from `UInt64` keeping only the low bits, reinterpreted as
+    /// `Int16`. Never traps.
+    public init(truncating other: UInt64) { self.raw = lang.cast_u64_i16(other.raw) }
+    /// @name Clamping
+    /// Converts from `UInt64`, saturating to `Int16.minValue` / `Int16.maxValue`
+    /// when the value doesn't fit.
+    public init(clamping other: UInt64) {
+        if other > UInt64(truncating: Int16.maxValue) {
+            self.raw = Int16.maxValue.raw
+        } else {
+            self.raw = lang.cast_u64_i16(other.raw)
+        }
+    }
 
     // ========================================================================
     // SIGN INSPECTION (Properties)
@@ -326,11 +458,11 @@ public struct Int16:
     // STEPPING
     // ========================================================================
 
-    /// Successor — `self + 1`. Wraps at `maxValue`. Used by `for-in` over
+    /// Successor — `self + 1`. Overflows at `maxValue`, like `add`. Used by `for-in` over
     /// integer ranges.
     public func successor() -> Int16 { self.add(Int16.one) }
 
-    /// Predecessor — `self - 1`. Wraps at `minValue`.
+    /// Predecessor — `self - 1`. Overflows at `minValue`, like `subtract`.
     public func predecessor() -> Int16 { self.subtract(Int16.one) }
 
     /// Number of `successor()` steps from `self` to `other` — `other - self`
@@ -369,11 +501,11 @@ public struct Int16:
     // HASHING
     // ========================================================================
 
-    /// Feeds the raw bytes of this value into `hasher`. Endianness-agnostic
-    /// only within a single process — do not persist hashes across builds.
+    /// Feeds this value into `hasher` as one 64-bit word
+    /// (`write(uint64:)`), which `DefaultHasher` mixes in a single round.
+    /// Don't persist hashes across builds.
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        let val = self;
-        hasher.write(ArraySlice(pointer: Pointer(to: val).asRaw().cast[UInt8](), count: Layout.of[Int16]().size))
+        hasher.write(uint64: UInt64(truncating: self))
     }
 
     // ========================================================================
@@ -384,7 +516,7 @@ public struct Int16:
     type Subtractable.Output = Int16
     type Multipliable.Output = Int16
     type Divisible.Output = Int16
-    type Modulo.Output = Int16
+    type Remainder.Output = Int16
     type Negatable.Output = Int16
     type BitwiseAnd.Output = Int16
     type BitwiseOr.Output = Int16
@@ -399,27 +531,107 @@ public struct Int16:
     type RangeThroughConstructible.Output = RangeThrough[Int16]
 
     // ========================================================================
-    // ARITHMETIC (Wrapping - Default)
+    // ARITHMETIC (Overflow-checked)
     // ========================================================================
 
-    /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
-    /// `addSaturating` to clamp.
-    public consuming func add(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_add(self.raw, other.raw)) }
+    /// `self + other`. Traps on overflow when overflow checks are on; use `addWrapping`, `addChecked`,
+    /// `addSaturating` or `addOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `Int16` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func add(consuming other: Int16) -> Int16 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i16_signed_add_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: Int16 +")
+        }
+        Int16(raw: lang.i16_add(self.raw, other.raw))
+    }
 
-    /// `self - other`, wrapping on overflow.
-    public consuming func subtract(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_sub(self.raw, other.raw)) }
+    /// `self + other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func addWrapping(other: Int16) -> Int16 { Int16(raw: lang.i16_add(self.raw, other.raw)) }
 
-    /// `self * other`, wrapping on overflow.
-    public consuming func multiply(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_mul(self.raw, other.raw)) }
+    /// `self + other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `addWrapping`.
+    public func addOverflowing(other: Int16) -> (Int16, Bool) {
+        (Int16(raw: lang.i16_add(self.raw, other.raw)), Bool(boolLiteral: lang.i16_signed_add_overflows(self.raw, other.raw)))
+    }
+
+    /// `self - other`. Traps on overflow when overflow checks are on; use `subtractWrapping`, `subtractChecked`,
+    /// `subtractSaturating` or `subtractOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `Int16` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func subtract(consuming other: Int16) -> Int16 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i16_signed_sub_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: Int16 -")
+        }
+        Int16(raw: lang.i16_sub(self.raw, other.raw))
+    }
+
+    /// `self - other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func subtractWrapping(other: Int16) -> Int16 { Int16(raw: lang.i16_sub(self.raw, other.raw)) }
+
+    /// `self - other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `subtractWrapping`.
+    public func subtractOverflowing(other: Int16) -> (Int16, Bool) {
+        (Int16(raw: lang.i16_sub(self.raw, other.raw)), Bool(boolLiteral: lang.i16_signed_sub_overflows(self.raw, other.raw)))
+    }
+
+    /// `self * other`. Traps on overflow when overflow checks are on; use `multiplyWrapping`, `multiplyChecked`,
+    /// `multiplySaturating` or `multiplyOverflowing` when overflow is expected.
+    ///
+    /// # Errors
+    ///
+    /// Panics when the result doesn't fit in `Int16` and overflow checks are
+    /// on (the default at `-O0`). With checks off it wraps.
+    public consuming func multiply(consuming other: Int16) -> Int16 {
+        if Bool(boolLiteral: lang.i1_and(lang.overflow_checks(), lang.i16_signed_mul_overflows(self.raw, other.raw))) {
+            fatalError("arithmetic overflow: Int16 *")
+        }
+        Int16(raw: lang.i16_mul(self.raw, other.raw))
+    }
+
+    /// `self * other`, wrapping around on overflow (two's complement).
+    /// For hashes, checksums and RNGs where wrap-around is the intent.
+    public func multiplyWrapping(other: Int16) -> Int16 { Int16(raw: lang.i16_mul(self.raw, other.raw)) }
+
+    /// `self * other` plus whether it overflowed. The value is the
+    /// wrapped result, as from `multiplyWrapping`.
+    public func multiplyOverflowing(other: Int16) -> (Int16, Bool) {
+        (Int16(raw: lang.i16_mul(self.raw, other.raw)), Bool(boolLiteral: lang.i16_signed_mul_overflows(self.raw, other.raw)))
+    }
+
+    /// The full double-width product `self * other` as `(low, high)`
+    /// halves: `low` is the wrapped product (as from `multiplyWrapping`),
+    /// `high` the bits above it. Compiles to one widening multiply. For
+    /// hashes, RNGs and bignum arithmetic.
+    public func multiplyFull(other: Int16) -> (Int16, Int16) {
+        (Int16(raw: lang.i16_mul(self.raw, other.raw)), Int16(raw: lang.i16_signed_mul_high(self.raw, other.raw)))
+    }
 
     /// Truncating integer division (`self / other`). For signed types,
-    /// `minValue / -1` wraps; use `divideChecked` to detect.
+    /// `minValue / -1` traps when overflow checks are on (and wraps
+    /// when off); use `divideWrapping` or `divideChecked`.
     ///
     /// # Errors
     ///
     /// Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
     /// process aborts before producing a result).
-    public consuming func divide(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_signed_div(self.raw, other.raw)) }
+    public consuming func divide(consuming other: Int16) -> Int16 {
+        if Bool(boolLiteral: lang.overflow_checks()) and self == Int16.minValue and other == -1 {
+            fatalError("arithmetic overflow: Int16.minValue / -1")
+        }
+        Int16(raw: lang.i16_signed_div(self.raw, other.raw))
+    }
+
+    /// `self / other`, with `minValue / -1` wrapping to `minValue`.
+    /// Still traps on division by zero.
+    public func divideWrapping(other: Int16) -> Int16 { Int16(raw: lang.i16_signed_div(self.raw, other.raw)) }
 
     /// `self % other` — truncated remainder; the result has the sign of
     /// `self` for signed types.
@@ -427,7 +639,31 @@ public struct Int16:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public consuming func modulo(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem(self.raw, other.raw)) }
+    public consuming func remainder(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem(self.raw, other.raw)) }
+
+    /// Euclidean modulo: the result is always in `0..<|other|`, whatever
+    /// the signs. Differs from `%` (`remainder`) only when `self` is
+    /// negative: `(-7) % 3` is `-1`, `(-7).modulo(by: 3)` is `2`.
+    ///
+    /// # Errors
+    ///
+    /// Traps on division by zero, like `remainder`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (-7).modulo(by: 3);   // 2
+    /// (7).modulo(by: -3);   // 1
+    /// (-7).modulo(by: -3);  // 2
+    /// ```
+    public func modulo(by other: Int16) -> Int16 {
+        let r = self.remainder(other);
+        if r >= 0 {
+            return r
+        }
+        // |r| < |other|, so neither branch overflows (even for minValue).
+        if other < 0 { r - other } else { r + other }
+    }
 
     /// `self / other` without the divide-by-zero and `minValue / -1` guards —
     /// the bare hardware divide. Faster in hot loops, but **undefined
@@ -447,37 +683,47 @@ public struct Int16:
     /// # Safety
     ///
     /// UB when `other == 0`, or signed `minValue % -1`.
-    public consuming func moduloUnchecked(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem_unchecked(self.raw, other.raw)) }
+    public consuming func remainderUnchecked(consuming other: Int16) -> Int16 { Int16(raw: lang.i16_signed_rem_unchecked(self.raw, other.raw)) }
 
-    /// Two's-complement negation. Wraps at the minimum value:
-    /// `Int16.minValue.negate() == Int16.minValue`. Use
-    /// `negateChecked` to surface the overflow.
-    public consuming func negate() -> Int16 { Int16(raw: lang.i16_neg(self.raw)) }
-    /// Absolute value. Wraps at the minimum value
-    /// (`Int16.minValue.abs() == Int16.minValue`); use
-    /// `absChecked` if that's a problem.
+    /// Two's-complement negation. Traps at the minimum value, which has
+    /// no positive counterpart, when overflow checks are on (wraps when off); use `negateWrapping`, `negateChecked` or
+    /// `negateSaturating` there.
+    public consuming func negate() -> Int16 {
+        if Bool(boolLiteral: lang.overflow_checks()) and self == Int16.minValue {
+            fatalError("arithmetic overflow: -Int16.minValue")
+        }
+        Int16(raw: lang.i16_neg(self.raw))
+    }
+
+    /// `-self`, with `-minValue` wrapping back to `minValue`.
+    public func negateWrapping() -> Int16 { Int16(raw: lang.i16_neg(self.raw)) }
+    /// Absolute value. Traps at the minimum value when overflow checks are on; use `absWrapping`,
+    /// `absChecked` or `absSaturating` there.
     public func abs() -> Int16 { if Bool(boolLiteral: lang.i16_signed_lt(self.raw, 0)) { self.negate() } else { self } }
+
+    /// `|self|`, with `minValue.absWrapping()` wrapping to `minValue`.
+    public func absWrapping() -> Int16 { if Bool(boolLiteral: lang.i16_signed_lt(self.raw, 0)) { self.negateWrapping() } else { self } }
 
     // ========================================================================
     // ARITHMETIC (Checked - Returns Optional)
     // ========================================================================
 
-    /// Wrapping addition that returns `None` instead of overflowing.
+    /// `self + other`, or `None` on overflow.
     public func addChecked(other: Int16) -> Int16? {
         if Bool(boolLiteral: lang.i16_signed_add_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.add(other))
+        .Some(self.addWrapping(other))
     }
 
-    /// Wrapping subtraction that returns `None` instead of overflowing.
+    /// `self - other`, or `None` on overflow.
     public func subtractChecked(other: Int16) -> Int16? {
         if Bool(boolLiteral: lang.i16_signed_sub_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.subtract(other))
+        .Some(self.subtractWrapping(other))
     }
 
-    /// Wrapping multiplication that returns `None` instead of overflowing.
+    /// `self * other`, or `None` on overflow.
     public func multiplyChecked(other: Int16) -> Int16? {
         if Bool(boolLiteral: lang.i16_signed_mul_overflows(self.raw, other.raw)) { return .None };
-        .Some(self.multiply(other))
+        .Some(self.multiplyWrapping(other))
     }
 
     /// Division that returns `None` for divide-by-zero or for the
@@ -490,7 +736,7 @@ public struct Int16:
         if self == Int16.minValue and other == Int16(intLiteral: lang.i64_neg(1)) {
             return .None
         };
-        .Some(self.divide(other))
+        .Some(self.divideWrapping(other))
     }
 
     /// Negation that returns `None` for `minValue` (whose negation overflows).
@@ -498,7 +744,7 @@ public struct Int16:
         if self == Int16.minValue {
             return .None
         };
-        .Some(self.negate())
+        .Some(self.negateWrapping())
     }
 
     /// Absolute value that returns `None` for `minValue` (whose absolute
@@ -507,9 +753,8 @@ public struct Int16:
         if self == Int16.minValue {
             return .None
         };
-        .Some(self.abs())
+        .Some(self.absWrapping())
     }
-
 
     // ========================================================================
     // ARITHMETIC (Saturating - Clamps to Bounds)
@@ -565,40 +810,90 @@ public struct Int16:
         }
     }
 
-
     // ========================================================================
     // ARITHMETIC (Extended)
     // ========================================================================
 
-    /// Raises `self` to `exponent` via binary exponentiation. Wraps on
-    /// overflow. Negative exponents return zero (integer truncation of
-    /// the would-be fraction).
+    /// Raises `self` to `exponent` via binary exponentiation.
+    ///
+    /// # Errors
+    ///
+    /// Panics on a negative exponent, and on overflow when overflow checks
+    /// are on (wraps when off); see `powChecked`,
+    /// `powWrapping` and `powSaturating`.
     ///
     /// # Examples
     ///
     /// ```
     /// (2).pow(10);  // 1024
     /// (3).pow(4);   // 81
-    /// (5).pow(-1);  // 0
     /// ```
     public func pow(exponent: Int64) -> Int16 {
+        if Bool(boolLiteral: lang.i1_not(lang.overflow_checks())) {
+            return self.powWrapping(exponent)
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+            .None => fatalError("arithmetic overflow: Int16.pow")
+        }
+    }
+
+    /// `self` raised to `exponent`, or `None` on overflow or a negative
+    /// exponent.
+    public func powChecked(exponent: Int64) -> Int16? {
         if exponent < 0 {
-            return Int16.zero
-        };
-        if exponent == 0 {
-            return Int16.one
-        };
-        var result = Int16.one;
+            return .None
+        }
+        var result: Int16 = 1;
         var base = self;
         var exp = exponent;
         while exp > 0 {
             if exp % 2 == 1 {
-                result = result.multiply(base)
-            };
-            base = base.multiply(base);
+                let next = result.multiplyChecked(base);
+                if next.isNone { return .None }
+                result = next.unwrap()
+            }
+            exp = exp / 2;
+            // Square only when another bit remains, so the last step can't
+            // overflow a result that fits.
+            if exp > 0 {
+                let squared = base.multiplyChecked(base);
+                if squared.isNone { return .None }
+                base = squared.unwrap()
+            }
+        }
+        .Some(result)
+    }
+
+    /// `self` raised to `exponent`, wrapping on overflow. A negative
+    /// exponent traps.
+    public func powWrapping(exponent: Int64) -> Int16 {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        var result: Int16 = 1;
+        var base = self;
+        var exp = exponent;
+        while exp > 0 {
+            if exp % 2 == 1 {
+                result = result.multiplyWrapping(base)
+            }
+            base = base.multiplyWrapping(base);
             exp = exp / 2
-        };
+        }
         result
+    }
+
+    /// `self` raised to `exponent`, clamped to `minValue`/`maxValue` on
+    /// overflow. A negative exponent traps.
+    public func powSaturating(exponent: Int64) -> Int16 {
+        if exponent < 0 {
+            fatalError("pow: negative exponent")
+        }
+        match self.powChecked(exponent) {
+            .Some(value) => value,
+            .None => if self < 0 and exponent % 2 == 1 { Int16.minValue } else { Int16.maxValue }
+        }
     }
 
     /// Greatest common divisor via Euclidean algorithm. For signed types
@@ -612,17 +907,17 @@ public struct Int16:
     /// (-12).gcd(8);  // 4
     /// ```
     public func gcd(other: Int16) -> Int16 {
-        var a = self.abs();
-        var b = other.abs();
+        var a = self.absWrapping();
+        var b = other.absWrapping();
         // `minValue.abs()` wraps to `minValue`, so a remainder can come out
         // negative: keep each remainder's magnitude so the result is
         // non-negative (only `gcd(minValue, 0)` = 2^(n-1) is unrepresentable).
         while b != Int16.zero {
             let t = b;
-            b = a.modulo(b).abs();
+            b = a.remainder(b).absWrapping();
             a = t
         };
-        a.abs()
+        a.absWrapping()
     }
 
     /// Least common multiple, computed as `|self| / gcd(self, other) * |other|`
@@ -700,7 +995,7 @@ public struct Int16:
     /// MSB re-enter at the LSB.
     public func rotateLeft(by count: Int64) -> Int16 {
         let bits: Int64 = 16;
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftLeft(by: c).bitwiseOr(self.shiftRight(by: bits - c)) }
     }
@@ -709,7 +1004,7 @@ public struct Int16:
     /// `rotateLeft`.
     public func rotateRight(by count: Int64) -> Int16 {
         let bits: Int64 = 16;
-        let c = count % bits;
+        let c = count.modulo(by: bits);
         if c == 0 { self }
         else { self.shiftRight(by: c).bitwiseOr(self.shiftLeft(by: bits - c)) }
     }
@@ -727,7 +1022,7 @@ public struct Int16:
     /// `self /= other`
     public mutating func divideAssign(other: Int16) { self = self.divide(other) }
     /// `self %= other`
-    public mutating func modAssign(other: Int16) { self = self.modulo(other) }
+    public mutating func remainderAssign(other: Int16) { self = self.remainder(other) }
     /// `self &= other`
     public mutating func bitwiseAndAssign(other: Int16) { self = self.bitwiseAnd(other) }
     /// `self |= other`
@@ -758,7 +1053,7 @@ public struct Int16:
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
         while i < 2 {
-            result.append(ptr.offset(by: i).read());
+            result.append(unsafe ptr.offset(by: i).read());
             i = i + 1
         }
         result
@@ -768,13 +1063,13 @@ public struct Int16:
     /// significant byte first — i.e. network byte order).
     public func toBytesBigEndian() -> std.collections.Array[UInt8] {
         var result = std.collections.Array[UInt8](capacity: 2);
-        let value = UInt64(from: self);
+        let value = UInt64(truncating: self);
         let mask: UInt64 = 255;
         var i: Int64 = 0;
         while i < 2 {
             let shift = (2 - 1 - i) * 8;
             let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
-            result.append(UInt8(from: byteVal));
+            result.append(UInt8(truncating: byteVal));
             i = i + 1
         }
         result
@@ -784,13 +1079,13 @@ public struct Int16:
     /// significant byte first).
     public func toBytesLittleEndian() -> std.collections.Array[UInt8] {
         var result = std.collections.Array[UInt8](capacity: 2);
-        let value = UInt64(from: self);
+        let value = UInt64(truncating: self);
         let mask: UInt64 = 255;
         var i: Int64 = 0;
         while i < 2 {
             let shift = i * 8;
             let byteVal = value.shiftRight(by: shift).bitwiseAnd(mask);
-            result.append(UInt8(from: byteVal));
+            result.append(UInt8(truncating: byteVal));
             i = i + 1
         }
         result
@@ -799,8 +1094,8 @@ public struct Int16:
     /// @name From Bytes
     /// Reassembles a `Int16` from 2 bytes in native byte order.
     /// Returns `null` if the input is not exactly 2 bytes long.
-    public init[S](fromBytes fromBytes: S)? where S: Slice[UInt8] {
-        let bytes = fromBytes.asSlice();
+    public init[S](fromBytes fromBytes: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromBytes.asUnsafeSlice();
         if bytes.count != 2 {
             return null
         }
@@ -808,7 +1103,7 @@ public struct Int16:
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
         var i: Int64 = 0;
         while i < 2 {
-            ptr.offset(by: i).write(bytes(unchecked: i));
+            unsafe ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }
         self.raw = value.raw;
@@ -817,26 +1112,26 @@ public struct Int16:
     /// @name From Bytes Big Endian
     /// Reassembles a `Int16` from 2 bytes in big-endian order.
     /// Returns `null` if the input is not exactly 2 bytes long.
-    public init[S](fromBytesBigEndian fromBytesBigEndian: S)? where S: Slice[UInt8] {
-        let bytes = fromBytesBigEndian.asSlice();
+    public init[S](fromBytesBigEndian fromBytesBigEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromBytesBigEndian.asUnsafeSlice();
         if bytes.count != 2 {
             return null
         }
         var result: UInt64 = 0;
         var i: Int64 = 0;
         while i < 2 {
-            let byteVal = UInt64(from: bytes(unchecked: i));
+            let byteVal = UInt64(from: unsafe bytes(unchecked: i));
             result = (result << 8) | byteVal;
             i = i + 1
         }
-        self.raw = Int16(from: result).raw;
+        self.raw = Int16(truncating: result).raw;
     }
 
     /// @name From Bytes Little Endian
     /// Reassembles a `Int16` from 2 bytes in little-endian order.
     /// Returns `null` if the input is not exactly 2 bytes long.
-    public init[S](fromBytesLittleEndian fromBytesLittleEndian: S)? where S: Slice[UInt8] {
-        let bytes = fromBytesLittleEndian.asSlice();
+    public init[S](fromBytesLittleEndian fromBytesLittleEndian: &S)? where S: Sliceable[UInt8], S: not Static, S: not Copyable, S: not Sized {
+        let bytes = fromBytesLittleEndian.asUnsafeSlice();
         if bytes.count != 2 {
             return null
         }
@@ -844,11 +1139,11 @@ public struct Int16:
         var i: Int64 = 0;
         while i < 2 {
             let shift = i * 8;
-            let byteVal = UInt64(from: bytes(unchecked: i));
+            let byteVal = UInt64(from: unsafe bytes(unchecked: i));
             result = result | (byteVal << shift);
             i = i + 1
         }
-        self.raw = Int16(from: result).raw;
+        self.raw = Int16(truncating: result).raw;
     }
 
     // ========================================================================
@@ -867,8 +1162,10 @@ public struct Int16:
     /// Int16(parsing: "-7");    // Some(-7)
     /// Int16(parsing: "abc");   // None
     /// ```
-    public init(parsing string: String)? {
-        let len = string.bytes.count;
+    public init[S](parsing text: S)? where S: Str, S: not Static {
+        // One view for the whole parse; works on String and StringSlice alike.
+        let bytes = text.bytes;
+        let len = bytes.count;
         if len == 0 {
             return null
         }
@@ -876,7 +1173,7 @@ public struct Int16:
         var index: Int64 = 0;
         var isNegative = false;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {
             isNegative = true;
@@ -892,15 +1189,15 @@ public struct Int16:
         // Accumulate the positive magnitude in UInt64 so that minValue's
         // magnitude (maxValue+1) is representable; convert + negate at the end.
         let maxMagnitude: UInt64 = if isNegative {
-            UInt64(from: Int16.maxValue) + 1
+            UInt64(truncating: Int16.maxValue) + 1
         } else {
-            UInt64(from: Int16.maxValue)
+            UInt64(truncating: Int16.maxValue)
         };
 
         var result: UInt64 = 0;
 
         while index < len {
-            let byte: UInt8 = string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             if byteVal < 48 or byteVal > 57 {
@@ -908,7 +1205,7 @@ public struct Int16:
             }
 
             let digit = byteVal - 48;
-            let digitU: UInt64 = UInt64(from: digit);
+            let digitU: UInt64 = UInt64(truncating: digit);
 
             if result > (maxMagnitude - digitU) / 10 {
                 return null
@@ -918,9 +1215,9 @@ public struct Int16:
             index = index + 1
         }
 
-        let typedResult = Int16(from: result);
+        let typedResult = Int16(truncating: result);
         if isNegative {
-            self.raw = typedResult.negate().raw
+            self.raw = typedResult.negateWrapping().raw
         } else {
             self.raw = typedResult.raw
         }
@@ -936,12 +1233,14 @@ public struct Int16:
     /// Int16(parsing: "101010", radix: 2);  // Some(42)
     /// Int16(parsing: "z", radix: 36);      // Some(35)
     /// ```
-    public init(parsing string: String, radix radix: Int64)? {
+    public init[S](parsing text: S, radix radix: Int64)? where S: Str, S: not Static {
+        // One view for the whole parse; works on String and StringSlice alike.
+        let bytes = text.bytes;
         if radix < 2 or radix > 36 {
             return null
         }
 
-        let len = string.bytes.count;
+        let len = bytes.count;
         if len == 0 {
             return null
         }
@@ -949,7 +1248,7 @@ public struct Int16:
         var index: Int64 = 0;
         var isNegative = false;
 
-        let firstByte: UInt8 = string.bytes(unchecked: 0);
+        let firstByte: UInt8 = unsafe bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 45 {
             isNegative = true;
@@ -962,17 +1261,17 @@ public struct Int16:
             return null
         }
 
-        let radixU: UInt64 = UInt64(from: radix);
+        let radixU: UInt64 = UInt64(truncating: radix);
         let maxMagnitude: UInt64 = if isNegative {
-            UInt64(from: Int16.maxValue) + 1
+            UInt64(truncating: Int16.maxValue) + 1
         } else {
-            UInt64(from: Int16.maxValue)
+            UInt64(truncating: Int16.maxValue)
         };
 
         var result: UInt64 = 0;
 
         while index < len {
-            let byte: UInt8 = string.bytes(unchecked: index);
+            let byte: UInt8 = unsafe bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
             let digit: Int64 = if byteVal >= 48 and byteVal <= 57 {
@@ -989,7 +1288,7 @@ public struct Int16:
                 return null
             }
 
-            let digitU: UInt64 = UInt64(from: digit);
+            let digitU: UInt64 = UInt64(truncating: digit);
             if result > (maxMagnitude - digitU) / radixU {
                 return null
             }
@@ -997,9 +1296,9 @@ public struct Int16:
             index = index + 1
         }
 
-        let typedResult = Int16(from: result);
+        let typedResult = Int16(truncating: result);
         if isNegative {
-            self.raw = typedResult.negate().raw
+            self.raw = typedResult.negateWrapping().raw
         } else {
             self.raw = typedResult.raw
         }
@@ -1041,11 +1340,11 @@ public struct Int16:
         // Convert to unsigned magnitude so minValue formats correctly.
         // negate() overflows on minValue; unsigned subtraction from zero does not.
         let mag: UInt16 = if isNegative {
-            UInt16.zero - UInt16(from: n)
+            UInt16.zero.subtractWrapping(UInt16(truncating: n))
         } else {
-            UInt16(from: n)
+            UInt16(truncating: n)
         };
-        let radixVal: UInt16 = UInt16(from: radix);
+        let radixVal: UInt16 = UInt16(truncating: radix);
         var m = mag;
         while m != UInt16.zero {
             let digit: UInt16 = m % radixVal;
@@ -1057,7 +1356,7 @@ public struct Int16:
             } else {
                 digitVal - 10 + 97
             };
-            digits.appendByte(UInt8(from: charCode));
+            digits.appendByte(UInt8(truncating: charCode));
             m = m / radixVal
         }
         }
@@ -1085,7 +1384,7 @@ public struct Int16:
 
         var i = digits.bytes.count - 1;
         while i >= 0 {
-            result.appendByte(digits.bytes(unchecked: i));
+            result.appendByte(unsafe digits.bytes(unchecked: i));
             i = i - 1
         }
 

@@ -4,7 +4,7 @@
 //! depends on this trait, not on concrete `QueryContext`. `WorldResolver`
 //! is the real implementation; tests can provide mocks.
 
-use kestrel_ast_builder::arg_binding::{BindParam, binds};
+use kestrel_ast_builder::arg_binding::{BindArg, BindParam, binds};
 use kestrel_ast_builder::{
     AstType, Callable, ConformanceItem, Conformances, Gettable, Name, NodeKind, Settable, Static,
     TypeParams, Vis,
@@ -16,8 +16,8 @@ use kestrel_hir_lower::{
     LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation,
 };
 use kestrel_name_res::{
-    ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeMemberSource, TypeMembersByName,
-    TypeResolution, expand_protocol_closure_in_place,
+    ConformingProtocols, ResolveBuiltin, TypeMemberSource, TypeMembersByName,
+    expand_protocol_closure_in_place,
 };
 use kestrel_semantics::{
     CopyRequirement, CopySemantics, IsBuiltinProtocol, NominalCopySemantics, NominalStaticness,
@@ -25,7 +25,7 @@ use kestrel_semantics::{
 };
 use kestrel_span::Span;
 
-use crate::ty::TyKind;
+use crate::ty::{TyKind, TyVar};
 
 /// Result of resolving a member on a type.
 #[derive(Clone, Debug)]
@@ -65,6 +65,8 @@ pub struct ParamInfo {
     pub label: Option<String>,
     pub ty: HirTy,
     pub has_default: bool,
+    /// `AstParam::takes_closure`: a trailing closure may fill it.
+    pub takes_closure: bool,
 }
 
 /// What kind of member was resolved.
@@ -319,19 +321,33 @@ pub trait TypeResolver {
     ///
     /// `is_call` separates `T.zero` (a property read) from `T.zero()` when a
     /// type has both a `static var zero` and a `static func zero()`.
+    ///
+    /// `extension_applies` answers whether a type extension's target type
+    /// args admit the receiver (`extend Wrap[Bool, Bool]` does not admit
+    /// `Wrap[String, String]`). Candidates are keyed on the type entity, so
+    /// only the solver — which can see the receiver's args — can tell.
     fn resolve_static_member(
         &self,
         receiver_ty: &TyKind,
         name: &str,
         args: &[crate::constraint::CallArg],
         is_call: bool,
+        extension_applies: &dyn Fn(Entity) -> bool,
     ) -> Result<MemberResolution, MemberError> {
-        let _ = (receiver_ty, name, args, is_call);
+        let _ = (receiver_ty, name, args, is_call, extension_applies);
         Err(MemberError::NotFound)
     }
 
     /// Check if a concrete type conforms to a protocol.
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool;
+
+    /// The entity a receiver's members live on, plus the arguments for that
+    /// entity's type params — THE pair member lookup and substitution share,
+    /// so they can never disagree. Nominal types answer themselves; the
+    /// world resolver also maps structural types to their `lang` entities.
+    fn entity_and_args(&self, ty: &TyKind) -> Option<(Entity, Vec<TyVar>)> {
+        ty.entity().map(|e| (e, ty.args().to_vec()))
+    }
 
     /// G17 — the base-aware half of [`Self::conforms_to`]'s
     /// `TyKind::AssocProjection` answer.
@@ -423,8 +439,9 @@ pub trait TypeResolver {
         member: Entity,
     ) -> Result<MemberResolution, MemberError>;
 
-    /// Check if `to` type can be constructed from `from` type via FromValue promotion.
-    /// Returns the `from()` method entity if promotion is possible.
+    /// Can `to` be built from a value via FromValue promotion? Returns the
+    /// `FromValue.from` REQUIREMENT when `to` conforms; the caller checks the
+    /// source against the conformance's `Output` arg.
     fn check_promotion(&self, from: &TyKind, to: &TyKind) -> Option<Entity>;
 }
 
@@ -475,6 +492,10 @@ impl TypeResolver for WorldResolver<'_> {
         self.build_member_resolution(member)
     }
 
+    fn entity_and_args(&self, ty: &TyKind) -> Option<(Entity, Vec<TyVar>)> {
+        self.structural_view(ty).or_else(|| ty.entity().map(|e| (e, ty.args().to_vec())))
+    }
+
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool {
         // Copyable / Cloneable are structural (copy-semantics), not *declared*
         // conformances — `ConformingProtocols` only materializes explicit
@@ -487,7 +508,8 @@ impl TypeResolver for WorldResolver<'_> {
             builtin: Builtin::Copyable,
             root: self.root,
         }) {
-            return self.copy_semantics_of(ty) != CopySemantics::NotCopyable;
+            return self.copy_semantics_of(ty) != CopySemantics::NotCopyable
+                && !matches!(ty, TyKind::RawExistential { .. });
         }
         if self.ctx.query(IsBuiltinProtocol {
             protocol,
@@ -495,6 +517,16 @@ impl TypeResolver for WorldResolver<'_> {
             root: self.root,
         }) {
             return self.copy_semantics_of(ty) == CopySemantics::Cloneable;
+        }
+        // Sized is structural too. Permissive like Static below: only a raw
+        // existential is rejected here; the precise per-instantiation answer
+        // (unsized tails, relaxed params) is the solver's `solver_ty_is_sized`.
+        if self.ctx.query(IsBuiltinProtocol {
+            protocol,
+            builtin: Builtin::Sized,
+            root: self.root,
+        }) {
+            return !matches!(ty, TyKind::RawExistential { .. });
         }
         // Static is likewise structural, never declared. DELIBERATELY
         // permissive (arg-independent — this resolver answer must never
@@ -568,7 +600,7 @@ impl TypeResolver for WorldResolver<'_> {
                 let bound_protocols = self.collect_assoc_type_protocol_bounds(*assoc);
                 bound_protocols.contains(&protocol)
             },
-            TyKind::Opaque { bounds, .. } => {
+            TyKind::Opaque { bounds, .. } | TyKind::RawExistential { bounds, .. } => {
                 // Expand all bounds through superprotocol chains
                 let mut all_protocols: Vec<Entity> = bounds.iter().map(|(p, _)| *p).collect();
                 let mut visited = crate::collections::HashSet::default();
@@ -583,51 +615,22 @@ impl TypeResolver for WorldResolver<'_> {
                 );
                 all_protocols.contains(&protocol)
             },
-            // Reference types conform via the generic synthetic entities
-            // (`extend &T: P` / `extend &mutating T: P`). Declares-only — the
-            // pointee is a TyVar (opaque here); the bound-aware answer is
-            // `type_satisfies`' Ref arm, which evaluates the extension's
-            // `where T: P` at the real pointee.
-            TyKind::Ref { mutating, .. } => {
-                let name = if *mutating { "&mutating" } else { "&" };
-                kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, name)
-                    .map(|e| {
-                        self.ctx
-                            .query(kestrel_name_res::ConformingProtocols {
-                                entity: e,
-                                root: self.root,
-                            })
-                            .contains(&protocol)
-                    })
-                    .unwrap_or(false)
-            },
-            // Structural singletons conform via their synthetic `lang` entities
-            // (`extend (): P` / `extend !: P`), keyed the same as nominal types.
-            TyKind::Tuple(elems) if elems.is_empty() => {
-                kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, "()")
-                    .map(|e| {
-                        self.ctx
-                            .query(kestrel_name_res::ConformingProtocols {
-                                entity: e,
-                                root: self.root,
-                            })
-                            .contains(&protocol)
-                    })
-                    .unwrap_or(false)
-            },
-            TyKind::Never => {
-                kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, "!")
-                    .map(|e| {
-                        self.ctx
-                            .query(kestrel_name_res::ConformingProtocols {
-                                entity: e,
-                                root: self.root,
-                            })
-                            .contains(&protocol)
-                    })
-                    .unwrap_or(false)
-            },
-            _ => false,
+            // Structural types (`&T`, `()`, `!`, `(A, B)`) conform via their
+            // synthetic `lang` entities (`extend &T: P`, `extend (X, Y): P`),
+            // keyed the same as nominal types. Declares-only — the element
+            // types are opaque here; the bound-aware answer (the extension's
+            // `where X: P` at the real elements) is `type_satisfies`'.
+            _ => self
+                .structural_view(ty)
+                .map(|(e, _)| {
+                    self.ctx
+                        .query(kestrel_name_res::ConformingProtocols {
+                            entity: e,
+                            root: self.root,
+                        })
+                        .contains(&protocol)
+                })
+                .unwrap_or(false),
         }
     }
 
@@ -734,14 +737,8 @@ impl TypeResolver for WorldResolver<'_> {
             // synthetic `lang` entities, so `().Mark` finds a binding declared in
             // `extend (): Marked { type Mark = … }` (#215) — mirrors the member
             // and conformance lookups in `resolve_member` / `conforms_to`.
-            TyKind::Tuple(elems) if elems.is_empty() => {
-                let entity =
-                    kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, "()")?;
-                self.find_associated_type_in_entity_and_extensions(entity, name)
-            },
-            TyKind::Never => {
-                let entity =
-                    kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, "!")?;
+            TyKind::Tuple(_) | TyKind::Never => {
+                let (entity, _) = self.structural_view(container)?;
                 self.find_associated_type_in_entity_and_extensions(entity, name)
             },
             TyKind::Protocol { .. }
@@ -762,9 +759,35 @@ impl TypeResolver for WorldResolver<'_> {
         assoc: Entity,
         name: &str,
     ) -> Option<AssociatedTypeResolution> {
-        // A concrete conformer's `type Out = …` witnesses every requirement
-        // spelled `Out`, so there the name *is* the match rule.
+        // A concrete conformer: the alias its conformance to `assoc`'s
+        // protocol supplies — its own, an extension's, or the blanket
+        // protocol extension's (`extend Comparable: Less[Self] { type
+        // Less.Output = Bool }`), qualifier-aware. Name lookup alone neither
+        // reaches the blanket nor tells `Less.Output` from `Equal.Output`.
         let Some(protocols) = self.abstract_container_bounds(container) else {
+            // `entity_and_args`, not `entity()`: a tuple's bindings live on its
+            // synthetic `lang.(,)` entity's extensions.
+            if let Some((entity, _)) = self.entity_and_args(container)
+                && let Some((alias, owner)) =
+                    self.ctx.query(kestrel_name_res::AssociatedTypeBinding {
+                        type_entity: entity,
+                        assoc,
+                        conformance_source: None,
+                        root: self.root,
+                    })
+                && let Some(resolved) = self.ctx.query(LowerTypeAnnotation {
+                    entity: alias,
+                    root: self.root,
+                })
+            {
+                let source_extension = (owner != entity
+                    && self.ctx.get::<NodeKind>(owner) == Some(&NodeKind::Extension))
+                .then_some(owner);
+                return Some(AssociatedTypeResolution {
+                    resolved,
+                    source_extension,
+                });
+            }
             return self.resolve_associated_type(container, name);
         };
         self.find_associated_type_in_protocols_where(&protocols, |e| e == assoc)
@@ -778,65 +801,18 @@ impl TypeResolver for WorldResolver<'_> {
     }
 
     fn check_promotion(&self, _from: &TyKind, to: &TyKind) -> Option<Entity> {
-        let to_entity = &match to {
-            TyKind::Struct { entity, .. }
-            | TyKind::Enum { entity, .. }
-            | TyKind::Protocol { entity, .. } => *entity,
-            _ => return None,
-        };
-
-        // Resolve the FromValue protocol
-        let from_value_protocol = self.builtin(Builtin::FromValueProtocol)?;
-
-        // Check if the target type conforms to FromValue
-        if !self.conforms_to(to, from_value_protocol) {
+        if !matches!(
+            to,
+            TyKind::Struct { .. } | TyKind::Enum { .. } | TyKind::Protocol { .. }
+        ) {
             return None;
         }
-
-        // Find the static `from` method on the target type (via extensions)
-        let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-            target: *to_entity,
-            root: self.root,
-        });
-
-        for ext in &extensions {
-            // Check if this extension provides FromValue conformance
-            if !self.extension_directly_conforms_to(*ext, from_value_protocol) {
-                continue;
-            }
-
-            // Look for a static `from` method in this extension
-            let children = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-                parent: *ext,
-                name: "from".to_string(),
-                context: self.body_owner,
-            });
-
-            for &child in &children {
-                if self.ctx.has::<Static>(child)
-                    && matches!(self.ctx.get::<NodeKind>(child), Some(NodeKind::Function))
-                {
-                    return Some(child);
-                }
-            }
+        let protocol = self.builtin(Builtin::FromValueProtocol)?;
+        if !self.conforms_to(to, protocol) {
+            return None;
         }
-
-        // Also check direct children (in case FromValue is implemented directly)
-        let direct = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-            parent: *to_entity,
-            name: "from".to_string(),
-            context: self.body_owner,
-        });
-
-        for &child in &direct {
-            if self.ctx.has::<Static>(child)
-                && matches!(self.ctx.get::<NodeKind>(child), Some(NodeKind::Function))
-            {
-                return Some(child);
-            }
-        }
-
-        None
+        self.builtin(Builtin::FromValueMethod)
+            .filter(|&m| self.ctx.parent_of(m) == Some(protocol))
     }
 
     fn resolve_static_member(
@@ -845,6 +821,7 @@ impl TypeResolver for WorldResolver<'_> {
         name: &str,
         args: &[crate::constraint::CallArg],
         is_call: bool,
+        extension_applies: &dyn Fn(Entity) -> bool,
     ) -> Result<MemberResolution, MemberError> {
         let Some(entity) = receiver_ty.entity() else {
             return Err(MemberError::NotFound);
@@ -870,12 +847,23 @@ impl TypeResolver for WorldResolver<'_> {
             TypeMemberSource::Extension(_) => 1,
             TypeMemberSource::ProtocolExtension { .. } => 2,
         };
+        // An extension for other type args contributes nothing — filtered
+        // before layering, so it can neither shadow nor tie with a member
+        // that does apply.
+        let applies = |source: &TypeMemberSource| match source {
+            TypeMemberSource::Extension(ext) => extension_applies(*ext),
+            _ => true,
+        };
         let mut seen: crate::collections::HashSet<String> = Default::default();
         let mut static_candidates: Vec<kestrel_hecs::Entity> = Vec::new();
         for current in 0..3 {
             let members: Vec<kestrel_hecs::Entity> = type_members
                 .iter()
-                .filter(|tm| layer(&tm.source) == current && self.ctx.has::<Static>(tm.entity))
+                .filter(|tm| {
+                    layer(&tm.source) == current
+                        && self.ctx.has::<Static>(tm.entity)
+                        && applies(&tm.source)
+                })
                 .map(|tm| tm.entity)
                 .collect();
             let fresh: Vec<kestrel_hecs::Entity> = members
@@ -914,16 +902,18 @@ impl TypeResolver for WorldResolver<'_> {
             };
         }
 
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let matches: Vec<kestrel_hecs::Entity> = static_candidates
             .iter()
             .copied()
             .filter(|&c| self.matches_labels(c, &arg_labels))
             .collect();
 
-        if std::env::var("DEBUG_STATIC_MEMBER").is_ok() {
-            eprintln!("  arg_labels={:?} matches={}", arg_labels, matches.len());
-        }
+        kestrel_debug::ktrace!(
+            "infer",
+            "static member {name}: arg_labels={arg_labels:?} matches={}",
+            matches.len()
+        );
 
         let member = match matches.len() {
             0 => {
@@ -937,6 +927,17 @@ impl TypeResolver for WorldResolver<'_> {
             },
             1 => matches[0],
             _ => {
+                // Same-label overloads that all witness one requirement of a
+                // parameterized protocol (`static func exactly(_: Int64)` +
+                // `exactly(_: Bool)` via `Exactly[Int64]` + `Exactly[Bool]`)
+                // collapse to that requirement, exactly as instance members
+                // and inits do in `resolve_member_nominal`; the solver then
+                // infers the protocol args from the call's arguments.
+                if let Some(proto_res) =
+                    self.try_resolve_through_protocol(entity, name, args, &matches)
+                {
+                    return Ok(proto_res);
+                }
                 return Err(MemberError::Ambiguous(
                     matches.into_iter().map(|e| (e, None, 0)).collect(),
                 ));
@@ -1086,7 +1087,55 @@ fn extract_protocol_type_args(
     }
 }
 
+/// Reverse of [`WorldResolver::structural_view`]: the structural type a
+/// synthetic `lang` entity stands for, at `args`. A body inside
+/// `extend (X, Y)` / `extend &T` sees `self` as the tuple / ref itself —
+/// never the synthetic entity — so `self.0` and the ref receiver peel work.
+pub(crate) fn structural_ty_kind(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    args: &[TyVar],
+) -> Option<TyKind> {
+    use kestrel_name_res::extensions::{lang_ref_mutability, lang_tuple_arity};
+    if let Some(mutating) = lang_ref_mutability(ctx, entity) {
+        return Some(TyKind::Ref { pointee: *args.first()?, mutating });
+    }
+    if let Some(arity) = lang_tuple_arity(ctx, entity) {
+        return (args.len() == arity).then(|| TyKind::Tuple(args.to_vec()));
+    }
+    let in_lang = ctx
+        .parent_of(entity)
+        .and_then(|p| ctx.get::<kestrel_ast_builder::Name>(p))
+        .is_some_and(|n| n.0 == "lang");
+    match ctx.get::<kestrel_ast_builder::Name>(entity)?.0.as_str() {
+        "()" if in_lang => Some(TyKind::Tuple(Vec::new())),
+        "!" if in_lang => Some(TyKind::Never),
+        _ => None,
+    }
+}
+
 impl WorldResolver<'_> {
+    /// THE map from a structural type to the synthetic `lang` entity its
+    /// extensions target, plus the arguments for that entity's type params:
+    /// `&T` / `&mutating T` → (`lang.&`, `[T]`), `()` / `!` → no args, and
+    /// `(A, B, …)` → (`lang.(,)` of that arity, the elements). `None` for
+    /// every other type. The reverse is [`structural_ty_kind`].
+    pub(crate) fn structural_view(&self, ty: &TyKind) -> Option<(Entity, Vec<TyVar>)> {
+        let (name, args) = match ty {
+            TyKind::Ref { mutating: true, pointee } => ("&mutating".to_string(), vec![*pointee]),
+            TyKind::Ref { mutating: false, pointee } => ("&".to_string(), vec![*pointee]),
+            TyKind::Tuple(elems) if elems.is_empty() => ("()".to_string(), Vec::new()),
+            TyKind::Tuple(elems) => (
+                kestrel_ast_builder::lang_module::lang_tuple_name(elems.len()),
+                elems.clone(),
+            ),
+            TyKind::Never => ("!".to_string(), Vec::new()),
+            _ => return None,
+        };
+        let entity = kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, &name)?;
+        Some((entity, args))
+    }
+
     /// Every receiver spine the owner's same-type clauses equate with
     /// `base_spine` for `assoc` (including `base_spine` itself):
     /// `where T.A = U.A` makes `[T]` and `[U]` interchangeable receivers of
@@ -1144,7 +1193,7 @@ impl WorldResolver<'_> {
         name: &str,
         args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError> {
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let mut protocols = vec![protocol];
         let mut visited = crate::collections::HashSet::default();
         visited.insert(protocol);
@@ -1189,12 +1238,13 @@ impl WorldResolver<'_> {
             return self.resolve_projection_member(*entity, None, name, _args);
         }
 
-        // Opaque types: delegate member resolution to the protocol bounds.
-        // Only the protocol interface and protocol extensions are visible;
-        // concrete-type extensions must NOT leak through.
-        if let TyKind::Opaque { bounds, .. } = receiver_ty {
+        // Opaque types and raw existentials: delegate member resolution to
+        // the protocol bounds. Only the protocol interface and protocol
+        // extensions are visible; concrete-type extensions must NOT leak
+        // through.
+        if let TyKind::Opaque { bounds, .. } | TyKind::RawExistential { bounds, .. } = receiver_ty {
             let bound_protocols: Vec<Entity> = bounds.iter().map(|(p, _)| *p).collect();
-            let arg_labels: Vec<Option<&str>> = _args.iter().map(|a| a.label.as_deref()).collect();
+            let arg_labels: Vec<BindArg> = _args.iter().map(BindArg::from).collect();
             match self.select_bound_candidate(&bound_protocols, name, &arg_labels)? {
                 Some(m) => return self.build_member_resolution(m),
                 None => {
@@ -1218,25 +1268,10 @@ impl WorldResolver<'_> {
             }
         }
 
-        let entity = match receiver_ty.entity() {
-            Some(e) => e,
-            // Structural singletons resolve members via their synthetic `lang`
-            // entities, so a direct `().foo()` / `().tag()` call finds members
-            // and conformances added by `extend ()` / `extend (): P`.
-            None => {
-                let lang_name = match receiver_ty {
-                    TyKind::Tuple(elems) if elems.is_empty() => "()",
-                    TyKind::Never => "!",
-                    _ => return Err(MemberError::NotFound),
-                };
-                match kestrel_name_res::extensions::resolve_lang_child(
-                    self.ctx, self.root, lang_name,
-                ) {
-                    Some(e) => e,
-                    None => return Err(MemberError::NotFound),
-                }
-            },
-        };
+        // Structural types (`()`, `!`, `(A, B)`, `&T`) resolve members via
+        // their synthetic `lang` entities, so `(a, b).m()` finds what
+        // `extend (X, Y)` declares; the solver binds X/Y from the same view.
+        let (entity, _) = self.entity_and_args(receiver_ty).ok_or(MemberError::NotFound)?;
         let entity = &entity;
 
         // Discover every type-side candidate by name in one pass: direct
@@ -1282,8 +1317,7 @@ impl WorldResolver<'_> {
         // protocol default when `Array` only declares `sorted(by:)` /
         // `sorted(byKey:)` (different signatures), but a direct overload that
         // does match wins.
-        let arg_labels_for_fallback: Vec<Option<&str>> =
-            _args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels_for_fallback: Vec<BindArg> = _args.iter().map(BindArg::from).collect();
         let direct_label_match = !all_candidates.is_empty()
             && all_candidates
                 .iter()
@@ -1351,7 +1385,7 @@ impl WorldResolver<'_> {
             }
             // A matching member that was filtered out by visibility?
             if let Some((candidate, visibility)) =
-                self.find_hidden_member(*entity, name, &extensions)
+                self.find_hidden_member(*entity, name, &extensions, None)
             {
                 return Err(MemberError::NotVisible {
                     candidate,
@@ -1362,7 +1396,7 @@ impl WorldResolver<'_> {
         }
 
         // Overload resolution: filter by matching argument labels and arity
-        let arg_labels: Vec<Option<&str>> = _args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = _args.iter().map(BindArg::from).collect();
         let matches: Vec<Entity> = instance_candidates
             .iter()
             .copied()
@@ -1371,6 +1405,16 @@ impl WorldResolver<'_> {
 
         let member = match matches.len() {
             0 => {
+                // A hidden overload these labels pick (`d(0)` next to a
+                // public `d(checked:)`) is a visibility error, not a label one.
+                if let Some((candidate, visibility)) =
+                    self.find_hidden_member(*entity, name, &extensions, Some(&arg_labels))
+                {
+                    return Err(MemberError::NotVisible {
+                        candidate,
+                        visibility,
+                    });
+                }
                 // No label match — recover a representative candidate so the
                 // downstream arg-binding emits a precise "wrong argument label"
                 // diagnostic instead of a vague "no member". Safe when exactly
@@ -1432,30 +1476,40 @@ impl WorldResolver<'_> {
     /// name match, returning the first hit along with its declared `Vis`.
     /// Used only when normal resolution came up empty, so the diagnostic can
     /// distinguish "is private" from "no member".
+    /// A member named `name` (keyword sentinels included, so subscripts and
+    /// inits count) that the visibility filter hid from this body, for an
+    /// E115 instead of "no member". With `labels`, only one the call's
+    /// labels would have matched.
     fn find_hidden_member(
         &self,
         entity: Entity,
         name: &str,
         extensions: &[Entity],
+        labels: Option<&[BindArg<'_>]>,
     ) -> Option<(Entity, Vis)> {
         let probe = |parent: Entity| -> Option<(Entity, Vis)> {
-            for &child in self.ctx.children_of(parent) {
-                if self.ctx.get::<Name>(child).is_some_and(|n| n.0 == name) {
-                    let vis = self.ctx.get::<Vis>(child).cloned().unwrap_or(Vis::Public);
-                    return Some((child, vis));
-                }
-            }
-            None
+            self.ctx
+                .children_of(parent)
+                .iter()
+                .copied()
+                .find_map(|child| {
+                    if kestrel_name_res::helpers::member_lookup_name(self.ctx, child) != Some(name)
+                    {
+                        return None;
+                    }
+                    if labels.is_some_and(|l| !self.matches_labels(child, l)) {
+                        return None;
+                    }
+                    let visible = self.ctx.query(kestrel_name_res::IsVisibleFrom {
+                        target: child,
+                        context: self.body_owner,
+                    });
+                    (!visible).then(|| (child, kestrel_name_res::effective_vis(self.ctx, child)))
+                })
         };
-        if let Some(hit) = probe(entity) {
-            return Some(hit);
-        }
-        for &ext in extensions {
-            if let Some(hit) = probe(ext) {
-                return Some(hit);
-            }
-        }
-        None
+        std::iter::once(entity)
+            .chain(extensions.iter().copied())
+            .find_map(probe)
     }
 
     /// Search a concrete type entity's children, then its conforming extensions,
@@ -1656,6 +1710,7 @@ impl WorldResolver<'_> {
                         label: p.label.clone(),
                         ty,
                         has_default: p.default_entity.is_some(),
+                        takes_closure: p.takes_closure(),
                     }
                 })
                 .collect()
@@ -1749,33 +1804,17 @@ impl WorldResolver<'_> {
             root: self.root,
         });
 
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let mut found: Option<(Entity, Entity)> = None; // (protocol, method)
 
         for &proto in &protocols {
-            // Search protocol's direct children for a matching member
-            let candidates = if name == "init" {
-                // Inits have no Name — search by NodeKind
-                self.ctx
-                    .children_of(proto)
-                    .iter()
-                    .filter(|&&c| self.ctx.get::<NodeKind>(c) == Some(&NodeKind::Initializer))
-                    .copied()
-                    .collect::<Vec<_>>()
-            } else if name == "subscript" {
-                self.ctx
-                    .children_of(proto)
-                    .iter()
-                    .filter(|&&c| self.ctx.get::<NodeKind>(c) == Some(&NodeKind::Subscript))
-                    .copied()
-                    .collect::<Vec<_>>()
-            } else {
-                self.ctx.query(kestrel_name_res::VisibleChildrenByName {
-                    parent: proto,
-                    name: name.to_string(),
-                    context: self.body_owner,
-                })
-            };
+            // The protocol's own requirements (`protocols` already holds its
+            // parents); `"init"` / `"subscript"` match nameless members.
+            let candidates = self.ctx.query(kestrel_name_res::VisibleChildrenByName {
+                parent: proto,
+                name: name.to_string(),
+                context: self.body_owner,
+            });
 
             // Filter by label match
             let matched: Vec<Entity> = candidates
@@ -1894,13 +1933,14 @@ impl WorldResolver<'_> {
                     .and_then(|t| t.clone())
                     .unwrap_or(HirTy::Error(Span::synthetic(0))),
                 has_default: p.default_entity.is_some(),
+                takes_closure: p.takes_closure(),
             })
             .collect()
     }
 
     /// Check if a callable's parameter labels match the given argument labels.
     /// Handles arity with default parameters.
-    fn matches_labels(&self, entity: Entity, arg_labels: &[Option<&str>]) -> bool {
+    fn matches_labels(&self, entity: Entity, arg_labels: &[BindArg<'_>]) -> bool {
         // Fields and computed properties carry `Callable { params: [] }` for
         // the getter's signature, but for member-resolution purposes they are
         // value accesses, not function calls. Trailing `(args)` after a
@@ -1918,11 +1958,7 @@ impl WorldResolver<'_> {
         // Match args to params in declaration order, allowing defaulted params
         // to be skipped anywhere (not just trailing). Single source of truth:
         // `arg_binding::bind_arguments`.
-        let bind_params: Vec<BindParam> = callable
-            .params
-            .iter()
-            .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
-            .collect();
+        let bind_params: Vec<BindParam> = callable.params.iter().map(BindParam::of).collect();
         binds(&bind_params, arg_labels)
     }
 
@@ -1985,72 +2021,12 @@ impl WorldResolver<'_> {
             .collect()
     }
 
-    /// Direct-only: does this extension entity declare a conformance to
-    /// `protocol` in its own `Conformances` list?
-    ///
-    /// Intentionally does NOT walk inheritance or other extensions — callers
-    /// that want the full transitive set must use `ConformingProtocols`.
-    /// Used by `check_promotion` to identify which extension directly declares
-    /// `FromValue` so we can search it for the corresponding static `from`
-    /// method.
-    fn extension_directly_conforms_to(&self, entity: Entity, protocol: Entity) -> bool {
-        let Some(conformances) = self.ctx.get::<Conformances>(entity) else {
-            return false;
-        };
-
-        for item in &conformances.0 {
-            if let ConformanceItem::Positive(ast_ty, _) = item
-                && let Some(resolved) = self.resolve_type_entity(ast_ty)
-                && resolved == protocol
-            {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    /// Resolve an AstType to a type entity using ResolveTypePath. Resolution
-    /// starts from `self.body_owner` (the body being inferred). For type-definition-
-    /// scoped resolution (e.g. where clauses), use the `WhereClausesOf` query
-    /// instead of threading `self.body_owner` through to non-body contexts.
+    /// The type entity an annotation names, resolved from `self.body_owner`
+    /// (the body being inferred). For type-definition-scoped resolution (e.g.
+    /// where clauses), use the `WhereClausesOf` query instead of threading
+    /// `self.body_owner` through to non-body contexts.
     fn resolve_type_entity(&self, ast_ty: &kestrel_ast_builder::AstType) -> Option<Entity> {
-        use kestrel_ast_builder::AstType;
-        match ast_ty {
-            AstType::Named { segments, .. } => {
-                let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-                match self.ctx.query(ResolveTypePath {
-                    segments: seg_names,
-                    context: self.body_owner,
-                    root: self.root,
-                }) {
-                    TypeResolution::Found(entity) => Some(entity),
-                    TypeResolution::SelfType => self.resolve_self_entity_from(self.body_owner),
-                    _ => None,
-                }
-            },
-            _ => None,
-        }
-    }
-
-    /// Resolve `Self` to the enclosing type entity, starting from `start`.
-    fn resolve_self_entity_from(&self, start: Entity) -> Option<Entity> {
-        let mut current = Some(start);
-        while let Some(entity) = current {
-            match self.ctx.get::<NodeKind>(entity) {
-                Some(NodeKind::Extension) => {
-                    return self.ctx.query(kestrel_name_res::ExtensionTargetEntity {
-                        extension: entity,
-                        root: self.root,
-                    });
-                },
-                Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) => {
-                    return Some(entity);
-                },
-                _ => current = self.ctx.parent_of(entity),
-            }
-        }
-        None
+        kestrel_name_res::annotation_entity(self.ctx, ast_ty, self.body_owner, self.root)
     }
 
     /// Resolve a member on a type parameter by searching its protocol bounds.
@@ -2073,7 +2049,7 @@ impl WorldResolver<'_> {
         // resolves name collisions between a primary bound and its inherited
         // conformances (e.g., Equatable.equals vs Equal.equals introduced by
         // `extend Equatable: Equal[Self]`).
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let member =
             if let Some(m) = self.select_bound_candidate(&direct_bounds, name, &arg_labels)? {
                 m
@@ -2155,7 +2131,7 @@ impl WorldResolver<'_> {
     ) -> Option<Vec<HirTy>> {
         let conformances = self.ctx.get::<Conformances>(from_protocol)?;
         for item in &conformances.0 {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
+            let ConformanceItem::Positive(ast_ty, ..) = item else {
                 continue;
             };
             let Some(resolved) = self.resolve_type_entity(ast_ty) else {
@@ -2228,7 +2204,7 @@ impl WorldResolver<'_> {
         &self,
         protocols: &[Entity],
         name: &str,
-        arg_labels: &[Option<&str>],
+        arg_labels: &[BindArg<'_>],
     ) -> Result<Option<Entity>, MemberError> {
         if protocols.is_empty() {
             return Ok(None);
@@ -2276,7 +2252,7 @@ impl WorldResolver<'_> {
             return Err(MemberError::NotFound);
         }
 
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let matches: Vec<Entity> = instance_candidates
             .iter()
             .copied()
@@ -2354,7 +2330,7 @@ impl WorldResolver<'_> {
     ) -> Result<MemberResolution, MemberError> {
         // Prefer direct bounds over expanded bounds (same reason as
         // resolve_param_member — see the comment there).
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let mut direct = self.collect_assoc_type_direct_bounds(alias_entity);
         self.retain_base_admitted(alias_entity, base_spine, &mut direct);
         if let Some(m) = self.select_bound_candidate(&direct, name, &arg_labels)? {
@@ -2398,7 +2374,7 @@ impl WorldResolver<'_> {
         }
 
         // Label matching for static members
-        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let arg_labels: Vec<BindArg> = args.iter().map(BindArg::from).collect();
         let matches: Vec<Entity> = static_candidates
             .iter()
             .copied()
@@ -2488,7 +2464,7 @@ impl WorldResolver<'_> {
         // Check Conformances on the TypeAlias itself (e.g., `type Iter: Iterator`)
         if let Some(conformances) = self.ctx.get::<Conformances>(alias_entity) {
             for item in &conformances.0 {
-                if let ConformanceItem::Positive(ast_ty, _) = item
+                if let ConformanceItem::Positive(ast_ty, ..) = item
                     && let Some(proto) = self.resolve_type_entity(ast_ty)
                     && self.ctx.get::<NodeKind>(proto) == Some(&NodeKind::Protocol)
                     && visited.insert(proto)
@@ -2643,9 +2619,10 @@ impl WorldResolver<'_> {
                     CopyRequirement::MayBeNonCopyable => CopySemantics::NotCopyable,
                 }
             },
-            // Mirror `hir_type_copy_semantics`: protocol existentials / `some P`
-            // are Copyable; an abstract associated projection is conservatively
-            // NotCopyable (not known to be copyable).
+            // Protocol existentials / `some P` are Copyable. An abstract
+            // associated projection is conservatively NotCopyable here (not
+            // known to be copyable) — UNLIKE `ty_copy_semantics`, which makes
+            // it Copyable-by-default; see this function's doc comment.
             TyKind::Protocol { .. } => CopySemantics::Copyable,
             // `some P and not Copyable` may hide a move-only underlier.
             TyKind::Opaque { not_copyable, .. } => {
@@ -2656,6 +2633,13 @@ impl WorldResolver<'_> {
                 }
             },
             TyKind::AssocProjection { .. } => CopySemantics::NotCopyable,
+            TyKind::RawExistential { bounds, .. } => {
+                kestrel_semantics::raw_existential_copy_semantics(
+                    self.ctx,
+                    bounds.iter().map(|(protocol, _)| *protocol),
+                    self.root,
+                )
+            },
             // A closure value's copy class is its KIND's (plan D6) — the twin
             // of the `solver_copy_class` arm.
             TyKind::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),

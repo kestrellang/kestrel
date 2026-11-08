@@ -26,7 +26,7 @@ struct Grid {
         let h = self.height;
         var xx = x; if xx < 0 { xx = xx + w; } else { if xx >= w { xx = xx - w; } }
         var yy = y; if yy < 0 { yy = yy + h; } else { if yy >= h { yy = yy - h; } }
-        self.cells(unchecked: yy * w + xx)
+        unsafe self.cells(unchecked: yy * w + xx)
     }
 
     func neighborCount(x x: Int64, y y: Int64) -> Int64 {
@@ -47,7 +47,7 @@ struct Grid {
                 let alive = self.cellAt(x: x, y: y);
                 let n = self.neighborCount(x: x, y: y);
                 let nextAlive = if alive { n == 2 or n == 3 } else { n == 3 };
-                self.next(unchecked: y * self.width + x) = nextAlive;
+                unsafe self.next(unchecked: y * self.width + x) = nextAlive;
             }
         }
         let tmp = self.cells;
@@ -72,11 +72,11 @@ func main() {
     var grid = Grid(width: W, height: H);
     grid.randomize(seed: 12648430);
 
-    let t0 = benchNowNs();
+    let t0 = unsafe benchNowNs();
     for _ in 0..<ITERS {
         grid.step();
     }
-    let t1 = benchNowNs();
+    let t1 = unsafe benchNowNs();
 
     var live: Int64 = 0;
     for i in 0..<grid.cells.count {

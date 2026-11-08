@@ -27,6 +27,7 @@ import std.ffi.(FFISafe, malloc, free, memcpy)
 import std.numeric.(Int64, UInt8)
 import std.memory.(Pointer, RawPointer)
 import std.core.(Convertible, Bool)
+import std.collections.(Slice)
 import std.text.(String)
 
 /// A null-terminated, non-owning byte pointer suitable for `@extern(.C)` boundaries.
@@ -107,7 +108,7 @@ public struct CString: FFISafe {
             return 0
         }
         var len = 0;
-        while self.raw.offset(by: len).read() != 0 {
+        while unsafe self.raw.offset(by: len).read() != 0 {
             len = len + 1;
         }
         len
@@ -127,7 +128,7 @@ public struct CString: FFISafe {
     /// etc.) is undefined behaviour.
     public func free() {
         if not self.raw.isNull {
-            std.ffi.free(self.raw.asRaw());
+            unsafe std.ffi.free(self.raw.asRaw());
         }
     }
 }
@@ -162,16 +163,16 @@ extend String {
         let byteLen = self.bytes.count;
         let totalSize = byteLen + 1;
 
-        let rawPtr = malloc(totalSize);
+        let rawPtr = unsafe malloc(totalSize);
         let ptr = rawPtr.cast[UInt8]();
 
         if ptr.isNull == false {
             if byteLen > 0 {
                 let srcPtr = RawPointer(raw: self.bytes.asRaw());
-                 memcpy(rawPtr, srcPtr, byteLen);
+                 unsafe memcpy(rawPtr, srcPtr, byteLen);
             }
 
-            ptr.offset(by: byteLen).write(0);
+            unsafe ptr.offset(by: byteLen).write(0);
         }
 
         return CString(raw: ptr);
@@ -186,6 +187,11 @@ extend String {
 extend String: Convertible[CString] {
     /// @name From CString
     /// Builds a `String` by copying the bytes out of `cstring`, excluding the null terminator.
+    ///
+    /// Bytes that aren't valid UTF-8 become U+FFFD, as with
+    /// `String(fromUtf8Lossy:)`, so the result is always a valid
+    /// `String`: C strings such as file names and environment values are
+    /// often not UTF-8.
     ///
     /// O(n) — `cstring.length` walks to the terminator and the byte
     /// copy is linear. Empty `CString`s (length zero) yield the
@@ -207,8 +213,11 @@ extend String: Convertible[CString] {
         if cstring.length == 0 {
             self.init();
         } else {
-            // Copy bytes from CString (excluding null terminator)
-            self = String.fromBytesUnchecked(cstring.raw, cstring.length);
+            // Copy bytes from CString (excluding null terminator). The
+            // checked copy is the fast path; only invalid input pays for
+            // the lossy decode.
+            let bytes = unsafe Slice.lend(start: cstring.raw, count: cstring.length);
+            self = String(fromUtf8: bytes) ?? String(fromUtf8Lossy: bytes);
         }
     }
 }

@@ -2,16 +2,18 @@ pub mod audit;
 pub mod collect;
 mod entail;
 pub mod expand;
+pub mod fat;
 pub mod mangle;
 mod ty_sites;
 pub mod types;
 pub mod verify;
+mod vtable;
 pub mod witness;
 
 pub use collect::CollectionResult;
 pub use types::{
     InstantiationKey, MonoEnum, MonoEnumCase, MonoField, MonoFunction, MonoModule, MonoParam,
-    MonoStruct, MonoTypeKey,
+    MonoStruct, MonoTypeKey, MonoVTable, MonoVTableEntry,
 };
 pub use verify::{MonoVerifyError, MonoVerifyResult};
 pub use witness::MonoError;
@@ -36,6 +38,7 @@ use crate::item::{Layout, TargetConfig};
 use crate::layout::StructLayout;
 use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
+use crate::ty_query::TypeEnv;
 use crate::value::Ownership;
 use crate::{CopyBehavior, MirModule, MonoFuncId, TyId};
 
@@ -59,13 +62,26 @@ pub fn monomorphize(
         entity_names,
         copyable_protocol,
         cloneable_protocol,
+        static_protocol,
+        sized_protocol,
         // Condition lowering is complete before mono: mir-lower has already
         // decided raw-branch vs `boolValue()` witness call, and the resulting
         // `Callee::Witness` is resolved by the ordinary witness machinery.
         boolean_conditional_protocol: _,
         bool_struct: _,
         observable_drop,
+        vtable_templates,
+        existential_clone_thunk,
     } = module;
+    let env = TypeEnv {
+        structs: &structs,
+        enums: &enums,
+        protocols: &protocols,
+        cloneable_protocol,
+        copyable_protocol,
+        static_protocol,
+        sized_protocol,
+    };
 
     // Phase 1: Instantiation discovery
     let CollectionResult {
@@ -73,12 +89,12 @@ pub fn monomorphize(
         witness_cache,
     } = collect::collect_all(
         &functions,
-        &structs,
-        &enums,
-        &protocols,
+        env,
         &witnesses,
         &mut ty_arena,
         &entity_names,
+        &vtable_templates,
+        existential_clone_thunk,
     )?;
 
     // Phase 2: Body monomorphization
@@ -89,11 +105,10 @@ pub fn monomorphize(
         let result = monomorphize_body(
             &mut ty_arena,
             &functions,
-            &protocols,
+            &env,
             &witnesses,
             &entity_names,
             key,
-            cloneable_protocol,
         );
         mono_bodies.push(result);
     }
@@ -108,6 +123,18 @@ pub fn monomorphize(
     for body_result in mono_bodies.iter_mut() {
         rewrite_callees(body_result, &func_id_map, &functions);
     }
+
+    // Phase 3b: existential function tables — intern each table literal.
+    let vtables = {
+        let mut interner =
+            vtable::VTableInterner::new(&vtable_templates, &func_id_map, &ty_arena, &entity_names);
+        for body_result in mono_bodies.iter_mut() {
+            if let Some(body) = &mut body_result.body {
+                interner.rewrite_body(body);
+            }
+        }
+        interner.tables
+    };
 
     // Phase 4: Type and layout resolution
     let (mono_structs, mono_enums) = resolve_types_and_layouts(
@@ -235,11 +262,13 @@ pub fn monomorphize(
             extern_info: body_result.extern_info.clone(),
             is_main: body_result.is_main,
             ret_borrow,
+            inline: body_result.inline,
         });
     }
 
     mono_module.entity_names = entity_names;
     mono_module.observable_drop = observable_drop;
+    mono_module.vtables = vtables;
     mono_module.structs = mono_structs;
     mono_module.enums = mono_enums;
 
@@ -247,6 +276,10 @@ pub fn monomorphize(
     for s in statics.values() {
         mono_module.statics.insert(s.entity, s.clone());
     }
+
+    // Two-word (data, table) pointers: rewrite the ops that meet one now
+    // that every type is concrete.
+    fat::legalize(&mut mono_module, &func_id_map, existential_clone_thunk);
 
     Ok(mono_module)
 }
@@ -390,16 +423,16 @@ struct MonoBodyResult {
     ret: TyId,
     extern_info: Option<crate::item::function::ExternInfo>,
     is_main: bool,
+    inline: Option<crate::item::function::InlineMode>,
 }
 
 fn monomorphize_body(
     arena: &mut TyArena,
     functions: &IndexMap<Entity, FunctionDef>,
-    protocols: &IndexMap<Entity, ProtocolDef>,
+    env: &TypeEnv<'_>,
     witnesses: &[WitnessDef],
     entity_names: &IndexMap<Entity, String>,
     key: &InstantiationKey,
-    cloneable_protocol: Option<Entity>,
 ) -> MonoBodyResult {
     let func = functions
         .get(&key.func_entity)
@@ -410,7 +443,7 @@ fn monomorphize_body(
         &key.type_args,
         key.self_type,
         arena,
-        protocols,
+        env.protocols,
         witnesses,
     );
 
@@ -431,6 +464,7 @@ fn monomorphize_body(
 
     let extern_info = func.extern_info.clone();
     let is_main = func.is_main;
+    let inline = func.inline;
 
     let Some(body) = &func.body else {
         return MonoBodyResult {
@@ -439,6 +473,7 @@ fn monomorphize_body(
             ret,
             extern_info,
             is_main,
+            inline,
         };
     };
 
@@ -471,7 +506,7 @@ fn monomorphize_body(
             // `Cloneable.clone()` on an escaping closure: the closure is a
             // shared handle with no witness function; cloning it is a retain.
             if let Some(copy) =
-                closure_clone_as_copy(arena, &inst.kind, &subst, witnesses, cloneable_protocol)
+                closure_clone_as_copy(arena, &inst.kind, &subst, witnesses, env.cloneable_protocol)
             {
                 adapted.push(Instruction {
                     kind: copy,
@@ -482,7 +517,7 @@ fn monomorphize_body(
             substitute_inst(
                 arena,
                 witnesses,
-                protocols,
+                env,
                 functions,
                 entity_names,
                 &mut inst.kind,
@@ -496,9 +531,16 @@ fn monomorphize_body(
             // would leak or double-drop the argument (a borrowed value stored
             // by a consuming setter was freed twice) — fail loudly instead.
             if was_witness && let Some(idx) = witness_convention_mismatch(&inst.kind, functions) {
+                let witness = match &inst.kind {
+                    InstKind::Call {
+                        callee: Callee::Direct { func, .. },
+                        ..
+                    } => functions.get(func).map(|f| f.name.clone()),
+                    _ => None,
+                };
                 panic!(
                     "ICE: witness call in {:?} passes arg {idx} with a convention its witness \
-                     doesn't take — the requirement and witness disagree",
+                     {witness:?} doesn't take — the requirement and witness disagree",
                     func.name
                 );
             }
@@ -553,6 +595,7 @@ fn monomorphize_body(
         ret,
         extern_info,
         is_main,
+        inline,
     }
 }
 
@@ -571,7 +614,6 @@ fn closure_clone_as_copy(
         callee:
             Callee::Witness {
                 protocol,
-                method,
                 self_type,
                 ..
             },
@@ -580,7 +622,9 @@ fn closure_clone_as_copy(
     else {
         return None;
     };
-    if Some(*protocol) != cloneable_protocol || method.name != "clone" {
+    // `Cloneable` has exactly one requirement (`clone_shim::clone_witness_key`
+    // relies on the same invariant), so the protocol alone names it.
+    if Some(*protocol) != cloneable_protocol {
         return None;
     }
     let concrete = collect::substitute_and_resolve(arena, witnesses, *self_type, subst);
@@ -621,7 +665,7 @@ fn witness_convention_mismatch(
 fn substitute_inst(
     arena: &mut TyArena,
     witnesses: &[WitnessDef],
-    protocols: &IndexMap<Entity, ProtocolDef>,
+    env: &TypeEnv<'_>,
     functions: &IndexMap<Entity, FunctionDef>,
     entity_names: &IndexMap<Entity, String>,
     kind: &mut InstKind,
@@ -644,7 +688,7 @@ fn substitute_inst(
         substitute_callee_and_resolve(
             arena,
             witnesses,
-            protocols,
+            env,
             functions,
             entity_names,
             callee,
@@ -707,7 +751,10 @@ fn substitute_immediate(
         collect::substitute_and_resolve(arena, witnesses, ty, subst)
     };
     match kind {
-        ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) | ImmediateKind::NullPtr(ty) => {
+        ImmediateKind::SizeOf(ty)
+        | ImmediateKind::AlignOf(ty)
+        | ImmediateKind::NullPtr(ty)
+        | ImmediateKind::VTable { payload: ty, .. } => {
             *ty = resolve(arena, *ty);
         },
         ImmediateKind::FunctionRef {
@@ -721,6 +768,20 @@ fn substitute_immediate(
             if let Some(st) = self_type {
                 *st = resolve(arena, *st);
             }
+        },
+        ImmediateKind::CFunctionRef {
+            type_args,
+            self_type,
+            ty,
+            ..
+        } => {
+            for ta in type_args.iter_mut() {
+                *ta = resolve(arena, *ta);
+            }
+            if let Some(st) = self_type {
+                *st = resolve(arena, *st);
+            }
+            *ty = resolve(arena, *ty);
         },
         _ => {},
     }
@@ -744,7 +805,7 @@ fn substitute_op_type(
 fn substitute_callee_and_resolve(
     arena: &mut TyArena,
     witnesses: &[WitnessDef],
-    protocols: &IndexMap<Entity, ProtocolDef>,
+    env: &TypeEnv<'_>,
     functions: &IndexMap<Entity, FunctionDef>,
     entity_names: &IndexMap<Entity, String>,
     callee: &mut Callee,
@@ -793,7 +854,7 @@ fn substitute_callee_and_resolve(
             let witness_result = witness::resolve_witness_call(
                 arena,
                 witnesses,
-                protocols,
+                env,
                 functions,
                 entity_names,
                 *protocol,
@@ -833,17 +894,32 @@ fn rewrite_callees(
             for (_, callee) in inst.kind.callees_mut() {
                 rewrite_callee(callee, func_id_map, functions);
             }
-            if let InstKind::Literal { value, .. } = &mut inst.kind
-                && let ImmediateKind::FunctionRef {
+            let InstKind::Literal { value, .. } = &mut inst.kind else {
+                continue;
+            };
+            match &value.kind {
+                ImmediateKind::FunctionRef {
                     func,
                     type_args,
                     self_type,
-                } = &value.kind
-            {
-                let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
-                if let Some(&mono_id) = func_id_map.get(&key) {
-                    value.kind = ImmediateKind::MonoFunctionRef(mono_id);
-                }
+                } => {
+                    let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                    if let Some(&mono_id) = func_id_map.get(&key) {
+                        value.kind = ImmediateKind::MonoFunctionRef(mono_id);
+                    }
+                },
+                ImmediateKind::CFunctionRef {
+                    func,
+                    type_args,
+                    self_type,
+                    ty,
+                } => {
+                    let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+                    if let Some(&mono_id) = func_id_map.get(&key) {
+                        value.kind = ImmediateKind::MonoCFunctionRef(mono_id, *ty);
+                    }
+                },
+                _ => {},
             }
         }
     }
@@ -940,11 +1016,12 @@ fn resolve_types_and_layouts(
                     let subst =
                         build_type_subst(sdef.type_params.iter().map(|tp| tp.entity), type_args);
 
-                    let mut layout = StructLayout::new();
+                    let mut layout = StructLayout::with_attrs(sdef.layout_attrs);
                     let mut all_resolved = true;
                     let mut fields = Vec::new();
 
-                    for field in &sdef.fields {
+                    let last = sdef.fields.len().saturating_sub(1);
+                    for (i, field) in sdef.fields.iter().enumerate() {
                         let concrete_ty =
                             collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
                         fields.push(MonoField::new(&field.name, concrete_ty));
@@ -956,9 +1033,29 @@ fn resolve_types_and_layouts(
                             enums,
                         );
 
-                        if let Some((size, align)) =
-                            mono_size_and_align(arena, concrete_ty, target, &layout_cache)
+                        // An unsized last field is the struct's unsized
+                        // tail: lay out the prefix only.
+                        if i == last
+                            && crate::ty::is_unsized(
+                                &mut GenericTails {
+                                    arena,
+                                    structs,
+                                    witnesses,
+                                },
+                                concrete_ty,
+                            )
                         {
+                            layout.unsized_tail = true;
+                            continue;
+                        }
+                        if let Some((size, align)) = mono_size_and_align(
+                            arena,
+                            structs,
+                            witnesses,
+                            concrete_ty,
+                            target,
+                            &layout_cache,
+                        ) {
                             layout.append_field(StructLayout::scalar(size, align));
                         } else {
                             all_resolved = false;
@@ -967,7 +1064,7 @@ fn resolve_types_and_layouts(
                     }
 
                     if all_resolved {
-                        layout.pad_to_align();
+                        let layout = layout.finish();
                         layout_cache.insert(cache_key, (layout.size, layout.align));
                         let mut ms = MonoStruct::new(*entity, type_args.clone());
                         ms.fields = fields;
@@ -1000,9 +1097,14 @@ fn resolve_types_and_layouts(
                                 structs,
                                 enums,
                             );
-                            if let Some((size, align)) =
-                                mono_size_and_align(arena, concrete_ty, target, &layout_cache)
-                            {
+                            if let Some((size, align)) = mono_size_and_align(
+                                arena,
+                                structs,
+                                witnesses,
+                                concrete_ty,
+                                target,
+                                &layout_cache,
+                            ) {
                                 case_layout.append_field(StructLayout::scalar(size, align));
                             } else {
                                 all_resolved = false;
@@ -1020,7 +1122,11 @@ fn resolve_types_and_layouts(
                     }
 
                     if all_resolved {
-                        let enum_layout = build_enum_layout(&variant_layouts, edef.cases.len());
+                        let enum_layout = build_enum_layout(
+                            &variant_layouts,
+                            edef.cases.len(),
+                            edef.layout_attrs,
+                        );
                         layout_cache.insert(cache_key, (enum_layout.size, enum_layout.align));
                         let mut me = MonoEnum::new(
                             *entity,
@@ -1157,33 +1263,18 @@ impl CopyLayer for MonoCopyLayer<'_> {
         // invariant whenever gating is non-empty (the only case the refine
         // loop reaches), so the kernel always falls through to the gating fold
         // — exactly the former `conditional_copy` behavior.
-        let copy = self
-            .structs
-            .get(&entity)
-            .map(|s| s.type_info.copy.clone())
-            .or_else(|| self.enums.get(&entity).map(|e| e.type_info.copy.clone()))
-            .unwrap_or(CopyBehavior::Bitwise);
+        let (copy, gating) = crate::ty_query::nominal_copy_in(self.structs, self.enums, entity);
         // Checked form of the invariant above: a pass that flips a conditional
         // container's base away from None would silently skip the gating fold.
         debug_assert!(
-            self.gating_positions(entity).is_empty() || matches!(copy, CopyBehavior::None),
+            gating.is_empty() || matches!(copy, CopyBehavior::None),
             "conditional container's generic def must keep CopyBehavior::None"
         );
         copy
     }
 
-    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
-        Cow::Borrowed(
-            self.structs
-                .get(&entity)
-                .map(|s| s.conditionally_copyable.as_slice())
-                .or_else(|| {
-                    self.enums
-                        .get(&entity)
-                        .map(|e| e.conditionally_copyable.as_slice())
-                })
-                .unwrap_or(&[]),
-        )
+    fn conditional_copy(&self, entity: Entity) -> Cow<'_, kestrel_copy_fold::ConditionalCopy> {
+        Cow::Borrowed(crate::ty_query::nominal_copy_in(self.structs, self.enums, entity).1)
     }
 
     fn member_semantics(&self, &ty: &TyId) -> CopyBehavior {
@@ -1303,11 +1394,25 @@ use crate::passes::layout::{build_enum_layout, primitive_size_and_align};
 
 /// Compute size and alignment for a concrete type, looking up mono layouts.
 fn mono_size_and_align(
-    arena: &TyArena,
+    arena: &mut TyArena,
+    structs: &IndexMap<Entity, StructDef>,
+    witnesses: &[WitnessDef],
     ty: TyId,
     target: &TargetConfig,
     layout_cache: &HashMap<(Entity, Vec<TyId>), (u64, u64)>,
 ) -> Option<(u64, u64)> {
+    // (data, table): a pointer to an unsized type, or a borrowed
+    // raw-existential value.
+    if crate::ty::is_fat(
+        &mut GenericTails {
+            arena,
+            structs,
+            witnesses,
+        },
+        ty,
+    ) {
+        return Some((target.pointer_size() * 2, target.pointer_size()));
+    }
     if let Some(sa) = primitive_size_and_align(arena.get(ty), target) {
         return Some(sa);
     }
@@ -1319,7 +1424,8 @@ fn mono_size_and_align(
             }
             let mut layout = StructLayout::new();
             for elem in &elems {
-                let (size, align) = mono_size_and_align(arena, *elem, target, layout_cache)?;
+                let (size, align) =
+                    mono_size_and_align(arena, structs, witnesses, *elem, target, layout_cache)?;
                 layout.append_field(StructLayout::scalar(size, align));
             }
             layout.pad_to_align();
@@ -1332,6 +1438,31 @@ fn mono_size_and_align(
         },
 
         _ => None,
+    }
+}
+
+/// [`crate::ty::TailLookup`] over the generic struct defs, substituting
+/// (and interning) the last field at the asked instance.
+pub(crate) struct GenericTails<'a> {
+    pub(crate) arena: &'a mut TyArena,
+    pub(crate) structs: &'a IndexMap<Entity, StructDef>,
+    pub(crate) witnesses: &'a [WitnessDef],
+}
+
+impl crate::ty::TailLookup for GenericTails<'_> {
+    fn arena(&self) -> &TyArena {
+        self.arena
+    }
+    fn last_field(&mut self, entity: Entity, args: &[TyId]) -> Option<TyId> {
+        let sdef = self.structs.get(&entity)?;
+        let field = sdef.fields.last()?;
+        let subst = build_type_subst(sdef.type_params.iter().map(|tp| tp.entity), args);
+        Some(collect::substitute_and_resolve(
+            self.arena,
+            self.witnesses,
+            field.ty,
+            &subst,
+        ))
     }
 }
 
@@ -1388,11 +1519,12 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
         module.add_function(func);
         module.register_name(entity(1), "main");
 
-        let target = TargetConfig::host_64();
+        let target = TargetConfig::host();
         let mono = monomorphize(module, &target).unwrap();
 
         assert_eq!(mono.functions.len(), 1);
@@ -1472,10 +1604,11 @@ mod tests {
                 extern_info: None,
                 is_main: true,
                 provides_protocol_default: false,
+                inline: None,
             });
             module.register_name(entity(1), "main");
 
-            let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+            let mono = monomorphize(module, &TargetConfig::host()).unwrap();
             assert_eq!(
                 mono_struct_size(&mono, (ghost, vec![i64_ty])),
                 Some(24),
@@ -1535,10 +1668,11 @@ mod tests {
             extern_info: None,
             is_main: true,
             provides_protocol_default: false,
+            inline: None,
         });
         module.register_name(entity(1), "main");
 
-        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let mono = monomorphize(module, &TargetConfig::host()).unwrap();
         assert_eq!(
             mono_struct_size(&mono, (inner, vec![i64_ty])),
             Some(24),
@@ -1587,6 +1721,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         // main() calls identity[Int64]
@@ -1626,6 +1761,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         module.add_function(main_fn);
@@ -1633,7 +1769,7 @@ mod tests {
         module.register_name(entity(1), "main");
         module.register_name(entity(2), "identity");
 
-        let target = TargetConfig::host_64();
+        let target = TargetConfig::host();
         let mono = monomorphize(module, &target).unwrap();
 
         // main + identity[Int64]
@@ -1691,6 +1827,7 @@ mod tests {
                 extern_info: None,
                 is_main: false,
                 provides_protocol_default: false,
+                inline: None,
             }
         };
 
@@ -1732,6 +1869,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
         module.add_function(maker);
 
@@ -1756,9 +1894,10 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         });
 
-        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let mono = monomorphize(module, &TargetConfig::host()).unwrap();
         let maker = mono
             .functions
             .iter()
@@ -1824,6 +1963,7 @@ mod tests {
                 extern_info: None,
                 is_main: false,
                 provides_protocol_default: false,
+                inline: None,
             });
         }
 
@@ -1856,10 +1996,11 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         });
         module.register_name(protocol_entity, "ClosureLifecycle");
 
-        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let mono = monomorphize(module, &TargetConfig::host()).unwrap();
         let main = mono
             .functions
             .iter()
@@ -1897,14 +2038,16 @@ mod tests {
             extern_info: Some(crate::item::function::ExternInfo {
                 calling_convention: crate::item::function::CallingConvention::C,
                 symbol_name: "malloc".into(),
+                ..crate::item::function::ExternInfo::c("malloc")
             }),
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
         module.add_function(func);
         module.register_name(entity(1), "malloc");
 
-        let target = TargetConfig::host_64();
+        let target = TargetConfig::host();
         let mono = monomorphize(module, &target).unwrap();
 
         assert_eq!(mono.functions.len(), 1);

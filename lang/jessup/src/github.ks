@@ -43,7 +43,7 @@ func githubClient() -> Swoop {
     var client = Swoop();
     client = client.header("Accept", "application/vnd.github+json");
     client = client.header("User-Agent", "jessup/0.1.0");
-    match getenv("GITHUB_TOKEN") {
+    match Environment.variable("GITHUB_TOKEN") {
         .Some(token) => {
             if token.bytes.count > 0 {
                 var auth = String();
@@ -363,7 +363,7 @@ func stringContains(haystack haystack: String, needle needle: String) -> Bool {
         var matched = true;
         var j: Int64 = 0;
         while j < nLen {
-            if haystack.bytes(unchecked: i + j) != needle.bytes(unchecked: j) {
+            if unsafe haystack.bytes(unchecked: i + j) != unsafe needle.bytes(unchecked: j) {
                 matched = false;
                 j = nLen
             } else {

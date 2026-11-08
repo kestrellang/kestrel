@@ -21,8 +21,8 @@ struct Res: not Copyable {
 struct Buf {
     var p: Pointer[Res]
     subscript(at index: Int64) -> Res {
-        ref { self.p.offset(by: index).value }
-        mutating ref { self.p.offset(by: index).mutatingValue }
+        ref { unsafe self.p.offset(by: index).value }
+        mutating ref { unsafe self.p.offset(by: index).mutatingValue }
     }
 }
 
@@ -31,7 +31,7 @@ func inspect(r: Res) -> Int64 { r.peekV() }
 @main
 func main() -> lang.i64 {
     let p = SystemAllocator().allocate(Layout.of[Res]()).unwrap().cast[Res]();
-    p.write(Res(v: 5));
+    unsafe p.write(Res(v: 5));
     var b = Buf(p: p);
 
     if b(at: 0).peekV() != 5 { return 1; }

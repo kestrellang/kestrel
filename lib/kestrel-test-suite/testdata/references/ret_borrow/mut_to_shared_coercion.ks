@@ -15,8 +15,8 @@ func readIt(x: Int64) -> Int64 { x }
 @main
 func main() -> lang.i64 {
     let cell = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    cell.write(42);
+    unsafe cell.write(42);
 
-    if readIt(cell.mutatingValue) != 42 { return 1; }
+    if readIt(unsafe cell.mutatingValue) != 42 { return 1; }
     0
 }

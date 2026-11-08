@@ -43,6 +43,44 @@ pub struct HirBody {
     /// Original condition expressions from while-loop desugaring.
     /// Used by the condition type analyzer to check that while conditions are Bool.
     pub while_conditions: Vec<HirExprId>,
+    /// Every `|>` in the body, with what its right side was. Type inference
+    /// rewords a failed pipe's errors into a fix-it from this.
+    pub pipes: Vec<PipeSite>,
+    /// Source extent of every `unsafe expr` / `unsafe { … }` in the body,
+    /// in source order. The wrapper itself lowers to its operand, so HIR is
+    /// unchanged for every other pass; the unsafe-use analyzer reads these
+    /// to decide which uses are inside an unsafe context (a lexical rule).
+    pub unsafe_regions: Vec<Span>,
+}
+
+/// One `lhs |> rhs` (`SugarKind::Pipe`), as HIR lowering saw its right side.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct PipeSite {
+    /// The whole pipe's span; the call it builds carries it too.
+    pub span: Span,
+    /// The right side's span.
+    pub rhs_span: Span,
+    /// The right side, as written.
+    pub rhs_text: String,
+    pub shape: PipeShape,
+}
+
+/// What a pipe's right side was, for its fix-it.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum PipeShape {
+    /// A call with `_` in its arguments: the slot is explicit, no fix-it.
+    Slotted,
+    /// A path, called with the piped value: `x |> f`. `call` is that call.
+    Path { call: HirExprId },
+    /// A call with no `_`, whose result is called: `x |> f(a)`.
+    /// `suggestion` is the call with a leading slot: `f(_, a)`.
+    CallValue { suggestion: String },
+    /// `x |> f ?? d`, which is `x |> (f ?? d)`.
+    Coalesce,
+    /// A closure literal: its own errors say what's wrong.
+    Closure,
+    /// Anything else, called with the piped value.
+    Value,
 }
 
 impl HirBody {
@@ -61,8 +99,64 @@ impl HirBody {
             tail_expr: None,
             guard_stmts: Vec::new(),
             while_conditions: Vec::new(),
+            pipes: Vec::new(),
+            unsafe_regions: Vec::new(),
         }
     }
+
+    /// Every `?.` bind in the body: its scrutinee `ProtocolCall` and the
+    /// `.Some` arm's binder `$o` (see `MatchSource::OptionalChain`).
+    pub fn optional_chain_binds(&self) -> Vec<OptionalChainBind> {
+        let mut binds = Vec::new();
+        for (_, expr) in self.exprs.iter() {
+            let HirExpr::Match {
+                scrutinee,
+                arms,
+                source: MatchSource::OptionalChain,
+                ..
+            } = expr
+            else {
+                continue;
+            };
+            // Arm 0 is `.Some($o)` by construction.
+            let Some(HirPat::ImplicitVariant { args, .. }) =
+                arms.first().map(|a| &self.pats[a.pattern])
+            else {
+                continue;
+            };
+            let Some(HirPat::Binding { local, .. }) = args.first().map(|a| &self.pats[a.pattern])
+            else {
+                continue;
+            };
+            binds.push(OptionalChainBind {
+                scrutinee: *scrutinee,
+                binder: *local,
+            });
+        }
+        binds
+    }
+
+    /// The local a place expression projects from, through fields, tuple
+    /// elements and transparent sugar (`a.b.0` → `a`).
+    pub fn place_root(&self, mut expr: HirExprId) -> Option<LocalId> {
+        loop {
+            match &self.exprs[expr] {
+                HirExpr::Local(local, _) => return Some(*local),
+                HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => expr = *base,
+                HirExpr::Sugar { inner, .. } => expr = *inner,
+                _ => return None,
+            }
+        }
+    }
+}
+
+/// One `?.` bind (`HirBody::optional_chain_binds`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct OptionalChainBind {
+    /// `ProtocolCall(base, OptionalChain, …)`.
+    pub scrutinee: HirExprId,
+    /// `$o`: the payload binder of the `.Some` arm.
+    pub binder: LocalId,
 }
 
 /// Where a `HirExpr::Match` came from. Drives diagnostic phrasing and lets
@@ -92,6 +186,13 @@ pub enum MatchSource {
     ParamDestructure,
     /// Desugared from `try expr` (Continue/Break matching on ControlFlow).
     TryOp,
+    /// Desugared from `x is T` or `x as? T`: one `is T` arm and `_`.
+    TypeTest,
+    /// One `?.` bind of an optional chain: the scrutinee is
+    /// `ProtocolCall(base, OptionalChain, chainBorrow | chainTake)`, the arms
+    /// are `.Some($o) => <rest of the chain>` and `.None => .None`. Arms are
+    /// checked against `Optional[α]`, so the tail is wrapped or flattened.
+    OptionalChain,
 }
 
 impl MatchSource {
@@ -121,8 +222,27 @@ pub enum SugarKind {
     /// if the AST-level place check rejected the LHS at desugar time.
     CompoundAssign,
     /// `"hello \(name)!"` — `inner` is the Block containing the
-    /// DefaultStringInterpolation init/append/build sequence.
+    /// accumulator init / append / `init(interpolation:)` sequence.
     StringInterpolation,
+    /// `x is T` / `x is not T` — `inner` is `match x { is T => true, _ =>
+    /// false }` (arms swapped for `is not`).
+    TypeTest,
+    /// `x as? T` — `inner` is the Block `{ let $cast: Optional[&T] = match x
+    /// { &$hit is T => .Some($hit), _ => .None }; $cast }`.
+    Cast,
+    /// `consuming x as? T` — `inner` is the Block `{ let $boxed = x; if
+    /// $boxed is T { .Ok(TakePayload($boxed)) } else { .Err($boxed) } }`.
+    ConsumingCast,
+    /// `lhs |> rhs` — `inner` is the call it rewrites to (`rhs(lhs)`, or
+    /// `rhs` with its `_` slots filled), wrapped in `{ let $pipe = lhs; … }`
+    /// when `lhs` is not a place. No protocol: pipe is function application.
+    Pipe,
+    /// `f(_, 1)` / `map(_.name)` — `inner` is the synthesized `Closure` whose
+    /// parameters stand for the `_`s.
+    Placeholder,
+    /// `a?.b.c` — `inner` is the outermost `Match { source: OptionalChain }`;
+    /// each further bind is a nested match in the `.Some` arm.
+    OptionalChain,
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).
@@ -269,6 +389,14 @@ pub enum HirExpr {
         owner: Option<HirExprId>,
         name: HirName,
         args: Option<Vec<HirCallArg>>,
+        /// Set by desugarings that call one protocol requirement on the
+        /// expected type (`try`'s `FromResidual.fromResidual`): the member IS
+        /// this requirement (the `@builtin`-tagged entity), so inference types
+        /// it from the requirement's signature with `Self` = the expected type
+        /// instead of looking `name` up among the type's members — which would
+        /// see every same-named static of every extension. `None` for
+        /// user-written `.name` and enum-case sugar.
+        requirement: Option<Entity>,
         span: Span,
     },
 
@@ -295,6 +423,13 @@ pub enum HirExpr {
         receiver: HirExprId,
         protocol: Entity,
         method: HirName,
+        /// The `@builtin`-tagged requirement of `protocol` this call IS
+        /// (operators' `AddOperatorMethod`, …). When set, inference types the
+        /// call from this requirement — never by looking `method` up among the
+        /// receiver's members — and MIR keys the witness from it. `None` falls
+        /// back to the by-name lookup (a prelude without the method tag, and
+        /// desugarings not converted yet).
+        requirement: Option<Entity>,
         type_args: Option<Vec<HirTy>>,
         args: Vec<HirCallArg>,
         /// True when this call was desugared from an operator (binary, unary,
@@ -352,6 +487,14 @@ pub enum HirExpr {
     },
     /// Malformed expression (error recovery)
     Error {
+        span: Span,
+    },
+    /// Consume an existential box whose payload is known to be `target`
+    /// (a preceding `is` test proved it) and return the payload by value.
+    /// Only produced by the `consuming x as? T` desugaring.
+    TakePayload {
+        expr: HirExprId,
+        target: crate::ty::HirTy,
         span: Span,
     },
 
@@ -465,10 +608,35 @@ pub enum HirPat {
         subpattern: HirPatId,
         span: Span,
     },
+    /// `[c] is T [{ .. }]`: the scrutinee is an existential whose payload is
+    /// a `target`. `binding` (`c`) borrows the payload as `&T`; `sub` (a
+    /// struct pattern, or `_`) matches the payload in place.
+    TypeTest {
+        binding: Option<LocalId>,
+        target: crate::ty::HirTy,
+        sub: HirPatId,
+        span: Span,
+    },
     /// Error recovery
     Error {
         span: Span,
     },
+}
+
+impl HirPat {
+    /// Takes its scrutinee apart (or tests its value) rather than binding
+    /// it whole: such a pattern matches through a ref to the pointee.
+    pub fn destructures(&self) -> bool {
+        matches!(
+            self,
+            HirPat::Tuple { .. }
+                | HirPat::Struct { .. }
+                | HirPat::Variant { .. }
+                | HirPat::ImplicitVariant { .. }
+                | HirPat::Literal { .. }
+                | HirPat::Range { .. }
+        )
+    }
 }
 
 // ===== Supporting types =====
@@ -546,6 +714,10 @@ impl std::hash::Hash for HirLiteral {
 pub struct HirCallArg {
     pub label: Option<String>,
     pub value: HirExprId,
+    /// An unlabeled trailing closure (`f(x) { … }`, `f { … }`). It may also
+    /// fill a labeled closure-typed parameter; see
+    /// `kestrel_ast_builder::arg_binding`.
+    pub trailing_closure: bool,
 }
 
 /// A key-value entry in a dictionary literal.
@@ -553,6 +725,77 @@ pub struct HirCallArg {
 pub struct HirDictEntry {
     pub key: HirExprId,
     pub value: HirExprId,
+}
+
+/// A place where a pattern borrows from its scrutinee instead of copying
+/// or moving out of it.
+#[derive(Clone, Copy, Debug)]
+pub struct PatBorrow<'a> {
+    /// `&mutating name`: the borrow needs a mutable scrutinee place.
+    pub mutating: bool,
+    pub span: &'a Span,
+    /// A type test (`c is T`) reads its payload in place; every other
+    /// borrow is a written `&` / `&mutating` binder.
+    pub type_test: bool,
+}
+
+/// Every borrow in `pat`, in source order. The single walk behind "does
+/// this pattern borrow?" questions: place-mode match lowering, E210, E499,
+/// and which accessor a failable scrutinee reads through.
+pub fn pat_borrows(pats: &Arena<HirPat>, pat: HirPatId) -> Vec<PatBorrow<'_>> {
+    let mut out = Vec::new();
+    collect_pat_borrows(pats, pat, &mut out);
+    out
+}
+
+fn collect_pat_borrows<'a>(pats: &'a Arena<HirPat>, pat: HirPatId, out: &mut Vec<PatBorrow<'a>>) {
+    let children: Vec<HirPatId> = match &pats[pat] {
+        HirPat::Binding {
+            by_ref: Some(mutating),
+            span,
+            ..
+        } => {
+            out.push(PatBorrow {
+                mutating: *mutating,
+                span,
+                type_test: false,
+            });
+            Vec::new()
+        },
+        HirPat::At { subpattern, .. } => vec![*subpattern],
+        HirPat::TypeTest { sub, span, .. } => {
+            out.push(PatBorrow {
+                mutating: false,
+                span,
+                type_test: true,
+            });
+            vec![*sub]
+        },
+        HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => {
+            prefix.iter().chain(suffix).copied().collect()
+        },
+        HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
+            args.iter().map(|a| a.pattern).collect()
+        },
+        HirPat::Struct { fields, .. } => fields.iter().filter_map(|f| f.pattern).collect(),
+        HirPat::Or { alternatives, .. } => alternatives.clone(),
+        _ => Vec::new(),
+    };
+    for child in children {
+        collect_pat_borrows(pats, child, out);
+    }
+}
+
+impl HirBody {
+    /// How a match with these arms holds its scrutinee: `None` when no arm
+    /// borrows from it (value mode), `Some(mutating)` when one does (place
+    /// mode), mutable iff any borrow is `&mutating`.
+    pub fn arms_borrow_mode(&self, arms: &[HirMatchArm]) -> Option<bool> {
+        arms.iter()
+            .flat_map(|arm| pat_borrows(&self.pats, arm.pattern))
+            .map(|b| b.mutating)
+            .max()
+    }
 }
 
 /// A single arm in a match expression.
@@ -606,107 +849,124 @@ pub struct HirStructPatField {
 ///
 /// Label is `None` for single-name params (no external label in Kestrel),
 /// `Some("by")` for shift ops, `Some("to")` for range ops.
-pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
-    (BinaryOp::Add, Builtin::AddOperatorProtocol, "add", None),
+pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, Builtin, &str, Option<&str>)] = &[
+    (BinaryOp::Add, Builtin::AddOperatorProtocol, Builtin::AddOperatorMethod, "add", None),
     (
         BinaryOp::Sub,
         Builtin::SubtractOperatorProtocol,
+        Builtin::SubtractOperatorMethod,
         "subtract",
         None,
     ),
     (
         BinaryOp::Mul,
         Builtin::MultiplyOperatorProtocol,
+        Builtin::MultiplyOperatorMethod,
         "multiply",
         None,
     ),
     (
         BinaryOp::Div,
         Builtin::DivideOperatorProtocol,
+        Builtin::DivideOperatorMethod,
         "divide",
         None,
     ),
     (
         BinaryOp::Rem,
-        Builtin::ModuloOperatorProtocol,
-        "modulo",
+        Builtin::RemainderOperatorProtocol,
+        Builtin::RemainderOperatorMethod,
+        "remainder",
         None,
     ),
     (
         BinaryOp::Eq,
         Builtin::EqualsOperatorProtocol,
+        Builtin::EqualsOperatorMethod,
         "equal",
         Some("to"),
     ),
     (
         BinaryOp::Ne,
         Builtin::NotEqualsOperatorProtocol,
+        Builtin::NotEqualsOperatorMethod,
         "notEqual",
         Some("to"),
     ),
     (
         BinaryOp::Lt,
         Builtin::LessThanOperatorProtocol,
+        Builtin::LessThanOperatorMethod,
         "lessThan",
         None,
     ),
     (
         BinaryOp::Gt,
         Builtin::GreaterThanOperatorProtocol,
+        Builtin::GreaterThanOperatorMethod,
         "greaterThan",
         None,
     ),
     (
         BinaryOp::Le,
         Builtin::LessOrEqualOperatorProtocol,
+        Builtin::LessOrEqualOperatorMethod,
         "lessThanOrEqual",
         None,
     ),
     (
         BinaryOp::Ge,
         Builtin::GreaterOrEqualOperatorProtocol,
+        Builtin::GreaterOrEqualOperatorMethod,
         "greaterThanOrEqual",
         None,
     ),
     (
         BinaryOp::BitAnd,
         Builtin::BitwiseAndOperatorProtocol,
+        Builtin::BitwiseAndOperatorMethod,
         "bitwiseAnd",
         None,
     ),
     (
         BinaryOp::BitOr,
         Builtin::BitwiseOrOperatorProtocol,
+        Builtin::BitwiseOrOperatorMethod,
         "bitwiseOr",
         None,
     ),
     (
         BinaryOp::BitXor,
         Builtin::BitwiseXorOperatorProtocol,
+        Builtin::BitwiseXorOperatorMethod,
         "bitwiseXor",
         None,
     ),
     (
         BinaryOp::Shl,
         Builtin::ShiftLeftOperatorProtocol,
+        Builtin::ShiftLeftOperatorMethod,
         "shiftLeft",
         Some("by"),
     ),
     (
         BinaryOp::Shr,
         Builtin::ShiftRightOperatorProtocol,
+        Builtin::ShiftRightOperatorMethod,
         "shiftRight",
         Some("by"),
     ),
     (
         BinaryOp::RangeInclusive,
         Builtin::InclusiveRangeOperatorProtocol,
+        Builtin::InclusiveRangeOperatorMethod,
         "inclusiveRange",
         Some("to"),
     ),
     (
         BinaryOp::RangeExclusive,
         Builtin::ExclusiveRangeOperatorProtocol,
+        Builtin::ExclusiveRangeOperatorMethod,
         "exclusiveRange",
         Some("to"),
     ),
@@ -715,180 +975,222 @@ pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
 /// Short-circuit operators: right operand is wrapped in a closure.
 /// `logicalAnd(other:)` and `logicalOr(other:)` are single-name params (no label).
 /// `coalesce(default:)` is also single-name (no label).
-pub const SHORT_CIRCUIT_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
+pub const SHORT_CIRCUIT_OP_PROTOCOLS: &[(BinaryOp, Builtin, Builtin, &str, Option<&str>)] = &[
     (
         BinaryOp::And,
         Builtin::LogicalAndOperatorProtocol,
+        Builtin::LogicalAndOperatorMethod,
         "logicalAnd",
         None,
     ),
     (
         BinaryOp::Or,
         Builtin::LogicalOrOperatorProtocol,
+        Builtin::LogicalOrOperatorMethod,
         "logicalOr",
         None,
     ),
     (
         BinaryOp::Coalesce,
         Builtin::CoalesceOperatorProtocol,
+        Builtin::CoalesceOperatorMethod,
         "coalesce",
         None,
     ),
 ];
 
-/// (operator, protocol_builtin, method_name)
-pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, &str)] = &[
-    (UnaryOp::Neg, Builtin::NegateOperatorProtocol, "negate"),
+/// (operator, protocol_builtin, method_builtin, method_name)
+pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, Builtin, &str)] = &[
+    (UnaryOp::Neg, Builtin::NegateOperatorProtocol, Builtin::NegateOperatorMethod, "negate"),
     (
         UnaryOp::BitNot,
         Builtin::BitwiseNotOperatorProtocol,
+        Builtin::BitwiseNotOperatorMethod,
         "bitwiseNot",
     ),
     (
         UnaryOp::LogicalNot,
         Builtin::LogicalNotOperatorProtocol,
+        Builtin::LogicalNotOperatorMethod,
         "logicalNot",
     ),
     (
         UnaryOp::RangeUpTo,
         Builtin::RangeUpToOperatorProtocol,
+        Builtin::RangeUpToOperatorMethod,
         "rangeUpTo",
     ),
     (
         UnaryOp::RangeThrough,
         Builtin::RangeThroughOperatorProtocol,
+        Builtin::RangeThroughOperatorMethod,
         "rangeThrough",
     ),
 ];
 
-/// (operator, protocol_builtin, method_name)
-pub const POSTFIX_OP_PROTOCOLS: &[(PostfixOp, Builtin, &str)] = &[
+/// (operator, protocol_builtin, method_builtin, method_name)
+pub const POSTFIX_OP_PROTOCOLS: &[(PostfixOp, Builtin, Builtin, &str)] = &[
     (
         PostfixOp::RangeFrom,
         Builtin::RangeFromOperatorProtocol,
+        Builtin::RangeFromOperatorMethod,
         "rangeFrom",
     ),
     (
         PostfixOp::Unwrap,
         Builtin::ForceUnwrapOperatorProtocol,
+        Builtin::ForceUnwrapOperatorMethod,
         "forceUnwrap",
     ),
 ];
 
-/// (operator, protocol_builtin, method_name, arg_label)
+/// (operator, protocol_builtin, method_builtin, method_name, arg_label)
 ///
 /// Most compound assign methods use single-name params (no label).
 /// Only shift-assign ops have a `"by"` label.
-pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, Builtin, &str, Option<&str>)] = &[
+pub const COMPOUND_ASSIGN_PROTOCOLS: &[(CompoundAssignOp, Builtin, Builtin, &str, Option<&str>)] = &[
     (
         CompoundAssignOp::AddAssign,
         Builtin::AddAssignProtocol,
+        Builtin::AddAssignMethod,
         "addAssign",
         None,
     ),
     (
         CompoundAssignOp::SubAssign,
         Builtin::SubtractAssignProtocol,
+        Builtin::SubtractAssignMethod,
         "subtractAssign",
         None,
     ),
     (
         CompoundAssignOp::MulAssign,
         Builtin::MultiplyAssignProtocol,
+        Builtin::MultiplyAssignMethod,
         "multiplyAssign",
         None,
     ),
     (
         CompoundAssignOp::DivAssign,
         Builtin::DivideAssignProtocol,
+        Builtin::DivideAssignMethod,
         "divideAssign",
         None,
     ),
     (
         CompoundAssignOp::RemAssign,
-        Builtin::ModuloAssignProtocol,
-        "modAssign",
+        Builtin::RemainderAssignProtocol,
+        Builtin::RemainderAssignMethod,
+        "remainderAssign",
         None,
     ),
     (
         CompoundAssignOp::BitAndAssign,
         Builtin::BitwiseAndAssignProtocol,
+        Builtin::BitwiseAndAssignMethod,
         "bitwiseAndAssign",
         None,
     ),
     (
         CompoundAssignOp::BitOrAssign,
         Builtin::BitwiseOrAssignProtocol,
+        Builtin::BitwiseOrAssignMethod,
         "bitwiseOrAssign",
         None,
     ),
     (
         CompoundAssignOp::BitXorAssign,
         Builtin::BitwiseXorAssignProtocol,
+        Builtin::BitwiseXorAssignMethod,
         "bitwiseXorAssign",
         None,
     ),
     (
         CompoundAssignOp::ShlAssign,
         Builtin::ShiftLeftAssignProtocol,
+        Builtin::ShiftLeftAssignMethod,
         "shiftLeftAssign",
         Some("by"),
     ),
     (
         CompoundAssignOp::ShrAssign,
         Builtin::ShiftRightAssignProtocol,
+        Builtin::ShiftRightAssignMethod,
         "shiftRightAssign",
         Some("by"),
     ),
 ];
 
+/// What an operator desugars to: a call to `method` (an `@builtin`-tagged
+/// requirement of `protocol`). `name`/`label` are its spelling — the call's
+/// `HirName` and arg label, and the by-name fallback when a prelude lacks the
+/// method tag.
+#[derive(Copy, Clone, Debug)]
+pub struct OperatorRequirement {
+    pub protocol: Builtin,
+    pub method: Builtin,
+    pub name: &'static str,
+    pub label: Option<&'static str>,
+}
+
+impl OperatorRequirement {
+    const fn new(
+        protocol: Builtin,
+        method: Builtin,
+        name: &'static str,
+        label: Option<&'static str>,
+    ) -> Self {
+        Self {
+            protocol,
+            method,
+            name,
+            label,
+        }
+    }
+}
+
 /// Look up the protocol for a binary operator.
-/// Returns `(protocol_builtin, method_name, arg_label)` or `None` if not found.
-pub fn lookup_binary_op(op: &BinaryOp) -> Option<(Builtin, &'static str, Option<&'static str>)> {
+pub fn lookup_binary_op(op: &BinaryOp) -> Option<OperatorRequirement> {
     BINARY_OP_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
-        .map(|(_, proto, method, label)| (*proto, *method, *label))
+        .map(|(_, protocol, method, name, label)| OperatorRequirement::new(*protocol, *method, name, *label))
 }
 
 /// Look up the protocol for a short-circuit binary operator.
-/// Returns `(protocol_builtin, method_name, arg_label)` or `None` if not found.
 pub fn lookup_short_circuit_op(
     op: &BinaryOp,
-) -> Option<(Builtin, &'static str, Option<&'static str>)> {
+) -> Option<OperatorRequirement> {
     SHORT_CIRCUIT_OP_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
-        .map(|(_, proto, method, label)| (*proto, *method, *label))
+        .map(|(_, protocol, method, name, label)| OperatorRequirement::new(*protocol, *method, name, *label))
 }
 
 /// Look up the protocol for a unary operator.
-/// Returns `(protocol_builtin, method_name)` or `None` if not found.
-pub fn lookup_unary_op(op: &UnaryOp) -> Option<(Builtin, &'static str)> {
+pub fn lookup_unary_op(op: &UnaryOp) -> Option<OperatorRequirement> {
     UNARY_OP_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
-        .map(|(_, proto, method)| (*proto, *method))
+        .map(|(_, protocol, method, name)| OperatorRequirement::new(*protocol, *method, name, None))
 }
 
 /// Look up the protocol for a postfix operator.
-/// Returns `(protocol_builtin, method_name)` or `None` if not found.
-pub fn lookup_postfix_op(op: &PostfixOp) -> Option<(Builtin, &'static str)> {
+pub fn lookup_postfix_op(op: &PostfixOp) -> Option<OperatorRequirement> {
     POSTFIX_OP_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
-        .map(|(_, proto, method)| (*proto, *method))
+        .map(|(_, protocol, method, name)| OperatorRequirement::new(*protocol, *method, name, None))
 }
 
 /// Look up the protocol for a compound assignment operator.
-/// Returns `(protocol_builtin, method_name, arg_label)` or `None` if not found.
 pub fn lookup_compound_assign_op(
     op: &CompoundAssignOp,
-) -> Option<(Builtin, &'static str, Option<&'static str>)> {
+) -> Option<OperatorRequirement> {
     COMPOUND_ASSIGN_PROTOCOLS
         .iter()
         .find(|(o, ..)| o == op)
-        .map(|(_, proto, method, label)| (*proto, *method, *label))
+        .map(|(_, protocol, method, name, label)| OperatorRequirement::new(*protocol, *method, name, *label))
 }
 
 // ===== Loop-label resolution =====
@@ -1004,6 +1306,8 @@ mod tests {
             BinaryOp::Coalesce,
             BinaryOp::RangeInclusive,
             BinaryOp::RangeExclusive,
+            // BinaryOp::Pipe is intentionally absent: it is rewritten into a
+            // call by HIR lowering, not desugared to a protocol.
         ];
 
         for op in &all_ops {

@@ -2,7 +2,7 @@
 // expect-stdout: 42\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 protocol Doubler {
     func double() -> Self

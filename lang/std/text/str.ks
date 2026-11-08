@@ -5,8 +5,8 @@ module std.text
 import std.core.(Bool, Equatable, Comparable, Ordering, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Pointer, RawPointer, ArraySlice)
-import std.collections.(Array)
+import std.memory.(Pointer, RawPointer)
+import std.collections.(Array, Slice)
 import std.iter.(Iterable)
 import std.ffi.(memmem)
 import std.text.(Formattable, Formatter, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, CharsIterator, BytesView, CharsView, GraphemesView, LinesView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
@@ -119,16 +119,15 @@ extend Str {
         if n == 0 {
             return buffer
         }
-        // ArraySlice is a non-owning view over the live string buffer;
+        // asByteSlice() borrows the live string buffer;
         // append(contentsOf:) copies out of it in a single pass.
-        buffer.append(contentsOf: ArraySlice(pointer: slice._rawPtr().offset(by: slice.start), count: n));
+        buffer.append(contentsOf: self.asByteSlice());
         buffer
     }
 
-    /// Returns a non-owning `ArraySlice[UInt8]` view over this string's
-    /// raw UTF-8 bytes — no copy, no allocation. The slice borrows the
-    /// live string buffer, so it must not outlive the string (or any
-    /// mutation of it). O(1).
+    /// Returns a borrowed `Slice[UInt8]` view over this string's raw
+    /// UTF-8 bytes — no copy, no allocation. The view borrows the live
+    /// string buffer, so it can't outlive the string. O(1).
     ///
     /// Use this to hand the bytes to a sink (a socket, a hasher, an
     /// FFI call) without materializing an `Array[UInt8]` via `toBytes()`.
@@ -139,9 +138,9 @@ extend Str {
     /// let bytes = "Hi".asByteSlice();
     /// bytes.count;  // 2
     /// ```
-    public func asByteSlice() -> ArraySlice[UInt8] {
+    public func asByteSlice() -> &Slice[UInt8] {
         let slice = self.asSlice();
-        ArraySlice(pointer: slice._rawPtr().offset(by: slice.start), count: (slice.end - slice.start))
+        unsafe Slice.lend(start: slice._rawPtr().offset(by: slice.start), count: slice.end - slice.start)
     }
 
     // -- Iteration -----------------------------------------------------------
@@ -219,8 +218,8 @@ extend Str {
     /// "hello world".contains(substring: "world");  // true
     /// "hello world".contains(substring: "xyz");    // false
     /// ```
-    public func contains(substring: some Str) -> Bool {
-        self.firstIndex(of: substring).isSome()
+    public func contains(substring: some Str and not Static) -> Bool {
+        self.firstIndex(of: substring).isSome
     }
 
     /// Returns true if any code point matches `predicate`.
@@ -231,7 +230,7 @@ extend Str {
     /// "abc123".contains(where: { (c) in c.isAsciiDigit });  // true
     /// ```
     public func contains(where predicate: (Char) -> Bool) -> Bool {
-        self.chars.firstIndex(where: predicate).isSome()
+        self.chars.firstIndex(where: predicate).isSome
     }
 
     /// Returns true if this string starts with `prefix`.
@@ -244,7 +243,7 @@ extend Str {
     /// "hello".starts(with: "hel");  // true
     /// "hello".starts(with: "xyz");  // false
     /// ```
-    public func starts(with prefix: some Str) -> Bool {
+    public func starts(with prefix: some Str and not Static) -> Bool {
         let slice = self.asSlice();
         let ps = prefix.asSlice();
         let prefixLen = (ps.end - ps.start);
@@ -263,7 +262,7 @@ extend Str {
     /// "hello".ends(with: "llo");  // true
     /// "hello".ends(with: "xyz");  // false
     /// ```
-    public func ends(with suffix: some Str) -> Bool {
+    public func ends(with suffix: some Str and not Static) -> Bool {
         let slice = self.asSlice();
         let ss = suffix.asSlice();
         let suffixLen = (ss.end - ss.start);
@@ -284,7 +283,7 @@ extend Str {
     /// "hello world".firstIndex(of: "world");  // Some(ByteIndex(6))
     /// "hello world".firstIndex(of: "xyz");    // None
     /// ```
-    public func firstIndex(of substring: some Str) -> ByteIndex? {
+    public func firstIndex(of substring: some Str and not Static) -> ByteIndex? {
         let slice = self.asSlice();
         let sub = substring.asSlice();
         let subLen = (sub.end - sub.start);
@@ -295,7 +294,7 @@ extend Str {
         if subLen > myLen { return .None }
         let base = slice._rawPtr().offset(by: slice.start).asRaw();
         let needle = sub._rawPtr().offset(by: sub.start).asRaw();
-        let result = memmem(base, myLen, needle, subLen);
+        let result = unsafe memmem(base, myLen, needle, subLen);
         if result.isNull {
             .None
         } else {
@@ -316,7 +315,7 @@ extend Str {
     /// "abcabc".lastIndex(of: "abc");  // Some(ByteIndex(3))
     /// "abcabc".lastIndex(of: "xyz");  // None
     /// ```
-    public func lastIndex(of substring: some Str) -> ByteIndex? {
+    public func lastIndex(of substring: some Str and not Static) -> ByteIndex? {
         let slice = self.asSlice();
         let sub = substring.asSlice();
         let subLen = (sub.end - sub.start);
@@ -332,7 +331,7 @@ extend Str {
         while myLen - i >= subLen {
             let base = myPtr.offset(by: slice.start + i).asRaw();
             let remaining = myLen - i;
-            let result = memmem(base, remaining, needlePtr, subLen);
+            let result = unsafe memmem(base, remaining, needlePtr, subLen);
             if result.isNull {
                 break
             }
@@ -354,15 +353,17 @@ extend Str {
     /// zero-copy `StringSlice` segments.
     ///
     /// The empty separator is special-cased to split per code
-    /// point. Adjacent separators produce empty segments.
+    /// point. Adjacent separators produce empty segments, as does a
+    /// separator at either end. An empty string has no segments.
     ///
     /// # Examples
     ///
     /// ```
     /// "a,b,c".split(",").collect();   // ["a", "b", "c"]
     /// "a,,b".split(",").count;        // 3 (empty segment preserved)
+    /// "a,".split(",").count;          // 2 (["a", ""])
     /// ```
-    public func split(separator: some Str) -> SplitView {
+    public func split(separator: some Str and not Static) -> SplitView {
         SplitView(slice: self.asSlice(), separator: separator.asSlice())
     }
 
@@ -403,7 +404,7 @@ extend Str {
         var realStart: Int64 = 0;
         var startDone: Bool = false;
         while realStart < myLen and startDone == false {
-            let byte = basePtr.offset(by: realStart).read();
+            let byte = unsafe basePtr.offset(by: realStart).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isWs = lang.i1_or(lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13)), lang.i32_eq(v, 12));
             if Bool(boolLiteral: isWs) {
@@ -416,7 +417,7 @@ extend Str {
         var endDone: Bool = false;
         while endPos > realStart and endDone == false {
             let idx = endPos - 1;
-            let byte = basePtr.offset(by: idx).read();
+            let byte = unsafe basePtr.offset(by: idx).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isWs = lang.i1_or(lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13)), lang.i32_eq(v, 12));
             if Bool(boolLiteral: isWs) {
@@ -445,7 +446,7 @@ extend Str {
         var realStart: Int64 = 0;
         var done: Bool = false;
         while realStart < myLen and done == false {
-            let byte = basePtr.offset(by: realStart).read();
+            let byte = unsafe basePtr.offset(by: realStart).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isWs = lang.i1_or(lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13)), lang.i32_eq(v, 12));
             if Bool(boolLiteral: isWs) {
@@ -475,7 +476,7 @@ extend Str {
         var done: Bool = false;
         while endPos > 0 and done == false {
             let idx = endPos - 1;
-            let byte = basePtr.offset(by: idx).read();
+            let byte = unsafe basePtr.offset(by: idx).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isWs = lang.i1_or(lang.i1_or(lang.i1_or(lang.i1_or(lang.i32_eq(v, 32), lang.i32_eq(v, 9)), lang.i32_eq(v, 10)), lang.i32_eq(v, 13)), lang.i32_eq(v, 12));
             if Bool(boolLiteral: isWs) {
@@ -614,7 +615,7 @@ extend Str {
         var hasUpperAscii = false;
         var i: Int64 = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             if byte > 127 {
                 var result = String();
                 for c in self.chars.iter() {
@@ -637,7 +638,7 @@ extend Str {
         var result = String(capacity: myLen);
         i = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isUpper = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
             if Bool(boolLiteral: isUpper) {
@@ -669,7 +670,7 @@ extend Str {
         var hasLowerAscii = false;
         var i: Int64 = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             if byte > 127 {
                 var result = String();
                 for c in self.chars.iter() {
@@ -692,7 +693,7 @@ extend Str {
         var result = String(capacity: myLen);
         i = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isLower = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
             if Bool(boolLiteral: isLower) {
@@ -760,7 +761,7 @@ extend Str {
         var result = String(capacity: myLen);
         var i: Int64 = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isUpper = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
             if Bool(boolLiteral: isUpper) {
@@ -791,7 +792,7 @@ extend Str {
         var result = String(capacity: myLen);
         var i: Int64 = 0;
         while i < myLen {
-            let byte = basePtr.offset(by: i).read();
+            let byte = unsafe basePtr.offset(by: i).read();
             let v: lang.i32 = lang.cast_i8_i32(byte.raw);
             let isLower = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
             if Bool(boolLiteral: isLower) {
@@ -818,7 +819,7 @@ extend Str {
     /// "Hello".equalsCaseInsensitive("HELLO");  // true
     /// "Hello".equalsCaseInsensitive("World");  // false
     /// ```
-    public func equalsCaseInsensitive(other: some Str) -> Bool {
+    public func equalsCaseInsensitive(other: some Str and not Static) -> Bool {
         self.caseFolded().isEqual(to: other.caseFolded())
     }
 
@@ -836,7 +837,7 @@ extend Str {
     /// "Content-Type".equalsIgnoreAsciiCase("content-type");  // true
     /// "Content-Type".equalsIgnoreAsciiCase("Host");          // false
     /// ```
-    public func equalsIgnoreAsciiCase(other: some Str) -> Bool {
+    public func equalsIgnoreAsciiCase(other: some Str and not Static) -> Bool {
         let a = self.asByteSlice();
         let b = other.asByteSlice();
         if a.count != b.count {
@@ -844,8 +845,8 @@ extend Str {
         }
         var i: Int64 = 0;
         while i < a.count {
-            var x = a.pointer.offset(by: i).read();
-            var y = b.pointer.offset(by: i).read();
+            var x = unsafe a.pointer.offset(by: i).read();
+            var y = unsafe b.pointer.offset(by: i).read();
             // Fold A–Z (0x41–0x5A) to lower case; leave everything else.
             if x >= 65 and x <= 90 { x = x + 32 };
             if y >= 65 and y <= 90 { y = y + 32 };
@@ -893,7 +894,7 @@ extend Str {
     /// "hello world".replaced("o", with: "0");    // "hell0 w0rld"
     /// "abcabc".replaced("ab", with: "ABCD");     // "ABCDcABCDc"
     /// ```
-    public func replaced(pattern: some Str, with replacement: some Str) -> String {
+    public func replaced(pattern: some Str and not Static, with replacement: some Str and not Static) -> String {
         let patternSlice = pattern.asSlice();
         let patternLen = (patternSlice.end - patternSlice.start);
         if patternLen == 0 {
@@ -911,7 +912,7 @@ extend Str {
         var i: Int64 = 0;
         while myLen - i >= patternLen {
             let base = myPtr.offset(by: i).asRaw();
-            let r = memmem(base, myLen - i, patternPtr.asRaw(), patternLen);
+            let r = unsafe memmem(base, myLen - i, patternPtr.asRaw(), patternLen);
             if r.isNull {
                 break
             }
@@ -932,7 +933,7 @@ extend Str {
         i = 0;
         while myLen - i >= patternLen {
             let base = myPtr.offset(by: i).asRaw();
-            let r = memmem(base, myLen - i, patternPtr.asRaw(), patternLen);
+            let r = unsafe memmem(base, myLen - i, patternPtr.asRaw(), patternLen);
             if r.isNull {
                 break
             }
@@ -987,9 +988,9 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "42".pad(leading: 5, with: '0');  // "00042"
+    /// "42".padded(leading: 5, with: '0');  // "00042"
     /// ```
-    public func pad(leading length: Int64, with char: Char) -> String {
+    public func padded(leading length: Int64, with char: Char) -> String {
         let currentLen = self.chars.count;
         if currentLen >= length {
             return self.toOwned()
@@ -1013,9 +1014,9 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "42".pad(trailing: 5, with: '.');  // "42..."
+    /// "42".padded(trailing: 5, with: '.');  // "42..."
     /// ```
-    public func pad(trailing length: Int64, with char: Char) -> String {
+    public func padded(trailing length: Int64, with char: Char) -> String {
         let currentLen = self.chars.count;
         if currentLen >= length {
             return self.toOwned()

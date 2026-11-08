@@ -104,6 +104,23 @@ compiler-emitted, post-mono in `kestrel-mir`'s `expand`. Capture-free
 allocate. A module with no box binding (a `stdlib: false` fixture) falls
 back to the historical stack-env snapshot path.
 
+## Existentials
+
+- **Tables and thunks** (`existential.rs`): one template per box and
+  protocol (or composition), generic over the payload; requirement, drop,
+  clone, discard and take thunks are synthetic generic functions. Mono
+  instantiates a template wherever an `ImmediateKind::VTable` literal names
+  it.
+- **Conversions and calls** (`body/existential.rs`): Box / Unsize / Upcast
+  from `TypedBody::existential_conversions`; a requirement on a raw
+  existential is a load from the table and a thin call.
+- **Type tests** (`body/pattern.rs` + `body/existential.rs`): an `is T`
+  switch is a test chain (shared with string literals, `emit_test_chain`).
+  Each test compares the box's table pointer with the table literal at `T`
+  (tables are interned per payload); `PathElement::Payload` views the data
+  word as `&T`. Type-test patterns always lower in place mode.
+  `TakePayload` frees the box through `consumePointee` with the take thunk.
+
 ## What Lives Elsewhere
 
 - **Layout and mangling** are in `kestrel-mir`, not here — this crate emits

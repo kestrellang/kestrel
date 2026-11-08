@@ -405,6 +405,49 @@ pub enum SyntaxKind {
     StringEnd,
     /// (T) - grouping parentheses around a type
     TyParen,
+    Is,
+    AsQuestion,
+    /// any P / any[B] P - boxed existential (`any` is contextual)
+    TyAny,
+    /// x as? T / consuming x as? T - existential downcast
+    ExprCast,
+    /// x is T / x is not T - existential type test
+    ExprTypeTest,
+    /// is T / name is T / name is T { fields } - type-test pattern
+    IsPattern,
+    /// Item = Int64 inside a type argument list (existential bounds)
+    TypeArgBinding,
+    /// x |> f - pipe operator
+    PipeGreater,
+    /// `_` as a whole call argument: a hole (`f(_, 1)`)
+    ExprPlaceholder,
+    /// `_` inside a larger argument (`map(_.name)`, `map(_ * 2)`)
+    ExprPlaceholderUse,
+    /// `a?` before `.member` / `.(args)`: one bind of an optional chain
+    ExprOptionalBind,
+    /// the whole postfix chain holding a `?.` (`a?.b.c()`)
+    ExprOptionalChain,
+    /// `?` after subscript params / a property name: a failable place
+    FailableMarker,
+    /// contextual `lazy` before let/var
+    LazyModifier,
+    /// modifying get { ... } (mutable receiver, yields a value)
+    ModifyingGetterClause,
+    /// modifying ref { ... } (mutable receiver, yields &T)
+    ModifyingRefClause,
+    /// willSet { ... } property observer
+    WillSetClause,
+    /// didSet { ... } property observer
+    DidSetClause,
+    Unsafe,
+    /// unsafe before func/init/subscript/var/protocol: callers must vouch for its contract
+    UnsafeModifier,
+    /// unsafe expr - the operand is an unsafe context
+    ExprUnsafe,
+    /// unsafe { ... } - a block that is an unsafe context
+    ExprUnsafeBlock,
+    /// unsafe P in a conformance list: the conformer vouches for P's contract
+    UnsafeConformance,
     /// Not a syntax kind — the end-of-enum marker. Its discriminant is the
     /// variant count, which lets `syntax_kind_table_round_trips` prove `ALL`
     /// complete. Never construct it.
@@ -680,6 +723,29 @@ impl SyntaxKind {
         SyntaxKind::FormatSpec,
         SyntaxKind::StringEnd,
         SyntaxKind::TyParen,
+        SyntaxKind::Is,
+        SyntaxKind::AsQuestion,
+        SyntaxKind::TyAny,
+        SyntaxKind::ExprCast,
+        SyntaxKind::ExprTypeTest,
+        SyntaxKind::IsPattern,
+        SyntaxKind::TypeArgBinding,
+        SyntaxKind::PipeGreater,
+        SyntaxKind::ExprPlaceholder,
+        SyntaxKind::ExprPlaceholderUse,
+        SyntaxKind::ExprOptionalBind,
+        SyntaxKind::ExprOptionalChain,
+        SyntaxKind::FailableMarker,
+        SyntaxKind::LazyModifier,
+        SyntaxKind::ModifyingGetterClause,
+        SyntaxKind::ModifyingRefClause,
+        SyntaxKind::WillSetClause,
+        SyntaxKind::DidSetClause,
+        SyntaxKind::Unsafe,
+        SyntaxKind::UnsafeModifier,
+        SyntaxKind::ExprUnsafe,
+        SyntaxKind::ExprUnsafeBlock,
+        SyntaxKind::UnsafeConformance,
     ];
 }
 
@@ -795,6 +861,10 @@ impl From<Token> for SyntaxKind {
             Token::InterpEnd => SyntaxKind::InterpEnd,
             Token::FormatSpec => SyntaxKind::FormatSpec,
             Token::StringEnd => SyntaxKind::StringEnd,
+            Token::Is => SyntaxKind::Is,
+            Token::AsQuestion => SyntaxKind::AsQuestion,
+            Token::PipeGreater => SyntaxKind::PipeGreater,
+            Token::Unsafe => SyntaxKind::Unsafe,
         }
     }
 }

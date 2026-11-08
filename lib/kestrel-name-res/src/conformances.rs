@@ -7,7 +7,10 @@
 use std::collections::HashSet;
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{ConformanceItem, Conformances, ExtensionTarget, NodeKind};
+use kestrel_ast_builder::{
+    ConformanceItem, Conformances, ExtensionTarget, Name, NodeKind, QualifiedTarget,
+    TypeAnnotation, TypeParams,
+};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::extensions::ExtensionsFor;
@@ -189,7 +192,7 @@ fn gather_protocol_instantiations(
         };
 
     for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
+        let ConformanceItem::Positive(ast_ty, ..) = item else {
             continue;
         };
         let Some(resolved) = resolve_conformance_entity(ctx, ast_ty, entity, root) else {
@@ -208,6 +211,32 @@ fn gather_protocol_instantiations(
         }
 
         instantiations.push((resolved, entity, type_args));
+    }
+}
+
+/// A conformance's protocol args with the protocol's declared defaults
+/// filling the unwritten tail: `: Multipliable` is `: Multipliable[Self]`
+/// (`Multipliable[Other = Self]`). The defaults are the protocol's own AST,
+/// so the caller lowers them in the conforming declaration's scope, where
+/// `Self` is the conforming type. Returns `written` unchanged when any
+/// unwritten param has no default (the implicit-positional `Array[T]: Slice`).
+pub fn conformance_args_with_defaults(
+    ctx: &QueryContext<'_>,
+    protocol: Entity,
+    written: Vec<AstType>,
+) -> Vec<AstType> {
+    let params = ctx
+        .get::<TypeParams>(protocol)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+    let defaults: Option<Vec<AstType>> = params
+        .iter()
+        .skip(written.len())
+        .map(|&p| ctx.get::<TypeAnnotation>(p).map(|t| t.0.clone()))
+        .collect();
+    match defaults {
+        Some(defaults) if !defaults.is_empty() => written.into_iter().chain(defaults).collect(),
+        _ => written,
     }
 }
 
@@ -315,7 +344,7 @@ fn declared_conformance_protocols(
         .0
         .iter()
         .filter_map(|item| {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
+            let ConformanceItem::Positive(ast_ty, ..) = item else {
                 return None;
             };
             resolve_conformance_entity(ctx, ast_ty, entity, root)
@@ -341,85 +370,6 @@ pub fn protocol_parents(ctx: &QueryContext<'_>, protocol: Entity, root: Entity) 
     parents
 }
 
-/// Find the init on `target` that witnesses `protocol`, restricted to those
-/// matching `predicate` (used to pick out a specific labeled-arg shape, e.g.
-/// `init(boolLiteral:)`).
-///
-/// Considered scopes:
-/// * `target`'s own children — accepted only if `target` directly declares
-///   conformance to `protocol`.
-/// * Children of every extension of `target` — accepted only if that
-///   extension declares conformance to `protocol`.
-///
-/// The conformance scope check is what makes this safe to use for literal
-/// init lookup: a coincidentally-shaped init on a type that doesn't
-/// actually conform (e.g. a user `init(intLiteral: …)` on an unrelated
-/// type) is rejected. Returns the first matching init by scan order; for
-/// the literal-init use case this is unambiguous because each protocol
-/// declares one init.
-pub fn find_protocol_witness_init<P>(
-    ctx: &QueryContext<'_>,
-    target: Entity,
-    protocol: Entity,
-    root: Entity,
-    predicate: P,
-) -> Option<Entity>
-where
-    P: Fn(&kestrel_ast_builder::Callable) -> bool,
-{
-    use kestrel_ast_builder::Callable;
-
-    // Check whether `parent` declares conformance to `protocol` — either
-    // directly or via a refining protocol (e.g. declaring
-    // ExpressibleByStringInterpolation implies ExpressibleByStringLiteral).
-    let declares_protocol = |parent: Entity| -> bool {
-        let Some(conformances) = ctx.get::<Conformances>(parent) else {
-            return false;
-        };
-        conformances.0.iter().any(|item| {
-            let ConformanceItem::Positive(ast_ty, _) = item else {
-                return false;
-            };
-            let Some(declared) = resolve_conformance_entity(ctx, ast_ty, parent, root) else {
-                return false;
-            };
-            if declared == protocol {
-                return true;
-            }
-            // Check if the declared protocol refines the target protocol
-            let transitive = ctx.query(ConformingProtocols {
-                entity: declared,
-                root,
-            });
-            transitive.contains(&protocol)
-        })
-    };
-
-    let matching_init_in = |parent: Entity| -> Option<Entity> {
-        ctx.children_of(parent).iter().copied().find(|&child| {
-            ctx.get::<NodeKind>(child) == Some(&NodeKind::Initializer)
-                && ctx.get::<Callable>(child).is_some_and(&predicate)
-        })
-    };
-
-    if declares_protocol(target)
-        && let Some(init) = matching_init_in(target)
-    {
-        return Some(init);
-    }
-
-    let extensions = ctx.query(ExtensionsFor { target, root });
-    for ext in extensions {
-        if declares_protocol(ext)
-            && let Some(init) = matching_init_in(ext)
-        {
-            return Some(init);
-        }
-    }
-
-    None
-}
-
 /// Resolve a conformance AstType to an entity via `ResolveTypePath`.
 ///
 /// Uses the conformance-bearing entity as resolution context — protocol
@@ -442,6 +392,190 @@ pub fn resolve_conformance_entity(
     }) {
         TypeResolution::Found(entity) => Some(entity),
         _ => None,
+    }
+}
+
+/// Query: the type alias that binds protocol associated type `assoc` for the
+/// nominal `type_entity` — THE answer every consumer (inference's concrete
+/// projection, entailment, witness lowering) asks.
+///
+/// Searched in order: `conformance_source` (below), the type's own body, its
+/// extensions, the declarations recorded as supplying the conformance, then
+/// extensions of every protocol the type conforms to (a blanket `extend
+/// Comparable: Less[Self] { type Less.Output = Bool }` — a conformance reached
+/// by refinement records the TYPE as its source). An alias carrying `assoc`'s
+/// name counts when qualified by `assoc`'s protocol (`type Addable.Output`
+/// never answers `Equal.Output`), or when unqualified in a declaration that
+/// WRITES the protocol (or a refinement of it) — `writes_conformance`. So an
+/// unqualified `type Output = Meters` in `extend Int64: Multipliable[Meters]`
+/// never answers Int64's `Less.Output`, and `Result`'s `type Output = T` (for
+/// `Tryable`) never answers `Equal.Output`.
+/// `conformance_source`, when the question is about ONE conformance (a type
+/// conforming to `Subtractable[Duration]` and `Subtractable[Instant]` in sibling
+/// extensions), is that conformance's declaring block: its own binding wins
+/// over everything, qualified or not. Returns `(alias, owner)`; the caller
+/// lowers the alias's annotation in the owner's scope.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct AssociatedTypeBinding {
+    pub type_entity: Entity,
+    pub assoc: Entity,
+    pub conformance_source: Option<Entity>,
+    pub root: Entity,
+}
+
+impl QueryFn for AssociatedTypeBinding {
+    type Output = Option<(Entity, Entity)>;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Self::Output {
+        let protocol = ctx.parent_of(self.assoc)?;
+        let name = ctx.get::<Name>(self.assoc)?.0.clone();
+        // `accept(alias, owner)` → does this alias bind here?
+        let find_in = |owner: Entity, accept: &dyn Fn(Entity) -> bool| {
+            ctx.children_of(owner)
+                .iter()
+                .copied()
+                // An alias with no annotation (`type Item` in a protocol body)
+                // declares the associated type; it binds nothing.
+                .find(|&alias| {
+                    alias_binds(ctx, self.root, alias, &name, protocol)
+                        && ctx.has::<kestrel_ast_builder::TypeAnnotation>(alias)
+                        && accept(alias)
+                })
+                .map(|alias| (alias, owner))
+        };
+        let qualified = |alias: Entity| ctx.get::<QualifiedTarget>(alias).is_some();
+        // 1. The conformance's own block, when it WRITES this protocol: its
+        //    `type Output = Meters` is this conformance's, qualified or not.
+        if let Some(source) = self.conformance_source
+            && writes_conformance_directly(ctx, self.root, source, protocol)
+            && let Some(found) = find_in(source, &|_| true)
+        {
+            return Some(found);
+        }
+        let mut owners: Vec<Entity> = vec![self.type_entity];
+        owners.extend(
+            ctx.query(ExtensionsFor {
+                target: self.type_entity,
+                root: self.root,
+            })
+            .iter()
+            .copied(),
+        );
+        owners.extend(
+            ctx.query(ConformingProtocolInstantiations {
+                entity: self.type_entity,
+                root: self.root,
+            })
+            .iter()
+            .filter(|(p, ..)| *p == protocol)
+            .map(|(_, source, _)| *source),
+        );
+        for &p in ctx
+            .query(ConformingProtocols {
+                entity: self.type_entity,
+                root: self.root,
+            })
+            .iter()
+        {
+            owners.extend(
+                ctx.query(ExtensionsFor {
+                    target: p,
+                    root: self.root,
+                })
+                .iter()
+                .copied(),
+            );
+        }
+        // 2. A binding qualified by this protocol anywhere beats 3. an
+        //    unqualified one — `String`'s `type Output = String` (for
+        //    `Addable`) must not answer `Less.Output` over the blanket
+        //    `extend Comparable: Less[Self] { type Less.Output = Bool }`.
+        owners
+            .iter()
+            .find_map(|&owner| find_in(owner, &qualified))
+            .or_else(|| {
+                owners.iter().find_map(|&owner| {
+                    let writes = writes_conformance(ctx, self.root, owner, protocol);
+                    find_in(owner, &|_| writes)
+                })
+            })
+    }
+}
+
+/// Does `owner` (a type body or extension) WRITE a conformance to `protocol`,
+/// or to a protocol refining it? That is the scope an unqualified
+/// `type Output = …` inside `owner` binds: `type Output = T` in `enum Result:
+/// Tryable` is `Tryable.Output`, never the blanket-supplied `Equal.Output`.
+pub fn writes_conformance(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    owner: Entity,
+    protocol: Entity,
+) -> bool {
+    let written = written_conformances(ctx, root, owner);
+    written.contains(&protocol) || expand_protocol_closure(ctx, root, written).contains(&protocol)
+}
+
+/// Does `owner` name `protocol` itself in its conformance list?
+fn writes_conformance_directly(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    owner: Entity,
+    protocol: Entity,
+) -> bool {
+    written_conformances(ctx, root, owner).contains(&protocol)
+}
+
+/// The protocols `owner`'s conformance list names, resolved in its scope.
+fn written_conformances(ctx: &QueryContext<'_>, root: Entity, owner: Entity) -> Vec<Entity> {
+    let Some(conformances) = ctx.get::<Conformances>(owner) else {
+        return Vec::new();
+    };
+    let context = ctx.parent_of(owner).unwrap_or(root);
+    conformances
+        .0
+        .iter()
+        .filter_map(|item| {
+            let ConformanceItem::Positive(AstType::Named { segments, .. }, ..) = item else {
+                return None;
+            };
+            match ctx.query(ResolveTypePath {
+                segments: segments.iter().map(|s| s.name.clone()).collect(),
+                context,
+                root,
+            }) {
+                TypeResolution::Found(e) => Some(e),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// Is `alias` a `type <name> = …` that binds `protocol`'s `<name>`:
+/// unqualified, or qualified by `protocol`?
+pub fn alias_binds(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    alias: Entity,
+    name: &str,
+    protocol: Entity,
+) -> bool {
+    if ctx.get::<NodeKind>(alias) != Some(&NodeKind::TypeAlias)
+        || ctx.get::<Name>(alias).is_none_or(|n| n.0 != name)
+    {
+        return false;
+    }
+    let Some(QualifiedTarget(AstType::Named { segments, .. })) = ctx.get::<QualifiedTarget>(alias)
+    else {
+        return true;
+    };
+    match ctx.query(ResolveTypePath {
+        segments: segments.iter().map(|s| s.name.clone()).collect(),
+        context: alias,
+        root,
+    }) {
+        TypeResolution::Found(e) => e == protocol,
+        _ => true,
     }
 }
 
@@ -479,7 +613,7 @@ mod tests {
     }
 
     fn positive(name: &str) -> ConformanceItem {
-        ConformanceItem::Positive(named_ast(name), fake_syntax())
+        ConformanceItem::Positive(named_ast(name), fake_syntax(), false)
     }
 
     fn spawn_protocol(world: &mut World, parent: Entity, name: &str) -> Entity {

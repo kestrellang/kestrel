@@ -415,6 +415,6 @@ func main() {
     while true {
         game.update();
         game.render();
-        usleep(16667); // ~60 FPS
+        unsafe usleep(16667); // ~60 FPS
     }
 }

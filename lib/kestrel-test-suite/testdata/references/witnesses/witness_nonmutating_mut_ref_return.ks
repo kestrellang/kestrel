@@ -5,7 +5,7 @@
 // Phase-0 validation for closure-kinds (docs/design/shared-box.md §The
 // Protocol): a NON-mutating protocol requirement returning `&mutating Slot`,
 // witness-dispatched through a generic body. The conformer derives the
-// reference from a Pointer (`valuePtr().mutatingValue`) — the exact shape
+// reference from a Pointer (`ptr.mutatingValue`) — the exact shape
 // `RcBox.sharedMutRef()` will use. E495 keys on pointer provenance, not on
 // the receiver convention, so this must compile and write through.
 module Test
@@ -17,14 +17,15 @@ protocol SharedMut {
 
 struct Cell: SharedMut {
     type Slot = Int64
-    fileprivate var storage: RcBox[Int64]
+    fileprivate var storage: Pointer[Int64]
 
     public init(v: Int64) {
-        self.storage = RcBox(v);
+        self.storage = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
+        unsafe self.storage.write(v);
     }
 
     public func sharedAccess() -> &mutating Int64 {
-        self.storage.valuePtr().mutatingValue
+        unsafe self.storage.mutatingValue
     }
 }
 

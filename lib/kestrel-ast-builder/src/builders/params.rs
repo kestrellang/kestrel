@@ -13,6 +13,7 @@ use crate::ast_type::lower_opt_type;
 use crate::components::{
     AstParam, FileId, NodeKind, ParamPattern, StructPatternField, TypeAnnotation, Valued,
 };
+use kestrel_ast::AstType;
 
 /// Extract the parameters of `list`. Creates child entities for default
 /// value expressions.
@@ -88,7 +89,7 @@ fn extract_single_param(
     synth_idx: &mut u32,
 ) -> Option<AstParam> {
     let is_consuming = param.consuming_token().is_some();
-    let is_mut = is_consuming || param.mutating_token().is_some();
+    let mut is_mut = is_consuming || param.mutating_token().is_some();
 
     let pat = param.pattern()?.pat()?;
     // A plain binding names the parameter; a destructuring pattern gets a
@@ -103,7 +104,18 @@ fn extract_single_param(
         },
     };
     let label = param.name().and_then(|n| n.text());
-    let ty = lower_opt_type(param.ty(), file_id);
+    let mut ty = lower_opt_type(param.ty(), file_id);
+    // `x: &T` / `x: &mutating T` spell the access mode with the type: the
+    // param is the pointee, passed by borrow / mutable borrow. Combined with
+    // a `mutating`/`consuming` keyword the ref stays, and HIR lowering
+    // rejects it (E480).
+    let mut by_ref = false;
+    if !is_mut && let Some((inner, mutating)) = ty.as_ref().and_then(AstType::param_ref) {
+        let inner = inner.clone();
+        ty = Some(inner);
+        is_mut = mutating;
+        by_ref = true;
+    }
 
     // Create child entity for default value expression
     let default_entity = param.default_value().map(|default| {
@@ -127,6 +139,7 @@ fn extract_single_param(
         default_entity,
         pattern,
         is_mut,
+        by_ref,
     })
 }
 
@@ -141,6 +154,15 @@ fn extract_param_pattern(pat: &ast::Pat) -> Option<ParamPattern> {
                 .map(|t| t.text().to_string())
                 .unwrap_or_default(),
             is_mut: b.var_token().is_some(),
+            by_ref: None,
+        },
+        ast::Pat::RefBindingPattern(b) => ParamPattern::Binding {
+            name: b
+                .identifier_token()
+                .map(|t| t.text().to_string())
+                .unwrap_or_default(),
+            is_mut: false,
+            by_ref: Some(b.mutating_token().is_some()),
         },
         ast::Pat::TuplePattern(t) => ParamPattern::Tuple {
             elements: t
@@ -165,6 +187,7 @@ fn extract_param_pattern(pat: &ast::Pat) -> Option<ParamPattern> {
                             ParamPattern::Binding {
                                 name: field_name.clone(),
                                 is_mut: false,
+                                by_ref: None,
                             },
                         );
                         fields.push(StructPatternField {

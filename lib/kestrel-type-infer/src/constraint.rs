@@ -4,7 +4,7 @@
 //! during constraint generation and consumed by the fixpoint solver.
 
 use kestrel_ast_builder::AstParam;
-use kestrel_ast_builder::arg_binding::{BindParam, binds};
+use kestrel_ast_builder::arg_binding::{BindArg, BindParam, binds};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::HirExprId;
 use kestrel_hir::ty::HirTy;
@@ -73,6 +73,9 @@ pub enum Reason {
     Element(Span),
     /// The target of an assignment.
     Assign(Span),
+    /// A later or-pattern alternative binds `name`, which the first
+    /// alternative (declared at `first`) already bound at another type.
+    OrPatternBinding { name: String, first: Span },
 }
 
 /// A type constraint emitted during constraint generation.
@@ -291,15 +294,6 @@ pub enum Constraint {
         span: Span,
     },
 
-    /// Links a string interpolation's result type to its accumulator type.
-    /// Deferred until result_tv is concrete, then resolves the accumulator
-    /// via `ExpressibleByStringInterpolation::Interpolation`.
-    InterpolationLink {
-        result_tv: TyVar,
-        acc_tv: TyVar,
-        span: Span,
-    },
-
     /// A member was committed while its applicability was still `Unknown`
     /// (bidi design §5.1 step 6): the receiver had an open var, so the
     /// extension's where clauses (or the protocol conformance it was reached
@@ -335,15 +329,23 @@ pub struct CallArg {
     pub label: Option<String>,
     pub ty: TyVar,
     pub value: HirExprId,
+    /// An unlabeled trailing closure (from `HirCallArg::trailing_closure`).
+    pub trailing_closure: bool,
+}
+
+impl<'a> From<&'a CallArg> for BindArg<'a> {
+    fn from(a: &'a CallArg) -> Self {
+        BindArg {
+            label: a.label.as_deref(),
+            trailing_closure: a.trailing_closure,
+        }
+    }
 }
 
 /// Check if call arg labels can bind to a callable's params. Arguments bind in
 /// declaration order with defaulted params skippable anywhere (not just
 /// trailing). Single source of truth: `kestrel_ast_builder::arg_binding`.
-pub fn labels_match(params: &[AstParam], arg_labels: &[Option<&str>]) -> bool {
-    let bind_params: Vec<BindParam> = params
-        .iter()
-        .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
-        .collect();
+pub fn labels_match(params: &[AstParam], arg_labels: &[BindArg<'_>]) -> bool {
+    let bind_params: Vec<BindParam> = params.iter().map(BindParam::of).collect();
     binds(&bind_params, arg_labels)
 }

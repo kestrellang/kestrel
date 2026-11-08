@@ -96,7 +96,7 @@ func handleInstall(matches matches: ArgumentMatches) {
     // Get channel from submatches (the arg defaults to "preview" when omitted).
     var channel = "preview";
     if matches.submatches.count > 0 {
-        let sub = matches.submatches(unchecked: 0);
+        let sub = unsafe matches.submatches(unchecked: 0);
         match sub.value(of: "channel") {
             .Some(c) => channel = c,
             .None => {}
@@ -125,7 +125,7 @@ func handleInstall(matches matches: ArgumentMatches) {
 func handleDefault(matches matches: ArgumentMatches) {
     var toolchainName = "";
     if matches.submatches.count > 0 {
-        let sub = matches.submatches(unchecked: 0);
+        let sub = unsafe matches.submatches(unchecked: 0);
         match sub.value(of: "toolchain") {
             .Some(t) => toolchainName = t,
             .None => {
@@ -173,7 +173,7 @@ func handleUpdate() {
 func handleRemove(matches matches: ArgumentMatches) {
     var toolchainName = "";
     if matches.submatches.count > 0 {
-        let sub = matches.submatches(unchecked: 0);
+        let sub = unsafe matches.submatches(unchecked: 0);
         match sub.value(of: "toolchain") {
             .Some(t) => toolchainName = t,
             .None => {
@@ -209,7 +209,7 @@ func handleShow() {
 func handleSelf(matches matches: ArgumentMatches) {
     // Check for "self update" subcommand
     if matches.submatches.count > 0 {
-        let sub = matches.submatches(unchecked: 0);
+        let sub = unsafe matches.submatches(unchecked: 0);
         match sub.subcommand {
             .Some(selfSub) => {
                 if selfSub == "update" {

@@ -182,6 +182,12 @@ impl<'a> CompilerDriver<'a> {
             root,
             is_executable,
         ));
+        // Diagnostics inside `@derive`-generated code move to the attribute.
+        let derived = kestrel_compiler::diagnostic::DerivedSources::new(world, root);
+        let diags: Vec<_> = diags
+            .into_iter()
+            .filter_map(|d| derived.remap_analyze(d))
+            .collect();
 
         let mut summary = AnalyzeSummary::default();
         for d in &diags {
@@ -374,6 +380,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::NoMember { .. } => "NoMember",
         InferError::AmbiguousMember { .. } => "AmbiguousMember",
         InferError::MemberNotVisible { .. } => "MemberNotVisible",
+        InferError::SugarOnlyMember { .. } => "SugarOnlyMember",
         InferError::MemberIsStatic { .. } => "MemberIsStatic",
         InferError::NoAssociatedType { .. } => "NoAssociatedType",
         InferError::InfiniteType { .. } => "InfiniteType",
@@ -381,9 +388,15 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::ImplicitMemberNotFound { .. } => "ImplicitMemberNotFound",
         InferError::ArgCountMismatch { .. } => "ArgCountMismatch",
         InferError::LabelMismatch { .. } => "LabelMismatch",
+        InferError::AmbiguousTrailingClosure { .. } => "AmbiguousTrailingClosure",
         InferError::InstanceMethodAsStatic { .. } => "InstanceMethodAsStatic",
         InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
         InferError::TypeMustBeKnown { .. } => "TypeMustBeKnown",
+        InferError::ExistentialBoxMismatch { .. } => "ExistentialBoxMismatch",
+        InferError::NotDispatchable { .. } => "NotDispatchable",
+        InferError::ExistentialAccess { .. } => "ExistentialAccess",
+        InferError::NotSelfConforming { .. } => "NotSelfConforming",
+        InferError::ExistentialBindingMismatch { .. } => "ExistentialBindingMismatch",
         InferError::TypeArgCountMismatch { .. } => "TypeArgCountMismatch",
         InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
         InferError::MemberwiseInitArity { .. } => "MemberwiseInitArity",
@@ -402,6 +415,9 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::KindMismatch { .. } => "KindMismatch",
         InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
         InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
+        InferError::UnsizedAssign { .. } => "UnsizedAssign",
+        InferError::OptionalChainNotConforming { .. } => "OptionalChainNotConforming",
+        InferError::PipeFixIt { .. } => "PipeFixIt",
     }
 }
 
@@ -415,6 +431,15 @@ fn format_error(err: &InferError) -> String {
         InferError::DoesNotConform { .. } => {
             format!("DoesNotConform at {}:{}", span.file_id, span.start)
         },
+        InferError::OptionalChainNotConforming { .. } => {
+            format!(
+                "OptionalChainNotConforming at {}:{}",
+                span.file_id, span.start
+            )
+        },
+        InferError::PipeFixIt { .. } => {
+            format!("PipeFixIt at {}:{}", span.file_id, span.start)
+        },
         InferError::NoMember { name, .. } => {
             format!("NoMember '{}' at {}:{}", name, span.file_id, span.start)
         },
@@ -427,6 +452,12 @@ fn format_error(err: &InferError) -> String {
         InferError::MemberNotVisible { name, .. } => {
             format!(
                 "MemberNotVisible '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
+        InferError::SugarOnlyMember { name, .. } => {
+            format!(
+                "SugarOnlyMember '{}' at {}:{}",
                 name, span.file_id, span.start
             )
         },
@@ -466,6 +497,10 @@ fn format_error(err: &InferError) -> String {
                 expected, got, span.file_id, span.start
             )
         },
+        InferError::AmbiguousTrailingClosure { candidates, .. } => format!(
+            "AmbiguousTrailingClosure candidates={:?} at {}:{}",
+            candidates, span.file_id, span.start
+        ),
         InferError::InstanceMethodAsStatic { name, .. } => {
             format!(
                 "InstanceMethodAsStatic '{}' at {}:{}",
@@ -481,6 +516,21 @@ fn format_error(err: &InferError) -> String {
                 member, span.file_id, span.start
             )
         },
+        InferError::NotDispatchable { message, .. }
+        | InferError::ExistentialAccess { message, .. }
+        | InferError::NotSelfConforming { message, .. } => {
+            format!("{} at {}:{}", message, span.file_id, span.start)
+        },
+        InferError::ExistentialBoxMismatch { from, to, .. } => format!(
+            "ExistentialBoxMismatch '{}' -> '{}' at {}:{}",
+            from, to, span.file_id, span.start
+        ),
+        InferError::ExistentialBindingMismatch {
+            from, to, assoc, ..
+        } => format!(
+            "ExistentialBindingMismatch '{}' -> '{}' ({}) at {}:{}",
+            from, to, assoc, span.file_id, span.start
+        ),
         InferError::TypeArgCountMismatch { expected, got, .. } => {
             format!(
                 "TypeArgCountMismatch expected={} got={} at {}:{}",
@@ -570,6 +620,9 @@ fn format_error(err: &InferError) -> String {
         },
         InferError::RefInTypeArgument { .. } => {
             format!("RefInTypeArgument at {}:{}", span.file_id, span.start)
+        },
+        InferError::UnsizedAssign { .. } => {
+            format!("UnsizedAssign at {}:{}", span.file_id, span.start)
         },
     }
 }

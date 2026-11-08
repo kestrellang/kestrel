@@ -321,6 +321,7 @@ mod tests {
             Conformances(vec![ConformanceItem::Positive(
                 named_ast("Base"),
                 fake_syntax(),
+                false,
             )]),
         );
         let derived_m = spawn_method(&mut world, derived, "derivedMethod");
@@ -356,6 +357,7 @@ mod tests {
             Conformances(vec![ConformanceItem::Positive(
                 named_ast("Base"),
                 fake_syntax(),
+                false,
             )]),
         );
 

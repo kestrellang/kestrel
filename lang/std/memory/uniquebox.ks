@@ -11,8 +11,9 @@ import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator)
 // single allocation. The word is 1 while the payload is present and 0 once
 // `takeValue()` has moved it out, so `destroy()` knows whether the slot still
 // owns anything. It is an `Int64` (not a `Bool`) for the same reason
-// `RcBoxStorage.refCount` is: the payload sits at a fixed `sizeof[Int64]`
-// offset, which `valuePtr()` computes without a field-offset intrinsic.
+// `RcBoxStorage.refCount` is: the payload sits right after the word, rounded
+// up to its alignment, which `valuePtr()` computes without a field-offset
+// intrinsic.
 //
 // `where T: not Copyable` is a RELAXATION, not a requirement: the payload is
 // a consuming closure's environment struct, which owns its captures.
@@ -75,23 +76,25 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     /// # Errors
     ///
     /// Panics with `"UniqueBox allocation failed"` on allocation failure.
+    @builtin(.UniqueBoxInit)
     public init(consuming value: T) {
         let layout: Layout = Layout.of[UniqueBoxStorage[T]]();
         var allocator: SystemAllocator = SystemAllocator();
         let result: RawPointer? = allocator.allocate(layout);
         if let .Some(rawPtr) = result {
             self.ptr = rawPtr.cast[UniqueBoxStorage[T]]();
-            self.ptr.write(UniqueBoxStorage(live: 1, value: value));
+            unsafe self.ptr.write(UniqueBoxStorage(live: 1, value: value));
         } else {
             fatalError("UniqueBox allocation failed")
         }
     }
 
     /// Pointer to the payload slot inside the block. Mirrors
-    /// `RcBox.valuePtr()`: the header is one `Int64`, so the payload starts at
-    /// `sizeof[Int64]` bytes.
+    /// `RcBox.valuePtr()`: the header is one `Int64` rounded up to the
+    /// payload's alignment, which is the block's own alignment
+    /// (max(8, align T)), so an `@align`ed payload lands where the layout put it.
     fileprivate func valuePtr() -> Pointer[T] {
-        let valueOffset = Int64(intLiteral: lang.sizeof[Int64]());
+        let valueOffset = Int64(intLiteral: lang.alignof[UniqueBoxStorage[T]]());
         self.ptr.asRaw().offset(by: valueOffset).cast[T]()
     }
 
@@ -108,10 +111,11 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     /// # Safety
     ///
     /// Must be called at most once per box, and never after `destroy()`.
+    @builtin(.UniqueBoxTakeValue)
     public func takeValue() -> T {
         let livePtr = self.ptr.asRaw().cast[Int64]();
-        livePtr.write(0);
-        self.valuePtr().take()
+        unsafe livePtr.write(0);
+        unsafe self.valuePtr().take()
     }
 
     /// Drops the payload (if it is still present) and frees the block. This is
@@ -121,10 +125,11 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     /// # Safety
     ///
     /// Must be called exactly once per box, after any `takeValue()`.
+    @builtin(.UniqueBoxDestroy)
     public func destroy() {
         let livePtr = self.ptr.asRaw().cast[Int64]();
-        if livePtr.read() == 1 {
-            self.valuePtr().dropInPlace();
+        if unsafe livePtr.read() == 1 {
+            unsafe self.valuePtr().dropInPlace();
         };
         self.free()
     }
@@ -133,6 +138,6 @@ public struct UniqueBox[T]: not Copyable where T: not Copyable {
     private func free() {
         let layout: Layout = Layout.of[UniqueBoxStorage[T]]();
         var allocator: SystemAllocator = SystemAllocator();
-        allocator.deallocate(self.ptr.asRaw(), layout)
+        unsafe allocator.deallocate(self.ptr.asRaw(), layout)
     }
 }

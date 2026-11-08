@@ -1,0 +1,9 @@
+[package]
+name = "wgpu_cube"
+version = "0.1.0"
+description = "A spinning, depth-tested cube in an SDL window, drawn with wgpu"
+
+[dependencies]
+wgpu = { path = "../../lang/wgpu" }
+sdl = { path = "../../lang/sdl" }
+linalg = { path = "../../lang/linalg" }

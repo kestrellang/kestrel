@@ -309,6 +309,7 @@ mod tests {
                         b.finish()
                     }),
                 ),
+                false,
             )]),
         );
 

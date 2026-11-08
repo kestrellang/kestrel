@@ -8,7 +8,7 @@
 // `S` value was rejected as a use-after-move (E500).
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 struct H: not Copyable {
     var v: std.numeric.Int64;

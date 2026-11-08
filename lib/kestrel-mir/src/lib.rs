@@ -22,11 +22,11 @@ use indexmap::{IndexMap, IndexSet};
 use kestrel_hecs::Entity;
 
 pub use body::OssaBody;
-pub use id::{BlockId, FieldIdx, MonoFuncId, TyId, ValueId, VariantIdx};
+pub use id::{BlockId, FieldIdx, MonoFuncId, MonoVTableId, TyId, ValueId, VariantIdx};
 pub use immediate::{Immediate, ImmediateKind};
 pub use item::WitnessMethodKey;
 pub use item::{CopyBehavior, DropBehavior, Layout, TargetConfig, TypeInfo, TypeParamDef};
-pub use layout::{EnumLayout, StructLayout};
+pub use layout::{EnumLayout, LayoutAttrs, LayoutKind, StructLayout};
 pub use op::{
     DivGuard, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness, op_type,
     op_type_mut,
@@ -94,6 +94,12 @@ pub struct MirModule {
     /// stdlib — the same answer the name scan gave in those cases.
     pub copyable_protocol: Option<Entity>,
     pub cloneable_protocol: Option<Entity>,
+    /// The `@builtin(.Static)` / `@builtin(.Sized)` protocol entities, on the
+    /// same terms. Mono decides a witness's `where T: Static` / `T: Sized`
+    /// clause structurally (no witness ever declares them), so it needs to
+    /// recognize them.
+    pub static_protocol: Option<Entity>,
+    pub sized_protocol: Option<Entity>,
     /// The `@builtin(.BooleanConditional)` protocol and the `@builtin(.Bool)`
     /// struct entities, resolved once in mir-lower via `ResolveBuiltin`.
     ///
@@ -117,9 +123,29 @@ pub struct MirModule {
     /// effect (closing a connection), so copy lifetime passes must not drop
     /// copies of it — or of anything containing it — earlier than scope end.
     pub observable_drop: IndexSet<Entity>,
+    /// Existential function-table shapes, generic over the payload
+    /// (`item::vtable`). Instantiated by mono at each `ImmediateKind::VTable`.
+    pub vtable_templates: IndexMap<Entity, crate::item::VTableTemplate>,
+    /// `fn __existential.clone[S](src, dst)`: clones a sized payload. A
+    /// table's clone word and a sized `Op::CloneIntoVal` both call it.
+    pub existential_clone_thunk: Option<Entity>,
 }
 
 impl MirModule {
+    /// Is `ty` unsized (a raw existential, a `lang.slice[T]`, or a struct
+    /// ending in one), judged on the generic struct defs? A type parameter
+    /// is `false` here: whether it's unsized is only known after mono.
+    pub fn is_unsized(&mut self, ty: TyId) -> bool {
+        crate::ty::is_unsized(
+            &mut crate::mono::GenericTails {
+                arena: &mut self.ty_arena,
+                structs: &self.structs,
+                witnesses: &self.witnesses,
+            },
+            ty,
+        )
+    }
+
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -133,9 +159,13 @@ impl MirModule {
             entity_names: IndexMap::new(),
             copyable_protocol: None,
             cloneable_protocol: None,
+            static_protocol: None,
+            sized_protocol: None,
             boolean_conditional_protocol: None,
             bool_struct: None,
             observable_drop: IndexSet::new(),
+            vtable_templates: IndexMap::new(),
+            existential_clone_thunk: None,
         }
     }
 

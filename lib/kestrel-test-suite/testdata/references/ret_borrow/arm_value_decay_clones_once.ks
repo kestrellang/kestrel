@@ -14,7 +14,7 @@ struct Tracked: Cloneable {
     var payload: String
     var clones: Pointer[Int64]
     func clone() -> Tracked {
-        self.clones.write(self.clones.read() + 1);
+        unsafe self.clones.write(self.clones.read() + 1);
         Tracked(payload: self.payload.clone(), clones: self.clones)
     }
 }
@@ -38,24 +38,24 @@ func pickRefs(h: Holder, c: Int64) -> Tracked {
 @main
 func main() -> lang.i64 {
     let clones = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    clones.write(0);
+    unsafe clones.write(0);
 
     let h = Holder(t: Tracked(payload: "alpha", clones: clones));
-    let baseline = clones.read();
+    let baseline = unsafe clones.read();
 
     // Taken ref arm: exactly one clone (the decay copy).
     let a = pick(h, clones, 1);
-    if clones.read() != baseline + 1 { return 1; }
+    if unsafe clones.read() != baseline + 1 { return 1; }
     if a.payload != "alpha" { return 2; }
 
     // Untaken ref arm: zero clones (construction is not a clone).
     let b = pick(h, clones, 0);
-    if clones.read() != baseline + 1 { return 3; }
+    if unsafe clones.read() != baseline + 1 { return 3; }
     if b.payload != "other" { return 4; }
 
     // All arms refs: still exactly one clone for the taken arm.
     let c = pickRefs(h, 1);
-    if clones.read() != baseline + 2 { return 5; }
+    if unsafe clones.read() != baseline + 2 { return 5; }
     if c.payload != "alpha" { return 6; }
     0
 }

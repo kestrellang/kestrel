@@ -22,9 +22,9 @@ module Test
             arr.shrinkToFit();
             if arr.count != 3 { return 5 }
             if arr.capacity != 3 { return 6 }
-            if arr(unchecked: 0) != 1 { return 7 }
-            if arr(unchecked: 1) != 2 { return 8 }
-            if arr(unchecked: 2) != 3 { return 9 }
+            if unsafe arr(unchecked: 0) != 1 { return 7 }
+            if unsafe arr(unchecked: 1) != 2 { return 8 }
+            if unsafe arr(unchecked: 2) != 3 { return 9 }
 
             // Test shrinkToFit on empty array with capacity
             var emptyWithCap = std.collections.Array[std.numeric.Int64](capacity: 50);

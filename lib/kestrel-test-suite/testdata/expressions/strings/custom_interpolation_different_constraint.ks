@@ -67,7 +67,7 @@ struct SqlQuery: ExpressibleByStringInterpolation, Cloneable {
         self.paramCount = 0;
     }
 
-    init(interpolation: SqlAccumulator) {
+    init(consuming interpolation: SqlAccumulator) {
         var acc = interpolation;
         let built = acc.build();
         self.template = built.template;

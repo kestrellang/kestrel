@@ -13,7 +13,7 @@ import std.numeric.(Int64)
 struct Buf {
     var p: Pointer[Int64]
     subscript(at index: Int64) -> Int64 {
-        ref { self.p.offset(by: index).value }
+        ref { unsafe self.p.offset(by: index).value }
     }
 }
 

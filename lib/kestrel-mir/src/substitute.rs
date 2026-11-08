@@ -85,6 +85,36 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             }
         },
 
+        MirTy::Slice(elem) => {
+            let sub_elem = substitute(arena, elem, subst);
+            if sub_elem != elem {
+                arena.slice(sub_elem)
+            } else {
+                ty
+            }
+        },
+
+        MirTy::RawExistential { bounds, bindings } => {
+            let sub_bounds: Vec<(kestrel_hecs::Entity, Vec<TyId>)> = bounds
+                .iter()
+                .map(|(p, args)| {
+                    (
+                        *p,
+                        args.iter().map(|&a| substitute(arena, a, subst)).collect(),
+                    )
+                })
+                .collect();
+            let sub_bindings: Vec<(kestrel_hecs::Entity, TyId)> = bindings
+                .iter()
+                .map(|&(a, t)| (a, substitute(arena, t, subst)))
+                .collect();
+            if sub_bounds != bounds || sub_bindings != bindings {
+                arena.raw_existential(sub_bounds, sub_bindings)
+            } else {
+                ty
+            }
+        },
+
         MirTy::Tuple(elems) => {
             let sub_elems: Vec<_> = elems.iter().map(|&e| substitute(arena, e, subst)).collect();
             if sub_elems != elems {
@@ -116,6 +146,27 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
                 arena.intern(MirTy::FuncThin {
                     params: sub_params,
                     ret: sub_ret,
+                })
+            } else {
+                ty
+            }
+        },
+
+        MirTy::FuncC {
+            params,
+            ret,
+            unsigned,
+        } => {
+            let sub_params: Vec<(TyId, ParamConvention)> = params
+                .iter()
+                .map(|&(t, conv)| (substitute(arena, t, subst), conv))
+                .collect();
+            let sub_ret = substitute(arena, ret, subst);
+            if sub_params != params || sub_ret != ret {
+                arena.intern(MirTy::FuncC {
+                    params: sub_params,
+                    ret: sub_ret,
+                    unsigned,
                 })
             } else {
                 ty

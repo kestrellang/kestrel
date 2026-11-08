@@ -3,7 +3,7 @@
 // expect-stdout: 4\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 enum Foo {
     case A

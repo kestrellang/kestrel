@@ -78,7 +78,7 @@ impl_trait!(HasName: StructDeclaration, EnumDeclaration, ProtocolDeclaration,
 impl_trait!(HasVisibility: StructDeclaration, EnumDeclaration, ProtocolDeclaration,
     FunctionDeclaration, FieldDeclaration, TypeAliasDeclaration, InitializerDeclaration,
     SubscriptDeclaration, EnumCaseDeclaration);
-impl_trait!(HasAttributes: StructDeclaration, EnumDeclaration, ProtocolDeclaration,
+impl_trait!(HasAttributes: StructDeclaration, EnumDeclaration, ProtocolDeclaration, ExtensionDeclaration, DeinitDeclaration,
     FunctionDeclaration, FieldDeclaration, TypeAliasDeclaration, InitializerDeclaration,
     SubscriptDeclaration, EnumCaseDeclaration);
 impl_trait!(HasGenerics: StructDeclaration, EnumDeclaration, ProtocolDeclaration,
@@ -158,6 +158,14 @@ impl TyFunction {
             .filter_map(|e| e.into_token())
             .find(|t| !t.kind().is_trivia())
     }
+
+    /// The convention attribute of a C function type (`@extern(.C)`).
+    pub fn convention(&self) -> Option<Attribute> {
+        self.syntax()
+            .children()
+            .take_while(|n| n.kind() != SyntaxKind::TyList)
+            .find_map(Attribute::cast)
+    }
 }
 
 impl TypeAliasDeclaration {
@@ -171,7 +179,76 @@ impl TypeAliasDeclaration {
     }
 }
 
+impl FieldDeclaration {
+    /// The accessor block, written before or after the initializer.
+    pub fn property_accessors(&self) -> Option<PropertyAccessors> {
+        self.property_accessorses().next()
+    }
+
+    /// The `= expr` initializer.
+    pub fn expression(&self) -> Option<Expression> {
+        self.expressions().next()
+    }
+
+    /// `lazy let|var`.
+    pub fn is_lazy(&self) -> bool {
+        self.lazy_modifier().is_some()
+    }
+
+    /// Instance storage the user declared: not `static`, not `lazy` (its
+    /// storage is a hidden cache), and no accessors except observers (an
+    /// observed property stays stored). The syntactic twin of
+    /// `FieldClass::is_declared_storage`, for passes that read source (derive).
+    pub fn is_declared_instance_storage(&self) -> bool {
+        !self.is_static()
+            && !self.is_lazy()
+            && self
+                .property_accessors()
+                .is_none_or(|acc| acc.is_observer_only())
+    }
+
+    /// `var name?: T`: a failable place.
+    pub fn is_failable(&self) -> bool {
+        self.failable_marker().is_some()
+    }
+}
+
 impl PropertyAccessors {
+    pub fn modifying_getter(&self) -> Option<ModifyingGetterClause> {
+        support::child(self.syntax())
+    }
+
+    pub fn modifying_ref_clause(&self) -> Option<ModifyingRefClause> {
+        support::child(self.syntax())
+    }
+
+    pub fn will_set(&self) -> Option<WillSetClause> {
+        support::child(self.syntax())
+    }
+
+    pub fn did_set(&self) -> Option<DidSetClause> {
+        support::child(self.syntax())
+    }
+
+    /// Only `willSet` / `didSet` clauses: no read or write provider and no
+    /// `{ expr }` shorthand body.
+    pub fn is_observer_only(&self) -> bool {
+        self.code_block().is_none()
+            && self.get_token().is_none()
+            && self.accessor_clauses().next().is_some()
+            && self.accessor_clauses().all(|c| {
+                matches!(
+                    c,
+                    AccessorClause::WillSetClause(_) | AccessorClause::DidSetClause(_)
+                )
+            })
+    }
+
+    /// Declares `willSet` and/or `didSet` observers.
+    pub fn has_observers(&self) -> bool {
+        self.will_set().is_some() || self.did_set().is_some()
+    }
+
     pub fn getter(&self) -> Option<GetterClause> {
         support::child(self.syntax())
     }
@@ -208,7 +285,11 @@ impl PropertyAccessors {
         self.code_block().is_some()
             || self.getter().is_some_and(|g| g.code_block().is_some())
             || self.setter().is_some_and(|s| s.code_block().is_some())
-            || self.ref_clause().is_some()
-            || self.mutating_ref_clause().is_some()
+            || self.ref_clause().is_some_and(|r| r.code_block().is_some())
+            || self
+                .mutating_ref_clause()
+                .is_some_and(|r| r.code_block().is_some())
+            || self.modifying_getter().is_some()
+            || self.modifying_ref_clause().is_some()
     }
 }

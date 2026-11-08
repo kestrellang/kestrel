@@ -44,6 +44,18 @@ It is a **pure function, deliberately not a query**: its input includes the call
 
 (Memberwise struct init — see above — is a *separate* positional zip over fields and does not go through the binder; fields have no skippable defaults.)
 
+## Member lookup goes through the shared queries
+
+Every "which members does this type/protocol have" question is answered by name-res: `TypeMembersByName` (type's own, its extensions', its protocols' extension defaults), `ProtocolMembersByName` (a protocol's requirements, its parents', and their defaults), `VisibleChildrenByName` (one decl's direct children). Inits and subscripts are nameless; they answer to the sentinels `"init"` / `"subscript"` through `kestrel_name_res::helpers::member_lookup_name` — the one name rule, which all three queries use.
+
+**Never hand-roll a lookup with `children_of` + a `NodeKind::Initializer` / `Subscript` filter, or `ExtensionsFor` + a loop.** Each copy drifted: struct construction (`gen_struct_init`) never saw protocol-extension inits, witness lowering never matched a subscript requirement (it compared `Name` against `"subscript"`), and a protocol-side split skipped the visibility check. A `NodeKind` check is fine for *classifying* an entity you already have ("is this an init?"), not for *finding* one.
+
+Protocol-extension members are a fallback layer: they join a candidate set only when nothing of the type's own matches the labels (methods, statics and inits all follow this), so a protocol's convenience init never takes away a struct's memberwise init.
+
+## A call's callee: type or value is syntactic
+
+`T(...)` is an init, `t(...)` with `t: T` is a subscript — and both callees have type `TyKind::Param`. **Never decide init-vs-subscript from the callee's `TyKind`.** The generator records calls whose callee *names* a type (`TypeRef`, or a `Def` of a struct/enum/protocol/type parameter/alias — `Self` lowers to a `Def` of the enclosing type or protocol) in `ctx.type_callee_calls` via `callee_names_type`; `solve_call` dispatches an init only for those.
+
 ## Structural / intrinsic types extend via synthetic `lang` entities
 
 `()`, `!`, and `lang.*` intrinsics are extendable (`extend (): P`,

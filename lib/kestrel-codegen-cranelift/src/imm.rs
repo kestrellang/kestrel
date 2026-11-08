@@ -41,8 +41,36 @@ pub fn compile_immediate(
         ImmediateKind::Unit => Ok(builder.ins().iconst(ptr_ty, 0)),
 
         ImmediateKind::MonoFunctionRef(mono_id) => compile_mono_func_ref(ctx, builder, *mono_id),
+        // A C-callable address: the `@export` wrapper or `@extern` symbol.
+        ImmediateKind::MonoCFunctionRef(mono_id, _) => {
+            let func_id = ctx
+                .c_symbols
+                .get(&mono_id.index())
+                .copied()
+                .ok_or_else(|| {
+                    CodegenError::Unsupported(format!(
+                        "C function value of mono function {} with no C symbol",
+                        mono_id.index()
+                    ))
+                })?;
+            let func_ref = ctx.cl_module.declare_func_in_func(func_id, builder.func);
+            Ok(builder.ins().func_addr(ctx.ptr_ty, func_ref))
+        },
 
-        ImmediateKind::FunctionRef { .. } => {
+        // The address of an existential function table.
+        ImmediateKind::MonoVTable(id) => {
+            let gv = ctx
+                .cl_module
+                .declare_data_in_func(ctx.vtable_data[id.index()], builder.func);
+            Ok(builder.ins().global_value(ptr_ty, gv))
+        },
+
+        ImmediateKind::VTable { .. } => {
+            debug_assert!(false, "unresolved VTable in codegen");
+            Ok(builder.ins().iconst(ptr_ty, 0))
+        },
+
+        ImmediateKind::FunctionRef { .. } | ImmediateKind::CFunctionRef { .. } => {
             debug_assert!(false, "unresolved FunctionRef in codegen");
             Ok(builder.ins().iconst(ptr_ty, 0))
         },

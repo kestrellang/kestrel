@@ -18,17 +18,17 @@ struct Clamped {
 
     subscript(at index: Int64) -> Int64 {
         get {
-            let raw = self.p.offset(by: index).value;
+            let raw = unsafe self.p.offset(by: index).value;
             if raw > 100 { 100 } else { raw }
         }
-        mutating ref { self.p.offset(by: index).mutatingValue }
+        mutating ref { unsafe self.p.offset(by: index).mutatingValue }
     }
 }
 
 @main
 func main() -> lang.i64 {
     let p = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    p.write(99);
+    unsafe p.write(99);
     var c = Clamped(p: p);
 
     if c(at: 0) != 99 { return 1; }
@@ -36,14 +36,14 @@ func main() -> lang.i64 {
     // RMW through the mutating ref: the += reads the RAW storage (99),
     // not get's clamped view — raw becomes 104.
     c(at: 0) += 5;
-    if p.read() != 104 { return 2; }
+    if unsafe p.read() != 104 { return 2; }
 
     // Reads still clamp.
     if c(at: 0) != 100 { return 3; }
 
     // Plain assignment also goes through the mutating ref (raw store).
     c(at: 0) = 250;
-    if p.read() != 250 { return 4; }
+    if unsafe p.read() != 250 { return 4; }
     if c(at: 0) != 100 { return 5; }
     0
 }

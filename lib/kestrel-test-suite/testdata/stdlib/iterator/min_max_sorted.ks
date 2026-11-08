@@ -14,19 +14,19 @@ module Test
 
             // Test min
             let minVal = arr.iter().min();
-            if minVal.isNone() { return 1 }
+            if minVal.isNone { return 1 }
             if minVal.unwrap() != 1 { return 2 }
 
             // Test max
             let maxVal = arr.iter().max();
-            if maxVal.isNone() { return 3 }
+            if maxVal.isNone { return 3 }
             if maxVal.unwrap() != 5 { return 4 }
 
             // Test sorted
             let sorted = arr.iter().sorted();
             if sorted.count != 5 { return 5 }
-            if sorted(unchecked: 0) != 1 { return 6 }
-            if sorted(unchecked: 4) != 5 { return 7 }
+            if unsafe sorted(unchecked: 0) != 1 { return 6 }
+            if unsafe sorted(unchecked: 4) != 5 { return 7 }
 
             // Test sum
             let sum = arr.iter().sum();

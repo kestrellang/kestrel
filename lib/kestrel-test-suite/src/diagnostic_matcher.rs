@@ -268,11 +268,14 @@ fn matches_annotation(ann: &Annotation, diag: &TestDiagnostic) -> bool {
                 .as_ref()
                 .is_none_or(|msg| diag.message.to_lowercase().contains(&msg.to_lowercase()))
         },
-        AnnotationKind::ErrorCode { code } => {
+        AnnotationKind::ErrorCode { code, message } => {
             if diag.severity != TestSeverity::Error {
                 return false;
             }
             diag.code.as_ref().is_some_and(|c| c == code)
+                && message
+                    .as_ref()
+                    .is_none_or(|msg| diag.message.to_lowercase().contains(&msg.to_lowercase()))
         },
         AnnotationKind::Warning { message } => {
             if diag.severity != TestSeverity::Warning {
@@ -290,7 +293,14 @@ fn describe_annotation(ann: &Annotation) -> String {
     match &ann.kind {
         AnnotationKind::Error { message: Some(msg) } => format!("error containing '{}'", msg),
         AnnotationKind::Error { message: None } => "any error".to_string(),
-        AnnotationKind::ErrorCode { code } => format!("error with code {}", code),
+        AnnotationKind::ErrorCode {
+            code,
+            message: None,
+        } => format!("error with code {}", code),
+        AnnotationKind::ErrorCode {
+            code,
+            message: Some(msg),
+        } => format!("error with code {} containing '{}'", code, msg),
         AnnotationKind::Warning { message: Some(msg) } => format!("warning containing '{}'", msg),
         AnnotationKind::Warning { message: None } => "any warning".to_string(),
     }
@@ -351,6 +361,7 @@ mod tests {
             line: 1,
             kind: AnnotationKind::ErrorCode {
                 code: "E441".to_string(),
+                message: None,
             },
         }];
         let diagnostics = vec![TestDiagnostic {

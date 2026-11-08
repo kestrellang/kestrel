@@ -1,13 +1,15 @@
 //! Lowering context — central state during HIR → MIR lowering.
 
 use kestrel_ast_builder::{
-    Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, Subscript,
+    Callable, EnclosingContainer, MutatingAccessor, Name, NodeKind, ReceiverKind, Subscript,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
-use kestrel_mir::{FieldIdx, MirModule, MirTy, TyId, VariantIdx, WitnessMethodKey};
+use kestrel_mir::{
+    FieldIdx, MirModule, MirTy, ParamConvention, TyId, VariantIdx, WitnessMethodKey,
+};
 use kestrel_name_res::ExtensionTargetEntity;
 
-use crate::name::qualified_name;
+use kestrel_ast_builder::qualified_name;
 
 /// Central state maintained during lowering.
 pub struct LowerCtx<'w> {
@@ -21,6 +23,8 @@ pub struct LowerCtx<'w> {
     /// `escaping` closure values (see `body/closure_box.rs`). Synthesized on
     /// first use so a module with no escaping closures gains nothing.
     pub escaping_nop_shim: Option<Entity>,
+    /// Existential thunks and table templates built so far.
+    pub existentials: crate::existential::ExistentialState,
 }
 
 impl<'w> LowerCtx<'w> {
@@ -35,6 +39,14 @@ impl<'w> LowerCtx<'w> {
         });
         module.cloneable_protocol = query.query(kestrel_name_res::ResolveBuiltin {
             builtin: kestrel_hir::Builtin::Cloneable,
+            root,
+        });
+        module.static_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Static,
+            root,
+        });
+        module.sized_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Sized,
             root,
         });
         // Implicit-condition lowering needs both of these at *every* branch
@@ -56,6 +68,7 @@ impl<'w> LowerCtx<'w> {
             closure_counter: 0,
             synthetic_counter: 0,
             escaping_nop_shim: None,
+            existentials: Default::default(),
         }
     }
 
@@ -69,11 +82,7 @@ impl<'w> LowerCtx<'w> {
     /// Record a nominal type marked `@observabledrop` (dropping it has an
     /// observable effect). Called from struct and enum lowering.
     pub fn record_observable_drop(&mut self, entity: Entity) {
-        let marked = self
-            .world
-            .get::<kestrel_ast_builder::Attributes>(entity)
-            .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "observabledrop"));
-        if marked {
+        if kestrel_ast_builder::attrs::attrs_of(&self.query, entity).is_observable_drop() {
             self.module.observable_drop.insert(entity);
         }
     }
@@ -107,6 +116,23 @@ impl<'w> LowerCtx<'w> {
         Some(FieldIdx::new(idx))
     }
 
+    /// The `NodeKind::Field` member of nominal `owner` named `name` (stored
+    /// or computed).
+    pub fn field_named(&self, owner: Entity, name: &str) -> Option<Entity> {
+        self.world.children_of(owner).iter().copied().find(|&c| {
+            self.world.get::<NodeKind>(c) == Some(&NodeKind::Field)
+                && self.world.get::<Name>(c).is_some_and(|n| n.0 == name)
+        })
+    }
+
+    /// The `FieldIdx` of stored field entity `field` in its owner's lowered
+    /// struct.
+    pub fn field_idx_of(&self, field: Entity) -> Option<FieldIdx> {
+        let owner = self.world.parent_of(field)?;
+        let name = &self.world.get::<Name>(field)?.0;
+        self.resolve_field_idx(owner, name)
+    }
+
     pub fn resolve_field_ty(&self, struct_entity: Entity, field_idx: FieldIdx) -> Option<TyId> {
         let def = self.module.structs.get(&struct_entity)?;
         def.fields.get(field_idx.index()).map(|f| f.ty)
@@ -135,6 +161,9 @@ impl<'w> LowerCtx<'w> {
     /// Uses the entity's Name + Callable param labels to construct a key
     /// that matches the witness table's binding keys.
     pub fn witness_method_key(&self, entity: Entity) -> WitnessMethodKey {
+        if self.world.get::<NodeKind>(entity) == Some(&NodeKind::RefAccessor) {
+            return self.witness_ref_key(entity);
+        }
         let name = self
             .world
             .get::<Name>(entity)
@@ -154,6 +183,49 @@ impl<'w> LowerCtx<'w> {
         WitnessMethodKey::new(name, labels)
     }
 
+    /// The witness key of the `@builtin`-tagged requirement `builtin` — how
+    /// the compiler names a requirement it calls itself (`boolValue`,
+    /// `report`, `consumePointee`), never a string literal. `None` without
+    /// the stdlib tag.
+    pub fn builtin_witness_key(&self, builtin: kestrel_hir::Builtin) -> Option<WitnessMethodKey> {
+        let requirement = self.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin,
+            root: self.root,
+        })?;
+        Some(self.witness_method_key(requirement))
+    }
+
+    /// Every member of `type_entity` (its own body and its extensions) that
+    /// can witness `requirement`: same node kind, same witness key. Callers
+    /// that need one answer must reject zero or several matches themselves —
+    /// "first hit wins" is what made selection depend on declaration order.
+    pub fn witness_candidates(&self, type_entity: Entity, requirement: Entity) -> Vec<Entity> {
+        let key = self.witness_method_key(requirement);
+        let kind = self.query.get::<NodeKind>(requirement).cloned();
+        let mut parents = vec![type_entity];
+        parents.extend(
+            self.query
+                .query(kestrel_name_res::extensions::ExtensionsFor {
+                    target: type_entity,
+                    root: self.root,
+                }),
+        );
+        parents
+            .into_iter()
+            .flat_map(|parent| {
+                self.query
+                    .children_of(parent)
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .filter(|&child| {
+                self.query.get::<NodeKind>(child) == kind.as_ref()
+                    && self.witness_method_key(child) == key
+            })
+            .collect()
+    }
+
     /// Build a WitnessMethodKey for a Setter entity by deriving
     /// `"{parent_name}.set"` from the parent Field/Subscript.
     /// Uses the parent's labels (not the setter's own Callable params)
@@ -164,6 +236,22 @@ impl<'w> LowerCtx<'w> {
             .map(|p| self.witness_method_key(p))
             .unwrap_or_else(|| WitnessMethodKey::simple("unknown"));
         WitnessMethodKey::new(format!("{}.set", parent_key.name), parent_key.labels)
+    }
+
+    /// Build a WitnessMethodKey for a RefAccessor entity: `"{parent}.ref"` or
+    /// `"{parent}.mutref"`, with the parent's labels, like the setter key.
+    /// Witness tables bind the same keys (witness_lower.rs).
+    pub fn witness_ref_key(&self, accessor: Entity) -> WitnessMethodKey {
+        let parent_key = self
+            .world
+            .parent_of(accessor)
+            .map(|p| self.witness_method_key(p))
+            .unwrap_or_else(|| WitnessMethodKey::simple("unknown"));
+        let mutating = self.world.get::<MutatingAccessor>(accessor).is_some();
+        WitnessMethodKey::new(
+            ref_witness_name(&parent_key.name, mutating),
+            parent_key.labels,
+        )
     }
 
     /// Find a `NodeKind::Setter` child of a Field or Subscript entity.
@@ -184,10 +272,40 @@ impl<'w> LowerCtx<'w> {
         })
     }
 
+    /// The receiver convention a member READ passes to its provider (`get`
+    /// body or `ref` accessor): `MutBorrow` for a `modifying get` /
+    /// `modifying ref` provider, whose receiver is mutable, else `Borrow`.
+    pub fn read_receiver_convention(&self, provider: Entity) -> ParamConvention {
+        let mutating = self
+            .world
+            .get::<Callable>(provider)
+            .and_then(|c| c.receiver.as_ref())
+            .is_some_and(|r| matches!(r, ReceiverKind::Mutating));
+        if mutating {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        }
+    }
+
     /// Consume the context and return the built MIR module.
     pub fn finish(self) -> MirModule {
         self.module
     }
+}
+
+/// The witness slot name of a place requirement's `ref` / `mutating ref`
+/// accessor: `"{member}.ref"` / `"{member}.mutref"`.
+pub fn ref_witness_name(member: &str, mutating: bool) -> String {
+    format!("{member}.{}", if mutating { "mutref" } else { "ref" })
+}
+
+/// The inverse of [`ref_witness_name`]: `(member, mutating)` for a ref
+/// accessor slot name, `None` for any other key.
+pub fn parse_ref_witness_name(name: &str) -> Option<(&str, bool)> {
+    name.strip_suffix(".mutref")
+        .map(|m| (m, true))
+        .or_else(|| name.strip_suffix(".ref").map(|m| (m, false)))
 }
 
 // === IsProtocolMethod query ===

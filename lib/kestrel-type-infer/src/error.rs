@@ -66,6 +66,15 @@ pub enum InferError {
         span: Span,
     },
 
+    /// The member is (or implements) a `@sugarOnly` requirement of
+    /// `protocol`, and is named outside that protocol's module.
+    SugarOnlyMember {
+        receiver: TyVar,
+        name: String,
+        protocol: String,
+        span: Span,
+    },
+
     /// Member exists but is static — cannot be accessed on an instance.
     MemberIsStatic {
         receiver: TyVar,
@@ -93,6 +102,11 @@ pub enum InferError {
     /// bind the value first (`let x = ...`) to store the decayed copy.
     RefInTypeArgument { span: Span },
 
+    /// E156: an assignment whose target is unsized (`xs(1..<3) = ys`, a
+    /// `Slice[T]` place). A slice can't be assigned as a whole; copy into it
+    /// (`assign(from:)`) or resize the owner (`replaceSubrange`).
+    UnsizedAssign { target: TyVar, span: Span },
+
     /// Error propagated from HIR (HirExpr::Error, HirPat::Error, etc.)
     FromHir { span: Span },
 
@@ -114,6 +128,13 @@ pub enum InferError {
     LabelMismatch {
         expected: Option<String>,
         got: Option<String>,
+        span: Span,
+    },
+
+    /// E113: an unlabeled trailing closure could fill more than one
+    /// closure-typed parameter (labels in `candidates`, `None` = unlabeled).
+    AmbiguousTrailingClosure {
+        candidates: Vec<Option<String>>,
         span: Span,
     },
 
@@ -158,6 +179,38 @@ pub enum InferError {
 
     /// Implicit `it` parameter used in a context expecting != 1 parameter.
     ItWrongArity { expected: usize, span: Span },
+
+    /// E147: an existential converted into an existential with a different
+    /// box. Boxes are never interconverted (existentials design §4). The
+    /// types are described when the error is raised.
+    ExistentialBoxMismatch {
+        from: String,
+        to: String,
+        span: Span,
+    },
+
+    /// E145: a requirement that can't be called through an existential
+    /// (static, generic, `Self`-using, or naming an unbound associated
+    /// type). `message` is complete; it names the member and the reason.
+    NotDispatchable { message: String, span: Span },
+
+    /// E146: an existential passed where `T: P` is needed, but `any P: P`
+    /// doesn't hold. `message` names the blocking requirement.
+    NotSelfConforming { message: String, span: Span },
+
+    /// E148: the existential's box doesn't grant the access a call needs
+    /// (`consuming` without `ConsumingIndirection`, `mutating` without
+    /// `MutableIndirection`). `message` is complete.
+    ExistentialAccess { message: String, span: Span },
+
+    /// E151: a value converted to `any P[A = X]` whose own `A` is not `X`.
+    ExistentialBindingMismatch {
+        from: String,
+        to: String,
+        assoc: String,
+        actual: String,
+        span: Span,
+    },
 
     /// A literal of a given kind can't be accepted by the target type.
     /// Emitted when an unresolved literal TyVar meets a concrete type that
@@ -226,6 +279,19 @@ pub enum InferError {
         span: Span,
     },
 
+    /// `a?.b` on a type that does not conform to `OptionalChain` (E157). The
+    /// `DoesNotConform` for that protocol, reworded for the operator.
+    OptionalChainNotConforming { ty: TyVar, span: Span },
+
+    /// A failed `x |> rhs`, reworded with a fix-it for the right side's
+    /// shape (`pipe::reword_pipe_errors`). Keeps the replaced error's code.
+    PipeFixIt {
+        code: &'static str,
+        message: String,
+        note: String,
+        span: Span,
+    },
+
     /// Circular opaque type inference: the concrete type behind `some P`
     /// is itself another `some P` from a mutually recursive call, so no
     /// concrete type can be determined.
@@ -261,6 +327,7 @@ pub fn describe_fn_kind(kind: kestrel_ast::FnTypeKind) -> String {
     match kind {
         kestrel_ast::FnTypeKind::Normal => "a normal closure".into(),
         kestrel_ast::FnTypeKind::Escaping => "an 'escaping' closure".into(),
+        kestrel_ast::FnTypeKind::C => "a C function".into(),
         // `keyword()` is the single source of truth for the spelling.
         other => format!("a '{}' closure", other.keyword().unwrap_or("")),
     }
@@ -311,6 +378,9 @@ fn kind_mismatch_note(
             "an 'escaping' closure is shared (aliases may exist), so its calls are not exclusive"
                 .into()
         },
+        // Only a named `@export(.C)` / `@extern(.C)` function has a C address.
+        (_, C) => "a closure has no C address; name an '@export(.C)' function instead".into(),
+        (C, _) => "a C function can't be used as a Kestrel closure yet".into(),
         _ => "see the closure passing table in the language reference".into(),
     }
 }
@@ -365,7 +435,13 @@ impl InferError {
 
         match self {
             Self::TypeMismatch { reason, .. } => {
-                let mut r = detailed("type mismatch".into());
+                let headline = match reason {
+                    Reason::OrPatternBinding { name, .. } => {
+                        format!("variable '{name}' has different types in or-pattern alternatives")
+                    },
+                    _ => "type mismatch".into(),
+                };
+                let mut r = detailed(headline);
                 reason.explain(&mut r);
                 r
             },
@@ -395,6 +471,11 @@ impl InferError {
                 "member '{name}' is {} and not accessible from this scope",
                 vis_label(visibility)
             )),
+
+            Self::SugarOnlyMember { name, protocol, .. } => labeled(
+                format!("'{name}' can only be used through its syntax"),
+                format!("'{name}' is a sugar-only requirement of '{protocol}'"),
+            ),
 
             Self::MemberIsStatic { name, .. } => labeled(
                 format!("'{name}' is a static member and cannot be used on an instance"),
@@ -426,6 +507,23 @@ impl InferError {
             )),
 
             Self::LabelMismatch { .. } => detailed("wrong argument label".into()),
+
+            Self::AmbiguousTrailingClosure { candidates, .. } => {
+                let names: Vec<String> = candidates
+                    .iter()
+                    .map(|l| match l {
+                        Some(l) => format!("`{l}:`"),
+                        None => "the unlabeled parameter".into(),
+                    })
+                    .collect();
+                labeled(
+                    format!(
+                        "ambiguous trailing closure: it could fill {}",
+                        names.join(" or ")
+                    ),
+                    "pass it inside the parentheses with its label".into(),
+                )
+            },
 
             Self::InstanceMethodAsStatic { name, .. } => {
                 detailed(format!("instance method '{name}' cannot be called on a type"))
@@ -481,6 +579,38 @@ impl InferError {
                 )
             },
 
+            Self::ExistentialBoxMismatch { from, to, .. } => labeled(
+                format!(
+                    "cannot convert '{from}' to '{to}': existentials in different boxes are \
+                     different types"
+                ),
+                format!("this is '{from}'"),
+            ),
+
+            Self::NotDispatchable { message, .. } => labeled(
+                message.clone(),
+                "not callable through an existential".into(),
+            ),
+
+            Self::ExistentialAccess { message, .. } => {
+                labeled(message.clone(), "the box does not allow this".into())
+            },
+
+            Self::NotSelfConforming { message, .. } => {
+                labeled(message.clone(), "an existential is needed to conform here".into())
+            },
+
+            Self::ExistentialBindingMismatch {
+                from,
+                to,
+                assoc,
+                actual,
+                ..
+            } => labeled(
+                format!("cannot convert '{from}' to '{to}': its '{assoc}' is '{actual}'"),
+                format!("'{from}.{assoc}' is '{actual}'"),
+            ),
+
             Self::ItWrongArity { expected, .. } => labeled(
                 "implicit 'it' parameter requires single-parameter context".into(),
                 format!("expected {expected} parameter(s)"),
@@ -530,6 +660,24 @@ impl InferError {
                 notes: vec![format!(
                     "primitive methods cannot be used as first-class values; use '.{method}()' instead"
                 )],
+                secondary: Vec::new(),
+            },
+
+            Self::OptionalChainNotConforming { .. } => RenderedInferError {
+                code: self.code(),
+                message: format!(
+                    "`?.` requires a type that conforms to `OptionalChain`, found `{detail}`"
+                ),
+                label: Some("this has no payload to chain on".into()),
+                notes: vec!["use `.` for a non-optional value".into()],
+                secondary: Vec::new(),
+            },
+
+            Self::PipeFixIt { message, note, .. } => RenderedInferError {
+                code: self.code(),
+                message: message.clone(),
+                label: Some("this pipe".into()),
+                notes: vec![note.clone()],
                 secondary: Vec::new(),
             },
 
@@ -601,6 +749,18 @@ impl InferError {
                 ],
                 secondary: Vec::new(),
             },
+
+            Self::UnsizedAssign { .. } => RenderedInferError {
+                code: self.code(),
+                message: "a slice cannot be assigned as a whole".into(),
+                label: Some("this place is unsized".into()),
+                notes: vec![
+                    "copy into it with `.assign(from: other)` (the lengths must match), or \
+                     resize the owner with `replaceSubrange`"
+                        .into(),
+                ],
+                secondary: Vec::new(),
+            },
         }
     }
 
@@ -634,15 +794,21 @@ impl InferError {
             Self::CannotInferType { .. } | Self::UnresolvedTypeParam { .. } => "E105",
             Self::DoesNotConform { .. } => "E107",
             Self::ItWrongArity { .. } => "E108",
+            Self::NotDispatchable { .. } => "E145",
+            Self::NotSelfConforming { .. } => "E146",
+            Self::ExistentialBoxMismatch { .. } => "E147",
+            Self::ExistentialAccess { .. } => "E148",
+            Self::ExistentialBindingMismatch { .. } => "E151",
             Self::TypeMismatch { .. } | Self::ConventionMismatch { .. } => "E109",
             Self::ArgCountMismatch { .. }
             | Self::LabelMismatch { .. }
+            | Self::AmbiguousTrailingClosure { .. }
             | Self::MemberwiseInitArity { .. }
             | Self::MemberwiseInitLabel { .. }
             | Self::NoMatchingOverload { .. }
             | Self::TypeArgCountMismatch { .. } => "E113",
             Self::LiteralNotAccepted { .. } => "E114",
-            Self::MemberNotVisible { .. } => "E115",
+            Self::MemberNotVisible { .. } | Self::SugarOnlyMember { .. } => "E115",
             Self::MemberIsStatic { .. }
             | Self::InstanceMethodAsStatic { .. }
             | Self::TypeParamAsValue { .. }
@@ -650,9 +816,12 @@ impl InferError {
             Self::InfiniteType { .. } => "E117",
             Self::TypeMustBeKnown { .. } => "E106",
             Self::CircularOpaqueReturn { .. } | Self::OpaqueUnderlierNotCopyable { .. } => "E118",
+            Self::OptionalChainNotConforming { .. } => "E157",
+            Self::PipeFixIt { code, .. } => code,
             Self::KindMismatch { .. } => "E624",
             Self::RefFunctionAsValue { .. } => "E491",
             Self::RefInTypeArgument { .. } => "E492",
+            Self::UnsizedAssign { .. } => "E156",
             Self::FromHir { .. } => "E100",
         }
     }
@@ -661,9 +830,12 @@ impl InferError {
     pub fn mentioned_types(&self) -> Vec<TyVar> {
         match self {
             Self::TypeMismatch { expected, got, .. } => vec![*expected, *got],
-            Self::DoesNotConform { ty, .. } => vec![*ty],
+            Self::DoesNotConform { ty, .. } | Self::OptionalChainNotConforming { ty, .. } => {
+                vec![*ty]
+            },
             Self::NoMember { receiver, .. }
             | Self::MemberNotVisible { receiver, .. }
+            | Self::SugarOnlyMember { receiver, .. }
             | Self::MemberIsStatic { receiver, .. } => vec![*receiver],
             Self::AmbiguousMember { receiver, .. } => receiver.iter().copied().collect(),
             Self::NoAssociatedType { container, .. } => vec![*container],
@@ -679,6 +851,7 @@ impl InferError {
             | Self::NoMember { span, .. }
             | Self::AmbiguousMember { span, .. }
             | Self::MemberNotVisible { span, .. }
+            | Self::SugarOnlyMember { span, .. }
             | Self::MemberIsStatic { span, .. }
             | Self::NoAssociatedType { span, .. }
             | Self::InfiniteType { span }
@@ -686,6 +859,7 @@ impl InferError {
             | Self::ImplicitMemberNotFound { span, .. }
             | Self::ArgCountMismatch { span, .. }
             | Self::LabelMismatch { span, .. }
+            | Self::AmbiguousTrailingClosure { span, .. }
             | Self::InstanceMethodAsStatic { span, .. }
             | Self::TypeParamAsValue { span }
             | Self::TypeMustBeKnown { span, .. }
@@ -694,6 +868,11 @@ impl InferError {
             | Self::MemberwiseInitArity { span, .. }
             | Self::MemberwiseInitLabel { span, .. }
             | Self::ItWrongArity { span, .. }
+            | Self::ExistentialBoxMismatch { span, .. }
+            | Self::NotDispatchable { span, .. }
+            | Self::ExistentialAccess { span, .. }
+            | Self::NotSelfConforming { span, .. }
+            | Self::ExistentialBindingMismatch { span, .. }
             | Self::LiteralNotAccepted { span, .. }
             | Self::UnresolvedTypeParam { span, .. }
             | Self::CannotInferType { span, .. }
@@ -702,9 +881,12 @@ impl InferError {
             | Self::MemberAccessOnPrimitive { span, .. }
             | Self::MethodNotCalled { span, .. }
             | Self::CircularOpaqueReturn { span }
+            | Self::OptionalChainNotConforming { span, .. }
+            | Self::PipeFixIt { span, .. }
             | Self::OpaqueUnderlierNotCopyable { span, .. }
             | Self::RefFunctionAsValue { span }
             | Self::RefInTypeArgument { span }
+            | Self::UnsizedAssign { span, .. }
             | Self::ConventionMismatch { span }
             | Self::KindMismatch { span, .. } => span,
         }
@@ -730,9 +912,52 @@ impl Reason {
             Reason::FirstArm(s) => (s, "expected because the first branch has this type"),
             Reason::Element(s) => (s, "expected because the first element has this type"),
             Reason::Assign(s) => (s, "expected because of the type of this target"),
+            Reason::OrPatternBinding { name, first } => {
+                if !first.is_synthetic() {
+                    r.secondary.push((
+                        first.clone(),
+                        format!("'{name}' has this type in the first alternative"),
+                    ));
+                }
+                return;
+            },
         };
         if !span.is_synthetic() {
             r.secondary.push((span.clone(), text.into()));
         }
+    }
+}
+
+/// The error for naming a `@sugarOnly` `requirement` (or a witness of it) as
+/// `name` outside its protocol's module.
+pub(crate) fn sugar_only_error(
+    qctx: &kestrel_hecs::QueryContext<'_>,
+    requirement: kestrel_hecs::Entity,
+    name: &str,
+    receiver: TyVar,
+    span: &Span,
+) -> InferError {
+    let protocol = qctx
+        .parent_of(requirement)
+        .and_then(|p| qctx.get::<kestrel_ast_builder::Name>(p))
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    // A nameless init reads better with its labels: `init(intLiteral:)`.
+    let name = match qctx.get::<kestrel_ast_builder::Callable>(requirement) {
+        Some(c) if name == "init" => {
+            let labels: String = c
+                .params
+                .iter()
+                .map(|p| format!("{}:", p.label.as_deref().unwrap_or("_")))
+                .collect();
+            format!("init({labels})")
+        },
+        _ => name.to_string(),
+    };
+    InferError::SugarOnlyMember {
+        receiver,
+        name,
+        protocol,
+        span: span.clone(),
     }
 }

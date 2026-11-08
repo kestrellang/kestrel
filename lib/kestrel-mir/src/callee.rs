@@ -13,6 +13,8 @@ pub enum Callee {
     Resolved(MonoFuncId),
     Thin(ValueId),
     Thick(ValueId),
+    /// A call through a C function address (`MirTy::FuncC`), with the C ABI.
+    C(ValueId),
     Witness {
         protocol: Entity,
         method: WitnessMethodKey,
@@ -41,7 +43,7 @@ impl Callee {
     /// Extract the ValueId for indirect callees (Thin/Thick).
     pub fn value(&self) -> Option<ValueId> {
         match self {
-            Self::Thin(v) | Self::Thick(v) => Some(*v),
+            Self::Thin(v) | Self::Thick(v) | Self::C(v) => Some(*v),
             _ => None,
         }
     }

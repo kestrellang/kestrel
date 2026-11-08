@@ -31,7 +31,14 @@ pub struct StructDef {
     /// T: Copyable`). Empty unless conditionally copyable. Drives
     /// per-instantiation `copy_behavior`: `X[args]` is Copyable iff every gating
     /// `args[i]` is. See `kestrel_semantics::ConditionalCopyableParams`.
-    pub conditionally_copyable: Vec<usize>,
+    pub conditionally_copyable: kestrel_copy_fold::ConditionalCopy,
+    /// The front end's `NominalStaticness`, carried so mono can decide a
+    /// `where T: Static` clause on a concrete instantiation.
+    pub staticness: kestrel_structural::Staticness,
+    /// The front end's `NominalSizedness`, for `where T: Sized` likewise.
+    pub sizedness: kestrel_structural::Sizedness,
+    /// `@layout` / `@align`, the input to every layout of this type.
+    pub layout_attrs: crate::layout::LayoutAttrs,
 }
 
 impl StructDef {
@@ -42,7 +49,10 @@ impl StructDef {
             type_params: Vec::new(),
             fields: Vec::new(),
             type_info: TypeInfo::default(),
-            conditionally_copyable: Vec::new(),
+            conditionally_copyable: kestrel_copy_fold::ConditionalCopy::default(),
+            staticness: kestrel_structural::Staticness::Static,
+            sizedness: kestrel_structural::Sizedness::Sized,
+            layout_attrs: crate::layout::LayoutAttrs::default(),
         }
     }
 

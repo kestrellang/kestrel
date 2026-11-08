@@ -1,11 +1,12 @@
-// StringSlice - immutable window into a String's UTF-8 bytes
+// StringSlice - read-only borrowed window into a String's UTF-8 bytes
 
 module std.text
 
 import std.core.(Bool, Equal, NotEqual, Equatable, Comparable, Ordering, Cloneable, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, RawPointer, RcBox, ArraySlice)
+import std.memory.(Layout, Pointer, RawPointer)
+import std.collections.(Slice)
 import std.iter.(Iterable)
 import std.text.(Formattable, Formatter, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringBuilder, StringStorage, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, Str, _bytesEqual, _bytesCompare)
 
@@ -18,6 +19,7 @@ import std.text.(Formattable, Formatter, FormatOptions, Char, Grapheme, decodeUt
 /// and what the subscript returns.
 public protocol StringIndex: Equatable, Comparable {
     type Yield
+    @sugarOnly
     func read(from slice: StringSlice) -> Yield
 }
 
@@ -99,12 +101,16 @@ extend CharIndex {
 // STRING SLICE
 // ============================================================================
 
-/// An immutable window into a `String`'s UTF-8 bytes with shared
-/// ownership. The central read-only abstraction of the text library.
+/// A read-only window into a `String`'s UTF-8 bytes. It borrows the
+/// string: a slice can't outlive the string it came from, and it can't
+/// be stored in a field or an array that would (E494/E509). Use
+/// `.toOwned()` to keep a piece.
 ///
-/// Zero-cost to create from a String (share the RcBox, cover the
-/// whole range). Zero-cost to narrow (adjust start/end). Keeps the
-/// source alive as long as the slice exists.
+/// Making and narrowing a slice is free: no refcount, and the string's
+/// buffer isn't pinned, so changing the string later doesn't copy it.
+/// Every read goes through the string's current buffer. If the string
+/// gets shorter than the slice while the slice is alive, the next read
+/// panics instead of reading freed memory.
 ///
 /// # Examples
 ///
@@ -117,13 +123,8 @@ extend CharIndex {
 ///
 /// # Representation
 ///
-/// `(source: RcBox[StringStorage], start: Int64, end: Int64)`.
-///
-/// # Memory Model
-///
-/// Shared ownership via `RcBox`. The source string's buffer stays
-/// alive as long as any slice references it. Call `.toOwned()` to
-/// copy just the slice's bytes into an independent `String`.
+/// `(base: &String, start: Int64, end: Int64)`. `start` and `end` are
+/// byte offsets into the whole string, not into this slice.
 public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], NotEqual[StringSlice], NotEqual[String], Comparable, Hashable, Cloneable, Formattable, Iterable {
     type Item = Char
     type TargetIterator = CharsIterator
@@ -132,17 +133,10 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
     type NotEqual[StringSlice].Output = Bool
     type NotEqual[String].Output = Bool
 
-    var source: RcBox[StringStorage]
+    // Module-internal so `String.asSlice()` can build one (memberwise).
+    let base: &String
     public let start: Int64
     public let end: Int64
-
-    /// @name From Source
-    /// Creates a slice covering `[start, end)` in the given storage.
-    public init(source source: RcBox[StringStorage], start start: Int64, end end: Int64) {
-        self.source = source;
-        self.start = start;
-        self.end = end;
-    }
 
     // -- Size ----------------------------------------------------------------
 
@@ -155,7 +149,7 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
     /// the source buffer (absolute byte offsets, not relative to this
     /// slice's start).
     public func subslice(from newStart: Int64, to newEnd: Int64) -> StringSlice {
-        StringSlice(source: self.source.clone(), start: newStart, end: newEnd)
+        StringSlice(base: self.base, start: newStart, end: newEnd)
     }
 
     // -- Conversion ----------------------------------------------------------
@@ -171,20 +165,30 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
 
     // -- Internal helpers ----------------------------------------------------
 
+    /// The string's current byte buffer. Panics when the string got
+    /// shorter than this slice since it was made.
     func _rawPtr() -> Pointer[UInt8] {
-        self.source.valuePtr().with { (storage) in storage.ptr }
+        if self.end > self.base._byteCount() {
+            fatalError("StringSlice: the string is shorter than the slice");
+        }
+        self.base._bytePtr()
+    }
+
+    /// The current address of this slice's first byte, as the raw pointer
+    /// the text views read through. Re-read it on every access.
+    func _bytes() -> lang.ptr[lang.i8] {
+        lang.cast_ptr[_, lang.i8](self._rawPtr().offset(by: self.start).asRaw().raw)
     }
 
     func _readByte(at offset: Int64) -> UInt8 {
-        self._rawPtr().offset(by: offset).read()
+        unsafe self._rawPtr().offset(by: offset).read()
     }
 
     // -- Iteration -----------------------------------------------------------
 
     /// Iterates code points in this slice.
     public func iter() -> CharsIterator {
-        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](self._rawPtr().offset(by: self.start).asRaw().raw);
-        CharsIterator(ptr: rawPtr, length: (self.end - self.start), byteIndex: 0)
+        CharsIterator(source: self, length: (self.end - self.start), byteIndex: 0)
     }
 
     // -- Str conformance -----------------------------------------------------
@@ -240,10 +244,13 @@ public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], No
     }
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(ArraySlice(pointer: self._rawPtr().offset(by: self.start), count: (self.end - self.start)))
+        let count = self.end - self.start;
+        hasher.write(unsafe Slice.lend(start: self._rawPtr().offset(by: self.start), count: count));
+        // Length terminator, as in `String.hash`.
+        hasher.write(uint64: UInt64(truncating: count))
     }
 
     public func clone() -> StringSlice {
-        StringSlice(source: self.source.clone(), start: self.start, end: self.end)
+        StringSlice(base: self.base, start: self.start, end: self.end)
     }
 }

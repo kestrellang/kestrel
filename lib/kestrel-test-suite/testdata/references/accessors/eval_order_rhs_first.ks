@@ -14,13 +14,13 @@ import std.numeric.(Int64)
 struct Buf {
     var p: Pointer[Int64]
     subscript(at index: Int64) -> Int64 {
-        ref { self.p.offset(by: index).value }
-        mutating ref { self.p.offset(by: index).mutatingValue }
+        ref { unsafe self.p.offset(by: index).value }
+        mutating ref { unsafe self.p.offset(by: index).mutatingValue }
     }
 }
 
 func rhsBump(k: Pointer[Int64]) -> Int64 {
-    k.write(1);
+    unsafe k.write(1);
     42
 }
 
@@ -30,15 +30,15 @@ func main() -> lang.i64 {
         .allocate(Layout.array[Int64](2))
         .unwrap()
         .cast[Int64]();
-    p.write(10);
-    p.offset(by: 1).write(20);
+    unsafe p.write(10);
+    unsafe p.offset(by: 1).write(20);
     let k = SystemAllocator().allocate(Layout.of[Int64]()).unwrap().cast[Int64]();
-    k.write(0);
+    unsafe k.write(0);
 
     var b = Buf(p: p);
     // RHS-first: rhsBump sets k to 1, THEN the index reads k (= 1).
-    b(at: k.read()) = rhsBump(k);
-    if p.read() != 10 { return 1; }
-    if p.offset(by: 1).read() != 42 { return 2; }
+    b(at: unsafe k.read()) = rhsBump(k);
+    if unsafe p.read() != 10 { return 1; }
+    if unsafe p.offset(by: 1).read() != 42 { return 2; }
     0
 }

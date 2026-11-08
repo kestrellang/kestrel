@@ -159,8 +159,7 @@ pub(super) fn try_literal_mismatch(
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
         LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
         LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
-        // Accumulator type variable — not directly coerced against user types
-        LiteralKind::StringInterpolation => return None,
+        LiteralKind::StringInterpolation => Builtin::ExpressibleByStringInterpolation,
     };
     Some(match ctx.resolver.builtin(feature) {
         Some(protocol) => InferError::DoesNotConform {
@@ -279,10 +278,26 @@ pub(super) fn solve_assign_target(
     expr: kestrel_hir::body::HirExprId,
     span: Span,
 ) -> SolveResult {
+    // A failable place read lends `Optional[&T]` and can't be assigned
+    // (the analyzer's E214). Check the value against the copied-out
+    // `Optional[T]` instead, so `d(k) = 3` / `= null` still type the value
+    // without a cascading `&T` mismatch.
+    if ctx.place_assign_values.contains(&expr)
+        && let Some((optional, pointee)) = lent_optional_payload(ctx, target)
+    {
+        let decayed = ctx.enum_ty(optional, vec![pointee]);
+        return solve_coerce(ctx, value, decayed, expr, span);
+    }
     match ctx.slot(ctx.resolve(target)) {
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
             let pointee = *pointee;
             solve_coerce(ctx, value, pointee, expr, span)
+        },
+        // An unsized place (`xs(1..<3) = ys`, a `Slice[T]`) has no value to
+        // overwrite as a whole (Rust's rule): reject it with its own error
+        // rather than a mismatch against the RHS.
+        TySlot::Resolved(_) if !super::conformance::solver_ty_is_sized(ctx, target, 0) => {
+            SolveResult::Error(InferError::UnsizedAssign { target, span })
         },
         TySlot::Resolved(_) | TySlot::Unresolved { literal: Some(_) } => {
             solve_coerce(ctx, value, target, expr, span)
@@ -319,6 +334,12 @@ pub(super) fn solve_coerce(
     if ctx.is_error(fr) || ctx.is_error(tr) {
         if ctx.is_error(fr) && matches!(ctx.slot(tr), TySlot::Unresolved { .. }) {
             ctx.poison(to);
+        }
+        // A failed `?.` arm leaves the chain's `Optional[α]` with nothing
+        // to pin `α`; poison it so the root cause (E157) isn't buried
+        // under "could not infer type".
+        if ctx.is_error(fr) && ctx.optional_chain_leaves.contains(&expr) {
+            poison_unresolved_type_args(ctx, to);
         }
         if ctx.is_error(tr) && matches!(ctx.slot(fr), TySlot::Unresolved { .. }) {
             ctx.poison(from);
@@ -391,6 +412,41 @@ pub(super) fn solve_coerce(
             },
         }
     }
+    // 1b. A bound `Optional[&T]` (`let f = b.first`) decays to `Optional[T]`
+    //     like a bound `&T` does: the binding owns a copy. Only binding
+    //     initializers and call arguments decay (MIR copies them out, `optional_ref_decays`); an
+    //     unresolved target waits for an annotation, else the end-of-body
+    //     default decays it (`apply_ref_decay_defaults`).
+    if optional_ref_decay_site(ctx, expr)
+        && let Some((optional, pointee)) = optional_ref_pointee(ctx, fr)
+    {
+        if matches!(ctx.slot(tr), TySlot::Unresolved { literal: None }) {
+            return SolveResult::Deferred(Constraint::Coerce {
+                from,
+                to,
+                expr,
+                span,
+                reason: Reason::Unspecified,
+            });
+        }
+        if optional_ref_pointee(ctx, tr).is_none() {
+            ctx.optional_ref_decays.insert(expr);
+            let decayed = ctx.named(optional, vec![pointee]);
+            return solve_coerce(ctx, decayed, to, expr, span);
+        }
+    }
+
+    // 1c. Anywhere else, an `Optional[&T]` coerced into a known
+    //     `Optional[U]` with a non-ref `U` (`get { self.d(key) }` returning
+    //     `Int64?`) is a copy-out too.
+    if let Some((optional, pointee)) = optional_ref_pointee(ctx, fr)
+        && optional_value_payload(ctx, tr)
+    {
+        ctx.optional_ref_decays.insert(expr);
+        let decayed = ctx.named(optional, vec![pointee]);
+        return solve_coerce(ctx, decayed, to, expr, span);
+    }
+
     // 2. `from` is a ref, `to` is not — copy-out DECAY (binding decay,
     //    consuming args, assignment RHS, return-of-T): the value read is of
     //    the POINTEE type; continue the whole coercion (incl. FromValue
@@ -420,7 +476,7 @@ pub(super) fn solve_coerce(
 
     // Check-mode leaf with a pending synthesized type (see
     // `InferCtx::synth_pending_exprs`): wait for it, so promotion can apply.
-    if ctx.synth_gate
+    if (ctx.synth_gate || ctx.optional_chain_leaves.contains(&expr))
         && ctx.synth_pending_exprs.contains(&expr)
         && matches!(ctx.slot(fr), TySlot::Unresolved { literal: None })
         && matches!(ctx.slot(tr), TySlot::Resolved(_))
@@ -527,41 +583,34 @@ pub(super) fn solve_coerce(
         _ => unreachable!(),
     };
 
-    if let Some(method) = ctx.resolver.check_promotion(&from_kind, &to_kind) {
-        // Verify the source type matches the `from` method's `value: T` parameter
-        // once T is bound to the target's type args. Without this, any source
-        // type silently promotes to any FromValue-conforming target (e.g.
-        // `let x: String? = 5` would succeed).
-        let target_entity = to_kind.entity();
-        let target_args: Vec<TyVar> = to_kind.args().to_vec();
-        let qctx = ctx.query_ctx;
-        let root = ctx.root;
-        if let Some(target_e) = target_entity {
-            let target_tps: Vec<Entity> = qctx
-                .get::<TypeParams>(target_e)
-                .map(|tp| tp.0.clone())
-                .unwrap_or_default();
-            let subs: Vec<(Entity, TyVar)> = target_tps
-                .iter()
-                .copied()
-                .zip(target_args.iter().copied())
-                .collect();
+    // Existential conversions (Box / Unsize / Upcast, E147, E151) at this
+    // check leaf, before promotion: an existential target is never
+    // `FromValue`.
+    if let Some(result) = crate::existential::try_convert(ctx, from, to, expr, &span) {
+        if matches!(result, SolveResult::Error(_)) {
+            ctx.errored_coerce_exprs.insert(expr);
+            ctx.poison(from);
+        }
+        return result;
+    }
 
-            if let Some(param_hir_tys) = qctx.query(LowerCallableTypes {
-                entity: method,
-                root,
-            }) && let Some(Some(value_hir_ty)) = param_hir_tys.first()
-            {
-                let param_tv = lower_hir_ty_sub(ctx, value_hir_ty, None, TyVar(0), &subs);
-                if unify::unify(ctx, from, param_tv).is_err() {
-                    ctx.errored_coerce_exprs.insert(expr);
-                    return SolveResult::Error(InferError::TypeMismatch {
-                        expected: param_tv,
-                        got: from,
-                        span,
-                        reason: Reason::Unspecified,
-                    });
-                }
+    if let Some(method) = ctx.resolver.check_promotion(&from_kind, &to_kind) {
+        // The source must be the target's `FromValue[Output]` arg — the
+        // conformance's protocol arg, pinned at the target (`Optional[Int64]:
+        // FromValue[Int64]`). Without this any source silently promotes to any
+        // FromValue target (`let x: String? = 5`).
+        if let Some(protocol) = ctx.query_ctx.parent_of(method) {
+            let output = ctx.fresh();
+            let pinned =
+                super::conformance::unify_bound_protocol_args(ctx, to_resolved, protocol, &[output]);
+            if pinned.is_err() || unify::unify(ctx, from, output).is_err() {
+                ctx.errored_coerce_exprs.insert(expr);
+                return SolveResult::Error(InferError::TypeMismatch {
+                    expected: output,
+                    got: from,
+                    span,
+                    reason: Reason::Unspecified,
+                });
             }
         }
 
@@ -573,19 +622,6 @@ pub(super) fn solve_coerce(
                 target_ty: to,
             },
         );
-        return SolveResult::Solved;
-    }
-
-    // Check protocol conformance: if the target is a protocol and the source conforms,
-    // the coercion is valid (protocol existential boxing handled at codegen).
-    // `SelfType { entity: P }` acts as an abstract `P` for this purpose.
-    let to_protocol_entity = match &to_kind {
-        TyKind::Protocol { entity, .. } | TyKind::SelfType { entity } => Some(*entity),
-        _ => None,
-    };
-    if let Some(to_entity) = to_protocol_entity
-        && ctx.resolver.conforms_to(&from_kind, to_entity)
-    {
         return SolveResult::Solved;
     }
 
@@ -694,6 +730,17 @@ pub(super) fn reconcile_fn_kinds(
     // `gen_expr` propagates outward through `Block`/`Sugar` wrappers — a
     // trailing-closure call site carries the WRAPPER's id in the `Coerce`.
     if ctx.closure_literal_exprs.contains(&expr) {
+        // A closure literal has no C address, whatever it captures.
+        if to_kind == kestrel_ast::FnTypeKind::C {
+            ctx.errored_coerce_exprs.insert(expr);
+            // Report the literal as what it is, a closure, even when its
+            // kind was already taken from the expected type.
+            return Some(SolveResult::Error(InferError::KindMismatch {
+                expected: to_kind,
+                actual: kestrel_ast::FnTypeKind::Normal,
+                span: span.clone(),
+            }));
+        }
         if from_kind != to_kind {
             ctx.set_function_kind(fr, to_kind);
         }
@@ -705,7 +752,11 @@ pub(super) fn reconcile_fn_kinds(
     if from_flex || to_flex {
         if from_flex && !to_flex && from_kind != to_kind {
             ctx.set_function_kind(fr, to_kind);
-            ctx.kind_coercions.insert(expr, (from_kind, to_kind));
+            // A named function adopting C is built as its C address outright
+            // (no widening of a 2-word value), so there is nothing to replay.
+            if to_kind != kestrel_ast::FnTypeKind::C {
+                ctx.kind_coercions.insert(expr, (from_kind, to_kind));
+            }
         } else if to_flex && !from_flex && from_kind != to_kind {
             ctx.set_function_kind(tr, from_kind);
         }
@@ -822,4 +873,76 @@ pub(super) fn reconcile_closure_conventions(
         .zip(&actual)
         .any(|(e, a)| *e != MutBorrow && *a == MutBorrow);
     mismatch.then(|| InferError::ConventionMismatch { span: span.clone() })
+}
+
+/// Shared `Optional[&T]` → the `Optional` entity and `T`. `None` for any other
+/// type (an `Optional[&mutating T]`, or an `Optional` whose payload is not yet
+/// known).
+/// Is `tv` an `Optional` whose payload is resolved and not a reference?
+fn optional_value_payload(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    let Some(optional) = ctx.resolver.builtin(Builtin::OptionalEnum) else {
+        return false;
+    };
+    let (TySlot::Resolved(TyKind::Enum { entity, args })
+    | TySlot::Resolved(TyKind::Struct { entity, args })) = ctx.slot(ctx.resolve(tv))
+    else {
+        return false;
+    };
+    *entity == optional
+        && args.len() == 1
+        && matches!(ctx.slot(ctx.resolve(args[0])), TySlot::Resolved(k) if !matches!(k, TyKind::Ref { .. }))
+}
+
+/// A position where a lent `Optional[&T]` decays to `Optional[T]` (unless
+/// the target itself is `Optional[&T]`): a binding initializer, a call
+/// argument (`print("\(xs.first())")`), or a method receiver
+/// (`xs.first().map(f)`: `Optional`'s methods aren't written for a
+/// reference payload).
+pub(crate) fn optional_ref_decay_site(
+    ctx: &InferCtx<'_>,
+    expr: kestrel_hir::body::HirExprId,
+) -> bool {
+    ctx.binding_init_exprs.contains(&expr)
+        || ctx.call_arg_exprs.contains(&expr)
+        || ctx.method_receiver_exprs.contains(&expr)
+}
+
+/// `tv` as `Optional[&T]` or `Optional[&mutating T]` (a lent failable
+/// read): the Optional entity and `T`.
+fn lent_optional_payload(ctx: &InferCtx<'_>, tv: TyVar) -> Option<(Entity, TyVar)> {
+    let optional = ctx.resolver.builtin(Builtin::OptionalEnum)?;
+    let TySlot::Resolved(TyKind::Enum { entity, args } | TyKind::Struct { entity, args }) =
+        ctx.slot(ctx.resolve(tv))
+    else {
+        return None;
+    };
+    if *entity != optional || args.len() != 1 {
+        return None;
+    }
+    let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(ctx.resolve(args[0])) else {
+        return None;
+    };
+    Some((optional, *pointee))
+}
+
+pub(crate) fn optional_ref_pointee(ctx: &InferCtx<'_>, tv: TyVar) -> Option<(Entity, TyVar)> {
+    let optional = ctx.resolver.builtin(Builtin::OptionalEnum)?;
+    let (TySlot::Resolved(TyKind::Enum { entity, args })
+    | TySlot::Resolved(TyKind::Struct { entity, args })) = ctx.slot(ctx.resolve(tv))
+    else {
+        return None;
+    };
+    if *entity != optional || args.len() != 1 {
+        return None;
+    }
+    // Only a shared payload decays: an `Optional[&mutating T]` local is how
+    // callers write through a lookup (`let m = c.pick(); if let .Some(w) = m`).
+    let TySlot::Resolved(TyKind::Ref {
+        pointee,
+        mutating: false,
+    }) = ctx.slot(ctx.resolve(args[0]))
+    else {
+        return None;
+    };
+    Some((optional, *pointee))
 }

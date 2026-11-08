@@ -141,14 +141,14 @@ public func pickWord(seed: Int64, words: Array[String]) -> String {
     let mixed = (s * 2654435761) % 2147483647;
     let positive = if mixed < 0 { 0 - mixed } else { mixed };
     let idx = positive % words.count;
-    words(unchecked: idx).clone()
+    unsafe words(unchecked: idx).clone()
 }
 
 /// Linear scan; the list is small enough that a hash isn't worth it.
 public func isValidWord(w: String, words: Array[String]) -> Bool {
     var i: Int64 = 0;
     while i < words.count {
-        if words(unchecked: i) == w { return true };
+        if unsafe words(unchecked: i) == w { return true };
         i = i + 1
     }
     false

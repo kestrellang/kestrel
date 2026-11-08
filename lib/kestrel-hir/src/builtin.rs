@@ -89,6 +89,8 @@ pub enum Builtin {
 
     // ===== Pattern matching =====
     Matchable,
+    /// `Matchable.matches(other:)` — the call a value pattern lowers to.
+    MatchableMatches,
     RangeMatchable,
     RangeMatchableIsAtLeast,
     RangeMatchableIsAtMost,
@@ -111,6 +113,17 @@ pub enum Builtin {
     UnsignedInteger,
     InternalExpressibleByArrayLiteral,
     InternalExpressibleByDictionaryLiteral,
+    /// The requirement init each literal protocol declares. Literal lowering
+    /// calls these through the witness table, so the conformer's witness is
+    /// whatever conformance checking matched — never a shape or label guess.
+    IntegerLiteralInit,
+    FloatLiteralInit,
+    StringLiteralInit,
+    BoolLiteralInit,
+    CharLiteralInit,
+    NullLiteralInit,
+    ArrayLiteralInit,
+    DictionaryLiteralInit,
 
     // ===== Default literal types =====
     DefaultIntegerLiteralType,
@@ -134,8 +147,8 @@ pub enum Builtin {
     MultiplyOperatorMethod,
     DivideOperatorProtocol,
     DivideOperatorMethod,
-    ModuloOperatorProtocol,
-    ModuloOperatorMethod,
+    RemainderOperatorProtocol,
+    RemainderOperatorMethod,
     NegateOperatorProtocol,
     NegateOperatorMethod,
 
@@ -207,8 +220,8 @@ pub enum Builtin {
     MultiplyAssignMethod,
     DivideAssignProtocol,
     DivideAssignMethod,
-    ModuloAssignProtocol,
-    ModuloAssignMethod,
+    RemainderAssignProtocol,
+    RemainderAssignMethod,
     BitwiseAndAssignProtocol,
     BitwiseAndAssignMethod,
     BitwiseOrAssignProtocol,
@@ -226,6 +239,12 @@ pub enum Builtin {
     TryExtractMethod,
     FromResidualProtocol,
     FromResidualMethod,
+
+    // ===== Optional chaining (`a?.b`) =====
+    OptionalChainProtocol,
+    OptionalChainBorrowMethod,
+    OptionalChainMutateMethod,
+    OptionalChainTakeMethod,
 
     // ===== Value promotion =====
     FromValueProtocol,
@@ -252,16 +271,41 @@ pub enum Builtin {
     ArrayStruct,
     SliceStruct,
     ManuallyDropStruct,
+    /// `std.ffi.NullableCFunction[F]`: `F` must be a C function type
+    /// (`@extern(.C) (…) -> …`), checked by the analyzer (E647).
+    NullableCFunctionStruct,
 
     // ===== String interpolation =====
-    DefaultStringInterpolation,
-    DefaultStringInterpolationInit,
-    DefaultStringInterpolationAppendLiteral,
-    DefaultStringInterpolationAppendInterpolation,
-    DefaultStringInterpolationBuild,
+    /// `ExpressibleByStringInterpolation`: the protocol an interpolated
+    /// literal's type must conform to (its literal protocol).
+    ExpressibleByStringInterpolation,
+    /// `ExpressibleByStringInterpolation.init(interpolation:)` — finishes an
+    /// interpolation, with `Self` = the literal's type.
+    StringInterpolationInit,
+    /// `Interpolatable.init(literalCapacity:interpolationCount:)` — creates
+    /// the accumulator.
+    InterpolatableInit,
+    /// `Interpolatable.appendLiteral` — appends one static segment.
+    InterpolatableAppendLiteral,
     FormatOptions,
+
+    // ===== References =====
+    /// `@builtin(.DecayOptionalRef) func decayOptionalRef[T](_: Optional[&T])
+    /// -> Optional[T]`: copies the payload out when an `Optional[&T]` is
+    /// bound (`let f = b.first`), so the binding owns a value and stops
+    /// borrowing the place.
+    DecayOptionalRef,
     FormattableProtocol,
     FormattableFormatIntoMethod,
+
+    // ===== Derivable protocols (`@derive`) =====
+    // With `FormattableProtocol`, the protocols `@derive` has a built-in
+    // deriver for. A protocol is derivable iff it is the target of one of
+    // these, never by its name.
+    EquatableProtocol,
+    HashableProtocol,
+    ComparableProtocol,
+    DefaultableProtocol,
 
     // ===== Exitable / @main return =====
     Exitable,
@@ -270,8 +314,12 @@ pub enum Builtin {
 
     // ===== Indirection / smart-pointer member peel =====
     /// `Indirection` — opt-in transparent member access: `wrapper.foo` peels
-    /// to `Target.foo` via `pointeeRef()`. Explicit conformance, non-marker.
+    /// to `Target.foo` through the required `value` place
+    /// ([`INDIRECTION_PLACE`]). Explicit conformance, non-marker.
     Indirection,
+    /// `MutableIndirection` — the wrapper also hands out `&mutating Target`.
+    /// A `mutating` requirement called through `any[B] P` needs it.
+    MutableIndirection,
 
     // ===== Shared-ownership box (implicit boxing) =====
     /// The generic struct the compiler instantiates for implicit boxing —
@@ -291,7 +339,64 @@ pub enum Builtin {
     /// payload, which double-frees the capture slots a one-shot body already
     /// moved out (docs/plans/closure-kinds/closure-kinds-plan.md D5).
     UniqueBox,
+
+    // ===== Existentials =====
+    /// The box `any P` desugars to: `any P` is `DefaultBox[<raw any P>]`.
+    /// `@builtin(.DefaultBoxType) public type DefaultBox[T] = RcBox[T]`
+    /// denotes the alias *target*, like the default literal types
+    /// (docs/plans/existentials/existentials-design.md).
+    DefaultBoxType,
+    /// A type whose size is known at compile time — every type except a raw
+    /// existential and a struct whose unsized tail is unsized. Structural,
+    /// like `Static`: never declared; every type parameter carries an
+    /// implicit `T: Sized`, relaxed with `where T: not Sized`.
+    Sized,
+    /// The contract a box type must meet to appear in `any[B] P`.
+    ExistentialBox,
+    /// A box that can give up its payload: consuming requirements and
+    /// `consuming x as? T` go through `consumePointee`.
+    ConsumingIndirection,
+    /// The stdlib's single-owner box (`OwnedBox`): the box diagnostics
+    /// suggest when an existential's payload must be consumed.
+    OwnedBox,
+
+    // ===== Requirements / members the compiler calls by tag =====
+    /// `BooleanConditional.boolValue()` — what a non-`Bool` condition calls.
+    BooleanConditionalBoolValue,
+    /// `ConsumingIndirection.consumePointee(body:)` — hands a box's payload out.
+    ConsumingIndirectionConsumePointee,
+    /// `ExistentialBox.init(consuming value:)` — moves a payload into a new box.
+    ExistentialBoxInit,
+    /// `SharedBox.sharedMutRef()` — mutable access through a shared handle.
+    SharedBoxSharedMutRef,
+    /// `UniqueBox.init(consuming value:)`.
+    UniqueBoxInit,
+    /// `UniqueBox.takeValue()` — moves the payload out (once).
+    UniqueBoxTakeValue,
+    /// `UniqueBox.destroy()` — the box's single reclamation point.
+    UniqueBoxDestroy,
+    /// `Indirection.pointeeRef()` — the member peel's read accessor.
+    IndirectionPointeeRef,
+    /// `MutableIndirection.pointeeMutRef()` — the member peel's write accessor.
+    MutableIndirectionPointeeMutRef,
+
+    // ===== Associated types the compiler projects by tag =====
+    /// `Indirection.Target` — the type a member peel reaches.
+    IndirectionTarget,
+    /// `_ExpressibleByArrayLiteral.Element` — an array literal's element type.
+    ArrayLiteralElement,
+    /// `_ExpressibleByDictionaryLiteral.Key`.
+    DictionaryLiteralKey,
+    /// `_ExpressibleByDictionaryLiteral.Value`.
+    DictionaryLiteralValue,
+    /// `ArrayMatchable.Element` — an array pattern's element type.
+    ArrayMatchableElement,
 }
+
+/// The place `Indirection` requires (`var value: Target { ref }`, refined to
+/// `{ ref mutating ref }` by `MutableIndirection`). The member peel and the
+/// existential box views lend the pointee through its accessors.
+pub const INDIRECTION_PLACE: &str = "value";
 
 impl Builtin {
     /// A display name for the builtin: the type/protocol name as it usually
@@ -314,6 +419,7 @@ impl Builtin {
 
             // Pattern matching
             Self::Matchable => "Matchable",
+            Self::MatchableMatches => "MatchableMatches",
             Self::RangeMatchable => "RangeMatchable",
             Self::RangeMatchableIsAtLeast => "RangeMatchableIsAtLeast",
             Self::RangeMatchableIsAtMost => "RangeMatchableIsAtMost",
@@ -333,6 +439,14 @@ impl Builtin {
             Self::UnsignedInteger => "UnsignedInteger",
             Self::InternalExpressibleByArrayLiteral => "_ExpressibleByArrayLiteral",
             Self::InternalExpressibleByDictionaryLiteral => "_ExpressibleByDictionaryLiteral",
+            Self::IntegerLiteralInit => "IntegerLiteralInit",
+            Self::FloatLiteralInit => "FloatLiteralInit",
+            Self::StringLiteralInit => "StringLiteralInit",
+            Self::BoolLiteralInit => "BoolLiteralInit",
+            Self::CharLiteralInit => "CharLiteralInit",
+            Self::NullLiteralInit => "NullLiteralInit",
+            Self::ArrayLiteralInit => "ArrayLiteralInit",
+            Self::DictionaryLiteralInit => "DictionaryLiteralInit",
 
             // Default literal types — resolved by source name
             Self::DefaultIntegerLiteralType => "Int64",
@@ -356,8 +470,8 @@ impl Builtin {
             Self::MultiplyOperatorMethod => "MultiplyOperatorMethod",
             Self::DivideOperatorProtocol => "Divisible",
             Self::DivideOperatorMethod => "DivideOperatorMethod",
-            Self::ModuloOperatorProtocol => "Modulo",
-            Self::ModuloOperatorMethod => "ModuloOperatorMethod",
+            Self::RemainderOperatorProtocol => "Remainder",
+            Self::RemainderOperatorMethod => "RemainderOperatorMethod",
             Self::NegateOperatorProtocol => "Negatable",
             Self::NegateOperatorMethod => "NegateOperatorMethod",
 
@@ -429,8 +543,8 @@ impl Builtin {
             Self::MultiplyAssignMethod => "MultiplyAssignMethod",
             Self::DivideAssignProtocol => "DivideAssign",
             Self::DivideAssignMethod => "DivideAssignMethod",
-            Self::ModuloAssignProtocol => "ModuloAssign",
-            Self::ModuloAssignMethod => "ModuloAssignMethod",
+            Self::RemainderAssignProtocol => "RemainderAssign",
+            Self::RemainderAssignMethod => "RemainderAssignMethod",
             Self::BitwiseAndAssignProtocol => "BitwiseAndAssign",
             Self::BitwiseAndAssignMethod => "BitwiseAndAssignMethod",
             Self::BitwiseOrAssignProtocol => "BitwiseOrAssign",
@@ -448,6 +562,12 @@ impl Builtin {
             Self::TryExtractMethod => "TryExtractMethod",
             Self::FromResidualProtocol => "FromResidualProtocol",
             Self::FromResidualMethod => "FromResidualMethod",
+
+            // Optional chaining
+            Self::OptionalChainProtocol => "OptionalChain",
+            Self::OptionalChainBorrowMethod => "OptionalChainBorrowMethod",
+            Self::OptionalChainMutateMethod => "OptionalChainMutateMethod",
+            Self::OptionalChainTakeMethod => "OptionalChainTakeMethod",
 
             // Value promotion
             Self::FromValueProtocol => "FromValue",
@@ -474,29 +594,47 @@ impl Builtin {
             Self::ArrayStruct => "ArrayStruct",
             Self::SliceStruct => "SliceStruct",
             Self::ManuallyDropStruct => "ManuallyDrop",
+            Self::NullableCFunctionStruct => "NullableCFunction",
 
             // String interpolation
-            Self::DefaultStringInterpolation => "DefaultStringInterpolation",
-            Self::DefaultStringInterpolationInit => "DefaultStringInterpolationInit",
-            Self::DefaultStringInterpolationAppendLiteral => {
-                "DefaultStringInterpolationAppendLiteral"
-            },
-            Self::DefaultStringInterpolationAppendInterpolation => {
-                "DefaultStringInterpolationAppendInterpolation"
-            },
-            Self::DefaultStringInterpolationBuild => "DefaultStringInterpolationBuild",
+            Self::ExpressibleByStringInterpolation => "ExpressibleByStringInterpolation",
+            Self::StringInterpolationInit => "StringInterpolationInit",
+            Self::InterpolatableInit => "InterpolatableInit",
+            Self::InterpolatableAppendLiteral => "InterpolatableAppendLiteral",
+            Self::DecayOptionalRef => "DecayOptionalRef",
             Self::FormatOptions => "FormatOptions",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
+
+            // Derivable protocols
+            Self::EquatableProtocol => "EquatableProtocol",
+            Self::HashableProtocol => "HashableProtocol",
+            Self::ComparableProtocol => "ComparableProtocol",
+            Self::DefaultableProtocol => "DefaultableProtocol",
 
             // Exitable — `Exitable`/`ExitCode` resolve by source name; the method
             // by its `@builtin` attribute name.
             Self::Exitable => "Exitable",
             Self::ExitableReport => "ExitableReport",
+            Self::BooleanConditionalBoolValue => "BooleanConditionalBoolValue",
+            Self::ConsumingIndirectionConsumePointee => "ConsumingIndirectionConsumePointee",
+            Self::ExistentialBoxInit => "ExistentialBoxInit",
+            Self::SharedBoxSharedMutRef => "SharedBoxSharedMutRef",
+            Self::UniqueBoxInit => "UniqueBoxInit",
+            Self::UniqueBoxTakeValue => "UniqueBoxTakeValue",
+            Self::UniqueBoxDestroy => "UniqueBoxDestroy",
+            Self::IndirectionPointeeRef => "IndirectionPointeeRef",
+            Self::MutableIndirectionPointeeMutRef => "MutableIndirectionPointeeMutRef",
+            Self::IndirectionTarget => "IndirectionTarget",
+            Self::ArrayLiteralElement => "ArrayLiteralElement",
+            Self::DictionaryLiteralKey => "DictionaryLiteralKey",
+            Self::DictionaryLiteralValue => "DictionaryLiteralValue",
+            Self::ArrayMatchableElement => "ArrayMatchableElement",
             Self::ExitCode => "ExitCode",
 
             // Indirection — resolves by source name (auto-imported from std.core).
             Self::Indirection => "Indirection",
+            Self::MutableIndirection => "MutableIndirection",
 
             // Shared box — a display name only, deliberately neither the
             // conformer's name (`RcBox`) nor the protocol's (`SharedBox`):
@@ -510,6 +648,14 @@ impl Builtin {
             // must go through the attribute index so the binding stays
             // swappable, and the sentinel must not name any source type.
             Self::UniqueBox => "UniqueBoxBinding",
+
+            // Default existential box — resolved through the index only, like
+            // the boxes above.
+            Self::DefaultBoxType => "DefaultBoxBinding",
+            Self::Sized => "Sized",
+            Self::ExistentialBox => "ExistentialBox",
+            Self::ConsumingIndirection => "ConsumingIndirection",
+            Self::OwnedBox => "OwnedBox",
         }
     }
 
@@ -531,6 +677,7 @@ impl Builtin {
 
             // Pattern matching
             "Matchable" => Some(Self::Matchable),
+            "MatchableMatches" => Some(Self::MatchableMatches),
             "RangeMatchable" => Some(Self::RangeMatchable),
             "RangeMatchableIsAtLeast" => Some(Self::RangeMatchableIsAtLeast),
             "RangeMatchableIsAtMost" => Some(Self::RangeMatchableIsAtMost),
@@ -550,6 +697,14 @@ impl Builtin {
             "UnsignedInteger" => Some(Self::UnsignedInteger),
             "_ExpressibleByArrayLiteral" => Some(Self::InternalExpressibleByArrayLiteral),
             "_ExpressibleByDictionaryLiteral" => Some(Self::InternalExpressibleByDictionaryLiteral),
+            "IntegerLiteralInit" => Some(Self::IntegerLiteralInit),
+            "FloatLiteralInit" => Some(Self::FloatLiteralInit),
+            "StringLiteralInit" => Some(Self::StringLiteralInit),
+            "BoolLiteralInit" => Some(Self::BoolLiteralInit),
+            "CharLiteralInit" => Some(Self::CharLiteralInit),
+            "NullLiteralInit" => Some(Self::NullLiteralInit),
+            "ArrayLiteralInit" => Some(Self::ArrayLiteralInit),
+            "DictionaryLiteralInit" => Some(Self::DictionaryLiteralInit),
 
             // FFI
             "FFISafe" => Some(Self::FFISafe),
@@ -573,8 +728,8 @@ impl Builtin {
             "MultiplyOperatorMethod" => Some(Self::MultiplyOperatorMethod),
             "DivideOperatorProtocol" => Some(Self::DivideOperatorProtocol),
             "DivideOperatorMethod" => Some(Self::DivideOperatorMethod),
-            "ModuloOperatorProtocol" => Some(Self::ModuloOperatorProtocol),
-            "ModuloOperatorMethod" => Some(Self::ModuloOperatorMethod),
+            "RemainderOperatorProtocol" => Some(Self::RemainderOperatorProtocol),
+            "RemainderOperatorMethod" => Some(Self::RemainderOperatorMethod),
             "NegateOperatorProtocol" => Some(Self::NegateOperatorProtocol),
             "NegateOperatorMethod" => Some(Self::NegateOperatorMethod),
 
@@ -654,8 +809,8 @@ impl Builtin {
             "MultiplyAssignMethod" => Some(Self::MultiplyAssignMethod),
             "DivideAssignProtocol" => Some(Self::DivideAssignProtocol),
             "DivideAssignMethod" => Some(Self::DivideAssignMethod),
-            "ModuloAssignProtocol" => Some(Self::ModuloAssignProtocol),
-            "ModuloAssignMethod" => Some(Self::ModuloAssignMethod),
+            "RemainderAssignProtocol" => Some(Self::RemainderAssignProtocol),
+            "RemainderAssignMethod" => Some(Self::RemainderAssignMethod),
             "BitwiseAndAssignProtocol" => Some(Self::BitwiseAndAssignProtocol),
             "BitwiseAndAssignMethod" => Some(Self::BitwiseAndAssignMethod),
             "BitwiseOrAssignProtocol" => Some(Self::BitwiseOrAssignProtocol),
@@ -673,6 +828,12 @@ impl Builtin {
             "TryExtractMethod" => Some(Self::TryExtractMethod),
             "FromResidualProtocol" => Some(Self::FromResidualProtocol),
             "FromResidualMethod" => Some(Self::FromResidualMethod),
+
+            // Optional chaining
+            "OptionalChainProtocol" => Some(Self::OptionalChainProtocol),
+            "OptionalChainBorrowMethod" => Some(Self::OptionalChainBorrowMethod),
+            "OptionalChainMutateMethod" => Some(Self::OptionalChainMutateMethod),
+            "OptionalChainTakeMethod" => Some(Self::OptionalChainTakeMethod),
 
             // Value promotion
             "FromValueProtocol" => Some(Self::FromValueProtocol),
@@ -699,34 +860,59 @@ impl Builtin {
             "ArrayStruct" => Some(Self::ArrayStruct),
             "SliceStruct" => Some(Self::SliceStruct),
             "ManuallyDropStruct" => Some(Self::ManuallyDropStruct),
+            "NullableCFunctionStruct" => Some(Self::NullableCFunctionStruct),
 
             // String interpolation
-            "DefaultStringInterpolation" => Some(Self::DefaultStringInterpolation),
-            "DefaultStringInterpolationInit" => Some(Self::DefaultStringInterpolationInit),
-            "DefaultStringInterpolationAppendLiteral" => {
-                Some(Self::DefaultStringInterpolationAppendLiteral)
-            },
-            "DefaultStringInterpolationAppendInterpolation" => {
-                Some(Self::DefaultStringInterpolationAppendInterpolation)
-            },
-            "DefaultStringInterpolationBuild" => Some(Self::DefaultStringInterpolationBuild),
+            "ExpressibleByStringInterpolation" => Some(Self::ExpressibleByStringInterpolation),
+            "StringInterpolationInit" => Some(Self::StringInterpolationInit),
+            "InterpolatableInit" => Some(Self::InterpolatableInit),
+            "InterpolatableAppendLiteral" => Some(Self::InterpolatableAppendLiteral),
+            "DecayOptionalRef" => Some(Self::DecayOptionalRef),
             "FormatOptions" => Some(Self::FormatOptions),
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
 
+            // Derivable protocols
+            "EquatableProtocol" => Some(Self::EquatableProtocol),
+            "HashableProtocol" => Some(Self::HashableProtocol),
+            "ComparableProtocol" => Some(Self::ComparableProtocol),
+            "DefaultableProtocol" => Some(Self::DefaultableProtocol),
+
             // Exitable / @main return
             "Exitable" => Some(Self::Exitable),
             "ExitableReport" => Some(Self::ExitableReport),
+            "BooleanConditionalBoolValue" => Some(Self::BooleanConditionalBoolValue),
+            "ConsumingIndirectionConsumePointee" => Some(Self::ConsumingIndirectionConsumePointee),
+            "ExistentialBoxInit" => Some(Self::ExistentialBoxInit),
+            "SharedBoxSharedMutRef" => Some(Self::SharedBoxSharedMutRef),
+            "UniqueBoxInit" => Some(Self::UniqueBoxInit),
+            "UniqueBoxTakeValue" => Some(Self::UniqueBoxTakeValue),
+            "UniqueBoxDestroy" => Some(Self::UniqueBoxDestroy),
+            "IndirectionPointeeRef" => Some(Self::IndirectionPointeeRef),
+            "MutableIndirectionPointeeMutRef" => Some(Self::MutableIndirectionPointeeMutRef),
+            "IndirectionTarget" => Some(Self::IndirectionTarget),
+            "ArrayLiteralElement" => Some(Self::ArrayLiteralElement),
+            "DictionaryLiteralKey" => Some(Self::DictionaryLiteralKey),
+            "DictionaryLiteralValue" => Some(Self::DictionaryLiteralValue),
+            "ArrayMatchableElement" => Some(Self::ArrayMatchableElement),
             "ExitCode" => Some(Self::ExitCode),
 
             // Indirection / smart-pointer member peel
             "Indirection" => Some(Self::Indirection),
+            "MutableIndirection" => Some(Self::MutableIndirection),
 
             // Shared-ownership box (implicit boxing)
             "SharedBox" => Some(Self::SharedBox),
 
             // Unique-ownership box (one-shot closure environments)
             "UniqueBox" => Some(Self::UniqueBox),
+
+            // Existentials
+            "DefaultBoxType" => Some(Self::DefaultBoxType),
+            "Sized" => Some(Self::Sized),
+            "ExistentialBox" => Some(Self::ExistentialBox),
+            "ConsumingIndirection" => Some(Self::ConsumingIndirection),
+            "OwnedBox" => Some(Self::OwnedBox),
 
             _ => None,
         }
@@ -749,6 +935,7 @@ impl Builtin {
                 | Self::DefaultNullLiteralType
                 | Self::DefaultArrayLiteralType
                 | Self::DefaultDictionaryLiteralType
+                | Self::DefaultBoxType
         )
     }
 
@@ -780,7 +967,8 @@ impl Builtin {
             Self::Matchable | Self::RangeMatchable | Self::ArrayMatchable => {
                 BuiltinKind::protocol()
             },
-            Self::RangeMatchableIsAtLeast
+            Self::MatchableMatches
+            | Self::RangeMatchableIsAtLeast
             | Self::RangeMatchableIsAtMost
             | Self::RangeMatchableIsBelow
             | Self::ArrayMatchableMatchLength
@@ -797,6 +985,14 @@ impl Builtin {
             | Self::UnsignedInteger
             | Self::InternalExpressibleByArrayLiteral
             | Self::InternalExpressibleByDictionaryLiteral => BuiltinKind::protocol(),
+            Self::IntegerLiteralInit
+            | Self::FloatLiteralInit
+            | Self::StringLiteralInit
+            | Self::BoolLiteralInit
+            | Self::CharLiteralInit
+            | Self::NullLiteralInit
+            | Self::ArrayLiteralInit
+            | Self::DictionaryLiteralInit => BuiltinKind::ProtocolMethod,
 
             // Default literal types
             Self::DefaultIntegerLiteralType
@@ -806,7 +1002,8 @@ impl Builtin {
             | Self::DefaultCharLiteralType
             | Self::DefaultNullLiteralType
             | Self::DefaultArrayLiteralType
-            | Self::DefaultDictionaryLiteralType => BuiltinKind::TypeAlias,
+            | Self::DefaultDictionaryLiteralType
+            | Self::DefaultBoxType => BuiltinKind::TypeAlias,
 
             // FFI
             Self::FFISafe => BuiltinKind::Protocol {
@@ -822,7 +1019,7 @@ impl Builtin {
             | Self::SubtractOperatorProtocol
             | Self::MultiplyOperatorProtocol
             | Self::DivideOperatorProtocol
-            | Self::ModuloOperatorProtocol
+            | Self::RemainderOperatorProtocol
             | Self::NegateOperatorProtocol
             | Self::EqualsOperatorProtocol
             | Self::NotEqualsOperatorProtocol
@@ -850,7 +1047,7 @@ impl Builtin {
             | Self::SubtractAssignProtocol
             | Self::MultiplyAssignProtocol
             | Self::DivideAssignProtocol
-            | Self::ModuloAssignProtocol
+            | Self::RemainderAssignProtocol
             | Self::BitwiseAndAssignProtocol
             | Self::BitwiseOrAssignProtocol
             | Self::BitwiseXorAssignProtocol
@@ -862,7 +1059,7 @@ impl Builtin {
             | Self::SubtractOperatorMethod
             | Self::MultiplyOperatorMethod
             | Self::DivideOperatorMethod
-            | Self::ModuloOperatorMethod
+            | Self::RemainderOperatorMethod
             | Self::NegateOperatorMethod
             | Self::EqualsOperatorMethod
             | Self::NotEqualsOperatorMethod
@@ -890,7 +1087,7 @@ impl Builtin {
             | Self::SubtractAssignMethod
             | Self::MultiplyAssignMethod
             | Self::DivideAssignMethod
-            | Self::ModuloAssignMethod
+            | Self::RemainderAssignMethod
             | Self::BitwiseAndAssignMethod
             | Self::BitwiseOrAssignMethod
             | Self::BitwiseXorAssignMethod
@@ -904,6 +1101,12 @@ impl Builtin {
             Self::ControlFlowEnum => BuiltinKind::Enum,
             Self::TryableProtocol | Self::FromResidualProtocol => BuiltinKind::protocol(),
             Self::TryExtractMethod | Self::FromResidualMethod => BuiltinKind::ProtocolMethod,
+
+            // Optional chaining
+            Self::OptionalChainProtocol => BuiltinKind::protocol(),
+            Self::OptionalChainBorrowMethod
+            | Self::OptionalChainMutateMethod
+            | Self::OptionalChainTakeMethod => BuiltinKind::ProtocolMethod,
 
             // Value promotion
             Self::FromValueProtocol => BuiltinKind::protocol(),
@@ -924,25 +1127,56 @@ impl Builtin {
             | Self::ResultTypeOperator => BuiltinKind::TypeAlias,
 
             // Builtin structs
-            Self::ArrayStruct | Self::SliceStruct | Self::ManuallyDropStruct => BuiltinKind::Struct,
+            Self::ArrayStruct
+            | Self::SliceStruct
+            | Self::ManuallyDropStruct
+            | Self::NullableCFunctionStruct => BuiltinKind::Struct,
 
             // String interpolation
-            Self::DefaultStringInterpolation | Self::FormatOptions => BuiltinKind::Struct,
-            Self::DefaultStringInterpolationInit
-            | Self::DefaultStringInterpolationAppendLiteral
-            | Self::DefaultStringInterpolationAppendInterpolation
-            | Self::DefaultStringInterpolationBuild => BuiltinKind::Function,
+            Self::FormatOptions => BuiltinKind::Struct,
+            Self::ExpressibleByStringInterpolation => BuiltinKind::protocol(),
+            Self::StringInterpolationInit
+            | Self::InterpolatableInit
+            | Self::InterpolatableAppendLiteral => BuiltinKind::ProtocolMethod,
+            Self::DecayOptionalRef => BuiltinKind::Function,
             Self::FormattableProtocol => BuiltinKind::protocol(),
             Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
+            Self::EquatableProtocol
+            | Self::HashableProtocol
+            | Self::ComparableProtocol
+            | Self::DefaultableProtocol => BuiltinKind::protocol(),
 
             // Exitable: non-marker protocol with a required `report()` method.
             Self::Exitable => BuiltinKind::protocol(),
             Self::ExitableReport => BuiltinKind::ProtocolMethod,
+            Self::BooleanConditionalBoolValue
+            | Self::ConsumingIndirectionConsumePointee
+            | Self::ExistentialBoxInit
+            | Self::SharedBoxSharedMutRef
+            | Self::IndirectionPointeeRef
+            | Self::MutableIndirectionPointeeMutRef => BuiltinKind::ProtocolMethod,
+            Self::IndirectionTarget
+            | Self::ArrayLiteralElement
+            | Self::DictionaryLiteralKey
+            | Self::DictionaryLiteralValue
+            | Self::ArrayMatchableElement => BuiltinKind::TypeAlias,
+            Self::UniqueBoxInit | Self::UniqueBoxTakeValue | Self::UniqueBoxDestroy => {
+                BuiltinKind::Function
+            },
             Self::ExitCode => BuiltinKind::Struct,
 
-            // Indirection: non-marker protocol with a required `pointeeRef()`
-            // method; explicit conformance (NOT implicit, unlike Copyable).
-            Self::Indirection => BuiltinKind::protocol(),
+            // Indirection: non-marker protocol with a required `value` place;
+            // explicit conformance (NOT implicit, unlike Copyable).
+            Self::Indirection | Self::MutableIndirection => BuiltinKind::protocol(),
+            // Structural like `Static`: computed, never declared.
+            Self::Sized => BuiltinKind::Protocol {
+                implicit_conformance: true,
+                must_be_marker: true,
+                tuple_conformance_propagation: false,
+                requires_fields_conform: false,
+                disallow_enum_conformance: false,
+            },
+            Self::ExistentialBox | Self::ConsumingIndirection => BuiltinKind::protocol(),
 
             // Shared box: the annotated symbol is the generic *struct* the
             // compiler instantiates (`RcBox`), not the `SharedBox` protocol
@@ -952,6 +1186,7 @@ impl Builtin {
             // Unique box: the annotated symbol is the generic *struct* the
             // compiler instantiates (`UniqueBox`).
             Self::UniqueBox => BuiltinKind::Struct,
+            Self::OwnedBox => BuiltinKind::Struct,
 
             // Well-known types — `Bool` resolves by name first, but carries
             // `@builtin(.Bool)` as the attribute anchor so strategy 2 works too.

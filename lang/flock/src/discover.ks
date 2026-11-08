@@ -4,6 +4,8 @@
 
 module flock.discover
 
+import clutch.shell.(entryNames)
+
 import flock.source.(joinPath)
 import flock.error.(FlockError)
 import flock.manifest.(BinDecl)
@@ -41,23 +43,23 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
 
     // src/main.ks -> default bin named after the package.
     let mainPath = joinPath(base: srcDir, rel: "main.ks");
-    if fileExists(mainPath) {
+    if Path(mainPath).exists() {
         result.append(BinTarget(name: packageName, entry: mainPath))
     }
 
     // src/bin/*.ks -> one bin each (direct children only).
     let binDir = joinPath(base: srcDir, rel: "bin");
-    if isDirectory(binDir) {
-        let entries = listDir(binDir).unwrap(or: []);
+    if Path(binDir).isDirectory() {
+        let entries = entryNames(binDir);
         var i: Int64 = 0;
         while i < entries.count {
-            let entry = entries(unchecked: i);
+            let entry = unsafe entries(unchecked: i);
             i = i + 1;
             if entry.starts(with: ".") or not entry.ends(with: ".ks") {
                 // skip hidden entries and non-.ks files
             } else {
                 let full = joinPath(base: binDir, rel: entry);
-                if not isDirectory(full) {
+                if not Path(full).isDirectory() {
                     let stem = entry.asSlice().subslice(from: 0, to: entry.bytes.count - 3).toOwned();
                     result.append(BinTarget(name: stem, entry: full))
                 }
@@ -71,7 +73,7 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
         var merged = [];
         var i: Int64 = 0;
         while i < result.count {
-            let target = result(unchecked: i);
+            let target = unsafe result(unchecked: i);
             i = i + 1;
             if not declsContainName(bins: bins, name: target.name) {
                 merged.append(target)
@@ -79,7 +81,7 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
         }
         i = 0;
         while i < bins.count {
-            let decl = bins(unchecked: i);
+            let decl = unsafe bins(unchecked: i);
             i = i + 1;
             merged.append(BinTarget(name: decl.name, entry: joinPath(base: rootDir, rel: decl.path)))
         }
@@ -92,8 +94,8 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
     while i < result.count {
         var j = i + 1;
         while j < result.count {
-            if result(unchecked: i).name == result(unchecked: j).name {
-                throw FlockError.DuplicateBinary(result(unchecked: i).name)
+            if unsafe result(unchecked: i).name == unsafe result(unchecked: j).name {
+                throw FlockError.DuplicateBinary(unsafe result(unchecked: i).name)
             }
             j = j + 1
         }
@@ -121,10 +123,10 @@ func declsContainName(bins bins: Array[BinDecl], name name: String) -> Bool {
 /// Skips hidden directories (starting with ".") and "target" directories.
 public func discoverSources(rootDir rootDir: String) -> Array[String] {
     var result = [];
-    let entries = listDir(rootDir).unwrap(or: []);
+    let entries = entryNames(rootDir);
     var i: Int64 = 0;
     while i < entries.count {
-        let entry = entries(unchecked: i);
+        let entry = unsafe entries(unchecked: i);
         i = i + 1;
 
         // Skip hidden entries and target directory
@@ -133,7 +135,7 @@ public func discoverSources(rootDir rootDir: String) -> Array[String] {
         } else {
             let fullPath = joinPath(base: rootDir, rel: entry);
 
-            if isDirectory(fullPath) {
+            if Path(fullPath).isDirectory() {
                 // Recurse into subdirectories
                 let subFiles = discoverSources(rootDir: fullPath);
                 for element in subFiles {

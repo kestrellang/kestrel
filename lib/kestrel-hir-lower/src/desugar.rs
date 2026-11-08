@@ -23,10 +23,11 @@ use crate::syntax::{BlockSyntax, Cond, ExprSrc, PatSrc, expr_children, first_exp
 ///
 /// This is a syntactic check used by `desugar_compound_assign`. Mutability
 /// of the resolved binding is enforced later by the assignment analyzer.
-fn is_place_syntax(expr: &SyntaxNode) -> bool {
+pub(crate) fn is_place_syntax(expr: &SyntaxNode) -> bool {
     match expr.kind() {
         SyntaxKind::ExprPath | SyntaxKind::ExprTupleIndex => true,
-        SyntaxKind::ExprGrouping => first_expr(expr)
+        // `unsafe p.value += 1`: the prefix marks a region, the place is its operand.
+        SyntaxKind::ExprGrouping | SyntaxKind::ExprUnsafe => first_expr(expr)
             .map(|inner| crate::syntax::unwrap_expr(&inner))
             .is_some_and(|inner| is_place_syntax(&inner)),
         _ => false,
@@ -57,7 +58,7 @@ impl LowerCtx<'_> {
         span: &Span,
     ) -> HirExprId {
         // Short-circuit ops wrap RHS in a closure
-        if let Some((proto, method, label)) = lookup_short_circuit_op(&op) {
+        if let Some(op_req) = lookup_short_circuit_op(&op) {
             let rhs_closure = self.alloc_expr(HirExpr::Closure {
                 params: Vec::new(),
                 body: HirBlock {
@@ -66,40 +67,18 @@ impl LowerCtx<'_> {
                 },
                 span: span.clone(),
             });
-            if let Some(protocol) = self.resolve_builtin(proto) {
-                return self.alloc_expr(HirExpr::ProtocolCall {
-                    from_operator: true,
-                    receiver: lhs,
-                    protocol,
-                    method: HirName::name(method),
-                    type_args: None,
-                    args: vec![HirCallArg {
-                        label: label.map(|l| l.to_string()),
-                        value: rhs_closure,
-                    }],
-                    span: span.clone(),
-                });
+            if let Some(protocol) = self.resolve_builtin(op_req.protocol) {
+                return self.operator_call(op_req, protocol, lhs, vec![rhs_closure], span);
             }
             self.emit_missing_operator_diagnostic(&op, span);
             return self.alloc_expr(HirExpr::Error { span: span.clone() });
         }
 
         // Regular binary op
-        if let Some((proto, method, label)) = lookup_binary_op(&op)
-            && let Some(protocol) = self.resolve_builtin(proto)
+        if let Some(op_req) = lookup_binary_op(&op)
+            && let Some(protocol) = self.resolve_builtin(op_req.protocol)
         {
-            return self.alloc_expr(HirExpr::ProtocolCall {
-                from_operator: true,
-                receiver: lhs,
-                protocol,
-                method: HirName::name(method),
-                type_args: None,
-                args: vec![HirCallArg {
-                    label: label.map(|l| l.to_string()),
-                    value: rhs,
-                }],
-                span: span.clone(),
-            });
+            return self.operator_call(op_req, protocol, lhs, vec![rhs], span);
         }
 
         self.emit_missing_operator_diagnostic(&op, span);
@@ -142,18 +121,10 @@ impl LowerCtx<'_> {
 
         let lowered_operand = self.lower_expr_src(operand);
 
-        if let Some((proto, method)) = lookup_unary_op(op)
-            && let Some(protocol) = self.resolve_builtin(proto)
+        if let Some(op_req) = lookup_unary_op(op)
+            && let Some(protocol) = self.resolve_builtin(op_req.protocol)
         {
-            return self.alloc_expr(HirExpr::ProtocolCall {
-                from_operator: true,
-                receiver: lowered_operand,
-                protocol,
-                method: HirName::name(method),
-                type_args: None,
-                args: Vec::new(),
-                span: span.clone(),
-            });
+            return self.operator_call(op_req, protocol, lowered_operand, Vec::new(), span);
         }
 
         self.ctx.accumulate(
@@ -180,18 +151,10 @@ impl LowerCtx<'_> {
     ) -> HirExprId {
         let lowered_operand = self.lower_expr_src(operand);
 
-        if let Some((proto, method)) = lookup_postfix_op(op)
-            && let Some(protocol) = self.resolve_builtin(proto)
+        if let Some(op_req) = lookup_postfix_op(op)
+            && let Some(protocol) = self.resolve_builtin(op_req.protocol)
         {
-            return self.alloc_expr(HirExpr::ProtocolCall {
-                from_operator: true,
-                receiver: lowered_operand,
-                protocol,
-                method: HirName::name(method),
-                type_args: None,
-                args: Vec::new(),
-                span: span.clone(),
-            });
+            return self.operator_call(op_req, protocol, lowered_operand, Vec::new(), span);
         }
 
         self.ctx.accumulate(
@@ -234,9 +197,13 @@ impl LowerCtx<'_> {
         // but only the typed layer can tell it apart from a temporary — the
         // assignment analyzer rejects the non-ref ones.
         let lhs_node = lhs.inner();
-        let call_shaped = lhs_node
-            .as_ref()
-            .is_some_and(|n| n.kind() == SyntaxKind::ExprCall);
+        let call_shaped = lhs_node.as_ref().is_some_and(|n| {
+            let n = match n.kind() {
+                SyntaxKind::ExprUnsafe => first_expr(n).map(|i| crate::syntax::unwrap_expr(&i)),
+                _ => Some(n.clone()),
+            };
+            n.is_some_and(|n| n.kind() == SyntaxKind::ExprCall)
+        });
         if !lhs_node.as_ref().is_some_and(is_place_syntax) && !call_shaped {
             self.ctx.accumulate(
                 Diagnostic::error()
@@ -255,21 +222,11 @@ impl LowerCtx<'_> {
         let lowered_lhs = self.lower_expr_src(lhs);
         let lowered_rhs = self.lower_expr_src(rhs);
 
-        if let Some((proto, method, label)) = lookup_compound_assign_op(op)
-            && let Some(protocol) = self.resolve_builtin(proto)
+        if let Some(op_req) = lookup_compound_assign_op(op)
+            && let Some(protocol) = self.resolve_builtin(op_req.protocol)
         {
-            let pcall = self.alloc_expr(HirExpr::ProtocolCall {
-                from_operator: true,
-                receiver: lowered_lhs,
-                protocol,
-                method: HirName::name(method),
-                type_args: None,
-                args: vec![HirCallArg {
-                    label: label.map(|l| l.to_string()),
-                    value: lowered_rhs,
-                }],
-                span: span.clone(),
-            });
+            let pcall =
+                self.operator_call(op_req, protocol, lowered_lhs, vec![lowered_rhs], span);
             return self.alloc_expr(HirExpr::Sugar {
                 kind: SugarKind::CompoundAssign,
                 inner: pcall,
@@ -589,6 +546,7 @@ impl LowerCtx<'_> {
             lowered_iterable = self.alloc_expr(HirExpr::Local(seq_local, span.clone()));
         }
         let iterate_call = self.alloc_expr(HirExpr::ProtocolCall {
+            requirement: self.protocol_requirement(iter_protocol, Builtin::IterableIterMethod),
             from_operator: false,
             receiver: lowered_iterable,
             protocol: iter_protocol,
@@ -610,6 +568,7 @@ impl LowerCtx<'_> {
         let iter_ref = self.alloc_expr(HirExpr::Local(iter_local, span.clone()));
         let next_call = if let Some(protocol) = self.resolve_builtin(Builtin::IteratorProtocol) {
             self.alloc_expr(HirExpr::ProtocolCall {
+                requirement: self.protocol_requirement(protocol, Builtin::IteratorNextMethod),
                 from_operator: false,
                 receiver: iter_ref,
                 protocol,
@@ -737,8 +696,9 @@ impl LowerCtx<'_> {
     /// ```
     ///
     /// `tryExtract()` is a ProtocolCall on Tryable, returning ControlFlow[Output, Early].
-    /// `.fromResidual($early)` is an ImplicitMember resolved against the function's
-    /// return type (which must conform to FromResidual[Early]).
+    /// `.fromResidual($early)` is an ImplicitMember bound to the tagged
+    /// `FromResidual` requirement, called with Self = the function's return
+    /// type (which must conform to `FromResidual[Early]`).
     /// Falls back to hardcoded .Ok/.Err if Tryable protocol is not available.
     pub(crate) fn desugar_try(&mut self, operand: &ExprSrc, span: &Span) -> HirExprId {
         let lowered_operand = self.lower_expr_src(operand);
@@ -764,6 +724,7 @@ impl LowerCtx<'_> {
             });
         };
         let scrutinee = self.alloc_expr(HirExpr::ProtocolCall {
+            requirement: self.protocol_requirement(try_protocol, Builtin::TryExtractMethod),
             from_operator: false,
             receiver: lowered_operand,
             protocol: try_protocol,
@@ -811,14 +772,21 @@ impl LowerCtx<'_> {
         });
         let early_ref = self.alloc_expr(HirExpr::Local(early_local, span.clone()));
 
-        // .fromResidual($early) — resolved against the function's return type
+        // .fromResidual($early): a call to the `@builtin(.FromResidualMethod)`
+        // requirement with Self = the function's return type, so inference
+        // checks `Return: FromResidual[typeof $early]` and mono picks that
+        // conformance — never a by-name lookup among the return type's statics.
+        // The requirement's single param is positional: no label.
+        let from_residual = self.resolve_builtin(Builtin::FromResidualMethod);
         let return_value = self.alloc_expr(HirExpr::ImplicitMember {
             owner: None,
             name: HirName::name("fromResidual"),
             args: Some(vec![HirCallArg {
-                label: Some("residual".to_string()),
+                trailing_closure: false,
+                label: None,
                 value: early_ref,
             }]),
+            requirement: from_residual,
             span: span.clone(),
         });
         let return_early = self.alloc_expr(HirExpr::Return {
@@ -873,9 +841,11 @@ impl LowerCtx<'_> {
             owner: None,
             name: HirName::name("Err"),
             args: Some(vec![HirCallArg {
+                trailing_closure: false,
                 label: None,
                 value: lowered_value,
             }]),
+            requirement: None,
             span: span.clone(),
         });
 
@@ -891,16 +861,20 @@ impl LowerCtx<'_> {
 
     // ===== Interpolated strings =====
 
-    /// Desugar `"hello \(name)!"` to a DefaultStringInterpolation builder sequence:
+    /// Desugar `"hello \(name)!"` to an accumulator sequence, `R` being the
+    /// literal's type (inferred; defaults to `String`):
     /// ```text
     /// {
-    ///     var $dsi = DefaultStringInterpolation(literalCapacity: 6, interpolationCount: 1)
-    ///     $dsi.appendLiteral(literal: "hello ")
-    ///     $dsi.appendInterpolation(value: name)
-    ///     $dsi.appendLiteral(literal: "!")
-    ///     $dsi.build()
+    ///     var $dsi = .init(literalCapacity: 7, interpolationCount: 1)  // Interpolatable.init, Self = R.Interpolation
+    ///     $dsi.appendLiteral("hello ")                                 // Interpolatable.appendLiteral
+    ///     $dsi.appendInterpolation(name)                               // plain method call
+    ///     $dsi.appendLiteral("!")
+    ///     .init(interpolation: $dsi)                                   // ExpressibleByStringInterpolation.init, Self = R
     /// }
     /// ```
+    /// Every call but `appendInterpolation` names its `@builtin` requirement.
+    /// `appendInterpolation` is not a requirement: each accumulator declares
+    /// its own overloads (which hole types it accepts, format options or not).
     pub(crate) fn desugar_interpolated_string(
         &mut self,
         node: &SyntaxNode,
@@ -919,8 +893,18 @@ impl LowerCtx<'_> {
             });
         }
 
-        // Resolve the DefaultStringInterpolation struct builtin
-        let Some(dsi_struct) = self.resolve_builtin(Builtin::DefaultStringInterpolation) else {
+        // The three requirements the sequence calls; `Interpolatable` is the
+        // protocol of the accumulator ones.
+        let append_literal = self.resolve_builtin(Builtin::InterpolatableAppendLiteral);
+        let requirements = (
+            self.resolve_builtin(Builtin::InterpolatableInit),
+            append_literal,
+            append_literal.and_then(|m| self.ctx.parent_of(m)),
+            self.resolve_builtin(Builtin::StringInterpolationInit),
+        );
+        let (Some(acc_init), Some(append_literal), Some(interpolatable), Some(finish)) =
+            requirements
+        else {
             self.ctx.accumulate(
                 Diagnostic::error()
                     .with_code("E129")
@@ -947,9 +931,9 @@ impl LowerCtx<'_> {
 
         let mut stmts: Vec<HirStmtId> = Vec::new();
 
-        // var $dsi = DefaultStringInterpolation(literalCapacity: N, interpolationCount: M)
+        // var $dsi = .init(literalCapacity: N, interpolationCount: M) — Self is
+        // the accumulator, pinned by the final `init(interpolation:)`.
         let dsi_local = self.define_local("$dsi", true, span.clone());
-        let dsi_type_ref = self.alloc_expr(HirExpr::Def(dsi_struct, Vec::new(), span.clone()));
         let lit_cap = self.alloc_expr(HirExpr::Literal {
             value: HirLiteral::Integer(literal_capacity as i128),
             span: span.clone(),
@@ -958,18 +942,22 @@ impl LowerCtx<'_> {
             value: HirLiteral::Integer(interpolation_count as i128),
             span: span.clone(),
         });
-        let init_call = self.alloc_expr(HirExpr::Call {
-            callee: dsi_type_ref,
-            args: vec![
+        let init_call = self.alloc_expr(HirExpr::ImplicitMember {
+            owner: None,
+            name: HirName::name("init"),
+            args: Some(vec![
                 HirCallArg {
+                    trailing_closure: false,
                     label: Some("literalCapacity".to_string()),
                     value: lit_cap,
                 },
                 HirCallArg {
+                    trailing_closure: false,
                     label: Some("interpolationCount".to_string()),
                     value: interp_count,
                 },
-            ],
+            ]),
+            requirement: Some(acc_init),
             span: span.clone(),
         });
         stmts.push(self.alloc_stmt(HirStmt::Let {
@@ -994,11 +982,15 @@ impl LowerCtx<'_> {
                         },
                         span: span.clone(),
                     });
-                    let append = self.alloc_expr(HirExpr::MethodCall {
+                    let append = self.alloc_expr(HirExpr::ProtocolCall {
+                        requirement: Some(append_literal),
+                        from_operator: false,
                         receiver: dsi_ref,
+                        protocol: interpolatable,
                         method: HirName::name("appendLiteral"),
                         type_args: None,
                         args: vec![HirCallArg {
+                            trailing_closure: false,
                             label: None,
                             value: str_lit,
                         }],
@@ -1017,6 +1009,7 @@ impl LowerCtx<'_> {
                     let lowered = self.lower_expr_src(expr);
 
                     let mut args = vec![HirCallArg {
+                        trailing_closure: false,
                         label: None,
                         value: lowered,
                     }];
@@ -1026,6 +1019,7 @@ impl LowerCtx<'_> {
                         && let Some(opts_expr) = self.build_format_options_from_spec(spec_str, span)
                     {
                         args.push(HirCallArg {
+                            trailing_closure: false,
                             label: None,
                             value: opts_expr,
                         });
@@ -1046,13 +1040,19 @@ impl LowerCtx<'_> {
             }
         }
 
-        // Tail expression: $dsi.build()
+        // Tail expression: .init(interpolation: $dsi), Self = the literal's
+        // type. Its parameter is `Self.Interpolation`, which is what ties the
+        // accumulator's type to the result's.
         let dsi_ref = self.alloc_expr(HirExpr::Local(dsi_local, span.clone()));
-        let build_call = self.alloc_expr(HirExpr::MethodCall {
-            receiver: dsi_ref,
-            method: HirName::name("build"),
-            type_args: None,
-            args: Vec::new(),
+        let build_call = self.alloc_expr(HirExpr::ImplicitMember {
+            owner: None,
+            name: HirName::name("init"),
+            args: Some(vec![HirCallArg {
+                trailing_closure: false,
+                label: Some("interpolation".to_string()),
+                value: dsi_ref,
+            }]),
+            requirement: Some(finish),
             span: span.clone(),
         });
 
@@ -1140,9 +1140,11 @@ impl LowerCtx<'_> {
                 owner: None,
                 name: HirName::name("Some"),
                 args: Some(vec![HirCallArg {
+                    trailing_closure: false,
                     label: None,
                     value: int_lit,
                 }]),
+                requirement: None,
                 span: span.clone(),
             });
             assign_field(self, &mut stmts, "width", some_val);
@@ -1158,9 +1160,11 @@ impl LowerCtx<'_> {
                 owner: None,
                 name: HirName::name("Some"),
                 args: Some(vec![HirCallArg {
+                    trailing_closure: false,
                     label: None,
                     value: int_lit,
                 }]),
+                requirement: None,
                 span: span.clone(),
             });
             assign_field(self, &mut stmts, "precision", some_val);
@@ -1177,6 +1181,7 @@ impl LowerCtx<'_> {
                 owner: None,
                 name: HirName::name(variant),
                 args: None,
+                requirement: None,
                 span: span.clone(),
             });
             assign_field(self, &mut stmts, "alignment", val);
@@ -1231,6 +1236,7 @@ impl LowerCtx<'_> {
                 owner: None,
                 name: HirName::name(variant),
                 args: None,
+                requirement: None,
                 span: span.clone(),
             });
             assign_field(self, &mut stmts, "sign", val);
@@ -1258,6 +1264,7 @@ impl LowerCtx<'_> {
                 owner: None,
                 name: HirName::name(variant),
                 args: None,
+                requirement: None,
                 span: span.clone(),
             });
             assign_field(self, &mut stmts, "floatStyle", val);
@@ -1294,7 +1301,52 @@ impl LowerCtx<'_> {
 
     /// Resolve a builtin type/protocol to its entity ID.
     /// Uses ResolveBuiltin query (cached, resolves from root context).
-    fn resolve_builtin(&self, builtin: Builtin) -> Option<kestrel_hecs::Entity> {
+    /// `receiver.<op>(args)` as a call to the operator's tagged requirement.
+    /// `requirement` is `None` only when the protocol (a test prelude) lacks
+    /// the method tag; inference then falls back to the by-name lookup.
+    fn operator_call(
+        &mut self,
+        op_req: OperatorRequirement,
+        protocol: kestrel_hecs::Entity,
+        receiver: HirExprId,
+        args: Vec<HirExprId>,
+        span: &Span,
+    ) -> HirExprId {
+        let requirement = self.protocol_requirement(protocol, op_req.method);
+        let args = args
+            .into_iter()
+            .map(|value| HirCallArg {
+                trailing_closure: false,
+                label: op_req.label.map(str::to_string),
+                value,
+            })
+            .collect();
+        self.alloc_expr(HirExpr::ProtocolCall {
+            requirement,
+            from_operator: true,
+            receiver,
+            protocol,
+            method: HirName::name(op_req.name),
+            type_args: None,
+            args,
+            span: span.clone(),
+        })
+    }
+
+    /// The `@builtin`-tagged requirement `method` of `protocol` — what a
+    /// desugaring's `ProtocolCall` names as its `requirement`, so inference
+    /// and MIR dispatch through THAT requirement, never a by-name member
+    /// lookup. `None` when the tag is missing or sits on another protocol.
+    pub(crate) fn protocol_requirement(
+        &self,
+        protocol: kestrel_hecs::Entity,
+        method: Builtin,
+    ) -> Option<kestrel_hecs::Entity> {
+        self.resolve_builtin(method)
+            .filter(|&m| self.ctx.parent_of(m) == Some(protocol))
+    }
+
+    pub(crate) fn resolve_builtin(&self, builtin: Builtin) -> Option<kestrel_hecs::Entity> {
         let result = self.ctx.query(ResolveBuiltin {
             builtin,
             root: self.root,
@@ -1322,27 +1374,10 @@ impl LowerCtx<'_> {
 
 // ===== Operator table lookups =====
 
-/// Look up protocol for a binary operator.
-fn lookup_binary_op(op: &BinaryOp) -> Option<(Builtin, &'static str, Option<&'static str>)> {
-    kestrel_hir::body::lookup_binary_op(op)
-}
-
-/// Look up protocol for a short-circuit operator.
-fn lookup_short_circuit_op(op: &BinaryOp) -> Option<(Builtin, &'static str, Option<&'static str>)> {
-    kestrel_hir::body::lookup_short_circuit_op(op)
-}
-
-/// Look up protocol for a unary operator.
-fn lookup_unary_op(op: &UnaryOp) -> Option<(Builtin, &'static str)> {
-    kestrel_hir::body::lookup_unary_op(op)
-}
-
-/// Look up protocol for a compound assignment operator.
-fn lookup_compound_assign_op(
-    op: &CompoundAssignOp,
-) -> Option<(Builtin, &'static str, Option<&'static str>)> {
-    kestrel_hir::body::lookup_compound_assign_op(op)
-}
+use kestrel_hir::body::{
+    OperatorRequirement, lookup_binary_op, lookup_compound_assign_op, lookup_postfix_op,
+    lookup_short_circuit_op, lookup_unary_op,
+};
 
 /// Human-readable symbol for a binary operator.
 fn binary_op_symbol(op: &BinaryOp) -> &'static str {

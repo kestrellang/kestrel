@@ -14,5 +14,5 @@ pub mod ops;
 pub mod pretty;
 
 pub use arena::{Arena, Idx};
-pub use ast_type::{AstType, FnTypeKind, ParamConvention, PathSegment};
+pub use ast_type::{AnyBound, AssocTypeBinding, AstType, FnTypeKind, ParamConvention, PathSegment};
 pub use ops::{BinaryOp, CompoundAssignOp, PostfixOp, UnaryOp};

@@ -3,7 +3,7 @@
 // expect-stdout: 0\n3\n
 
 module Main
-import std.io.stdio.println
+import std.streams.println
 
 public struct Foo {
     public var structVar: std.numeric.Int64 = 0;

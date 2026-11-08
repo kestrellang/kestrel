@@ -78,6 +78,7 @@ pub(crate) fn is_label_keyword(kind: K) -> bool {
             | K::Throw
             | K::Throws
             | K::Try
+            | K::Unsafe
             | K::Type
             | K::Var
             | K::Where

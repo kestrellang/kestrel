@@ -69,6 +69,16 @@ type checking. Those are deferred to type inference.
 | `format_spec.rs` | Interpolation format specifiers |
 | `ty.rs` | Type lowering (sugar resolution, path types) |
 
+## Existentials
+
+`any P` lowers to the default box over `HirTy::RawExistential` (`ty.rs`; a
+bare protocol type is E144). `existential.rs` lowers `is` patterns to
+`HirPat::TypeTest` and desugars the expression forms onto them: `x is T` to a
+two-arm bool-literal match, `x as? T` to a match ascribed `Optional[&T]`, and
+`consuming x as? T` to an `if` over a type test with `HirExpr::TakePayload`
+in the hit arm, ascribed `T throws _`. Each is wrapped in a `HirExpr::Sugar`
+(`SugarKind::TypeTest` / `Cast` / `ConsumingCast`).
+
 ## Design Decisions
 
 See [design.md](design.md) for detailed rationale on:

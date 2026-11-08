@@ -19,27 +19,27 @@ func main() -> lang.i64 {
 
     // -- Checked subscript read --
     let c0 = arr(checked: 0);
-    if c0.isNone() { return 4 }
+    if c0.isNone { return 4 }
     if c0.unwrap() != 10 { return 5 }
     let cOut = arr(checked: 99);
-    if cOut.isSome() { return 6 }
+    if cOut.isSome { return 6 }
 
     // -- Unchecked subscript read/write --
-    if arr(unchecked: 0) != 10 { return 7 }
-    arr(unchecked: 1) = 99;
+    if unsafe arr(unchecked: 0) != 10 { return 7 }
+    unsafe arr(unchecked: 1) = 99;
     if arr(1) != 99 { return 8 }
-    arr(unchecked: 1) = 20;
+    unsafe arr(unchecked: 1) = 20;
 
     // -- Clamped subscript read --
     let cl = arr(clamped: -5);
-    if cl.isNone() { return 9 }
+    if cl.isNone { return 9 }
     if cl.unwrap() != 10 { return 10 }
     let clHigh = arr(clamped: 100);
     if clHigh.unwrap() != 30 { return 11 }
 
     // -- Wrapped subscript read --
     let w = arr(wrapped: -1);
-    if w.isNone() { return 12 }
+    if w.isNone { return 12 }
     if w.unwrap() != 30 { return 13 }
     let w2 = arr(wrapped: 3);
     if w2.unwrap() != 10 { return 14 }
@@ -57,31 +57,31 @@ func main() -> lang.i64 {
 
     // -- Range checked --
     let rcOk = arr(checked: 0..<2);
-    if rcOk.isNone() { return 20 }
+    if rcOk.isNone { return 20 }
     let rcBad = arr(checked: 0..<10);
-    if rcBad.isSome() { return 21 }
+    if rcBad.isSome { return 21 }
 
     // -- Range clamped --
-    let rcl = arr(clamped: -5..<100);
+    let rcl = arr(within: -5..<100);
     if rcl.count != 3 { return 22 }
 
-    // -- ArraySlice subscripts via Slice[T] extension --
+    // -- Slice subscripts --
     let s = arr.asSlice();
     if s(0) != 10 { return 23 }
     if s(2) != 30 { return 24 }
 
     let sc = s(checked: 99);
-    if sc.isSome() { return 25 }
+    if sc.isSome { return 25 }
 
-    let su = s(unchecked: 1);
+    let su = unsafe s(unchecked: 1);
     if su != 20 { return 26 }
 
     let scl = s(clamped: -5);
-    if scl.isNone() { return 27 }
+    if scl.isNone { return 27 }
     if scl.unwrap() != 10 { return 28 }
 
     let sw = s(wrapped: -1);
-    if sw.isNone() { return 29 }
+    if sw.isNone { return 29 }
     if sw.unwrap() != 30 { return 30 }
 
     // -- Range subscript on slice --

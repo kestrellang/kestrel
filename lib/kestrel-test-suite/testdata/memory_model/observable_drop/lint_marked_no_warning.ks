@@ -15,7 +15,7 @@ func sys_close(fd: Int32) -> Int32
 struct Handle: Cloneable {
     var fd: Int32
     func clone() -> Handle { Handle(fd: self.fd) }
-    deinit { sys_close(self.fd); }
+    deinit { unsafe sys_close(self.fd); }
 }
 
 @main

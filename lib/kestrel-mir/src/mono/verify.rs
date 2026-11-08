@@ -371,8 +371,8 @@ fn check_callee(
                 });
             }
         },
-        Callee::Thin(_) | Callee::Thick(_) if site == CalleeSite::Call => {},
-        Callee::Thin(_) | Callee::Thick(_) => {
+        Callee::Thin(_) | Callee::Thick(_) | Callee::C(_) if site == CalleeSite::Call => {},
+        Callee::Thin(_) | Callee::Thick(_) | Callee::C(_) => {
             errors.push(MonoVerifyError {
                 user_facing: false,
                 func_idx: fi,
@@ -443,7 +443,7 @@ fn check_literal(
     errors: &mut Vec<MonoVerifyError>,
 ) {
     match kind {
-        ImmediateKind::FunctionRef { .. } => {
+        ImmediateKind::FunctionRef { .. } | ImmediateKind::CFunctionRef { .. } => {
             errors.push(MonoVerifyError {
                 user_facing: false,
                 func_idx: fi,
@@ -453,7 +453,7 @@ fn check_literal(
                 span: span.cloned(),
             });
         },
-        ImmediateKind::MonoFunctionRef(id) => {
+        ImmediateKind::MonoFunctionRef(id) | ImmediateKind::MonoCFunctionRef(id, _) => {
             if id.index() >= func_count {
                 errors.push(MonoVerifyError {
                     user_facing: false,
@@ -575,6 +575,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
         module.structs.insert(
             (entity(2), vec![]),
@@ -633,6 +634,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -741,6 +743,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -787,6 +790,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -831,6 +835,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -883,6 +888,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -925,6 +931,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -975,9 +982,11 @@ mod tests {
             extern_info: Some(ExternInfo {
                 calling_convention: crate::item::function::CallingConvention::C,
                 symbol_name: "malloc".into(),
+                ..crate::item::function::ExternInfo::c("malloc")
             }),
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -999,6 +1008,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
@@ -1038,6 +1048,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         });
 
         let result = verify_mono(&module);
