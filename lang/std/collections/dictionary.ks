@@ -334,10 +334,9 @@ struct DictionaryStorage[K, V]: Cloneable {
 ///
 /// The hash for each key is cached in its bucket so resizes don't
 /// recompute it. The default hasher, `DefaultHasher`, is SipHash-1-3 with
-/// a random per-process key, so iteration order differs between runs (set
-/// `KESTREL_DETERMINISTIC_HASHING` to pin it). For trusted keys where
-/// hashing dominates, `Dictionary[K, V, FastHasher]` is faster and has the
-/// same order on every run.
+/// a random per-process key, so iteration order differs between runs. For
+/// trusted keys, `Dictionary[K, V, FastHasher]` is faster and has the same
+/// order on every run.
 ///
 /// # Capacity & Reallocation
 ///

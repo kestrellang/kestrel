@@ -6,7 +6,6 @@ module std.collections
 import std.core.(Hasher, Hashable, Defaultable)
 import std.numeric.(UInt8, UInt64, Int64, DefaultRandom)
 import std.collections.(Slice)
-import std.memory.(RawPointer)
 
 // ============================================================================
 // DEFAULT HASHER (SIPHASH-1-3)
@@ -15,28 +14,19 @@ import std.memory.(RawPointer)
 /// The process-wide SipHash key, drawn from `DefaultRandom` the first time
 /// a `DefaultHasher()` is made. One key per process (as in Swift), so every
 /// table agrees on every hash within a run, and a table's iteration order
-/// changes from run to run. Setting `KESTREL_DETERMINISTIC_HASHING` in the
-/// environment pins the key to zero for reproducible runs (tests, diffs).
+/// changes from run to run. For a fixed order, name a hasher with a fixed
+/// key in the table's type, e.g. `Dictionary[K, V, FastHasher]`.
 var sipProcessKey0: UInt64 = 0;
 var sipProcessKey1: UInt64 = 0;
 var sipProcessKeyed: Bool = false;
-
-@extern(.C, mangleName: "getenv")
-func hashing_getenv(consuming name: RawPointer) -> RawPointer
 
 /// Draws the process key once.
 func sipProcessKey() -> (UInt64, UInt64) {
     if not sipProcessKeyed {
         sipProcessKeyed = true;
-        let name = "KESTREL_DETERMINISTIC_HASHING".toCString();
-        let value = unsafe hashing_getenv(name.raw.asRaw());
-        let pinned = not value.isNull;
-        name.free();
-        if not pinned {
-            var rng = DefaultRandom();
-            sipProcessKey0 = rng.nextUInt64();
-            sipProcessKey1 = rng.nextUInt64()
-        }
+        var rng = DefaultRandom();
+        sipProcessKey0 = rng.nextUInt64();
+        sipProcessKey1 = rng.nextUInt64()
     }
     (sipProcessKey0, sipProcessKey1)
 }
