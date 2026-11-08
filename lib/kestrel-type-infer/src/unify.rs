@@ -116,6 +116,15 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
                             | (LiteralKind::Float, LiteralKind::Integer)
                     ) {
                         Some(LiteralKind::Float)
+                    } else if matches!(
+                        (x, y),
+                        (LiteralKind::String, LiteralKind::StringInterpolation)
+                            | (LiteralKind::StringInterpolation, LiteralKind::String)
+                    ) {
+                        // `match n { 0 => "Fizz", _ => "\(n)" }`: the
+                        // interpolation is the narrower requirement, and
+                        // both default to `String`.
+                        Some(LiteralKind::StringInterpolation)
                     } else {
                         return Err(UnifyError::Mismatch);
                     }

@@ -364,9 +364,13 @@ fn postfix(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
     } else {
         let chain = primary(p)?;
         let mut chain = tight_ops(p, chain, false, &mut binds);
-        chain = trailing_closures(p, chain);
-        // Continuation: `.member` on a later line, followed by tight operators.
-        while p.at(K::Dot) {
+        // Each link of a `.member` chain, on this line or a later one, may
+        // take trailing closures: `xs.filter { … }.map { … }`.
+        loop {
+            chain = trailing_closures(p, chain);
+            if !p.at(K::Dot) {
+                break;
+            }
             chain = member(p, chain, true);
             chain = tight_ops(p, chain, false, &mut binds);
         }
