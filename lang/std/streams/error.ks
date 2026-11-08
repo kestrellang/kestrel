@@ -20,7 +20,7 @@ import std.ffi.(CString)
 /// # Examples
 ///
 /// ```
-/// match readText("config.toml") {
+/// match File.readText("config.toml") {
 ///     .Ok(text) => parse(text),
 ///     .Err(e) if e.kind == .NotFound => defaults(),
 ///     .Err(e) => fail(e)

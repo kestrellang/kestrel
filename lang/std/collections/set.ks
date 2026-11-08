@@ -152,9 +152,9 @@ public struct SetIterator[T, H = DefaultHasher]: Iterator where T: Hashable, H: 
 /// # Hashing
 ///
 /// Each element's hash is computed via `T: Hashable` and stored in the
-/// underlying dictionary's bucket. Swap the hasher type by writing
-/// `Set[T, SipHasher]` etc.; the default `DefaultHasher` is FNV-1a
-/// (see `DefaultHasher` for caveats around adversarial inputs).
+/// underlying dictionary's bucket. The default, `DefaultHasher`, is
+/// randomly keyed SipHash-1-3 (see `Dictionary`); write `Set[T, FastHasher]`
+/// for the faster unkeyed hasher.
 ///
 /// # Representation
 ///

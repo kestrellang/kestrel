@@ -208,7 +208,7 @@ func handleInit(lib lib: Bool) -> lang.i32 {
     var content = String();
     content.append("[package]\nname = \""); content.append(dirName.clone()); content.append("\"\nversion = \"0.1.0\"\norg = \"\"\ndescription = \"\"\nauthor = \"\"\nlicense = \"\"\nrepository = \"\"\nwebsite = \"\"\ndocumentation = \"\"\n\n[dependencies]\n");
 
-    match writeText(Path(manifestPath), content) {
+    match File.writeText(Path(manifestPath), content) {
         .Ok(_) => {  println("Created flock.toml"); },
         .Err(e) => {
              eprintln("Failed to create flock.toml");
@@ -232,7 +232,7 @@ func handleInit(lib lib: Bool) -> lang.i32 {
         if not Path(libPath).exists() {
             var c = String();
             c.append("module "); c.append(modName); c.append(".lib\n\n/// Returns a friendly greeting.\npublic func greeting() -> String {\n    \"Hello from "); c.append(dirName); c.append("\"\n}\n");
-            match writeText(Path(libPath), c) {
+            match File.writeText(Path(libPath), c) {
                 .Ok(_) => {  println("Created src/lib.ks"); },
                 .Err(_) => {}
             }
@@ -242,7 +242,7 @@ func handleInit(lib lib: Bool) -> lang.i32 {
         if not Path(mainPath).exists() {
             var c = String();
             c.append("module "); c.append(modName); c.append(".main\n\n@main\nfunc main() -> lang.i32 {\n    println(\"Hello from "); c.append(dirName); c.append("!\");\n    0\n}\n");
-            match writeText(Path(mainPath), c) {
+            match File.writeText(Path(mainPath), c) {
                 .Ok(_) => {  println("Created src/main.ks"); },
                 .Err(_) => {}
             }
@@ -291,7 +291,7 @@ func handlePublish() -> lang.i32 {
         ),
         dependencies: []
     );
-    match readText(Path(manifestPath)) {
+    match File.readText(Path(manifestPath)) {
         .Err(_) => {
              eprintln("cannot read flock.toml");
             return 1
@@ -330,7 +330,7 @@ func handlePublish() -> lang.i32 {
     // Read token from ~/.flock/credentials
     var token = "";
     let credPath = joinPath(base: flockHome(), rel: "credentials");
-    match readText(Path(credPath)) {
+    match File.readText(Path(credPath)) {
         .Ok(contents) => token = trimWhitespace(contents),
         .Err(_) => {}
     }
@@ -539,7 +539,7 @@ func installOne(bin bin: BinTarget, built built: ResolvedBuild, binDir binDir: S
         .Ok(_) => {}
     }
 
-    match rename(Path(tmp), to: Path(dest.clone())) {
+    match File.rename(Path(tmp), to: Path(dest.clone())) {
         .Ok(_) => {},
         .Err(_) => {
             var m = String(); m.append("failed to move binary into "); m.append(binDir.clone());
@@ -595,7 +595,7 @@ func loadLocalPackage(rootDir rootDir: String) -> ResolvedPackage throws FlockEr
     if not Path(manifestPath).exists() {
         throw FlockError.ManifestNotFound(manifestPath)
     }
-    match readText(Path(manifestPath)) {
+    match File.readText(Path(manifestPath)) {
         .Err(e) => {
             var msg = String(); msg.append("cannot read "); msg.append(manifestPath);
             .Err(FlockError.IoError(msg))
@@ -790,7 +790,7 @@ func writeLockFile(cwd cwd: String, rootName rootName: String, nodes nodes: Arra
 
     let lockContent = generateLockFile(entries: lockEntries);
     let lockPath = joinPath(base: cwd, rel: "flock.lock");
-    match writeText(Path(lockPath), lockContent) {
+    match File.writeText(Path(lockPath), lockContent) {
         .Ok(_) => {},
         .Err(_) => {}
     }

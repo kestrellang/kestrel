@@ -99,7 +99,7 @@ public func readConfig() -> JessupConfig {
             if not Path(path).exists() {
                 return JessupConfig(defaultChannel: "stable")
             }
-            match readText(Path(path)) {
+            match File.readText(Path(path)) {
                 .Err(_) => JessupConfig(defaultChannel: "stable"),
                 .Ok(source) => {
                     match parseToml(source) {
@@ -132,7 +132,7 @@ public func writeConfig(config config: JessupConfig) -> () throws JessupError {
             content.append("[config]\ndefault_channel = \"");
             content.append(config.defaultChannel);
             content.append("\"\n");
-            match writeText(Path(path), content) {
+            match File.writeText(Path(path), content) {
                 .Ok(_) => .Ok(()),
                 .Err(_) => {
                     var ioMsg = String();

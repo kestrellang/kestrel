@@ -103,17 +103,6 @@ public struct Metadata {
     }
 }
 
-/// The metadata of what's at `path`, following symbolic links (`stat`).
-public func metadata(path: Path) -> Result[Metadata, IoError] {
-    readMetadata(path, true)
-}
-
-/// The metadata of `path` itself, without following a symbolic link
-/// (`lstat`).
-public func symbolicLinkMetadata(path: Path) -> Result[Metadata, IoError] {
-    readMetadata(path, false)
-}
-
 internal func readMetadata(path: Path, follow: Bool) -> Result[Metadata, IoError] {
     let out = unsafe malloc(metadataCellCount * 8);
     let cpath = try path.toNativePath();
@@ -141,4 +130,17 @@ internal func metadataFrom(out: RawPointer) -> Metadata {
         device: UInt64(truncating: unsafe cells.offset(by: 5).read()),
         inode: UInt64(truncating: unsafe cells.offset(by: 6).read())
     )
+}
+
+extend Metadata {
+    /// The metadata of what's at `path`, following symbolic links (`stat`).
+    public static func of(path: Path) -> Result[Metadata, IoError] {
+        readMetadata(path, true)
+    }
+
+    /// The metadata of `path` itself, without following a symbolic link
+    /// (`lstat`).
+    public static func ofSymbolicLink(path: Path) -> Result[Metadata, IoError] {
+        readMetadata(path, false)
+    }
 }

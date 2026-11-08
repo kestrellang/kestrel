@@ -203,12 +203,12 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
 
     /// `true` if something exists at this path (following symbolic links).
     public func exists() -> Bool {
-        metadata(self).isOk
+        Metadata.of(self).isOk
     }
 
     /// `true` if this path is a regular file (following symbolic links).
     public func isFile() -> Bool {
-        match metadata(self) {
+        match Metadata.of(self) {
             .Ok(m) => m.kind == .File,
             .Err(_) => false
         }
@@ -216,7 +216,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
 
     /// `true` if this path is a directory (following symbolic links).
     public func isDirectory() -> Bool {
-        match metadata(self) {
+        match Metadata.of(self) {
             .Ok(m) => m.kind == .Directory,
             .Err(_) => false
         }
@@ -224,7 +224,7 @@ public struct Path: Equatable, Hashable, Cloneable, Formattable, ExpressibleBySt
 
     /// The metadata of what's at this path, following symbolic links.
     public func metadata() -> Result[Metadata, IoError] {
-        metadata(self)
+        Metadata.of(self)
     }
 
     /// The absolute path with every symbolic link, `.` and `..` resolved

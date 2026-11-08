@@ -301,7 +301,7 @@ func selectBestVersion(versions versions: Array[Version], constraint constraint:
 func loadCachedPackage(pkgDir pkgDir: String) -> ResolvedPackage throws FlockError {
     let manifestPath = joinPath(base: pkgDir, rel: "flock.toml");
 
-    match readText(Path(manifestPath)) {
+    match File.readText(Path(manifestPath)) {
         .Err(_) => throw FlockError.ManifestNotFound(manifestPath),
         .Ok(source) => {
             match parseManifest(source: source) {

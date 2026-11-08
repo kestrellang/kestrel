@@ -1,6 +1,6 @@
 module images
 
-import std.files.(Path, readBytes, writeBytes)
+import std.files.(Path, File)
 
 // The one-call helpers: decode or load a whole file, encode or save an
 // image. Everything here is built on `ImageFormat` and `CollectingSink`.
@@ -117,14 +117,14 @@ func encodeWith(format: any ImageFormat, image: RawImage, options: EncodeOptions
 }
 
 func readImageFile(path: String) -> Result[Array[UInt8], ImageError] {
-    match readBytes(Path(path)) {
+    match File.readBytes(Path(path)) {
         .Ok(data) => .Ok(data),
         .Err(e) => .Err(ImageError(kind: .io, format: "", message: "\(path): \(e.description())"))
     }
 }
 
 func writeImageFile(path: String, data: Array[UInt8]) -> Result[(), ImageError] {
-    match writeBytes(Path(path), data.asSlice()) {
+    match File.writeBytes(Path(path), data.asSlice()) {
         .Ok(_) => .Ok(()),
         .Err(e) => .Err(ImageError(kind: .io, format: "", message: "\(path): \(e.description())"))
     }

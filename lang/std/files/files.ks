@@ -7,8 +7,8 @@
 // # Examples
 //
 // ```
-// let text = try readText("notes.txt");
-// try writeText("copy.txt", text);
+// let text = try File.readText("notes.txt");
+// try File.writeText("copy.txt", text);
 // for entry in try Directory.entries(".") {
 //     println((try entry).name);
 // }

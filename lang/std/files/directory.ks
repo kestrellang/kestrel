@@ -61,7 +61,7 @@ public enum Directory {
     public static func removeAll(path: Path) -> Result[(), IoError] {
         // `entries` opens `path` with `opendir`, which follows a link, so
         // check the argument with `lstat` first.
-        if (try symbolicLinkMetadata(path)).isSymbolicLink {
+        if (try Metadata.ofSymbolicLink(path)).isSymbolicLink {
             return withNativePath(path, { (p) in unsafe native_unlink(p) })
         }
         Directory.removeTree(path)
@@ -169,7 +169,7 @@ public struct DirectoryEntries: Iterator, not Copyable {
         let path = self.base.joined(with: name);
         // d_type is unknown on some file systems: ask lstat.
         let kind = if code == 4 {
-            match symbolicLinkMetadata(path) {
+            match Metadata.ofSymbolicLink(path) {
                 .Ok(m) => m.kind,
                 .Err(e) => return .Some(.Err(e))
             }

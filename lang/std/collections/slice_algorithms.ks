@@ -3,7 +3,7 @@
 module std.collections
 
 import std.core.(Bool, Comparable, Ordering, fatalError)
-import std.numeric.(Int64, UInt64, RandomNumberGenerator, SystemRandom)
+import std.numeric.(Int64, UInt64, RandomNumberGenerator, DefaultRandom)
 import std.result.(Optional)
 import std.memory.(UnsafeSlice, Pointer)
 import std.iter.(Iterator)
@@ -72,7 +72,7 @@ extend Slice[T] where T: Copyable {
 
     /// Shuffles the slice in place with a fresh system RNG.
     public mutating func shuffle() {
-        var rng = SystemRandom();
+        var rng = DefaultRandom();
         self.shuffle(using: rng)
     }
 

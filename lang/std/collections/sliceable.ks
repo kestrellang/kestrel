@@ -3,7 +3,7 @@
 module std.collections
 
 import std.core.(Bool, Equatable, Comparable, Ordering, Hashable, Hasher, Range, ClosedRange, RangeFrom, RangeUpTo, RangeThrough, fatalError)
-import std.numeric.(Int64, UInt64, RandomNumberGenerator, SystemRandom)
+import std.numeric.(Int64, UInt64, RandomNumberGenerator, DefaultRandom)
 import std.result.(Optional)
 import std.memory.(UnsafeSlice, UnsafeSliceIterator, Pointer)
 import std.iter.(Iterable)
@@ -271,7 +271,7 @@ extend Sliceable[T] {
         .Some(unsafe s.pointer.offset(by: index).read())
     }
 
-    /// A uniformly random element using OS entropy, or `.None` for an
+    /// A uniformly random element from `DefaultRandom`, or `.None` for an
     /// empty collection. O(1).
     ///
     /// # Examples
@@ -280,7 +280,7 @@ extend Sliceable[T] {
     /// ["red", "green", "blue"].randomElement();  // e.g. Some("green")
     /// ```
     public func randomElement() -> T? {
-        var rng = SystemRandom();
+        var rng = DefaultRandom();
         self.randomElement(using: rng)
     }
 

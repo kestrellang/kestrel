@@ -8,7 +8,7 @@ import std.core.(Range, ClosedRange, Hashable)
 import std.collections.(SeqRange)
 import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
-import std.numeric.(RandomNumberGenerator, Lcg64, SystemRandom)
+import std.numeric.(RandomNumberGenerator, Lcg64, DefaultRandom)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
 import std.ffi.(memcpy, memmove)
@@ -1187,7 +1187,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// arr.shuffle();  // e.g. [3, 1, 5, 2, 4]
     /// ```
     public mutating func shuffle() {
-        var rng = SystemRandom();
+        var rng = DefaultRandom();
         self.shuffle(using: rng)
     }
 
