@@ -1022,6 +1022,33 @@ fn compile_op2<'ctx>(
         Op::AddOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "add", li(), ri())?,
         Op::SubOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "sub", li(), ri())?,
         Op::MulOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "mul", li(), ri())?,
+        // Extend to double width, multiply, keep the top half. LLVM pairs it
+        // with a `mul` of the same operands into one widening multiply.
+        Op::MulHigh(_, sign) => {
+            let narrow = li().get_type();
+            let width = narrow.get_bit_width();
+            let wide = match width {
+                8 => cx.i16_type(),
+                16 => cx.i32_type(),
+                32 => cx.i64_type(),
+                _ => cx.i128_type(),
+            };
+            let ext = |v: IntValue<'ctx>| match sign {
+                Signedness::Signed => builder.build_int_s_extend(v, wide, "mulh.ext"),
+                Signedness::Unsigned => builder.build_int_z_extend(v, wide, "mulh.ext"),
+            };
+            let product = builder
+                .build_int_mul(ext(li()).unwrap(), ext(ri()).unwrap(), "mulh.full")
+                .unwrap();
+            let shift = wide.const_int(width as u64, false);
+            let high = builder
+                .build_right_shift(product, shift, false, "mulh.shr")
+                .unwrap();
+            builder
+                .build_int_truncate(high, narrow, "mulh")
+                .unwrap()
+                .into()
+        },
         Op::FAdd(_) => builder.build_float_add(lf(), rf(), "fadd").unwrap().into(),
         Op::FSub(_) => builder.build_float_sub(lf(), rf(), "fsub").unwrap().into(),
         Op::FMul(_) => builder.build_float_mul(lf(), rf(), "fmul").unwrap().into(),

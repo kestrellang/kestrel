@@ -605,6 +605,14 @@ public struct UInt32:
         (UInt32(raw: lang.i32_mul(self.raw, other.raw)), Bool(boolLiteral: lang.i32_unsigned_mul_overflows(self.raw, other.raw)))
     }
 
+    /// The full double-width product `self * other` as `(low, high)`
+    /// halves: `low` is the wrapped product (as from `multiplyWrapping`),
+    /// `high` the bits above it. Compiles to one widening multiply. For
+    /// hashes, RNGs and bignum arithmetic.
+    public func multiplyFull(other: UInt32) -> (UInt32, UInt32) {
+        (UInt32(raw: lang.i32_mul(self.raw, other.raw)), UInt32(raw: lang.i32_unsigned_mul_high(self.raw, other.raw)))
+    }
+
     /// Truncating integer division (`self / other`). For signed types,
     /// `minValue / -1` wraps; use `divideChecked` to detect.
     ///

@@ -868,6 +868,8 @@ fn compile_op2(
         Op::MulOverflows(bits, sign) => {
             emit_overflow_check(builder, bits, sign, OverflowKind::Mul, lhs, rhs)
         },
+        Op::MulHigh(_, Signedness::Signed) => builder.ins().smulhi(lhs, rhs),
+        Op::MulHigh(_, Signedness::Unsigned) => builder.ins().umulhi(lhs, rhs),
         Op::FAdd(_) => builder.ins().fadd(lhs, rhs),
         Op::FSub(_) => builder.ins().fsub(lhs, rhs),
         Op::FMul(_) => builder.ins().fmul(lhs, rhs),

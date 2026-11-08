@@ -4,7 +4,7 @@
 
 module Test
 
-// `FastHasher` is foldhash's fast variant with its fixed seeds, so it gives
+// `FoldHasher` is foldhash's fast variant with its fixed seeds, so it gives
 // the same values as Rust's `foldhash::fast::FixedState::default()` (0.1.5).
 // Line 1: one `write(bytes:)` of the bytes `i * 7 + 3` for lengths covering
 // every path (empty, 1–3, 4–7, 8–16, medium up to 255, long from 256).
@@ -29,7 +29,7 @@ func word(i: Int64) -> UInt64 {
 func main() {
     var line = "";
     for n in [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 48, 63, 64, 100, 255, 256, 257, 300, 1000] {
-        var h = FastHasher();
+        var h = FoldHasher();
         let b = bytes(n);
         h.write(b.asSlice());
         if line != "" { line = line + " " };
@@ -39,7 +39,7 @@ func main() {
 
     var words = "";
     for k in [1, 2, 3, 5] {
-        var h = FastHasher();
+        var h = FoldHasher();
         var i: Int64 = 0;
         while i < k {
             h.write(uint64: word(i));
@@ -50,7 +50,7 @@ func main() {
     }
     print(words + "\n");
 
-    var m = FastHasher();
+    var m = FoldHasher();
     let hello: Array[UInt8] = [104, 101, 108, 108, 111];  // "hello"
     m.write(hello.asSlice());
     m.write(uint64: 5);
@@ -60,6 +60,6 @@ func main() {
     m.write(uint64: 7);
     print("\(m.finish())\n");
 
-    var empty = FastHasher();
+    var empty = FoldHasher();
     print("\(empty.finish())\n");
 }

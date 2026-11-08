@@ -517,6 +517,18 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
             }
         }
 
+        // High half of the double-width product (signed or unsigned), same
+        // type as the operands. Backs `multiplyFull`.
+        for sign in ["signed", "unsigned"] {
+            seed_fn(
+                world,
+                lang,
+                &format!("{ty_name}_{sign}_mul_high"),
+                &[("a", ty.clone()), ("b", ty.clone())],
+                ty.clone(),
+            );
+        }
+
         // Unary ops returning same type. `bswap` is skipped for i8: reversing
         // the bytes of a single byte is the identity, so there is nothing to
         // lower — the stdlib's Int8/UInt8 `byteSwapped` already returns `self`

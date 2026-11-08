@@ -1,5 +1,5 @@
 // Hashers: `DefaultHasher` (keyed SipHash-1-3, used by `Dictionary` and
-// `Set`) and `FastHasher` (foldhash, unkeyed).
+// `Set`) and `FoldHasher` (foldhash, unkeyed).
 
 module std.collections
 
@@ -40,8 +40,9 @@ func sipProcessKey() -> (UInt64, UInt64) {
 /// `DefaultHasher()` uses a random per-process key; `DefaultHasher(key0:key1:)`
 /// takes an explicit 128-bit key and gives the reference SipHash-1-3 value
 /// of the bytes written. It streams (split writes hash the same as one
-/// write) and integers go through `write(uint64:)` as one word. It's slower than `FastHasher`; pick that for trusted keys when
-/// hashing is the bottleneck.
+/// write) and integers go through `write(uint64:)` as one word. It's
+/// slower than `FastHasher`; pick that for trusted keys when hashing is
+/// the bottleneck.
 ///
 /// # Examples
 ///
@@ -171,6 +172,10 @@ public struct DefaultHasher: Hasher, Defaultable {
 // FAST HASHER (FOLDHASH)
 // ============================================================================
 
+/// The fast, unkeyed `Hasher`: currently `FoldHasher`. Name this for
+/// "fast, not attack-resistant"; name `FoldHasher` to pin the algorithm.
+public type FastHasher = FoldHasher;
+
 // foldhash's fixed seeds (hex digits of pi): ARBITRARY4..7 are the fold
 // and expand seeds; ARBITRARY3 starts the accumulator (see `init`).
 let foldSeed: UInt64 = 4983270260364809079;      // 0x452821e638d01377
@@ -199,11 +204,11 @@ let foldExpandSeed3: UInt64 = 4577018097722394903;   // 0x3f84d5b5b5470917
 /// # Examples
 ///
 /// ```
-/// var h = FastHasher();
+/// var h = FoldHasher();
 /// "hello".hash(into: h);
 /// let hash = h.finish();  // the same on every run
 ///
-/// let ids: Dictionary[Int64, String, FastHasher] = Dictionary();
+/// let ids: Dictionary[Int64, String, FoldHasher] = Dictionary();
 /// ```
 ///
 /// # Representation
@@ -211,7 +216,7 @@ let foldExpandSeed3: UInt64 = 4577018097722394903;   // 0x3f84d5b5b5470917
 /// `accumulator` (the running digest) and the integer buffer: `spongeLo`
 /// and `spongeHi` hold up to two pending words, `spongeLen` the bits used
 /// (0, 64 or 128).
-public struct FastHasher: Hasher, Defaultable {
+public struct FoldHasher: Hasher, Defaultable {
     private var accumulator: UInt64
     private var spongeLo: UInt64
     private var spongeHi: UInt64
@@ -302,24 +307,11 @@ public struct FastHasher: Hasher, Defaultable {
     }
 }
 
-/// The 128-bit product `x * y` with its two halves XORed: foldhash's mixing
-/// step. Built from four 32×32-bit products, since there's no 128-bit
-/// integer type.
+/// The 128-bit product `x * y` with its two halves XORed: foldhash's
+/// mixing step, one widening multiply.
 func foldedMultiply(x: UInt64, y: UInt64) -> UInt64 {
-    let mask: UInt64 = 4294967295;
-    let x0 = x.bitwiseAnd(mask);
-    let x1 = x.shiftRight(by: 32);
-    let y0 = y.bitwiseAnd(mask);
-    let y1 = y.shiftRight(by: 32);
-    let ll = x0.multiplyWrapping(y0);
-    let lh = x0.multiplyWrapping(y1);
-    let hl = x1.multiplyWrapping(y0);
-    let hh = x1.multiplyWrapping(y1);
-    // Carry out of the low half: its top 32 bits plus the low halves of
-    // the cross terms (each under 2^32, so the sum can't overflow).
-    let mid = ll.shiftRight(by: 32).addWrapping(lh.bitwiseAnd(mask)).addWrapping(hl.bitwiseAnd(mask));
-    let hi = hh.addWrapping(lh.shiftRight(by: 32)).addWrapping(hl.shiftRight(by: 32)).addWrapping(mid.shiftRight(by: 32));
-    x.multiplyWrapping(y).bitwiseXor(hi)
+    let (low, high) = x.multiplyFull(y);
+    low.bitwiseXor(high)
 }
 
 /// `width` (1, 4 or 8) little-endian bytes at `ptr + at`. Byte-wise
