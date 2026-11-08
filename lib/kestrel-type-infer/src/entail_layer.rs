@@ -440,7 +440,9 @@ impl FrontEndLayer<'_, '_> {
         let (box_ty, raw) = match ty {
             ETy::Abstract(i) => (None, self.abstracts.borrow()[*i as usize].clone()),
             ETy::Nominal { args, .. } => match args.as_slice() {
-                [ETy::Abstract(i)] => (Some(ty), self.abstracts.borrow()[*i as usize].clone()),
+                // The payload is the box's first type argument; the rest
+                // (its allocator) don't affect the access it grants.
+                [ETy::Abstract(i), ..] => (Some(ty), self.abstracts.borrow()[*i as usize].clone()),
                 _ => return None,
             },
             _ => return None,

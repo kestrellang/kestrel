@@ -106,7 +106,11 @@ impl OssaBodyCtx<'_, '_> {
         let bounds = bounds_of(self.ctx, raw);
         match conv.kind {
             ConversionKind::Box => {
-                let boxed_ty = self.ctx.module.ty_arena.named(boxed, vec![from_ty]);
+                // The payload swapped for the concrete type; the box's other
+                // args (its allocator) carry over.
+                let mut args = type_args.clone();
+                args[0] = from_ty;
+                let boxed_ty = self.ctx.module.ty_arena.named(boxed, args);
                 let Some(made) = self.emit_box_init(boxed_ty, value) else {
                     return value;
                 };

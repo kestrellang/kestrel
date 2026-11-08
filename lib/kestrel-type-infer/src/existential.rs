@@ -37,6 +37,8 @@ pub(crate) struct PendingConversion {
 /// The parts of an existential type `B[rawany P and Q, A = X]`.
 struct Existential {
     box_entity: Entity,
+    /// The box's args after the payload (a defaulted allocator).
+    rest: Vec<TyVar>,
     bounds: Vec<Entity>,
     bindings: Vec<(Entity, TyVar)>,
 }
@@ -48,7 +50,8 @@ fn as_existential(ctx: &InferCtx<'_>, tv: TyVar) -> Option<Existential> {
     else {
         return None;
     };
-    let [arg] = args.as_slice() else {
+    // The payload is the first arg; any others (an allocator) ride along.
+    let [arg, rest @ ..] = args.as_slice() else {
         return None;
     };
     let TySlot::Resolved(TyKind::RawExistential { bounds, bindings }) = ctx.slot(ctx.resolve(*arg))
@@ -57,6 +60,7 @@ fn as_existential(ctx: &InferCtx<'_>, tv: TyVar) -> Option<Existential> {
     };
     Some(Existential {
         box_entity: *entity,
+        rest: rest.to_vec(),
         bounds: bounds.iter().map(|(p, _)| *p).collect(),
         bindings: bindings.clone(),
     })
@@ -82,6 +86,19 @@ pub(crate) fn try_convert(
                     span: span.clone(),
                 }));
             }
+            let rest_matches = source.rest.len() == target.rest.len()
+                && source
+                    .rest
+                    .iter()
+                    .zip(target.rest.iter())
+                    .all(|(&have, &want)| unify::unify(ctx, have, want).is_ok());
+            if !rest_matches {
+                return Some(SolveResult::Error(InferError::ExistentialBoxMismatch {
+                    from: describe_tyvar(ctx, from),
+                    to: describe_tyvar(ctx, to),
+                    span: span.clone(),
+                }));
+            }
             if !upcast_holds(ctx, &source, &target) {
                 return None;
             }
@@ -89,13 +106,26 @@ pub(crate) fn try_convert(
         },
         None => {
             // `B[T]` is unsized in place; anything else is boxed whole.
-            let (kind, payload) = match ctx.slot(ctx.resolve(from)) {
+            let same_box = match ctx.slot(ctx.resolve(from)) {
                 TySlot::Resolved(
                     TyKind::Struct { entity, args } | TyKind::Enum { entity, args },
-                ) if *entity == target.box_entity && args.len() == 1 => {
+                ) if *entity == target.box_entity && args.len() == 1 + target.rest.len() => {
+                    Some(args.clone())
+                },
+                _ => None,
+            };
+            let (kind, payload) = match same_box {
+                Some(args) => {
+                    // Unsizing changes only the payload: `B[T, X]` to
+                    // `B[rawany P, X]`.
+                    for (&have, &want) in args[1..].iter().zip(target.rest.iter()) {
+                        if unify::unify(ctx, have, want).is_err() {
+                            return None;
+                        }
+                    }
                     (ConversionKind::Unsize, args[0])
                 },
-                _ => (ConversionKind::Box, from),
+                None => (ConversionKind::Box, from),
             };
             if let Some(err) = payload_error(ctx, payload, from, to, &target, span) {
                 return Some(err);
@@ -440,9 +470,7 @@ pub(crate) fn pinned_assoc_of(ctx: &InferCtx<'_>, kind: &TyKind, key: &AssocKey)
         TyKind::Struct { args, .. } | TyKind::Enum { args, .. }
             if matches!(key, AssocKey::Entity(_)) =>
         {
-            let [payload] = args.as_slice() else {
-                return None;
-            };
+            let payload = args.first()?;
             match ctx.slot(ctx.resolve(*payload)) {
                 TySlot::Resolved(TyKind::RawExistential { bindings, .. }) => {
                     pinned_assoc(ctx, bindings, key)

@@ -368,9 +368,10 @@ fn lower_any_type(
         bindings,
         span: span.clone(),
     };
+    // The box's other params (its allocator) take their defaults.
     HirTy::Struct {
         entity: box_entity,
-        args: vec![raw],
+        args: fill_type_arg_defaults(ctx, root, box_entity, vec![raw]),
         span: span.clone(),
     }
 }

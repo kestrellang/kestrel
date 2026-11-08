@@ -34,7 +34,7 @@ pub(crate) struct IndirectCase {
     pub logical_tys: Vec<TyId>,
     /// What the box holds: the lone field, or the tuple of all of them.
     pub payload_ty: TyId,
-    /// `OwnedBox[payload_ty]` — the case's one physical field.
+    /// `OwnedBox[payload_ty, …defaults]` — the case's one physical field.
     pub box_ty: TyId,
     /// `payload_ty` is a tuple (two or more declared fields).
     pub is_tuple: bool,
@@ -102,7 +102,7 @@ impl OssaBodyCtx<'_, '_> {
         let self_ptr = self.emit_op1(Op::StackAlloc(case.box_ty), one, ptr_ty);
         let arg = self.prepare_call_arg(packed, ParamConvention::Consuming);
         self.emit_call_void(
-            Callee::direct_with_args(init, vec![case.payload_ty], None),
+            Callee::direct_with_args(init, self.box_type_args(case.box_ty), None),
             vec![
                 CallArg {
                     value: self_ptr,
@@ -130,7 +130,11 @@ impl OssaBodyCtx<'_, '_> {
         );
         self.ctx.register_name(take_value);
         let payload = self.emit_call_returning(
-            Callee::direct_with_args(take_value, vec![case.payload_ty], Some(case.box_ty)),
+            Callee::direct_with_args(
+                take_value,
+                self.box_type_args(case.box_ty),
+                Some(case.box_ty),
+            ),
             vec![CallArg {
                 value: boxed,
                 convention: ParamConvention::Consuming,
@@ -161,13 +165,13 @@ impl OssaBodyCtx<'_, '_> {
         let (wrappers, raw_ty) = self
             .unwrap_handle_to_pointer(field_ty)
             .expect("ICE: OwnedBox pointer field does not peel to a raw pointer");
-        for i in 0..wrappers.len() {
-            let next_ty = wrappers.get(i + 1).copied().unwrap_or(raw_ty);
+        for (i, layer) in wrappers.iter().enumerate() {
+            let next_ty = wrappers.get(i + 1).map_or(raw_ty, |l| l.ty);
             let next = self.alloc_guaranteed(next_ty, cur);
             self.push_inst(InstKind::StructExtract {
                 result: next,
                 operand: cur,
-                field: FieldIdx::new(0),
+                field: layer.ptr_field,
             });
             cur = next;
         }
@@ -179,6 +183,14 @@ impl OssaBodyCtx<'_, '_> {
         let view = self.emit_begin_borrow_addr(word, case.payload_ty);
         debug_assert_eq!(self.body.value(view).ownership, Ownership::Guaranteed);
         view
+    }
+
+    /// A box type's type args: the payload, then its defaulted allocator.
+    fn box_type_args(&self, box_ty: TyId) -> Vec<TyId> {
+        match self.ctx.module.ty_arena.get(box_ty) {
+            MirTy::Named { type_args, .. } => type_args.clone(),
+            _ => panic!("ICE: indirect enum box type is not a nominal OwnedBox"),
+        }
     }
 
     /// The `OwnedBox` entity of a box type.
@@ -204,8 +216,8 @@ impl OssaBodyCtx<'_, '_> {
             (fields, sdef.type_params.clone())
         };
         let mut subst = kestrel_mir::SubstMap::new();
-        if let Some(tp) = tps.first() {
-            subst.type_params.insert(tp.entity, case.payload_ty);
+        for (tp, arg) in tps.iter().zip(self.box_type_args(case.box_ty)) {
+            subst.type_params.insert(tp.entity, arg);
         }
         let target = self.ctx.module.ty_arena.pointer(case.payload_ty);
         for (i, ty) in fields.into_iter().enumerate() {

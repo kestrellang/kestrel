@@ -1,7 +1,8 @@
 //! # Existential Box Analyzer (existentials)
 //!
 //! `any[B] P` lowers to `B[rawany P]`, so `B` must be able to hold an
-//! unsized payload: exactly one type parameter declared `not Sized`, a
+//! unsized payload: exactly one type parameter without a default (the
+//! payload; any others, like an allocator, have defaults) declared `not Sized`, a
 //! conformance to `ExistentialBox` (its `init(consuming:)` is how a concrete
 //! value gets boxed), and every stored field holding `T` only behind a
 //! pointer (docs/plans/existentials/existentials-design.md §3). The rules
@@ -153,7 +154,9 @@ fn diagnostic(
 ) -> AnalyzeDiagnostic {
     let name = util::entity_name(ctx, box_entity);
     let reason = match defect {
-        BoxDefect::ParamCount => "it must have exactly one type parameter".to_string(),
+        BoxDefect::ParamCount => {
+            "it must have exactly one type parameter without a default".to_string()
+        },
         BoxDefect::ParamNotRelaxed => "its type parameter is not declared 'not Sized'".to_string(),
         BoxDefect::NotExistentialBox => "it does not conform to 'ExistentialBox'".to_string(),
         BoxDefect::FieldByValue { field, param } => format!(

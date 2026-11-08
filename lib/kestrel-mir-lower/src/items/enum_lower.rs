@@ -118,7 +118,8 @@ fn box_case(ctx: &mut LowerCtx, case: &mut EnumCaseDef) {
             many.iter().map(|f| f.ty).collect(),
         )),
     };
-    let box_ty = ctx.module.ty_arena.named(owned_box, vec![payload_ty]);
+    let box_args = crate::ty::with_default_type_args(ctx, owned_box, vec![payload_ty]);
+    let box_ty = ctx.module.ty_arena.named(owned_box, box_args);
     case.payload_fields = vec![FieldDef::new("$box", box_ty)];
     case.indirect = Some(IndirectPayload {
         logical_fields,
