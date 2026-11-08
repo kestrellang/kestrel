@@ -1,0 +1,2 @@
+a -> e: a -> c -> d -> e (cost 26)
+a -> f: a -> c -> f (cost 11)
