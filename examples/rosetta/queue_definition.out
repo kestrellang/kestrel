@@ -1,0 +1,7 @@
+empty: true
+pop: first
+pop: second
+pop: third
+pop: fourth
+empty: true
+pop on empty: nothing
