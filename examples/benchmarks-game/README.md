@@ -17,18 +17,21 @@ Seconds, best of 3 runs (Python: 1 run, from the first round), every program pin
 | fasta 25M | 1.17 | 0.74 #3 | 0.92 #7 | 3.08 #2 | 2.61 #2 | 0.78 #9 | 13.08 #1 | 4.18 #5 | 19.43 #3 |
 | k-nucleotide 25M | 5.31 | 5.74 #1 | 3.44 #3 | 9.26 #6 | 23.30 #2 | 9.20 #6 | 34.21 #3 | 34.12 #3 | 92.81 #3 |
 | reverse-complement 25M | 0.71 | 0.21 #9 | 0.20 #1 | 0.42 #1 | 0.53 #1 | 0.46 #7 | 1.08 #7 | 1.00 #7 | 0.93 #3 |
-| binary-trees 21 | 11.69 | 2.25 #3 | 2.56 #2 | 16.68 #6 | 2.87 #9 | 11.02 #2 | — | 16.21 #7 | 52.68 #2 |
+| binary-trees 21 | 2.96 | 2.25 #3 | 2.56 #2 | 16.68 #6 | 2.87 #9 | 11.02 #2 | — | 16.21 #7 | 52.68 #2 |
 | pidigits 10000 | 0.54 | 0.53 #2 | 0.54 #1 | 0.67 #4 | 0.56 #2 | 0.57 #5 | 0.74 #4 | 0.74 #4 | 0.76 #3 |
 | regex-redux 5M | 1.56 | 1.41 #5 | 0.87 #6 | 16.86 #4 | 18.19 #2 | 1.63 #2 | 3.61 #4 | 3.65 #4 | 1.88 #2 |
 
-Geometric mean of Kestrel's time over the other language's (below 1 means Kestrel is faster): C 1.63, Rust 1.68, C# 1.04, Swift 0.68, Go 0.56, Node 0.47, TypeScript 0.38 (9 benchmarks), Python 0.08.
+The binary-trees row is the std-arena version (see below), measured at `b00a92b2`; the other rows are from `2014aa37`.
+
+Geometric mean of Kestrel's time over the other language's (below 1 means Kestrel is faster): C 1.42, Rust 1.46, C# 0.91, Swift 0.59, Go 0.49, Node 0.41, TypeScript 0.38 (9 benchmarks, no binary-trees), Python 0.07. With the `malloc` binary-trees (11.69 s) they were C 1.63, Rust 1.68, C# 1.04, Swift 0.68, Go 0.56, Node 0.47, Python 0.08.
 
 Variants in `variants/`:
 
+- `binarytrees_malloc.ks` does one `malloc` and one `free` per node, like C #1: 11.1 s, against 11.0 s for that C program.
 - `binarytrees_enum.ks` uses an `indirect enum`: 11.7 s with this branch's compiler and std (16.0 s before). Each node is 32 bytes (two 16-byte `Tree` values), against 16 bytes for the raw-pointer version.
 - `regexredux_pure.ks` uses the pure-Kestrel `lang/regex` package instead of PCRE2: 102 s.
 
-For reference, the plain-`malloc` C binary-trees (#1) takes 11.0 s on the same core; the fast C, Rust and Swift entries use APR pools or arenas, which Kestrel's std doesn't have.
+The fast C, Rust and Swift binary-trees entries use APR pools or arena crates; the Kestrel program uses std's `ArenaAllocator` the same way.
 
 ## std and compiler changes in this branch
 
@@ -53,7 +56,7 @@ Profiling these programs with `perf` led to three changes, measured at -O2 on on
 - **fasta**: a lookup table indexed by the generator state replaces the cumulative-probability search; output goes through one buffer.
 - **k-nucleotide**: k-mers packed 2 bits per base into a `UInt64` key, counted in `Dictionary[UInt64, Int64, FoldHasher]`. It's held back by `Dictionary` itself (see below).
 - **reverse-complement**: read straight into one buffer, squeeze newlines out in place, write the complement in 1 MB pieces.
-- **binary-trees**: 16-byte nodes of two raw `Pointer`s, one `malloc` and one `free` per node, like C #1.
+- **binary-trees**: 16-byte nodes of two raw `Pointer`s, bump-allocated from std's `ArenaAllocator` (1 MB first chunk). Each tree is freed at once with `reset()`, which keeps the chunk for the next tree (11.1 s → 2.96 s).
 - **pidigits**: GMP through `@extern(.C)`, the same library the C, Rust and Go programs use.
 - **regex-redux**: PCRE2 with its JIT through `@extern(.C)`, like the C program.
 
@@ -61,7 +64,7 @@ Profiling these programs with `perf` led to three changes, measured at -O2 on on
 
 - **No SIMD types or intrinsics.** n-body, spectral-norm and mandelbrot are close to the scalar or auto-vectorized C, but the winners hand-write AVX.
 - **`Dictionary` cache misses.** After this branch's Dictionary rework, k-nucleotide is memory-bound on the entry load of the 140k-key tables (Rust #3, the same algorithm on hashbrown: 3.44 s).
-- **No arena or pool allocator in std.** binary-trees is at C-with-`malloc` speed, 5x behind the pooled programs.
+- **binary-trees allocation.** With std's arena it is 1.3x behind C #3 (APR pools, 2.25 s) and 1.2x behind Rust #2 (bumpalo, 2.56 s).
 - **reverse-complement I/O.** About half the time is kernel time: reading, and page faults from growing and zero-filling the input buffer.
 
 ## Running
