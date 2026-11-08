@@ -37,11 +37,17 @@ public protocol Readable {
 extend Readable {
     /// Reads to end of stream, appending to `buf`. Returns the number of
     /// bytes appended. Retries reads interrupted by a signal.
+    ///
+    /// Reads go straight into `buf`'s spare capacity, which doubles when
+    /// full (in place when the allocator can), so the bytes are written
+    /// once and never zero-filled or copied through a scratch buffer.
     public mutating func readAll(mutating into buf: Array[UInt8]) -> Result[Int64, IoError] {
-        var chunk = Array[UInt8](repeating: 0, count: 8192);
-        var total: Int64 = 0;
+        let start = buf.count;
         loop {
-            let n = match self.read(into: chunk.asMutableSlice()) {
+            if buf.count == buf.capacity {
+                buf.reserveCapacity(if buf.capacity < 8192 { 8192 } else { buf.capacity * 2 });
+            }
+            let n = match self.read(into: unsafe buf.spareCapacity()) {
                 .Ok(n) => n,
                 .Err(e) => {
                     if isInterrupted(e) { continue }
@@ -51,10 +57,9 @@ extend Readable {
             if n == 0 {
                 break
             }
-            buf.append(contentsOf: chunk(0..<n));
-            total = total + n
+            unsafe buf.setCount(buf.count + n)
         }
-        .Ok(total)
+        .Ok(buf.count - start)
     }
 
     /// Fills all of `buf`. A stream that ends first is an error, not a
