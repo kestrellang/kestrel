@@ -190,9 +190,9 @@ impl FieldDeclaration {
         self.expressions().next()
     }
 
-    /// `lazy let|var`.
+    /// `lazy let|var` (or `lazy static var`).
     pub fn is_lazy(&self) -> bool {
-        self.lazy_modifier().is_some()
+        self.lazy_modifiers().next().is_some()
     }
 
     /// Instance storage the user declared: not `static`, not `lazy` (its

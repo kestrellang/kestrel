@@ -120,8 +120,9 @@ FailableMarker =
 SubscriptBody =
   CodeBlock | PropertyAccessors
 
+// `lazy` may also lead the modifiers (`lazy static var`, rejected later as E639).
 FieldDeclaration =
-  AttributeList? Visibility StaticModifier? UnsafeModifier? LazyModifier? ('let' | 'var') Name
+  AttributeList? Visibility (LazyModifier StaticModifier)? StaticModifier? UnsafeModifier? LazyModifier? ('let' | 'var') Name
   FailableMarker? ':' Ty
   (PropertyAccessors ('=' Expression)? | '=' Expression PropertyAccessors?)? ';'?
 

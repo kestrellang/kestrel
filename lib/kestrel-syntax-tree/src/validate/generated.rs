@@ -136,6 +136,10 @@ pub(super) static RULES: &[(K, R)] = &[
         R::Seq(&[
             R::Opt(&R::Kind(K::AttributeList)),
             R::Kind(K::Visibility),
+            R::Opt(&R::Seq(&[
+                R::Kind(K::LazyModifier),
+                R::Kind(K::StaticModifier),
+            ])),
             R::Opt(&R::Kind(K::StaticModifier)),
             R::Opt(&R::Kind(K::UnsafeModifier)),
             R::Opt(&R::Kind(K::LazyModifier)),
