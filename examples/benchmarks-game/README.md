@@ -21,7 +21,7 @@ Seconds, best of 3 runs (Python: 1 run, from the first round), every program pin
 | pidigits 10000 | 0.54 | 0.53 #2 | 0.54 #1 | 0.67 #4 | 0.56 #2 | 0.57 #5 | 0.74 #4 | 0.74 #4 | 0.76 #3 |
 | regex-redux 5M | 1.56 | 1.41 #5 | 0.87 #6 | 16.86 #4 | 18.19 #2 | 1.63 #2 | 3.61 #4 | 3.65 #4 | 1.88 #2 |
 
-The binary-trees row is the std-arena version (see below), measured at `b00a92b2`; the other rows are from `2014aa37`.
+The binary-trees row is the std-arena version (see below), measured at `b00a92b2`; the other rows are from `2014aa37`. The reverse-complement row predates the I/O changes below: measured side by side at `4afafcd4` on a busier machine, the old program took 0.80 s, the new one 0.48 s, and C #9 0.27 s (page faults 193k → 62k).
 
 Geometric mean of Kestrel's time over the other language's (below 1 means Kestrel is faster): C 1.42, Rust 1.46, C# 0.91, Swift 0.59, Go 0.49, Node 0.41, TypeScript 0.38 (9 benchmarks, no binary-trees), Python 0.07. With the `malloc` binary-trees (11.69 s) they were C 1.63, Rust 1.68, C# 1.04, Swift 0.68, Go 0.56, Node 0.47, Python 0.08.
 
@@ -55,7 +55,7 @@ Profiling these programs with `perf` led to three changes, measured at -O2 on on
 - **mandelbrot**: 8 pixels per byte as 8 scalar lanes, with the inner iterations unrolled so the SLP vectorizer packs them (6.2 s → 3.1 s).
 - **fasta**: a lookup table indexed by the generator state replaces the cumulative-probability search; output goes through one buffer.
 - **k-nucleotide**: k-mers packed 2 bits per base into a `UInt64` key, counted in `Dictionary[UInt64, Int64, FoldHasher]`. It's held back by `Dictionary` itself (see below).
-- **reverse-complement**: read straight into one buffer, squeeze newlines out in place, write the complement in 1 MB pieces.
+- **reverse-complement**: `readAll` reads stdin straight into one `Array`'s spare capacity, newlines are squeezed out in place, and the complement goes out in 1 MB pieces.
 - **binary-trees**: 16-byte nodes of two raw `Pointer`s, bump-allocated from std's `ArenaAllocator` (1 MB first chunk). Each tree is freed at once with `reset()`, which keeps the chunk for the next tree (11.1 s → 2.96 s).
 - **pidigits**: GMP through `@extern(.C)`, the same library the C, Rust and Go programs use.
 - **regex-redux**: PCRE2 with its JIT through `@extern(.C)`, like the C program.
@@ -65,7 +65,7 @@ Profiling these programs with `perf` led to three changes, measured at -O2 on on
 - **No SIMD types or intrinsics.** n-body, spectral-norm and mandelbrot are close to the scalar or auto-vectorized C, but the winners hand-write AVX.
 - **`Dictionary` cache misses.** After this branch's Dictionary rework, k-nucleotide is memory-bound on the entry load of the 140k-key tables (Rust #3, the same algorithm on hashbrown: 3.44 s).
 - **binary-trees allocation.** With std's arena it is 1.3x behind C #3 (APR pools, 2.25 s) and 1.2x behind Rust #2 (bumpalo, 2.56 s).
-- **reverse-complement I/O.** About half the time is kernel time: reading, and page faults from growing and zero-filling the input buffer.
+- **reverse-complement I/O.** Three fixes in this branch cut page faults from 193k to 62k: a destructuring `let` moves out of its hidden temp instead of copying (the tuple-returning reader forked its buffer), `readAll` reads in place into spare capacity, and `Array(repeating: 0, count:)` gets `calloc`ed memory instead of writing every byte. What's left is mostly the buffer growing by `realloc`.
 
 ## Running
 
