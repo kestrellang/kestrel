@@ -25,8 +25,9 @@ import std.memory.(ExistentialBox, Layout, Pointer, RawPointer, Allocator, Syste
 ///
 /// # Representation
 ///
-/// A `Pointer[T]` to a heap block holding just the payload, plus a liveness
-/// flag. The block is measured from the payload itself (`Layout.ofValue`),
+/// A `Pointer[T]` to a heap block holding just the payload: one word for a
+/// sized payload. The pointer is null once `consumePointee` has given the
+/// payload up. The block is measured from the payload itself (`Layout.ofValue`),
 /// so an unsized payload works.
 ///
 /// # Memory Model
@@ -46,10 +47,11 @@ import std.memory.(ExistentialBox, Layout, Pointer, RawPointer, Allocator, Syste
 // `where T: Sized`.
 @builtin(.OwnedBox)
 public struct OwnedBox[T]: not Copyable where T: not Copyable, T: not Sized, T: not Static {
+    // Null once `consumePointee` has handed the payload out and freed the
+    // block, so `deinit` has nothing left to do (Kestrel has no `forget`).
+    // No separate liveness flag: indirect enum cases store this box, so
+    // every word here is a word in each recursive node.
     fileprivate var ptr: Pointer[T]
-    // False once `consumePointee` has handed the payload out and freed the
-    // block, so `deinit` has nothing left to do. Kestrel has no `forget`.
-    fileprivate var live: Bool
 
     /// @name From Value
     /// Allocates a block holding `value`. Panics if the underlying
@@ -65,7 +67,6 @@ public struct OwnedBox[T]: not Copyable where T: not Copyable, T: not Sized, T: 
         if let .Some(rawPtr) = result {
             self.ptr = rawPtr.cast[T]();
             unsafe self.ptr.write(value);
-            self.live = true;
         } else {
             fatalError("OwnedBox allocation failed")
         }
@@ -94,10 +95,9 @@ public struct OwnedBox[T]: not Copyable where T: not Copyable, T: not Sized, T: 
     /// Drops the payload and frees the block, unless `consumePointee`
     /// already took the payload out.
     deinit {
-        if self.live {
-            unsafe self.ptr.dropInPlace();
-            self.free()
-        }
+        if self.ptr.isNull { return; }
+        unsafe self.ptr.dropInPlace();
+        self.free()
     }
 }
 
@@ -108,12 +108,13 @@ extend OwnedBox[T]: MutableIndirection {
 // The box owns its payload alone, so it can give it up.
 extend OwnedBox[T]: ConsumingIndirection {
     public consuming func consumePointee[R](body: (Pointer[T]) -> R) -> R where R: not Copyable, R: not Static {
-        // Move `self` into a `var` before clearing `live`: assigning a field
+        // Move `self` into a `var` before nulling `ptr`: assigning a field
         // of a `consuming self` directly writes to a copy today.
         var me = self;
         let result = body(me.ptr);
         me.free();
-        me.live = false;
+        // Null address, same metadata: `deinit` then skips the payload.
+        me.ptr = RawPointer.nullPointer().cast[T]().withMetadata(of: me.ptr);
         result
     }
 }
