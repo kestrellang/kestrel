@@ -10,7 +10,7 @@ import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
 import std.numeric.(RandomNumberGenerator, Lcg64, DefaultRandom)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
+import std.memory.(Layout, Pointer, UnsafeSlice, UnsafeSliceIterator, RawPointer, Allocator, GlobalAllocator, LiteralSlice, CowBox)
 import std.ffi.(memcpy, memmove)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
@@ -28,15 +28,15 @@ import std.collections.(Sliceable, Slice, SliceIndex, SliceClampable)
 /// # Representation
 ///
 /// A `CowBox` share (one refcount) and the `(ptr, remaining)` cursor.
-public struct ArrayIterator[T]: Iterator, Cloneable {
+public struct ArrayIterator[T, A = GlobalAllocator]: Iterator, Cloneable where A: Allocator {
     type Item = T
 
-    private var storage: CowBox[ArrayStorage[T]]
+    private var storage: CowBox[ArrayStorage[T, A]]
     private var cursor: UnsafeSliceIterator[T]
 
     /// @name From Storage
     /// Holds `storage` for the cursor's lifetime.
-    fileprivate init(storage storage: CowBox[ArrayStorage[T]], cursor cursor: UnsafeSliceIterator[T]) {
+    fileprivate init(storage storage: CowBox[ArrayStorage[T, A]], cursor cursor: UnsafeSliceIterator[T]) {
         self.storage = storage;
         self.cursor = cursor;
     }
@@ -47,7 +47,7 @@ public struct ArrayIterator[T]: Iterator, Cloneable {
     }
 
     /// An independent cursor at the same position, holding its own share.
-    public func clone() -> ArrayIterator[T] {
+    public func clone() -> ArrayIterator[T, A] {
         ArrayIterator(storage: self.storage.clone(), cursor: self.cursor)
     }
 }
@@ -86,13 +86,17 @@ public struct ArrayIterator[T]: Iterator, Cloneable {
 /// Owns the heap buffer. Deallocation happens in `deinit`. Used as a value
 /// inside `RcBox`, which provides the reference counting that makes COW
 /// possible.
-struct ArrayStorage[T]: Cloneable {
+struct ArrayStorage[T, A]: Cloneable where A: Allocator {
     /// Heap pointer to the element buffer; null when `cap == 0`.
     var ptr: Pointer[T]
     /// Number of initialized elements stored in the buffer.
     var len: Int64
     /// Total slots allocated; always `>= len`.
     var cap: Int64
+    /// Where the buffer came from and goes back to. Copied with the
+    /// storage, so an allocator must be a handle (stateless, or pointing
+    /// at shared state like an arena).
+    var allocator: A
 
     /// @name From Fields
     /// Constructs an `ArrayStorage` from raw fields.
@@ -108,12 +112,13 @@ struct ArrayStorage[T]: Cloneable {
     /// # Examples
     ///
     /// ```
-    /// let s = ArrayStorage(ptr: rawPtr.cast[T](), len: 0, cap: 16);
+    /// let s = ArrayStorage(ptr: rawPtr.cast[T](), len: 0, cap: 16, allocator: SystemAllocator());
     /// ```
-    init(ptr ptr: Pointer[T], len len: Int64, cap cap: Int64) {
+    init(ptr ptr: Pointer[T], len len: Int64, cap cap: Int64, allocator allocator: A) {
         self.ptr = ptr;
         self.len = len;
         self.cap = cap;
+        self.allocator = allocator;
     }
 
     /// Deep-copies the storage into a freshly allocated buffer.
@@ -129,23 +134,24 @@ struct ArrayStorage[T]: Cloneable {
     /// ```
     /// let copy = storage.clone();
     /// ```
-    func clone() -> ArrayStorage[T] {
+    func clone() -> ArrayStorage[T, A] {
         if self.cap == 0 {
             return ArrayStorage(
                 ptr: Pointer[T].nullPointer(),
                 len: 0,
-                cap: 0
+                cap: 0,
+                allocator: self.allocator
             )
         }
         let layout = Layout.array[T](self.cap);
-        var allocator = SystemAllocator();
+        var allocator = self.allocator;
         let result = allocator.allocate(layout);
         if let .Some(rawPtr) = result {
             let newPtr = rawPtr.cast[T]();
             for i in 0..<self.len {
                 unsafe newPtr.offset(by: i).write(self.ptr.offset(by: i).read());
             }
-            ArrayStorage(ptr: newPtr, len: self.len, cap: self.cap)
+            ArrayStorage(ptr: newPtr, len: self.len, cap: self.cap, allocator: allocator)
         } else {
             fatalError("ArrayStorage clone allocation failed")
         }
@@ -173,7 +179,7 @@ struct ArrayStorage[T]: Cloneable {
                 i = i + 1
             };
             let layout = Layout.array[T](self.cap);
-            var allocator = SystemAllocator();
+            var allocator = self.allocator;
             unsafe allocator.deallocate(self.ptr.asRaw(), layout)
         }
     }
@@ -228,7 +234,7 @@ struct ArrayStorage[T]: Cloneable {
 ///
 /// # Representation
 ///
-/// Holds a single `CowBox[ArrayStorage[T]]` field. The storage is a
+/// Holds a single `CowBox[ArrayStorage[T, A]]` field. The storage is a
 /// `(ptr, len, cap)` triple over a heap-allocated buffer.
 ///
 /// # Memory Model
@@ -248,19 +254,16 @@ struct ArrayStorage[T]: Cloneable {
 /// - Iteration order is insertion order.
 /// - Operations marked O(1) are amortized; growth is geometric.
 @builtin(.ArrayStruct)
-public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Cloneable, Defaultable {
+public struct Array[T, A = GlobalAllocator]: Sliceable[T], Iterable, Cloneable where A: Allocator {
     /// `Iterable` element type — the element produced by `iter().next()`.
     type Item = T
     /// `Iterable` iterator type — the concrete iterator returned by `iter()`.
-    type TargetIterator = ArrayIterator[T]
-    /// Pattern-matching element type — used by `ArrayMatchable` for
-    /// `[a, b, ..rest]` patterns.
-    type Element = T
+    type TargetIterator = ArrayIterator[T, A]
 
     /// COW storage — `CowBox` handles the reference counting and
     /// clone-on-write barrier. Sharing this between `Array` copies is
     /// what enables COW.
-    fileprivate var storage: CowBox[ArrayStorage[T]]
+    fileprivate var storage: CowBox[ArrayStorage[T, A]]
 
     /// Returns the raw element pointer. Internal helper for storage access.
     fileprivate func ptr() -> Pointer[T] { self.storage.value.ptr }
@@ -280,269 +283,39 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// Module-internal — used by `clone()`, `ArrayBuilder.build()`, and
     /// other `std.collections` code that constructs arrays from raw
     /// storage.
-    init(storage storage: CowBox[ArrayStorage[T]]) {
+    init(storage storage: CowBox[ArrayStorage[T, A]]) {
         self.storage = storage;
     }
 
     // ========================================================================
-    // CONSTRUCTORS
+    // CONSTRUCTORS (explicit allocator)
     // ========================================================================
 
-    /// @name Empty
-    /// Creates an empty array with no allocation.
-    ///
-    /// Capacity starts at zero; the first `append` allocates a small
-    /// buffer (currently 4 elements). Use `init(capacity:)` if you can
-    /// pre-size to avoid the early growth steps.
+    /// @name With Allocator
+    /// An empty array whose buffer will come from `allocator`. Nothing is
+    /// allocated until the first insert.
     ///
     /// # Examples
     ///
     /// ```
-    /// var arr = Array[Int64]();
-    /// arr.count;     // 0
-    /// arr.capacity;  // 0
+    /// var arena = ArenaAllocator();
+    /// var xs = Array[Int64, ArenaAllocator](allocator: arena);
+    /// xs.append(1);  // allocated from the arena
     /// ```
-    public init() {
-        self.storage = CowBox(ArrayStorage(
-            ptr: Pointer[T].nullPointer(),
-            len: 0,
-            cap: 0
-        ));
+    public init(allocator allocator: A) {
+        self.storage = CowBox(ArrayStorage(ptr: Pointer[T].nullPointer(), len: 0, cap: 0, allocator: allocator));
     }
 
-    /// @name With Capacity
-    /// Creates an empty array with at least the requested capacity reserved.
-    ///
-    /// Equivalent to `Array()` followed by `reserveCapacity(...)`, but
-    /// done in a single allocation. A non-positive `capacity` behaves
-    /// like `init()` (no allocation). Panics if allocation fails.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// var arr = Array[Int64](capacity: 1000);
-    /// arr.count;     // 0
-    /// arr.capacity;  // >= 1000 — no reallocation for first 1000 appends
-    /// ```
-    public init(capacity capacity: Int64) {
-        if capacity > 0 {
-            let layout = Layout.array[T](capacity);
-            var allocator = SystemAllocator();
-            let result = allocator.allocate(layout);
-            if let .Some(rawPtr) = result {
-                self.storage = CowBox(ArrayStorage(
-                    ptr: rawPtr.cast[T](),
-                    len: 0,
-                    cap: capacity
-                ))
-            } else {
-                fatalError("Array allocation failed")
-            }
-        } else {
-            self.storage = CowBox(ArrayStorage(
-                ptr: Pointer[T].nullPointer(),
-                len: 0,
-                cap: 0
-            ))
-        }
+    /// @name With Capacity And Allocator
+    /// An empty array with room for `capacity` elements, allocated from
+    /// `allocator`. Panics on allocation failure.
+    public init(capacity capacity: Int64, allocator allocator: A) {
+        self.init(allocator: allocator);
+        self.grow(capacity)
     }
 
-    /// @name Literal Bridge
-    /// Compiler-emitted bridge initializer for `[a, b, c]` array literals.
-    ///
-    /// Not called by user code directly — the parser lowers literal
-    /// expressions into a `(ptr, count)` pair which this constructor wraps
-    /// in a `LiteralSlice` and forwards to `init(arrayLiteral:)`.
-    ///
-    /// # Safety
-    ///
-    /// The compiler guarantees `_arrayLiteralPointer` points to exactly
-    /// `_arrayLiteralCount` initialized elements of `T`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let arr = [1, 2, 3];   // emitted by the compiler as a call to this init
-    /// ```
-    public init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64) {
-        // The compiler hands us an OWNED, initialized buffer of `count`
-        // elements (it moved each element in and abandons the buffer after
-        // this call). Bit-MOVE the whole buffer into fresh storage with a
-        // single memcpy. Do NOT route through `init(arrayLiteral:)` /
-        // `LiteralSlice` element-wise `read()`: `read()` clones for
-        // non-Copyable `T`, which would duplicate every element and leak the
-        // abandoned source originals (the buffer is never dropped). A bitwise
-        // transfer moves ownership exactly once — no clone, no leak.
-        let count = Int64(intLiteral: _arrayLiteralCount);
-        if count > 0 {
-            let layout = Layout.array[T](count);
-            var allocator = SystemAllocator();
-            if let .Some(rawPtr) = allocator.allocate(layout) {
-                let newPtr = rawPtr.cast[T]();
-                let stride = Int64(intLiteral: lang.sizeof[T]());
-                 unsafe memcpy(newPtr.asRaw(), Pointer[T](raw: _arrayLiteralPointer).asRaw(), count * stride);
-                self.storage = CowBox(ArrayStorage(ptr: newPtr, len: count, cap: count))
-            } else {
-                fatalError("Array allocation failed")
-            }
-        } else {
-            self.storage = CowBox(ArrayStorage(
-                ptr: Pointer[T].nullPointer(),
-                len: 0,
-                cap: 0
-            ))
-        }
-    }
-
-    /// @name Array Literal
-    /// Creates an array containing every element of the supplied literal
-    /// slice.
-    ///
-    /// Allocates a buffer sized exactly to the literal's element count
-    /// (so `capacity == count` after construction) and copies the
-    /// elements over. An empty slice yields an empty unallocated array.
-    /// Panics if allocation fails.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// // Triggered by the array-literal syntax:
-    /// let arr: Array[Int64] = [10, 20, 30];
-    /// ```
-    public init(arrayLiteral elements: LiteralSlice[T]) {
-        let elementCount = elements.count;
-        if elementCount > 0 {
-            let layout = Layout.array[T](elementCount);
-            var allocator = SystemAllocator();
-            let result = allocator.allocate(layout);
-            if let .Some(rawPtr) = result {
-                let newPtr = rawPtr.cast[T]();
-                var currentLen: Int64 = 0;
-                // Copy elements from literal slice
-                var iter = elements.iter();
-                while let .Some(item) = iter.next() {
-                    unsafe newPtr.offset(by: currentLen).write(item);
-                    currentLen = currentLen + 1
-                }
-                self.storage = CowBox(ArrayStorage(
-                    ptr: newPtr,
-                    len: currentLen,
-                    cap: elementCount
-                ))
-            } else {
-                fatalError("Array allocation failed")
-            }
-        } else {
-            self.storage = CowBox(ArrayStorage(
-                ptr: Pointer[T].nullPointer(),
-                len: 0,
-                cap: 0
-            ))
-        }
-    }
-
-    /// @name Repeating Value
-    /// Creates an array of `count` identical copies of `value`.
-    ///
-    /// Allocates exactly `count` slots and writes the same value into each.
-    /// `count <= 0` produces an empty array. Useful for initializing
-    /// fixed-size buffers; if you instead want each slot computed, use
-    /// `init(count:generator:)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let zeros = Array(repeating: 0, count: 5);    // [0, 0, 0, 0, 0]
-    /// let empty = Array(repeating: "x", count: 0);  // []
-    /// let pad   = Array(repeating: " ", count: 3);  // [" ", " ", " "]
-    /// ```
-    public init(repeating value: T, count count: Int64) {
-        if count <= 0 {
-            self.init()
-        } else {
-            let layout = Layout.array[T](count);
-            var allocator = SystemAllocator();
-            let result = allocator.allocate(layout);
-            if let .Some(rawPtr) = result {
-                let newPtr = rawPtr.cast[T]();
-                // Write first element directly
-                unsafe newPtr.write(value);
-                // Copy for remaining elements
-                for i in 1..<count {
-                    unsafe newPtr.offset(by: i).write(value);
-                }
-                self.storage = CowBox(ArrayStorage(
-                    ptr: newPtr,
-                    len: count,
-                    cap: count
-                ))
-            } else {
-                fatalError("Array allocation failed")
-            }
-        }
-    }
-
-    /// @name From Iterable
-    /// Creates an array by collecting every element produced by an iterable.
-    ///
-    /// Drains `iterable` to completion via `append`, so the resulting
-    /// capacity is whatever the growth policy lands on (not necessarily
-    /// equal to `count`). For a sized source you can shave reallocations
-    /// by following with `shrinkToFit()`. See also `append(from:)`
-    /// to add elements to an existing array.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let fromRange = Array(from: 1..<5);         // [1, 2, 3, 4]
-    /// let fromSet   = Array(from: mySet);         // arbitrary order
-    /// let collected = lines.iter().collect();     // an iterator: use collect()
-    /// ```
-    public init[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
-        self.init();
-        var iter = iterable.iter();
-        while let .Some(item) = iter.next() {
-            self.append(item)
-        }
-    }
-
-    /// @name From Generator
-    /// Creates an array of `count` elements computed by a per-index closure.
-    ///
-    /// Allocates exactly `count` slots and invokes `gen(i)` once for each
-    /// `i` in `0..<count`. `count <= 0` produces an empty array. Use this
-    /// when each slot is a function of its index; for a constant value,
-    /// prefer `init(repeating:count:)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let squares = Array(of: 5, generatedBy: { (i) in i * i });  // [0, 1, 4, 9, 16]
-    /// let indices = Array(of: 3, generatedBy: { (i) in i });      // [0, 1, 2]
-    /// let empty   = Array(of: 0, generatedBy: { (i) in i });      // []
-    /// ```
-    public init(of count: Int64, generatedBy gen: (Int64) -> T) {
-        if count <= 0 {
-            self.init()
-        } else {
-            let layout = Layout.array[T](count);
-            var allocator = SystemAllocator();
-            let result = allocator.allocate(layout);
-            if let .Some(rawPtr) = result {
-                let newPtr = rawPtr.cast[T]();
-                for i in 0..<count {
-                    unsafe newPtr.offset(by: i).write(gen(i));
-                }
-                self.storage = CowBox(ArrayStorage(
-                    ptr: newPtr,
-                    len: count,
-                    cap: count
-                ))
-            } else {
-                fatalError("Array allocation failed")
-            }
-        }
-    }
+    /// The allocator this array's buffer comes from.
+    public var allocator: A { self.storage.value.allocator }
 
     // ========================================================================
     // PROPERTIES
@@ -647,7 +420,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
             let _ = unsafe memcpy(newPtr.asRaw(), s.ptr.asRaw(), s.len * Int64(intLiteral: lang.sizeof[T]()));
         }
         if s.cap > 0 {
-            var allocator = SystemAllocator();
+            var allocator = s.allocator;
             unsafe allocator.deallocate(s.ptr.asRaw(), Layout.array[T](s.cap))
         }
         s.ptr = newPtr;
@@ -680,9 +453,21 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
             newCap = newCap * 2
         }
 
-        // Allocate new buffer
         let newLayout = Layout.array[T](newCap);
-        var allocator = SystemAllocator();
+        var allocator = self.storage.value.allocator;
+        if self.storage.isUnique and myCap > 0 {
+            // Unique: let the allocator grow the block, in place when it
+            // can (`realloc`, or an arena's newest block). A move is a bit
+            // copy, so the bytes it carries over are valid for any `T`.
+            let s = &mutating self.storage.value;
+            let grown = unsafe allocator.reallocate(s.ptr.asRaw(), Layout.array[T](myCap), newLayout);
+            if let .Some(rawPtr) = grown {
+                s.ptr = rawPtr.cast[T]();
+                s.cap = newCap;
+                return
+            }
+            fatalError("Array grow failed")
+        }
         let result = allocator.allocate(newLayout);
         let newPtr = if let .Some(rawPtr) = result {
             rawPtr.cast[T]()
@@ -700,7 +485,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
         for i in 0..<n {
             unsafe newPtr.offset(by: i).write(src.offset(by: i).read())
         }
-        self.storage = CowBox(ArrayStorage(ptr: newPtr, len: n, cap: newCap))
+        self.storage = CowBox(ArrayStorage(ptr: newPtr, len: n, cap: newCap, allocator: allocator))
     }
 
     // ========================================================================
@@ -725,16 +510,27 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// var arr = [1, 2];
     /// arr.append(3);  // [1, 2, 3]
     /// ```
+    @inline(.Always)
     public mutating func append(consuming element: T) {
-        let myLen = self.len();
-        // No separate `makeUnique`: `grow` and the `value` write below fork.
-        self.grow(myLen + 1);
-        // Reserve the slot and bump `len` in place (O(1) amortized), then
-        // move the element in.
+        // Fast path inline: unique storage with a free slot. Growth and
+        // the copy-on-write fork stay out of line so callers' loops stay
+        // small.
+        if not self.storage.isUnique or self.len() == self.cap() {
+            self.makeRoomForAppend()
+        }
+        // Reserve the slot and bump `len` in place, then move the element in.
         let s = &mutating self.storage.value;
         let slot = s.ptr.offset(by: s.len);
         s.len = s.len + 1;
         unsafe slot.write(element)
+    }
+
+    /// Slow path of `append`: grows a full buffer (copying a shared one
+    /// straight into the bigger buffer), else forks shared storage.
+    @inline(.Never)
+    private mutating func makeRoomForAppend() {
+        self.grow(self.len() + 1);
+        self.makeUnique()
     }
 
     /// Appends every element of `other` to the end of this array.
@@ -1125,7 +921,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// arr.replaceSubrange(1..<1, with: [9, 9]);      // insert: [1, 9, 9, 20, 30, 5]
     /// arr.replaceSubrange(0..<2, with: Array[Int64]());  // remove: [9, 20, 30, 5]
     /// ```
-    public mutating func replaceSubrange[R](range: R, with replacement: Array[T]) where R: SeqRange {
+    public mutating func replaceSubrange[R, B](range: R, with replacement: Array[T, B]) where R: SeqRange, B: Allocator {
         let resolved = range.resolve(self.count);
         let start = resolved.start;
         let end = resolved.end;
@@ -1204,7 +1000,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// let result = arr.shuffled(using: rng);
     /// // arr is still [1, 2, 3, 4, 5]
     /// ```
-    public func shuffled(mutating using rng: some RandomNumberGenerator) -> Array[T] {
+    public func shuffled(mutating using rng: some RandomNumberGenerator) -> Array[T, A] {
         var result = self.clone();
         result.shuffle(using: rng);
         result
@@ -1222,7 +1018,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// let shuffled = arr.shuffled();  // e.g. [4, 2, 5, 1, 3]
     /// // arr is still [1, 2, 3, 4, 5]
     /// ```
-    public func shuffled() -> Array[T] {
+    public func shuffled() -> Array[T, A] {
         var result = self.clone();
         result.shuffle();
         result
@@ -1277,7 +1073,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
                 self.makeUnique();
                 let s = &mutating self.storage.value;
                 let layout = Layout.array[T](myCap);
-                var allocator = SystemAllocator();
+                var allocator = s.allocator;
                 unsafe allocator.deallocate(s.ptr.asRaw(), layout);
                 s.ptr = Pointer[T].nullPointer();
                 s.cap = 0
@@ -1289,7 +1085,7 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
 
         // Reallocate to exact size
         let newLayout = Layout.array[T](myLen);
-        var allocator = SystemAllocator();
+        var allocator = self.storage.value.allocator;
         let result = allocator.allocate(newLayout);
         if let .Some(rawPtr) = result {
             self.moveStorage(to: rawPtr.cast[T](), cap: myLen)
@@ -1308,13 +1104,13 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// Returns a forward iterator over the array's elements, as they are now:
     /// the iterator shares the storage, so later mutation of the array copies
     /// first and the iteration is unaffected.
-    public func iter() -> ArrayIterator[T] {
+    public func iter() -> ArrayIterator[T, A] {
         self.iterRange(start: 0, count: self.len())
     }
 
     /// Iterator over elements `[start, start + count)`, sharing the storage
     /// (the slices' `iter()`). The caller has checked the range fits.
-    internal func iterRange(start start: Int64, count count: Int64) -> ArrayIterator[T] {
+    internal func iterRange(start start: Int64, count count: Int64) -> ArrayIterator[T, A] {
         ArrayIterator(
             storage: self.storage.clone(),
             cursor: UnsafeSliceIterator(ptr: self.ptr().offset(by: start), remaining: count),
@@ -1400,8 +1196,284 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
     /// var b = a.clone();  // O(1), shares storage
     /// b.append(4);        // b deep-copies here; a is unchanged
     /// ```
-    public func clone() -> Array[T] {
+    public func clone() -> Array[T, A] {
         Array(storage: self.storage.clone())
+    }
+}
+
+// Constructors that make their own allocator: available when it has a
+// default (`GlobalAllocator`, the default `A`, does), and with them the
+// literal and `Defaultable` conformances.
+extend Array[T, A]: ExpressibleByArrayLiteral, _ExpressibleByArrayLiteral, Defaultable where A: Defaultable {
+    /// Array-literal element type.
+    type Element = T
+
+    // ========================================================================
+    // CONSTRUCTORS
+    // ========================================================================
+
+    /// @name Empty
+    /// Creates an empty array with no allocation.
+    ///
+    /// Capacity starts at zero; the first `append` allocates a small
+    /// buffer (currently 4 elements). Use `init(capacity:)` if you can
+    /// pre-size to avoid the early growth steps.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = Array[Int64]();
+    /// arr.count;     // 0
+    /// arr.capacity;  // 0
+    /// ```
+    public init() {
+        self.storage = CowBox(ArrayStorage(
+            ptr: Pointer[T].nullPointer(),
+            len: 0,
+            cap: 0,
+            allocator: A()
+        ));
+    }
+
+    /// @name With Capacity
+    /// Creates an empty array with at least the requested capacity reserved.
+    ///
+    /// Equivalent to `Array()` followed by `reserveCapacity(...)`, but
+    /// done in a single allocation. A non-positive `capacity` behaves
+    /// like `init()` (no allocation). Panics if allocation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var arr = Array[Int64](capacity: 1000);
+    /// arr.count;     // 0
+    /// arr.capacity;  // >= 1000 — no reallocation for first 1000 appends
+    /// ```
+    public init(capacity capacity: Int64) {
+        if capacity > 0 {
+            let layout = Layout.array[T](capacity);
+            var allocator = A();
+            let result = allocator.allocate(layout);
+            if let .Some(rawPtr) = result {
+                self.storage = CowBox(ArrayStorage(
+                    ptr: rawPtr.cast[T](),
+                    len: 0,
+                    cap: capacity,
+                    allocator: allocator
+                ))
+            } else {
+                fatalError("Array allocation failed")
+            }
+        } else {
+            self.storage = CowBox(ArrayStorage(
+                ptr: Pointer[T].nullPointer(),
+                len: 0,
+                cap: 0,
+                allocator: A()
+            ))
+        }
+    }
+
+    /// @name Literal Bridge
+    /// Compiler-emitted bridge initializer for `[a, b, c]` array literals.
+    ///
+    /// Not called by user code directly — the parser lowers literal
+    /// expressions into a `(ptr, count)` pair which this constructor wraps
+    /// in a `LiteralSlice` and forwards to `init(arrayLiteral:)`.
+    ///
+    /// # Safety
+    ///
+    /// The compiler guarantees `_arrayLiteralPointer` points to exactly
+    /// `_arrayLiteralCount` initialized elements of `T`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let arr = [1, 2, 3];   // emitted by the compiler as a call to this init
+    /// ```
+    public init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64) {
+        // The compiler hands us an OWNED, initialized buffer of `count`
+        // elements (it moved each element in and abandons the buffer after
+        // this call). Bit-MOVE the whole buffer into fresh storage with a
+        // single memcpy. Do NOT route through `init(arrayLiteral:)` /
+        // `LiteralSlice` element-wise `read()`: `read()` clones for
+        // non-Copyable `T`, which would duplicate every element and leak the
+        // abandoned source originals (the buffer is never dropped). A bitwise
+        // transfer moves ownership exactly once — no clone, no leak.
+        let count = Int64(intLiteral: _arrayLiteralCount);
+        if count > 0 {
+            let layout = Layout.array[T](count);
+            var allocator = A();
+            if let .Some(rawPtr) = allocator.allocate(layout) {
+                let newPtr = rawPtr.cast[T]();
+                let stride = Int64(intLiteral: lang.sizeof[T]());
+                 unsafe memcpy(newPtr.asRaw(), Pointer[T](raw: _arrayLiteralPointer).asRaw(), count * stride);
+                self.storage = CowBox(ArrayStorage(ptr: newPtr, len: count, cap: count, allocator: allocator))
+            } else {
+                fatalError("Array allocation failed")
+            }
+        } else {
+            self.storage = CowBox(ArrayStorage(
+                ptr: Pointer[T].nullPointer(),
+                len: 0,
+                cap: 0,
+                allocator: A()
+            ))
+        }
+    }
+
+    /// @name Array Literal
+    /// Creates an array containing every element of the supplied literal
+    /// slice.
+    ///
+    /// Allocates a buffer sized exactly to the literal's element count
+    /// (so `capacity == count` after construction) and copies the
+    /// elements over. An empty slice yields an empty unallocated array.
+    /// Panics if allocation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Triggered by the array-literal syntax:
+    /// let arr: Array[Int64] = [10, 20, 30];
+    /// ```
+    public init(arrayLiteral elements: LiteralSlice[T]) {
+        let elementCount = elements.count;
+        if elementCount > 0 {
+            let layout = Layout.array[T](elementCount);
+            var allocator = A();
+            let result = allocator.allocate(layout);
+            if let .Some(rawPtr) = result {
+                let newPtr = rawPtr.cast[T]();
+                var currentLen: Int64 = 0;
+                // Copy elements from literal slice
+                var iter = elements.iter();
+                while let .Some(item) = iter.next() {
+                    unsafe newPtr.offset(by: currentLen).write(item);
+                    currentLen = currentLen + 1
+                }
+                self.storage = CowBox(ArrayStorage(
+                    ptr: newPtr,
+                    len: currentLen,
+                    cap: elementCount,
+                    allocator: allocator
+                ))
+            } else {
+                fatalError("Array allocation failed")
+            }
+        } else {
+            self.storage = CowBox(ArrayStorage(
+                ptr: Pointer[T].nullPointer(),
+                len: 0,
+                cap: 0,
+                allocator: A()
+            ))
+        }
+    }
+
+    /// @name Repeating Value
+    /// Creates an array of `count` identical copies of `value`.
+    ///
+    /// Allocates exactly `count` slots and writes the same value into each.
+    /// `count <= 0` produces an empty array. Useful for initializing
+    /// fixed-size buffers; if you instead want each slot computed, use
+    /// `init(count:generator:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let zeros = Array(repeating: 0, count: 5);    // [0, 0, 0, 0, 0]
+    /// let empty = Array(repeating: "x", count: 0);  // []
+    /// let pad   = Array(repeating: " ", count: 3);  // [" ", " ", " "]
+    /// ```
+    public init(repeating value: T, count count: Int64) {
+        if count <= 0 {
+            self.init()
+        } else {
+            let layout = Layout.array[T](count);
+            var allocator = A();
+            let result = allocator.allocate(layout);
+            if let .Some(rawPtr) = result {
+                let newPtr = rawPtr.cast[T]();
+                // Write first element directly
+                unsafe newPtr.write(value);
+                // Copy for remaining elements
+                for i in 1..<count {
+                    unsafe newPtr.offset(by: i).write(value);
+                }
+                self.storage = CowBox(ArrayStorage(
+                    ptr: newPtr,
+                    len: count,
+                    cap: count,
+                    allocator: allocator
+                ))
+            } else {
+                fatalError("Array allocation failed")
+            }
+        }
+    }
+
+    /// @name From Iterable
+    /// Creates an array by collecting every element produced by an iterable.
+    ///
+    /// Drains `iterable` to completion via `append`, so the resulting
+    /// capacity is whatever the growth policy lands on (not necessarily
+    /// equal to `count`). For a sized source you can shave reallocations
+    /// by following with `shrinkToFit()`. See also `append(from:)`
+    /// to add elements to an existing array.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let fromRange = Array(from: 1..<5);         // [1, 2, 3, 4]
+    /// let fromSet   = Array(from: mySet);         // arbitrary order
+    /// let collected = lines.iter().collect();     // an iterator: use collect()
+    /// ```
+    public init[I](from iterable: I) where I: Iterable, I: not Static, I.Item = T {
+        self.init();
+        var iter = iterable.iter();
+        while let .Some(item) = iter.next() {
+            self.append(item)
+        }
+    }
+
+    /// @name From Generator
+    /// Creates an array of `count` elements computed by a per-index closure.
+    ///
+    /// Allocates exactly `count` slots and invokes `gen(i)` once for each
+    /// `i` in `0..<count`. `count <= 0` produces an empty array. Use this
+    /// when each slot is a function of its index; for a constant value,
+    /// prefer `init(repeating:count:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let squares = Array(of: 5, generatedBy: { (i) in i * i });  // [0, 1, 4, 9, 16]
+    /// let indices = Array(of: 3, generatedBy: { (i) in i });      // [0, 1, 2]
+    /// let empty   = Array(of: 0, generatedBy: { (i) in i });      // []
+    /// ```
+    public init(of count: Int64, generatedBy gen: (Int64) -> T) {
+        if count <= 0 {
+            self.init()
+        } else {
+            let layout = Layout.array[T](count);
+            var allocator = A();
+            let result = allocator.allocate(layout);
+            if let .Some(rawPtr) = result {
+                let newPtr = rawPtr.cast[T]();
+                for i in 0..<count {
+                    unsafe newPtr.offset(by: i).write(gen(i));
+                }
+                self.storage = CowBox(ArrayStorage(
+                    ptr: newPtr,
+                    len: count,
+                    cap: count,
+                    allocator: allocator
+                ))
+            } else {
+                fatalError("Array allocation failed")
+            }
+        }
     }
 }
 
@@ -1413,9 +1485,9 @@ public struct Array[T]: Sliceable[T], Iterable, ExpressibleByArrayLiteral, _Expr
 /// element type itself is `Equatable`.
 // contains, firstIndex(of:), lastIndex(of:), starts(with:), ends(with:), split(separator:),
 // isEqual: provided by extend Sliceable[T] where T: Equatable
-extend Array[T]: Equatable where T: Equatable { }
+extend Array[T, A]: Equatable where T: Equatable { }
 
-extend Array[T] where T: Equatable {
+extend Array[T, A] where T: Equatable {
     /// Removes the first element equal to `element`. Returns whether a
     /// removal occurred.
     ///
@@ -1503,7 +1575,7 @@ extend Array[T] where T: Equatable {
     /// [1, 1, 2, 2, 3].deduped();        // [1, 2, 3]
     /// [1, 2, 1, 2].deduped();           // [1, 2, 1, 2] — none are adjacent
     /// ```
-    public func deduped() -> Array[T] {
+    public func deduped() -> Array[T, A] {
         var result = self.clone();
         result.dedup();
         result
@@ -1516,7 +1588,7 @@ extend Array[T] where T: Equatable {
 /// Enables patterns such as `[a, b]`, `[a, ..rest]`, `[a, .., z]`, and
 /// `[a, ..rest, z]` against an `Array[T]` scrutinee. End users do not call
 /// the methods below directly — they're invoked by lowered match code.
-extend Array[T]: unsafe ArrayMatchable {
+extend Array[T, A]: unsafe ArrayMatchable {
     /// `ArrayMatchable` element type — what the pattern bindings extract.
     type Element = T
     /// `..rest` binds a slice of the array's elements.
@@ -1556,7 +1628,7 @@ extend Array[T]: unsafe ArrayMatchable {
 // ============================================================================
 
 /// Ordering-aware operations available when `T: Comparable`.
-extend Array[T] where T: Comparable {
+extend Array[T, A] where T: Comparable {
     /// Sorts the array in ascending order using the natural `<` ordering.
     ///
     /// Uses introsort — O(n log n) worst-case. For descending or custom
@@ -1582,7 +1654,7 @@ extend Array[T] where T: Comparable {
 
 /// `Hashable` conformance — an array hashes its elements in order, so
 /// two arrays hash equal exactly when they compare `==`.
-extend Array[T]: Hashable where T: Hashable {
+extend Array[T, A]: Hashable where T: Hashable {
     /// Order-sensitive hash: feeds the element count, then each element
     /// front to back, into `hasher`.
     ///
@@ -1605,7 +1677,7 @@ extend Array[T]: Hashable where T: Hashable {
     }
 }
 
-extend Array[T] where T: Hashable {
+extend Array[T, A] where T: Hashable {
     /// Removes every duplicate in place, keeping the first occurrence.
     ///
     /// Implemented by replacing storage with the result of `unique()`,
@@ -1618,7 +1690,10 @@ extend Array[T] where T: Hashable {
     /// arr.removeDuplicates();  // [1, 2, 3]
     /// ```
     public mutating func removeDuplicates() {
-        self = self.unique()
+        // Refill in place so the array keeps its own allocator.
+        let kept = self.unique();
+        self.clear();
+        self.append(contentsOf: kept)
     }
 }
 
@@ -1628,7 +1703,7 @@ extend Array[T] where T: Hashable {
 
 /// Custom-comparator and key-extracting sort overloads, available for
 /// every element type (no `Comparable` requirement).
-extend Array[T] {
+extend Array[T, A] {
     /// Sorts the array in place using a `<`-style comparator.
     ///
     /// The comparator returns `true` when its first argument should come
@@ -1657,7 +1732,7 @@ extend Array[T] {
     /// let arr = [3, 1, 2];
     /// let desc = arr.sorted(by: { (a, b) in a > b });  // [3, 2, 1]
     /// ```
-    public func sorted(by comparator: (T, T) -> Bool) -> Array[T] {
+    public func sorted(by comparator: (T, T) -> Bool) -> Array[T, A] {
         var result = self.clone();
         result.sort(by: comparator);
         result
@@ -1713,7 +1788,7 @@ extend Array[T] {
     /// let words = ["hi", "hello", "hey"];
     /// let byLen = words.sorted(byKey: { (w) in w.count });
     /// ```
-    public func sorted[K](consuming byKey key: (T) -> K) -> Array[T] where K: Comparable {
+    public func sorted[K](consuming byKey key: (T) -> K) -> Array[T, A] where K: Comparable {
         var copy = self.clone();
         copy.sort(byKey: key);
         copy
@@ -1725,7 +1800,7 @@ extend Array[T] {
 // ============================================================================
 
 /// Flattening for arrays whose elements are themselves `Iterable`.
-extend Array[T] where T: Iterable {
+extend Array[T, A] where T: Iterable {
     /// Concatenates each element's iterator into a single
     /// `Array[T.Item]`.
     ///
@@ -1755,7 +1830,7 @@ extend Array[T] where T: Iterable {
 }
 
 /// String-joining for arrays whose elements are `Formattable`.
-extend Array[T] where T: Formattable {
+extend Array[T, A] where T: Formattable {
     /// Concatenates each element's string representation, separated by
     /// `separator`.
     ///
@@ -1789,7 +1864,7 @@ extend Array[T] where T: Formattable {
 /// Renders as `"[e1, e2, ...]"`, so arrays work in string interpolation and
 /// `print`. The `format` witness comes from `extend Sliceable[T] where
 /// T: Formattable`.
-extend Array[T]: Formattable where T: Formattable {}
+extend Array[T, A]: Formattable where T: Formattable {}
 
 // ============================================================================
 // DIRECT ITERABLE CONFORMANCE
@@ -1826,4 +1901,4 @@ extend Array[T]: Formattable where T: Formattable {}
 /// func sum(of values: [Float]) -> Float { ... }
 /// ```
 @builtin(.ArrayTypeOperator)
-public type ArrayTypeOperator[T] = Array[T];
+public type ArrayTypeOperator[T] = Array[T, GlobalAllocator];

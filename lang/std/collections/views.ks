@@ -456,7 +456,7 @@ extend Slice[T] where T: Equatable, T: Copyable {
     }
 }
 
-extend Array[T] {
+extend Array[T, A] {
     /// See `Slice.chunks(of:)`.
     public func chunks(of size: Int64) -> ChunksView[T] { self.asSlice().chunks(of: size) }
     /// See `Slice.windows(of:)`.
@@ -470,7 +470,7 @@ extend Array[T] {
     }
 }
 
-extend Array[T] where T: Equatable {
+extend Array[T, A] where T: Equatable {
     /// See `Slice.split(separator:)`.
     public func split(separator: T) -> ArraySplitView[T] {
         let s = &self.asSlice();

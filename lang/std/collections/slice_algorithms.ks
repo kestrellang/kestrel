@@ -5,7 +5,7 @@ module std.collections
 import std.core.(Bool, Comparable, Ordering, fatalError)
 import std.numeric.(Int64, UInt64, RandomNumberGenerator, DefaultRandom)
 import std.result.(Optional)
-import std.memory.(UnsafeSlice, Pointer)
+import std.memory.(UnsafeSlice, Pointer, Allocator, GlobalAllocator)
 import std.iter.(Iterator)
 import std.collections.(Array, Slice)
 
@@ -258,7 +258,7 @@ fileprivate func siftDown[T](s: UnsafeSlice[T], lo: Int64, start: Int64, n: Int6
 // ARRAY REFERENCE ITERATORS
 // ============================================================================
 
-extend Array[T] {
+extend Array[T, A] {
     /// Iterator over SHARED REFERENCES (`&T`) to the elements, in place —
     /// no copies, no clones. It borrows the array, so it can't outlive it.
     ///
@@ -270,7 +270,7 @@ extend Array[T] {
     ///     print(w.len());   // reads in place — no element copy
     /// }
     /// ```
-    public func refs() -> ArrayRefsIterator[T] {
+    public func refs() -> ArrayRefsIterator[T, A] {
         let b = &self;
         ArrayRefsIterator(base: b, index: 0, end: self.count)
     }
@@ -288,7 +288,7 @@ extend Array[T] {
     /// }
     /// // xs == [2, 3, 4]
     /// ```
-    public mutating func mutatingRefs() -> ArrayMutatingRefsIterator[T] {
+    public mutating func mutatingRefs() -> ArrayMutatingRefsIterator[T, A] {
         let b = &mutating self;
         ArrayMutatingRefsIterator(base: b, index: 0, end: self.count)
     }
@@ -302,10 +302,10 @@ extend Array[T] {
 /// Returned by `Array.refs()`. It borrows the
 /// array and reads each element through it, so a reference can't
 /// outlive the array. Stops early if the array gets shorter.
-public struct ArrayRefsIterator[T]: Iterator {
+public struct ArrayRefsIterator[T, A = GlobalAllocator]: Iterator where A: Allocator {
     type Item = &T
 
-    fileprivate let base: &Array[T]
+    fileprivate let base: &Array[T, A]
     fileprivate var index: Int64
     fileprivate let end: Int64
 
@@ -326,10 +326,10 @@ public struct ArrayRefsIterator[T]: Iterator {
 /// `Array.mutatingRefs()`. Each write goes through the array's own
 /// element accessor, so it runs the copy-on-write check: a copy of the
 /// array taken during the loop keeps its old contents.
-public struct ArrayMutatingRefsIterator[T]: Iterator {
+public struct ArrayMutatingRefsIterator[T, A = GlobalAllocator]: Iterator where A: Allocator {
     type Item = &mutating T
 
-    fileprivate let base: &mutating Array[T]
+    fileprivate let base: &mutating Array[T, A]
     fileprivate var index: Int64
     fileprivate let end: Int64
 

@@ -6,6 +6,7 @@ import std.result.(Optional)
 import std.memory.(Layout, RawPointer, Pointer)
 import std.ffi.(malloc, free, realloc, posixMemalign, memcpy)
 import std.numeric.(Int64)
+import std.core.(Defaultable)
 
 /// Protocol for raw-memory allocators.
 ///
@@ -54,7 +55,7 @@ public protocol Allocator {
 ///
 /// Stateless: the struct holds no fields. All bookkeeping lives in libc's
 /// heap. Cloning or copying the allocator has no effect on the heap state.
-public struct SystemAllocator: Allocator {
+public struct SystemAllocator: Allocator, Defaultable {
     /// @name Default
     /// Builds a stateless system allocator. No heap interaction occurs here.
     public init() {}
@@ -136,5 +137,4 @@ public struct SystemAllocator: Allocator {
 /// at the project level if a global custom allocator is needed.
 public type GlobalAllocator = SystemAllocator
 
-// Note: ArenaAllocator and PoolAllocator require Buffer (Phase 14)
-// They will be added after Buffer is implemented
+// `ArenaAllocator` lives in arena.ks.

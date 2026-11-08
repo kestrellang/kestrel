@@ -139,7 +139,7 @@ public struct ArrayBuilder[T] {
         if self.len == 0 {
             return Array[T]()
         }
-        let storage = ArrayStorage(ptr: self.ptr, len: self.len, cap: self.cap);
+        let storage = ArrayStorage(ptr: self.ptr, len: self.len, cap: self.cap, allocator: SystemAllocator());
         let result = Array[T](storage: CowBox(storage));
         self.ptr = Pointer[T].nullPointer();
         self.len = 0;
