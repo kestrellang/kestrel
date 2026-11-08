@@ -1,6 +1,8 @@
-// Rosetta Code: Averages/Arithmetic mean, Averages/Median, Averages/Mode,
-// Standard deviation
+// Rosetta Code: Averages (arithmetic mean, median, mode, standard deviation)
 // https://rosettacode.org/wiki/Averages/Arithmetic_mean
+// https://rosettacode.org/wiki/Averages/Median
+// https://rosettacode.org/wiki/Averages/Mode
+// https://rosettacode.org/wiki/Standard_deviation
 module Main
 
 func mean(xs: Array[Float64]) -> Float64 {

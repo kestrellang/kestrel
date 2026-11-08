@@ -1,4 +1,4 @@
-// Rosetta Code: Arbitrary-precision integers (100! with a hand-rolled bignum)
+// Rosetta Code: Factorial (100! with a hand-rolled bignum)
 // https://rosettacode.org/wiki/Factorial
 module Main
 
