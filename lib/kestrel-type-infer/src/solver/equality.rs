@@ -601,8 +601,12 @@ pub(super) fn solve_coerce(
         // FromValue target (`let x: String? = 5`).
         if let Some(protocol) = ctx.query_ctx.parent_of(method) {
             let output = ctx.fresh();
-            let pinned =
-                super::conformance::unify_bound_protocol_args(ctx, to_resolved, protocol, &[output]);
+            let pinned = super::conformance::unify_bound_protocol_args(
+                ctx,
+                to_resolved,
+                protocol,
+                &[output],
+            );
             if pinned.is_err() || unify::unify(ctx, from, output).is_err() {
                 ctx.errored_coerce_exprs.insert(expr);
                 return SolveResult::Error(InferError::TypeMismatch {

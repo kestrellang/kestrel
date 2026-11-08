@@ -50,8 +50,8 @@ pub(crate) use conformance::*;
 pub(crate) use defaults::*;
 pub(crate) use equality::*;
 use lower::*;
-pub(crate) use member::{extension_applies, requirement_call, try_indirection_peel};
 use member::*;
+pub(crate) use member::{extension_applies, requirement_call, try_indirection_peel};
 
 /// Diagnose type parameters at generic call sites that inference couldn't
 /// pin down. Lib1 silently defaulted these to `Never` (RFC 1216-style

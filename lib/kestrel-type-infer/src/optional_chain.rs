@@ -31,7 +31,9 @@ pub(crate) fn decide_chain_modes(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     }
     for bind in &binds {
         // The provisional mode is the requirement HIR lowering tagged.
-        let take = ctx.resolver.builtin(kestrel_hir::Builtin::OptionalChainTakeMethod);
+        let take = ctx
+            .resolver
+            .builtin(kestrel_hir::Builtin::OptionalChainTakeMethod);
         let mode = match &hir.exprs[bind.scrutinee] {
             HirExpr::ProtocolCall {
                 requirement: Some(r),

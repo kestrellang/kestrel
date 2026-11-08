@@ -1054,7 +1054,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // to each literal element. Falls back to fresh on the default path.
             let arr_tv = ctx.fresh_literal(LiteralKind::Array);
             ctx.literal_spans.insert(arr_tv, span.clone());
-            let conformer = adopt_conformer_expectation(ctx, arr_tv, &expect, LiteralKind::Array, span);
+            let conformer =
+                adopt_conformer_expectation(ctx, arr_tv, &expect, LiteralKind::Array, span);
             let elem_tv = ctx.fresh();
             associated_builtin(ctx, arr_tv, Builtin::ArrayLiteralElement, elem_tv, span);
             // Bidirectional hint: if the enclosing `let` annotated this array
@@ -1124,10 +1125,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // knows its `Key`/`Value`: each entry is checked against them, so
             // mixed values each build the target's `Value` and nested literals
             // / implicit members (`.Str(s)`) see it as their expected type.
-            let checked_entry = (conformer
-                && expectation_known(ctx, key_tv)
-                && expectation_known(ctx, val_tv))
-            .then_some((key_tv, val_tv));
+            let checked_entry =
+                (conformer && expectation_known(ctx, key_tv) && expectation_known(ctx, val_tv))
+                    .then_some((key_tv, val_tv));
             for entry in entries {
                 // Literal entries always decay refs to owned (stage 1.5).
                 mark_arm_value(ctx, hir, entry.key);
@@ -1657,7 +1657,13 @@ fn gen_pat(
             let rest_tv = ctx.fresh();
             if let Some(proto) = ctx.resolver.builtin(kestrel_hir::Builtin::ArrayMatchable) {
                 ctx.conforms(scrutinee_tv, proto, span.clone());
-                associated_builtin(ctx, scrutinee_tv, Builtin::ArrayMatchableElement, elem_tv, span);
+                associated_builtin(
+                    ctx,
+                    scrutinee_tv,
+                    Builtin::ArrayMatchableElement,
+                    elem_tv,
+                    span,
+                );
                 // `Rest` has no @builtin tag yet, so it is still bound by name.
                 ctx.associated(scrutinee_tv, "Rest", rest_tv, span.clone());
             }
@@ -3025,7 +3031,10 @@ fn instantiate_entity_inner(
     if let Some(ext) = qctx
         .parent_of(entity)
         .filter(|&p| qctx.get::<NodeKind>(p) == Some(&NodeKind::Extension))
-        && let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity { extension: ext, root })
+        && let Some(target) = qctx.query(kestrel_name_res::ExtensionTargetEntity {
+            extension: ext,
+            root,
+        })
     {
         let owner_args: Vec<TyVar> = qctx
             .get::<TypeParams>(target)
@@ -3034,7 +3043,8 @@ fn instantiate_entity_inner(
             .iter()
             .filter_map(|p| subs.iter().find(|(e, _)| e == p).map(|&(_, tv)| tv))
             .collect();
-        type_arg_vars = bind_extension_pattern_params(ctx, Some(ext), &owner_args, &mut subs, site_span);
+        type_arg_vars =
+            bind_extension_pattern_params(ctx, Some(ext), &owner_args, &mut subs, site_span);
     }
     type_arg_vars.extend(fresh_type_args.iter().copied());
 
@@ -3164,10 +3174,12 @@ pub(crate) fn bind_extension_pattern_params(
         return Vec::new();
     };
     let root = ctx.root;
-    let pattern = ctx.query_ctx.query(kestrel_name_res::ExtensionPatternParams {
-        extension: ext,
-        root,
-    });
+    let pattern = ctx
+        .query_ctx
+        .query(kestrel_name_res::ExtensionPatternParams {
+            extension: ext,
+            root,
+        });
     if pattern.is_empty() {
         return Vec::new();
     }
@@ -3186,7 +3198,10 @@ pub(crate) fn bind_extension_pattern_params(
         .collect();
     let written = ctx
         .query_ctx
-        .query(kestrel_hir_lower::LowerExtensionTargetTypeArgs { extension: ext, root })
+        .query(kestrel_hir_lower::LowerExtensionTargetTypeArgs {
+            extension: ext,
+            root,
+        })
         .unwrap_or_default();
     for (hir_arg, &owner_arg) in written.iter().zip(owner_args) {
         let pattern_tv = lower_hir_ty_with_subs(ctx, hir_arg, subs);
@@ -3512,7 +3527,13 @@ fn extract_array_elem_hint(ctx: &InferCtx<'_>, tv: TyVar) -> Option<TyVar> {
 /// spelling: a conformer that also binds another protocol's same-named
 /// `Element` must not hand that one to a literal or pattern. Without the
 /// stdlib tag there is no such protocol, so nothing is constrained.
-fn associated_builtin(ctx: &mut InferCtx<'_>, container: TyVar, tag: Builtin, result: TyVar, span: &Span) {
+fn associated_builtin(
+    ctx: &mut InferCtx<'_>,
+    container: TyVar,
+    tag: Builtin,
+    result: TyVar,
+    span: &Span,
+) {
     if let Some(assoc) = ctx.resolver.builtin(tag) {
         ctx.associated_entity(container, assoc, result, span.clone());
     }
@@ -4229,7 +4250,11 @@ fn gen_struct_pat(
     // Field types name the struct's params; bind them to the scrutinee's
     // args (as `gen_variant_pat` does for enum payloads), so `Wrap[Page] {
     // value: p }` types `p` as `Page`, not `T`.
-    let subs: Vec<(Entity, TyVar)> = type_params.iter().copied().zip(fresh_args.iter().copied()).collect();
+    let subs: Vec<(Entity, TyVar)> = type_params
+        .iter()
+        .copied()
+        .zip(fresh_args.iter().copied())
+        .collect();
     let struct_tv = ctx.named(entity, fresh_args);
 
     // Scrutinee must be this struct type
