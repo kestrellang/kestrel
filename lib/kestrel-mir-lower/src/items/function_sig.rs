@@ -417,11 +417,13 @@ fn mark_maybe_noncopyable_params(
         if marked {
             continue;
         }
-        let requirement = ctx.query.query(kestrel_semantics::TypeParamCopyRequirement {
-            param: tp.entity,
-            context: entity,
-            root: ctx.root,
-        });
+        let requirement = ctx
+            .query
+            .query(kestrel_semantics::TypeParamCopyRequirement {
+                param: tp.entity,
+                context: entity,
+                root: ctx.root,
+            });
         if requirement == kestrel_semantics::CopyRequirement::MayBeNonCopyable {
             wc.add_constraint(WhereConstraint::not_implements(tp.entity, copyable));
         }

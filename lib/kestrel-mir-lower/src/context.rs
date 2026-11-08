@@ -203,13 +203,22 @@ impl<'w> LowerCtx<'w> {
         let key = self.witness_method_key(requirement);
         let kind = self.query.get::<NodeKind>(requirement).cloned();
         let mut parents = vec![type_entity];
-        parents.extend(self.query.query(kestrel_name_res::extensions::ExtensionsFor {
-            target: type_entity,
-            root: self.root,
-        }));
+        parents.extend(
+            self.query
+                .query(kestrel_name_res::extensions::ExtensionsFor {
+                    target: type_entity,
+                    root: self.root,
+                }),
+        );
         parents
             .into_iter()
-            .flat_map(|parent| self.query.children_of(parent).iter().copied().collect::<Vec<_>>())
+            .flat_map(|parent| {
+                self.query
+                    .children_of(parent)
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
             .filter(|&child| {
                 self.query.get::<NodeKind>(child) == kind.as_ref()
                     && self.witness_method_key(child) == key

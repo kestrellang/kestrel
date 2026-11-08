@@ -148,7 +148,7 @@ impl OssaBodyCtx<'_, '_> {
                         self.body.value_names.insert(addr, name);
                         self.local_map
                             .insert(*local, super::LocalBinding::Var(addr));
-                        let flag = self.maybe_alloc_var_flag(ty);
+                        let flag = self.maybe_alloc_local_flag(*local, ty);
                         self.track_var(addr, ty, Some(*local), flag);
                     }
                 } else {
@@ -159,7 +159,7 @@ impl OssaBodyCtx<'_, '_> {
                     self.body.value_names.insert(addr, name);
                     self.local_map
                         .insert(*local, super::LocalBinding::Var(addr));
-                    let flag = self.maybe_alloc_var_flag(ty);
+                    let flag = self.maybe_alloc_local_flag(*local, ty);
                     self.track_var(addr, ty, Some(*local), flag);
                 }
             },

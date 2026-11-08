@@ -49,41 +49,62 @@ impl OssaBodyCtx<'_, '_> {
     /// netted zero on the shared `RcBox`, so dropping the "clone" over-released
     /// the storage. Moving the local balances the books (no copy, no drop).
     pub fn lower_expr_for_return(&mut self, expr_id: HirExprId) -> ValueId {
-        if self.has_value_conversion(expr_id) {
-            return self.lower_expr(expr_id);
+        if let Some(v) = self.try_move_var_local(expr_id) {
+            return v;
         }
-        let local = match &self.hir.exprs[expr_id] {
-            HirExpr::Local(l, _) if self.is_var_local(l) => Some(*l),
-            _ => None,
-        };
-        if let Some(hir_local) = local {
-            let ty = self.resolve_local_type(hir_local);
-            let addr = self.map_local(hir_local);
-            // Only a *true owned* `var` local may be moved: its binding value is
-            // the @owned StackAlloc address it solely owns. A MutBorrow param
-            // (`mutating self`/args) is also bound as `Var`, but its binding
-            // value is @guaranteed — it aliases the caller's storage, so moving
-            // out of it (`return self` in a mutating method) would strand the
-            // caller. Leave those to the cloning path.
-            if self.owns_var_slot(hir_local, addr)
-                && self.ownership_for(ty) == kestrel_mir::value::Ownership::Owned
-                && self.var_init(hir_local) != Some(super::VarInit::DefUninit)
-            {
-                let v = self.emit_take(addr, ty);
-                self.record_var_whole(hir_local, super::VarInit::DefUninit);
-                // Apply any recorded value promotion (e.g. `T` → `Result[T,E]`
-                // / `Optional[T]` Ok/Some-wrapping at a throws/Optional return).
-                // The non-var path delegates to `lower_expr`, which promotes;
-                // this fast path must do the same or a bare `var result` tail
-                // returns the unwrapped scalar where a `Result` is expected,
-                // mis-codegening into a pointer deref (segfault).
-                return self.apply_promotion(expr_id, v);
-            }
-        }
+        // The arms of an `if`/`match`/block in return position are return
+        // positions too (`if c { o } else { … }` moves `o`). The flag is
+        // one-shot: the construct takes it on entry, and it is cleared here
+        // in case the expression lowered through some other path.
+        self.return_tail = matches!(
+            self.hir.exprs[expr_id],
+            HirExpr::If { .. } | HirExpr::Match { .. } | HirExpr::Block { .. }
+        ) && !self.has_value_conversion(expr_id);
+        let value = self.lower_expr(expr_id);
+        self.return_tail = false;
         // A field moved out of an owned local (`self.inner` in a consuming
         // method, `p.a` of a let) is a planned partial move: `lower_expr`
         // takes it out of the slot (see `partial_move.rs`).
-        self.lower_expr(expr_id)
+        value
+    }
+
+    /// Move a bare owned `var` local out of its slot (`load [take]`) when the
+    /// caller knows this read is its last use. `None` when `expr_id` isn't
+    /// such a local, so the caller falls back to `lower_expr`'s copy.
+    pub(super) fn try_move_var_local(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        if self.has_value_conversion(expr_id) {
+            return None;
+        }
+        let HirExpr::Local(hir_local, _) = self.hir.exprs[expr_id] else {
+            return None;
+        };
+        if !self.is_var_local(&hir_local) {
+            return None;
+        }
+        let ty = self.resolve_local_type(hir_local);
+        let addr = self.map_local(hir_local);
+        // Only a *true owned* `var` local may be moved: its binding value is
+        // the @owned StackAlloc address it solely owns. A MutBorrow param
+        // (`mutating self`/args) is also bound as `Var`, but its binding
+        // value is @guaranteed — it aliases the caller's storage, so moving
+        // out of it (`return self` in a mutating method) would strand the
+        // caller. Leave those to the cloning path.
+        if !self.owns_var_slot(hir_local, addr)
+            || self.ownership_for(ty) != kestrel_mir::value::Ownership::Owned
+            || self.var_init(hir_local) == Some(super::VarInit::DefUninit)
+            || !self.var_movable_here(hir_local)
+        {
+            return None;
+        }
+        let v = self.emit_take(addr, ty);
+        self.record_var_whole(hir_local, super::VarInit::DefUninit);
+        // Apply any recorded value promotion (e.g. `T` → `Result[T,E]`
+        // / `Optional[T]` Ok/Some-wrapping at a throws/Optional return).
+        // The non-var path delegates to `lower_expr`, which promotes;
+        // this fast path must do the same or a bare `var result` tail
+        // returns the unwrapped scalar where a `Result` is expected,
+        // mis-codegening into a pointer deref (segfault).
+        Some(self.apply_promotion(expr_id, v))
     }
 
     /// Apply a recorded `FromValue.from(value)` promotion if type-infer
